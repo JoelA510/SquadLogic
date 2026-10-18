@@ -11,9 +11,11 @@
 import { assert, assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import {
   buildLockedOccupancy,
+  dateSchedulerSlots,
   runPracticeOptimizer,
   type SchedulerSlot,
 } from '../engines/auto-scheduler-solver.ts';
+import { toDaylightSlot } from '../engines/practice-daylight.ts';
 import {
   liveRelocationsOf,
   loadSeasonPracticeLock,
@@ -29,6 +31,12 @@ import {
   RELOCATED_ROSTER,
   RELOCATED_SLOTS,
 } from '../../../../tests/fixtures/relocatedLockCases.js';
+import {
+  SOLVER_DATED_CASES,
+  SOLVER_DATED_TODAY,
+  seasonLongDating,
+  solverDatedRun,
+} from '../../../../tests/fixtures/solverDatedCases.js';
 
 type Row = Record<string, unknown>;
 
@@ -81,6 +89,13 @@ const seed = new Map<string, Row>(RELOCATED_DB_EXCEPTIONS.map((x: Row) => [Strin
 const lockedTeams = new Set(RELOCATED_DB_ASSIGNMENTS.map((r: Row) => String(r.team_id)));
 const placeable = RELOCATED_ROSTER.map((t) => t.id).filter((id) => !lockedTeams.has(id));
 const slotOf = (id: string) => String(seed.get(id)!.practice_slot_id);
+/** M4.8: the seed's dating, season-long from each slot's first occurrence (the Vitest arm's). */
+const DATING = seasonLongDating(slots, toDaylightSlot, {
+  timeZone: 'UTC',
+  until: '2026-11-30',
+  liveFrom: '2026-09-07',
+});
+const datedSlotsById = new Map(dateSchedulerSlots(slots, DATING).map((s) => [s.id, s]));
 
 async function loadSeed() {
   const lock = await loadSeasonPracticeLock(fakeClient([...RELOCATED_DB_EXCEPTIONS]), {
@@ -130,6 +145,7 @@ Deno.test(
       slots,
       locked: lockedOf(lock),
       placeableTeamIds: placeable,
+      dating: DATING,
       config: { ...GREEDY_ONLY },
     });
     const taken = new Set(run.placements.map((p) => p.slotId));
@@ -162,11 +178,18 @@ Deno.test('relocated lock - a row with no withdrawn_at key refuses the read', ()
 
 Deno.test('relocated lock - each live in-run relocation holds a unit and its coaches', async () => {
   const lock = await loadSeed();
-  const base = buildLockedOccupancy(lockedOf(lock), teamsById, slotsById, lock.relocations);
+  const base = buildLockedOccupancy(
+    lockedOf(lock),
+    teamsById,
+    datedSlotsById,
+    lock.relocations,
+    DATING.liveFrom
+  );
+  const heldUnits = (slotId: string) => base.slotOccupants.get(slotId)?.length ?? 0;
   for (const id of RELOCATED_EXPECT.liveInRun) {
     const held = slotsById.get(slotOf(id))!;
     const units: Record<string, number> = RELOCATED_EXPECT.unitsHeld;
-    assertEquals(base.slotCapacity.get(held.id), held.capacity - units[held.id], `${id} units`);
+    assertEquals(heldUnits(held.id), units[held.id], `${id} units`);
     for (const coachId of teamsById.get(String(seed.get(id)!.team_id))!.coachIds) {
       assert(
         (base.coachAssignments.get(coachId) ?? []).some((w) => w.slotId === held.id),
@@ -176,7 +199,7 @@ Deno.test('relocated lock - each live in-run relocation holds a unit and its coa
   }
   for (const id of RELOCATED_EXPECT.withdrawn) {
     const slot = slotsById.get(slotOf(id))!;
-    assertEquals(base.slotCapacity.get(slot.id), slot.capacity, `withdrawn ${id} holds its slot`);
+    assertEquals(heldUnits(slot.id), 0, `withdrawn ${id} holds its slot`);
   }
   assertEquals(
     base.relocatedOutsideRun.map((r) => r.exceptionId).sort(),
@@ -194,6 +217,7 @@ Deno.test(
       locked: lockedOf(lock),
       relocated: lock.relocations,
       placeableTeamIds: placeable,
+      dating: DATING,
       config: { ...GREEDY_ONLY },
     });
     const used = new Map<string, number>();
@@ -229,3 +253,54 @@ Deno.test(
     );
   }
 );
+
+// ---------------------------------------------------------------------------
+// M4.8: the dated hard constraint, over the table the Vitest arm runs
+// (`tests/autoSchedulerLock.test.js`), so the two runtimes answer one table.
+// ---------------------------------------------------------------------------
+
+for (const testCase of SOLVER_DATED_CASES) {
+  Deno.test(`dated solver - ${testCase.name}`, async () => {
+    const { slots: caseSlots, dating } = solverDatedRun(testCase, toDaylightSlot);
+    const run = await runPracticeOptimizer({
+      teams: testCase.teams.map((t) => ({ ...prepareTeam(t), division: t.division })),
+      slots: caseSlots as unknown as SchedulerSlot[],
+      locked: testCase.locked,
+      placeableTeamIds: [...testCase.placeable],
+      dating,
+      config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
+    });
+    assertEquals(
+      run.placements.map((p) => `${p.teamId} -> ${p.slotId}`).sort(),
+      [...testCase.expect.placements].sort(),
+      'placements'
+    );
+    assertEquals(
+      run.unassigned.map((u) => `${u.teamId}: ${u.reason}`).sort(),
+      [...testCase.expect.unassigned].sort(),
+      'unplaced'
+    );
+    assertEquals(
+      run.endedRows.map((r) => r.assignmentId),
+      [...testCase.expect.ended]
+    );
+    assertEquals(
+      run.unreadableRange.map((r) => r.assignmentId),
+      [...testCase.expect.unreadable]
+    );
+    assertEquals(run.evaluation.summary.dateModel, 'dated');
+    assertEquals(run.evaluation.coachConflicts.length, 0, 'the search created a conflict');
+    assertEquals(run.liveFrom, SOLVER_DATED_TODAY);
+  });
+}
+
+Deno.test('dated solver - the table reaches every shape, so no case is vacuous', () => {
+  const names = SOLVER_DATED_CASES.map((c) => c.name);
+  for (const shape of ['W4-S1', 'W4-S2', 'E1', 'E2', 'E3', 'DST', 'cannot be read']) {
+    assert(
+      names.some((n) => n.includes(shape)),
+      `no case for ${shape}`
+    );
+  }
+  assert(SOLVER_DATED_CASES.length >= 12, 'the table lost cases');
+});

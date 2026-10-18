@@ -127,8 +127,8 @@ function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
  * clash only on a shared live date with overlapping wall windows, and a slot's
  * `assignedCount` is its busiest date (rows as `assignmentRows`); with none,
  * first-occurrence instants and row counts, unchanged. `summary.dateModel`
- * says which ran. The auto-scheduler's own scoring is always undated
- * (`auto-scheduler-solver.ts` `scoreSchedule`, plan Q2).
+ * says which ran. The auto-scheduler's own scoring is dated since M4.8, from
+ * the store's slot dating (`auto-scheduler-solver.ts` `scoreSchedule`, Q1).
  *
  * **Saved practice exceptions (the M4.7 follow-up, plan Q1)**, exactly as
  * core: a dated call may pass `exceptions` (`practice_exceptions` rows as

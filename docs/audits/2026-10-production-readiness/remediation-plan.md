@@ -18,7 +18,7 @@ on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1 moved i
   - Free-tier budgets, the AA accent palette, and the real-backend E2E made required: #581.
 - M5: #557.
 
-Open: M4.8 (needs an owner-approved plan before any code), M6, the M1 tails, and the follow-ups in
+Open: M4.8 (plan approved 2026-10-18, built, in review), M6, the M1 tails, and the follow-ups in
 "Discovered during execution".
 
 The order to take them in, by dependency, is [`resume-queue.md`](./resume-queue.md). Every agent
@@ -866,6 +866,15 @@ standards these items name · [ ] deployed and smoke-tested
 >   CI pending.
 
 > **M4.8. The auto-scheduler's coach check compares first-occurrence instants, so it can double-book a coach** (not an audit finding: found by the M4.7 plan, Q2; medium) — **plan first: needs the owner's approval before any code**
+> - **Status (2026-10-18): built, in review.** Plan `docs/PLAN_SOLVER_DATE_MODEL.md`, approved
+>   by the owner on 2026-10-18 with every recommendation as written; built in branch
+>   `claude/vibrant-allen-hr7y7s-m48` (the PR is opened by the coordinator). The solver judges
+>   dated occupancy from the store's slot dating; `scoreSchedule` scores dated; a slot it cannot
+>   date refuses the run (422 `SLOT_DATING_UNREADABLE`); the response carries `liveFrom` and the
+>   page dates new placements from it. On the season-2026 corpus sweep (lock shares 0 / 0.5 /
+>   0.9, seeds 1 / 2 / 3, two todays) the placements are byte-identical to a golden generated on
+>   `main` before the change (*executed*). No migration. The plan's §12 records how the build
+>   settled what the text left open.
 > - **Status (2026-10-13): open, not planned.** Proposed by the M4.7 plan (Q2, approved as
 >   recommended) and left out of M4.7 because it is the solver, whose behaviour that item froze.
 > - **Why here:** it is the same gap M4.7 closes in the evaluators, left open in the one place

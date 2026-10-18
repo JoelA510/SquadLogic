@@ -364,9 +364,14 @@ on `public.min` (an aggregate, which cannot carry a `search_path`) and
 `public.set_updated_at` (calls only `now()`), accepted (`20261018040000` later
 dropped `set_updated_at`, an orphan only a fresh build had, and its waiver);
 `auth_rls_initplan` (11
-policies on 9 tables) and `multiple_permissive_policies` (20 tables), debt until
-2027-01-11: performance, not access, and rewriting RLS policies is its own
-reviewed change. Tests: `tests/supabaseAdvisors.test.js`.
+policies on 9 tables) and `multiple_permissive_policies` (20 tables) were waived
+as debt until 2027-01-11 (performance, not access). They are fixed by
+`20261018030000_rls_advisor_rewrite.sql` (`docs/PLAN_RLS_ADVISOR_REWRITE.md`);
+the same change removed both waivers from the register, so either lint now
+fails the gate on its first finding (reverting the migration needs them put
+back by hand); `supabase/tests/rls_policy_matrix.sql` holds the rewrite to no change
+in access.
+Tests: `tests/supabaseAdvisors.test.js`.
 
 **The local advisors are a subset of the hosted ones.** The hosted project's
 advisors also report every `SECURITY DEFINER` function callable by `anon` or
@@ -467,9 +472,12 @@ its search path, so names print qualified; run it from a default session. An `on
 and the repository does not build; an `only_in_snapshot` row carries a key,
 which `python3 scripts/dbharness/catalog_snapshot.py name supabase/catalog-snapshot.json <key>`
 names. Either is drift: record it in the remediation plan and fix it with a
-migration, never by hand. Measured on 2026-10-18, before `20261018040000`
-deployed: exactly the 29 objects that migration drops (17 triggers, 12
-functions) were `only_in_database`, and nothing was `only_in_snapshot`.
+migration, never by hand. Measured on 2026-10-18, before `20261018030000` and
+`20261018040000` deployed: the 29 objects `20261018040000` drops (17 triggers,
+12 functions) were `only_in_database`, and the policies differed by exactly
+the RLS rewrite (28 old policies `only_in_database`, 65 new ones
+`only_in_snapshot`); nothing else differed. Once both have deployed, expect only
+the three `count` rows (133, 119, 35).
 
 ## Real-backend E2E (`e2e-real-backend.yml`)
 

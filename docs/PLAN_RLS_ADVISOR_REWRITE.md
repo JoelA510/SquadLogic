@@ -10,7 +10,11 @@ before PR 1: 130 migrations, 82 policies on `public` as §1.3 counts (_executed_
 the figures below were taken at `cab8ce1` (129 migrations). §4.2's matrix
 gained a fifth probe in review, an UPDATE moving every row the persona may
 update to an organization no persona belongs to, so an UPDATE policy's WITH
-CHECK is tested too (910 cells). Was: PROPOSED,
+CHECK is tested too (910 cells). PR 2 is migration `20261018030000`, with
+its revert and smoke, `reconcile_prod_rls_drift()` and its smoke on the new
+spec, and both waivers removed; the matrix passes it unchanged. Its smoke pins
+the 26 tables' 85 policies rather than `public`'s 119 (§3), so a migration on
+another table does not move it. Was: PROPOSED,
 awaiting the owner's approval (§9). A schema change to
 row-level security, so plan first; applied by CI on merge. Resume queue,
 Wave 2, with a deadline: the advisor waivers in

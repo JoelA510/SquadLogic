@@ -1468,7 +1468,8 @@ smoke-tested
     by the owner as recommended): `20261018040000_reconcile_trigger_drift` and the catalogue drift
     check (`supabase/catalog-snapshot.json`, checked by the harness; the operator query in
     `ci-cd.md`). Production compared with the snapshot before deploy differs by exactly the 29
-    objects the migration drops (*executed*, read-only). Not deployed.
+    objects the migration drops and the not-yet-deployed RLS rewrite's policies (*executed*,
+    read-only). Not deployed.
   - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
     which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
     renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
@@ -1957,14 +1958,46 @@ smoke-tested
   - Any member of an organization, a coach or a parent included, can INSERT `telemetry_log`
     rows for it; only its admins read them. *Executed.*
 
+- 2026-10-18, the RLS advisor rewrite, PR 2 (branch `claude/vibrant-allen-hr7y7s-rlsrewrite`,
+  stacked on PR 1): migration `20261018030000_rls_advisor_rewrite.sql` with its revert and smoke,
+  `reconcile_prod_rls_drift()` and the `20260928000000` smoke on the new spec, and the
+  `auth_rls_initplan` and `multiple_permissive_policies` waivers removed. 82 policies on `public`
+  become 119; the persona matrix passes unchanged; the revert restores a catalogue identical to
+  the one before (every policy's command, roles and deparsed clauses compared, and the reconcile
+  function's body by hash). *Executed* locally (all suites, the harness, plants listed in the
+  PR); CI's runs are the PR's.
+  - **Production matches the build exactly, today.** Its 82 `public` policies hash to the same
+    digest as a fresh build's before the rewrite (`89d6a1d4...`, over table, name, command,
+    permissive, roles and both clauses), and its advisors still report 11 `auth_rls_initplan`
+    and 20 `multiple_permissive_policies`. *Executed* (read-only SELECT and `get_advisors`,
+    2026-10-18). After deploy, the same digest should read `a9380ecab8c4...` on 119 policies, if
+    production's Postgres deparses the new clauses as the harness's does.
+  - **An UPDATE that names its row also checks the new row against the SELECT policies.** So a
+    matrix probe moving the subject row to another organization (`... WHERE id = ...`) was
+    refused by the member SELECT policy and could not see an UPDATE policy's `WITH CHECK
+    (true)`; the probe now has no WHERE (PR 1). The same masking protects the app's own
+    filtered PATCHes; an unfiltered one reaches only the UPDATE policy. *Executed.*
+  - `scripts/dbharness/prove.sh`'s five `20260928000000` plants targeted a function body this
+    migration replaces (its anchor pre-flight refused them); they are re-aimed at
+    `20261018030000`, and each was run once by hand against the `20260928000000` smoke and
+    turned it red. The full prover (about 5.4 hours) was not run. *Executed* (the five).
+  - Comments that name the replaced policies were left as they are: the practice-persistence
+    Edge Function's (`practice_assignments_write_admin`; changing it would redeploy the
+    function) and those in earlier migrations. `docs/security/rls-policies.md`'s example of the
+    usual policy shape (a member `FOR ALL`) is out of date with every table this rewrite
+    touched; a note on the new shape is added, the example is not rewritten. *Statically
+    reviewed.*
+  - `coach_team_requests` keeps its single admin `FOR ALL` policy: it has no member SELECT beside
+    it, so it is not a finding. *Executed* (the migration's closing check).
+
 - 2026-10-18, found by the schema drift PR (branch `claude/vibrant-allen-hr7y7s-drift`):
   - **The field import relied on the dropped trigger for sub-surfaces, in production only.**
     `finalize_field_import_job` (`20260503070000`) writes `supports_halves`, and in production
     `trigger_manage_field_subunits` then created `A` and `B` (and `rollback_field_import_job`,
     `20260909000000`, restoring `supports_halves = false`, deleted them). After `20261018040000`
     a field imported with halves has no sub-surfaces until an admin saves it on the Fields page,
-    which is what a fresh build (CI) has always done. Production holds 0 fields, so nothing changes for existing
-    data. Not changed: the import RPC is its own change. *Statically reviewed.*
+    which is what a fresh build (CI) has always done. Production holds 0 fields, so nothing
+    changes for existing data. Not changed: the import RPC is its own change. *Statically reviewed.*
   - **The mock's direct-table `fields` paths still imitate the dropped trigger** (insert and
     update of `fields` through `from('fields')` create, and with halves off delete, sub-surfaces;
     `tests/mockDeleteTombstones.test.js` pins the delete). No app code writes `fields` directly

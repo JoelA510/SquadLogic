@@ -309,14 +309,15 @@ export type EmptyGameRosterRefusal = {
  * games (found by PR 2-C, plan "Discovered during execution").
  *
  * `evaluateGameSchedule` (`engines/scoring-engine.ts`) resolves both sides of
- * every game against `teams` and skips a side it cannot find, without a word.
- * With `teams` empty it therefore skips every game and answers `status: 'ok'`,
- * `coveragePercent: 100` and no conflict: a clean report after examining
- * nothing, and with `persist: true` a recorded run. With `games` empty it
+ * every game against `teams`. With `teams` empty it used to skip every game
+ * without a word and answer `status: 'ok'`, `coveragePercent: 100` and no
+ * conflict: a clean report after examining nothing, and with `persist: true`
+ * a recorded run. With `games` empty it
  * answers `ok` over no game at all. Both are refused here, at the input
- * boundary, before the season read, the engine and persistence. The engine's
- * scoring is unchanged: refusing a request is input validation, while
- * reporting a game's unknown team is a scoring change, which this is not.
+ * boundary, before the season read, the engine and persistence. (Since the
+ * #576 follow-up the engine reports each unknown side and an empty match as an
+ * error too; a block that names no rostered team is
+ * {@link refuseUnmatchedGameRoster}'s.)
  *
  * `null` games (a practice-only request) is not refused here.
  */
@@ -336,6 +337,52 @@ export function refuseEmptyGameRoster(
     code: EMPTY_GAME_ROSTER,
     teamCount,
     gameCount,
+  };
+}
+
+/** The `code` of `fairness-scoring`'s 422 for a games block that names no rostered team. */
+export const GAME_ROSTER_UNMATCHED = 'GAME_ROSTER_UNMATCHED';
+
+export type GameRosterUnmatchedRefusal = {
+  error: string;
+  code: typeof GAME_ROSTER_UNMATCHED;
+  teamCount: number;
+  gameCount: number;
+};
+
+/**
+ * Refuse a games block in which no game names a rostered team (#576
+ * follow-up, `docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md` §3.3, Q2):
+ * {@link refuseEmptyGameRoster}'s refusal one step on. Every side of every
+ * game is unknown to the roster, so nothing on it would be examined -- the
+ * engine reports each side as unknown and an `error`, and no score should be
+ * saved for it. Refused at the input boundary, before the season read, the
+ * engine and persistence, whether or not `persist` is set.
+ *
+ * A block with some rostered side is not refused: its unknown sides are
+ * warnings (`attention-needed`, Q3), the external league's teams among them.
+ * An empty block is {@link refuseEmptyGameRoster}'s, which runs first.
+ */
+export function refuseUnmatchedGameRoster(
+  games:
+    | { teams: Array<{ id: string }>; games: Array<{ homeTeamId: string; awayTeamId: string }> }
+    | null
+    | undefined
+): GameRosterUnmatchedRefusal | null {
+  if (!games || games.teams.length === 0 || games.games.length === 0) return null;
+  const rostered = new Set(games.teams.map((t) => t.id));
+  if (games.games.some((g) => rostered.has(g.homeTeamId) || rostered.has(g.awayTeamId))) {
+    return null;
+  }
+  const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+  return {
+    error:
+      `No game in this request names a team on its roster (${plural(games.teams.length, 'team')}, ` +
+      `${plural(games.games.length, 'game')}), so nothing would be examined. Nothing was ` +
+      'evaluated or saved.',
+    code: GAME_ROSTER_UNMATCHED,
+    teamCount: games.teams.length,
+    gameCount: games.games.length,
   };
 }
 

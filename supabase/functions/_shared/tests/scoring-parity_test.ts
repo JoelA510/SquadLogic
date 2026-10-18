@@ -26,10 +26,18 @@
  */
 
 import { assert, assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
-import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
-import type { PracticeAssignment, PracticeException, Slot, Team } from '../schemas/scoring.ts';
+import { evaluateGameSchedule, evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
+import type {
+  GameAssignment,
+  PracticeAssignment,
+  PracticeException,
+  Slot,
+  Team,
+} from '../schemas/scoring.ts';
 import extract from './fixtures/scoring-parity.season-2026.json' with { type: 'json' };
 import dated from './fixtures/scoring-parity-dated.season-2026.json' with { type: 'json' };
+import games from './fixtures/scoring-parity-games.season-2026.json' with { type: 'json' };
+import { edgeGameProjection } from '../../../../tests/fixtures/gameScoringProjection.js';
 
 interface Agreed {
   summary: {
@@ -289,5 +297,40 @@ Deno.test('scoring parity dated - the generator writes the extract this file rea
   assert(
     generator.includes(`'${DATED_EXTRACT_PATH}'`),
     `${GENERATOR} no longer writes ${DATED_EXTRACT_PATH}`
+  );
+});
+
+// ---- Games (#576 follow-up, docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md §3.5) ----
+
+/** Literals, the Vitest arm's (it checks this file for each `name: value,` pair). */
+const GAMES_EXPECTED = {
+  games: 542,
+  teamsRostered: 132,
+  teamsScheduled: 131,
+  unknownTeams: 5,
+  gameCoachConflicts: 3,
+};
+const GAMES_EXTRACT_PATH =
+  'supabase/functions/_shared/tests/fixtures/scoring-parity-games.season-2026.json';
+
+Deno.test("scoring parity, games - the Edge engine gives core's recorded answer", () => {
+  assertEquals(games.inputs.games.length, GAMES_EXPECTED.games);
+  assertEquals(games.inputs.teams.length, GAMES_EXPECTED.teamsRostered);
+  assertEquals(games.expected.teamsScheduled, GAMES_EXPECTED.teamsScheduled);
+  assertEquals(games.expected.unknownTeams.length, GAMES_EXPECTED.unknownTeams);
+  assertEquals(games.expected.coachConflicts.length, GAMES_EXPECTED.gameCoachConflicts);
+  const result = evaluateGameSchedule({
+    assignments: games.inputs.games as unknown as GameAssignment[],
+    teams: games.inputs.teams as unknown as Team[],
+  });
+  assertEquals(edgeGameProjection(result), games.expected);
+  assertEquals(result.summary.coveragePercent, 99.24);
+});
+
+Deno.test('scoring parity, games - the generator writes the extract this arm reads', () => {
+  const generator = Deno.readTextFileSync(GENERATOR);
+  assert(
+    generator.includes(`'${GAMES_EXTRACT_PATH}'`),
+    `${GENERATOR} no longer writes ${GAMES_EXTRACT_PATH}`
   );
 });

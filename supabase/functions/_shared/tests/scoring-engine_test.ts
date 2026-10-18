@@ -3,9 +3,20 @@ import {
   assertStringIncludes,
   assertThrows,
 } from 'https://deno.land/std@0.203.0/assert/mod.ts';
-import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
-import { Team, Slot, PracticeAssignment, PracticeException } from '../schemas/scoring.ts';
+import { evaluateGameSchedule, evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
+import {
+  GameAssignment,
+  Team,
+  Slot,
+  PracticeAssignment,
+  PracticeException,
+} from '../schemas/scoring.ts';
 import dated from './fixtures/scoring-dated-vectors.json' with { type: 'json' };
+import gameVectors from './fixtures/game-scoring-vectors.json' with { type: 'json' };
+import {
+  edgeGameProjection,
+  truthProjection,
+} from '../../../../tests/fixtures/gameScoringProjection.js';
 
 Deno.test('evaluatePracticeSchedule - basic assignment calculation', () => {
   const teams: Team[] = [
@@ -218,4 +229,42 @@ Deno.test('evaluatePracticeSchedule exceptions - an undated call refuses them', 
   );
   // None sent is not a refusal.
   evaluatePracticeSchedule({ ...vector, slots, exceptions: [] });
+});
+
+// ---- Games (#576 follow-up, docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md §3.5) ----
+//
+// The Edge arm of the game vector table, in the runtime it is deployed to.
+// `tests/scoringEngineDrift.test.js` runs core and the Edge over the same
+// table under Node; each truth is worked out by hand.
+
+Deno.test('evaluateGameSchedule - the vector table is the plan table (meta, can fail)', () => {
+  assertEquals(
+    gameVectors.vectors.map((v) => v.name.split(':')[0]),
+    ['G1', 'G2', 'G3 (control)', 'G4', 'S1', 'S2', 'U2', 'D1']
+  );
+});
+
+for (const vector of gameVectors.vectors) {
+  Deno.test(`evaluateGameSchedule - the hand-worked truth: ${vector.name}`, () => {
+    const result = evaluateGameSchedule({
+      assignments: vector.games as unknown as GameAssignment[],
+      teams: vector.teams as Team[],
+    });
+    assertEquals(edgeGameProjection(result), truthProjection(vector.truth));
+    assertEquals(result.summary.coveragePercent, vector.truth.coveragePercent);
+    assertEquals(result.status, vector.truth.edgeStatus);
+  });
+}
+
+Deno.test('evaluateGameSchedule - an unknown side is a warning naming it, once per team', () => {
+  const [g2] = gameVectors.vectors.filter((v) => v.name.startsWith('G2'));
+  const result = evaluateGameSchedule({
+    assignments: g2.games as unknown as GameAssignment[],
+    teams: g2.teams as Team[],
+  });
+  const unknown = result.issues.filter((i) => i.category === 'data-quality');
+  assertEquals(unknown.length, 1);
+  assertEquals(unknown[0].severity, 'warning');
+  assertEquals(unknown[0].message, 'game references unknown team X');
+  assertEquals(unknown[0].details, { teamId: 'X', weekIndex: 1, slotId: 'slot-g1' });
 });

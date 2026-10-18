@@ -6,13 +6,15 @@ import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClien
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 /**
- * An import sends the uploaded file's name nowhere it is not needed.
+ * An import keeps the uploaded file's name out of the audit trail.
  *
  * The audit log keeps no upload file names (owner decision 2026-10-14). The
  * name still forms the import job's `storage_path`, which the import reads
  * back, so `create_import_job` still takes it; but `import-validation` has not
  * read `file_name` since #577, and `create_import_job` stopped writing it into
- * its `import.started` audit row in 20261018000000. This runs a real import
+ * its `import.started` audit row in 20261018000000. (The import panel's
+ * telemetry write-back still sends it; that is recorded as an open question in
+ * the remediation plan, not covered here.) This runs a real import
  * through the mock client (the mock's `create_import_job` mirrors the RPC) and
  * reads what was actually sent and stored.
  */

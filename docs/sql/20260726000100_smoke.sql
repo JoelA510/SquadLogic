@@ -8,18 +8,23 @@ where schemaname = 'public'
   and tablename = 'organizations'
   and policyname = 'Admins can manage organizations';
 
--- 2. The new org-membership-gated policy exists, covers ALL commands, and
---    both its USING and WITH CHECK clauses reference is_org_admin (not a
---    raw JWT claim). Expect one row with qual/with_check both containing
---    'is_org_admin'.
-select 'new policy is is_org_admin-gated (expect qual/with_check both mention is_org_admin)' as check,
+-- 2. The new org-membership-gated policy exists and every clause it has
+--    references is_org_admin (not a raw JWT claim). Since
+--    20261018030000_rls_advisor_rewrite.sql it is three policies, one per
+--    command ("Organizations: admins insert", "... update", "... delete"),
+--    replacing the FOR ALL "Organizations: admins manage" with the same
+--    expression. Expect three rows; INSERT has no USING and DELETE no WITH
+--    CHECK, so those columns read NULL there and true everywhere else.
+select 'new policy is is_org_admin-gated (expect 3 rows, every clause present mentions is_org_admin)' as check,
        policyname, cmd,
        qual like '%is_org_admin%' as using_gated,
        with_check like '%is_org_admin%' as with_check_gated
 from pg_policies
 where schemaname = 'public'
   and tablename = 'organizations'
-  and policyname = 'Organizations: admins manage';
+  and policyname in ('Organizations: admins insert', 'Organizations: admins update',
+                     'Organizations: admins delete')
+order by policyname;
 
 -- 3. The pre-existing read policy ("Organizations: members can access") is
 --    untouched by this migration. Expect one row.

@@ -3,10 +3,16 @@
 -- Restores `persist_team_schedule` exactly as 20260923000000 defines it and
 -- `persist_game_schedule` exactly as 20260503030000 does (both copied, not
 -- retyped): the service role is exempt from their caller checks again, the
--- game save admits any member again, and neither writes an audit row. Revert
--- the Edge Functions in the same change (plan section 9), or the reverted RPCs
--- save with no audit row at all: the Edge code this revert pairs with is the
--- one that wrote `team.saved` / `game.saved` after the save.
+-- game save admits any member again, and neither writes an audit row.
+--
+-- ORDER (plan section 9): ship the Edge revert FIRST, in its own PR, and this
+-- migration after it. CI applies a migration before it deploys the Edge
+-- Functions, so shipping both together leaves the current Edge calling these
+-- restored bodies as the user, with no audit write on either side: saves
+-- commit unaudited. Edge first, the old Edge calls the forward RPCs with the
+-- service role, which they refuse (42501): saves are refused, never unaudited,
+-- until this migration lands. The Edge code this revert pairs with is the one
+-- that wrote `team.saved` / `game.saved` after the save.
 --
 -- Audit rows written while the forward migration was live stay (the audit log
 -- is append-only).

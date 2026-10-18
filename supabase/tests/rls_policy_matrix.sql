@@ -24,24 +24,35 @@
 -- and one in Org B (from the fixtures where they have one, seeded below
 -- otherwise).
 --
--- **Probes**, per persona and table (26 x 7 x 4 = 728 cells):
+-- **Probes**, per persona and table (26 x 7 x 5 = 910 cells):
 --   sel  which of the two subject rows SELECT returns: 'AB', 'A', 'B' or '-';
---   ins  an INSERT of a new Org A row: 'ok', or 'rls' (refused by a policy's
---        WITH CHECK), or 'grant' (refused by a table privilege);
---   upd  how many rows an UPDATE of Org A's subject row reaches (each sets one
---        column to itself), or 'rls'/'grant';
---   del  how many rows a DELETE of Org A's subject row reaches, or 'grant'.
+--   ins  an INSERT of a new Org A row: 'ok';
+--   upd  how many rows an UPDATE of Org A's subject row reaches, setting one
+--        column to the value it has;
+--   mov  how many rows an UPDATE moving Org A's subject row to Org B (its
+--        organization column set to Org B's id) reaches, which an UPDATE
+--        policy's WITH CHECK has to refuse; 'n/a' on `organizations` and
+--        `profiles`, which have no organization column to move;
+--   del  how many rows a DELETE of Org A's subject row reaches.
+-- Any probe can instead read 'rls' (a row refused by a policy's WITH CHECK,
+-- "new row violates row-level security policy") or 'grant' (a table privilege
+-- the role lacks, "permission denied for table"); any other 42501 is shown
+-- with its message, and so differs from every expected cell.
 -- Every write probe undoes itself: it raises the private SQLSTATE `MXUND`
 -- after the write and catches only that (and 42501, the refusal it is
 -- measuring), so its subtransaction rolls back and no probe sees another's
--- effect. Any other error is not caught: it aborts the test.
+-- effect. Any other error is not caught: it aborts the test. A write reads
+-- 'ok' once its statement has returned, foreign keys checked; none of the 26
+-- tables has a deferred constraint or a constraint trigger that would run
+-- only at commit (checked on a31ddde).
 --
--- **Assertions** (32): five meta-assertions (the subject list is 26
--- RLS-enabled tables, every subject row was seeded, every persona ran as the
--- identity it claims, the expected table covers all 182 table-persona pairs,
--- the probes produced all 728 cells); one that no cell anywhere differs from
--- the literal expected table below; and one `results_eq` per table, so a
--- failure names its table. Every differing cell is printed as a diagnostic.
+-- **Assertions** (32): five meta-assertions (the 26 subject tables exist and
+-- each has RLS enabled, every subject row was seeded, every persona ran as the
+-- identity it claims on every table, the expected table covers all 182
+-- table-persona pairs, the probes produced all 910 cells); one that no cell
+-- anywhere differs from the literal expected table below; and one
+-- `results_eq` per table, so a failure names its table. Every differing cell
+-- is printed as a diagnostic.
 --
 -- The expected table was generated on `main` (a31ddde, 82 policies) and each
 -- row was then checked by hand against the policy text it follows; the notes
@@ -237,8 +248,9 @@ INSERT INTO matrix_persona VALUES
     (7, 'anon',     'anon',          NULL);
 
 -- tbl: the table; a_row / b_row: the predicate naming its Org A / Org B
--- subject row; upd_col: the column the UPDATE probe sets to itself;
--- insert_sql: the INSERT probe, a new Org A row.
+-- subject row; upd_col: the column the UPDATE probe sets to itself, and the
+-- one the move probe sets to Org B's id when it is the organization column
+-- (organization_id or org_id); insert_sql: the INSERT probe, a new Org A row.
 CREATE TEMP TABLE matrix_subject (
     tbl text PRIMARY KEY, a_row text NOT NULL, b_row text NOT NULL,
     upd_col text NOT NULL, insert_sql text NOT NULL
@@ -398,11 +410,25 @@ INSERT INTO matrix_subject VALUES
                'session-probe', 'import.suggestion_received')$$);
 
 CREATE TEMP TABLE matrix_seen (tbl text PRIMARY KEY, a_n bigint, b_n bigint);
-CREATE TEMP TABLE matrix_identity (persona text PRIMARY KEY, db_role text, uid uuid);
+CREATE TEMP TABLE matrix_identity (
+    tbl text, persona text, db_role text, uid uuid, PRIMARY KEY (tbl, persona)
+);
 CREATE TEMP TABLE matrix_result (
-    tbl text, persona text, sel text, ins text, upd text, del text,
+    tbl text, persona text, sel text, ins text, upd text, mov text, del text,
     PRIMARY KEY (tbl, persona)
 );
+
+-- A probe's 42501, named. Called after RESET ROLE, on the message the probe
+-- kept ('E:' and the error's text); any other cell passes through.
+CREATE FUNCTION pg_temp.matrix_cell(raw text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $f$
+    SELECT CASE
+        WHEN raw NOT LIKE 'E:%' THEN raw
+        WHEN raw LIKE 'E:new row violates row-level security policy%' THEN 'rls'
+        WHEN raw LIKE 'E:permission denied for table%' THEN 'grant'
+        ELSE '42501 ' || substr(raw, 3)
+    END
+$f$;
 
 -- ── 4. The probes ─────────────────────────────────────────────────────────
 -- The role and the JWT claims are set OUTSIDE each probe's subtransaction, so
@@ -418,6 +444,7 @@ DECLARE
     v_sel text;
     v_ins text;
     v_upd text;
+    v_mov text;
     v_del text;
     v_uid uuid;
     v_role text;
@@ -434,7 +461,8 @@ BEGIN
             -- Cleared each time, so a probe that recorded nothing leaves a
             -- NULL (which the cell-count assertion counts) rather than the
             -- previous table's answer.
-            v_sel := NULL; v_ins := NULL; v_upd := NULL; v_del := NULL;
+            v_sel := NULL; v_ins := NULL; v_upd := NULL; v_mov := NULL; v_del := NULL;
+            v_uid := NULL; v_role := NULL;
             PERFORM set_config('request.jwt.claims',
                 CASE WHEN p.uid IS NULL THEN '{"role":"anon"}'
                      ELSE json_build_object('sub', p.uid, 'role', p.db_role)::text END,
@@ -452,7 +480,7 @@ BEGIN
                               WHEN nb > 0 THEN 'B'
                               ELSE '-' END;
             EXCEPTION WHEN insufficient_privilege THEN
-                v_sel := 'grant';
+                v_sel := 'E:' || SQLERRM;
             END;
 
             -- ins: a new Org A row.
@@ -461,20 +489,33 @@ BEGIN
                 RAISE SQLSTATE 'MXUND' USING MESSAGE = 'ok';
             EXCEPTION
                 WHEN SQLSTATE 'MXUND' THEN v_ins := SQLERRM;
-                WHEN insufficient_privilege THEN
-                    v_ins := CASE WHEN SQLERRM LIKE 'new row violates row-level security policy%' THEN 'rls' ELSE 'grant' END;
+                WHEN insufficient_privilege THEN v_ins := 'E:' || SQLERRM;
             END;
 
-            -- upd: Org A's subject row, one column set to itself.
+            -- upd: Org A's subject row, one column set to the value it has.
             BEGIN
                 EXECUTE format('UPDATE public.%I SET %I = %I WHERE %s', s.tbl, s.upd_col, s.upd_col, s.a_row);
                 GET DIAGNOSTICS n = ROW_COUNT;
                 RAISE SQLSTATE 'MXUND' USING MESSAGE = n::text;
             EXCEPTION
                 WHEN SQLSTATE 'MXUND' THEN v_upd := SQLERRM;
-                WHEN insufficient_privilege THEN
-                    v_upd := CASE WHEN SQLERRM LIKE 'new row violates row-level security policy%' THEN 'rls' ELSE 'grant' END;
+                WHEN insufficient_privilege THEN v_upd := 'E:' || SQLERRM;
             END;
+
+            -- mov: Org A's subject row moved to Org B.
+            IF s.upd_col IN ('organization_id', 'org_id') THEN
+                BEGIN
+                    EXECUTE format('UPDATE public.%I SET %I = %L WHERE %s', s.tbl, s.upd_col,
+                                   'b2222222-2222-2222-2222-222222222222', s.a_row);
+                    GET DIAGNOSTICS n = ROW_COUNT;
+                    RAISE SQLSTATE 'MXUND' USING MESSAGE = n::text;
+                EXCEPTION
+                    WHEN SQLSTATE 'MXUND' THEN v_mov := SQLERRM;
+                    WHEN insufficient_privilege THEN v_mov := 'E:' || SQLERRM;
+                END;
+            ELSE
+                v_mov := 'n/a';
+            END IF;
 
             -- del: Org A's subject row.
             BEGIN
@@ -483,13 +524,14 @@ BEGIN
                 RAISE SQLSTATE 'MXUND' USING MESSAGE = n::text;
             EXCEPTION
                 WHEN SQLSTATE 'MXUND' THEN v_del := SQLERRM;
-                WHEN insufficient_privilege THEN
-                    v_del := CASE WHEN SQLERRM LIKE 'new row violates row-level security policy%' THEN 'rls' ELSE 'grant' END;
+                WHEN insufficient_privilege THEN v_del := 'E:' || SQLERRM;
             END;
 
             RESET ROLE;
-            INSERT INTO matrix_result VALUES (s.tbl, p.persona, v_sel, v_ins, v_upd, v_del);
-            INSERT INTO matrix_identity VALUES (p.persona, v_role, v_uid) ON CONFLICT (persona) DO NOTHING;
+            INSERT INTO matrix_result VALUES (s.tbl, p.persona,
+                pg_temp.matrix_cell(v_sel), pg_temp.matrix_cell(v_ins), pg_temp.matrix_cell(v_upd),
+                pg_temp.matrix_cell(v_mov), pg_temp.matrix_cell(v_del));
+            INSERT INTO matrix_identity VALUES (s.tbl, p.persona, v_role, v_uid);
         END LOOP;
     END LOOP;
     PERFORM set_config('request.jwt.claims', '', true);
@@ -497,252 +539,252 @@ END
 $matrix$;
 
 -- ── 5. The expected table ─────────────────────────────────────────────────
--- One row per table and persona: sel, ins, upd, del (see the header). The
+-- One row per table and persona: sel, ins, upd, mov, del (see the header). The
 -- note above each table names the policies its rows follow on a31ddde. The
 -- common shape, "member SELECT, admin ALL", is a <t>_select_member policy
 -- (is_org_member) beside an admins' FOR ALL policy (is_org_admin, which admits
 -- admin and tenant_admin): every member of Org A reads A's row, A's admin and
--- tenant_admin write it, Bob reads B's only, and the outsider and anon read
--- nothing. None of the 26 tables has a policy for `anon`, so anon's writes are
+-- tenant_admin write it but cannot move it to Org B (the WITH CHECK refuses:
+-- 'rls'), Bob reads B's only, and the outsider and anon read nothing. None of the 26 tables has a policy for `anon`, so anon's writes are
 -- refused by RLS (or by the grant, where the table grants anon nothing).
 CREATE TEMP TABLE matrix_expected (
-    tbl text, persona text, sel text, ins text, upd text, del text,
+    tbl text, persona text, sel text, ins text, upd text, mov text, del text,
     PRIMARY KEY (tbl, persona)
 );
 INSERT INTO matrix_expected VALUES
     -- audit_log: "Audit Log: admins view": a member whose role is 'admin' (not tenant_admin); no write policy.
-    ('audit_log',                   'admin_a',  'A',  'rls',   '0',     '0'),
-    ('audit_log',                   'tenant_a', '-',  'rls',   '0',     '0'),
-    ('audit_log',                   'coach_a',  '-',  'rls',   '0',     '0'),
-    ('audit_log',                   'parent_a', '-',  'rls',   '0',     '0'),
-    ('audit_log',                   'admin_b',  'B',  'rls',   '0',     '0'),
-    ('audit_log',                   'outsider', '-',  'rls',   '0',     '0'),
-    ('audit_log',                   'anon',     '-',  'rls',   '0',     '0'),
+    ('audit_log',                   'admin_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'tenant_a', '-',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'coach_a',  '-',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'parent_a', '-',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- email_log: member SELECT, admin ALL (is_org_admin: admin or tenant_admin).
-    ('email_log',                   'admin_a',  'A',  'ok',    '1',     '1'),
-    ('email_log',                   'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('email_log',                   'coach_a',  'A',  'rls',   '0',     '0'),
-    ('email_log',                   'parent_a', 'A',  'rls',   '0',     '0'),
-    ('email_log',                   'admin_b',  'B',  'rls',   '0',     '0'),
-    ('email_log',                   'outsider', '-',  'rls',   '0',     '0'),
-    ('email_log',                   'anon',     '-',  'rls',   '0',     '0'),
+    ('email_log',                   'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('email_log',                   'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('email_log',                   'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('email_log',                   'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('email_log',                   'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('email_log',                   'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('email_log',                   'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- evaluation_findings: member SELECT, admin ALL.
-    ('evaluation_findings',         'admin_a',  'A',  'ok',    '1',     '1'),
-    ('evaluation_findings',         'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('evaluation_findings',         'coach_a',  'A',  'rls',   '0',     '0'),
-    ('evaluation_findings',         'parent_a', 'A',  'rls',   '0',     '0'),
-    ('evaluation_findings',         'admin_b',  'B',  'rls',   '0',     '0'),
-    ('evaluation_findings',         'outsider', '-',  'rls',   '0',     '0'),
-    ('evaluation_findings',         'anon',     '-',  'rls',   '0',     '0'),
+    ('evaluation_findings',         'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_findings',         'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_findings',         'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_findings',         'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_findings',         'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('evaluation_findings',         'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('evaluation_findings',         'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- evaluation_metrics: member SELECT, admin ALL.
-    ('evaluation_metrics',          'admin_a',  'A',  'ok',    '1',     '1'),
-    ('evaluation_metrics',          'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('evaluation_metrics',          'coach_a',  'A',  'rls',   '0',     '0'),
-    ('evaluation_metrics',          'parent_a', 'A',  'rls',   '0',     '0'),
-    ('evaluation_metrics',          'admin_b',  'B',  'rls',   '0',     '0'),
-    ('evaluation_metrics',          'outsider', '-',  'rls',   '0',     '0'),
-    ('evaluation_metrics',          'anon',     '-',  'rls',   '0',     '0'),
+    ('evaluation_metrics',          'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_metrics',          'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_metrics',          'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_metrics',          'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_metrics',          'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('evaluation_metrics',          'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('evaluation_metrics',          'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- evaluation_run_events: member SELECT, admin ALL.
-    ('evaluation_run_events',       'admin_a',  'A',  'ok',    '1',     '1'),
-    ('evaluation_run_events',       'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('evaluation_run_events',       'coach_a',  'A',  'rls',   '0',     '0'),
-    ('evaluation_run_events',       'parent_a', 'A',  'rls',   '0',     '0'),
-    ('evaluation_run_events',       'admin_b',  'B',  'rls',   '0',     '0'),
-    ('evaluation_run_events',       'outsider', '-',  'rls',   '0',     '0'),
-    ('evaluation_run_events',       'anon',     '-',  'rls',   '0',     '0'),
+    ('evaluation_run_events',       'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_run_events',       'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_run_events',       'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_run_events',       'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_run_events',       'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('evaluation_run_events',       'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('evaluation_run_events',       'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- evaluation_runs: member SELECT, admin ALL.
-    ('evaluation_runs',             'admin_a',  'A',  'ok',    '1',     '1'),
-    ('evaluation_runs',             'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('evaluation_runs',             'coach_a',  'A',  'rls',   '0',     '0'),
-    ('evaluation_runs',             'parent_a', 'A',  'rls',   '0',     '0'),
-    ('evaluation_runs',             'admin_b',  'B',  'rls',   '0',     '0'),
-    ('evaluation_runs',             'outsider', '-',  'rls',   '0',     '0'),
-    ('evaluation_runs',             'anon',     '-',  'rls',   '0',     '0'),
+    ('evaluation_runs',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_runs',             'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('evaluation_runs',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_runs',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_runs',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('evaluation_runs',             'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('evaluation_runs',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- export_jobs: member SELECT, admin ALL.
-    ('export_jobs',                 'admin_a',  'A',  'ok',    '1',     '1'),
-    ('export_jobs',                 'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('export_jobs',                 'coach_a',  'A',  'rls',   '0',     '0'),
-    ('export_jobs',                 'parent_a', 'A',  'rls',   '0',     '0'),
-    ('export_jobs',                 'admin_b',  'B',  'rls',   '0',     '0'),
-    ('export_jobs',                 'outsider', '-',  'rls',   '0',     '0'),
-    ('export_jobs',                 'anon',     '-',  'rls',   '0',     '0'),
+    ('export_jobs',                 'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('export_jobs',                 'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('export_jobs',                 'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('export_jobs',                 'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('export_jobs',                 'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('export_jobs',                 'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('export_jobs',                 'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- game_slots: member SELECT, admin ALL.
-    ('game_slots',                  'admin_a',  'A',  'ok',    '1',     '1'),
-    ('game_slots',                  'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('game_slots',                  'coach_a',  'A',  'rls',   '0',     '0'),
-    ('game_slots',                  'parent_a', 'A',  'rls',   '0',     '0'),
-    ('game_slots',                  'admin_b',  'B',  'rls',   '0',     '0'),
-    ('game_slots',                  'outsider', '-',  'rls',   '0',     '0'),
-    ('game_slots',                  'anon',     '-',  'rls',   '0',     '0'),
+    ('game_slots',                  'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('game_slots',                  'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('game_slots',                  'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('game_slots',                  'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('game_slots',                  'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('game_slots',                  'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('game_slots',                  'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- games: member SELECT, admin ALL.
-    ('games',                       'admin_a',  'A',  'ok',    '1',     '1'),
-    ('games',                       'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('games',                       'coach_a',  'A',  'rls',   '0',     '0'),
-    ('games',                       'parent_a', 'A',  'rls',   '0',     '0'),
-    ('games',                       'admin_b',  'B',  'rls',   '0',     '0'),
-    ('games',                       'outsider', '-',  'rls',   '0',     '0'),
-    ('games',                       'anon',     '-',  'rls',   '0',     '0'),
+    ('games',                       'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('games',                       'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('games',                       'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('games',                       'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('games',                       'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('games',                       'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('games',                       'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- import_jobs: two member SELECT policies (one the legacy subquery form); no write policy.
-    ('import_jobs',                 'admin_a',  'A',  'rls',   '0',     '0'),
-    ('import_jobs',                 'tenant_a', 'A',  'rls',   '0',     '0'),
-    ('import_jobs',                 'coach_a',  'A',  'rls',   '0',     '0'),
-    ('import_jobs',                 'parent_a', 'A',  'rls',   '0',     '0'),
-    ('import_jobs',                 'admin_b',  'B',  'rls',   '0',     '0'),
-    ('import_jobs',                 'outsider', '-',  'rls',   '0',     '0'),
-    ('import_jobs',                 'anon',     '-',  'rls',   '0',     '0'),
+    ('import_jobs',                 'admin_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- organization_members: "Org Members: view members" (member), "admins manage" (ALL, is_org_admin).
-    ('organization_members',        'admin_a',  'A',  'ok',    '1',     '1'),
-    ('organization_members',        'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('organization_members',        'coach_a',  'A',  'rls',   '0',     '0'),
-    ('organization_members',        'parent_a', 'A',  'rls',   '0',     '0'),
-    ('organization_members',        'admin_b',  'B',  'rls',   '0',     '0'),
-    ('organization_members',        'outsider', '-',  'rls',   '0',     '0'),
-    ('organization_members',        'anon',     '-',  'rls',   '0',     '0'),
+    ('organization_members',        'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('organization_members',        'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('organization_members',        'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('organization_members',        'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('organization_members',        'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('organization_members',        'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('organization_members',        'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- organization_schema_history: "Schema History: Admins Only": role = 'admin' (not tenant_admin); no write policy.
-    ('organization_schema_history', 'admin_a',  'A',  'rls',   '0',     '0'),
-    ('organization_schema_history', 'tenant_a', '-',  'rls',   '0',     '0'),
-    ('organization_schema_history', 'coach_a',  '-',  'rls',   '0',     '0'),
-    ('organization_schema_history', 'parent_a', '-',  'rls',   '0',     '0'),
-    ('organization_schema_history', 'admin_b',  'B',  'rls',   '0',     '0'),
-    ('organization_schema_history', 'outsider', '-',  'rls',   '0',     '0'),
-    ('organization_schema_history', 'anon',     '-',  'rls',   '0',     '0'),
+    ('organization_schema_history', 'admin_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'tenant_a', '-',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'coach_a',  '-',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'parent_a', '-',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- organizations: member SELECT and admin ALL on the organization's own id; a new organization has no admin, so no INSERT passes.
-    ('organizations',               'admin_a',  'A',  'rls',   '1',     '1'),
-    ('organizations',               'tenant_a', 'A',  'rls',   '1',     '1'),
-    ('organizations',               'coach_a',  'A',  'rls',   '0',     '0'),
-    ('organizations',               'parent_a', 'A',  'rls',   '0',     '0'),
-    ('organizations',               'admin_b',  'B',  'rls',   '0',     '0'),
-    ('organizations',               'outsider', '-',  'rls',   '0',     '0'),
-    ('organizations',               'anon',     '-',  'rls',   '0',     '0'),
+    ('organizations',               'admin_a',  'A',  'rls',   '1',   'n/a',   '1'),
+    ('organizations',               'tenant_a', 'A',  'rls',   '1',   'n/a',   '1'),
+    ('organizations',               'coach_a',  'A',  'rls',   '0',   'n/a',   '0'),
+    ('organizations',               'parent_a', 'A',  'rls',   '0',   'n/a',   '0'),
+    ('organizations',               'admin_b',  'B',  'rls',   '0',   'n/a',   '0'),
+    ('organizations',               'outsider', '-',  'rls',   '0',   'n/a',   '0'),
+    ('organizations',               'anon',     '-',  'rls',   '0',   'n/a',   '0'),
 
     -- player_buddies: member SELECT, admin ALL.
-    ('player_buddies',              'admin_a',  'A',  'ok',    '1',     '1'),
-    ('player_buddies',              'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('player_buddies',              'coach_a',  'A',  'rls',   '0',     '0'),
-    ('player_buddies',              'parent_a', 'A',  'rls',   '0',     '0'),
-    ('player_buddies',              'admin_b',  'B',  'rls',   '0',     '0'),
-    ('player_buddies',              'outsider', '-',  'rls',   '0',     '0'),
-    ('player_buddies',              'anon',     '-',  'rls',   '0',     '0'),
+    ('player_buddies',              'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('player_buddies',              'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('player_buddies',              'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('player_buddies',              'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('player_buddies',              'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('player_buddies',              'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('player_buddies',              'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- players: member SELECT, admin ALL.
-    ('players',                     'admin_a',  'A',  'ok',    '1',     '1'),
-    ('players',                     'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('players',                     'coach_a',  'A',  'rls',   '0',     '0'),
-    ('players',                     'parent_a', 'A',  'rls',   '0',     '0'),
-    ('players',                     'admin_b',  'B',  'rls',   '0',     '0'),
-    ('players',                     'outsider', '-',  'rls',   '0',     '0'),
-    ('players',                     'anon',     '-',  'rls',   '0',     '0'),
+    ('players',                     'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('players',                     'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('players',                     'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('players',                     'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('players',                     'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('players',                     'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('players',                     'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- practice_assignments: member SELECT, admin ALL.
-    ('practice_assignments',        'admin_a',  'A',  'ok',    '1',     '1'),
-    ('practice_assignments',        'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('practice_assignments',        'coach_a',  'A',  'rls',   '0',     '0'),
-    ('practice_assignments',        'parent_a', 'A',  'rls',   '0',     '0'),
-    ('practice_assignments',        'admin_b',  'B',  'rls',   '0',     '0'),
-    ('practice_assignments',        'outsider', '-',  'rls',   '0',     '0'),
-    ('practice_assignments',        'anon',     '-',  'rls',   '0',     '0'),
+    ('practice_assignments',        'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('practice_assignments',        'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('practice_assignments',        'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('practice_assignments',        'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('practice_assignments',        'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('practice_assignments',        'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('practice_assignments',        'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- practice_exceptions: member SELECT, admin ALL; anon holds no privilege on the table at all.
-    ('practice_exceptions',         'admin_a',  'A',  'ok',    '1',     '1'),
-    ('practice_exceptions',         'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('practice_exceptions',         'coach_a',  'A',  'rls',   '0',     '0'),
-    ('practice_exceptions',         'parent_a', 'A',  'rls',   '0',     '0'),
-    ('practice_exceptions',         'admin_b',  'B',  'rls',   '0',     '0'),
-    ('practice_exceptions',         'outsider', '-',  'rls',   '0',     '0'),
-    ('practice_exceptions',         'anon',     'grant','grant', 'grant', 'grant'),
+    ('practice_exceptions',         'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('practice_exceptions',         'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('practice_exceptions',         'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('practice_exceptions',         'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('practice_exceptions',         'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('practice_exceptions',         'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('practice_exceptions',         'anon',     'grant','grant', 'grant','grant', 'grant'),
 
     -- profile_players: own row (profile_id = auth.uid()) or member; Org B's row is the outsider's own; no write policy.
-    ('profile_players',             'admin_a',  'A',  'rls',   '0',     '0'),
-    ('profile_players',             'tenant_a', 'A',  'rls',   '0',     '0'),
-    ('profile_players',             'coach_a',  'A',  'rls',   '0',     '0'),
-    ('profile_players',             'parent_a', 'A',  'rls',   '0',     '0'),
-    ('profile_players',             'admin_b',  'B',  'rls',   '0',     '0'),
-    ('profile_players',             'outsider', 'B',  'rls',   '0',     '0'),
-    ('profile_players',             'anon',     '-',  'rls',   '0',     '0'),
+    ('profile_players',             'admin_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'outsider', 'B',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- profiles: own row only, read and update; Org A's subject row is Charlie's profile, Org B's is Bob's; no INSERT or DELETE policy.
-    ('profiles',                    'admin_a',  '-',  'rls',   '0',     '0'),
-    ('profiles',                    'tenant_a', '-',  'rls',   '0',     '0'),
-    ('profiles',                    'coach_a',  'A',  'rls',   '1',     '0'),
-    ('profiles',                    'parent_a', '-',  'rls',   '0',     '0'),
-    ('profiles',                    'admin_b',  'B',  'rls',   '0',     '0'),
-    ('profiles',                    'outsider', '-',  'rls',   '0',     '0'),
-    ('profiles',                    'anon',     '-',  'rls',   '0',     '0'),
+    ('profiles',                    'admin_a',  '-',  'rls',   '0',   'n/a',   '0'),
+    ('profiles',                    'tenant_a', '-',  'rls',   '0',   'n/a',   '0'),
+    ('profiles',                    'coach_a',  'A',  'rls',   '1',   'n/a',   '0'),
+    ('profiles',                    'parent_a', '-',  'rls',   '0',   'n/a',   '0'),
+    ('profiles',                    'admin_b',  'B',  'rls',   '0',   'n/a',   '0'),
+    ('profiles',                    'outsider', '-',  'rls',   '0',   'n/a',   '0'),
+    ('profiles',                    'anon',     '-',  'rls',   '0',   'n/a',   '0'),
 
     -- registration_forms: member or status 'open' (Org A's form is open: deliberate, plan Q6); writes need role = 'admin' (not tenant_admin, plan Q5).
-    ('registration_forms',          'admin_a',  'A',  'ok',    '1',     '1'),
-    ('registration_forms',          'tenant_a', 'A',  'rls',   '0',     '0'),
-    ('registration_forms',          'coach_a',  'A',  'rls',   '0',     '0'),
-    ('registration_forms',          'parent_a', 'A',  'rls',   '0',     '0'),
-    ('registration_forms',          'admin_b',  'AB', 'rls',   '0',     '0'),
-    ('registration_forms',          'outsider', 'A',  'rls',   '0',     '0'),
-    ('registration_forms',          'anon',     '-',  'rls',   '0',     '0'),
+    ('registration_forms',          'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('registration_forms',          'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('registration_forms',          'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('registration_forms',          'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('registration_forms',          'admin_b',  'AB', 'rls',   '0',   '0',     '0'),
+    ('registration_forms',          'outsider', 'A',  'rls',   '0',   '0',     '0'),
+    ('registration_forms',          'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- registrations: (own AND member) or is_org_admin, for every command; Org A's row is the parent's own, and so is the INSERT probe's.
-    ('registrations',               'admin_a',  'A',  'ok',    '1',     '1'),
-    ('registrations',               'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('registrations',               'coach_a',  '-',  'rls',   '0',     '0'),
-    ('registrations',               'parent_a', 'A',  'ok',    '1',     '1'),
-    ('registrations',               'admin_b',  'B',  'rls',   '0',     '0'),
-    ('registrations',               'outsider', '-',  'rls',   '0',     '0'),
-    ('registrations',               'anon',     '-',  'rls',   '0',     '0'),
+    ('registrations',               'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('registrations',               'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('registrations',               'coach_a',  '-',  'rls',   '0',   '0',     '0'),
+    ('registrations',               'parent_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('registrations',               'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('registrations',               'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('registrations',               'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- scheduler_runs: member SELECT, admin ALL.
-    ('scheduler_runs',              'admin_a',  'A',  'ok',    '1',     '1'),
-    ('scheduler_runs',              'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('scheduler_runs',              'coach_a',  'A',  'rls',   '0',     '0'),
-    ('scheduler_runs',              'parent_a', 'A',  'rls',   '0',     '0'),
-    ('scheduler_runs',              'admin_b',  'B',  'rls',   '0',     '0'),
-    ('scheduler_runs',              'outsider', '-',  'rls',   '0',     '0'),
-    ('scheduler_runs',              'anon',     '-',  'rls',   '0',     '0'),
+    ('scheduler_runs',              'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('scheduler_runs',              'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('scheduler_runs',              'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('scheduler_runs',              'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('scheduler_runs',              'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('scheduler_runs',              'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('scheduler_runs',              'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- season_settings: member SELECT; writes need role = 'admin' (not tenant_admin, plan Q5).
-    ('season_settings',             'admin_a',  'A',  'ok',    '1',     '1'),
-    ('season_settings',             'tenant_a', 'A',  'rls',   '0',     '0'),
-    ('season_settings',             'coach_a',  'A',  'rls',   '0',     '0'),
-    ('season_settings',             'parent_a', 'A',  'rls',   '0',     '0'),
-    ('season_settings',             'admin_b',  'B',  'rls',   '0',     '0'),
-    ('season_settings',             'outsider', '-',  'rls',   '0',     '0'),
-    ('season_settings',             'anon',     '-',  'rls',   '0',     '0'),
+    ('season_settings',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('season_settings',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('season_settings',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('season_settings',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('season_settings',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('season_settings',             'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('season_settings',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- staging_players: member SELECT, admin ALL.
-    ('staging_players',             'admin_a',  'A',  'ok',    '1',     '1'),
-    ('staging_players',             'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('staging_players',             'coach_a',  'A',  'rls',   '0',     '0'),
-    ('staging_players',             'parent_a', 'A',  'rls',   '0',     '0'),
-    ('staging_players',             'admin_b',  'B',  'rls',   '0',     '0'),
-    ('staging_players',             'outsider', '-',  'rls',   '0',     '0'),
-    ('staging_players',             'anon',     '-',  'rls',   '0',     '0'),
+    ('staging_players',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('staging_players',             'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('staging_players',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- team_players: member SELECT, admin ALL.
-    ('team_players',                'admin_a',  'A',  'ok',    '1',     '1'),
-    ('team_players',                'tenant_a', 'A',  'ok',    '1',     '1'),
-    ('team_players',                'coach_a',  'A',  'rls',   '0',     '0'),
-    ('team_players',                'parent_a', 'A',  'rls',   '0',     '0'),
-    ('team_players',                'admin_b',  'B',  'rls',   '0',     '0'),
-    ('team_players',                'outsider', '-',  'rls',   '0',     '0'),
-    ('team_players',                'anon',     '-',  'rls',   '0',     '0'),
+    ('team_players',                'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    ('team_players',                'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('team_players',                'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('team_players',                'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('team_players',                'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('team_players',                'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('team_players',                'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- telemetry_log: INSERT by any member of the row's organization; SELECT by its admin or tenant_admin; no UPDATE or DELETE policy.
-    ('telemetry_log',               'admin_a',  'A',  'ok',    '0',     '0'),
-    ('telemetry_log',               'tenant_a', 'A',  'ok',    '0',     '0'),
-    ('telemetry_log',               'coach_a',  '-',  'ok',    '0',     '0'),
-    ('telemetry_log',               'parent_a', '-',  'ok',    '0',     '0'),
-    ('telemetry_log',               'admin_b',  'B',  'rls',   '0',     '0'),
-    ('telemetry_log',               'outsider', '-',  'rls',   '0',     '0'),
-    ('telemetry_log',               'anon',     '-',  'rls',   '0',     '0');
+    ('telemetry_log',               'admin_a',  'A',  'ok',    '0',   '0',     '0'),
+    ('telemetry_log',               'tenant_a', 'A',  'ok',    '0',   '0',     '0'),
+    ('telemetry_log',               'coach_a',  '-',  'ok',    '0',   '0',     '0'),
+    ('telemetry_log',               'parent_a', '-',  'ok',    '0',   '0',     '0'),
+    ('telemetry_log',               'admin_b',  'B',  'rls',   '0',   '0',     '0'),
+    ('telemetry_log',               'outsider', '-',  'rls',   '0',   '0',     '0'),
+    ('telemetry_log',               'anon',     '-',  'rls',   '0',   '0',     '0');
 
 -- ── 6. Meta-assertions ────────────────────────────────────────────────────
 SELECT is(
@@ -750,7 +792,7 @@ SELECT is(
        JOIN pg_class c ON c.oid = to_regclass('public.' || quote_ident(s.tbl))
       WHERE c.relkind = 'r' AND c.relrowsecurity),
     26::bigint,
-    'the subject list is the 26 advisor-flagged tables, each an RLS-enabled table'
+    'the 26 subject tables exist, each an ordinary table with RLS enabled'
 );
 
 SELECT is(
@@ -759,10 +801,13 @@ SELECT is(
     'every subject table holds exactly one Org A and one Org B subject row'
 );
 
-SELECT results_eq(
-    $$SELECT persona, db_role, uid FROM matrix_identity ORDER BY persona$$,
-    $$SELECT persona, db_role, uid FROM matrix_persona ORDER BY persona$$,
-    'every persona ran as the role and user it claims'
+SELECT is(
+    (SELECT count(*) FROM matrix_identity i
+       JOIN matrix_persona p ON p.persona = i.persona
+       JOIN matrix_subject s ON s.tbl = i.tbl
+      WHERE i.db_role = p.db_role AND i.uid IS NOT DISTINCT FROM p.uid),
+    182::bigint,
+    'every persona ran as the role and user it claims, on every table (26 x 7)'
 );
 
 SELECT is(
@@ -773,9 +818,9 @@ SELECT is(
 );
 
 SELECT is(
-    (SELECT count(sel) + count(ins) + count(upd) + count(del) FROM matrix_result),
-    728::bigint,
-    'the probes produced every cell (26 tables x 7 personas x 4 probes)'
+    (SELECT count(sel) + count(ins) + count(upd) + count(mov) + count(del) FROM matrix_result),
+    910::bigint,
+    'the probes produced every cell (26 tables x 7 personas x 5 probes)'
 );
 
 -- Every differing cell, anywhere in the matrix: printed, then counted. This
@@ -784,11 +829,13 @@ SELECT is(
 -- tests/pgtapPlanCounts.test.js can count them against plan().
 CREATE TEMP VIEW matrix_diff AS
 SELECT coalesce(r.tbl, e.tbl) AS tbl, coalesce(r.persona, e.persona) AS persona,
-       concat_ws(', ', r.sel, r.ins, r.upd, r.del) AS got,
-       concat_ws(', ', e.sel, e.ins, e.upd, e.del) AS want
+       format('%s, %s, %s, %s, %s', coalesce(r.sel, 'NULL'), coalesce(r.ins, 'NULL'),
+              coalesce(r.upd, 'NULL'), coalesce(r.mov, 'NULL'), coalesce(r.del, 'NULL')) AS got,
+       format('%s, %s, %s, %s, %s', coalesce(e.sel, 'NULL'), coalesce(e.ins, 'NULL'),
+              coalesce(e.upd, 'NULL'), coalesce(e.mov, 'NULL'), coalesce(e.del, 'NULL')) AS want
   FROM matrix_result r
   FULL JOIN matrix_expected e ON e.tbl = r.tbl AND e.persona = r.persona
- WHERE (r.sel, r.ins, r.upd, r.del) IS DISTINCT FROM (e.sel, e.ins, e.upd, e.del);
+ WHERE (r.sel, r.ins, r.upd, r.mov, r.del) IS DISTINCT FROM (e.sel, e.ins, e.upd, e.mov, e.del);
 
 SELECT diag(d) FROM (
     SELECT string_agg(format('DIFF %s | %s | got (%s) expected (%s)', tbl, persona, got, want),
@@ -805,7 +852,7 @@ SELECT is(
 -- ── 7. The matrix, one assertion per table ────────────────────────────────
 CREATE FUNCTION pg_temp.matrix_rows(source text, t text) RETURNS text
 LANGUAGE sql IMMUTABLE AS $f$
-    SELECT format('SELECT persona, sel, ins, upd, del FROM %I JOIN matrix_persona USING (persona)'
+    SELECT format('SELECT persona, sel, ins, upd, mov, del FROM %I JOIN matrix_persona USING (persona)'
                   ' WHERE tbl = %L ORDER BY ord', source, t)
 $f$;
 

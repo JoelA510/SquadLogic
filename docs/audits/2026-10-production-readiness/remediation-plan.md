@@ -1914,12 +1914,13 @@ smoke-tested
 
 - 2026-10-18, the RLS advisor rewrite, PR 1 (branch `claude/vibrant-allen-hr7y7s-rlsmatrix`,
   `docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2): the persona matrix only, no migration.
-  `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE and DELETE for seven
-  personas on the 26 tables the two waived lints name (728 cells), against a literal expected
-  table generated on `a31ddde` and checked row by row against the policy text. Green against
-  today's policies; four planted policy changes and four planted test defects each turn it red
-  (the PR lists them). *Executed* on a local build of all 130 migrations with pgTAP 1.3.3 and
-  Supabase's default grants and `auth.uid()`; CI's run is the PR's.
+  `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE, a move to the other
+  organization (an UPDATE's WITH CHECK) and DELETE for seven personas on the 26 tables the two
+  waived lints name (910 cells), against a literal expected table generated on `a31ddde` and
+  checked row by row against the policy text. Green against today's policies; five planted
+  policy changes and seven planted test defects each turn it red (the PR lists them).
+  *Executed* on a local build of all 130 migrations with pgTAP 1.3.3 and Supabase's default
+  grants and `auth.uid()`; CI's run is the PR's.
   - **A `tenant_admin` is narrower than `is_org_admin` in four places, not two.** The plan's Q5
     names `season_settings` and `registration_forms` (writes need `role = 'admin'`); the matrix
     shows the same inline test on two SELECT policies: a `tenant_admin` reads no `audit_log`

@@ -1461,6 +1461,15 @@ smoke-tested
     production: schema drift between what CI builds and what production has. Harmless here
     (waived); not investigated further. *Executed* (one read-only `pg_proc` SELECT through the
     Supabase MCP).
+    **Investigated 2026-10-17** ([`schema-drift-2026-10.md`](../../operations/schema-drift-2026-10.md)):
+    an orphan of `definitive_schema`'s fresh-replay reset, which also hid 17 production-only
+    triggers (one deleting data) and a production-only `persist_evaluation_run` overload.
+    **Built 2026-10-18, in review** (branch `claude/vibrant-allen-hr7y7s-drift`; the plan approved
+    by the owner as recommended): `20261018060000_reconcile_trigger_drift` and the catalogue drift
+    check (`supabase/catalog-snapshot.json`, checked by the harness; the operator query in
+    `ci-cd.md`). Production compared with the snapshot before deploy differs by exactly the 29
+    objects the migration drops and the not-yet-deployed RLS rewrite's policies (*executed*,
+    read-only). Not deployed.
   - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
     which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
     renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
@@ -1995,6 +2004,35 @@ smoke-tested
   - `coach_team_requests` keeps its single admin `FOR ALL` policy: it has no member SELECT beside
     it, so it is not a finding. *Executed* (the migration's closing check).
 
+- 2026-10-18, found by the schema drift PR (branch `claude/vibrant-allen-hr7y7s-drift`):
+  - **The field import relied on the dropped trigger for sub-surfaces, in production only.**
+    `finalize_field_import_job` (`20260503070000`) writes `supports_halves`, and in production
+    `trigger_manage_field_subunits` then created `A` and `B` (and `rollback_field_import_job`,
+    `20260909000000`, restoring `supports_halves = false`, deleted them). After `20261018060000`
+    a field imported with halves has no sub-surfaces until an admin saves it on the Fields page,
+    which is what a fresh build (CI) has always done. Production holds 0 fields, so nothing
+    changes for existing data. Not changed: the import RPC is its own change. *Statically reviewed.*
+  - **The mock's direct-table `fields` paths still imitate the dropped trigger** (insert and
+    update of `fields` through `from('fields')` create, and with halves off delete, sub-surfaces;
+    `tests/mockDeleteTombstones.test.js` pins the delete). No app code writes `fields` directly
+    (RLS gives members SELECT only); the mock's RPC paths, which the app uses, are insert-only
+    now. Not changed. *Statically reviewed* (a search of `frontend/src` for `from('fields')`).
+  - **The production-only `persist_evaluation_run(jsonb, jsonb[], jsonb[])` checked no
+    organization membership**: any authenticated caller could write an evaluation run into any
+    organization through it (its body, read back). Dropped by `20261018060000`; production holds
+    0 `evaluation_runs`. *Executed* (read-only `pg_get_functiondef`).
+  - **The mock E2E "Reverting a field to no longer support halves" never edited the field it
+    seeded.** Its field was called "Field 2", as is one in the mock seed, and "Edit" opened the
+    seed's; its checks passed on that field's card. Renamed ("Halves Pitch") and inverted to the
+    new behaviour; it now fails with the old delete planted in the mock. *Executed* (mock E2E,
+    sandbox Chromium).
+  - **Function bodies drift too, and the catalogue check does not compare them.** Production's
+    `persist_evaluation_run(jsonb, jsonb, jsonb)` body differs from the repository's
+    (`md5(prosrc)` `9184eba3...` against `77228dda...`; production's has no comments), and the
+    `propagate_org_id_from_*` bodies differed only by line endings (`20260324000000` has CRLF).
+    Whether any body differs in behaviour is *unverified*; comparing normalised bodies is a
+    possible extension of `catalog_snapshot.sql`. *Executed* (read-only `md5(prosrc)` on both
+    sides).
 - 2026-10-18, the audit-in-transaction PR (branch `claude/vibrant-allen-hr7y7s-audittxn`, migration
   `20261018070000`; `docs/PLAN_AUDIT_IN_TRANSACTION.md`, approved by the owner on 2026-10-18 with
   every recommendation as written). Wave 2's "write each audit row in the same transaction as its

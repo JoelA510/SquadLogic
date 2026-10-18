@@ -321,12 +321,18 @@ Given(
 );
 
 Then(
-  'the database should automatically remove field subunits for {string}',
-  async ({ page }, f: string) => {
-    await page.waitForTimeout(1000);
-    // ERADICATE DB CHEAT: Assert the subunit string is physically removed from the UI
-    const card = page.locator('div.bg-bg-surface', { hasText: f }).first();
-    await expect(card.getByText(/Sub-units:/i).first()).toBeHidden();
+  '{string} should still list its sub-surfaces {string} and {string}',
+  async ({ page }, f: string, a: string, b: string) => {
+    // Halves off deletes nothing (20261018060000): each sub-surface stays,
+    // retirable on its own, until an admin retires it. Matched by its retire
+    // control's label, which names the field. (The scenario's field is not
+    // called "Field 2": the mock seed has one, and "Edit" then opened that one,
+    // so the scenario never touched the field it had seeded.)
+    for (const label of [a, b]) {
+      await expect(
+        page.getByRole('button', { name: `Retire ${label} of ${f}`, exact: true })
+      ).toBeVisible({ timeout: 10000 });
+    }
   }
 );
 

@@ -4,10 +4,9 @@
     {
       "lint": "function_search_path_mutable",
       "findings": [
-        "function_search_path_mutable_public_min_3eb6d2f5e7ee95ed566dd6cdda54dac3",
-        "function_search_path_mutable_public_set_updated_at_9b1889f56258bf9d6554213c05019c76"
+        "function_search_path_mutable_public_min_3eb6d2f5e7ee95ed566dd6cdda54dac3"
       ],
-      "reason": "public.min(uuid) is an aggregate (20260612000000), which cannot carry SET search_path; its support function min_uuid pins search_path = public. public.set_updated_at() is a trigger function that calls only now(), which resolves from pg_catalog before any search_path entry; a from-scratch build creates it (20251217000000) but production has none (schema drift, recorded in the plan).",
+      "reason": "public.min(uuid) is an aggregate (20260612000000), which cannot carry SET search_path; its support function min_uuid pins search_path = public.",
       "expires": null
     }
   ]

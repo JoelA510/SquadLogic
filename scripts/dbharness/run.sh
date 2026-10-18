@@ -266,6 +266,66 @@ start_cluster || { echo "FAIL: could not start cluster"; exit 1; }
 echo "=== applying migration set ==="
 fresh_db || { echo "HARNESS FAILED"; exit 1; }
 apply_all || { echo "HARNESS FAILED"; exit 1; }
+STATUS=0
+
+# ---------------------------------------------------------------------------
+# The catalogue snapshot: the fresh build against supabase/catalog-snapshot.json
+# ---------------------------------------------------------------------------
+#
+# **Why.** Production's schema was never built by replaying these migrations,
+# and nothing compared the two: 17 triggers and a function overload lived only
+# in production and three orphan functions only here, one of those triggers
+# deleting data (docs/operations/schema-drift-2026-10.md). The snapshot is this
+# build's catalogue -- every `public` function signature, trigger and policy
+# digest, read by scripts/dbharness/catalog_snapshot.sql -- so a migration that
+# changes the catalogue fails here until it updates the snapshot in the same
+# pull request, and the operator query in docs/operations/ci-cd.md
+# ("Catalogue drift check") compares production with the same file.
+#
+# It runs on the database built to head and BEFORE the smokes: a smoke may
+# commit a seed (`smoke_plant`), and the snapshot is of what the migrations
+# build, nothing else. `HARNESS_WRITE_CATALOG_SNAPSHOT=1` rewrites the file
+# from this build (and still fails the run) -- for the author of such a
+# migration, never for CI. `catalog_snapshot.py` refuses (exit 2) a catalogue with a
+# section under its floor, so an empty read cannot match anything.
+echo "=== catalogue snapshot (supabase/catalog-snapshot.json) ==="
+v_cat_sql="$RUN_DIR/catalog_snapshot.sql"
+rm -f "$v_cat_sql" $SCRATCH/catalog.json
+if ! cp "$REPO/scripts/dbharness/catalog_snapshot.sql" "$v_cat_sql" || ! chmod 644 "$v_cat_sql"; then
+  echo "FAIL catalog snapshot: could not stage scripts/dbharness/catalog_snapshot.sql"; STATUS=1
+elif ! as_pg "psql -v ON_ERROR_STOP=1 -h $RUN_DIR/sock -U postgres -d $DB -tA -f $v_cat_sql" \
+       >$SCRATCH/catalog.json 2>$SCRATCH/catalog_err; then
+  echo "FAIL catalog snapshot: the catalogue query failed"; dump 10 $SCRATCH/catalog_err; STATUS=1
+else
+  python3 "$REPO/scripts/dbharness/catalog_snapshot.py" diff \
+    "$REPO/supabase/catalog-snapshot.json" $SCRATCH/catalog.json >$SCRATCH/catalog_diff 2>&1
+  v_cat_rc=$?
+  if [ "$v_cat_rc" -eq 0 ]; then
+    echo "PASS catalog snapshot"
+    dump 1 $SCRATCH/catalog_diff
+  elif [ "${HARNESS_WRITE_CATALOG_SNAPSHOT:-}" = "1" ]; then
+    # Written from the build whatever the old file held (a merge conflict in
+    # it refuses the diff, exit 2), and the run still FAILS: a rewrite is not a
+    # pass, so this switch can never turn a drifted build green.
+    if python3 "$REPO/scripts/dbharness/catalog_snapshot.py" write \
+         $SCRATCH/catalog.json "$REPO/supabase/catalog-snapshot.json" >$SCRATCH/catalog_write 2>&1; then
+      echo "FAIL catalog snapshot: HARNESS_WRITE_CATALOG_SNAPSHOT=1 rewrote supabase/catalog-snapshot.json from this build; review it, commit it, and run again. What differed:"
+      dump 60 $SCRATCH/catalog_diff
+      STATUS=1
+    else
+      echo "FAIL catalog snapshot: could not rewrite supabase/catalog-snapshot.json"; dump 5 $SCRATCH/catalog_write; STATUS=1
+    fi
+  elif [ "$v_cat_rc" -eq 1 ]; then
+    echo "FAIL catalog snapshot: the fresh build's catalogue differs from supabase/catalog-snapshot.json"
+    dump 60 $SCRATCH/catalog_diff
+    echo "    A migration that changes a public function signature, trigger or policy updates the snapshot"
+    echo "    in the same pull request: HARNESS_WRITE_CATALOG_SNAPSHOT=1 sudo bash scripts/dbharness/run.sh"
+    STATUS=1
+  else
+    echo "FAIL catalog snapshot: the comparison refused its input"; dump 10 $SCRATCH/catalog_diff; STATUS=1
+  fi
+fi
+
 echo "=== smokes, enumerated from docs/sql/ ==="
 #
 # **The set used to be a hand-maintained list of "the migrations this PR
@@ -321,7 +381,7 @@ echo "=== smokes, enumerated from docs/sql/ ==="
 # here, and a `(checked)` claim cannot be quietly renamed out of the census by
 # inventing a word for it. The four declared today are `(coverage)`,
 # `(refused)`, `(known gap, pinned)` and `(unplantable)`.
-STATUS=0
+# (STATUS is initialised before the catalogue snapshot stage, above.)
 
 SMOKE_DIR="$REPO/docs/sql"
 MIGRATION_DIR="$REPO/supabase/migrations"
@@ -1251,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018070000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old

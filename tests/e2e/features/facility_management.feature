@@ -30,13 +30,13 @@ Feature: Facility Management CRUD
     Then "Field 1" should display a subunit indicator like "A/B Halves Enabled"
     And the database should automatically contain field subunits "A" and "B" for "Field 1"
 
-  Scenario: Reverting a field to no longer support halves
-    Given a field "Field 2" at "North Park" exists with subunits
-    When I click the "Edit" button for "Field 2"
+  Scenario: Switching halves off keeps the field's sub-surfaces
+    Given a field "Halves Pitch" at "North Park" exists with subunits
+    When I click the "Edit" button for "Halves Pitch"
     And I toggle "Supports Halves/Sub-fields" to OFF
     And I click "Save Field"
-    Then "Field 2" should not display a subunit indicator
-    And the database should automatically remove field subunits for "Field 2"
+    Then "Halves Pitch" should not display a subunit indicator
+    And "Halves Pitch" should still list its sub-surfaces "A" and "B"
 
   Scenario: Deactivating a field
     Given a field "Field 3" at "South Base" exists and is active

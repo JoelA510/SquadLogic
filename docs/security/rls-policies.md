@@ -38,13 +38,48 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 ```
 
-Most table policies follow this organization-scoped member-access pattern:
+A table that members read and admins write follows this shape (`players`; the rewrite
+`20261018030000_rls_advisor_rewrite.sql` split the admin `FOR ALL` policy by command and left the
+member `SELECT` policy as it was):
 
 ```sql
-CREATE POLICY "org_scoped_access" ON public.<table_name>
-  FOR ALL TO authenticated
-  USING (is_org_member(organization_id))
-  WITH CHECK (is_org_member(organization_id));
+-- Members read: one SELECT policy, the only one a SELECT evaluates.
+CREATE POLICY "players_select_member" ON public.players
+  FOR SELECT TO authenticated
+  USING (public.is_org_member(organization_id));
+
+-- Admins write: one policy per command, not FOR ALL.
+CREATE POLICY "players_insert_admin" ON public.players
+  FOR INSERT TO authenticated
+  WITH CHECK (public.is_org_admin(organization_id));
+
+CREATE POLICY "players_update_admin" ON public.players
+  FOR UPDATE TO authenticated
+  USING (public.is_org_admin(organization_id))
+  WITH CHECK (public.is_org_admin(organization_id));
+
+CREATE POLICY "players_delete_admin" ON public.players
+  FOR DELETE TO authenticated
+  USING (public.is_org_admin(organization_id));
+```
+
+A policy that reads the caller itself wraps `auth.uid()` in `(select ...)`. `registration_forms` and
+`season_settings` test `om.role = 'admin'` inline, narrower than `is_org_admin()`, which also admits
+`tenant_admin`, and kept so by the rewrite. `registration_forms` (INSERT shown; UPDATE carries the
+same expression in `USING` and `WITH CHECK`, DELETE in `USING`):
+
+```sql
+CREATE POLICY "registration_forms_admin_insert" ON public.registration_forms
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    is_org_member(organization_id) AND
+    EXISTS (
+      SELECT 1 FROM public.organization_members om
+      WHERE om.profile_id = (select auth.uid())
+        AND om.organization_id = registration_forms.organization_id
+        AND om.role = 'admin'
+    )
+  );
 ```
 
 Admin-owned configuration tables may be narrower. `divisions` allow organization members to

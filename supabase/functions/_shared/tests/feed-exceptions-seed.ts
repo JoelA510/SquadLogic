@@ -31,7 +31,12 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Rec = Record<string, any>;
 
-export const TEAM = { id: 'team-t1', name: 'Test Tigers', organization_id: 'org-o1' };
+export const TEAM = {
+  id: 'team-t1',
+  name: 'Test Tigers',
+  organization_id: 'org-o1',
+  season_settings_id: 'season-1' as string | null,
+};
 export const TIMEZONE = 'America/Los_Angeles';
 
 const field = (name: string, location: string) => ({ name, locations: { name: location } });
@@ -459,9 +464,12 @@ export function feedProblems(ics: string, seed: FeedSeed): string[] {
  * The builder surface `teamFeed.ts` and `readSeasonTimezone` call, over the
  * seed. `fail` names tables whose read returns an error.
  */
-export function fakeClient(seed: FeedSeed, opts: { fail?: string[] } = {}) {
+export function fakeClient(seed: FeedSeed, opts: { fail?: string[]; newerSeasons?: Rec[] } = {}) {
   const tables: Record<string, Rec[]> = {
+    // `order()` is a no-op here, so the array is already newest first: a newer
+    // season (`newerSeasons`) is what an unfiltered read would return.
     season_settings: [
+      ...(opts.newerSeasons ?? []),
       { id: 'season-1', organization_id: seed.team.organization_id, timezone: seed.timezone },
     ],
     games: [],

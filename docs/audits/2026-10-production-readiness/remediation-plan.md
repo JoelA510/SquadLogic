@@ -2150,6 +2150,16 @@ smoke deferred to the owner's v1.1.0 release smoke)
     feed and `expandPractices` run on that series). No test asserts the wrong portal behaviour;
     the feed's right behaviour is pinned in `tests/calendarFeed.test.js`. For the owner to place
     (the fix is a portal change, and possibly a scheduler finding per crossing date).
+    **Portal half fixed 2026-10-19** (owner: "Fix the portal DST bug"), branch
+    `claude/vibrant-allen-hr7y7s-portal-dst` (PR number to be filled in by the coordinator):
+    `expandPractices` now takes the season timezone (the team's division's `season_settings.timezone`,
+    added to the team read) and places each date with core `placePracticeTime`, built on
+    `resolveZonedInstant`, the function the feed's Deno twin is pinned to. A date whose wall time
+    does not exist is a dated TIME TBD with the feed's reason; the fall-back hour is shown at its wall
+    time with the feed's note; a season with no timezone shows TIME TBD, as the feed does.
+    `tests/teamPortalPracticeDst.test.js` holds the two readers to each other date by date; one E2E
+    scenario covers the gap date. *Executed.* **Still open:** the scheduling page and the auto-scheduler
+    dating a slot by its first occurrence only (a scheduler finding per crossing date), not changed.
   - **Team locking has no product writer.** The team-generation engine honours `team.locked` (a
     locked team takes no late players), but `teams` and `team_players` have no `locked` column,
     `admin_update_team` patches only `name` and `notes`, `buildTeamRows` and the team-persistence

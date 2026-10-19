@@ -25,3 +25,11 @@ Feature: Team portal shows saved practice changes
     And I am on the "Team Portal" page for the "Tigers"
     When I mark my child as going to the moved practice
     Then the moved practice should show my child as going
+
+  # A weekly 02:30 series across the spring-forward date: the date has no 02:30,
+  # and the portal says so as the calendar feed does (it showed 02:30 before).
+  Scenario: A parent sees the spring-forward date as TIME TBD
+    Given the "Tigers" have a Sunday 02:30 practice series across the spring-forward date
+    And I am on the "Team Portal" page for the "Tigers"
+    Then I should see the spring-forward date as TIME TBD with its reason
+    And I should see an ordinary Sunday of the series at 02:30

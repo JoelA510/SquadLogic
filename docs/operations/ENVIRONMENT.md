@@ -197,7 +197,7 @@ gate:
    and carry no `VITE_` prefix, so they never reach the bundle. The mock
    client needs none of them: it accepts one fixed demo password,
    `test-password-123`.
-   `playwright.config.ts` loads `.env.test`, then `.env`, into the Node process
+   `playwright.config.ts` loads the `TEST_*` names in `.env.test`, then `.env`, into the Node process
    (`tests/e2e/loadTestEnv.js`); a variable already exported in the shell wins.
    The mock suite reads the three `TEST_*_EMAIL` names too, so a populated
    `.env.test` changes the address it signs in as.

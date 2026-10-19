@@ -39,10 +39,10 @@ upgrade (D6 held majors out of the remediation plan), in an order the owner pick
 - `@sentry/react` 11;
 - `lucide-react` 1;
 - `dotenv` 18: done (18.0.8), PR #606;
-- `globals` 17: its own PR, after #606 (one held major per PR);
-- `@testing-library/jest-dom` 7.
+- `globals` 17: done (17.13.0), PR #610;
+- `@testing-library/jest-dom` 7: done (7.0.1), branch `claude/vibrant-allen-hr7y7s-up-jest-dom`, PR number to be added.
 
-Not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.
+The rest are not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.
 
 ## After those, as the owner schedules them
 
@@ -55,7 +55,7 @@ starts as a plan.
     `packages/core/src/outputGeneration.js`). It changes what an export contains, negative numbers
     included, so the plan decides the escaping rule;
   - DS-5: a throttle on `submit_registration`, the RPC left open to `anon`.
-- **B3, dashboard, impersonation and observability tails:**
+- **B3, dashboard, impersonation and observability tails: done** (FK indexes deferred with a trigger), branch `claude/vibrant-allen-hr7y7s-b3-tails` (PR number to be filled in by the coordinator):
   - DS-9: `TopBar` swallows `impersonateUser` failures, and `AdminComplianceDashboard` leaves them
     unhandled;
   - DS-14: `dashboardCache` (`frontend/src/lib/cache.js`) is used only by its own test; wire it in
@@ -65,7 +65,8 @@ starts as a plan.
     season-read `console.error`s carry no request id; the persistence stand-in handler is not
     wrapped; `flush()` is awaited before a failing response. Needs the Deno suite and a redeploy;
   - production's performance advisors report 90 `unindexed_foreign_keys` and 19 `unused_index` at
-    INFO (read 2026-10-19). Untriaged; any index is a migration, so plan first.
+    INFO (read 2026-10-19): triaged, deferred (1,703 live rows in `public`), no migration;
+    `docs/changes/2026-10-19-b3-fk-index-triage.md`.
 - **B4, docs-drift pass (docs only): done**, branch `claude/vibrant-allen-hr7y7s-b4-docs` (PR number to be filled in by the coordinator):
   - DD-1: `frontend-architecture.md`'s route table (`/compliance`, `/reporting`,
     `/registration/:formId`; the live paths are `/admin/compliance`, `/register/:formId`);
@@ -75,7 +76,7 @@ starts as a plan.
   - DD-5: `v1.1-planning.md` quotes old M2.2 wording;
   - and `docs/security/rls-policies.md`'s example policy shape, out of date for every table the
     RLS rewrite touched.
-- **B5, test journeys and tooling:**
+- **B5, test journeys and tooling: DD-9 done; TG-3 partly (a DST-gap slot, a late registrant on a reviewed roster)**, branch `claude/vibrant-allen-hr7y7s-b5-tests` (PR number to be filled in by the coordinator). **Open for the owner** (the remediation plan's Close-out and "Discovered during execution" have the evidence): the rainout journey has no feature to test (build one, plan first, or drop it and correct `docs/testing/e2e_master_plan.md`); team locking has no product writer (add one, or remove the engine's handling), so no locked-roster scenario exists; and a weekly series crossing a spring-forward date is shown as a normal practice by the team portal while the calendar feed marks it TIME TBD:
   - TG-3: scenarios for DST-boundary practice splitting, rainout acknowledgement, and a late
     registrant on a locked roster;
   - DD-9: `playwright.config.ts` loads only `.env`, so `.env.test` (the documented place for the

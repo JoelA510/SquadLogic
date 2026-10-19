@@ -13,7 +13,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import viteConfig from '../vite.config.js';
-import { sentryEnvironment, sentryInitOptions } from '../frontend/src/lib/sentryOptions.js';
+import {
+  NETWORK_ADDRESS_DENYLIST,
+  sentryEnvironment,
+  sentryInitOptions,
+} from '../frontend/src/lib/sentryOptions.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -123,16 +127,19 @@ describe('Sentry privacy and sampling', () => {
       databaseQueryData: false,
       queues: false,
       genAI: { inputs: false, outputs: false },
-      urlQueryParams: true,
     });
-    // Without its own deny list the SDK default is `true`: all headers.
-    const httpHeaders = /** @type {{ request: unknown, response: unknown }} */ (
-      client.getDataCollectionOptions().httpHeaders
-    );
-    for (const side of [httpHeaders.request, httpHeaders.response]) {
-      expect(side).toEqual({
-        deny: expect.arrayContaining(['forwarded', '-ip', 'remote-', 'via']),
-      });
+    // Without its own deny list the SDK default is `true`: all headers and all
+    // query params. Each must carry the whole list (Codex on #616: a missing
+    // '-user' passed the old subset check).
+    const resolved = /** @type {any} */ (client.getDataCollectionOptions());
+    const full = ['forwarded', '-ip', 'remote-', 'via', '-user'];
+    expect([...NETWORK_ADDRESS_DENYLIST]).toEqual(full);
+    for (const side of [
+      resolved.httpHeaders.request,
+      resolved.httpHeaders.response,
+      resolved.urlQueryParams,
+    ]) {
+      expect(side).toEqual({ deny: full });
     }
   });
 

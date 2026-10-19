@@ -2,21 +2,28 @@
  * The v10 default (`sendDefaultPii` off) for the privacy-relevant categories,
  * as Sentry's v11 migration guide tabulates it and spells it ("If you want to
  * keep the v10 default behavior"). A function, so no caller shares or mutates
- * another's nested objects. Query parameters stay collected (v10 collected them
- * too; the guide's deny list there would also filter an unrelated `?via=`).
+ * another's nested objects. Query parameters get the same network-address deny
+ * list as headers, as the guide's baseline does: v10 with `sendDefaultPii` off
+ * filtered them the same way (Codex on #616).
  * `stackFrameVariables` and `frameContextLines` are not pinned: neither is
  * something `sendDefaultPii` governed, and neither sends data in a browser.
  */
+export const NETWORK_ADDRESS_DENYLIST = Object.freeze([
+  'forwarded',
+  '-ip',
+  'remote-',
+  'via',
+  '-user',
+]);
+
 export function dataCollectionBaseline() {
-  const networkAddressHeaders = () => ({
-    deny: ['forwarded', '-ip', 'remote-', 'via', '-user'],
-  });
+  const networkAddress = () => ({ deny: [...NETWORK_ADDRESS_DENYLIST] });
   return {
     userInfo: false,
     cookies: false,
-    httpHeaders: { request: networkAddressHeaders(), response: networkAddressHeaders() },
+    httpHeaders: { request: networkAddress(), response: networkAddress() },
     httpBodies: [],
-    urlQueryParams: true,
+    urlQueryParams: networkAddress(),
     genAI: { inputs: false, outputs: false },
     databaseQueryData: false,
     queues: false,

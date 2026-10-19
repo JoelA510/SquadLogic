@@ -1188,8 +1188,9 @@ const HEADERS = {
 };
 ```
 
-Games produce two rows (Home and Away, `:124-140`); RFC-ish CSV escaping is in `formatCsv`
-(`:255-269`) and `escapeCsvValue` (`:271-285`). Timestamps are `toISOString()` unless a timezone is
+Games produce two rows (Home and Away, `:124-140`); CSV escaping is in `formatCsv`
+(`:255-269`), which writes every cell through `escapeCsvCell` in `packages/core/src/csv.js`: RFC 4180
+quoting, and a leading apostrophe on a cell a spreadsheet would run as a formula (DS-4). Timestamps are `toISOString()` unless a timezone is
 supplied, in which case `date.toLocaleString('en-US', { timeZone })` (`:229-238`) — an en-US
 locale string, not a stable machine format.
 

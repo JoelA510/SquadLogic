@@ -2170,6 +2170,21 @@ smoke deferred to the owner's v1.1.0 release smoke)
     manual (hand-moved) assignment is the lock a user can create. Flagged for the owner: add a team
     lock (a plan first), or remove the engine's `locked` handling. *Statically reviewed.*
 
+- 2026-10-19, found by B2 (branch `claude/vibrant-allen-hr7y7s-b2-hardening`, PR #609, Codex review):
+  - **`timezone('utc', now())` is a zone-less timestamp that the session time zone reinterprets,
+    and a PostgREST caller sets the session time zone** (`Prefer: timezone=...`). It is the
+    default of `created_at` columns (`registrations.created_at` among them) and is used 239 times
+    across `supabase/migrations`. Under `+14` a row defaulted this way is dated 14 hours in the
+    past, under `-12` in the future, so any window, ordering or retention rule that compares those
+    columns against the clock can be skewed by the caller. B2's throttle does not rely on it (its
+    window is `now() - interval` and the RPC sets `created_at` to `now()` itself), and a smoke and
+    pgTAP case run under `+14` and `-12`. The table defaults and the other 238 uses are **not**
+    changed here (a repo-wide idiom; a flagged refactor). For the owner to place: audit which of
+    them feed a comparison a caller can influence (`prune_old_audit_logs`, heartbeat and staleness
+    checks), and move the column defaults to `now()` in a plan of their own. *Statically
+    reviewed* for the count and the idiom; *executed* for the `+14` and `-12` behaviour of the
+    throttle.
+
 ## Deferred with reason
 
 - 2.1 (strict types) — D2's default: the repository's stated rule is `strict: false`; raising it
@@ -2255,8 +2270,8 @@ looked at on `main` (`1fe2265`) for this PR (*statically reviewed* unless stated
 
 | Item | Placement | Check |
 | --- | --- | --- |
-| DS-4 CSV formula injection | Moved to B2 (plan first: it changes what an export contains, including negative numbers) | `escapeCsvValue` in `packages/core/src/outputGeneration.js` quotes only `"`, `,`, CR, LF |
-| DS-5 `submit_registration` throttle | Moved to B2 (plan first: schema) | no throttle in the RPC's migrations |
+| DS-4 CSV formula injection | Moved to B2 (plan first: it changes what an export contains, including negative numbers). **Built 2026-10-19** on branch `claude/vibrant-allen-hr7y7s-b2-hardening` (plan `docs/changes/2026-10-19-b2-hardening.md`): `escapeCsvCell` in `packages/core/src/csv.js` | `escapeCsvValue` in `packages/core/src/outputGeneration.js` quotes only `"`, `,`, CR, LF |
+| DS-5 `submit_registration` throttle | Moved to B2 (plan first: schema). **Built 2026-10-19** on the same branch: migration `20261019010000`, ten registrations per caller per form per 60 seconds, PT429 | no throttle in the RPC's migrations |
 | DS-9 impersonation failures swallowed | **Done**, B3 (branch `claude/vibrant-allen-hr7y7s-b3-tails`) | `TopBar.jsx` still ended `impersonateUser(profile).catch(() => {})` (July: toasts added on both call sites; and `impersonateUser` now rejects when its audit row comes back as an error, which supabase-js returns rather than throws, so the July fix alone would never have fired) |
 | DS-14 `dashboardCache` unused | **Done**, B3: the instance is deleted, not wired in | `frontend/src/lib/cache.js` was imported only by `tests/cache.test.js`. Deleted rather than wired in: the dashboard hooks poll a running run and refetch after a save, so a 30 s cache would show a schedule from before the save |
 | DS-15 serial dashboard queries | **Done**, B3 | `AdminReportingDashboard` (four reads, and the discarded fifth removed) and `EnterpriseDashboard` (three) now use `Promise.all` |

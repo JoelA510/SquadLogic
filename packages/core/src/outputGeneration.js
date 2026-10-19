@@ -1,3 +1,4 @@
+import { escapeCsvCell } from './csv.js';
 import { coachExportCells, coachesOfTeamRow } from './people/coachList.js';
 
 /**
@@ -307,26 +308,10 @@ export function formatCsv(headers, rows) {
     throw new TypeError('rows must be an array');
   }
 
-  const headerLine = headers.map(escapeCsvValue).join(',');
+  const headerLine = headers.map(escapeCsvCell).join(',');
   const dataLines = rows.map((row) => {
-    return headers.map((header) => escapeCsvValue(row[header] ?? '')).join(',');
+    return headers.map((header) => escapeCsvCell(row[header] ?? '')).join(',');
   });
 
   return [headerLine, ...dataLines].join('\n');
-}
-
-function escapeCsvValue(value) {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  const stringValue = String(value);
-  if (
-    stringValue.includes('"') ||
-    stringValue.includes(',') ||
-    stringValue.includes('\n') ||
-    stringValue.includes('\r')
-  ) {
-    return `"${stringValue.replace(/"/g, '""')}"`;
-  }
-  return stringValue;
 }

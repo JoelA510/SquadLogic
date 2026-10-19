@@ -82,6 +82,9 @@ R25="$REPO/docs/sql/20261018060000_revert.sql"
 # Wave 2: team and game saves audit in their own transaction, and the revert.
 M27="$REPO/supabase/migrations/20261018070000_audit_in_save_transaction.sql"
 R27="$REPO/docs/sql/20261018070000_revert.sql"
+# B2 (DS-5): the submit_registration throttle, and its revert.
+M28="$REPO/supabase/migrations/20261019010000_submit_registration_throttle.sql"
+R28="$REPO/docs/sql/20261019010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3638,6 +3641,71 @@ END;
 DO" \
   "revert 20261018070000"
 
+# B2 (DS-5): the registration throttle. The smoke RAISEs on each; the revert
+# claim on a body that drifted.
+plant "M28 the throttle admits one registration too many" "$M28" \
+  "    IF v_recent >= v_limit THEN" \
+  "    IF v_recent > v_limit THEN" \
+  "smoke 20261019010000"
+
+plant "M28 the throttle counts every caller's registrations" "$M28" \
+  "    WHERE r.profile_id = v_caller
+      AND r.form_id = p_form_id" \
+  "    WHERE r.form_id = p_form_id" \
+  "smoke 20261019010000"
+
+plant "M28 the window is compared zone-less again" "$M28" \
+  "      AND r.created_at > now() - v_window;" \
+  "      AND r.created_at > timezone('utc', now()) - v_window;" \
+  "smoke 20261019010000"
+
+plant "M28 the insert takes the zone-less column default again" "$M28" \
+  "        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at,
+        created_at
+    )
+    VALUES (
+        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now(),
+        now()
+    )" \
+  "        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at
+    )
+    VALUES (
+        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now()
+    )" \
+  "smoke 20261019010000"
+
+plant "M28 a member may delete the registrations the throttle counts" "$M28" \
+  "    ON public.registrations FOR DELETE TO authenticated
+    USING (public.is_org_admin(organization_id));" \
+  "    ON public.registrations FOR DELETE TO authenticated
+    USING ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+           OR public.is_org_admin(organization_id));" \
+  "smoke 20261019010000"
+
+plant "M28 a member may back-date the registrations the throttle counts" "$M28" \
+  "    ON public.registrations FOR UPDATE TO authenticated
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));" \
+  "    ON public.registrations FOR UPDATE TO authenticated
+    USING ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+           OR public.is_org_admin(organization_id))
+    WITH CHECK ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+           OR public.is_org_admin(organization_id));" \
+  "smoke 20261019010000"
+
+plant "R28 the revert leaves a split registrations policy behind" "$R28" \
+  "DROP POLICY IF EXISTS \"registrations_admin_update\" ON public.registrations;
+" \
+  "" \
+  "revert 20261019010000"
+
+plant "R28 the revert restores a drifted submit_registration body" "$R28" \
+  "          USING ERRCODE = '23505';
+END;" \
+  "          USING ERRCODE = '23505'; -- drifted
+END;" \
+  "revert 20261019010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3767,6 +3835,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"]="M23 the blackout row is not locked FOR SHARE"
   ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
+  ["(checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, drops the throttle index, and restores the one FOR ALL registrations policy"]="R28 the revert restores a drifted submit_registration body"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

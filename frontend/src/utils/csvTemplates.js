@@ -13,6 +13,8 @@
  * the common optional columns so users discover what else they can include.
  */
 
+import { escapeCsvCell } from '@squadlogic/core/csv.js';
+
 export const CSV_TEMPLATES = {
   players: {
     headers: [
@@ -123,22 +125,6 @@ export const CSV_TEMPLATES = {
     filename: 'squadlogic-field-availability-template.csv',
   },
 };
-
-/**
- * RFC-4180-compliant quoting: wrap a cell in double quotes only if it
- * contains a quote, comma, or newline, and escape embedded quotes by
- * doubling them.
- */
-function escapeCsvCell(cell) {
-  const str = String(cell ?? '');
-  // RFC 4180 requires quoting when the field contains any quote, any
-  // part of a CRLF line break, or a comma. Include `\r` explicitly so
-  // Windows-sourced values carrying the CR alone still quote correctly.
-  if (/["\n\r,]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
 
 function toCsv(rows) {
   return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');

@@ -2351,3 +2351,7 @@ persistence failure that reaches only the console; not in B3's list, not changed
 imports it, so the entry is removed): DS-15's change to it has no user-visible effect until it is
 routed or deleted, which is the owner's call. Both dashboards still drop the `error` of some reads
 (the reporting page's standings read, all three of the enterprise page's); unchanged, as before.
+Owner's call, 2026-10-19: `AdminReportingDashboard` is deleted (branch
+`claude/vibrant-allen-hr7y7s-cleanup`), with its two DS-15 test cases; nothing imported it, and
+knip reports nothing newly unused. The rainout journey is dropped from
+`docs/testing/e2e_master_plan.md` in the same branch, so TG-3 has no third journey to build.

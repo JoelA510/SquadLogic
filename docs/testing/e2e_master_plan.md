@@ -7,7 +7,7 @@
 
 SquadLogic relies on complex algorithmic engines (team generation, scheduling) and strict data governance (RBAC, multi-tenancy). To ensure the application works flawlessly for end-users, our testing strategy is **UI-Driven and Behavior-Driven**.
 
-We use **Playwright** paired with **Cucumber/Gherkin (`.feature` files)**. This allows us to define tests in plain English domain language (e.g., "Given I am a Coach", "When a Rainout occurs") that map directly to automated browser interactions.
+We use **Playwright** paired with **Cucumber/Gherkin (`.feature` files)**. This allows us to define tests in plain English domain language (e.g., "Given I am a Coach", "When I enter a game score") that map directly to automated browser interactions.
 
 ### The Antigravity IDE / Browser Sub-Agent Workflow
 
@@ -39,7 +39,6 @@ We leverage AI browser agents (like the Antigravity IDE `browser_subagent`) to v
   - A Coach logging in to view their specific team's roster and upcoming practice schedule.
   - An Admin importing a new GotSport CSV and resolving validation errors.
   - A Coach inputting a game score and viewing the updated standings.
-  - Handling urgent alerts (e.g., acknowledging a Rainout notification).
 
 ### Pillar 3: The Security & Access Test (RBAC & Multi-Tenancy)
 

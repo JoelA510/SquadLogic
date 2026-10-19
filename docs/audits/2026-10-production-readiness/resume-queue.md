@@ -81,6 +81,10 @@ starts as a plan.
     registrant on a locked roster;
   - DD-9: `playwright.config.ts` loads only `.env`, so `.env.test` (the documented place for the
     `TEST_*` credentials) is never read locally.
+- **Owner decisions, 2026-10-19:** the rainout journey is dropped (removed from
+  `docs/testing/e2e_master_plan.md`) and the unrouted `AdminReportingDashboard` is deleted, both in
+  branch `claude/vibrant-allen-hr7y7s-cleanup`; the team portal's DST-gap defect is to be fixed
+  (branch `claude/vibrant-allen-hr7y7s-portal-dst`). Team locking is still open.
 
 ## The release
 

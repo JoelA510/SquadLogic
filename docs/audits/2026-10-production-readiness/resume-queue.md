@@ -49,8 +49,8 @@ upgrade (D6 held majors out of the remediation plan), in an order the owner pick
 - `jsdom` 30;
 - `@sentry/react` 11;
 - `lucide-react` 1;
-- `dotenv` 18;
-- `globals` 17;
+- `dotenv` 18: done (18.0.8), branch `claude/vibrant-allen-hr7y7s-up-dotenv-globals`, PR #TBD;
+- `globals` 17: done (17.13.0), same branch and PR;
 - `@testing-library/jest-dom` 7.
 
 Not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.

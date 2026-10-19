@@ -11,10 +11,9 @@
     "strict": false,
     "jsx": "react-jsx",
     "lib": ["dom", "dom.iterable", "esnext"],
-    "baseUrl": ".",
     "paths": {
-      "@squadlogic/core/*": ["packages/core/src/*"],
-      "src/*": ["packages/core/src/*"]
+      "@squadlogic/core/*": ["./packages/core/src/*"],
+      "src/*": ["./packages/core/src/*"]
     },
     "types": ["node", "react", "react-dom"],
     "skipLibCheck": true

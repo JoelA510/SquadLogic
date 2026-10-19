@@ -8,7 +8,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(10);
+SELECT plan(13);
 
 INSERT INTO public.registration_forms (id, organization_id, title, status, division_id) VALUES
     ('e0000019-0000-0000-0000-0000000000a1', 'a1111111-1111-1111-1111-111111111111',
@@ -163,6 +163,46 @@ SELECT throws_ok(
 );
 SET LOCAL timezone = 'UTC';
 RESET role;
+
+-- 11-13. The rows the throttle counts are not the caller's to edit (Codex on #609).
+--    Under the old FOR ALL policy Charlie could back-date or delete them and call again.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+UPDATE public.registrations
+   SET created_at = now() - interval '1 day'
+ WHERE profile_id = '33333333-3333-3333-3333-333333333333';
+DELETE FROM public.registrations
+ WHERE profile_id = '33333333-3333-3333-3333-333333333333';
+SELECT throws_ok(
+    $$ INSERT INTO public.registrations (organization_id, form_id, player_id, profile_id)
+       SELECT r.organization_id, 'e0000019-0000-0000-0000-0000000000a2'::uuid, r.player_id, r.profile_id
+         FROM public.registrations r
+        WHERE r.form_id = 'e0000019-0000-0000-0000-0000000000a4'
+          AND r.profile_id = '33333333-3333-3333-3333-333333333333'
+        LIMIT 1 $$,
+    '42501',
+    NULL,
+    'a member cannot insert a registration directly, past the RPC'
+);
+SELECT throws_ok(
+    $$ SELECT public.submit_registration(
+         'a1111111-1111-1111-1111-111111111111'::uuid,
+         'e0000019-0000-0000-0000-0000000000a4'::uuid,
+         '33333333-3333-3333-3333-333333333333'::uuid,
+         '{}'::jsonb, NULL, 'Edited', 'Throttle') $$,
+    'PT429',
+    'Too many registrations submitted for this form. Wait a minute and try again.',
+    'after the member tries to back-date and delete their rows, the eleventh is still refused PT429'
+);
+RESET role;
+SELECT is(
+    (SELECT count(*) FROM public.registrations
+      WHERE profile_id = '33333333-3333-3333-3333-333333333333'
+        AND form_id = 'e0000019-0000-0000-0000-0000000000a4'
+        AND created_at > now() - interval '60 seconds'),
+    10::bigint,
+    'the member''s UPDATE and DELETE changed none of the ten rows the throttle counts'
+);
 
 SELECT * FROM finish();
 ROLLBACK;

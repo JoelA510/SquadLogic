@@ -13,6 +13,10 @@ test('every formula lead character is neutralised, and quoting still applies aft
   assert.equal(escapeCsvCell('\t=1+1'), "'\t=1+1");
   // Leading spaces do not hide a formula (the July audit's fix approach).
   assert.equal(escapeCsvCell('  =1+1'), "'  =1+1");
+  // Nor does a mix of whitespace before the lead (Codex, #609): a space then a tab or CR.
+  assert.equal(escapeCsvCell(' \t=1+1'), "' \t=1+1");
+  assert.equal(escapeCsvCell(' \r=1+1'), '"\' \r=1+1"');
+  assert.equal(escapeCsvCell(' \n@SUM(1)'), '"\' \n@SUM(1)"');
   // A leading CR also forces RFC 4180 quoting, after the prefix.
   assert.equal(escapeCsvCell('\r=1+1'), '"\'\r=1+1"');
   // The payload that carries a comma and a quote is prefixed, then quoted.

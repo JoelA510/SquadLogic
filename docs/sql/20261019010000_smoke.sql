@@ -13,6 +13,10 @@
 --     under +14 and -12 ten succeed and the eleventh is refused PT429;
 --   * a call that fails validation (a form that is not open) is refused with its
 --     own code (22023), not PT429, and a refused call does not extend the window;
+--   * the rows it counts are not the caller's to edit: as the member, an UPDATE
+--     that back-dates them and a DELETE change nothing, a direct INSERT is refused
+--     by RLS, and the eleventh call is still refused PT429; an organization admin
+--     still updates and deletes; the table has exactly the four split policies;
 --   * the posture is unchanged: SECURITY DEFINER, search_path=public, EXECUTE for
 --     authenticated and anon (the public registration route), and the index the
 --     count uses exists on (profile_id, form_id, created_at).
@@ -193,6 +197,117 @@ BEGIN
         RAISE EXCEPTION 'registrations_profile_form_created_idx is missing or not on (profile_id, form_id, created_at)';
     END IF;
     RAISE NOTICE 'submit_registration is SECURITY DEFINER with search_path=public, executable by authenticated and anon, and the count is indexed';
+END;
+$$;
+
+-- (f) The rows the throttle counts are not the caller's to edit (Codex on #609).
+DO $$
+DECLARE
+    v_parent uuid := gen_random_uuid();
+    v_admin uuid := gen_random_uuid();
+    v_org uuid;
+    v_season uuid;
+    v_div uuid;
+    v_form uuid;
+    v_form2 uuid;
+    v_player uuid;
+    v_reg uuid;
+    v_i integer;
+    v_n integer;
+    v_rows integer;
+    v_err text;
+    v_code text;
+BEGIN
+    INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+        (v_parent, 'reg-edit-parent@example.test', '{"password_length": 16}'),
+        (v_admin, 'reg-edit-admin@example.test', '{"password_length": 16}');
+    INSERT INTO public.profiles (id, email) VALUES
+        (v_parent, 'reg-edit-parent@example.test'), (v_admin, 'reg-edit-admin@example.test')
+        ON CONFLICT DO NOTHING;
+    INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org Throttle Edit', 'smoke-org-throttle-edit')
+        RETURNING id INTO v_org;
+    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+        (v_org, v_parent, 'parent'), (v_org, v_admin, 'admin');
+    INSERT INTO public.season_settings (organization_id, name)
+        VALUES (v_org, 'Throttle Edit Season') RETURNING id INTO v_season;
+    INSERT INTO public.divisions (organization_id, season_settings_id, name)
+        VALUES (v_org, v_season, 'Throttle Edit Division') RETURNING id INTO v_div;
+    INSERT INTO public.registration_forms (organization_id, title, status, division_id) VALUES
+        (v_org, 'Edit form', 'open', v_div) RETURNING id INTO v_form;
+    INSERT INTO public.registration_forms (organization_id, title, status, division_id) VALUES
+        (v_org, 'Edit second form', 'open', v_div) RETURNING id INTO v_form2;
+
+    PERFORM set_config('request.jwt.claim.sub', v_parent::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_parent, 'role', 'authenticated')::text, true);
+    FOR v_i IN 1..10 LOOP
+        PERFORM public.submit_registration(v_org, v_form, v_parent, '{}'::jsonb, NULL, 'Edit' || v_i, 'Throttle');
+    END LOOP;
+
+    -- The member reads their ten, and can neither back-date nor delete them.
+    SET LOCAL ROLE authenticated;
+    SELECT count(*) INTO v_n FROM public.registrations WHERE profile_id = v_parent;
+    UPDATE public.registrations SET created_at = now() - interval '1 day' WHERE profile_id = v_parent;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RESET ROLE;
+    IF v_n <> 10 OR v_rows <> 0 THEN
+        RAISE EXCEPTION 'registrations as the member: read % (want 10), back-dated % (want 0)', v_n, v_rows;
+    END IF;
+    SET LOCAL ROLE authenticated;
+    DELETE FROM public.registrations WHERE profile_id = v_parent;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RESET ROLE;
+    IF v_rows <> 0 THEN
+        RAISE EXCEPTION 'registrations as the member: deleted % (want 0)', v_rows;
+    END IF;
+
+    -- A direct INSERT, past the RPC, is refused by RLS.
+    SELECT player_id INTO v_player FROM public.registrations WHERE profile_id = v_parent LIMIT 1;
+    v_err := NULL;
+    BEGIN
+        SET LOCAL ROLE authenticated;
+        INSERT INTO public.registrations (organization_id, form_id, player_id, profile_id)
+            VALUES (v_org, v_form2, v_player, v_parent);
+    EXCEPTION WHEN insufficient_privilege THEN
+        GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    END;
+    RESET ROLE;
+    IF v_err IS NULL OR v_err NOT LIKE 'new row violates row-level security policy%' THEN
+        RAISE EXCEPTION 'registrations as the member: the direct insert was not refused by RLS (error: %)', COALESCE(v_err, 'none -- it succeeded');
+    END IF;
+
+    -- So the eleventh call is still refused.
+    v_code := NULL;
+    BEGIN
+        PERFORM public.submit_registration(v_org, v_form, v_parent, '{}'::jsonb, NULL, 'Edit11', 'Throttle');
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE;
+    END;
+    IF v_code IS DISTINCT FROM 'PT429' THEN
+        RAISE EXCEPTION 'after the member''s edits the eleventh registration was not refused PT429 (got %)', coalesce(v_code, 'success');
+    END IF;
+    RAISE NOTICE 'the member cannot back-date, delete or directly insert registrations, and the eleventh is still refused PT429';
+
+    -- The organization admin still writes directly.
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    SELECT id INTO v_reg FROM public.registrations WHERE profile_id = v_parent LIMIT 1;
+    SET LOCAL ROLE authenticated;
+    UPDATE public.registrations SET medical_cleared = true WHERE profile_id = v_parent;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    DELETE FROM public.registrations WHERE id = v_reg;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RESET ROLE;
+    IF v_n <> 10 OR v_rows <> 1 THEN
+        RAISE EXCEPTION 'registrations as the admin: updated % (want 10), deleted % (want 1)', v_n, v_rows;
+    END IF;
+
+    IF (SELECT array_agg(polname::text || ':' || polcmd::text ORDER BY polname)
+          FROM pg_policy WHERE polrelid = 'public.registrations'::regclass)
+       IS DISTINCT FROM ARRAY['registrations_admin_delete:d', 'registrations_admin_insert:a',
+                              'registrations_admin_update:w', 'registrations_select_own_or_admin:r'] THEN
+        RAISE EXCEPTION 'registrations does not have exactly the four split policies';
+    END IF;
+    RAISE NOTICE 'an organization admin still updates and deletes registrations; the table has the four split policies';
 END;
 $$;
 

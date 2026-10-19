@@ -3674,6 +3674,31 @@ plant "M28 the insert takes the zone-less column default again" "$M28" \
     )" \
   "smoke 20261019010000"
 
+plant "M28 a member may delete the registrations the throttle counts" "$M28" \
+  "    ON public.registrations FOR DELETE TO authenticated
+    USING (public.is_org_admin(organization_id));" \
+  "    ON public.registrations FOR DELETE TO authenticated
+    USING ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+           OR public.is_org_admin(organization_id));" \
+  "smoke 20261019010000"
+
+plant "M28 a member may back-date the registrations the throttle counts" "$M28" \
+  "    ON public.registrations FOR UPDATE TO authenticated
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));" \
+  "    ON public.registrations FOR UPDATE TO authenticated
+    USING ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+           OR public.is_org_admin(organization_id))
+    WITH CHECK ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+           OR public.is_org_admin(organization_id));" \
+  "smoke 20261019010000"
+
+plant "R28 the revert leaves a split registrations policy behind" "$R28" \
+  "DROP POLICY IF EXISTS \"registrations_admin_update\" ON public.registrations;
+" \
+  "" \
+  "revert 20261019010000"
+
 plant "R28 the revert restores a drifted submit_registration body" "$R28" \
   "          USING ERRCODE = '23505';
 END;" \
@@ -3810,7 +3835,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"]="M23 the blackout row is not locked FOR SHARE"
   ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
-  ["(checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, and drops the throttle index"]="R28 the revert restores a drifted submit_registration body"
+  ["(checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, drops the throttle index, and restores the one FOR ALL registrations policy"]="R28 the revert restores a drifted submit_registration body"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

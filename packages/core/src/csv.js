@@ -5,7 +5,7 @@
  * Two rules, applied in this order:
  *
  * 1. **Neutralise a formula.** A cell that Excel, LibreOffice or Sheets would
- *    read as a formula starts with `=`, `+`, `-` or `@` (leading spaces allowed); a leading tab or
+ *    read as a formula starts with `=`, `+`, `-` or `@` (leading whitespace allowed); a leading tab or
  *    carriage return is the other way in (OWASP, "CSV Injection"). Such a cell
  *    gets a leading apostrophe, which the spreadsheet shows as nothing and
  *    reads as "this is text". Without it, a team named `=HYPERLINK(...)` or a
@@ -40,10 +40,11 @@
 const PLAIN_SIGNED_NUMBER = /^ *[+-]?\d+(\.\d+)?$/;
 
 /**
- * A cell a spreadsheet may take as a formula: `=`, `+`, `-` or `@` first (after
- * any leading spaces, as the July audit's fix approach says), or a tab or CR first.
+ * A cell a spreadsheet may take as a formula: `=`, `+`, `-` or `@` first after
+ * any run of leading whitespace (spaces, tabs, CRs and LFs in any mix, so
+ * `' \t=1+1'` is caught as well as `'  =1+1'`), or a tab or CR first.
  */
-const FORMULA_LEAD = /^( *[=+\-@]|[\t\r])/;
+const FORMULA_LEAD = /^([ \t\r\n]*[=+\-@]|[\t\r])/;
 
 /**
  * Prefix a formula-looking cell with an apostrophe.

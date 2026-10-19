@@ -2294,11 +2294,15 @@ NEEDLES
     if [ "$id" = "20261019010000" ]; then
       # The body read back from the catalogue, not from the revert's own
       # NOTICE: md5 of the 20260602010000 dollar-quoted text, the posture, no
-      # throttle left in it, and the index gone. `missing` fires when the
+      # throttle left in it, the index gone, and registrations back to its one
+      # FOR ALL policy. `missing` fires when the
       # lookup finds no function, so a broken query cannot read as restored.
       if psql_cmd "SELECT 'SUBMIT-REG-VERDICT:' || CASE
                WHEN to_regprocedure('public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)') IS NULL THEN 'missing'
                WHEN to_regclass('public.registrations_profile_form_created_idx') IS NOT NULL THEN 'index-left'
+               WHEN (SELECT array_agg(polname::text || ':' || polcmd::text ORDER BY polname)
+                       FROM pg_policy WHERE polrelid = 'public.registrations'::regclass)
+                    IS DISTINCT FROM ARRAY['registrations_user_own_or_admin:*'] THEN 'policies-wrong'
                WHEN (SELECT md5(p.prosrc) = '311952a6b46dec9141313d13789dad12' AND p.prosecdef
                             AND p.proconfig = ARRAY['search_path=public']
                        FROM pg_proc p
@@ -2306,7 +2310,7 @@ NEEDLES
                  THEN 'restored'
                ELSE 'wrong' END;" \
          >$SCRATCH/harness_submit_reg 2>&1 && grep -q 'SUBMIT-REG-VERDICT:restored' $SCRATCH/harness_submit_reg; then
-        echo "  | (checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, and drops the throttle index"
+        echo "  | (checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, drops the throttle index, and restores the one FOR ALL registrations policy"
       else
         echo "FAIL revert ${id}: the submit_registration revert did not restore the previous body and posture"
         dump 10 $SCRATCH/harness_submit_reg; STATUS=1

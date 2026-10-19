@@ -11,12 +11,25 @@
 -- back 2026-10-19) with one step added after the form check: count the caller's
 -- registrations to this form in the last 60 seconds and refuse the eleventh
 -- with SQLSTATE PT429 (HTTP 429 through PostgREST). Signature, RETURNS, SECURITY
--- DEFINER, search_path, grants and comment are unchanged.
+-- DEFINER, search_path, grants and comment are unchanged. The registrations
+-- policy is narrowed (below) so the caller cannot rewrite what is counted.
 --
 -- **The index.** `registrations` had only its primary key and (form_id,
 -- player_id); the count filters on profile_id, which was also an unindexed
 -- foreign key. `registrations_profile_form_created_idx` serves the count and
 -- that FK. The table is empty in production (read 2026-10-19), so it builds at once.
+--
+-- **The rows it counts are not the caller's to edit** (Codex on #609).
+-- `registrations_user_own_or_admin` was FOR ALL: a member could UPDATE their own
+-- rows' created_at out of the window, or DELETE them, and call again (the players
+-- the RPC created stay); they could also INSERT a registration directly, past the
+-- RPC's checks, and set medical_cleared on their own row. The policy is split:
+-- members read their own rows (unchanged), and only an organization admin
+-- (is_org_admin: admin or tenant_admin, unchanged) writes directly. A member's
+-- one write path is this SECURITY DEFINER RPC, which RLS does not bind; the
+-- medical toggle is admin_update_registration_medical_status (also DEFINER).
+-- Nothing in frontend/src writes registrations directly (searched 2026-10-19:
+-- the one direct use is AdminComplianceDashboard's SELECT).
 --
 -- **Not covered** (plan, risks): a flood of calls that all fail validation
 -- inserts nothing and so is not counted; connection load is bounded by the
@@ -174,5 +187,27 @@ EXCEPTION
           USING ERRCODE = '23505';
 END;
 $function$;
+
+DROP POLICY IF EXISTS "registrations_user_own_or_admin" ON public.registrations;
+
+CREATE POLICY "registrations_select_own_or_admin"
+    ON public.registrations FOR SELECT TO authenticated
+    USING (
+        (profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+        OR public.is_org_admin(organization_id)
+    );
+
+CREATE POLICY "registrations_admin_insert"
+    ON public.registrations FOR INSERT TO authenticated
+    WITH CHECK (public.is_org_admin(organization_id));
+
+CREATE POLICY "registrations_admin_update"
+    ON public.registrations FOR UPDATE TO authenticated
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));
+
+CREATE POLICY "registrations_admin_delete"
+    ON public.registrations FOR DELETE TO authenticated
+    USING (public.is_org_admin(organization_id));
 
 COMMIT;

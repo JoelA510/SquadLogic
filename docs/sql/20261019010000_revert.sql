@@ -2,8 +2,10 @@
 --
 -- Restores `submit_registration` as 20260602010000 defines it (the text is
 -- copied from that migration, not retyped) and drops the index the throttle
--- added. Nothing else changed: the signature, the grants (anon and
--- authenticated keep EXECUTE) and the comment were never touched.
+-- added, and restores the single FOR ALL `registrations_user_own_or_admin`
+-- policy in its 20261018030000 form (the (select auth.uid()) rewrite) in place
+-- of the four the throttle split it into. Nothing else changed: the signature,
+-- the grants (anon and authenticated keep EXECUTE) and the comment were never touched.
 --
 -- Verified: the revert fails unless the restored body has no throttle and keeps
 -- its posture (SECURITY DEFINER, search_path=public); the harness also compares
@@ -125,6 +127,23 @@ $function$;
 
 DROP INDEX IF EXISTS public.registrations_profile_form_created_idx;
 
+DROP POLICY IF EXISTS "registrations_select_own_or_admin" ON public.registrations;
+DROP POLICY IF EXISTS "registrations_admin_insert" ON public.registrations;
+DROP POLICY IF EXISTS "registrations_admin_update" ON public.registrations;
+DROP POLICY IF EXISTS "registrations_admin_delete" ON public.registrations;
+DROP POLICY IF EXISTS "registrations_user_own_or_admin" ON public.registrations;
+
+CREATE POLICY "registrations_user_own_or_admin"
+    ON public.registrations FOR ALL TO authenticated
+    USING (
+        (profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+        OR public.is_org_admin(organization_id)
+    )
+    WITH CHECK (
+        (profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
+        OR public.is_org_admin(organization_id)
+    );
+
 DO $revert$
 BEGIN
     IF NOT EXISTS (
@@ -138,7 +157,12 @@ BEGIN
     IF to_regclass('public.registrations_profile_form_created_idx') IS NOT NULL THEN
         RAISE EXCEPTION 'the throttle index is still there';
     END IF;
-    RAISE NOTICE 'revert verified: submit_registration has no throttle, SECURITY DEFINER with search_path=public, and the throttle index is gone';
+    IF (SELECT array_agg(polname::text || ':' || polcmd::text ORDER BY polname)
+          FROM pg_policy WHERE polrelid = 'public.registrations'::regclass)
+       IS DISTINCT FROM ARRAY['registrations_user_own_or_admin:*'] THEN
+        RAISE EXCEPTION 'registrations does not have exactly its one FOR ALL policy back';
+    END IF;
+    RAISE NOTICE 'revert verified: submit_registration has no throttle, SECURITY DEFINER with search_path=public, the throttle index is gone, and registrations has its one FOR ALL policy back';
 END;
 $revert$;
 

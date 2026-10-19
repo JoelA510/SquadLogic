@@ -74,7 +74,7 @@ evolves. If you are about to make a decision one of these covers, read it first.
     and fails in production. When writing a query, verify the column against
     `supabase/migrations/`, not against the mock seed.
 14. **Optimistic UI needs a snapshot to roll back to.** Capture state before
-    the mutation, apply eagerly, restore on RPC failure — and *check* per-item
+    the mutation, apply eagerly, restore on RPC failure — and _check_ per-item
     results of batched mutations; a helper that resolves `{ success: false }`
     instead of throwing will make `Promise.all` look like success.
 15. **Bound concurrency on per-row RPC fan-outs.** Strictly sequential loops
@@ -176,7 +176,7 @@ evolves. If you are about to make a decision one of these covers, read it first.
     that restores the catalogue exactly. A change you cannot diff against a recorded baseline is
     only reviewed, not proven.
 36. **A CSV a person opens neutralises formula cells through one helper.** A team, coach or note
-    that starts `=`, `+`, `-` or `@` (or a tab or CR) runs as a formula in Excel, LibreOffice and
+    that starts `=`, `+`, `-` or `@` (after any mix of leading whitespace, or a tab or CR) runs as a formula in Excel, LibreOffice and
     Sheets. Every export writes its cells through `escapeCsvCell` (`packages/core/src/csv.js`):
     an apostrophe prefix, except a plain signed number, so `-5` and `+15551234567` survive. Two
     paths deliberately do not use it, because a prefix would corrupt data that is read back:
@@ -192,3 +192,9 @@ evolves. If you are about to make a decision one of these covers, read it first.
     reinterprets, and a PostgREST caller sets that zone (`Prefer: timezone=`). Under `+14` the
     default dates a row 14 hours back, outside every window. Never build a security window on
     `timezone('utc', now())` (B2, DS-5; the repo-wide idiom is logged in the remediation plan).
+38. **What a throttle counts must be immutable to the caller.** The first DS-5 throttle counted the
+    caller's `registrations` rows while the FOR ALL policy `registrations_user_own_or_admin` let
+    the same caller UPDATE or DELETE them: back-date ten rows and the eleventh call passes. Before
+    building a limit, an audit or a window on rows, read every policy on that table for the
+    caller's role, not only the function's own SQL. The fix kept members to SELECT and their
+    writes to the SECURITY DEFINER RPC (B2, DS-5; Codex review on the PR).

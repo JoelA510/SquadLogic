@@ -85,11 +85,22 @@ test ties the mock's observed limit to the migration's.
   paths (closed form refused 22023, grants, posture).
 - `registrations` is empty in production (read 2026-10-19), so the index builds instantly and no
   existing row changes meaning.
-- A registration deleted inside the window lowers the count; only an admin or a cascade deletes one.
+- A registration deleted inside the window lowers the count. This risk line first said only an
+  admin or a cascade deletes one; that was wrong (Codex review on the PR): the FOR ALL policy
+  `registrations_user_own_or_admin` let a member UPDATE their own rows' `created_at` out of the
+  window or DELETE them and call again, INSERT a registration directly past the RPC, and set
+  `medical_cleared` on their own row. The same migration splits it: members SELECT their own rows
+  (unchanged); INSERT, UPDATE and DELETE are `is_org_admin` only (admin and tenant_admin,
+  unchanged). A member's one write path is the RPC, which is SECURITY DEFINER and not bound by
+  RLS; the medical toggle is `admin_update_registration_medical_status` (also DEFINER). Nothing
+  in `frontend/src` writes `registrations` directly as a member (searched 2026-10-19; the one
+  direct use is `AdminComplianceDashboard`'s SELECT). The persona matrix's `parent_a` row moves
+  from `ok/1/rls/1` to `rls/0/0/0`.
 - The session time zone is caller-controlled (PostgREST `Prefer: timezone=`), and
   `registrations.created_at`'s default `timezone('utc', now())` is zone-less: under `+14` it dates
   a row 14 hours back, outside the window. The throttle therefore compares against `now() -
 interval` and the RPC sets `created_at` to `now()` itself (Codex review on the PR). The table
   default and the 238 other uses are left for a plan of their own (remediation plan, "Discovered
   during execution", 2026-10-19).
-- Rollback: `docs/sql/20261019010000_revert.sql` restores the body and drops the index.
+- Rollback: `docs/sql/20261019010000_revert.sql` restores the body, drops the index, and
+  restores the single FOR ALL policy in its 20261018030000 form.

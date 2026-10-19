@@ -1,6 +1,6 @@
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TopBar from '../frontend/src/components/chrome/TopBar.jsx';
 import SideNav from '../frontend/src/components/chrome/SideNav.jsx';
@@ -12,9 +12,15 @@ const mocks = vi.hoisted(() => ({
   switchSeason: vi.fn(),
   toggleThemeMode: vi.fn(),
   impersonateUser: vi.fn().mockResolvedValue(undefined),
+  toast: vi.fn(),
+  previewProfiles: [],
   auth: {},
   org: {},
   permission: {},
+}));
+
+vi.mock('../frontend/src/components/ui/ToastHost.jsx', () => ({
+  useToast: () => mocks.toast,
 }));
 
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
@@ -45,6 +51,9 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
     from: () => ({
       select: () => ({
         in: () => Promise.resolve({ data: [], error: null }),
+        eq: () => ({
+          in: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
+        }),
       }),
     }),
   },
@@ -66,6 +75,7 @@ function configureRole(role) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.previewProfiles = [];
   localStorage.clear();
   mocks.auth.signOut = mocks.signOut;
   mocks.auth.isAdmin = true;
@@ -127,6 +137,27 @@ describe('TopBar', () => {
     fireEvent.click(accountButton);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
     expect(mocks.signOut).toHaveBeenCalled();
+  });
+
+  it('toasts when starting a role preview fails, and not when it starts', async () => {
+    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.impersonateUser.mockRejectedValueOnce(new Error('rpc down'));
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/Could not start/), 'warning')
+    );
+
+    mocks.toast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
+    await waitFor(() => expect(mocks.impersonateUser).toHaveBeenCalledTimes(2));
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 
   it('focuses the global search when "/" is pressed', () => {

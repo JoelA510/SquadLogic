@@ -84,7 +84,7 @@ security, database, or observability settings that were not directly verified.
   gate. Chart-vendor splitting, asset optimization, and tighter earned budgets
   are deferred to the performance polish task.
 - **Vercel/CI Node parity:** resolved 2026-10 (remediation plan item M1.4):
-  `.nvmrc` pins `24`, `engines.node` is `^24.0.0`, CI reads `.nvmrc`, and
+  `.nvmrc` pins `24`, `engines.node` is `^24.15.0`, CI reads `.nvmrc`, and
   Vercel builds on `24.x`. At this check Vercel reported Node `24.x` while CI
   ran Node 20 and `package.json` declared `>=20`.
 - **Production Supabase migration reconciliation:** exact linked migration

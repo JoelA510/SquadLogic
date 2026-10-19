@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
- * B3 (DS-9, DS-15): the two reporting dashboards send their independent reads
- * together, and a failed "preview as" is said out loud.
+ * B3 (DS-9, DS-15): `EnterpriseDashboard` sends its independent reads together,
+ * and a failed "preview as" is said out loud. (`AdminReportingDashboard`, the
+ * other DS-15 page, was unrouted and is deleted by the owner's 2026-10-19 call.)
  *
  * The Supabase client is a fake whose every read stays pending until the test
  * resolves it, so "how many reads were in flight before the first answered" is
@@ -67,7 +68,6 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-import AdminReportingDashboard from '../frontend/src/pages/AdminReportingDashboard.jsx';
 import EnterpriseDashboard from '../frontend/src/pages/EnterpriseDashboard.jsx';
 import AdminComplianceDashboard from '../frontend/src/pages/AdminComplianceDashboard.jsx';
 
@@ -93,39 +93,6 @@ async function answerAll() {
 }
 
 describe('DS-15: the dashboards send independent reads together', () => {
-  it('AdminReportingDashboard has all four reads in flight before any answers, and reads standings once', async () => {
-    render(<AdminReportingDashboard />);
-    await waitFor(() => expect(mocks.pending).toHaveLength(4));
-    expect(mocks.pending.map((p) => p.table).sort()).toEqual([
-      'view_compliance_stats',
-      'view_facility_usage',
-      'view_league_standings',
-      'view_org_metrics',
-    ]);
-    await answerAll();
-    // The discarded second `view_league_standings` read is gone.
-    expect(mocks.fromCalls.filter((t) => t === 'view_league_standings')).toHaveLength(1);
-    expect(mocks.fromCalls).toHaveLength(4);
-    expect(screen.queryByText(/Failed to load reporting metrics/)).not.toBeInTheDocument();
-  });
-
-  it('AdminReportingDashboard still reports a failed read', async () => {
-    render(<AdminReportingDashboard />);
-    await waitFor(() => expect(mocks.pending).toHaveLength(4));
-    await act(async () => {
-      mocks.pending
-        .splice(0)
-        .forEach(({ table, resolve }) =>
-          resolve(
-            table === 'view_compliance_stats'
-              ? { data: null, error: { code: '42501', message: 'denied' } }
-              : { data: [], error: null }
-          )
-        );
-    });
-    expect(await screen.findByText(/Failed to load reporting metrics/)).toBeInTheDocument();
-  });
-
   it('EnterpriseDashboard has all three reads in flight before any answers', async () => {
     render(<EnterpriseDashboard />);
     await waitFor(() => expect(mocks.pending).toHaveLength(3));

@@ -23,6 +23,8 @@ over `packages/`, `frontend/src/`, `supabase/` and `scripts/`; Edge Functions wr
 | `ColumnMapper.serializeCanonicalCsv`                 | re-packages an upload for our own import parser                                                                                                | **leave**: not a file anyone opens; a prefix would corrupt names and `+1...` phone numbers on import. The export is where data meets a spreadsheet, and it escapes there |
 | `fieldAdmin/serialise.js` `toCsv` / `quoteCell`      | lossless round-trip of the field registry; only tests call it                                                                                  | **leave**: its reader would have to strip a prefix. Revisit if a download is ever wired to it                                                                            |
 
+Since this plan, `AdminReportingDashboard.jsx` (an unrouted page) has been deleted by owner decision, so `formatCsv` now writes the schedule exports only.
+
 **Options.**
 
 1. Prefix an apostrophe to any cell starting `=`, `+`, `-`, `@` (leading spaces allowed, as the July

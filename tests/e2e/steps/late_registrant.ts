@@ -157,19 +157,6 @@ Given('a late registrant appears in the latest import', async ({ page }) => {
   );
 });
 
-Given('every saved team is locked', async ({ page }) => {
-  await page.evaluate(() => {
-    const db = window.__MOCK_DB__ as MockDb | undefined;
-    if (!db) throw new Error('mock store not initialised');
-    const run = (db.scheduler_runs ?? []).find((r) => r.id === 'late-saved-run') as
-      | { results: { teams: Array<Record<string, unknown>> } }
-      | undefined;
-    if (!run) throw new Error('the saved team run is not seeded');
-    for (const team of run.results.teams) team.locked = true;
-    window.__saveMockDB__(db);
-  });
-});
-
 When('I re-run teaming from the dashboard workflow', async ({ page }) => {
   // The button asks before it replaces the current draft; the scenario says yes.
   let asked = false;
@@ -195,18 +182,6 @@ Then(
         `Incremental rerun: ${plural(teams, 'team')} preserved, ${plural(late, 'late player')} seated, 0 dropped.`
       )
     ).toBeVisible();
-  }
-);
-
-/** One of the four totals the overview shows, by its label. */
-const teamTotal = (page: Page, label: string) =>
-  page.locator(`article[aria-label="${label}"] .text-xl`);
-
-Then(
-  '{int} players are assigned and {int} is left for manual review',
-  async ({ page }, assigned: number, review: number) => {
-    await expect(teamTotal(page, 'Assigned Players')).toHaveText(String(assigned));
-    await expect(teamTotal(page, 'Manual Review')).toHaveText(String(review));
   }
 );
 
@@ -245,11 +220,4 @@ Then('the late registrant is on exactly one of them', async ({ page }) => {
   // awaited each original card), so a count of zero would be a real zero.
   await teamColumn(page, TEAMS[0].id);
   await expect.poll(() => cardsOnSavedTeams(page, LATE_PLAYER)).toBe(1);
-});
-
-Then('the late registrant is on none of them', async ({ page }) => {
-  await teamColumn(page, TEAMS[0].id);
-  // Counted in the teams' own columns, not page-wide: a card rendered in some
-  // other list would not make this pass or fail.
-  await expect.poll(() => cardsOnSavedTeams(page, LATE_PLAYER)).toBe(0);
 });

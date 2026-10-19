@@ -10,6 +10,12 @@ Feature: A late registrant and a roster that has already been reviewed
   ids and players (docs/architecture/incremental-teaming-hardening.md). Given
   steps seed the saved teams and the import (inputs); every Then reads the DOM.
 
+  Not covered, on purpose: a LOCKED team. The engine honours `team.locked`, but
+  nothing in the product writes it (no `locked` column on `teams` or
+  `team_players`, no RPC, Edge Function or page sets it; the remediation plan,
+  "Discovered during execution", B5), so a scenario would test a state no user
+  can create.
+
   Background:
     Given I am logged into SquadLogic as an "admin"
     And the U12 Boys roster was saved as the teams Falcons and Herons with three players each
@@ -21,11 +27,3 @@ Feature: A late registrant and a roster that has already been reviewed
     And all 7 players are assigned and none is left for manual review
     And the saved teams keep their ids and original players
     And the late registrant is on exactly one of them
-
-  Scenario: A late registrant is not forced onto locked teams
-    Given every saved team is locked
-    When I re-run teaming from the dashboard workflow
-    Then the page reports 2 saved teams kept and 0 late players seated
-    And 6 players are assigned and 1 is left for manual review
-    And the saved teams keep their ids and original players
-    And the late registrant is on none of them

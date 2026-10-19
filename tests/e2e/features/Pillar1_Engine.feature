@@ -74,11 +74,16 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
     Then the game "Team A" vs "Team B" is staged for review on "Field 1"
     And 1 of the 1 round-robin matchups are scheduled
 
-  # TG-3 (DST boundary). A slot whose wall time the season's clock skips is not
-  # guessed at: the page names it and its cause as TIME TBD, and the slots
-  # around it are still scheduled. 2026-03-08 is the spring-forward Sunday in
-  # the seeded season's zone (America/Los_Angeles): 02:00 becomes 03:00.
-  Scenario: A practice slot inside the spring-forward gap is shown as TIME TBD, not scheduled
+  # TG-3 (DST boundary), the scheduling page. The page and the solver place a
+  # weekly slot by its FIRST occurrence only, so what this covers is a slot
+  # whose first occurrence falls in the gap: it is not guessed at, the page
+  # names it and its cause as TIME TBD, and the slots around it are still
+  # scheduled. A series that starts earlier and crosses the gap is NOT judged
+  # per date here (see the remediation plan, "Discovered during execution",
+  # B5): the calendar feed's per-date handling is held by
+  # tests/calendarFeed.test.js. 2026-03-08 is the spring-forward Sunday in the
+  # seeded season's zone (America/Los_Angeles): 02:00 becomes 03:00.
+  Scenario: A practice slot that begins in the spring-forward gap is shown as TIME TBD, not scheduled
     Given these teams and coaches in "U10 Boys":
       | team  | coach        |
       | Hawks | Coach Rivera |

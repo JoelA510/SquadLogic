@@ -17,7 +17,7 @@ This document translates the roadmap's team formation phase into actionable plan
 
 ## Objectives
 
-- Produce balanced teams per division that respect maximum roster sizes stored in the database.
+- Produce balanced teams per division that respect the roster-size and team-count bounds stored in the database (`max_roster_size`, plus the optional minimum roster, target team size, team-count override and minimum/maximum team counts).
 - Keep mutually confirmed buddies together while ignoring one-sided requests.
 - Guarantee that each volunteer head coach is paired with their player(s).
 - Surface enough metadata so admins can audit fairness and make manual swaps before schedules are generated.
@@ -27,19 +27,23 @@ This document translates the roadmap's team formation phase into actionable plan
 - **Players**: Retrieved from the `players` table, joined with `divisions` to determine roster caps and gameplay formats.
 - **Buddy pairs**: Derived from `players.mutual_buddy_code`. Only reciprocal matches are considered valid.
 - **Coach volunteers**: From the `coaches` table with `player_id` links and `can_coach_multiple_teams` flag.
-- **Configuration**: Season-level overrides from `season_settings` (roster adjustments, division ordering, lock dates).
+- **Configuration**: Season-level overrides from `season_settings` (roster adjustments, division ordering, lock dates), and per-division bounds on `divisions` (`min_roster_size`, `target_team_size`, `team_count_override`, `min_teams`, `max_teams`; migration `20260502001000`), which admins edit on the Team Analysis page through `admin_upsert_division_settings` and which `normalizeDivisionRosterConstraints` in `packages/core/src/teamGeneration.js` reads as `minRosterSize`, `targetTeamSize`, `teamCountOverride`, `minTeams` and `maxTeams`.
 
 ## Processing Steps
 
 1. **Division preparation**
-   - Query all active divisions for the upcoming season along with `max_roster_size`, ordering by youngest divisions first (customizable via `season_settings`).
+   - Query all active divisions for the upcoming season along with `max_roster_size` and the optional bounds above, ordering by youngest divisions first (customizable via `season_settings`).
    - Fetch players per division, grouping by grade or skill tier when present.
    - Build "assignment units" that either represent a single player or a confirmed buddy pair.
 2. **Coach anchoring**
    - For each unit containing a coach's child, pre-assign a team shell and attach the coach profile.
    - Support coaches with multiple teams by reading `can_coach_multiple_teams`; create one slot per team request.
 3. **Roster balancing algorithm**
-   - Determine required team count as `ceil(totalPlayers / maxRosterSize)` while ensuring enough slots for coach commitments.
+   - Determine required team count in `buildTeamsForDivision` (`packages/core/src/teamGeneration.js`), from the division's bounds:
+     - Start from `ceil(totalPlayers / targetTeamSize)` (`targetTeamSize` defaults to `maxRosterSize`), or `teamCountOverride` when one is set.
+     - Raise it to at least the number of distinct volunteer coaches, `minTeams` when set, and `ceil(totalPlayers / maxRosterSize)` so the roster cap can hold everyone.
+     - When `minRosterSize` is set and there are at least that many players, lower it to no more than `floor(totalPlayers / minRosterSize)` so teams are not spread below the minimum, but never below the floors in the previous step.
+     - Cap it at `maxTeams` when set. The cap is applied last and wins over the capacity floor: a team that cannot be created because of it leaves its units in the overflow queue with an insufficient-capacity reason.
    - Initialize team objects with metadata: division, coach (if already placed), assistant capacity, and roster limit.
    - Iterate through shuffled assignment units, always placing the next unit into the team with the smallest roster load. Use a tie-breaker that favors teams lacking coaches to keep leadership balanced.
    - If adding a unit would exceed the roster cap, place it in an overflow queue for manual resolution.
@@ -56,6 +60,7 @@ This document translates the roadmap's team formation phase into actionable plan
 - **Roster assignments**: Populate a join table `team_players` with each player's `team_id`, assignment timestamp, and source (`auto` vs `manual`).
 - **Overflow queue**: The allocator exposes an `overflowByDivision` collection so manual workflows can immediately review units that exceeded roster capacity.
 - **Buddy resolution report**: JSON payload summarizing honored and unmet buddy requests for admin review. The allocator now exposes this via `buddyDiagnosticsByDivision`, listing mutual pairs alongside unmatched requests (missing registrations, non-reciprocal entries, and self references) so admins can reconcile data issues quickly.
+- **Roster balance summary**: `rosterBalanceByDivision` carries per-team fill (`slotsRemaining`, `fillRate`, `needsPlayersToMin` when a minimum roster is set) and a division summary with `teamsNeedingPlayers`, plus `teamsBelowMinRoster` when `minRosterSize` is set and `teamCountConstraints` (`minTeams`, `maxTeams`) when either bound is set.
 - **Coach coverage summary**: Highlight any division lacking enough volunteer coaches to meet team counts. The allocator now
   returns this metadata through `coachCoverageByDivision`, which includes total team counts, volunteer coach coverage, and a
   `needsAdditionalCoaches` flag so the admin workflow can prioritize outreach.
@@ -115,13 +120,11 @@ This document translates the roadmap's team formation phase into actionable plan
 
 ### Test harness plan
 
-- Use Jest with a fixture loader that seeds in-memory objects mirroring the schema (players, coaches, divisions, configuration).
+- Use Vitest with a fixture loader that seeds in-memory objects mirroring the schema (players, coaches, divisions, configuration).
 - Provide scenario fixtures: balanced division, buddy-heavy division, coach overlap division, and capacity-deficit division.
 - Assert both database mutations (mocked repositories) and diagnostic payload content for each scenario.
 - Integrate snapshot tests for the overflow report and buddy resolution report to detect regressions in admin-facing outputs.
 
 ## Next Steps
 
-- Implement Jest unit tests for buddy pairing logic, roster balancing, and overflow detection using the seed data proposed in the data modeling plan.
-- Design admin UI wireframes for the roster review page, including filters and manual adjustment controls.
-- Draft Supabase Row Level Security policies limiting roster edits to authenticated admin roles.
+None outstanding in this document. The items it once listed have shipped: unit tests for buddy pairing, roster balancing and overflow detection (`tests/teamGeneration.test.js`, `tests/buddyLinking.test.js`, `tests/assignmentUnits.test.js`), the roster review and manual adjustment UI (`frontend/src/components/teaming/RosterManager.jsx`, `frontend/src/pages/TeamBuilderPage.jsx`), and the Row Level Security policies that limit roster edits to admins (`docs/security/rls-policies.md`).

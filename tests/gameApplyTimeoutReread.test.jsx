@@ -187,7 +187,9 @@ async function generateAndApply(save) {
       <GameSchedulingPage />
     </MemoryRouter>
   );
-  const run = await screen.findByRole('button', { name: 'Run auto-scheduler optimization' });
+  const run = await screen.findByRole('button', {
+    name: 'Auto-Generate: run auto-scheduler optimization',
+  });
   await waitFor(() => expect(run).toBeEnabled());
   fireEvent.click(run);
   const apply = await screen.findByRole('button', { name: /apply schedule/i });
@@ -275,7 +277,9 @@ describe('the game page and the admin-only save (docs/PLAN_AUDIT_IN_TRANSACTION.
         <GameSchedulingPage />
       </MemoryRouter>
     );
-    const run = await screen.findByRole('button', { name: 'Run auto-scheduler optimization' });
+    const run = await screen.findByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
     await waitFor(() => expect(run).toBeEnabled());
     fireEvent.click(run);
     const apply = await screen.findByRole('button', { name: /apply schedule/i });

@@ -27,23 +27,23 @@ afterEach(() => {
 
 describe('loadTestEnv', () => {
   it('reads TEST_* from .env.test, which the config used to skip', () => {
-    const dir = repoWith({ '.env.test': 'TEST_PASSWORD=from-env-test\n' });
+    const dir = repoWith({ '.env.test': 'TEST_FIXTURE_VALUE=from-env-test\n' });
     /** @type {NodeJS.ProcessEnv} */
     const env = {};
     loadTestEnv(dir, env);
-    expect(env.TEST_PASSWORD).toBe('from-env-test');
+    expect(env.TEST_FIXTURE_VALUE).toBe('from-env-test');
   });
 
   it('ranks the shell over .env.test over .env', () => {
     const dir = repoWith({
-      '.env': 'TEST_PASSWORD=from-env\nTEST_ADMIN_EMAIL=from-env\nVITE_ONLY=from-env\n',
-      '.env.test': 'TEST_PASSWORD=from-env-test\nTEST_ADMIN_EMAIL=from-env-test\n',
+      '.env': 'TEST_FIXTURE_VALUE=from-env\nTEST_ADMIN_EMAIL=from-env\nVITE_ONLY=from-env\n',
+      '.env.test': 'TEST_FIXTURE_VALUE=from-env-test\nTEST_ADMIN_EMAIL=from-env-test\n',
     });
     /** @type {NodeJS.ProcessEnv} */
     const env = { TEST_ADMIN_EMAIL: 'from-shell' };
     loadTestEnv(dir, env);
     expect(env.TEST_ADMIN_EMAIL).toBe('from-shell');
-    expect(env.TEST_PASSWORD).toBe('from-env-test');
+    expect(env.TEST_FIXTURE_VALUE).toBe('from-env-test');
     // .env still supplies what .env.test does not name.
     expect(env.VITE_ONLY).toBe('from-env');
   });
@@ -58,12 +58,12 @@ describe('loadTestEnv', () => {
   it('takes only TEST_* names from .env.test, so it cannot repoint the dev server', () => {
     const dir = repoWith({
       '.env.test':
-        'TEST_PASSWORD=pw\nVITE_USE_MOCK_SUPABASE=false\nVITE_SUPABASE_URL=https://x.invalid\n',
+        'TEST_FIXTURE_VALUE=pw\nVITE_USE_MOCK_SUPABASE=false\nVITE_SUPABASE_URL=https://x.invalid\n',
     });
     /** @type {NodeJS.ProcessEnv} */
     const env = {};
     loadTestEnv(dir, env);
-    expect(env.TEST_PASSWORD).toBe('pw');
+    expect(env.TEST_FIXTURE_VALUE).toBe('pw');
     expect(env.VITE_USE_MOCK_SUPABASE).toBeUndefined();
     expect(env.VITE_SUPABASE_URL).toBeUndefined();
   });

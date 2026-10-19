@@ -81,7 +81,7 @@ The application is structured around the following workflows (see `frontend/src/
 
 ### Prerequisites
 
-- Node.js 24 (the version `.nvmrc` pins; `package.json` `engines` requires `^24.0.0`, and CI and
+- Node.js 24 (the version `.nvmrc` pins; `package.json` `engines` requires `^24.15.0`, and CI and
   the Vercel build run on it). With nvm: `nvm use`.
 - npm (v10 or higher)
 - A Supabase Project (for database and auth) — or run in mock mode (below) with no backend at all

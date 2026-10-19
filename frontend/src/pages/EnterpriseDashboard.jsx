@@ -73,22 +73,17 @@ export default function EnterpriseDashboard() {
     async function loadData() {
       if (!currentOrganization?.id) return;
       try {
-        const { data: pData } = await supabase
-          .from('players')
-          .select('id, custom_attributes, team_id, division')
-          .eq('organization_id', currentOrganization.id);
+        // Independent reads, sent together rather than one after another.
+        const orgId = currentOrganization.id;
+        const [{ data: pData }, { data: orgData }, { data: compData }] = await Promise.all([
+          supabase
+            .from('players')
+            .select('id, custom_attributes, team_id, division')
+            .eq('organization_id', orgId),
+          supabase.from('view_org_metrics').select('*').eq('organization_id', orgId).single(),
+          supabase.from('view_compliance_stats').select('*').eq('organization_id', orgId),
+        ]);
         if (pData) setPlayers(pData);
-
-        const { data: orgData } = await supabase
-          .from('view_org_metrics')
-          .select('*')
-          .eq('organization_id', currentOrganization.id)
-          .single();
-
-        const { data: compData } = await supabase
-          .from('view_compliance_stats')
-          .select('*')
-          .eq('organization_id', currentOrganization.id);
 
         let cCleared = 0;
         let cTotal = 0;

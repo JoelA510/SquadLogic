@@ -1,21 +1,22 @@
 /**
  * In-memory TTL cache — Phase 9 Production Hardening
  *
- * A lightweight caching layer for dashboard data to enforce the 200ms
- * interaction ceiling. No external dependencies — uses a plain Map with
- * TTL-based expiration and optional stale-while-revalidate support.
+ * A lightweight cache with TTL-based expiration and optional
+ * stale-while-revalidate support. No external dependencies — a plain Map.
+ *
+ * It backs Edge Function invocations only (`edgeFunctionCache` and `cachedInvoke`
+ * below). The dashboard's Supabase reads are deliberately uncached: they poll a
+ * running run, and the pages refetch right after a save, so a 30 s window would
+ * show a schedule or roster from before the save. (A `dashboardCache` instance sat
+ * here unused until DS-14 removed it; see the 2026-10 remediation plan.)
  *
  * Usage:
- *   import { dashboardCache } from '../lib/cache.js';
+ *   import { TTLCache } from '../lib/cache.js';
+ *   const cache = new TTLCache({ defaultTtlMs: 30_000 });
  *
- *   // Set with 30s TTL
- *   dashboardCache.set('teams:org-123', teamsData, { ttlMs: 30_000 });
- *
- *   // Get (returns null if expired)
- *   const cached = dashboardCache.get('teams:org-123');
- *
- *   // Get-or-fetch pattern
- *   const data = await dashboardCache.getOrFetch('teams:org-123', fetchTeams, { ttlMs: 30_000 });
+ *   cache.set('teams:org-123', teamsData, { ttlMs: 30_000 });
+ *   const cached = cache.get('teams:org-123'); // null if expired
+ *   const data = await cache.getOrFetch('teams:org-123', fetchTeams, { ttlMs: 30_000 });
  */
 
 /** @typedef {{ data: any, expiresAt: number, staleAt: number }} CacheEntry */
@@ -134,15 +135,8 @@ class TTLCache {
 }
 
 /**
- * Shared dashboard cache instance.
- * Default: 30s TTL, max 200 entries.
- */
-export const dashboardCache = new TTLCache({ defaultTtlMs: 30_000, maxEntries: 200 });
-
-/**
  * Shared Edge Function invocation cache — Wave 6b Task 1.
- * Default TTL: 60s (callers pass a per-call TTL). Isolated from `dashboardCache`
- * so edge-function invocation reductions are observable independently.
+ * Default TTL: 60s (callers pass a per-call TTL).
  *
  * Key format: `<functionName>:<stable-json-of-org-scoped-params>`
  * The `organization_id` MUST appear in the param object to prevent

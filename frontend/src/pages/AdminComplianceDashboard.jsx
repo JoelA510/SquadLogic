@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useToast } from '../components/ui/ToastHost.jsx';
 import {
   Search,
   CheckCircle2,
@@ -141,6 +142,7 @@ function PlayerComplianceGrid() {
 export default function AdminComplianceDashboard() {
   const { currentOrganization } = useOrganization();
   const { isAdmin, impersonateUser, isImpersonating, user } = useAuth();
+  const toast = useToast();
   const [forms, setForms] = useState([]);
   const [selectedFormId, setSelectedFormId] = useState('');
   const [registrations, setRegistrations] = useState([]);
@@ -362,7 +364,14 @@ export default function AdminComplianceDashboard() {
                       <div className="flex flex-col items-end gap-1">
                         {isAdmin && reg.profiles?.id && (
                           <button
-                            onClick={() => impersonateUser(reg.profiles)}
+                            onClick={() =>
+                              impersonateUser(reg.profiles).catch(() => {
+                                toast(
+                                  'Could not start the preview as this parent. Try again.',
+                                  'warning'
+                                );
+                              })
+                            }
                             className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-500/10 text-status-warning-text text-xs font-bold border border-amber-500/20 hover:bg-amber-500/20 transition-all"
                             title="View as this parent"
                           >

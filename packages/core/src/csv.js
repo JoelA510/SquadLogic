@@ -25,8 +25,8 @@
  *
  * ## Where it applies
  *
- * Output a person opens: `outputGeneration.formatCsv` (schedule exports and the
- * roster export) and the import template download. It is *not* applied to
+ * Output a person opens: `outputGeneration.formatCsv` (the master and per-team
+ * schedule exports) and the import template download. It is *not* applied to
  * `ColumnMapper.serializeCanonicalCsv` (our own re-packaging of an upload for the
  * import parser, which a prefix would corrupt) or to `fieldAdmin`'s `toCsv` (a
  * lossless round-trip format whose reader would have to unprefix); the export is

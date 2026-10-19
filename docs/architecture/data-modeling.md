@@ -36,11 +36,32 @@
     are rows in `coach_practice_preferences`, requested by the coach and
     approved by an admin.)
   - `can_coach_multiple_teams` (boolean)
-  - `status` (`active`, `pending-confirmation`, `inactive`, `interested`)
+  - `status` (`active`, `pending-confirmation`, `inactive`, `interested`); `interested` is a
+    coach lead captured from a player import (migration `20260421060000`), see Coach Leads below
+  - `import_source` (`player_import_lead` for a captured lead, `coach_csv` once a coach import
+    has applied the row) and `last_imported_at`
 - **Indexes & constraints**:
   - Unique index on `email`.
   - Foreign key `player_id` references `players.id` with `ON DELETE SET NULL`.
   - Enum-backed availability days ensure consistent weekday values.
+
+### Coach Leads
+
+- **Purpose**: Record which divisions an `interested` coach lead asked to coach, and which player
+  registration flagged them, so admins can filter "who is interested in U12B?" on `/coaches` and
+  trace a lead back to its source.
+- **Table** `coach_interested_programs` (`20260421060000`): `id`, `coach_id` (→ `coaches.id`,
+  `ON DELETE CASCADE`), `division_id` (→ `divisions.id`, `ON DELETE CASCADE`),
+  `inferred_from_player_id` (→ `players.id`, `ON DELETE SET NULL`), `organization_id`,
+  `created_at`.
+- **Indexes & constraints**:
+  - `UNIQUE NULLS NOT DISTINCT` on (`coach_id`, `division_id`, `inferred_from_player_id`), so a
+    re-import whose player id is null does not insert duplicates.
+  - The `coach_interested_programs_org_scope` trigger (`20260503000000`) requires the coach, the
+    division and the player to belong to the row's `organization_id` (`23514` otherwise).
+  - Members read through one SELECT policy; there is no write policy. `upsert_coach_leads` is the
+    writer, and deleting a coach (`admin_delete_coaches`) cascades its links. See
+    [`persistence-rpc-layer.md`](persistence-rpc-layer.md) §2.9 and §2.20.
 
 ### Divisions
 
@@ -50,10 +71,22 @@
   - `name` (text, e.g., "U10 Girls 7v7")
   - `gender_policy` (enum: `coed`, `girls`, `boys`)
   - `max_roster_size` (smallint)
+  - Team-size and team-count bounds (migration `20260502001000`, all nullable integers, each
+    `> 0` when set): `min_roster_size`, `target_team_size`, `team_count_override`, `min_teams`,
+    `max_teams`. Team generation reads them as `minRosterSize`, `targetTeamSize`,
+    `teamCountOverride`, `minTeams` and `maxTeams` (`packages/core/src/rosterSizing.js`); see
+    [`team-generation.md`](team-generation.md).
   - `play_format` (text, e.g., `7v7`)
   - `season_start`, `season_end` (date)
 - **Indexes & constraints**:
   - Unique index on `name` per season range to prevent duplicates.
+  - CHECKs `divisions_roster_size_bounds` (`min_roster_size <= max_roster_size`),
+    `divisions_team_count_bounds` (`min_teams <= max_teams`) and
+    `divisions_team_count_override_min_bound` / `_max_bound` (an override stays within
+    `min_teams` and `max_teams`), each passing when either side is null.
+  - Writers: `admin_upsert_division_settings` (admin-only, audited; `20260504020000`), called from
+    the Team Analysis page's rules form (`frontend/src/pages/TeamAnalysisPage.jsx`). Members read
+    divisions; admins insert, update and delete through per-command policies.
 
 ### Teams
 
@@ -171,6 +204,13 @@ Detailed ingestion workflows live in `docs/operations/ingestion-pipeline.md`. Hi
    - Normalizes guardian contact information into structured JSON where source columns are present.
    - Normalizes GotSport coach-interest fields into `willing_to_coach` and mirrors the value to the legacy `coach_volunteer` flag for existing reports.
    - Validates mutual buddy codes by checking for reciprocal entries before linking pairs.
+   - Captures coach leads: after promotion, a row with positive coach intent (`willing_to_coach` or
+     `coach_volunteer`) and a resolvable guardian name and email is sent to `upsert_coach_leads`,
+     which creates an `interested` coach (`import_source = 'player_import_lead'`) when no coach
+     has that email yet. A coach in the same organization that already has the email keeps its
+     status and import source; only its `last_imported_at` is updated. Either way the lead gets a
+     `coach_interested_programs` link per division. A later coach CSV with the same email updates
+     that row to the CSV's status (default `active`) in `finalize_coach_import_job`.
    - Flags duplicate registrations or missing division assignments for manual review.
 2. **Field Availability Importer**
    - Accepts standardized CSV with `location,field,subunit,day,start,end,type,capacity,valid_until` columns.

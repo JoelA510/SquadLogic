@@ -66,7 +66,7 @@ starts as a plan.
     wrapped; `flush()` is awaited before a failing response. Needs the Deno suite and a redeploy;
   - production's performance advisors report 90 `unindexed_foreign_keys` and 19 `unused_index` at
     INFO (read 2026-10-19). Untriaged; any index is a migration, so plan first.
-- **B4, docs-drift pass (docs only):**
+- **B4, docs-drift pass (docs only): done**, branch `claude/vibrant-allen-hr7y7s-b4-docs` (PR number to be filled in by the coordinator):
   - DD-1: `frontend-architecture.md`'s route table (`/compliance`, `/reporting`,
     `/registration/:formId`; the live paths are `/admin/compliance`, `/register/:formId`);
   - DD-2: `docs/expansion/03_ROADMAP.md` lists division team-size configuration as backlog;

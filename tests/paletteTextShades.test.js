@@ -105,6 +105,26 @@ describe('text colours come from the theme tokens, not palette shades', () => {
     expect(findPaletteText(allowed)).toEqual([]);
   });
 
+  it('uses the -text warning token for text, not the bare --warning (3.84:1 on the light surface)', () => {
+    const bare = /(?<![\w-])(?:[a-z0-9-]+:)*text-status-warning(?![-\w])/g;
+    expect(
+      'text-status-warning-text bg-status-warning/20 hover:text-status-warning'.match(bare)
+    ).toEqual(['hover:text-status-warning']);
+    const offenders = files.flatMap((file) =>
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .flatMap((line, index) =>
+          new RegExp(bare.source).test(line)
+            ? [`${path.relative(FRONTEND_SRC, file)}:${index + 1}`]
+            : []
+        )
+    );
+    expect(
+      offenders,
+      'Use text-status-warning-text; see docs/ui/agent-ui-ux-guidelines.md'
+    ).toEqual([]);
+  });
+
   it('uses no palette shade for text outside the listed exceptions', () => {
     const offenders = hits.filter((hit) => !isExcepted(hit));
     expect(

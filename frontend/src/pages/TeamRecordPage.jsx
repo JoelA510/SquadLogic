@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import Button from '../components/ui/Button.jsx';
+import Modal from '../components/ui/Modal.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
 import Badge from '../components/ui/Badge.jsx';
 import Avatar from '../components/ui/Avatar.jsx';
@@ -469,7 +470,7 @@ export default function TeamRecordPage() {
                         className={`text-xs font-bold px-2 py-1 rounded-full ${
                           isMedicalCleared
                             ? 'bg-status-success-bg text-status-success'
-                            : 'bg-status-warning-bg text-status-warning'
+                            : 'bg-status-warning-bg text-status-warning-text'
                         }`}
                       >
                         Medical Clearance: {isMedicalCleared ? 'Yes' : 'Pending'}
@@ -638,9 +639,8 @@ export function CalendarModal({ team, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-bg-app border border-border-subtle rounded-xl p-6 w-full max-w-md shadow-md">
-        <h3 className="text-xl font-bold text-text-primary mb-4">Calendar Subscription</h3>
+    <Modal open onClose={onClose} title="Calendar Subscription">
+      <>
         <label
           htmlFor="team-calendar-subscription-link"
           className="block text-sm text-text-secondary mb-4"
@@ -656,12 +656,12 @@ export function CalendarModal({ team, onClose }) {
           className="w-full bg-bg-surface border border-border-subtle rounded-lg p-3 text-text-primary mb-4 text-sm"
         />
         {!calendarToken && (
-          <p className="text-sm text-status-warning mb-3">
+          <p className="text-sm text-status-warning-text mb-3">
             No calendar link is currently available. Regenerate the link before sharing it.
           </p>
         )}
         {rotateMessage && (
-          <p className="text-sm text-status-warning mb-3" aria-live="polite">
+          <p className="text-sm text-status-warning-text mb-3" aria-live="polite">
             {rotateMessage}
           </p>
         )}
@@ -691,8 +691,8 @@ export function CalendarModal({ team, onClose }) {
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }
 
@@ -715,7 +715,7 @@ function RsvpButton({ active, type, onClick }) {
     declined: { icon: X, color: 'text-status-error', bg: 'bg-status-error-bg', label: 'Not Going' },
     maybe: {
       icon: Minus,
-      color: 'text-status-warning',
+      color: 'text-status-warning-text',
       bg: 'bg-status-warning-bg',
       label: 'Maybe',
     },

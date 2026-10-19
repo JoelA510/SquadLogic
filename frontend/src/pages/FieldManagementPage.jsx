@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Button from '../components/ui/Button.jsx';
-import { MapPin, Plus, Edit2, Trash2, X, Check, CalendarX, RotateCcw } from 'lucide-react';
+import Modal from '../components/ui/Modal.jsx';
+import { MapPin, Plus, Edit2, Trash2, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
 import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
 import PracticeRepairLauncher from '../components/scheduling/PracticeRepairLauncher.jsx';
@@ -735,216 +736,203 @@ export default function FieldManagementPage() {
 
       {/* Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-bg-app border border-border-subtle rounded-xl p-6 w-full max-w-md shadow-md animate-scaleIn">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-text-primary">
-                {editingField ? 'Edit Field' : 'Add New Field'}
-              </h2>
-              <button
-                type="button"
-                aria-label="Close modal"
-                onClick={() => setIsModalOpen(false)}
-                className="text-text-muted hover:text-text-primary"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {/* Location Select or Create */}
-              <div className="bg-bg-surface p-3 rounded-lg border border-border-subtle space-y-3">
-                <div className="flex justify-between items-center">
-                  <label
-                    htmlFor="field-location-input"
-                    className="block text-sm font-medium text-text-secondary"
-                  >
-                    Venue / Location
-                  </label>
-                  {!isAddingLocation && (
-                    <button
-                      onClick={() => setIsAddingLocation(true)}
-                      className="text-xs text-text-accent hover:text-brand-500 flex items-center"
-                    >
-                      <Plus size={12} className="mr-1" /> Add New Location
-                    </button>
-                  )}
-                  {isAddingLocation && locations.length > 0 && (
-                    <button
-                      onClick={() => setIsAddingLocation(false)}
-                      className="text-xs text-text-secondary hover:text-text-primary"
-                    >
-                      Select Existing
-                    </button>
-                  )}
-                </div>
-
-                {isAddingLocation ? (
-                  <input
-                    id="field-location-input"
-                    type="text"
-                    aria-label="New location name"
-                    placeholder="e.g. Main Complex"
-                    value={newLocationName}
-                    onChange={(e) => setNewLocationName(e.target.value)}
-                    className="w-full bg-bg-app border border-border-highlight rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
-                  />
-                ) : (
-                  <select
-                    id="field-location-input"
-                    value={formData.location_id}
-                    onChange={(e) => setFormData({ ...formData, location_id: e.target.value })}
-                    className="w-full bg-bg-app border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
-                  >
-                    <option value="" disabled>
-                      Select a location
-                    </option>
-                    {locations.map((loc) => (
-                      <option key={loc.id} value={loc.id}>
-                        {loc.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div>
-                <label
-                  htmlFor="field-name"
-                  className="block text-sm font-medium text-text-secondary mb-1"
-                >
-                  Field Name
-                </label>
-                <input
-                  id="field-name"
-                  type="text"
-                  placeholder="e.g. Field 1"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="surface-type"
-                    className="block text-sm font-medium text-text-secondary mb-1"
-                  >
-                    Surface Type
-                  </label>
-                  <select
-                    id="surface-type"
-                    value={formData.surface_type}
-                    onChange={(e) => setFormData({ ...formData, surface_type: e.target.value })}
-                    className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary text-sm"
-                  >
-                    <option>Grass</option>
-                    <option>Turf</option>
-                    <option>Indoor</option>
-                  </select>
-                </div>
-                <div>
-                  <label
-                    htmlFor="field-size"
-                    className="block text-sm font-medium text-text-secondary mb-1"
-                  >
-                    Size
-                  </label>
-                  <select
-                    id="field-size"
-                    value={formData.size}
-                    onChange={(e) => setFormData({ ...formData, size: e.target.value })}
-                    className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary text-sm"
-                  >
-                    <option>11v11</option>
-                    <option>9v9</option>
-                    <option>7v7</option>
-                    <option>5v5</option>
-                    <option>Clinic</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="field-priority"
-                  className="block text-sm font-medium text-text-secondary mb-1"
-                >
-                  Priority (1-10)
-                </label>
-                <input
-                  id="field-priority"
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={formData.priority_rating}
-                  onChange={(e) =>
-                    setFormData({ ...formData, priority_rating: parseInt(e.target.value) || 1 })
-                  }
-                  className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mt-2 p-3 bg-bg-surface border border-border-subtle rounded-lg">
-                <label className="flex flex-col gap-2 cursor-pointer">
-                  <span className="text-sm font-medium text-text-primary">Sub-fields</span>
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.supports_halves ? 'bg-brand-500' : 'bg-bg-app border border-border-subtle'}`}
-                    >
-                      <div
-                        className={`w-4 h-4 rounded-full bg-white transition-transform ${formData.supports_halves ? 'translate-x-6' : 'translate-x-0'}`}
-                      />
-                    </div>
-                    <span className="text-xs text-text-secondary">
-                      {formData.supports_halves ? 'A/B Halves' : 'Full Field Only'}
-                    </span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="hidden"
-                    checked={formData.supports_halves}
-                    onChange={(e) =>
-                      setFormData({ ...formData, supports_halves: e.target.checked })
-                    }
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 cursor-pointer">
-                  <span className="text-sm font-medium text-text-primary">Status</span>
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.active ? 'bg-green-500' : 'bg-bg-app border border-border-subtle'}`}
-                    >
-                      <div
-                        className={`w-4 h-4 rounded-full bg-white transition-transform ${formData.active ? 'translate-x-6' : 'translate-x-0'}`}
-                      />
-                    </div>
-                    <span className="text-xs text-text-secondary">
-                      {formData.active ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="hidden"
-                    checked={formData.active}
-                    onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-8">
+        <Modal
+          open
+          onClose={() => setIsModalOpen(false)}
+          title={editingField ? 'Edit Field' : 'Add New Field'}
+          footer={
+            <>
               <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
                 Cancel
               </Button>
               <Button variant="primary" onClick={handleSave} className="flex items-center gap-2">
                 <Check size={18} /> Save Field
               </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            {/* Location Select or Create */}
+            <div className="bg-bg-surface p-3 rounded-lg border border-border-subtle space-y-3">
+              <div className="flex justify-between items-center">
+                <label
+                  htmlFor="field-location-input"
+                  className="block text-sm font-medium text-text-secondary"
+                >
+                  Venue / Location
+                </label>
+                {!isAddingLocation && (
+                  <button
+                    onClick={() => setIsAddingLocation(true)}
+                    className="text-xs text-text-accent hover:text-brand-500 flex items-center"
+                  >
+                    <Plus size={12} className="mr-1" /> Add New Location
+                  </button>
+                )}
+                {isAddingLocation && locations.length > 0 && (
+                  <button
+                    onClick={() => setIsAddingLocation(false)}
+                    className="text-xs text-text-secondary hover:text-text-primary"
+                  >
+                    Select Existing
+                  </button>
+                )}
+              </div>
+
+              {isAddingLocation ? (
+                <input
+                  id="field-location-input"
+                  type="text"
+                  aria-label="New location name"
+                  placeholder="e.g. Main Complex"
+                  value={newLocationName}
+                  onChange={(e) => setNewLocationName(e.target.value)}
+                  className="w-full bg-bg-app border border-border-highlight rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
+                />
+              ) : (
+                <select
+                  id="field-location-input"
+                  value={formData.location_id}
+                  onChange={(e) => setFormData({ ...formData, location_id: e.target.value })}
+                  className="w-full bg-bg-app border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
+                >
+                  <option value="" disabled>
+                    Select a location
+                  </option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="field-name"
+                className="block text-sm font-medium text-text-secondary mb-1"
+              >
+                Field Name
+              </label>
+              <input
+                id="field-name"
+                type="text"
+                placeholder="e.g. Field 1"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label
+                  htmlFor="surface-type"
+                  className="block text-sm font-medium text-text-secondary mb-1"
+                >
+                  Surface Type
+                </label>
+                <select
+                  id="surface-type"
+                  value={formData.surface_type}
+                  onChange={(e) => setFormData({ ...formData, surface_type: e.target.value })}
+                  className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary text-sm"
+                >
+                  <option>Grass</option>
+                  <option>Turf</option>
+                  <option>Indoor</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="field-size"
+                  className="block text-sm font-medium text-text-secondary mb-1"
+                >
+                  Size
+                </label>
+                <select
+                  id="field-size"
+                  value={formData.size}
+                  onChange={(e) => setFormData({ ...formData, size: e.target.value })}
+                  className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary text-sm"
+                >
+                  <option>11v11</option>
+                  <option>9v9</option>
+                  <option>7v7</option>
+                  <option>5v5</option>
+                  <option>Clinic</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="field-priority"
+                className="block text-sm font-medium text-text-secondary mb-1"
+              >
+                Priority (1-10)
+              </label>
+              <input
+                id="field-priority"
+                type="number"
+                min="1"
+                max="10"
+                value={formData.priority_rating}
+                onChange={(e) =>
+                  setFormData({ ...formData, priority_rating: parseInt(e.target.value) || 1 })
+                }
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-2 focus:border-brand-400 focus:outline-none text-text-primary"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-2 p-3 bg-bg-surface border border-border-subtle rounded-lg">
+              <label className="flex flex-col gap-2 cursor-pointer">
+                <span className="text-sm font-medium text-text-primary">Sub-fields</span>
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.supports_halves ? 'bg-brand-500' : 'bg-bg-app border border-border-subtle'}`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white transition-transform ${formData.supports_halves ? 'translate-x-6' : 'translate-x-0'}`}
+                    />
+                  </div>
+                  <span className="text-xs text-text-secondary">
+                    {formData.supports_halves ? 'A/B Halves' : 'Full Field Only'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={formData.supports_halves}
+                  onChange={(e) => setFormData({ ...formData, supports_halves: e.target.checked })}
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 cursor-pointer">
+                <span className="text-sm font-medium text-text-primary">Status</span>
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.active ? 'bg-green-500' : 'bg-bg-app border border-border-subtle'}`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white transition-transform ${formData.active ? 'translate-x-6' : 'translate-x-0'}`}
+                    />
+                  </div>
+                  <span className="text-xs text-text-secondary">
+                    {formData.active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={formData.active}
+                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
+                />
+              </label>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

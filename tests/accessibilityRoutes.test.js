@@ -19,7 +19,6 @@ const FEATURE = path.join(ROOT, 'tests', 'e2e', 'features', 'accessibility.featu
 
 /** Routes the scan leaves out, each with why. A static route never belongs here. */
 const NOT_SCANNED = {
-  '/invite/:code': 'needs a live invite code; it renders the sign-in form, which is scanned',
   '*': 'the catch-all redirects to /, which is scanned',
 };
 
@@ -47,11 +46,20 @@ function declaredRoutes(text) {
   return [...text.matchAll(/\bpath=(?:"([^"]+)"|(\{[^}]*\}))/g)].map((m) => m[1] ?? m[2]);
 }
 
-/** The first column of the feature's Examples table, plus the sign-in page's own scenario. */
+/**
+ * The first column of the feature's Examples table, plus every route a scenario of its own scans
+ * by name (`axe finds no serious or critical violations on "/login" in ...`): the sign-in page,
+ * and the invite link, whose code is part of the path.
+ */
 function scannedRoutes(text) {
   const rows = [...text.matchAll(/^\s*\|\s*(\/[^\s|]*)\s*\|/gm)].map((m) => m[1]);
-  const signIn = /violations on "\/login"/.test(text) ? ['/login'] : [];
-  return [...rows, ...signIn];
+  // A live Gherkin step only: a `#`-commented step, or one in a description, names no scan.
+  const named = [
+    ...text.matchAll(
+      /^[ \t]*(?:Given|When|Then|And|But)[ \t]+axe finds .*violations on "(\/[^"\s]*)" in the/gm
+    ),
+  ].map((m) => m[1]);
+  return [...new Set([...rows, ...named])];
 }
 
 /** Declared routes neither scanned (directly or through a seeded record) nor in NOT_SCANNED. */
@@ -92,11 +100,18 @@ describe('accessibility scan coverage', () => {
   });
 
   it('scans each record page on a seeded record, and matches a record path to its route', () => {
-    for (const route of ['/players/:playerId', '/team/:teamId', '/register/:formId']) {
+    for (const route of [
+      '/players/:playerId',
+      '/team/:teamId',
+      '/register/:formId',
+      '/invite/:code',
+    ]) {
       expect(declared).toContain(route);
       expect(unscannedRoutes([route], scanned)).toEqual([]);
     }
     expect(covers('/players/:playerId', '/players/player-1')).toBe(true);
+    expect(covers('/invite/:code', '/invite/SPRING2026')).toBe(true);
+    expect(covers('/invite/:code', '/invite/')).toBe(false);
     expect(covers('/players/:playerId', '/players/')).toBe(false);
     expect(covers('/players/:playerId', '/players/player-1/edit')).toBe(false);
     expect(covers('/team/:teamId', '/teams/t1')).toBe(false);
@@ -104,6 +119,32 @@ describe('accessibility scan coverage', () => {
     // A record path dropped from the scan leaves its route unscanned.
     const withoutPlayer = scanned.filter((path) => path !== '/players/player-1');
     expect(unscannedRoutes(declared, withoutPlayer)).toEqual(['/players/:playerId']);
+    // The invite link is scanned by scenarios of its own; without them its route is unscanned.
+    const withoutInvite = scanned.filter((path) => !path.startsWith('/invite/'));
+    expect(unscannedRoutes(declared, withoutInvite)).toEqual(['/invite/:code']);
+  });
+
+  it('counts a live scan step, and not a commented-out one or prose that quotes it', () => {
+    const live =
+      '    And axe finds no serious or critical violations on "/invite/SPRING2026" in the "light" theme';
+    expect(scannedRoutes(live)).toEqual(['/invite/SPRING2026']);
+    expect(
+      scannedRoutes(
+        `Then axe finds no serious or critical violations on "/login" in the "dark" theme`
+      )
+    ).toEqual(['/login']);
+    // Negative controls: the step is not run when it is commented out.
+    expect(scannedRoutes(`    # ${live.trim()}`)).toEqual([]);
+    expect(
+      scannedRoutes(
+        `#And axe finds no serious or critical violations on "/login" in the "light" theme`
+      )
+    ).toEqual([]);
+    expect(
+      scannedRoutes(
+        `  # Scenario notes: axe finds no serious or critical violations on "/login" in the "light" theme`
+      )
+    ).toEqual([]);
   });
 
   it('catches a route dropped from the scan, and one declared out of the usual order', () => {

@@ -948,7 +948,8 @@ describe('unwired layers :: the scan examined the repository', () => {
 
     const tsconfig = readFileSync(path.join(REPO_ROOT, 'tsconfig.json'), 'utf8');
     const tsconfigAliases = [
-      ...tsconfig.matchAll(/"([^"]+)\/\*"\s*:\s*\[\s*"packages\/core\/src\/\*"/g),
+      // `./` is optional: TypeScript 6 dropped `baseUrl`, so `paths` are written relative.
+      ...tsconfig.matchAll(/"([^"]+)\/\*"\s*:\s*\[\s*"(?:\.\/)?packages\/core\/src\/\*"/g),
     ].map((match) => match[1]);
     // tsconfig declares two of the three; `@` is a Vite-only alias.
     expect([...new Set(tsconfigAliases)].sort()).toEqual(['@squadlogic/core', 'src']);

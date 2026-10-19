@@ -53,6 +53,13 @@ updates:
         versions: ['>= 10']
       - dependency-name: '@eslint/js'
         versions: ['>= 10']
+      # 2026-10-19: typescript-eslint (8.72.0, latest and canary) peers on
+      # typescript <6.1.0 and throws "does not support TS 7.0" at load, and TS
+      # 7.0 ships no compiler API. package.json holds ~6.0.3. Remove when
+      # typescript-eslint widens its range, or when the side-by-side alias
+      # setup (resume-queue.md) is adopted.
+      - dependency-name: typescript
+        versions: ['>= 6.1']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       minor-and-patch:

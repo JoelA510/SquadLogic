@@ -31,7 +31,16 @@ Dependabot's grouped majors PR #584 was closed (2026-10-19): `eslint@10` cannot 
 release supports ESLint 10. The rest of that group is taken one at a time, each as a plan-first
 upgrade (D6 held majors out of the remediation plan), in an order the owner picks:
 
-- `typescript` 7;
+- `typescript` 7: blocked upstream. typescript-eslint 8.72.0 (latest and canary) peers on
+  `typescript <6.1.0` and, given 7.0.2, throws "typescript-eslint does not support TS 7.0" at
+  load (executed 2026-10-19; typescript-eslint issue 10940). TS 7.0 ships no compiler API. Taken
+  instead: `typescript` 6.0.3, with `baseUrl` dropped from `tsconfig.json` (deprecated in 6.0,
+  removed in 7.0), branch `claude/vibrant-allen-hr7y7s-up-ts6` (PR number: coordinator). The
+  route to 7.0 is Microsoft's side-by-side setup (`typescript` as
+  `npm:@typescript/typescript6` for the API, `@typescript/native` as `npm:typescript@^7` for
+  `tsc`), a plan-first change because it puts two compilers in the tree; or wait for TS 7.1's
+  API and typescript-eslint's support. `package.json` holds `~6.0.3` and Dependabot ignores
+  `typescript >= 6.1` (typescript-eslint's range) until then;
 - `vite` 8: done (8.3.4), with the next three in one PR (their peer ranges are coupled), branch
   `claude/vibrant-allen-hr7y7s-up-vite8` (PR number: coordinator);
 - `@vitejs/plugin-react` 6: done (6.1.2), same branch;

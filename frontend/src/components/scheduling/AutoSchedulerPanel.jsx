@@ -72,7 +72,11 @@ export default function AutoSchedulerPanel({
             onClick={onTrigger}
             disabled={disabled || isRunning}
             loading={isRunning}
-            aria-label={isRunning ? 'Optimization in progress' : 'Run auto-scheduler optimization'}
+            aria-label={
+              isRunning
+                ? 'Optimizing: optimization in progress'
+                : 'Auto-Generate: run auto-scheduler optimization'
+            }
             aria-busy={isRunning}
           >
             <Zap size={16} aria-hidden="true" />

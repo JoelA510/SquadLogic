@@ -198,3 +198,12 @@ evolves. If you are about to make a decision one of these covers, read it first.
     building a limit, an audit or a window on rows, read every policy on that table for the
     caller's role, not only the function's own SQL. The fix kept members to SELECT and their
     writes to the SECURITY DEFINER RPC (B2, DS-5; Codex review on the PR).
+39. **An axe-core minor can add a rule.** axe-core 4.14 (via `@axe-core/playwright` 4.14.0, a
+    Dependabot minor) enabled `label-content-name-mismatch` (WCAG 2.5.3 Label in Name), which
+    4.13 shipped as experimental and off. 45 E2E scans failed on buttons whose `aria-label` left
+    out their visible text: the org and season switchers (no space between the label and value
+    spans, so the visible text read "SeasonFall 2026"), the avatar's initials, `InlineField`'s
+    "Edit Team" over the value, and the Auto-Generate button. A name must contain what a speech
+    user sees; `aria-hidden` on the visible text does not satisfy axe, and neither do brackets
+    around it. Run the axe E2E scans on any axe bump, and pin label-in-name with
+    `tests/helpers/labelInName.js`, which jsdom can check without axe.

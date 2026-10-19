@@ -38,12 +38,28 @@ describe('CalendarModal', () => {
       'webcal://localhost:3000/functions/v1/calendar-feed?token=mock-token'
     );
 
-    expect(screen.getByText(/No calendar link is currently available/i)).toBeInTheDocument();
+    const notice = screen.getByText(/No calendar link is currently available/i);
+    expect(notice).toBeInTheDocument();
+    // The bare warning token was 3.39:1 on the sunken light surface (axe `color-contrast`); the `-text`
+    // token is the AA one in both themes.
+    expect(notice).toHaveClass('text-status-warning-text');
+    expect(notice).not.toHaveClass('text-status-warning');
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Regenerate Link' })).toHaveAttribute(
       'type',
       'button'
     );
+  });
+
+  it('opens as a named modal dialog with focus inside, and closes on Escape', () => {
+    const onClose = vi.fn();
+    render(<CalendarModal team={{ id: 'team-1', calendar_token: 'tok' }} onClose={onClose} />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Calendar Subscription' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toContainElement(/** @type {HTMLElement} */ (document.activeElement));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('uses the rotate token RPC result before enabling copy', async () => {
@@ -69,7 +85,9 @@ describe('CalendarModal', () => {
     expect(calendarLink).not.toHaveValue(
       'webcal://localhost:3000/functions/v1/calendar-feed?token=mock-token'
     );
-    expect(screen.getByText(/New link generated/i)).toBeInTheDocument();
+    const message = screen.getByText(/New link generated/i);
+    expect(message).toBeInTheDocument();
+    expect(message).toHaveClass('text-status-warning-text');
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeEnabled();
   });
 

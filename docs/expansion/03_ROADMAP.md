@@ -44,6 +44,7 @@ Following v1.0 completion, additional work was executed under **Epic 19: Launch 
 - **Phase 1 (Completed with operator follow-up):** GitHub Actions CI/CD pipeline and Vercel production deployment. Branch protection remains an operator-owned setting to validate before release sign-off.
 - **Phase 2 (Completed):** Interactive Game Schedule Grid with drag-and-drop (`@dnd-kit`), real-time validation, and the final E2E test scenario
 - **Phase 3 (Completed):** Live Supabase backend transition, Edge Function deployment, production cutover (see [`production-cutover.md`](../operations/production-cutover.md))
+- **v1.1 Area B (Completed):** Division team-size configuration. Per-division `min_roster_size`, `target_team_size`, `team_count_override`, `min_teams` and `max_teams` (migration `20260502001000`) are saved by the audited `admin_upsert_division_settings` RPC (`20260504020000`) from the Team Analysis page, and team generation reads them (`packages/core/src/rosterSizing.js`, `packages/core/src/teamGeneration.js`). See [`v1.1-planning.md`](v1.1-planning.md) Area B.
 
 Additionally, a comprehensive **4-phase security audit** was completed in March 2026; its remediations shipped in the v1.0.1 hardening PRs and migrations.
 
@@ -114,7 +115,7 @@ Engineering backlog:
 - [ ] Automated accessibility checks in E2E (`@axe-core/playwright`) and a post-redesign WCAG 2.2 AA re-certification pass (the pre-redesign certification was retired with the redesign).
 - [ ] Lighthouse CI performance budget for the production bundle.
 - [ ] One-click snapshot-aware teaming re-run from the co-ed merge/split modal (currently players move and rosters are rebuilt in the Team Builder).
-- [ ] v1.1 feature areas — import write-through completion (team promotion), division team-size configuration, placeholder coaches/admin swap — see [`v1.1-planning.md`](v1.1-planning.md).
+- [ ] v1.1 feature areas — import write-through completion (team promotion), placeholder coaches/admin swap — see [`v1.1-planning.md`](v1.1-planning.md).
 - [ ] Org-scoped coach email uniqueness (currently globally `UNIQUE`; a multi-org constraint change is needed before scaling beyond one org per deployment).
 
 Heat forecast follow-ups ([`heat-forecast.md`](../architecture/heat-forecast.md); deliberately not built with the first version):

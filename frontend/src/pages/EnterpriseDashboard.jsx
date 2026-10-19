@@ -298,6 +298,7 @@ export default function EnterpriseDashboard() {
             <h3 className="text-lg font-bold text-text-primary">Fluid Attributes Distribution</h3>
             {attributeOptions.length > 0 && !isLowSample && (
               <select
+                aria-label="Attribute to chart"
                 className="bg-bg-surface border border-border-highlight rounded-lg px-3 py-1.5 text-sm text-text-primary focus:border-brand outline-none"
                 value={selectedMapping}
                 onChange={(e) => setSelectedMapping(e.target.value)}

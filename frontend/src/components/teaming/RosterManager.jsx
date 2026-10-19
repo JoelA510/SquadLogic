@@ -299,7 +299,7 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
                   className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
                     c.severity === 'error'
                       ? 'bg-status-error/20 text-status-error'
-                      : 'bg-status-warning/20 text-status-warning'
+                      : 'bg-status-warning/10 text-status-warning-text'
                   }`}
                 >
                   {c.type}

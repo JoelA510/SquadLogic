@@ -6,7 +6,7 @@ import { formatDateTime } from '../utils/formatters.js';
 const COLOR_CLASSES = {
   blue: 'text-text-accent bg-brand-500/10 border-brand-500/30',
   green: 'text-status-success bg-status-success/10 border-status-success/30',
-  amber: 'text-status-warning bg-status-warning/10 border-status-warning/30',
+  amber: 'text-status-warning-text bg-status-warning/10 border-status-warning/30',
   purple: 'text-text-accent bg-accent-500/10 border-accent-500/30',
 };
 

@@ -43,6 +43,17 @@ Given('I am signed out on the sign-in page', async ({ page }) => {
   await page.waitForLoadState('networkidle');
 });
 
+Given('I am signed out and open the invite link {string}', async ({ page }, code: string) => {
+  await page.goto('/');
+  await waitForMockClient(page);
+  await page.evaluate(() => sessionStorage.removeItem('__MOCK_SESSION__'));
+  await page.goto(`/invite/${code}`);
+  // The sign-in form under the invite banner, with the URL still the invite's.
+  await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible({ timeout: 20_000 });
+  expect(new URL(page.url()).pathname).toBe(`/invite/${code}`);
+  await page.waitForLoadState('networkidle');
+});
+
 When('I switch the sign-in page to the dark theme', async ({ page }) => {
   // The sign-in page has no theme toggle, so set the choice the toggle would store. The page has
   // mounted (its Sign In button is visible), so ThemeProvider reads it on the reload rather than
@@ -349,3 +360,201 @@ Then(
     expect(drawn.gridStrokes).toEqual([drawn.grid]);
   }
 );
+
+// ---- Pages the seed leaves empty or masked (#591 follow-up) ----
+
+/**
+ * Add rows to mock tables from the page, each stamped with the active organization. The seeds
+ * below are the only place this file touches the mock database; the Then steps read the page.
+ */
+async function seedMockTables(page: Page, rows: Record<string, Array<Record<string, unknown>>>) {
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ rows, mockOrgId }) => {
+      const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>>>;
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      for (const [table, added] of Object.entries(rows)) {
+        const ids = new Set(added.map((row) => row.id));
+        db[table] = [
+          ...(db[table] ?? []).filter((row) => !ids.has(row.id)),
+          ...added.map((row) => ({ organization_id: orgId, ...row })),
+        ];
+      }
+      window.__saveMockDB__(db);
+    },
+    { rows, mockOrgId: MOCK_ORG_ID }
+  );
+}
+
+When(
+  'I publish a baseline from the Exports page and compare it with the schedule',
+  async ({ page }) => {
+    await page.getByTestId('generate-csvs-btn').click();
+    await expect(page.getByText('CSVs generated successfully.')).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Upload to Storage' }).click();
+    await expect(page.getByText(/^Uploaded \d+ files/)).toBeVisible({ timeout: 15_000 });
+    // The new baseline is listed once the upload has recorded it.
+    const select = page.getByTestId('baseline-select');
+    await expect(select.locator('option')).toHaveCount(2, { timeout: 15_000 });
+    await select.selectOption({ index: 1 });
+    await page.getByTestId('check-parity-btn').click();
+    await expect(page.getByTestId('parity-report')).toBeVisible({ timeout: 15_000 });
+  }
+);
+
+Given(
+  'a coach has a pending practice preference request and another has one in force',
+  async ({ page }) => {
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
+    await seedMockTables(page, {
+      coach_practice_preferences: [
+        {
+          id: 'a11y-pref-requested',
+          coach_id: 'coach-lead-1',
+          dimension: 'weekday',
+          level: 'must_keep',
+          value: 'TUE',
+          status: 'requested',
+          requested_at: now.toISOString(),
+          decided_at: null,
+          effective_from: null,
+          effective_to: null,
+        },
+        {
+          id: 'a11y-pref-approved',
+          coach_id: 'c2',
+          dimension: 'start_time',
+          level: 'prefer_keep',
+          value: 18 * 60,
+          status: 'approved',
+          requested_at: now.toISOString(),
+          decided_at: now.toISOString(),
+          effective_from: yesterday,
+          effective_to: null,
+        },
+      ],
+    });
+  }
+);
+
+Given('seasonal availability is imported for a field', async ({ page }) => {
+  // The page reads a profile with its formats, blackout windows and equipment embedded. The mock
+  // does not resolve those embeds from their own tables, so they sit on the row, as PostgREST
+  // would return it.
+  await seedMockTables(page, {
+    field_availability_profiles: [
+      {
+        id: 'a11y-profile-1',
+        season_label: 'Fall 2026',
+        location: 'Riverside Park',
+        field_name: 'Back Pitch',
+        record_status: 'conditional',
+        approval_status: 'pending',
+        available_from: '2026-09-01',
+        available_until: '2026-11-15',
+        month_indicators: 'Sep Oct Nov',
+        blackout_months: 'August',
+        teams_per_hour: '4',
+        aggregate_teams_per_hour: '8',
+        lighted: true,
+        restroom: true,
+        potty: false,
+        day_constraints: 'Weekdays after 5pm',
+        move_to_location: 'Hillside Complex',
+        field_availability_profile_formats: [
+          { id: 'a11y-format-1', format_code: '7v7', format_quantity: 2, format_order: 1 },
+        ],
+        field_blackout_windows: [
+          {
+            id: 'a11y-window-1',
+            blackout_from: '2026-10-10',
+            blackout_until: '2026-10-12',
+            reason: 'Harvest festival',
+          },
+        ],
+        field_equipment_requirements: [
+          { id: 'a11y-equip-1', goal_equipment: 'Portable goals', requirement_status: 'required' },
+        ],
+      },
+    ],
+  });
+});
+
+Given(
+  'the organization has {int} players with a custom attribute',
+  async ({ page }, count: number) => {
+    const sizes = ['Small', 'Medium', 'Large'];
+    await seedMockTables(page, {
+      players: Array.from({ length: count }, (_, index) => ({
+        id: `a11y-player-${index + 1}`,
+        first_name: `Sample${index + 1}`,
+        last_name: 'Player',
+        division: 'U10',
+        status: 'active',
+        custom_attributes: { jersey_size: sizes[index % sizes.length] },
+      })),
+    });
+  }
+);
+
+Then('the chart of the custom attribute is drawn instead of the privacy mask', async ({ page }) => {
+  await expect(page.getByText('Data Masked for Privacy')).toHaveCount(0);
+  await expect(
+    page.getByRole('img', { name: /Bar chart showing distribution of players/ })
+  ).toBeVisible({
+    timeout: 20_000,
+  });
+});
+
+// ---- Each route's main dialog, open (#591: "a scan with each route's main dialog open") ----
+
+/**
+ * A dialog is a `role="dialog"` with a name, and focus has moved into it. A plain overlay `<div>`
+ * with a heading passes axe and fails all three, so the steps assert them.
+ */
+async function expectDialogOpen(page: Page, name: string) {
+  const dialogElement = page.getByRole('dialog', { name });
+  await expect(dialogElement).toBeVisible({ timeout: 20_000 });
+  await expect(dialogElement.getByRole('heading', { name }).first()).toBeVisible();
+  await expect
+    .poll(() => dialogElement.evaluate((el) => el.contains(document.activeElement)), {
+      message: `focus is inside the "${name}" dialog`,
+    })
+    .toBe(true);
+}
+
+Then('the {string} dialog is open with focus inside it', async ({ page }, name: string) => {
+  await expectDialogOpen(page, name);
+});
+
+When(
+  'I open the {string} dialog with {string}',
+  async ({ page }, dialog: string, opener: string) => {
+    // `A > B` is a menu or tab strip: the button A, then its item B.
+    for (const name of opener.split(' > ')) {
+      await page
+        .getByRole('button', { name })
+        .or(page.getByRole('menuitem', { name }))
+        .or(page.getByRole('tab', { name }))
+        .first()
+        .click();
+    }
+    await expectDialogOpen(page, dialog);
+  }
+);
+
+When('I switch to the dark theme behind the open dialog', async ({ page }) => {
+  // The dialog's overlay covers the top bar, so a pointer click on the toggle would land on the
+  // overlay. The click is dispatched on the button itself: the same handler, with the dialog (and
+  // whatever it holds in memory) left open for the dark scan.
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+  await page.evaluate(() => {
+    const toggle = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Switch to dark mode"]'
+    );
+    if (!toggle) throw new Error('The theme toggle is not on the page');
+    toggle.click();
+  });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});

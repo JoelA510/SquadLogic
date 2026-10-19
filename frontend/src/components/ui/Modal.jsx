@@ -33,6 +33,13 @@ export default function Modal({
 }) {
   const dialogRef = useRef(null);
   const previousFocusRef = useRef(null);
+  // The latest `onClose`, read by the key handler. A caller that passes an inline arrow gets a new
+  // function on every render; keeping it out of the effect's dependencies stops each re-render
+  // (a keystroke in a form on the page) from moving focus back to the first control.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return undefined;
@@ -45,7 +52,7 @@ export default function Modal({
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab' || !dialog) return;
@@ -67,7 +74,7 @@ export default function Modal({
       document.removeEventListener('keydown', handleKeyDown, true);
       previousFocusRef.current?.focus?.();
     };
-  }, [open, onClose, initialFocusRef]);
+  }, [open, initialFocusRef]);
 
   if (!open) return null;
 

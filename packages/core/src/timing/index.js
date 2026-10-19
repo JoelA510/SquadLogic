@@ -79,6 +79,15 @@ export {
 } from './solar.js';
 
 export {
+  PRACTICE_TIME_MISSING,
+  PRACTICE_TIME_NOTE_CAUSES,
+  PRACTICE_TIME_NOTE_CAUSE_UNKNOWN,
+  PRACTICE_TIME_TBD_CAUSES,
+  PRACTICE_TIME_TBD_CAUSE_UNKNOWN,
+  placePracticeTime,
+} from './practiceTime.js';
+
+export {
   SEASON_CLOCK_EVENT,
   crossCheckClockChangeNotes,
   deriveSeasonClockEvents,

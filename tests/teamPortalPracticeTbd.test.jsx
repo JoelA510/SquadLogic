@@ -90,7 +90,7 @@ beforeEach(() => {
     error: null,
     team: { name: 'Tigers', division: { name: 'U10', season: {} } },
     roster: [],
-    events: expandPractices(ROWS),
+    events: expandPractices(ROWS, [], 'America/Los_Angeles'),
     rsvps: [],
     messages: [],
     myPlayers: [],
@@ -107,7 +107,7 @@ describe('team portal: an unexpandable practice row is TIME TBD, not absent', ()
   });
 
   it('expandPractices returns every expected entry, one TBD per unexpandable row', () => {
-    const events = expandPractices(ROWS);
+    const events = expandPractices(ROWS, [], 'America/Los_Angeles');
     for (const row of ROWS) {
       const expected = expectedFor(row);
       const got = events.filter((e) => e.id === row.id);
@@ -144,5 +144,40 @@ describe('team portal: an unexpandable practice row is TIME TBD, not absent', ()
     for (const code of codes) {
       expect(PRACTICE_TBD_CAUSES[code], code).toBe(UNPLACEABLE_CAUSES[code]);
     }
+  });
+});
+
+describe('team portal: a daylight-saving date is shown as the calendar feed shows it', () => {
+  const sunday = { ...monday, day_of_week: 'sun', start_time: '02:30:00', end_time: '04:00:00' };
+
+  it('the spring-forward Sunday reads TIME TBD with its reason, the others keep 02:30', () => {
+    mocks.portalState.events = expandPractices(
+      [{ id: 'pa-dst', effective_date_range: '[2026-03-01,2026-03-29)', slot: sunday }],
+      [],
+      'America/Los_Angeles'
+    );
+    render(<TeamRecordPage />);
+    const cause = UNPLACEABLE_CAUSES.WALL_TIME_NONEXISTENT;
+    expect(screen.getByText(`Time TBD on Sunday, March 8: ${cause}`)).toBeInTheDocument();
+    expect(screen.getAllByText('TIME TBD - Practice')).toHaveLength(1);
+    expect(screen.getAllByText('02:30 - 04:00')).toHaveLength(3);
+  });
+
+  it('the fall-back Sunday keeps its time and says the hour happens twice', () => {
+    mocks.portalState.events = expandPractices(
+      [
+        {
+          id: 'pa-dst',
+          effective_date_range: '[2026-10-25,2026-11-15)',
+          slot: { ...sunday, start_time: '01:30:00', end_time: '03:00:00' },
+        },
+      ],
+      [],
+      'America/Los_Angeles'
+    );
+    render(<TeamRecordPage />);
+    expect(screen.queryByText('TIME TBD - Practice')).toBeNull();
+    expect(screen.getAllByText('01:30 - 03:00')).toHaveLength(3);
+    expect(screen.getAllByText(/^Note: the clock goes back that night/)).toHaveLength(1);
   });
 });

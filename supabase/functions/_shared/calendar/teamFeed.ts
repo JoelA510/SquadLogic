@@ -54,6 +54,12 @@ export interface FeedTeam {
   id: string;
   name: string;
   organization_id: string | null;
+  /**
+   * The team's own season (its division's `season_settings_id`). The feed reads
+   * that season's clock, as the team portal does (`PORTAL_TEAM_SELECT`); without
+   * it, `readSeasonTimezone` falls back to the organization's newest season.
+   */
+  season_settings_id?: string | null;
 }
 
 /**
@@ -126,7 +132,11 @@ export async function composeTeamFeed(input: {
   // calls itself "the one server-side read of a season's clock", and a second
   // copy in this file is how `.single()` ends up fixed on one arm and not the
   // other -- the twin-arm shape this whole change exists to stop.
-  const season = await readSeasonTimezone(client as SeasonSettingsReader, organizationId);
+  const season = await readSeasonTimezone(
+    client as SeasonSettingsReader,
+    organizationId,
+    team.season_settings_id ?? null
+  );
   if (season.errored) {
     // Not fatal. A feed that 500s takes every family's calendar down; every
     // event becomes TIME TBD instead, which says the true thing.

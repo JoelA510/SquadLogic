@@ -56,6 +56,8 @@ Given(
           id: teamId,
           name: team,
           organization_id: orgId,
+          // The portal places a team's practices on its division's season clock.
+          division_id: 'u8-div-id',
           calendar_token: `mock-calendar-token-${teamId}`,
           calendar_token_expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
         });

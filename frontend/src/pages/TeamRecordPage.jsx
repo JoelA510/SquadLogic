@@ -280,6 +280,12 @@ export default function TeamRecordPage() {
                               <MapPin size={14} />
                               {event.location ?? 'Location TBD'}
                             </div>
+                            {event.timingNotes?.map((note) => (
+                              // The feed's placed-event note: an ambiguous fall-back hour.
+                              <p key={note} className="md:col-span-2 text-text-secondary">
+                                Note: {note}.
+                              </p>
+                            ))}
                             {event.kind === 'relocated' && (
                               // Q3: one line naming what the move replaces.
                               <p className="md:col-span-2 text-text-secondary">

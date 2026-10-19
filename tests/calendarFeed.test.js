@@ -736,6 +736,54 @@ describe('calendar feed applies saved practice exceptions (8.6 3b PR 12b)', () =
     return { ...result, logged };
   };
 
+  it("reads the team's own season clock, not the organization's newest season (Codex, #613)", async () => {
+    // The portal reads the team's division's season (PORTAL_TEAM_SELECT); the
+    // feed must read the same one. A newer season elsewhere in the organization
+    // in another zone is what an unscoped read would return.
+    const newerSeasons = [
+      {
+        id: 'season-newer',
+        organization_id: SEED.team.organization_id,
+        timezone: 'America/Phoenix',
+      },
+    ];
+    const own = await seeded(SEED, { newerSeasons });
+    expect(own.ics).toMatch(/X-WR-TIMEZONE:America\/Los_Angeles/);
+    // Control: without the team's season id the newest season's zone wins,
+    // so the assertion above can fail.
+    const unscoped = await seeded(
+      { ...SEED, team: { ...SEED.team, season_settings_id: null } },
+      {
+        newerSeasons,
+      }
+    );
+    expect(unscoped.ics).toMatch(/X-WR-TIMEZONE:America\/Phoenix/);
+
+    const client = fakeClient(SEED, { newerSeasons });
+    await composeTeamFeed({
+      client,
+      team: SEED.team,
+      orgName: 'Test Org',
+      now: NOW,
+      log: () => {},
+    });
+    const seasonReads = client.calls.filter((c) => c.table === 'season_settings');
+    expect(seasonReads).toHaveLength(1);
+    expect(seasonReads[0].eq).toEqual([
+      ['organization_id', SEED.team.organization_id],
+      ['id', 'season-1'],
+    ]);
+  });
+
+  it('the Edge handler passes the team division season to the feed', () => {
+    const ENTRY = fs.readFileSync(
+      path.resolve(__dirname, '../supabase/functions/calendar-feed/index.ts'),
+      'utf8'
+    );
+    expect(ENTRY).toMatch(/division:divisions\(season_settings_id\)/);
+    expect(ENTRY).toMatch(/season_settings_id: team\.division\?\.season_settings_id \?\? null/);
+  });
+
   it('the seed exercises every case, and the meter goes red with every window moved off', () => {
     const counts = exerciseOf(SEED);
     for (const [name, n] of Object.entries(counts)) expect(n, name).toBeGreaterThanOrEqual(1);

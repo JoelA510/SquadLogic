@@ -262,7 +262,14 @@ const PLAYER = { id: 'player-1', first_name: 'Sam', last_name: 'Sample' };
 
 function dbOf(exceptions = EXCEPTIONS) {
   return {
-    teams: [{ id: 'team-1', name: 'Tigers', organization_id: MOCK_ORG_ID, division: null }],
+    teams: [
+      {
+        id: 'team-1',
+        name: 'Tigers',
+        organization_id: MOCK_ORG_ID,
+        division: { id: 'div-1', name: 'U10', season: { id: 1, timezone: 'America/Los_Angeles' } },
+      },
+    ],
     team_players: [{ team_id: 'team-1', player: PLAYER }],
     games: [],
     practice_assignments: ROWS,

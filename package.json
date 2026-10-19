@@ -76,7 +76,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "7.0.1",
-    "globals": "^14.0.0",
+    "globals": "^17.13.0",
     "jsdom": "^27.3.0",
     "knip": "~6.41.0",
     "playwright-bdd": "^9.0.0",

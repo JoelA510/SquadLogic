@@ -73,3 +73,19 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
     When I press "Generate Schedule" on the Game Scheduling page
     Then the game "Team A" vs "Team B" is staged for review on "Field 1"
     And 1 of the 1 round-robin matchups are scheduled
+
+  # TG-3 (DST boundary). A slot whose wall time the season's clock skips is not
+  # guessed at: the page names it and its cause as TIME TBD, and the slots
+  # around it are still scheduled. 2026-03-08 is the spring-forward Sunday in
+  # the seeded season's zone (America/Los_Angeles): 02:00 becomes 03:00.
+  Scenario: A practice slot inside the spring-forward gap is shown as TIME TBD, not scheduled
+    Given these teams and coaches in "U10 Boys":
+      | team  | coach        |
+      | Hawks | Coach Rivera |
+    And a Thursday practice slot at 17:00 with room for one team
+    And a Sunday practice slot at 02:30 on the night the clocks go forward
+    When I run the auto-scheduler on the Practice Scheduling page
+    Then the page shows 1 practice slot as TIME TBD because daylight saving skips its hour
+    And the TIME TBD slot is named as 2026-03-08 at 02:30
+    And the auto-scheduler places 1 teams and leaves 0 unplaced
+    And nothing is placed on the Sunday that has no 02:30

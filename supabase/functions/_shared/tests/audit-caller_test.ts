@@ -19,11 +19,15 @@ import { assert, assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.t
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import {
   AUDIT_ERROR_MAX_CHARS,
+  AUDIT_WRITE_FAILED_MESSAGE,
   auditErrorText,
+  auditWriteFailedResponse,
   createUserClient,
+  isAuditWriteFailure,
   recordAudit,
   recordAuditNow,
 } from '../auth.ts';
+import type { FailureContext } from '../logtail.ts';
 
 const URL_ = 'https://project.example.test';
 const ANON = 'anon-key-not-a-secret';
@@ -71,6 +75,25 @@ function callerRequest(): Request {
   });
 }
 
+const CTX: FailureContext = {
+  functionName: 'auto-scheduler',
+  requestId: 'req-1',
+  organizationId: ORG,
+};
+
+/** Runs `fn` with `console.error` captured: `logFailure` writes through it. */
+async function capturingErrors(fn: () => Promise<void>): Promise<unknown[][]> {
+  const errors: unknown[][] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => void errors.push(args);
+  try {
+    await fn();
+  } finally {
+    console.error = originalError;
+  }
+  return errors;
+}
+
 const PARAMS = {
   organizationId: ORG,
   action: 'scheduler.auto_refused',
@@ -83,9 +106,9 @@ Deno.test('the audit helpers refuse a service-role client at the type level', ()
   // Never called: the bodies exist only for the type check.
   const typeOnly = () => {
     // @ts-expect-error -- a service-role client is not a UserClient.
-    void recordAuditNow(service, PARAMS);
+    void recordAuditNow(service, CTX, PARAMS);
     // @ts-expect-error -- nor for the fire-and-forget form.
-    recordAudit(service, PARAMS);
+    recordAudit(service, CTX, PARAMS);
   };
   assert(typeof typeOnly === 'function');
 });
@@ -96,7 +119,7 @@ Deno.test(
     const seen = await withFetch(
       () => new Response(JSON.stringify('b2222222-2222-2222-2222-222222222222'), { status: 200 }),
       async () => {
-        await recordAuditNow(createUserClient(callerRequest(), URL_, ANON), PARAMS);
+        await recordAuditNow(createUserClient(callerRequest(), URL_, ANON), CTX, PARAMS);
       }
     );
     assertEquals(seen.length, 1, 'exactly one request: the RPC');
@@ -119,26 +142,98 @@ Deno.test(
   }
 );
 
-Deno.test('recordAuditNow never rejects when the write fails', async () => {
-  const errors: unknown[][] = [];
-  const originalError = console.error;
-  console.error = (...args: unknown[]) => void errors.push(args);
-  try {
-    await withFetch(
-      () =>
-        new Response(JSON.stringify({ code: '23502', message: 'null value in column "user_id"' }), {
-          status: 400,
-        }),
-      async () => {
-        await recordAuditNow(createUserClient(callerRequest(), URL_, ANON), PARAMS);
-      }
+Deno.test('the audit helpers refuse a call with no failure context at the type level', () => {
+  const client = createUserClient(callerRequest(), URL_, ANON);
+  // Never called: the bodies exist only for the type check. Without the
+  // context a failed write could not reach BetterStack (plan section 3.3).
+  const typeOnly = () => {
+    // @ts-expect-error -- the failure context is required.
+    void recordAuditNow(client, PARAMS);
+    // @ts-expect-error -- for the fire-and-forget form too.
+    recordAudit(client, PARAMS);
+  };
+  assert(typeof typeOnly === 'function');
+});
+
+Deno.test(
+  'a failed audit write reaches logFailure with the action and the handler context, and never rejects',
+  async () => {
+    const errors = await capturingErrors(async () => {
+      await withFetch(
+        () =>
+          new Response(JSON.stringify({ code: '23503', message: 'audit_log_action_fkey' }), {
+            status: 409,
+          }),
+        async () => {
+          await recordAuditNow(createUserClient(callerRequest(), URL_, ANON), CTX, PARAMS);
+        }
+      );
+    });
+    assertEquals(errors.length, 1, 'the failure is logged once');
+    assertEquals(
+      errors[0][0],
+      '[ERROR] auto-scheduler: Audit write failed: scheduler.auto_refused'
     );
+    const context = errors[0][1] as Record<string, unknown>;
+    assertEquals(context.function_name, 'auto-scheduler');
+    assertEquals(context.request_id, 'req-1');
+    assertEquals(context.organization_id, ORG);
+    assertEquals((context.error as Record<string, unknown>).code, '23503');
+  }
+);
+
+Deno.test('a thrown audit write (network) reaches logFailure too', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (() => Promise.reject(new TypeError('network down'))) as typeof fetch;
+  let errors: unknown[][] = [];
+  try {
+    errors = await capturingErrors(async () => {
+      await recordAuditNow(createUserClient(callerRequest(), URL_, ANON), CTX, PARAMS);
+    });
   } finally {
-    console.error = originalError;
+    globalThis.fetch = original;
   }
   assertEquals(errors.length, 1, 'the failure is logged once');
-  assertEquals(errors[0][0], 'Audit log write failed:');
+  assertEquals(errors[0][0], '[ERROR] auto-scheduler: Audit write failed: scheduler.auto_refused');
 });
+
+Deno.test('a save rolled back for its audit row is told apart by SLA01 alone', () => {
+  assert(isAuditWriteFailure({ code: 'SLA01', message: 'audit write failed, nothing was saved' }));
+  assert(!isAuditWriteFailure({ code: '42501', message: 'caller is not an admin' }));
+  assert(!isAuditWriteFailure({ message: 'SLA01' }), 'the code decides, not the text');
+  assert(!isAuditWriteFailure(null));
+  assert(!isAuditWriteFailure('SLA01'));
+});
+
+Deno.test(
+  'the rolled-back save answers 500 AUDIT_WRITE_FAILED, logged through logFailure',
+  async () => {
+    const ctx: FailureContext = { functionName: 'team-persistence', requestId: 'req-2' };
+    let response: Response | undefined;
+    const errors = await capturingErrors(async () => {
+      response = await auditWriteFailedResponse(ctx, 'Team save', {
+        code: 'SLA01',
+        message: 'audit write failed, nothing was saved: insert violates foreign key',
+      });
+    });
+    assertEquals(response?.status, 500);
+    assertEquals(await response?.json(), {
+      status: 'error',
+      code: 'AUDIT_WRITE_FAILED',
+      message: AUDIT_WRITE_FAILED_MESSAGE,
+    });
+    assert(AUDIT_WRITE_FAILED_MESSAGE.startsWith('Nothing was saved'));
+    assertEquals(errors.length, 1);
+    assertEquals(
+      errors[0][0],
+      '[ERROR] team-persistence: Team save rolled back: its audit row could not be written'
+    );
+    assertEquals(
+      ((errors[0][1] as Record<string, unknown>).error as Record<string, unknown>).code,
+      'SLA01'
+    );
+  }
+);
 
 Deno.test('auditErrorText bounds what a failure writes into the audit log', () => {
   assertEquals(AUDIT_ERROR_MAX_CHARS, 200);

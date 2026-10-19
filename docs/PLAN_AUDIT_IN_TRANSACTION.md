@@ -288,8 +288,16 @@ about 300. One PR, effort M.
 
 ## 9. Rollback
 
-Merge a forward migration that applies the revert script's definitions (CI is
-the only writer), and revert the Edge and client changes in the same PR.
+In two PRs, Edge first (CI applies a migration before it deploys the Edge Functions, so a
+single PR would leave the current Edge calling the restored RPCs as the user with no audit
+write on either side: saves committed unaudited):
+
+1. Revert the Edge and client changes. The old Edge calls the new RPCs with the service role,
+   which they refuse (42501): saves are refused, never unaudited, until step 2.
+2. Merge a forward migration that applies the revert script's definitions (CI is the only
+   writer).
+
+(Found by review on #600; recorded at build time.)
 
 ---
 

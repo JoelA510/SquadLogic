@@ -9,6 +9,7 @@ import {
   type SupabaseClient,
   type User,
 } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
+import { type FailureContext, logFailure } from './logtail.ts';
 
 /**
  * Extract and validate user from the Authorization header.
@@ -217,9 +218,19 @@ export interface AuditParams {
  * handler refusing a request is precisely the case CLAUDE.md's audit
  * immutability rule most wants recorded, so the refusal paths await this.
  *
- * Never rejects: an audit failure must not turn into a 500.
+ * Never rejects: an audit failure must not turn into a 500 (owner decision,
+ * 2026-10-14: these writes follow work that has already happened). A failure
+ * is reported through `logFailure` with the handler's own `failure` context,
+ * so it reaches BetterStack with the function, request and organization, not
+ * only the console (docs/PLAN_AUDIT_IN_TRANSACTION.md section 3.3). The
+ * context is required, so no call site can leave a failure unreported.
  */
-export async function recordAuditNow(userClient: UserClient, params: AuditParams): Promise<void> {
+export async function recordAuditNow(
+  userClient: UserClient,
+  failure: FailureContext,
+  params: AuditParams
+): Promise<void> {
+  const what = `Audit write failed: ${params.action}`;
   try {
     const { error } = await userClient.rpc('record_audit_event', {
       p_organization_id: params.organizationId,
@@ -228,9 +239,9 @@ export async function recordAuditNow(userClient: UserClient, params: AuditParams
       p_resource_id: params.resourceId ?? null,
       p_metadata: params.metadata ?? {},
     });
-    if (error) console.error('Audit log write failed:', error.message);
+    if (error) await logFailure(failure, what, error);
   } catch (err) {
-    console.error('Audit log write failed:', (err as Error).message);
+    await logFailure(failure, what, err);
   }
 }
 
@@ -242,8 +253,51 @@ export async function recordAuditNow(userClient: UserClient, params: AuditParams
  * Returns `void` deliberately and historically. Use {@link recordAuditNow}
  * anywhere the handler is about to return.
  */
-export function recordAudit(userClient: UserClient, params: AuditParams): void {
-  void recordAuditNow(userClient, params);
+export function recordAudit(
+  userClient: UserClient,
+  failure: FailureContext,
+  params: AuditParams
+): void {
+  void recordAuditNow(userClient, failure, params);
+}
+
+/**
+ * The SQLSTATE `persist_team_schedule` and `persist_game_schedule` raise when
+ * their own audit row could not be written (20261018070000). The RPC has
+ * rolled the whole save back by then, so the outcome is known: nothing was
+ * saved. A custom class nothing else raises, so it cannot be mistaken for
+ * another refusal.
+ */
+export const AUDIT_WRITE_FAILED_SQLSTATE = 'SLA01';
+
+/** What the caller is told when a save was rolled back for its audit row. */
+export const AUDIT_WRITE_FAILED_MESSAGE =
+  'Nothing was saved: the audit record could not be written. Try again; if it keeps failing, report it.';
+
+/** Whether an RPC error is a save rolled back because its audit row failed. */
+export function isAuditWriteFailure(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === AUDIT_WRITE_FAILED_SQLSTATE
+  );
+}
+
+/**
+ * The 500 for a save whose audit row could not be written, logged through
+ * `logFailure` first (plan section 3.2). `save` names it in the log: "Team
+ * save", "Game save".
+ */
+export async function auditWriteFailedResponse(
+  failure: FailureContext,
+  save: string,
+  error: unknown
+): Promise<Response> {
+  await logFailure(failure, `${save} rolled back: its audit row could not be written`, error);
+  return jsonResponse(
+    { status: 'error', code: 'AUDIT_WRITE_FAILED', message: AUDIT_WRITE_FAILED_MESSAGE },
+    500
+  );
 }
 
 /**

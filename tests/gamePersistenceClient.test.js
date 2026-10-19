@@ -8,6 +8,7 @@ import {
   PERSISTENCE_TIMEOUT,
   PERSISTENCE_TIMEOUT_MS,
   PERSISTENCE_UNREADABLE_RESPONSE,
+  isUnknownPersistenceOutcome,
 } from '../frontend/src/lib/persistenceRequest.js';
 import { settleWithin } from './helpers/index.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
@@ -146,6 +147,47 @@ test('surfaces game persistence errors from the edge function', async () => {
       }),
     /Access denied/
   );
+});
+
+// docs/PLAN_AUDIT_IN_TRANSACTION.md 3.2: a save rolled back for its audit row
+// answers 500 AUDIT_WRITE_FAILED. The error carries the server's message and
+// code, and is a known outcome: not one a page re-reads for.
+test('a save rolled back for its audit row rejects with AUDIT_WRITE_FAILED, a known outcome', async () => {
+  vi.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: /** @type {any} */ ({ access_token: 'token-123' }) },
+    error: null,
+  });
+  const message =
+    'Nothing was saved: the audit record could not be written. Try again; if it keeps failing, report it.';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({ status: 'error', code: 'AUDIT_WRITE_FAILED', message }),
+    }))
+  );
+
+  const error = await persistGameScheduleReview({
+    assignments: [
+      {
+        division: 'U10',
+        weekIndex: 1,
+        slotId: 'slot-1',
+        start: '2026-04-04T08:00:00Z',
+        end: '2026-04-04T09:00:00Z',
+        homeTeamId: 'team-1',
+        awayTeamId: 'team-2',
+      },
+    ],
+  }).then(
+    () => assert.fail('the save resolved'),
+    (err) => err
+  );
+  assert.equal(error.message, message);
+  assert.equal(error.code, 'AUDIT_WRITE_FAILED');
+  assert.equal(error.status, 500);
+  assert.equal(isUnknownPersistenceOutcome(error), false);
 });
 
 // M2.5 (audit finding 5.2): a stalled Edge Function used to leave Apply

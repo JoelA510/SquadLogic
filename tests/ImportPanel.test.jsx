@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ImportPanel from '../frontend/src/components/ImportPanel.jsx';
+import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
@@ -115,6 +116,39 @@ describe('ImportPanel', () => {
 
     firstBadge.focus();
     await waitFor(() => expect(firstBadge).toHaveFocus());
+  });
+
+  it('sends import telemetry without the uploaded file name', async () => {
+    const getUser = vi.mocked(supabase.auth.getUser);
+    const rpc = vi.mocked(supabase.rpc);
+    getUser.mockResolvedValue(/** @type {any} */ ({ data: { user: { id: 'user-1' } } }));
+    rpc.mockResolvedValue(/** @type {any} */ ({ data: null, error: null }));
+    render(<ImportPanel onImport={vi.fn()} />);
+
+    const file = new File(
+      ['first_name,last_name,date_of_birth\nAlex,Smith,2016-01-01'],
+      'Smith family registrations.csv',
+      { type: 'text/csv' }
+    );
+    fireEvent.change(screen.getByLabelText(/browse files/i), { target: { files: [file] } });
+    await screen.findByText('Smith family registrations.csv');
+
+    fireEvent.click(screen.getByRole('button', { name: /start import/i }));
+
+    await waitFor(() =>
+      expect(rpc).toHaveBeenCalledWith(
+        'log_telemetry_event',
+        expect.objectContaining({ p_event_name: 'import.suggestions_applied' })
+      )
+    );
+    const [, args] = /** @type {[string, any]} */ (
+      rpc.mock.calls.find(([name]) => name === 'log_telemetry_event')
+    );
+    expect(args.p_payload).not.toHaveProperty('file_name');
+    expect(JSON.stringify(args.p_payload)).not.toContain('Smith family');
+    expect(args.p_payload).toEqual(
+      expect.objectContaining({ import_type: expect.any(String), match_count: expect.any(Number) })
+    );
   });
 
   it('uses keyboard-accessible controls for import notifications and file picking', () => {

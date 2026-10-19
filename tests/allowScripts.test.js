@@ -29,14 +29,12 @@ const lock = JSON.parse(readFileSync(path.resolve('package-lock.json'), 'utf8'))
 
 /**
  * Install scripts with no decision yet, each with the question it waits on.
- * Remove an entry once `allowScripts` records the decision.
+ * Remove an entry once `allowScripts` records the decision. None today:
+ * `fsevents` (macOS only, `node-gyp rebuild`; the template denies the same
+ * 2.3.3) was decided by the owner on 2026-10-18 to stay denied.
  */
-const AWAITING_DECISION = {
-  // macOS only (`node-gyp rebuild`), so it never installs on Linux CI or
-  // this sandbox. The template denies the same 2.3.3 (its tarball ships the
-  // built fsevents.node); recording that here is an owner decision (plan M6).
-  fsevents: 'deny as the template does, after a macOS install is checked',
-};
+/** @type {Record<string, string>} */
+const AWAITING_DECISION = {};
 
 /** The package name a lockfile key or an `allowScripts` key names. */
 function packageName(/** @type {string} */ key) {
@@ -76,6 +74,7 @@ describe('allowScripts', () => {
     // Meta: the lockfile scan found the install scripts there are (esbuild
     // and fsevents today), so an empty gap list is not an empty scan.
     expect(scripted).toContain('esbuild');
+    expect(scripted).toContain('fsevents');
     const undecided = scripted.filter(
       (name) => !decided.includes(name) && !Object.hasOwn(AWAITING_DECISION, name)
     );
@@ -84,6 +83,11 @@ describe('allowScripts', () => {
 
   it('allows esbuild by name, reviewed', () => {
     expect(pkg.allowScripts?.esbuild).toBe(true);
+  });
+
+  it("denies fsevents by name, the owner's decision of 2026-10-18", () => {
+    expect(scripted).toContain('fsevents');
+    expect(pkg.allowScripts?.fsevents).toBe(false);
   });
 
   it('names no package without an install script, and none both decided and awaiting', () => {

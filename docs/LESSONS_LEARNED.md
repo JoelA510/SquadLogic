@@ -154,3 +154,23 @@ evolves. If you are about to make a decision one of these covers, read it first.
     progress logs, and completed plans rot into misinformation. Living docs
     describe the present; durable knowledge goes here; everything else is
     recoverable from git history.
+32. **A helper that runs as the wrong principal fails everywhere and says nothing.** Every Edge
+    audit write ran through the service client, where `auth.uid()` is NULL, so
+    `audit_log.user_id NOT NULL` refused each row and the error was only logged (#577). The fixes
+    that held: the audit row is written in the same transaction as the save, so a failed write
+    rolls the save back (#600), and the helper takes a branded user client, so the wrong client is
+    a type error. The same sweep found a game-schedule save any member could call (#600).
+33. **A gate nobody runs or requires is not a gate.** Coverage thresholds were configured and never
+    enforced, pgTAP ran on some PRs, and the staging suite skipped itself (M3.1, M3.2, M4.5). The
+    fix was to run each in the required CI, hold the required list to the workflows' real job names
+    with a test (`tests/rulesetRequiredChecks.test.js`), and delete the one test that could not
+    fail where it mattered.
+34. **A mock that cannot refuse hides the defect.** The mock's non-UUID ids made every game slot
+    unschedulable and the forged E2E steps hid it; the real-backend E2E (#578) found audit writes
+    failing and a stale-event bounce that the mock cannot have. Keep a small
+    real-backend suite beside the mock, and make a step read what the page shows, not the store.
+35. **Pin behaviour before changing it.** The solver's date model (#593) was held to a golden
+    generated on `main` first and merged byte-identical on the undated corpus; the RLS rewrite
+    (#596) was preceded by a persona matrix of 910 cells on today's policies (#595) and a revert
+    that restores the catalogue exactly. A change you cannot diff against a recorded baseline is
+    only reviewed, not proven.

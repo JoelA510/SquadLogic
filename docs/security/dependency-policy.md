@@ -124,8 +124,9 @@ with `npm install-scripts approve <pkg> --no-allow-scripts-pin` or
 `npm install-scripts deny <pkg>`. `esbuild` is approved (plan M6: its
 postinstall links the platform binary the lockfile already installs and runs
 `--version`). `tests/allowScripts.test.js` fails when a package in the
-lockfile has an install script and no decision; `fsevents` (macOS only) is
-listed there as awaiting the owner's.
+lockfile has an install script and no decision. `fsevents` (macOS only,
+`node-gyp rebuild`; its tarball ships the built binary) is denied by name: the
+owner decided on 2026-10-18 that it stays denied.
 
 None of them changes what `npm ci` installs: CI and Vercel install
 `package-lock.json` as it is. To take an urgent fix younger than the wait, once

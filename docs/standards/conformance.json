@@ -1,0 +1,7 @@
+{
+  "visibility": "public",
+  "baseline": {
+    "recorded": "2026-10-19",
+    "standards": ["node.strict-types", "supabase.advisors-in-ci"]
+  }
+}

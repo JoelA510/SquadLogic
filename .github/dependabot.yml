@@ -45,6 +45,14 @@ updates:
       # in-flight PRs don't churn; pinned at 3.7.4 in package.json.
       - dependency-name: prettier
         versions: ['> 3.7.4']
+      # 2026-10-19: eslint-plugin-jsx-a11y 6.10.2 peers on eslint ^3 to ^9, so
+      # eslint 10 cannot resolve and `npm ci` fails (grouped majors PR #584,
+      # Build & Test run 38600851700). @eslint/js moves with eslint. Remove
+      # when a jsx-a11y release supports ESLint 10.
+      - dependency-name: eslint
+        versions: ['>= 10']
+      - dependency-name: '@eslint/js'
+        versions: ['>= 10']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       minor-and-patch:

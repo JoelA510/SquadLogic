@@ -402,3 +402,40 @@ describe('FieldManagementPage: the two new estate depths', () => {
     await waitFor(() => expect(unretireFieldSubunit).toHaveBeenCalledWith('su-2'));
   });
 });
+
+describe('FieldManagementPage field dialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(useFields).mockReturnValue(baseHook);
+  });
+
+  it('opens as a named modal dialog with focus inside, keeps it while typing, and closes on Escape', () => {
+    render(<FieldManagementPage />);
+    const opener = screen.getByRole('button', { name: /add field/i });
+    opener.focus();
+    fireEvent.click(opener);
+
+    // axe cannot see a plain overlay `<div>`; the role, the name and the focus are the dialog.
+    const dialog = screen.getByRole('dialog', { name: 'Add New Field' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toContainElement(/** @type {HTMLElement} */ (document.activeElement));
+
+    // The form state lives in the page, so every keystroke re-renders it with a new `onClose`;
+    // focus must stay in the field being typed in.
+    const name = screen.getByLabelText('Field Name');
+    name.focus();
+    fireEvent.change(name, { target: { value: 'South Field' } });
+    expect(screen.getByLabelText('Field Name')).toHaveValue('South Field');
+    expect(document.activeElement).toBe(name);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('names the dialog "Edit Field" when a field is edited', () => {
+    render(<FieldManagementPage />);
+    fireEvent.click(screen.getByRole('button', { name: /edit north field|edit field/i }));
+    expect(screen.getByRole('dialog', { name: 'Edit Field' })).toBeInTheDocument();
+  });
+});

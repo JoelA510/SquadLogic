@@ -253,6 +253,7 @@ Feature: Every top-level route passes an automated accessibility scan
     And I am on the Practice Scheduling page
     When I override "Team A" onto the second practice slot and apply
     Then a dialog asks to replace the saved practice of "Team A"
+    And the "Override a saved practice" dialog is open with focus inside it
     And axe finds no serious or critical violations on "/schedule/practice" in the "light" theme
     When I switch to the dark theme behind the open dialog
     Then the scan sees "Override a saved practice" on the page

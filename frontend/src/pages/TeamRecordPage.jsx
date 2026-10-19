@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import Button from '../components/ui/Button.jsx';
+import Modal from '../components/ui/Modal.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
 import Badge from '../components/ui/Badge.jsx';
 import Avatar from '../components/ui/Avatar.jsx';
@@ -638,9 +639,8 @@ export function CalendarModal({ team, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-bg-app border border-border-subtle rounded-xl p-6 w-full max-w-md shadow-md">
-        <h3 className="text-xl font-bold text-text-primary mb-4">Calendar Subscription</h3>
+    <Modal open onClose={onClose} title="Calendar Subscription">
+      <>
         <label
           htmlFor="team-calendar-subscription-link"
           className="block text-sm text-text-secondary mb-4"
@@ -691,8 +691,8 @@ export function CalendarModal({ team, onClose }) {
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }
 

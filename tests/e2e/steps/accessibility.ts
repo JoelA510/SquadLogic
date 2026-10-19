@@ -509,6 +509,25 @@ Then('the chart of the custom attribute is drawn instead of the privacy mask', a
 
 // ---- Each route's main dialog, open (#591: "a scan with each route's main dialog open") ----
 
+/**
+ * A dialog is a `role="dialog"` with a name, and focus has moved into it. A plain overlay `<div>`
+ * with a heading passes axe and fails all three, so the steps assert them.
+ */
+async function expectDialogOpen(page: Page, name: string) {
+  const dialogElement = page.getByRole('dialog', { name });
+  await expect(dialogElement).toBeVisible({ timeout: 20_000 });
+  await expect(dialogElement.getByRole('heading', { name }).first()).toBeVisible();
+  await expect
+    .poll(() => dialogElement.evaluate((el) => el.contains(document.activeElement)), {
+      message: `focus is inside the "${name}" dialog`,
+    })
+    .toBe(true);
+}
+
+Then('the {string} dialog is open with focus inside it', async ({ page }, name: string) => {
+  await expectDialogOpen(page, name);
+});
+
 When(
   'I open the {string} dialog with {string}',
   async ({ page }, dialog: string, opener: string) => {
@@ -521,11 +540,7 @@ When(
         .first()
         .click();
     }
-    // Some of these dialogs are the shared Modal and some are the page's own overlay, so the dialog
-    // is told by its heading, which both have.
-    await expect(page.getByRole('heading', { name: dialog }).first()).toBeVisible({
-      timeout: 20_000,
-    });
+    await expectDialogOpen(page, dialog);
   }
 );
 

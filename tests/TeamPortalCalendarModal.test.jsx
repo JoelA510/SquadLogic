@@ -51,6 +51,17 @@ describe('CalendarModal', () => {
     );
   });
 
+  it('opens as a named modal dialog with focus inside, and closes on Escape', () => {
+    const onClose = vi.fn();
+    render(<CalendarModal team={{ id: 'team-1', calendar_token: 'tok' }} onClose={onClose} />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Calendar Subscription' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toContainElement(/** @type {HTMLElement} */ (document.activeElement));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the rotate token RPC result before enabling copy', async () => {
     mocks.rpc.mockResolvedValue({
       data: { status: 'ok', calendar_token: 'secure-calendar-token' },

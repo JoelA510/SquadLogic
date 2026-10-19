@@ -1754,6 +1754,14 @@ smoke deferred to the owner's v1.1.0 release smoke)
       `paletteTextShades.test.js`), and each of the three scenarios that found a violation was
       red with its fix reverted. The masking scenario was red with its seed step removed.
       *Executed.*
+    - Review round (Codex): the dialog step now asserts a named `role="dialog"` and focus inside
+      it, not just a visible heading. "Add New Field" and "Calendar Subscription" were plain
+      `<div>` overlays (no role, no `aria-modal`, no focus move or containment; axe cannot see
+      that) and now use the shared `Modal`. `Modal` keeps `onClose` in a ref, so a parent that
+      re-renders on every keystroke (the field form) no longer pulls focus back to the first
+      control. Not fixed here: the field form's "Sub-fields" and "Status" toggles are
+      `display: none` checkboxes, so a keyboard cannot reach them (WCAG 2.1.1; a scan cannot see
+      it either). *Statically reviewed*; its own item.
     - Still unscanned, with reason (all *statically reviewed*): `PracticeEnactDialog` (opens from
       the practice repair panel, which needs a repair plan) and `RetireEstateNodeDialog` (opens
       from `/fields` on a retirable estate node) each need seeded state of their own;

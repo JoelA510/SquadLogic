@@ -53,7 +53,12 @@ function declaredRoutes(text) {
  */
 function scannedRoutes(text) {
   const rows = [...text.matchAll(/^\s*\|\s*(\/[^\s|]*)\s*\|/gm)].map((m) => m[1]);
-  const named = [...text.matchAll(/violations on "(\/[^"\s]*)" in the/g)].map((m) => m[1]);
+  // A live Gherkin step only: a `#`-commented step, or one in a description, names no scan.
+  const named = [
+    ...text.matchAll(
+      /^[ \t]*(?:Given|When|Then|And|But)[ \t]+axe finds .*violations on "(\/[^"\s]*)" in the/gm
+    ),
+  ].map((m) => m[1]);
   return [...new Set([...rows, ...named])];
 }
 
@@ -117,6 +122,29 @@ describe('accessibility scan coverage', () => {
     // The invite link is scanned by scenarios of its own; without them its route is unscanned.
     const withoutInvite = scanned.filter((path) => !path.startsWith('/invite/'));
     expect(unscannedRoutes(declared, withoutInvite)).toEqual(['/invite/:code']);
+  });
+
+  it('counts a live scan step, and not a commented-out one or prose that quotes it', () => {
+    const live =
+      '    And axe finds no serious or critical violations on "/invite/SPRING2026" in the "light" theme';
+    expect(scannedRoutes(live)).toEqual(['/invite/SPRING2026']);
+    expect(
+      scannedRoutes(
+        `Then axe finds no serious or critical violations on "/login" in the "dark" theme`
+      )
+    ).toEqual(['/login']);
+    // Negative controls: the step is not run when it is commented out.
+    expect(scannedRoutes(`    # ${live.trim()}`)).toEqual([]);
+    expect(
+      scannedRoutes(
+        `#And axe finds no serious or critical violations on "/login" in the "light" theme`
+      )
+    ).toEqual([]);
+    expect(
+      scannedRoutes(
+        `  # Scenario notes: axe finds no serious or critical violations on "/login" in the "light" theme`
+      )
+    ).toEqual([]);
   });
 
   it('catches a route dropped from the scan, and one declared out of the usual order', () => {

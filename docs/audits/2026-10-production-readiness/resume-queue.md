@@ -36,7 +36,7 @@ upgrade (D6 held majors out of the remediation plan), in an order the owner pick
 - `@vitejs/plugin-react` 6;
 - `vitest` 5;
 - `jsdom` 30: done (30.1.3), branch `claude/vibrant-allen-hr7y7s-up-jsdom` (PR number to be filled in by the coordinator);
-- `@sentry/react` 11;
+- `@sentry/react` 11: done (11.8.0), branch `claude/vibrant-allen-hr7y7s-up-sentry` (PR number to be filled in by the coordinator);
 - `lucide-react` 1;
 - `dotenv` 18: done (18.0.8), PR #606;
 - `globals` 17: done (17.13.0), PR #610;

@@ -98,7 +98,7 @@
 | --- | --- | --- |
 | No event appears in Sentry within 5 minutes | DSN typo or bundle cache | Re-run the `curl \| grep` check from step 3 of One-time setup; re-deploy without cache. |
 | Event appears but no React component stack | `Sentry.init({ integrations: [reactRouterV7BrowserTracingIntegration()] })` missing a component | Check `frontend/src/main.jsx` — the `Sentry.init` call must have the React integration. |
-| Event appears with wrong or no release tag | Stale bundle, or the `define` in `vite.config.js` was removed | Re-deploy without cache; `tests/sentryConfig.test.js` pins the `define`, the `release` option, and `sendDefaultPii: false`. |
+| Event appears with wrong or no release tag | Stale bundle, or the `define` in `vite.config.js` was removed | Re-deploy without cache; `tests/sentryConfig.test.js` pins the `define`, the `release` option, and the explicit `dataCollection` baseline. |
 | CSP console errors (`Refused to connect to ...`) | CSP `connect-src` missing the Sentry ingest host | Add it to `connect-src` in `vercel.json` (see `docs/security/csp.md`). |
 
 ## De-commissioning

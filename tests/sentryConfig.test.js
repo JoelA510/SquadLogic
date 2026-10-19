@@ -91,9 +91,57 @@ describe('Sentry Session Replay', () => {
 });
 
 describe('Sentry privacy and sampling', () => {
-  it('states sendDefaultPii: false explicitly', () => {
-    expect(Object.hasOwn(options(), 'sendDefaultPii')).toBe(true);
-    expect(options().sendDefaultPii).toBe(false);
+  // SDK v11 removed `sendDefaultPii`; an unset `dataCollection` collects user
+  // info, cookies and bodies by default, so the v10 baseline is stated.
+  it('states dataCollection explicitly, with every v10-restrictive category off', () => {
+    expect(Object.hasOwn(options(), 'sendDefaultPii')).toBe(false);
+    expect(options().dataCollection).toMatchObject({
+      userInfo: false,
+      cookies: false,
+      httpBodies: [],
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    });
+  });
+
+  it('the SDK resolves that baseline, not its permissive v11 defaults', async () => {
+    // The SDK's own resolver, so a renamed or ignored key shows here: an
+    // object that only looks right would resolve to the defaults.
+    const { BrowserClient, defaultStackParser, makeFetchTransport } = await import('@sentry/react');
+    const client = new BrowserClient({
+      ...options(),
+      integrations: [],
+      stackParser: defaultStackParser,
+      transport: makeFetchTransport,
+    });
+    expect(client.getDataCollectionOptions()).toMatchObject({
+      userInfo: false,
+      cookies: false,
+      httpBodies: [],
+      databaseQueryData: false,
+      queues: false,
+      genAI: { inputs: false, outputs: false },
+      urlQueryParams: true,
+    });
+    // Without its own deny list the SDK default is `true`: all headers.
+    const httpHeaders = /** @type {{ request: unknown, response: unknown }} */ (
+      client.getDataCollectionOptions().httpHeaders
+    );
+    for (const side of [httpHeaders.request, httpHeaders.response]) {
+      expect(side).toEqual({
+        deny: expect.arrayContaining(['forwarded', '-ip', 'remote-', 'via']),
+      });
+    }
+  });
+
+  it('hands each init its own dataCollection objects', () => {
+    const a = /** @type {any} */ (options().dataCollection);
+    const b = /** @type {any} */ (options().dataCollection);
+    expect(a).not.toBe(b);
+    expect(a.httpHeaders.request).not.toBe(a.httpHeaders.response);
+    expect(a.httpHeaders.request.deny).not.toBe(b.httpHeaders.request.deny);
   });
 
   it('keeps the existing sample rates and environment', () => {

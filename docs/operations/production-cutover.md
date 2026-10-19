@@ -20,7 +20,7 @@
 | System              | Expected state                                                                                 | How to verify                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | Vercel deployment   | Latest `main` production deployment is `READY`                                                  | Vercel dashboard or connector deployment list       |
-| Vercel Node runtime | Project reports Node `24.x`; CI runs the `.nvmrc` pin (24); `engines` is `^24.0.0`             | Vercel project settings, `.nvmrc`, `package.json`   |
+| Vercel Node runtime | Project reports Node `24.x`; CI runs the `.nvmrc` pin (24); `engines` is `^24.15.0`             | Vercel project settings, `.nvmrc`, `package.json`   |
 | Vercel env vars     | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` set, `VITE_USE_MOCK_SUPABASE` absent            | Vercel dashboard → Settings → Environment Variables |
 | Supabase project    | `ACTIVE_HEALTHY`                                                                                | Supabase dashboard or MCP `get_project`             |
 | Database migrations | Production has all repo-required migrations applied; local repo currently has 49 migration files | Supabase dashboard → Database → Migrations          |

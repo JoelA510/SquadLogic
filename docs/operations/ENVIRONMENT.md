@@ -17,7 +17,7 @@ These variables are set in **Vercel → Project Settings → Environment Variabl
 ### Node runtime
 
 One Node version, pinned once: `.nvmrc` holds `24`, and `package.json`
-`engines.node` is `^24.0.0`. CI reads `.nvmrc` in every `setup-node` step
+`engines.node` is `^24.15.0` (the floor jsdom 30 needs: `^22.22.2 || ^24.15.0 || >=26`). CI reads `.nvmrc` in every `setup-node` step
 (`ci.yml`, `pgtap.yml`). The Vercel project builds on Node `24.x` (read from
 the Vercel API, `nodeVersion: "24.x"`, 2026-10-13). Vercel also reads
 `engines.node`: when `package.json` names a major, it overrides the dashboard's

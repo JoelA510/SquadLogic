@@ -10,7 +10,7 @@
  * which names every package with an install script for every platform
  * (`hasInstallScript`), not only the ones this machine installed:
  *
- * - every such package has a decision, or is listed below as awaiting one;
+ * - every such package has a decision;
  * - every decision names such a package (no stale entries, as
  *   `npm install-scripts prune` would remove).
  *
@@ -26,15 +26,6 @@ import { describe, expect, it } from 'vitest';
 
 const pkg = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8'));
 const lock = JSON.parse(readFileSync(path.resolve('package-lock.json'), 'utf8'));
-
-/**
- * Install scripts with no decision yet, each with the question it waits on.
- * Remove an entry once `allowScripts` records the decision. None today:
- * `fsevents` (macOS only, `node-gyp rebuild`; the template denies the same
- * 2.3.3) was decided by the owner on 2026-10-18 to stay denied.
- */
-/** @type {Record<string, string>} */
-const AWAITING_DECISION = {};
 
 /** The package name a lockfile key or an `allowScripts` key names. */
 function packageName(/** @type {string} */ key) {
@@ -74,10 +65,7 @@ describe('allowScripts', () => {
     // Meta: the lockfile scan found the install scripts there are (esbuild
     // and fsevents today), so an empty gap list is not an empty scan.
     expect(scripted).toContain('esbuild');
-    expect(scripted).toContain('fsevents');
-    const undecided = scripted.filter(
-      (name) => !decided.includes(name) && !Object.hasOwn(AWAITING_DECISION, name)
-    );
+    const undecided = scripted.filter((name) => !decided.includes(name));
     expect(undecided).toEqual([]);
   });
 
@@ -86,13 +74,10 @@ describe('allowScripts', () => {
   });
 
   it("denies fsevents by name, the owner's decision of 2026-10-18", () => {
-    expect(scripted).toContain('fsevents');
     expect(pkg.allowScripts?.fsevents).toBe(false);
   });
 
-  it('names no package without an install script, and none both decided and awaiting', () => {
+  it('names no package without an install script', () => {
     expect(decided.filter((name) => !scripted.includes(name))).toEqual([]);
-    expect(Object.keys(AWAITING_DECISION).filter((name) => !scripted.includes(name))).toEqual([]);
-    expect(decided.filter((name) => Object.hasOwn(AWAITING_DECISION, name))).toEqual([]);
   });
 });

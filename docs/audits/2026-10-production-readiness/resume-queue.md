@@ -13,7 +13,8 @@ At most two agent PRs in flight; read [`agent-brief.md`](./agent-brief.md) first
 
 Done since the pause, so nothing here repeats it: Waves 0-4 and the M6 polish (#587-#592, #588),
 M4.7's exceptions (#590), M4.8 (#593), the #576 follow-up (#594), the RLS persona matrix and
-rewrite (#595, #596), the file-name audit fix (#597, with #599 for telemetry), the schema drift
+rewrite (#595, #596), the file-name audit fix (#597; the telemetry half, #599, was open when this was written, see
+below), the schema drift
 fix (#598), and audit-in-transaction (#600).
 
 ## Next: B1, the accessibility follow-up (#591's discovered entry)
@@ -33,6 +34,12 @@ fix (#598), and audit-in-transaction (#600).
 - Fold in while there: `text-status-warning` (the bare `--warning`) is still used as text in 11
   places at 3.84:1 on the light surface (the `-text` tokens are the fix).
 - This is the next item. It is not built yet.
+
+## Open PR
+
+- #599 (import telemetry stops sending the file name; the owner chose this 2026-10-18) was open
+  when this was written. Merge it on green; until then the 5 existing production rows and any new
+  import's telemetry carry the name.
 
 ## Then: the planned major upgrades, one PR each
 
@@ -110,8 +117,8 @@ starts as a plan.
   - open the scheduled-failure issue from its own job;
   - per-event concurrency.
 - The template's 24,000-byte `AGENTS.md` limit exists for Antigravity. This project doesn't use
-  Antigravity, so the limit should be configurable. It is not enforced here (`AGENTS.md`
-  header).
+  Antigravity, so the limit should be configurable. `AGENTS.md` is sized for Claude Code and
+  Codex (its header).
 - `supabase.advisors-in-ci` fails a gate that does fail on unwaived findings: it reads `--fail-on
   none` as "never fails", though `scripts/ci/supabaseAdvisors.mjs` blocks on the JSON. Baselined in
   `docs/standards/conformance.json` until the probe can read a wrapper.

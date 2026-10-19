@@ -159,12 +159,13 @@ evolves. If you are about to make a decision one of these covers, read it first.
     `audit_log.user_id NOT NULL` refused each row and the error was only logged (#577). The fixes
     that held: the audit row is written in the same transaction as the save, so a failed write
     rolls the save back (#600), and the helper takes a branded user client, so the wrong client is
-    a type error. The same sweep found a game-schedule save any member could call (#600).
+    a type error. The same sweep found a game-schedule save any member could call (#600, migration
+    `20261018070000`).
 33. **A gate nobody runs or requires is not a gate.** Coverage thresholds were configured and never
     enforced, pgTAP ran on some PRs, and the staging suite skipped itself (M3.1, M3.2, M4.5). The
     fix was to run each in the required CI, hold the required list to the workflows' real job names
     with a test (`tests/rulesetRequiredChecks.test.js`), and delete the one test that could not
-    fail where it mattered.
+    fail where it mattered (`tests/integration/staging.test.js`).
 34. **A mock that cannot refuse hides the defect.** The mock's non-UUID ids made every game slot
     unschedulable and the forged E2E steps hid it; the real-backend E2E (#578) found audit writes
     failing and a stale-event bounce that the mock cannot have. Keep a small

@@ -2,7 +2,8 @@
 
 Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`audit.md`](./audit.md) (commit `565e980`)
 
-**Status:** DONE 2026-10-19, with the deferrals and open owner questions in "Close-out" below.
+**Status:** DONE 2026-10-19, with the deferrals (M1.5's two acceptance legs among them) and the open
+owner questions in "Close-out" below.
 Approved by the owner on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1
 moved into Milestone 1 (PR 1-B, as M1.7). Paused by the owner on 2026-10-14 after Milestone 4;
 resumed 2026-10-17. On 2026-10-18 the owner approved the five plans that followed (every
@@ -28,8 +29,9 @@ recommendation as written). Merged:
   audit in their transaction; the game save needs an admin). #599 (import telemetry stops
   sending the file name) was open when this was written.
 
-Open: nothing in the plan. What was deferred, and to whom, is in "Close-out"; the work that
-remains, in order, is [`resume-queue.md`](./resume-queue.md). Every agent reads
+Open in the plan: nothing that is not a stated deferral. #599 (import telemetry) was open when
+this was written. The acceptance legs and deferrals, and to whom, are in "Close-out"; the work
+that remains, in order, is [`resume-queue.md`](./resume-queue.md). Every agent reads
 [`agent-brief.md`](./agent-brief.md).
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
@@ -1048,7 +1050,7 @@ v1.1.0 release smoke)
 ## Milestone 5 — Agent rules, docs and operability
 
 > **M5.1. One AGENTS.md for every agent, without contradictions** (audit finding 12.1, high)
-> - **Status (2026-10-13): merged as #557 (`b80e077`).** Root `AGENTS.md` (23,589 bytes) holds every rule, its
+> - **Status (2026-10-13): merged as #557 (`b80e077`).** Root `AGENTS.md` (23,589 bytes when merged; since resized, #586) holds every rule, its
 >   sections numbered as CLAUDE.md's were; `CLAUDE.md` is `@AGENTS.md` plus Claude Code's notes.
 >   The contradictions and how each was resolved are listed in the PR. `project-hardening/` is
 >   deleted after its durable rules were merged (one task per PR, merge only on the owner's say,
@@ -2160,7 +2162,9 @@ file by hand so a rerun needs no flag). It records two failures:
 - `supabase.advisors-in-ci`: the scorer reads `--fail-on none` in `pgtap.yml` as "reports and
   never fails". The step does fail: `scripts/ci/supabaseAdvisors.mjs` reads the JSON against
   `docs/security/supabase-advisor-waivers.json` and blocks an unwaived WARN or ERROR (M3.3, with
-  planted defects shown red). The probe cannot see that. Recorded as a baseline entry, not a
+  planted defects shown red; `tests/supabaseAdvisors.test.js` holds the gate). The probe cannot
+  see that. The baseline entry would also mask a future weakening of that gate, so that test, not
+  the entry, is what guards it. Recorded as a baseline entry, not a
   waiver, and for the template (an issue or pull request there, per AGENTS.md).
 
 Rerun with the file: exit 0, `2 baseline, 25 pass, 2 n/a, 8 audit` (*executed*). The 8 `audit`
@@ -2201,10 +2205,11 @@ blocks the end state the plan measures against.
 The audit's own areas and scale (the severity of the worst finding in the area; "none open" when
 every finding in it is closed or deferred as stated). *Before* is the audit's summary table
 (2026-10-12, `565e980`). *After* is what the merged PRs close; it was not re-audited area by
-area, and the "Not measured" list below says what no one re-ran. CI evidence is each PR's own
+area, so read "None open" as "no finding the audit raised is still open"; the "Not measured" list
+below says what no one re-ran. CI evidence is each PR's own
 required checks (the live ruleset requires six; the audit's baseline had none required).
 
-| # | Area | Before | After | Evidence |
+| # | Area | Before | After (the audit's findings still open; residuals named in the row) | Evidence |
 | --- | --- | --- | --- | --- |
 | 1 | Architecture & boundaries | Medium (1.1, 1.2) | None open | 1.1: parity tests #551, widened by #560, #590, #593, #594; the two engines stay by D4. 1.2: knip in CI, #557. |
 | 2 | Type safety | High (2.1) | **High (2.1), deferred by D2** | 2.1 is baselined, not fixed (`conformance.json`). 2.2 typed env module #558; 2.3 client-side payload validation #576. |

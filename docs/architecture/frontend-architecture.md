@@ -24,10 +24,13 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/schedule/practice`    | `PracticeSchedulingPage`   | Practice slot assignment with lock/unlock toggles               |
 | `/schedule/game`        | `GameSchedulingPage`       | Interactive game schedule grid with drag-and-drop               |
 | `/settings`             | `SettingsPage`             | League config, theme branding, season management                |
-| `/compliance`           | `AdminComplianceDashboard` | Registration forms, waiver tracking                             |
-| `/reporting`            | `AdminReportingDashboard`  | Game metrics, standings, charts                                 |
+| `/admin/compliance`     | `AdminComplianceDashboard` | Waiver and medical-clearance tracking (admin)                   |
+| `/admin/forms`          | `RegistrationForms`        | Registration form management (admin)                            |
+| `/admin/audit-logs`     | `AuditLogPage`             | Audit Explorer (global-settings permission)                     |
+| `/admin/analytics`      | `AnalyticalDashboard`      | Analytical Insights: fairness trend, conflict frequency (admin) |
+| `/admin/reports`        | `EnterpriseDashboard`      | Org readiness and distribution analytics (admin)                |
 | `/standings`            | `LeagueStandings`          | Score entry, standings tables, tie-breaker logic                |
-| `/registration/:formId` | `RegistrationFlow`         | Public registration form flow                                   |
+| `/register/:formId`     | `RegistrationFlow`         | Registration form flow (signed-in, inside the dashboard layout) |
 | `/team/:teamId`         | `TeamRecordPage`           | Team record (tabs: schedule+RSVP+chat, roster, staff, balance)  |
 | `/players`              | `PlayersPage`              | Virtualized editable players grid (audited RPC mutations)       |
 | `/players/:playerId`    | `PlayerRecordPage`         | Player record with inline editing                               |
@@ -39,6 +42,17 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/exports`              | `ExportsPage`              | Output generation (CSVs, emails)                                |
 | `/admin/members`        | `MembersPage`              | Invites & membership                                            |
 | `/schedule/heat`        | `HeatForecastPage`         | Field WBGT forecast (admin, `heat_forecast` feature; NWS API)   |
+| `/coaches`              | `CoachesPage`              | Coach roster, status and team assignment (admin)                |
+| `/coaches/practice-preferences` | `CoachPreferencesPage` | Coach practice-preference requests; admin reviews them     |
+| `/schedule/practice-lighting`   | `PracticeLightingPage` | Portable-lighting requests for practice slots; admin decides |
+| `/setup/features`       | `FeaturesSetupPage`        | "Choose your tools": feature flags, outside the dashboard chrome |
+| `/account`              | `AccountSettingsPage`      | The signed-in user's account settings                           |
+| `/invite/:code`         | `InvitePage`               | Invite redemption; reachable with or without a session or organization (signed out, the page shows an inline login) |
+| `/auth/reset-password`  | `ResetPassword`            | Password reset; reachable without a session, outside the dashboard layout |
+| `/organizations/new`    | `OrganizationCreation`     | Create an organization; signed-in, outside the dashboard layout. A signed-in user with no organization is sent here from `/` |
+
+Every other path redirects to `/` (`path="*"`). Signed out, any route but `/invite/:code` and
+`/auth/reset-password` renders `Login` (`AppContent` in `App.jsx`).
 
 ## State Management
 

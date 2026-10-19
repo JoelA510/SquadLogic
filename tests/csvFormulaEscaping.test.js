@@ -38,7 +38,19 @@ test('legitimate negative and signed numbers are not corrupted', () => {
   assert.equal(escapeCsvCell('-0.25'), '-0.25');
   assert.equal(escapeCsvCell('+15551234567'), '+15551234567');
   // Not a plain number: an operator, a second sign, a unit or a bare sign.
-  for (const text of ['-5+3', '--5', '-5 ', '- 5', '-', '+', '-1e3', '-5%', '+1 (555) 123']) {
+  for (const text of [
+    '-5+3',
+    '--5',
+    '-5 ',
+    '- 5',
+    '-',
+    '+',
+    '-1e3',
+    '-5%',
+    '+1 (555) 123',
+    '\t-5',
+    '\r+5',
+  ]) {
     assert.equal(neutraliseFormula(text), `'${text}`, text);
   }
 });

@@ -33,8 +33,11 @@
  * where data meets a spreadsheet, so the rule lives there.
  */
 
-/** A cell that is only a signed decimal: a number to a spreadsheet, never a formula. */
-const PLAIN_SIGNED_NUMBER = /^[+-]?\d+(\.\d+)?$/;
+/**
+ * A cell that is only a signed decimal, after optional spaces (not tabs or CRs,
+ * which always neutralise): a number to a spreadsheet, never a formula.
+ */
+const PLAIN_SIGNED_NUMBER = /^ *[+-]?\d+(\.\d+)?$/;
 
 /**
  * A cell a spreadsheet may take as a formula: `=`, `+`, `-` or `@` first (after
@@ -49,7 +52,7 @@ const FORMULA_LEAD = /^( *[=+\-@]|[\t\r])/;
  * @returns {string}
  */
 export function neutraliseFormula(text) {
-  if (!FORMULA_LEAD.test(text) || PLAIN_SIGNED_NUMBER.test(text.trimStart())) {
+  if (!FORMULA_LEAD.test(text) || PLAIN_SIGNED_NUMBER.test(text)) {
     return text;
   }
   return `'${text}`;

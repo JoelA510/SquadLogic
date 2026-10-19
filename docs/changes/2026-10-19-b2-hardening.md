@@ -16,12 +16,12 @@ registration and import put there.
 over `packages/`, `frontend/src/`, `supabase/` and `scripts/`; Edge Functions write none, and
 `calendar-feed` writes ICS):
 
-| Writer | Output | Decision |
-| --- | --- | --- |
-| `outputGeneration.formatCsv` (core) | master and per-team schedule exports, downloaded and uploaded to the `exports` bucket; also the roster export in `AdminReportingDashboard.jsx` | **escape** |
-| `frontend/src/utils/csvTemplates.js` `escapeCsvCell` | import template download (constant example rows) | **escape**, by adopting the shared helper (one rule, one copy) |
-| `ColumnMapper.serializeCanonicalCsv` | re-packages an upload for our own import parser | **leave**: not a file anyone opens; a prefix would corrupt names and `+1...` phone numbers on import. The export is where data meets a spreadsheet, and it escapes there |
-| `fieldAdmin/serialise.js` `toCsv` / `quoteCell` | lossless round-trip of the field registry; only tests call it | **leave**: its reader would have to strip a prefix. Revisit if a download is ever wired to it |
+| Writer                                               | Output                                                                                                                                         | Decision                                                                                                                                                                 |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `outputGeneration.formatCsv` (core)                  | master and per-team schedule exports, downloaded and uploaded to the `exports` bucket; also the roster export in `AdminReportingDashboard.jsx` | **escape**                                                                                                                                                               |
+| `frontend/src/utils/csvTemplates.js` `escapeCsvCell` | import template download (constant example rows)                                                                                               | **escape**, by adopting the shared helper (one rule, one copy)                                                                                                           |
+| `ColumnMapper.serializeCanonicalCsv`                 | re-packages an upload for our own import parser                                                                                                | **leave**: not a file anyone opens; a prefix would corrupt names and `+1...` phone numbers on import. The export is where data meets a spreadsheet, and it escapes there |
+| `fieldAdmin/serialise.js` `toCsv` / `quoteCell`      | lossless round-trip of the field registry; only tests call it                                                                                  | **leave**: its reader would have to strip a prefix. Revisit if a download is ever wired to it                                                                            |
 
 **Options.**
 
@@ -41,7 +41,8 @@ is no per-column switch to get wrong; the rule is on the value. The helper is `e
 RFC 4180 quoting unchanged) so every caller keeps working.
 
 **Risks.** A cell now shows a leading `'` in the file (Excel shows it literally when a CSV is
-opened; it is a visible, honest marker). A coach email beginning `+` or `-` (rare) is prefixed.
+opened; it is a visible, honest marker). A coach email beginning `+` or `-` (rare), or a free-text cell such as `+1 (555) 123`, is prefixed;
+other CSV readers keep the apostrophe as data (the exports carry no phone column today).
 Anything that parses our exports back would see the prefix: nothing does (searched).
 
 ## DS-5: a throttle on `submit_registration`
@@ -84,4 +85,5 @@ test ties the mock's observed limit to the migration's.
   paths (closed form refused 22023, grants, posture).
 - `registrations` is empty in production (read 2026-10-19), so the index builds instantly and no
   existing row changes meaning.
+- A registration deleted inside the window lowers the count; only an admin or a cascade deletes one.
 - Rollback: `docs/sql/20261019010000_revert.sql` restores the body and drops the index.

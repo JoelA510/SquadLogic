@@ -52,8 +52,8 @@ function CtxSwitcher({ label, icon: Icon, value, items }) {
               minWidth: 0,
             }}
           >
-            <span className="ctx-label">{label}</span>
-            <span className="ctx-val">{value}</span>
+            {/* The space keeps "<label> <value>" a phrase of the aria-label (WCAG 2.5.3). */}
+            <span className="ctx-label">{label}</span> <span className="ctx-val">{value}</span>
           </span>
           <ChevronDown
             size={15}
@@ -308,7 +308,7 @@ export default function TopBar({ onToggleNav = undefined }) {
             type="button"
             className="avatar"
             onClick={toggle}
-            aria-label={`Account menu for ${displayName}`}
+            aria-label={`Account menu for ${displayName}, ${initials}`}
             style={{ marginLeft: 2, border: 'none', cursor: 'pointer' }}
             {...triggerProps}
           >

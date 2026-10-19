@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TopBar from '../frontend/src/components/chrome/TopBar.jsx';
 import SideNav from '../frontend/src/components/chrome/SideNav.jsx';
 import PageHeader from '../frontend/src/components/chrome/PageHeader.jsx';
+import { expectVisibleTextInName } from './helpers/index.js';
 
 const mocks = vi.hoisted(() => ({
   signOut: vi.fn(),
@@ -121,6 +122,19 @@ describe('TopBar', () => {
     fireEvent.click(screen.getByRole('button', { name: /Active Season/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Fall 2026/ }));
     expect(mocks.switchSeason).toHaveBeenCalledWith({ id: 'season-2', name: 'Fall 2026' });
+  });
+
+  it("carries each trigger's visible text in its accessible name (WCAG 2.5.3)", () => {
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    expectVisibleTextInName(screen.getByRole('button', { name: /^Active Organization: / }));
+    expectVisibleTextInName(screen.getByRole('button', { name: 'Active Season: Spring 2026' }));
+    expectVisibleTextInName(
+      screen.getByRole('button', { name: /^Account menu for Avery Admin, / })
+    );
   });
 
   it('toggles the theme and exposes an account menu with sign out', () => {

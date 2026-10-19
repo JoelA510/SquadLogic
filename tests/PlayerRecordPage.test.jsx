@@ -93,7 +93,7 @@ describe('PlayerRecordPage', () => {
   it('saves an inline edit through admin_update_player', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Alex Smith' });
-    fireEvent.click(screen.getByRole('button', { name: 'Edit First name' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Edit First name:/ }));
     const input = screen.getByRole('textbox', { name: 'First name' });
     fireEvent.change(input, { target: { value: 'Alexander' } });
     fireEvent.keyDown(input, { key: 'Enter' });

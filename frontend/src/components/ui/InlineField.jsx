@@ -82,8 +82,10 @@ export default function InlineField({
           className="rf-value"
           onClick={start}
           style={!editable ? { cursor: 'default' } : undefined}
-          aria-label={editable ? `Edit ${label}` : label}
         >
+          {/* The name comes from the content so it contains the visible value (WCAG 2.5.3);
+              the space is a text node because a trailing one inside .sr-only can collapse. */}
+          <span className="sr-only">{editable ? `Edit ${label}:` : `${label}:`}</span>{' '}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {render ? (
               render(value)

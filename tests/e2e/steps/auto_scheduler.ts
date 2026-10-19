@@ -217,7 +217,7 @@ Then('the progress indicator should show a best score percentage', async ({ page
 });
 
 Then('the Auto-Generate button should be disabled during optimization', async ({ page }) => {
-  // Button aria-label is "Optimization in progress" when running
+  // Button aria-label is "Optimizing: optimization in progress" when running
   const button = page.getByRole('button', { name: /Optimization in progress/i });
   await expect(button).toBeDisabled();
 });

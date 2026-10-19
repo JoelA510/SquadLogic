@@ -85,14 +85,17 @@ const handler = withFailureLogging('calendar-feed', async (req, logCtx) => {
     const { data: team, error: teamErr } = await supabase
       .from('teams')
       .select(
-        'id, name, organization_id, division_id, calendar_token_expires_at, organizations(name)'
+        'id, name, organization_id, division_id, calendar_token_expires_at, organizations(name), division:divisions(season_settings_id)'
       )
       .eq('calendar_token', token)
       .single()
       // Untyped client: the SDK cannot see that teams.organization_id is a
       // to-one FK, so it types the embed as an array. PostgREST returns one
       // object (or null). Type-only; `overrideTypes` returns `this`.
-      .overrideTypes<{ organizations: { name: string | null } | null }>();
+      .overrideTypes<{
+        organizations: { name: string | null } | null;
+        division: { season_settings_id: string | null } | null;
+      }>();
 
     if (teamErr || !team) {
       return new Response('Invalid calendar token or team not found.', { status: 404 });
@@ -121,7 +124,13 @@ const handler = withFailureLogging('calendar-feed', async (req, logCtx) => {
     // overflows TypeScript's instantiation depth (TS2589, #483); runtime shape is unchanged.
     const { ics: icsString } = await composeTeamFeed({
       client: supabase as unknown as TeamFeedClient,
-      team: { id: team.id, name: team.name, organization_id: team.organization_id },
+      team: {
+        id: team.id,
+        name: team.name,
+        organization_id: team.organization_id,
+        // The team's own season clock, as the portal reads it, not the newest season's.
+        season_settings_id: team.division?.season_settings_id ?? null,
+      },
       orgName,
     });
 

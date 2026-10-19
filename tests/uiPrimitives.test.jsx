@@ -133,6 +133,24 @@ describe('Modal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps focus where it is when the parent re-renders with a new onClose', () => {
+    const { rerender } = render(
+      <Modal open onClose={() => {}} title="Edit">
+        <input aria-label="First" />
+        <input aria-label="Second" />
+      </Modal>
+    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close dialog' }));
+    screen.getByLabelText('Second').focus();
+    rerender(
+      <Modal open onClose={() => {}} title="Edit">
+        <input aria-label="First" />
+        <input aria-label="Second" />
+      </Modal>
+    );
+    expect(document.activeElement).toBe(screen.getByLabelText('Second'));
+  });
+
   it('renders nothing when closed', () => {
     render(
       <Modal open={false} onClose={() => {}} title="Hidden">

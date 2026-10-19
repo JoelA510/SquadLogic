@@ -343,7 +343,7 @@ export default function AdminComplianceDashboard() {
                           <CheckCircle2 size={12} /> Confirmed
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-status-warning-bg text-status-warning border border-status-warning/20">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-status-warning-bg text-status-warning-text border border-status-warning/20">
                           <AlertCircle size={12} /> Pending
                         </span>
                       )}

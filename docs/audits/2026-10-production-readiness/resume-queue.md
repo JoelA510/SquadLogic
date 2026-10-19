@@ -11,30 +11,19 @@ Tags:
 
 At most two agent PRs in flight; read [`agent-brief.md`](./agent-brief.md) first.
 
-Done since the pause, so nothing here repeats it: Waves 0-4 and the M6 polish (#587-#592, #588),
+Done since the pause, so nothing here repeats it: the accessibility follow-up (B1, below), Waves 0-4 and the M6 polish (#587-#592, #588),
 M4.7's exceptions (#590), M4.8 (#593), the #576 follow-up (#594), the RLS persona matrix and
 rewrite (#595, #596), the file-name audit fix (#597) and its telemetry half (#599), the schema drift
 fix (#598), and audit-in-transaction (#600).
 
-## Next: B1, the accessibility follow-up (#591's discovered entry)
+## Done: B1, the accessibility follow-up (#591's discovered entry)
 
-- **ready:** one follow-up PR that widens the axe scan to what it still does not see, from the
-  plan's Wave 4 entry (2026-10-17, "The scan sees only what the mock seed renders"):
-  - `/exports` with a published baseline;
-  - `/coaches/practice-preferences` with a pending request;
-  - `/fields` with seasonal availability;
-  - `/admin/reports` past its 3-player masking threshold;
-  - `/invite/:code`;
-  - an "open each route's primary dialog" scan, for every overlay that opens on a click
-    (dialogs, menus, drawers).
-  - Each scenario seeds its content on the page, runs both themes, and is shown failing on a
-    planted violation. `tests/accessibilityRoutes.test.js` lists the routes left out and why;
-    shrink that list.
-- Fold in while there: `text-status-warning` (the bare `--warning`) is still used as text in 11
-  places at 3.84:1 on the light surface (the `-text` tokens are the fix).
-- This is the next item. It is not built yet.
+The axe scan now covers `/exports` with a baseline, `/coaches/practice-preferences` with a pending
+request, `/fields` with seasonal availability, `/admin/reports` past its masking threshold,
+`/invite/:code`, and seven routes' main dialogs open; bare `text-status-warning` as text is gone
+and refused. What stays unscanned, and why, is in the plan's #591 entry ("Done 2026-10-19").
 
-## Then: the planned major upgrades, one PR each
+## Next: the planned major upgrades, one PR each
 
 Dependabot's grouped majors PR #584 was closed (2026-10-19): `eslint@10` cannot resolve against
 `eslint-plugin-jsx-a11y@6.10.2`'s peer range (`eslint ^3` to `^9`; Build & Test run 38600851700).

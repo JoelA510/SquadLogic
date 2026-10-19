@@ -694,8 +694,11 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       p_metrics: metrics,
     });
 
+    // A run whose record did not save fails, as fairness-scoring's does: the catch below logs it
+    // with the request id and audits `scheduler.auto_failed`, rather than auditing a completed run
+    // whose `resourceId` names no row.
     if (persistError) {
-      console.error('Persistence failed:', persistError);
+      throw new Error(`Persistence failed: ${persistError.message}`);
     }
 
     // 11. Audit: scheduler completed

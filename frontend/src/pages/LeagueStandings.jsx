@@ -205,7 +205,9 @@ export default function LeagueStandings() {
                         <td className="px-4 py-4 text-center">{team.games_played}</td>
                         <td className="px-4 py-4 text-center text-status-success">{team.wins}</td>
                         <td className="px-4 py-4 text-center text-status-error">{team.losses}</td>
-                        <td className="px-4 py-4 text-center text-status-warning">{team.draws}</td>
+                        <td className="px-4 py-4 text-center text-status-warning-text">
+                          {team.draws}
+                        </td>
                         <td className="px-4 py-4 text-center">{team.goals_for}</td>
                         <td className="px-4 py-4 text-center">{team.goals_against}</td>
                         <td className="px-4 py-4 text-center font-medium">

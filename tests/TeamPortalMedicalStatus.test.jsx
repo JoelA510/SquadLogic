@@ -87,7 +87,7 @@ describe('TeamRecordPage medical clearance', () => {
     expect(screen.getByText('Blair Bennett')).toBeInTheDocument();
     expect(screen.getByText('Casey Chen')).toBeInTheDocument();
     expect(screen.getByText('Medical Clearance: Yes')).toHaveClass('text-status-success');
-    expect(screen.getByText('Medical Clearance: Pending')).toHaveClass('text-status-warning');
+    expect(screen.getByText('Medical Clearance: Pending')).toHaveClass('text-status-warning-text');
     expect(screen.getAllByText(/Medical Clearance:/)).toHaveLength(2);
   });
 });

@@ -403,7 +403,7 @@ export default function EvaluationPanel({
                     Coach conflicts:{' '}
                     <span
                       className={
-                        coachConflictCount > 0 ? 'text-status-warning' : 'text-status-success'
+                        coachConflictCount > 0 ? 'text-status-warning-text' : 'text-status-success'
                       }
                     >
                       {coachConflictCount}

@@ -56,10 +56,11 @@ describe('OutputGenerationPanel', () => {
     expect(screen.getByText('Team Schedules: 1 files')).toBeInTheDocument();
     expect(screen.getByText('CSVs generated successfully.')).toBeInTheDocument();
 
-    expect(screen.getByRole('button', { name: 'Upload to Storage' })).toHaveAttribute(
-      'type',
-      'button'
-    );
+    const upload = screen.getByRole('button', { name: 'Upload to Storage' });
+    expect(upload).toHaveAttribute('type', 'button');
+    // The theme's primary button: white on `bg-orange-500` was 2.88:1 (axe `color-contrast`).
+    expect(upload).toHaveClass('btn', 'btn-primary');
+    expect(upload.className).not.toMatch(/orange/);
     expect(screen.getByRole('button', { name: 'Download Master CSV' })).toHaveAttribute(
       'type',
       'button'

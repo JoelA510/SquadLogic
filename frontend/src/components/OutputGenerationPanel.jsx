@@ -867,7 +867,9 @@ export default function OutputGenerationPanel({
                 type="button"
                 onClick={handleUpload}
                 disabled={status === 'uploading'}
-                className="relative z-20 bg-orange-500 hover:bg-orange-400 text-white px-4 py-2 rounded-lg shadow-lg shadow-orange-500/20 transition-all"
+                // `btn-primary` and not a palette orange: white on `orange-500` was 2.88:1 (axe,
+                // `color-contrast`), under AA's 4.5:1 in both themes.
+                className="btn btn-primary relative z-20"
               >
                 {status === 'uploading' ? 'Uploading...' : 'Upload to Storage'}
               </button>

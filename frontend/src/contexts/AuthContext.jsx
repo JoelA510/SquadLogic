@@ -216,8 +216,10 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
-      // Log impersonation start
-      await supabase.rpc('record_audit_event', {
+      // Log impersonation start. supabase-js returns an RPC failure as `{ error }`
+      // and does not throw it, so the result is checked: a preview that could not
+      // be audited is refused (and the caller says so) rather than started unlogged.
+      const { error: auditError } = await supabase.rpc('record_audit_event', {
         p_organization_id: targetProfile.organization_id || user.profile.organization_id,
         p_action: 'impersonation.started',
         p_metadata: {
@@ -226,6 +228,7 @@ export const AuthProvider = ({ children }) => {
           admin_email: user.email,
         },
       });
+      if (auditError) throw auditError;
 
       setImpersonatedUser(targetProfile);
     } catch (err) {
@@ -238,8 +241,10 @@ export const AuthProvider = ({ children }) => {
     if (!impersonatedUser) return;
 
     try {
-      // Log impersonation end
-      await supabase.rpc('record_audit_event', {
+      // Log impersonation end. Best effort by design: an admin whose end-audit
+      // fails must still be able to leave the preview, so the failure is logged,
+      // not thrown (unlike the start, which is refused).
+      const { error: auditError } = await supabase.rpc('record_audit_event', {
         p_organization_id: impersonatedUser.organization_id || user.profile.organization_id,
         p_action: 'impersonation.ended',
         p_metadata: {
@@ -248,6 +253,9 @@ export const AuthProvider = ({ children }) => {
           admin_email: user.email,
         },
       });
+
+      if (auditError)
+        console.error('[Auth] impersonation.ended audit row not written:', auditError);
 
       setImpersonatedUser(null);
     } catch (err) {

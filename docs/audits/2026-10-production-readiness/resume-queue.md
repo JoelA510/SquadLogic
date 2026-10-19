@@ -66,7 +66,7 @@ starts as a plan.
     `packages/core/src/outputGeneration.js`). It changes what an export contains, negative numbers
     included, so the plan decides the escaping rule;
   - DS-5: a throttle on `submit_registration`, the RPC left open to `anon`.
-- **B3, dashboard, impersonation and observability tails:**
+- **B3, dashboard, impersonation and observability tails: done** (FK indexes deferred with a trigger), branch `claude/vibrant-allen-hr7y7s-b3-tails` (PR number to be filled in by the coordinator):
   - DS-9: `TopBar` swallows `impersonateUser` failures, and `AdminComplianceDashboard` leaves them
     unhandled;
   - DS-14: `dashboardCache` (`frontend/src/lib/cache.js`) is used only by its own test; wire it in
@@ -76,7 +76,8 @@ starts as a plan.
     season-read `console.error`s carry no request id; the persistence stand-in handler is not
     wrapped; `flush()` is awaited before a failing response. Needs the Deno suite and a redeploy;
   - production's performance advisors report 90 `unindexed_foreign_keys` and 19 `unused_index` at
-    INFO (read 2026-10-19). Untriaged; any index is a migration, so plan first.
+    INFO (read 2026-10-19): triaged, deferred (1,703 live rows in `public`), no migration;
+    `docs/changes/2026-10-19-b3-fk-index-triage.md`.
 - **B4, docs-drift pass (docs only): done**, branch `claude/vibrant-allen-hr7y7s-b4-docs` (PR number to be filled in by the coordinator):
   - DD-1: `frontend-architecture.md`'s route table (`/compliance`, `/reporting`,
     `/registration/:formId`; the live paths are `/admin/compliance`, `/register/:formId`);

@@ -24,7 +24,7 @@ import {
   recordAuditNow,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
-import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
+import { edgeLogger, logFailure, logRequest, withFailureLogging } from '../_shared/logtail.ts';
 
 const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
   // 1. CORS Preflight
@@ -137,10 +137,11 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       typeof metadata?.seasonSettingsId === 'string' ? metadata.seasonSettingsId : null;
     const season = await readSeasonTimezone(supabase, organizationId, seasonSettingsId);
     if (season.errored) {
-      console.error('fairness-scoring: season_settings read failed', {
+      logRequest(logCtx, 'error', 'fairness-scoring: season_settings read failed', {
         organizationId,
         message: season.message,
       });
+      await edgeLogger.flush();
       return jsonResponse(
         {
           error: "The season's timezone could not be read, so times cannot be placed.",
@@ -168,12 +169,13 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       // persisted under a guessed zone is worse than no run: it reads as
       // evidence the schedule was checked.
       const failure = describeAnchorFailure(blocking);
-      console.error('fairness-scoring: refused, times could not be placed', {
+      logRequest(logCtx, 'error', 'fairness-scoring: refused, times could not be placed', {
         organizationId,
         timezone: season.timezone,
         refusedCount: blocking.length,
         byCode: failure.byCode,
       });
+      await edgeLogger.flush();
       return jsonResponse(failure, 422);
     }
 

@@ -2144,7 +2144,7 @@ the public GitHub API); everything else cites the merged PR that holds its evide
 | M1.3's remaining acceptance (a blocked merge shown, `check:settings`) | Waived by the owner 2026-10-13 (unchanged). The live ruleset was read back 2026-10-19 and requires six checks (*executed*). |
 | M1.5, signed-in leg: a Sentry event tagged with user and organization ids | Deferred, owner, to the v1.1.0 release smoke: it needs a real signed-in account and a real error, which no agent has. A Sentry search of production (30 days) for issues with a user id found none (*executed*; says nothing either way, since no signed-in error has occurred). |
 | M1.5, Edge leg: a BetterStack error carrying the organization id | Deferred, same owner and smoke. The code is #553's `withFailureLogging`, Deno-tested there. |
-| Edge logging residuals (the auto-scheduler's other refusals and fairness-scoring's two season-read `console.error`s carry no request id; the persistence stand-in handler is not wrapped; `flush()` is awaited before a failing response) | Deferred to backlog B3 (resume queue). Not small: each is an Edge Function change that needs the Deno suite and a redeploy, and `auto-scheduler/index.ts` is the solver's function. Owner: the repository owner schedules it. |
+| Edge logging residuals (the auto-scheduler's other refusals and fairness-scoring's two season-read `console.error`s carry no request id; the persistence stand-in handler is not wrapped; `flush()` is awaited before a failing response) | **Done**, B3 (branch `claude/vibrant-allen-hr7y7s-b3-tails`; needs the Edge redeploy): `logRequest` in `_shared/logtail.ts` gives the auto-scheduler's refusals and fairness-scoring's two reads the function name, request id and organization; the three persistence stand-in handlers are wrapped; `flush()` is bounded to 2 s. *Executed* (Deno 2.9.6 check and mirror suite, vitest). |
 | Milestone exit boxes | Ticked where the evidence is cited; "deployed and smoke-tested" is `[~]` throughout, because merging is not a smoke test (below). |
 
 Nothing in M1 was left that was small enough to finish without an Edge change.
@@ -2183,9 +2183,9 @@ looked at on `main` (`1fe2265`) for this PR (*statically reviewed* unless stated
 | --- | --- | --- |
 | DS-4 CSV formula injection | Moved to B2 (plan first: it changes what an export contains, including negative numbers) | `escapeCsvValue` in `packages/core/src/outputGeneration.js` quotes only `"`, `,`, CR, LF |
 | DS-5 `submit_registration` throttle | Moved to B2 (plan first: schema) | no throttle in the RPC's migrations |
-| DS-9 impersonation failures swallowed | Moved to B3 | `TopBar.jsx` still ends `impersonateUser(profile).catch(() => {})` |
-| DS-14 `dashboardCache` unused | Moved to B3 | `frontend/src/lib/cache.js` is imported only by `tests/cache.test.js` |
-| DS-15 serial dashboard queries | Moved to B3 | not re-read; the July entry stands |
+| DS-9 impersonation failures swallowed | **Done**, B3 (branch `claude/vibrant-allen-hr7y7s-b3-tails`) | `TopBar.jsx` still ended `impersonateUser(profile).catch(() => {})` (July: toasts added on both call sites; and `impersonateUser` now rejects when its audit row comes back as an error, which supabase-js returns rather than throws, so the July fix alone would never have fired) |
+| DS-14 `dashboardCache` unused | **Done**, B3: the instance is deleted, not wired in | `frontend/src/lib/cache.js` was imported only by `tests/cache.test.js`. Deleted rather than wired in: the dashboard hooks poll a running run and refetch after a save, so a 30 s cache would show a schedule from before the save |
+| DS-15 serial dashboard queries | **Done**, B3 | `AdminReportingDashboard` (four reads, and the discarded fifth removed) and `EnterpriseDashboard` (three) now use `Promise.all` |
 | DD-1 route table in `frontend-architecture.md` | Moved to B4 | it still lists `/compliance`, `/reporting`, `/registration/:formId`; `App.jsx` routes `/admin/compliance`, `/register/:formId` |
 | DD-2 roadmap lists team-size configuration as backlog | Moved to B4 | `docs/expansion/03_ROADMAP.md` line 117 still lists it |
 | DD-3 `data-modeling.md` and `team-generation.md` omit shipped subsystems | Moved to B4 | not re-read; the July entry stands |
@@ -2219,7 +2219,7 @@ required checks (the live ruleset requires six; the audit's baseline had none re
 | 7 | CI/CD | High (7.1, 7.2) | None open | Ruleset live with six checks (read 2026-10-19, *executed*); Node 24 pinned #552; Vercel settings and rollback written down #557; actions pinned and zizmor #574; `build` is a build #588. Owner: clear the dashboard's build-command override (M5.4). |
 | 8 | Security | High (8.1) | None open | Audit gate #559 (`npm audit (high and critical block)` passed on `main`'s head, *executed*); install guards, Dependabot #559; env #558; SECURITY.md, LICENSE #556; advisors gate #573 with both waivers gone #596. `fsevents` denied, `esbuild` approved. Not measured here: hosted-only lints (definer functions callable by signed-in users, leaked-password protection off, per the 2026-10-13 m3b entry). |
 | 9 | Observability | High (9.1) | **Closed in code; acceptance not measured** | 9.1 #553, 9.2 #545; signed-out event received (preview). The signed-in and BetterStack legs are deferred to the v1.1.0 release smoke (owner). A search for a production event with a user id found none. |
-| 10 | Performance | Low | Low | Bundle gate now measures the shipped shape (Replay lazy, caps re-baselined) #588. New, untriaged: production reports 90 `unindexed_foreign_keys` and 19 `unused_index` at INFO (read 2026-10-19, *executed*), which the audit could not see. |
+| 10 | Performance | Low | Low | Bundle gate now measures the shipped shape (Replay lazy, caps re-baselined) #588. Triaged in B3, no change: production reports 90 `unindexed_foreign_keys` and 19 `unused_index` at INFO (read 2026-10-19, *executed*), over 1,703 live rows in all of `public` (largest table 1,153); deferred with a re-check trigger, `docs/changes/2026-10-19-b3-fk-index-triage.md`. |
 | 11 | Accessibility & UX completeness | High (11.1, 11.2) | None open for the audited findings | Lint + axe on every route in both themes #580 (zero known violations after #581); keyboard game grid #579; `DataGrid` tab stop, token text, chart theme #591. Content not yet scanned: backlog B1, the resume queue's next item. |
 | 12 | Docs, operability & stated-rule conformance | High (12.1) | None open | One `AGENTS.md`, loadable skills, July plan closed, knip #557; LICENSE #556; LF endings and release line #588. Scorecard: all area-12 standards pass (2026-10-19, *executed*). |
 | 13 | Core flows | Blocker (13.1) | None open | 13.1 #551; 13.2 real-backend E2E #578 (and its audit-row assertion #592); 13.3 #579. Beyond the audit: dated scoring #560, #590, dated solver #593, game evaluator #594, audited saves #600. |
@@ -2265,8 +2265,7 @@ read, not exercised: whether Dependabot honours them shows on its next monthly r
 ### Is the plan done?
 
 Yes. Every item is done, or deferred with a reason and an owner: M1.5's two legs (owner, the
-v1.1.0 release smoke); the Edge logging residuals (B3); the thirteen July items (B2-B5, DD-7
-done); the ten planned major upgrades (resume queue, one PR each); 2.1 (D2, baselined); 4.1 (deferred with reason, above). No item is blocked.
+v1.1.0 release smoke); the thirteen July items (B2-B5; DD-7 and, with B3, DS-9, DS-14 and DS-15 done); the ten planned major upgrades (resume queue, one PR each); 2.1 (D2, baselined); 4.1 (deferred with reason, above). No item is blocked.
 
 ## When this plan is done
 
@@ -2275,3 +2274,16 @@ Mark the status line DONE with the date, move the lessons worth keeping into
 
 Done 2026-10-19: the status line is DONE, and lessons 32-35 in `docs/LESSONS_LEARNED.md` carry
 what is worth keeping.
+
+B3 (2026-10-19, branch `claude/vibrant-allen-hr7y7s-b3-tails`): DS-9, DS-14, DS-15 and the Edge
+logging residuals are done above; the FK index triage is deferred with its trigger
+(`docs/changes/2026-10-19-b3-fk-index-triage.md`). Found on the way: `impersonateUser` ignored the
+`{ error }` that `supabase.rpc('record_audit_event')` returns, so a preview started with no
+`impersonation.started` row; it now refuses. `stopImpersonation` has the same shape and is left
+best-effort on purpose (an admin whose end-audit fails must still be able to leave the preview).
+The auto-scheduler's `console.error('Persistence failed:', persistError)` is a swallowed
+persistence failure that reaches only the console; not in B3's list, not changed.
+`AdminReportingDashboard` is routed nowhere (the knip `ignoreFiles` entry said so; B3's test now
+imports it, so the entry is removed): DS-15's change to it has no user-visible effect until it is
+routed or deleted, which is the owner's call. Both dashboards still drop the `error` of some reads
+(the reporting page's standings read, all three of the enterprise page's); unchanged, as before.

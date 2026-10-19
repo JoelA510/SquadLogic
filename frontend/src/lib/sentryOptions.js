@@ -1,4 +1,37 @@
 /**
+ * The v10 default (`sendDefaultPii` off) for the privacy-relevant categories,
+ * as Sentry's v11 migration guide tabulates it and spells it ("If you want to
+ * keep the v10 default behavior"). A function, so no caller shares or mutates
+ * another's nested objects. Query parameters get the same network-address deny
+ * list as headers, as the guide's baseline does: v10 with `sendDefaultPii` off
+ * filtered them the same way (Codex on #616).
+ * `stackFrameVariables` and `frameContextLines` are not pinned: neither is
+ * something `sendDefaultPii` governed, and neither sends data in a browser.
+ */
+export const NETWORK_ADDRESS_DENYLIST = Object.freeze([
+  'forwarded',
+  '-ip',
+  'remote-',
+  'via',
+  '-user',
+]);
+
+export function dataCollectionBaseline() {
+  const networkAddress = () => ({ deny: [...NETWORK_ADDRESS_DENYLIST] });
+  return {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: { request: networkAddress(), response: networkAddress() },
+    httpBodies: [],
+    urlQueryParams: networkAddress(),
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    graphQL: { document: false, variables: false },
+  };
+}
+
+/**
  * The options `frontend/src/main.jsx` passes to `Sentry.init`, kept pure so a
  * unit test can pin them without booting the app. The DSN gate stays in
  * main.jsx: this only shapes the options once a DSN is present.
@@ -21,11 +54,13 @@ export function sentryInitOptions({ dsn, dev, release, deployEnv, integrations }
     environment: sentryEnvironment({ dev, deployEnv }),
     release,
 
-    // Data minimisation, stated rather than defaulted: the SDK does not attach
-    // the IP address, cookies or request headers by default. This does not
-    // limit Session Replay or an explicit setUser call; those are governed
-    // by their own settings.
-    sendDefaultPii: false,
+    // Data minimisation, stated rather than defaulted: no IP address, cookies,
+    // request or response bodies, or GenAI/database/queue data.
+    // `dataCollection` replaced `sendDefaultPii` in SDK v11, and an unset
+    // `dataCollection` collects all of them, so it is never left unset. This
+    // does not limit Session Replay or an explicit setUser call; those are
+    // governed by their own settings.
+    dataCollection: dataCollectionBaseline(),
 
     // React-specific integrations
     integrations,

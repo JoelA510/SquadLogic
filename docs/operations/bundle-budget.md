@@ -94,8 +94,15 @@ Measured on a build with no credentials (as CI built then, without Sentry), 2026
 | total first paint (5 files) | 231.21 KB (236,757 B) | 208.43 KB (213,435 B) |
 | `mockSupabaseClient-*.js` (lazy) | in main entry | 22.69 KB (23,239 B), fetched only in mock mode |
 
-The caps are unchanged. The main-entry cap now has ~23 KB of headroom and can
-be tightened per the policy below.
+The caps were unchanged by that split, which left the main-entry cap ~23 KB of
+headroom at the time.
+
+`@sentry/react` 10.76.2 to 11.8.0 (2026-10-19), measured on the build CI makes
+(Sentry on): main entry 174.34 to 179.75 KB gz (+5.41 KB). The main-entry cap is
+190,000 B (185.55 KB), so about **5.8 KB of headroom is left today**, not the
+~23 KB above; the next growth in the entry needs a look. `sentryReplay-*.js`
+40.19 to 40.30 KB; total first-paint 276.85 to 282.25 KB of 289.06 KB. No
+budget was raised.
 
 ## What is measured: the build production ships, Sentry on
 

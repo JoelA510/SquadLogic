@@ -40,9 +40,9 @@ upgrade (D6 held majors out of the remediation plan), in an order the owner pick
 - `lucide-react` 1;
 - `dotenv` 18: done (18.0.8), PR #606;
 - `globals` 17: its own PR, after #606 (one held major per PR);
-- `@testing-library/jest-dom` 7.
+- `@testing-library/jest-dom` 7: done (7.0.1), branch `claude/vibrant-allen-hr7y7s-up-jest-dom`, PR number to be added.
 
-Not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.
+The rest are not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.
 
 ## After those, as the owner schedules them
 

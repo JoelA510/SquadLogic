@@ -1,9 +1,23 @@
 import { createBdd } from 'playwright-bdd';
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
+
+/**
+ * Set one of the field dialog's switches by keyboard: focus it and press Space, the way a
+ * keyboard user would (WCAG 2.1.1). A switch the keyboard cannot reach fails here.
+ */
+async function setFieldSwitch(page: Page, name: string, on: boolean) {
+  const control = page.getByRole('dialog').getByRole('switch', { name, exact: true });
+  await expect(control).toBeVisible({ timeout: 10000 });
+  if ((await control.getAttribute('aria-checked')) !== String(on)) {
+    await control.focus();
+    await page.keyboard.press('Space');
+  }
+  await expect(control).toHaveAttribute('aria-checked', String(on));
+}
 
 Given('I have an organization labeled {string}', async ({ page }, orgName: string) => {
   if (page.url() === 'about:blank') await page.goto('/');
@@ -97,10 +111,7 @@ When('I ensure {string} is disabled', async ({ page }, label: string) => {
       : label === 'Active'
         ? 'Status'
         : label;
-  const checkbox = page.getByLabel(uiLabel).first();
-  if (await checkbox.isChecked()) {
-    await page.getByText(uiLabel, { exact: true }).first().click({ force: true });
-  }
+  await setFieldSwitch(page, uiLabel, false);
 });
 
 Then(
@@ -204,13 +215,7 @@ When('I toggle {string} to ON', async ({ page }, label: string) => {
       : label === 'Active'
         ? 'Status'
         : label;
-  const container = page.locator('label').filter({ hasText: uiLabel }).first();
-  const checkbox = container.locator('input[type="checkbox"]').first();
-
-  const isChecked = await checkbox.evaluate((node: HTMLInputElement) => node.checked);
-  if (!isChecked) {
-    await page.getByText(uiLabel, { exact: true }).first().click({ force: true });
-  }
+  await setFieldSwitch(page, uiLabel, true);
   await page
     .getByRole('button', { name: /Save Field/i })
     .first()
@@ -228,16 +233,7 @@ When('I toggle {string} to OFF', async ({ page }, label: string) => {
       : label === 'Active'
         ? 'Status'
         : label;
-  const container = page.locator('label').filter({ hasText: uiLabel }).first();
-  const checkbox = container.locator('input').first();
-
-  await expect(container).toBeVisible({ timeout: 10000 });
-  await page.waitForTimeout(500);
-
-  const isChecked = await checkbox.evaluate((node: HTMLInputElement) => node.checked);
-  if (isChecked) {
-    await container.click({ force: true });
-  }
+  await setFieldSwitch(page, uiLabel, false);
   await page
     .getByRole('button', { name: /Save Field/i })
     .first()

@@ -2186,14 +2186,14 @@ looked at on `main` (`1fe2265`) for this PR (*statically reviewed* unless stated
 | DS-9 impersonation failures swallowed | Moved to B3 | `TopBar.jsx` still ends `impersonateUser(profile).catch(() => {})` |
 | DS-14 `dashboardCache` unused | Moved to B3 | `frontend/src/lib/cache.js` is imported only by `tests/cache.test.js` |
 | DS-15 serial dashboard queries | Moved to B3 | not re-read; the July entry stands |
-| DD-1 route table in `frontend-architecture.md` | Moved to B4 | it still lists `/compliance`, `/reporting`, `/registration/:formId`; `App.jsx` routes `/admin/compliance`, `/register/:formId` |
-| DD-2 roadmap lists team-size configuration as backlog | Moved to B4 | `docs/expansion/03_ROADMAP.md` line 117 still lists it |
-| DD-3 `data-modeling.md` and `team-generation.md` omit shipped subsystems | Moved to B4 | not re-read; the July entry stands |
-| DD-4 `persistence-rpc-layer.md` lacks the `20260613*` RPCs | Moved to B4 | not re-read; the July entry stands |
-| DD-5 `v1.1-planning.md` quotes old M2.2 wording | Moved to B4 | not re-read; the July entry stands |
+| DD-1 route table in `frontend-architecture.md` | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | it still lists `/compliance`, `/reporting`, `/registration/:formId`; `App.jsx` routes `/admin/compliance`, `/register/:formId` |
+| DD-2 roadmap lists team-size configuration as backlog | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | `docs/expansion/03_ROADMAP.md` line 117 still lists it |
+| DD-3 `data-modeling.md` and `team-generation.md` omit shipped subsystems | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | not re-read; the July entry stands |
+| DD-4 `persistence-rpc-layer.md` lacks the `20260613*` RPCs | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | not re-read; the July entry stands |
+| DD-5 `v1.1-planning.md` quotes old M2.2 wording | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | not re-read; the July entry stands |
 | DD-7 `ENVIRONMENT.md` omits the `TEST_*` variables | **Done**, by #558 | `ENVIRONMENT.md` lines 193-198 now list `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` and say which layer reads them |
-| DD-9 `playwright.config.ts` loads only `.env` | Moved to B5 (needs a Playwright run to verify) | `dotenv.config()` with no path, line 6 |
-| TG-3 three E2E journeys (DST-boundary splitting, rainout acknowledgement, late registrant on a locked roster) | Moved to B5 | none of the three has a scenario |
+| DD-9 `playwright.config.ts` loads only `.env` | **Done** in B5 (branch `claude/vibrant-allen-hr7y7s-b5-tests`) | the config now loads the shell, then `.env.test`, then `.env` through `tests/e2e/loadTestEnv.js`; `tests/loadTestEnv.test.js` fails with `.env.test` dropped from the list or the order swapped (*executed*) |
+| TG-3 three E2E journeys (DST-boundary splitting, rainout acknowledgement, late registrant on a locked roster) | **Two done, one not buildable** in B5 (branch `claude/vibrant-allen-hr7y7s-b5-tests`) | DST: a spring-forward slot is shown as TIME TBD and the rest still scheduled (`Pillar1_Engine.feature`). Late registrant: two scenarios, a reviewed roster and a locked one (`late_registrant_reviewed_roster.feature`). Rainout acknowledgement: the product has no rainout or alert-acknowledgement feature (a search of `frontend/src`, `packages/core/src`, `supabase/functions` and `supabase/migrations` for `rain-?out` finds two code comments, both on core's practice-exception `cancelled` kind, which no page creates or shows; the only `acknowledged` flags are in core's `resolve` and `freeze` modules, which no page calls), so there is nothing to drive; `docs/testing/e2e_master_plan.md` lists a journey the app does not have. Weather closures are covered by the blackout and heat-forecast features. |
 
 None was dropped. The deferral reason for the lot: each is a behaviour or contract change, or
 needs a test run the plan's own rules require (plan-first, a planted defect shown red), and none

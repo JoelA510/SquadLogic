@@ -127,4 +127,8 @@ This document translates the roadmap's team formation phase into actionable plan
 
 ## Next Steps
 
-None outstanding in this document. The items it once listed have shipped: unit tests for buddy pairing, roster balancing and overflow detection (`tests/teamGeneration.test.js`, `tests/buddyLinking.test.js`, `tests/assignmentUnits.test.js`), the roster review and manual adjustment UI (`frontend/src/components/teaming/RosterManager.jsx`, `frontend/src/pages/TeamBuilderPage.jsx`), and the Row Level Security policies that limit roster edits to admins (`docs/security/rls-policies.md`).
+Shipped: unit tests for buddy pairing, roster balancing and overflow detection (`tests/teamGeneration.test.js`, `tests/buddyLinking.test.js`, `tests/assignmentUnits.test.js`), the roster review and manual adjustment UI (`frontend/src/components/teaming/RosterManager.jsx`, `frontend/src/pages/TeamBuilderPage.jsx`), and the Row Level Security policies that limit roster edits to admins (`docs/security/rls-policies.md`).
+
+Still open from the test harness plan above: those tests build inline objects rather than using a
+schema-shaped fixture loader, they do not assert repository mutations, and there are no snapshot
+tests (`toMatchSnapshot` / `toMatchInlineSnapshot`) for the overflow or buddy reports.

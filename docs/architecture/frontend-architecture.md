@@ -47,6 +47,12 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/schedule/practice-lighting`   | `PracticeLightingPage` | Portable-lighting requests for practice slots; admin decides |
 | `/setup/features`       | `FeaturesSetupPage`        | "Choose your tools": feature flags, outside the dashboard chrome |
 | `/account`              | `AccountSettingsPage`      | The signed-in user's account settings                           |
+| `/invite/:code`         | `InvitePage`               | Invite redemption; reachable with or without a session or organization (signed out, the page shows an inline login) |
+| `/auth/reset-password`  | `ResetPassword`            | Password reset; reachable without a session, outside the dashboard layout |
+| `/organizations/new`    | `OrganizationCreation`     | Create an organization; signed-in, outside the dashboard layout. A signed-in user with no organization is sent here from `/` |
+
+Every other path redirects to `/` (`path="*"`). Signed out, any route but `/invite/:code` and
+`/auth/reset-password` renders `Login` (`AppContent` in `App.jsx`).
 
 ## State Management
 

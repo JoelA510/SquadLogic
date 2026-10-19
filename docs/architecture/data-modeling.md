@@ -206,7 +206,9 @@ Detailed ingestion workflows live in `docs/operations/ingestion-pipeline.md`. Hi
    - Validates mutual buddy codes by checking for reciprocal entries before linking pairs.
    - Captures coach leads: after promotion, a row with positive coach intent (`willing_to_coach` or
      `coach_volunteer`) and a resolvable guardian name and email is sent to `upsert_coach_leads`,
-     which creates an `interested` coach (`import_source = 'player_import_lead'`) and a
+     which creates an `interested` coach (`import_source = 'player_import_lead'`) when no coach
+     has that email yet. A coach in the same organization that already has the email keeps its
+     status and import source; only its `last_imported_at` is updated. Either way the lead gets a
      `coach_interested_programs` link per division. A later coach CSV with the same email updates
      that row to the CSV's status (default `active`) in `finalize_coach_import_job`.
    - Flags duplicate registrations or missing division assignments for manual review.

@@ -336,6 +336,29 @@ describe('LIVE-5 — an event that cannot be placed says so', () => {
     expect(tbd(events[0]).code).toBe('WALL_TIME_NONEXISTENT');
   });
 
+  it('places every other Sunday of a weekly series and reports only the spring-forward one (TG-3)', () => {
+    // A series that starts the Sunday before the change: 2026-03-08 02:30 does
+    // not exist in America/Los_Angeles, the other three Sundays do. The gap
+    // date is the one refused, by name and by date; none of the others is lost.
+    const events = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/Los_Angeles',
+      practices: [
+        practiceRow(
+          { day_of_week: 'sun', start_time: '02:30:00', end_time: '03:30:00' },
+          { effective_date_range: '[2026-03-01,2026-03-29)' }
+        ),
+      ],
+    });
+    expect(events.map((ev) => ev.kind)).toEqual(['timed', 'unplaceable', 'timed', 'timed']);
+    expect(timed(events[0]).dtstart).toBe('20260301T103000Z');
+    expect(tbd(events[1]).date).toBe('2026-03-08');
+    expect(tbd(events[1]).code).toBe('WALL_TIME_NONEXISTENT');
+    // After the change the same 02:30 wall time is PDT (UTC-7).
+    expect(timed(events[2]).dtstart).toBe('20260315T093000Z');
+    expect(timed(events[3]).dtstart).toBe('20260322T093000Z');
+  });
+
   it('writes no VEVENT at all when not even the day is known', () => {
     const events = buildFeedEvents({
       teamName: 'Tigers',

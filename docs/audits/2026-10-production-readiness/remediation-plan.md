@@ -2138,6 +2138,28 @@ smoke deferred to the owner's v1.1.0 release smoke)
     `tests/` imports them, and a service-role client would now be refused 42501. *Statically
     reviewed.*
 
+- 2026-10-19, found by B5 (branch `claude/vibrant-allen-hr7y7s-b5-tests`, PR #607):
+  - **A weekly practice series that crosses a spring-forward date is handled in one surface and not
+    the others.** For a Sunday 02:30 series over `[2026-03-01,2026-03-29)` in `America/Los_Angeles`:
+    the calendar feed (`buildFeedEvents`) places 03-01, 03-15 and 03-22 and reports 03-08 as TIME
+    TBD (`WALL_TIME_NONEXISTENT`); the team portal (`expandPractices` in `useTeamPortal.js`) shows
+    03-08 at 02:30 like any other Sunday, a time that does not exist (its comment says the season
+    timezone "is not needed"); and `PracticeSchedulingPage`/the auto-scheduler date a slot by its
+    first occurrence only (`normalizePracticeSlot`, `anchorWallTimes`), so the crossing date draws
+    no finding there. Families see two different answers for the same practice. *Executed* (the
+    feed and `expandPractices` run on that series). No test asserts the wrong portal behaviour;
+    the feed's right behaviour is pinned in `tests/calendarFeed.test.js`. For the owner to place
+    (the fix is a portal change, and possibly a scheduler finding per crossing date).
+  - **Team locking has no product writer.** The team-generation engine honours `team.locked` (a
+    locked team takes no late players), but `teams` and `team_players` have no `locked` column,
+    `admin_update_team` patches only `name` and `notes`, `buildTeamRows` and the team-persistence
+    handler never write it, and no page sets it (a search of `supabase/migrations`,
+    `supabase/functions`, `packages/core/src/teamSupabase.js` and `frontend/src` finds `locked`
+    only as practice-assignment locks and as `source: 'locked'`, which `normalizeSource` turns into
+    `manual`). A locked-roster scenario would test a state no user can create, so B5 has none. A
+    manual (hand-moved) assignment is the lock a user can create. Flagged for the owner: add a team
+    lock (a plan first), or remove the engine's `locked` handling. *Statically reviewed.*
+
 ## Deferred with reason
 
 - 2.1 (strict types) — D2's default: the repository's stated rule is `strict: false`; raising it
@@ -2228,14 +2250,14 @@ looked at on `main` (`1fe2265`) for this PR (*statically reviewed* unless stated
 | DS-9 impersonation failures swallowed | **Done**, B3 (branch `claude/vibrant-allen-hr7y7s-b3-tails`) | `TopBar.jsx` still ended `impersonateUser(profile).catch(() => {})` (July: toasts added on both call sites; and `impersonateUser` now rejects when its audit row comes back as an error, which supabase-js returns rather than throws, so the July fix alone would never have fired) |
 | DS-14 `dashboardCache` unused | **Done**, B3: the instance is deleted, not wired in | `frontend/src/lib/cache.js` was imported only by `tests/cache.test.js`. Deleted rather than wired in: the dashboard hooks poll a running run and refetch after a save, so a 30 s cache would show a schedule from before the save |
 | DS-15 serial dashboard queries | **Done**, B3 | `AdminReportingDashboard` (four reads, and the discarded fifth removed) and `EnterpriseDashboard` (three) now use `Promise.all` |
-| DD-1 route table in `frontend-architecture.md` | Moved to B4 | it still lists `/compliance`, `/reporting`, `/registration/:formId`; `App.jsx` routes `/admin/compliance`, `/register/:formId` |
-| DD-2 roadmap lists team-size configuration as backlog | Moved to B4 | `docs/expansion/03_ROADMAP.md` line 117 still lists it |
-| DD-3 `data-modeling.md` and `team-generation.md` omit shipped subsystems | Moved to B4 | not re-read; the July entry stands |
-| DD-4 `persistence-rpc-layer.md` lacks the `20260613*` RPCs | Moved to B4 | not re-read; the July entry stands |
-| DD-5 `v1.1-planning.md` quotes old M2.2 wording | Moved to B4 | not re-read; the July entry stands |
+| DD-1 route table in `frontend-architecture.md` | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | *Statically reviewed* on `main` after #605: the 33 route rows of `frontend-architecture.md`'s "Current Routes" table equal the 33 `path=` values in `App.jsx` (compared by script, no difference either way), including `/admin/compliance`, `/register/:formId` and `/coaches`; `/compliance`, `/reporting` and `/registration/:formId` are gone. `AdminReportingDashboard.jsx` is still unrouted (baselined in `knip.jsonc`) and the doc no longer mentions it; deleting it stays an owner decision |
+| DD-2 roadmap lists team-size configuration as backlog | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | *Statically reviewed* on `main` after #605: `docs/expansion/03_ROADMAP.md` line 47 lists division team-size configuration as "v1.1 Area B (Completed)", naming the five `divisions` columns, `admin_upsert_division_settings` and `rosterSizing.js`; `v1.1-planning.md` line 90 carries "Status: landed" for Area B |
+| DD-3 `data-modeling.md` and `team-generation.md` omit shipped subsystems | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | *Statically reviewed* on `main` after #605: `data-modeling.md` lists `min_roster_size`, `target_team_size`, `team_count_override`, `min_teams`, `max_teams` and their CHECKs (lines 75-86) and `coach_interested_programs` (lines 53-60, 212); `team-generation.md` states the bounds (lines 20, 30) and the count rule from `targetTeamSize` or `teamCountOverride` (line 43) |
+| DD-4 `persistence-rpc-layer.md` lacks the `20260613*` RPCs | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | *Statically reviewed* on `main` after #605: `persistence-rpc-layer.md` rows at lines 205-214 cover `admin_delete_coaches`, `admin_update_registration_form`, `admin_delete_registration_form`, `admin_remove_member`, `admin_change_member_role`, `get_organization_members`, `admin_cancel_game_assignment`, `admin_cancel_practice_assignment`, `admin_delete_team` and `admin_update_team`, each with its migration; Known Gaps (line 301) now marks the audit-action CHECK lag "Resolved" by `20260613000006` (`audit_actions` lookup) |
+| DD-5 `v1.1-planning.md` quotes old M2.2 wording | **Done** in PR #605 (branch `claude/vibrant-allen-hr7y7s-b4-docs`) | *Statically reviewed* on `main` after #605: `v1.1-planning.md` line 36 quotes M2.2 as "Shipped CSV validation, import-job tracking, and error recovery. Durable staged promotion ... has since shipped", the wording `03_ROADMAP.md` lines 33-34 carries now, and line 141 marks the M2.2 row Landed; the Area A gap statement (team-import promotion pending) is unchanged |
 | DD-7 `ENVIRONMENT.md` omits the `TEST_*` variables | **Done**, by #558 | `ENVIRONMENT.md` lines 193-198 now list `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` and say which layer reads them |
-| DD-9 `playwright.config.ts` loads only `.env` | Moved to B5 (needs a Playwright run to verify) | `dotenv.config()` with no path, line 6 |
-| TG-3 three E2E journeys (DST-boundary splitting, rainout acknowledgement, late registrant on a locked roster) | Moved to B5 | none of the three has a scenario |
+| DD-9 `playwright.config.ts` loads only `.env` | **Done** in B5 (branch `claude/vibrant-allen-hr7y7s-b5-tests`) | the config now loads the shell, then `.env.test`, then `.env` through `tests/e2e/loadTestEnv.js`; `tests/loadTestEnv.test.js` fails with `.env.test` dropped from the list or the order swapped (*executed*) |
+| TG-3 three E2E journeys (DST-boundary splitting, rainout acknowledgement, late registrant on a locked roster) | **Two journeys partly covered, one not buildable** in B5 (branch `claude/vibrant-allen-hr7y7s-b5-tests`). Covered exactly: (1) a practice slot whose first occurrence falls in the spring-forward gap is shown as TIME TBD while other slots are scheduled (`Pillar1_Engine.feature`, E2E); the calendar feed expands a weekly series across the gap, refusing only the gap date and keeping the rest (`tests/calendarFeed.test.js`, unit); (2) a late registrant is seated on a reviewed roster without moving anyone, team ids kept (`late_registrant_reviewed_roster.feature`, E2E). Not covered: a series that crosses the gap on the scheduling page, the team portal or the solver (a defect, below); a locked roster (no product writer, below); rainout acknowledgement (no feature) | DST, late registrant: as above. Rainout: the product has no rainout or alert-acknowledgement feature (a search of `frontend/src`, `packages/core/src`, `supabase/functions` and `supabase/migrations` for `rain-?out` finds two code comments, both on core's practice-exception `cancelled` kind, which no page creates or shows; the only `acknowledged` flags are in core's `resolve` and `freeze` modules, which no page calls), so there is nothing to drive; `docs/testing/e2e_master_plan.md` lists a journey the app does not have. Weather closures are covered by the blackout and heat-forecast features. |
 
 None was dropped. The deferral reason for the lot: each is a behaviour or contract change, or
 needs a test run the plan's own rules require (plan-first, a planted defect shown red), and none

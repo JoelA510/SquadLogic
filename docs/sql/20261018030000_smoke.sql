@@ -11,8 +11,10 @@
 --    before it commits; this repeats it on every later build, so a later
 --    migration that brings either back fails here, by name.
 -- 2. The 26 tables carry exactly the policies the rewrite leaves: 85 (48
---    before it), and on each of the 19 split tables an INSERT, an UPDATE and a
---    DELETE admin policy and no FOR ALL one. Counted on the 26 tables, not on
+--    before it), plus the 3 that 20261019010000 added when it split
+--    registrations' FOR ALL policy into a SELECT and three admin writes: 88.
+--    And on each of the 19 split tables an INSERT, an UPDATE and a DELETE
+--    admin policy and no FOR ALL one. Counted on the 26 tables, not on
 --    all of `public` (119), so a migration on another table does not move it.
 -- 3. A member and an admin of one organization, on `players` (a split
 --    member/admin table): the member reads the organization's row, and its
@@ -159,8 +161,8 @@ BEGIN
         RAISE EXCEPTION 'expected the 26 tables of the advisor findings, found %', v_n;
     END IF;
     SELECT count(*) INTO v_n FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 85 THEN
-        RAISE EXCEPTION 'the 26 tables carry % policies; the rewrite leaves 85', v_n;
+    IF v_n <> 88 THEN
+        RAISE EXCEPTION 'the 26 tables carry % policies; the rewrite leaves 85, and 20261019010000 adds 3: 88', v_n;
     END IF;
     v_bad := NULL;
     FOR i IN 1 .. array_length(c_split, 1) LOOP
@@ -184,7 +186,7 @@ BEGIN
                 AND policyname = 'Users can view their organization''s import jobs') THEN
         RAISE EXCEPTION 'the legacy import_jobs SELECT survived the rewrite';
     END IF;
-    RAISE NOTICE 'the 26 tables carry 85 policies: on each of the 19 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
+    RAISE NOTICE 'the 26 tables carry 88 policies (85 from the rewrite, 3 from 20261019010000): on each of the 19 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
 
     -- ---- seed: one organization, a member, an admin and a tenant_admin ------
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES

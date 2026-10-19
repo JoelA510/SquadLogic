@@ -747,11 +747,11 @@ INSERT INTO matrix_expected VALUES
     ('registration_forms',          'outsider', 'A',  'rls',   '0',   '0',     '0'),
     ('registration_forms',          'anon',     '-',  'rls',   '0',   '0',     '0'),
 
-    -- registrations: (own AND member) or is_org_admin, for every command; Org A's row is the parent's own, and so is the INSERT probe's.
+    -- registrations: SELECT (own AND member) or is_org_admin; INSERT/UPDATE/DELETE is_org_admin only (20261019010000: a member writes through submit_registration). Org A's row is the parent's own, and so is the INSERT probe's.
     ('registrations',               'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('registrations',               'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('registrations',               'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('registrations',               'parent_a', 'A',  'ok',    '1',   'rls',   '1'),
+    ('registrations',               'parent_a', 'A',  'rls',   '0',   '0',     '0'),
     ('registrations',               'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('registrations',               'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('registrations',               'anon',     '-',  'rls',   '0',   '0',     '0'),

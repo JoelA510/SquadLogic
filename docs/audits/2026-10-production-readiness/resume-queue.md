@@ -50,7 +50,9 @@ All five groups hold the thirteen July items and the tails the close-out deferre
 the repository owner. A group that touches persistence, the solver, a schema or a filed figure
 starts as a plan.
 
-- **B2, export and registration hardening (plan first, schema for DS-5):**
+- **B2, export and registration hardening (plan first, schema for DS-5):** **done 2026-10-19**, branch
+  `claude/vibrant-allen-hr7y7s-b2-hardening` (PR number: coordinator), plan
+  `docs/changes/2026-10-19-b2-hardening.md`.
   - DS-4: spreadsheet-formula characters in the CSV export (`escapeCsvValue` in
     `packages/core/src/outputGeneration.js`). It changes what an export contains, negative numbers
     included, so the plan decides the escaping rule;

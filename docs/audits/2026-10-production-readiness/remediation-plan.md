@@ -2,27 +2,36 @@
 
 Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`audit.md`](./audit.md) (commit `565e980`)
 
-**Status:** IN PROGRESS, paused by the owner on 2026-10-14 after Milestone 4. Approved by the owner
-on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1 moved into Milestone 1
-(PR 1-B, as M1.7). Merged:
-- M1: #551, #552, #553, plus #545 for M1.6.
+**Status:** DONE 2026-10-19, with the deferrals (M1.5's two acceptance legs among them) and the open
+owner questions in "Close-out" below.
+Approved by the owner on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1
+moved into Milestone 1 (PR 1-B, as M1.7). Paused by the owner on 2026-10-14 after Milestone 4;
+resumed 2026-10-17. On 2026-10-18 the owner approved the five plans that followed (every
+recommendation as written). Merged:
+- M1: #551 (M1.1, M1.2), #552 (M1.3, M1.4, M1.7), #553 (M1.5), #545 (M1.6).
 - M2: #556 (M2.4-M2.6), #558 (M2.2), #559 (M2.1, M2.3).
-- M3: #573, #574, #575.
+- M3: #573 (M3.2-M3.4), #574 (M3.1, M3.5), #575 (zizmor required).
 - M4:
   - M4.1, M4.5: #578.
   - M4.2: #580.
   - M4.3, M4.6: #579.
   - M4.4: #576.
-  - M4.7: plan #555, build #560.
+  - M4.7: plan #555, build #560, exceptions follow-up #590.
+  - M4.8: #593. The #576 follow-up (Edge game evaluator, unknown teams): #594.
   - The Edge audit fix found during it: #577.
   - Free-tier budgets, the AA accent palette, and the real-backend E2E made required: #581.
 - M5: #557.
+- M6: #588.
+- The resume queue's waves: Wave 0 #587 (mock ids); Wave 3 #589 (import Continue, team sync,
+  abort check, game grid); Wave 4 #591 (accessibility follow-ups); Wave 2 #592 (exports bucket),
+  #597 (`create_import_job` stops auditing the file name), #595 + #596 (RLS persona matrix, then
+  the rewrite with both advisor waivers removed), #598 (schema drift), #600 (team and game saves
+  audit in their transaction; the game save needs an admin), #599 (import telemetry stops
+  sending the file name; merged as f561674).
 
-Open: M4.8 (plan approved 2026-10-18, built, in review), M6, the M1 tails, and the follow-ups in
-"Discovered during execution".
-
-The order to take them in, by dependency, is [`resume-queue.md`](./resume-queue.md). Every agent
-reads [`agent-brief.md`](./agent-brief.md).
+Open in the plan: nothing that is not a stated deferral. The acceptance legs and deferrals, and to whom, are in "Close-out"; the work
+that remains, in order, is [`resume-queue.md`](./resume-queue.md). Every agent reads
+[`agent-brief.md`](./agent-brief.md).
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
@@ -122,6 +131,7 @@ project files as before. Not tied to an audit finding (the trial's rerun found
 it), so it carries no ID.
 
 > **M1.1. The practice page's fairness evaluation reports a clean result after examining nothing** (audit finding 13.1, blocker)
+> - **Status: merged as #551 (`73d98d0`), with M1.2.** The record is the PR and its entry under "Discovered during execution" (the panel rendered `issue.details` objects as a React child; fixed there). *Statically reviewed* here; the PR's own runs are the evidence.
 > - **Fix approach:** pass the page's scheduler teams (the `normalizeTeam` output, which carries
 >   `assistantCoachIds`) and slot list into `EvaluationPanel`, as issue #364 sketches; in
 >   `EvaluationPanel`, render "Nothing to evaluate: 0 teams / 0 slots" instead of a score when
@@ -148,6 +158,7 @@ it), so it carries no ID.
 >   scratch probe of the panel.
 
 > **M1.2. The core evaluator and its Deno port can drift without a test noticing** (audit finding 1.1, medium; pulled into Milestone 1 because M1.1 widens it)
+> - **Status: merged as #551 (`73d98d0`).** The parity tests have been widened since by the date-model work (#560, #590, #593) and the game evaluator (#594); see M4.7, M4.8 and the #576 follow-up. *Statically reviewed* here.
 > - **Fix approach:** add a mirror test that runs `evaluatePracticeSchedule` (core) and
 >   `scoring-engine.ts` (Deno) on the same non-empty inputs drawn from the season-2026 corpus and
 >   compares coach conflicts, team counts and scores; and a Vitest twin for the core side. It runs
@@ -169,7 +180,7 @@ it), so it carries no ID.
 **PR 1-B — `chore/require-ci-on-main`**
 
 > **M1.3. Nothing requires CI before a merge, and a push to `main` migrates production** (audit finding 7.1, high)
-> - **Status (2026-10-13): live; the record is in #552 (open).** The owner imported ruleset
+> - **Status (2026-10-13): live; merged as #552 (`33e68ab`).** The owner imported ruleset
 >   `25015698` ("main: pull requests with green CI") from `.github/rulesets/main.json`: pull
 >   requests only (0 approvals), `Build & Test` and `Deno Mirror Tests` required on an
 >   up-to-date branch, no force pushes, no deletion. The live rules, read back through
@@ -185,7 +196,10 @@ it), so it carries no ID.
 >   "Merging is blocked"; a direct push is refused) and `check:settings`, which needs a token
 >   with Administration: read (not available to the agent; it got 401).
 >   **Owner decision 2026-10-13:** that remaining acceptance (the "Merging is blocked"
->   demonstration and `check:settings`) is waived; the ruleset is considered done.
+>   demonstration and `check:settings`) is waived; the ruleset is considered done. Re-read 2026-10-19 (public rules API, *executed*): the live
+>   ruleset requires six checks, `Build & Test`, `Deno Mirror Tests`, `Run pgTAP against local
+>   Supabase`, `npm audit (high and critical block)`, `Workflow audit (zizmor)` and `E2E against
+>   local Supabase`, matching `.github/rulesets/main.json` (#573, #575, #581).
 > - **Fix approach:** add `.github/rulesets/main.json` from the skeleton
 >   (`prompts/skeletons/.github/rulesets/main.json`), requiring pull requests, the checks
 >   `Build & Test` and `Deno Mirror Tests` (D5), and no force pushes or deletions on `main`; the
@@ -209,7 +223,7 @@ it), so it carries no ID.
 >   reviewed.
 
 > **M1.4. CI runs an end-of-life Node that production doesn't use, and nothing pins one** (audit finding 7.2, high)
-> - **Status (2026-10-13): in #552 (open).** `.nvmrc` `24`, `engines.node` `^24.0.0`, and every
+> - **Status (2026-10-13): merged as #552 (`33e68ab`).** `.nvmrc` `24`, `engines.node` `^24.0.0`, and every
 >   `setup-node` step reads `node-version-file: .nvmrc` (`ci.yml`'s two; `pgtap.yml` had none and
 >   ran npm on the runner image's Node, so it gained one). #332's runtime half, credited; its
 >   actions and dependency refresh stay with M2.1. Vercel builds on `24.x` (API), and `engines`
@@ -239,7 +253,7 @@ it), so it carries no ID.
 > - **Verification label:** executed (the current state); the fix statically reviewed.
 
 > **M1.7. A production build without Supabase configuration serves the mock on the production host** (audit finding 5.1, high; moved from M2.2 into Milestone 1 by the owner at approval, 2026-10-13; numbered after M1.6 so existing references stay valid)
-> - **Status (2026-10-13): in #552 (open).** `config.js` refuses on every host; the host plays no
+> - **Status (2026-10-13): merged as #552 (`33e68ab`).** `config.js` refuses on every host; the host plays no
 >   part, so the opt-in now also runs the mock on a custom domain, where the old guard refused it
 >   (listed in the PR). Test gate *executed*: `tests/mockModeGuard.test.js`, 19 cases; against the
 >   old `config.js` 9 fail, the `*.vercel.app`, `localhost` and `127.0.0.1` cases because the
@@ -303,6 +317,10 @@ it), so it carries no ID.
 >   remains (owner):** the signed-in leg (an event tagged with user and organization IDs; it
 >   needs a real account) and an Edge Function error in BetterStack with the organization ID
 >   (after the merge deploys the functions).
+>   **Closed out 2026-10-19:** both legs need a real signed-in account and are deferred to the
+>   v1.1.0 release smoke, owner (see "Close-out"). A Sentry search for production issues with a
+>   user id (30 days) found none; that is *unverified*, not a pass, since no signed-in error has
+>   occurred to carry one.
 > - **Fix approach:** call `logger.setUser({ id, organization_id, role })` from `AuthContext`
 >   on sign-in and from `OrganizationContext` on organization switch, and `setUser(null)` on
 >   sign-out (IDs only, never names or emails); route each Edge Function's top-level error path
@@ -357,19 +375,21 @@ it), so it carries no ID.
 > - **Diff class:** minimal diff.
 > - **Verification label:** statically reviewed.
 
-**Milestone exit:** [ ] CI is a required check and blocks merge on the gate (M1.3; the owner
-imports the ruleset) · [ ] a production build without Supabase configuration refuses to start on
-every host, the production host included (M1.7) · [ ] error reporting receives an induced error,
-tagged with user and organization IDs (M1.5; the CSP half, M1.6, is in `main` through #545) ·
-[ ] zero open blockers (M1.1) · [ ] deployed
-and smoke-tested
+**Milestone exit:** [x] CI is a required check and blocks merge on the gate (M1.3; the live
+ruleset requires six checks, read back 2026-10-19) · [x] a production build without Supabase
+configuration refuses to start on every host, the production host included (M1.7, #552; the build
+itself fails since M2.2, #558) · [~] error reporting receives an induced error, tagged with user
+and organization IDs (M1.5: the signed-out leg is done on #553's preview; the signed-in and
+BetterStack legs are deferred to the owner's v1.1.0 release smoke; the CSP half, M1.6, is in
+`main` through #545) · [x] zero open blockers (M1.1, #551) · [~] deployed and smoke-tested (merged
+to `main`; the Manual QA script was not run end to end, deferred to the same smoke)
 
 ---
 
 ## Milestone 2 — Data integrity & security
 
 > **M2.1. Eight high advisories, no waiver, no audit gate** (audit finding 8.1, high)
-> - **Status (2026-10-13): in #559 (open).** #332's in-range refresh (`npm update` within the
+> - **Status (2026-10-13): merged as #559 (`acac2ed`).** #332's in-range refresh (`npm update` within the
 >   current majors, taken under M2.3's 3-day release wait) cleared every vulnerable package `npm
 >   audit` reported (15: 8 high, carrying 18 high advisories; 6 moderate; 1 low); floors raised for the direct ones (`react-router-dom`
 >   `^7.18.4`, `vite` `^7.3.7`, `postcss` `^8.5.29`). No major upgrade and no waiver needed (D6).
@@ -407,7 +427,7 @@ and smoke-tested
 > - **Verification label:** executed (the current audit); the fix statically reviewed.
 
 > **M2.2. A typed env module, and production decided by the build, not the hostname** (audit finding 2.2, medium)
-> - **Status (2026-10-13): in #558 (open).** `frontend/src/env.js` is the only reader of
+> - **Status (2026-10-13): merged as #558 (`18ebc0e`).** `frontend/src/env.js` is the only reader of
 >   `import.meta.env` (by name); the Zod rules are in `frontend/src/envRules.js`, run by a
 >   `vite.config.js` plugin when a production build starts and again by `env.js` in the browser;
 >   M1.7's guard moved into `env.js` unchanged. A production build without `VITE_SUPABASE_URL` /
@@ -451,7 +471,7 @@ and smoke-tested
 > 8.4 — resolved by M2.2 (no whole-object read; the test password leaves the `VITE_` prefix).
 
 > **M2.3. Dependency updates and install guards** (audit finding 8.2, medium)
-> - **Status (2026-10-13): in #559 (open), with M2.1.** `.github/dependabot.yml` (npm and
+> - **Status (2026-10-13): merged as #559 (`acac2ed`), with M2.1.** `.github/dependabot.yml` (npm and
 >   Actions, weekly, grouped, 3-day cooldown; holds `@types/node` below 25,
 >   `eslint-plugin-react-hooks` below 7.1 and `@tanstack/react-virtual` below 3.14, each with its
 >   reason); `.npmrc` with
@@ -561,16 +581,18 @@ and smoke-tested
 > - **Diff class:** minimal diff (input validation; no schema or persistence change).
 > - **Verification label:** statically reviewed (the defect, read in #551's review).
 
-**Milestone exit:** [ ] no unwaived high/critical advisory and the audit gate runs on PRs and
-weekly · [ ] a production build without Supabase variables fails · [ ] scorecard passes the
-standards these items name · [ ] deployed and smoke-tested
+**Milestone exit:** [x] no unwaived high/critical advisory and the audit gate runs on PRs and
+weekly (#559; `npm audit (high and critical block)` passed on `main`'s head, read 2026-10-19) ·
+[x] a production build without Supabase variables fails (#558) · [x] scorecard passes the
+standards these items name (2026-10-19, see "Close-out") · [~] deployed and smoke-tested (merged;
+smoke deferred to the owner's v1.1.0 release smoke)
 
 ---
 
 ## Milestone 3 — Testing & CI depth
 
 > **M3.1. Coverage thresholds are configured but never enforced** (audit finding 6.1, high)
-> - **Status (2026-10-13): done in PR M3-A (branch `claude/vibrant-allen-hr7y7s-m3a`; open).**
+> - **Status (2026-10-13): merged as #574 (`ca6279c`).**
 >   Build & Test's "Unit & Integration Tests" step runs `npm run test:coverage`. Measured with
 >   CI's command on `main` at `9fba821` merged with this branch (*executed*): 93.08 / 84.37 / 95.21
 >   / 94.07 overall, 65.32 / 55.54 / 67.81 / 69.37 for `frontend/src/hooks`. Thresholds raised
@@ -606,8 +628,8 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M3.2. pgTAP runs only on some PRs, so it can't be required** (audit finding 6.3, medium)
-> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open);
->   the live ruleset is the owner's step after merge.** `pgtap.yml` has no `paths` filter and
+> - **Status (2026-10-13): merged as #573 (`9fba821`);
+>   the live ruleset requires the pgTAP check (read back 2026-10-19, *executed*).** `pgtap.yml` has no `paths` filter and
 >   pins CLI `2.118.0`, the deploy jobs' version (kept over 2.95.4 because `migrationGuard.mjs`
 >   parses 2.118.0's JSON; `supabaseCliPin.test.js` now holds every workflow to one version).
 >   `supabase start` skips the services no suite uses, after an edge-runtime 502 failed a run.
@@ -616,7 +638,7 @@ standards these items name · [ ] deployed and smoke-tested
 >   Green on 2.118.0: 53 files, 662 assertions (*fully validated*, dispatch run 38484268374).
 >   Test gate: a throwaway migration adding a permissive `USING (true)` SELECT policy on `teams`
 >   failed `rls_cross_org_isolation.sql` tests 1 and 3 (*fully validated*, dispatch run
->   38484483751 on a throwaway branch, no PR). Merge blocking awaits the live ruleset.
+>   38484483751 on a throwaway branch, no PR). Merge blocking is live: the ruleset lists the check.
 > - **Fix approach:** drop the `paths` filter from `pgtap.yml` (D5), use the one
 >   `SUPABASE_CLI_VERSION`, and add it to the ruleset's required checks.
 > - **Files touched:** `.github/workflows/pgtap.yml`, `.github/rulesets/main.json`.
@@ -633,7 +655,7 @@ standards these items name · [ ] deployed and smoke-tested
 > 3.1 — resolved by M3.2.
 
 > **M3.3. Supabase's own advisors never run** (audit finding 8.6, medium)
-> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
+> - **Status (2026-10-13): merged as #573 (`9fba821`).**
 >   `supabase db advisors --local --type all --level info --fail-on none --output-format json`
 >   (flags confirmed with `--help` on 2.118.0), read by `scripts/ci/supabaseAdvisors.mjs`
 >   against `docs/security/supabase-advisor-waivers.json` (a waiver names each finding by its
@@ -659,7 +681,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M3.4. The migration harness runs nowhere in CI, and needs an undocumented OS user** (audit finding 4.2, medium)
-> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
+> - **Status (2026-10-13): merged as #573 (`9fba821`).**
 >   `dbharness.yml` (job `Migration harness (PostgreSQL 16)`, ubuntu-24.04) runs on PRs touching
 >   `supabase/`, `docs/sql/`, `scripts/dbharness/` or itself, creates `pgrunner`, runs the
 >   harness as root and fails unless it exits 0 with `HARNESS OK`. Not required (path-filtered).
@@ -684,7 +706,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** executed (the harness, here, with `HARNESS_PGUSER=postgres`).
 
 > **M3.5. Workflows unaudited, actions pinned by tag** (audit finding 7.4, medium)
-> - **Status (2026-10-13): done in PR M3-A (branch `claude/vibrant-allen-hr7y7s-m3a`; open).**
+> - **Status (2026-10-13): merged as #574 (`ca6279c`).**
 >   Every `uses:` is pinned by full commit SHA with a `# vX.Y.Z` comment, each resolved from the
 >   action's tags with `git ls-remote` (the commit its moving major tag named that day, so no
 >   action changed): checkout v7.0.1, setup-node v7.1.0, upload-artifact v7.0.2, setup-deno
@@ -712,16 +734,16 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Diff class:** minimal diff.
 > - **Verification label:** executed (current state).
 
-**Milestone exit:** [ ] coverage, pgTAP, advisors and the harness fail CI on a planted defect ·
-[ ] pgTAP required · [ ] deployed and smoke-tested
+**Milestone exit:** [x] coverage, pgTAP, advisors and the harness fail CI on a planted defect
+(each item's test gate, #573, #574) · [x] pgTAP required (live ruleset, 2026-10-19) · [~] deployed
+and smoke-tested (merged; smoke deferred to the owner's v1.1.0 release smoke)
 
 ---
 
 ## Milestone 4a — Completeness vs. what "complete" means: the flows
 
 > **M4.6. The E2E scenarios named for the engines never run them** (audit finding 13.3, high)
-> - **Status (2026-10-14): built, in review** (branch `claude/vibrant-allen-hr7y7s-w3b`, not
->   merged). The three scenarios press Generate Teams, Run auto-scheduler and Generate Schedule
+> - **Status (2026-10-14): merged as #579 (`3d26248`).** The three scenarios press Generate Teams, Run auto-scheduler and Generate Schedule
 >   on seeded inputs and read the page: the team engine forms 10 teams where 5 were asked for
 >   (100 players, at most 10 each); a planted coach clash leaves one of two teams unplaced and a
 >   slot a locked practice fills gets nobody; 3 of 6 matchups are scheduled, with a coach clash,
@@ -756,8 +778,7 @@ standards these items name · [ ] deployed and smoke-tested
 
 
 > **M4.1. No core flow is proven against the real backend** (audit finding 13.2, medium)
-> - **Status (2026-10-14): built, in review** (branch `claude/vibrant-allen-hr7y7s-w3d`, not
->   merged). `.github/workflows/e2e-real-backend.yml`, job **E2E against local Supabase**, runs
+> - **Status (2026-10-14): merged as #578 (`39bebc6`).** `.github/workflows/e2e-real-backend.yml`, job **E2E against local Supabase**, runs
 >   on every pull request (no `paths` filter, no job `if`) and is not required yet. It starts
 >   `supabase start` with the edge runtime (its own job, so the required pgTAP job keeps
 >   excluding it), seeds `tests/e2e/real-backend/seed.sql` (pseudonymous; `supabase/seed.sql`
@@ -787,8 +808,7 @@ standards these items name · [ ] deployed and smoke-tested
 >   `verify_jwt` off alone does not fail it: the function refuses a caller with no session
 >   itself (run 38502405552). The features and steps are under `tests/e2e/real-backend/`, not
 >   `tests/e2e/features/` and `tests/e2e/steps/`: the mock project's globs would load them.
->   Recommended as a required check after several green pull-request runs (a ruleset change,
->   so another owner import). The audit-log assertion after import is done (2026-10-17, branch
+>   Made a required check by #581 (the live ruleset lists it, read back 2026-10-19). The audit-log assertion after import is done (2026-10-17, branch
 >   `claude/vibrant-allen-hr7y7s-exports`, entry below): each import in the re-import scenario
 >   requires its import-validation and `finalize_import_job` audit rows, as the administrator
 >   (*executed*, dispatched run 39008438365; red with the action renamed, run 39008441959).
@@ -811,8 +831,8 @@ standards these items name · [ ] deployed and smoke-tested
 > 6.4 — resolved by M4.1.
 
 > **M4.7. Both scoring engines judge a weekly slot by its first occurrence and ignore assignment date ranges** (not an audit finding: found by PR 1-A, #551; medium) — **plan first: needs the owner's approval before any code**
-> - **Status (2026-10-17): built and merged (#560); the exceptions follow-up (Q1) built, in
->   review** (branch `claude/vibrant-allen-hr7y7s-m47x`, not merged). Ranges and slot
+> - **Status (2026-10-17): built and merged (#560); the exceptions follow-up (Q1) merged as #590
+>   (`d5f74e5`).** Ranges and slot
 >   validity are in both engines, held together by a dated parity extract (corpus cases C1
 >   and C4) and 14 hand-written witnesses run by core, the cross-arm drift test and Deno; the
 >   page sends each slot's dating and each row's range, the override panel counts from the
@@ -863,19 +883,18 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Rollback:** revert the PR (no data changes).
 > - **Diff class:** flagged change to the domain model (plan first).
 > - **Verification label:** executed (witnesses, parity, plants and the solver sweep, locally);
->   CI pending.
+>   merged through the required checks (#560, #590).
 
 > **M4.8. The auto-scheduler's coach check compares first-occurrence instants, so it can double-book a coach** (not an audit finding: found by the M4.7 plan, Q2; medium) — **plan first: needs the owner's approval before any code**
-> - **Status (2026-10-18): built, in review.** Plan `docs/PLAN_SOLVER_DATE_MODEL.md`, approved
->   by the owner on 2026-10-18 with every recommendation as written; built in branch
->   `claude/vibrant-allen-hr7y7s-m48` (the PR is opened by the coordinator). The solver judges
+> - **Status (2026-10-18): merged as #593 (`208ccc6`).** Plan `docs/PLAN_SOLVER_DATE_MODEL.md`, approved
+>   by the owner on 2026-10-18 with every recommendation as written. The solver judges
 >   dated occupancy from the store's slot dating; `scoreSchedule` scores dated; a slot it cannot
 >   date refuses the run (422 `SLOT_DATING_UNREADABLE`); the response carries `liveFrom` and the
 >   page dates new placements from it. On the season-2026 corpus sweep (lock shares 0 / 0.5 /
 >   0.9, seeds 1 / 2 / 3, two todays) the placements are byte-identical to a golden generated on
 >   `main` before the change (*executed*). No migration. The plan's §12 records how the build
 >   settled what the text left open.
-> - **Status (2026-10-13): open, not planned.** Proposed by the M4.7 plan (Q2, approved as
+> - **Status (2026-10-13, history): open, not planned.** Proposed by the M4.7 plan (Q2, approved as
 >   recommended) and left out of M4.7 because it is the solver, whose behaviour that item froze.
 > - **Why here:** it is the same gap M4.7 closes in the evaluators, left open in the one place
 >   that decides placements; after M4.7 the panel reports the clash the solver can create, but
@@ -942,8 +961,7 @@ standards these items name · [ ] deployed and smoke-tested
 >   violations, listed in `KNOWN_VIOLATIONS` with their owners (below).
 
 > **M4.3. The game grid is drag-only** (audit finding 11.2, high)
-> - **Status (2026-10-14): built, in review** (branch `claude/vibrant-allen-hr7y7s-w3b`, not
->   merged). The grid uses the roster manager's sensor pattern with its own arrow-key rule
+> - **Status (2026-10-14): merged as #579 (`3d26248`).** The grid uses the roster manager's sensor pattern with its own arrow-key rule
 >   (`gridKeyboardCoordinates`: `sortableKeyboardCoordinates` moves only a droppable, and a game
 >   card is not one), named announcements, a grip button as the keyboard activator, and a
 >   "Move to…" list on each card of the empty game slots on their own field. A drop and a Move
@@ -999,8 +1017,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M4.5. The staging suite never runs** (audit finding 6.2, medium)
-> - **Status (2026-10-14): deleted, in review** (branch `claude/vibrant-allen-hr7y7s-w3d`, with
->   M4.1). Run against production with the publishable key on 2026-10-14 (*executed*: anon
+> - **Status (2026-10-14): deleted, merged as #578 (`39bebc6`), with M4.1.** Run against production with the publishable key on 2026-10-14 (*executed*: anon
 >   reads, one anon insert RLS refused, unauthenticated Edge calls), its connectivity test
 >   failed on a healthy project (`error` is null, so `toContain` throws), and in a probe copy a
 >   table that does not exist passed its schema check: it could not fail where it mattered.
@@ -1022,16 +1039,17 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Diff class:** minimal diff.
 > - **Verification label:** executed (it skips today).
 
-**Milestone exit (4a and 4b):** [ ] real-backend E2E green on PRs · [ ] the engine scenarios
-fail when their engine is stubbed · [ ] accessibility scan in E2E · [ ] deployed and
-smoke-tested
+**Milestone exit (4a and 4b):** [x] real-backend E2E green on PRs and required (#578, #581) ·
+[x] the engine scenarios fail when their engine is stubbed (#579) · [x] accessibility scan in E2E
+(#580, widened by #591) · [~] deployed and smoke-tested (merged; smoke deferred to the owner's
+v1.1.0 release smoke)
 
 ---
 
 ## Milestone 5 — Agent rules, docs and operability
 
 > **M5.1. One AGENTS.md for every agent, without contradictions** (audit finding 12.1, high)
-> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Root `AGENTS.md` (23,589 bytes) holds every rule, its
+> - **Status (2026-10-13): merged as #557 (`b80e077`).** Root `AGENTS.md` (23,589 bytes when merged; since resized, #586) holds every rule, its
 >   sections numbered as CLAUDE.md's were; `CLAUDE.md` is `@AGENTS.md` plus Claude Code's notes.
 >   The contradictions and how each was resolved are listed in the PR. `project-hardening/` is
 >   deleted after its durable rules were merged (one task per PR, merge only on the owner's say,
@@ -1062,7 +1080,7 @@ smoke-tested
 > 12.3 — resolved by M5.1. 12.4 — resolved by M5.1.
 
 > **M5.2. The three repository skills can't be loaded** (audit finding 12.2, medium)
-> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Frontmatter on all three, their facts corrected
+> - **Status (2026-10-13): merged as #557 (`b80e077`).** Frontmatter on all three, their facts corrected
 >   against the code (the evaluator registry is `EVALUATOR_REGISTRY` in
 >   `packages/core/src/evaluators/index.js`, scores are 0-100; `ALL_FLAGS` is derived; the audit
 >   rows carry `action` and `metadata.old`/`new`), and Claude Code copies in `.claude/skills/`.
@@ -1080,7 +1098,7 @@ smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M5.3. The July plan was never closed** (audit finding 12.5, medium)
-> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** The July plan is marked superseded, with a disposition
+> - **Status (2026-10-13): merged as #557 (`b80e077`).** The July plan is marked superseded, with a disposition
 >   for each of its 37 items: 13 closed (with the PR), 11 open under an October finding, 13 open
 >   and not carried by this audit (listed below, under "Discovered during execution").
 >   *Statically reviewed.*
@@ -1097,7 +1115,7 @@ smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M5.4. Vercel's settings and the frontend rollback aren't written down** (audit finding 7.3, medium)
-> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open), except the test gate.** `vercel.json` sets `framework`,
+> - **Status (2026-10-13): merged as #557 (`b80e077`), except the test gate.** `vercel.json` sets `framework`,
 >   `buildCommand` (`npm run frontend:build`) and `outputDirectory`, held by
 >   `tests/vercelBuildSettings.test.js`; `ENVIRONMENT.md` lists what the Vercel project sets, by
 >   name; `ci-cd.md` has the Vercel settings and a frontend rollback; the cutover runbook's mock
@@ -1124,7 +1142,7 @@ smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M5.5. No unused-code check** (audit finding 1.2, low)
-> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** knip `~6.27.0` (later versions need zod `^4.4.3`, which
+> - **Status (2026-10-13): merged as #557 (`b80e077`).** knip `~6.27.0` (later versions need zod `^4.4.3`, which
 >   would move the app's zod) in CI's Build & Test as `npm run check:unused`; the core package's
 >   exports count as public API, its files do not; `knip.jsonc` keeps a dated, reasoned baseline
 >   (2 unused files; 12 files whose unused exports, one unused type and one duplicate export are
@@ -1143,15 +1161,16 @@ smoke-tested
 > - **Diff class:** minimal diff.
 > - **Verification label:** executed (current state).
 
-**Milestone exit:** [ ] `check:instructions` and the scorecard's §12 standards pass · [ ] deployed
-and smoke-tested
+**Milestone exit:** [x] `check:instructions` and the scorecard's §12 standards pass (#557; the
+scorecard rerun 2026-10-19 passes every area-12 standard) · [~] deployed and smoke-tested
+(merged; the Vercel dashboard's build-command override is still the owner's to clear, M5.4)
 
 ---
 
 ## Milestone 6 — Polish
 
 > **M6.1. `npm run build` isn't a build** (audit finding 7.5, low)
-> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** `build` runs
+> - **Status: merged as #588 (`6517d33`).** `build` runs
 >   `frontend:build`, and Build & Test's build step runs `npm run build`, so CI runs the `build`
 >   script (`node.ci-runs-gate`). One change from the fix approach: `scripts/build.js` (an import
 >   check of seven core functions) is deleted, not renamed to `check:core-exports`. Every one of
@@ -1174,7 +1193,7 @@ and smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M6.2. CRLF and mixed line endings** (audit finding 12.7, low)
-> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** The six applied
+> - **Status: merged as #588 (`6517d33`).** The six applied
 >   migrations committed with CRLF or mixed endings are marked `-text` in `.gitattributes`, each by
 >   name, and the five other files are renormalized to LF (three architecture docs, two E2E
 >   `.feature` files; `.gitignore` was done by PR M5). The diff is line endings only. Acceptance,
@@ -1200,7 +1219,7 @@ and smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M6.3. Stale `test.todo` entries** (audit finding 6.5, low)
-> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** The six todos in
+> - **Status: merged as #588 (`6517d33`).** The six todos in
 >   `tests/teamGeneration.characterization.test.js` are deleted; a comment in their place names
 >   the test that covers each (`tests/teamGenerationIncremental.test.js` and the numbered
 >   scenarios in `tests/incrementalTeamingScenarios.test.js`). Test gate, *executed*: the file
@@ -1218,7 +1237,7 @@ and smoke-tested
 > - **Verification label:** executed.
 
 > **M6.4. README's release line is stale** (audit finding 12.9, low)
-> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** Reconciled against the
+> - **Status: merged as #588 (`6517d33`).** Reconciled against the
 >   three sources: `CHANGELOG.md`'s latest release is 1.0.1 (2026-04-23), `package.json` says
 >   1.0.1, and the production bundle (`squadlogic.secureyour.tech`, fetched 2026-10-17) carries
 >   `1.0.1` as Sentry's release alongside unreleased work (the heat forecast's chunk). *Executed.*
@@ -1241,8 +1260,9 @@ and smoke-tested
 > - **Diff class:** minimal diff.
 > - **Verification label:** statically reviewed.
 
-**Milestone exit:** [ ] scorecard shows only baselined or waived failures · [ ] deployed and
-smoke-tested
+**Milestone exit:** [x] scorecard shows only baselined or waived failures (2026-10-19: 0 fail,
+2 baselined; `docs/standards/conformance.json`) · [~] deployed and smoke-tested (merged as #588;
+smoke deferred to the owner's v1.1.0 release smoke)
 
 ---
 
@@ -1375,7 +1395,7 @@ smoke-tested
     injection), DS-5 (`submit_registration` throttle), DS-9 (impersonation failures swallowed),
     DS-14 (`dashboardCache` unused), DS-15 (serial dashboard queries), DD-1 to DD-5, DD-7, DD-9
     (docs drift) and TG-3 (three E2E journeys). For the owner to place; the July plan's table
-    has the detail. *Statically reviewed.*
+    has the detail. *Statically reviewed.* **Placed 2026-10-19:** see "Close-out".
   - The production bundle embeds every `VITE_VERCEL_*` system variable Vercel exposes, the last
     commit's message and author among them, because `config.js` reads `import.meta.env` whole
     (8.4, M2.2). *Executed* (names checked in the deployed bundle, values not recorded).
@@ -1464,12 +1484,13 @@ smoke-tested
     **Investigated 2026-10-17** ([`schema-drift-2026-10.md`](../../operations/schema-drift-2026-10.md)):
     an orphan of `definitive_schema`'s fresh-replay reset, which also hid 17 production-only
     triggers (one deleting data) and a production-only `persist_evaluation_run` overload.
-    **Built 2026-10-18, in review** (branch `claude/vibrant-allen-hr7y7s-drift`; the plan approved
+    **Merged 2026-10-18 as #598 (`b721397`)** (the plan approved
     by the owner as recommended): `20261018060000_reconcile_trigger_drift` and the catalogue drift
     check (`supabase/catalog-snapshot.json`, checked by the harness; the operator query in
     `ci-cd.md`). Production compared with the snapshot before deploy differs by exactly the 29
     objects the migration drops and the not-yet-deployed RLS rewrite's policies (*executed*,
-    read-only). Not deployed.
+    read-only). Applied by CI on merge: production's migration list includes
+    `20261018060000` (read-only `list_migrations`, 2026-10-19, *executed*).
   - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
     which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
     renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
@@ -1578,7 +1599,7 @@ smoke-tested
     non-empty roster (core's `evaluateGameSchedule` warns `unknown-team`), so a roster that
     matches no game still scores clean. Reporting it is a scoring change, so it is not in this
     PR; `EvaluationPanel` has no client guard for games either, unreachable while no page passes
-    `gameData`. *Statically reviewed.* **Status (2026-10-18): built, in review**, by plan
+    `gameData`. *Statically reviewed.* **Status (2026-10-18): merged as #594 (`af3552f`)**, by plan
     `docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md` (approved by the owner on 2026-10-18 with every
     recommendation as written), branch `claude/vibrant-allen-hr7y7s-gameeval`: the Edge reports
     each unknown side, counts coverage from the roster, checks every coach, treats one fixture as
@@ -1604,7 +1625,7 @@ smoke-tested
       characters (#577).
     - `scheduler.auto_progress` volume is accepted (about 50 rows per run, 180-day retention).
     - Still open: the SQL-side `create_import_job` audit (`20260522130000`) stores `file_name`
-      and needs its own migration. *Statically reviewed.* **Fixed 2026-10-18** (branch
+      and needs its own migration. *Statically reviewed.* **Fixed 2026-10-18, merged as #597 (`149ed9c`)** (branch
       `claude/vibrant-allen-hr7y7s-importfilename`, migration `20261018050000`;
       `docs/PLAN_AUDIT_IN_TRANSACTION.md` §3.4, Q1, Q5): `create_import_job` is replaced wholesale
       without `file_name` in its `import.started` metadata (the name still forms `storage_path`),
@@ -1617,7 +1638,9 @@ smoke-tested
       `file_name`, and `telemetry_log.payload` stores it: all 5 such production rows carry one
       (read-only count, 2026-10-18). The owner's 2026-10-14 decision named the audit log; whether
       it covers telemetry is a question for the owner. *Executed* (the count); the code path
-      *statically reviewed*.
+      *statically reviewed*. **Decided 2026-10-18:** stop sending it. #599 (merged as f561674)
+      removes `file_name` from the payload; the 5 existing rows age out
+      under the 180-day retention, as #597's did.
 
 - 2026-10-14, found by PR w3b (M4.6, M4.3):
   - The mock's organization id is `org-1`, not a UUID, and core's `SlotSchema` refuses an
@@ -1626,7 +1649,7 @@ smoke-tested
     hid it. The auto-scheduler's request schema refuses the mock's `org-1` and `season-1` the same
     way. Not fixed (a change to the mock's ids touches most of the E2E suite); the game scenario
     seeds a club with a UUID id. *Executed* (the page's own error, on a run of the scenario).
-    **Fixed 2026-10-17** (Wave 0, branch `claude/vibrant-allen-hr7y7s-mockids`): the ids are
+    **Fixed 2026-10-17** (Wave 0, #587, branch `claude/vibrant-allen-hr7y7s-mockids`): the ids are
     `MOCK_ORG_ID` and `MOCK_SEASON_ID` (`frontend/src/lib/mockSeedIds.js`), fixed UUIDs shared by
     the mock, the factories, the unit tests and the E2E steps; the E2E auto-scheduler route now
     validates the whole request schema. A Pillar 1 scenario runs Generate Schedule on the seed's
@@ -1769,7 +1792,7 @@ smoke-tested
     `rgb(71, 85, 105)`), and `tests/chartColorTokens.test.js` refuses a literal colour in any file
     that imports Recharts (red on the old page). Light and dark screenshots compared. *Executed.*
 
-- 2026-10-17, PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`): Wave 4's M6 polish. The resume
+- 2026-10-17, PR M6 (#588, branch `claude/vibrant-allen-hr7y7s-m6`): Wave 4's M6 polish. The resume
   queue lists six items as "M6.1-M6.4"; only the `build` script is plan item M6.1. The other five
   are entries above. The plan's own M6.2 (CRLF), M6.3 (`test.todo`) and M6.4 (README release
   line) were added to the same PR afterwards; their status lines are above.
@@ -1809,7 +1832,8 @@ smoke-tested
     (link count 2), which only `install.js` makes. *Executed.*
   - **Open for the owner:** `fsevents` 2.3.3 (macOS only) also has an install script
     (`node-gyp rebuild`); the template denies the same version. Listed as awaiting a decision in
-    `tests/allowScripts.test.js`. *Statically reviewed.*
+    `tests/allowScripts.test.js`. *Statically reviewed.* **Decided 2026-10-18:** it stays denied;
+    recorded in the close-out PR (`allowScripts` `fsevents: false`, the test, `dependency-policy.md`).
   - Without a DSN the main entry is 134.19 KB against the old 137.16 KB cap: about 3 KB was left
     before this PR's re-baseline. *Executed.*
 
@@ -1825,7 +1849,7 @@ smoke-tested
     dates (2025-01-01 to 2025-12-31). Generate Schedule on the seed stages a 1:00 AM kickoff, and
     did not refuse the slot for lying outside the season. Seed data; not changed. *Executed*
     (the staged game on the new scenario's page reads "Sat, 4/4/2026 · 1:00 AM").
-- 2026-10-17, the Wave 3 UI PR (`claude/vibrant-allen-hr7y7s-w3ui`), the product bugs that don't
+- 2026-10-17, the Wave 3 UI PR (#589, `claude/vibrant-allen-hr7y7s-w3ui`), the product bugs that don't
   touch the engines. Each test below was run red with its fix reverted (*executed*):
   - **Import "Continue"** keeps the import and moves on: it calls only `onImport()`; the import
     stays in `ImportContext`, `ImportPage` goes to `/teams`, the dashboard goes to step 2, and
@@ -1897,7 +1921,7 @@ smoke-tested
     `20260611000400_players_team_id_sync.sql`), so Team Builder places them. *Statically
     reviewed.*
 
-- 2026-10-17, the exports PR (branch `claude/vibrant-allen-hr7y7s-exports`): the `exports`
+- 2026-10-17, the exports PR (#592, branch `claude/vibrant-allen-hr7y7s-exports`): the `exports`
   bucket and its policies (migration `20261017000000`), "Upload to Storage" wired to it, and the
   real-backend import scenario's audit assertion. CI evidence below is from `workflow_dispatch`
   runs on the branch and on the throwaway `claude/vibrant-allen-hr7y7s-exports-plant`:
@@ -1947,7 +1971,7 @@ smoke-tested
     team file through a Playwright route and lists the bucket empty afterwards (*statically
     reviewed* until the PR's CI runs it).
 
-- 2026-10-17, found by the M4.7 exceptions follow-up (Q1):
+- 2026-10-17, found by the M4.7 exceptions follow-up (Q1, #590):
   - The override panel's per-slot "N free" (`overrideSlotLoad`, Q5) counts series only: a
     relocated week still holds its original slot and not its target, and a TIME TBD week still
     counts. Not changed; a question for the owner in the PR. *Statically reviewed.*
@@ -1968,7 +1992,7 @@ smoke-tested
     (Q2, M4.8); its lock load already holds slots for live `time_tbd` and `relocated` rows
     (`practice-lock.ts`). *Statically reviewed.*
 
-- 2026-10-17, found by the Wave 4 accessibility PR (branch `claude/vibrant-allen-hr7y7s-a11y`):
+- 2026-10-17, found by the Wave 4 accessibility PR (#591, branch `claude/vibrant-allen-hr7y7s-a11y`):
   - The import page's "Roll Back Coach Import" button is gone once you leave the page and come
     back in the app (the Coaches link, then Import): the import shows as applied, with no way to
     roll it back from there. *Executed* (the button list before and after, mock mode).
@@ -1984,7 +2008,7 @@ smoke-tested
     tokens are the fix. *Executed* (ratios computed the way `tests/themeTextContrast.test.js`
     does).
 
-- 2026-10-18, the RLS advisor rewrite, PR 1 (branch `claude/vibrant-allen-hr7y7s-rlsmatrix`,
+- 2026-10-18, the RLS advisor rewrite, PR 1 (#595, branch `claude/vibrant-allen-hr7y7s-rlsmatrix`,
   `docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2): the persona matrix only, no migration.
   `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE, a move to an
   organization nobody belongs to (an UPDATE's WITH CHECK) and DELETE for seven personas on the 26 tables the two
@@ -2006,7 +2030,7 @@ smoke-tested
   - Any member of an organization, a coach or a parent included, can INSERT `telemetry_log`
     rows for it; only its admins read them. *Executed.*
 
-- 2026-10-18, the RLS advisor rewrite, PR 2 (branch `claude/vibrant-allen-hr7y7s-rlsrewrite`,
+- 2026-10-18, the RLS advisor rewrite, PR 2 (#596, branch `claude/vibrant-allen-hr7y7s-rlsrewrite`,
   stacked on PR 1): migration `20261018030000_rls_advisor_rewrite.sql` with its revert and smoke,
   `reconcile_prod_rls_drift()` and the `20260928000000` smoke on the new spec, and the
   `auth_rls_initplan` and `multiple_permissive_policies` waivers removed. 82 policies on `public`
@@ -2038,7 +2062,7 @@ smoke-tested
   - `coach_team_requests` keeps its single admin `FOR ALL` policy: it has no member SELECT beside
     it, so it is not a finding. *Executed* (the migration's closing check).
 
-- 2026-10-18, found by the schema drift PR (branch `claude/vibrant-allen-hr7y7s-drift`):
+- 2026-10-18, found by the schema drift PR (#598, branch `claude/vibrant-allen-hr7y7s-drift`):
   - **The field import relied on the dropped trigger for sub-surfaces, in production only.**
     `finalize_field_import_job` (`20260503070000`) writes `supports_halves`, and in production
     `trigger_manage_field_subunits` then created `A` and `B` (and `rollback_field_import_job`,
@@ -2067,7 +2091,7 @@ smoke-tested
     Whether any body differs in behaviour is *unverified*; comparing normalised bodies is a
     possible extension of `catalog_snapshot.sql`. *Executed* (read-only `md5(prosrc)` on both
     sides).
-- 2026-10-18, the audit-in-transaction PR (branch `claude/vibrant-allen-hr7y7s-audittxn`, migration
+- 2026-10-18, the audit-in-transaction PR (#600, branch `claude/vibrant-allen-hr7y7s-audittxn`, migration
   `20261018070000`; `docs/PLAN_AUDIT_IN_TRANSACTION.md`, approved by the owner on 2026-10-18 with
   every recommendation as written). Wave 2's "write each audit row in the same transaction as its
   save" is done: `persist_team_schedule` and `persist_game_schedule` write `team.saved` /
@@ -2109,7 +2133,8 @@ smoke-tested
 ## Deferred with reason
 
 - 2.1 (strict types) — D2's default: the repository's stated rule is `strict: false`; raising it
-  is a flagged refactor across 867 files. Recorded in the conformance baseline. Reopen if the
+  is a flagged refactor across 867 files. Recorded in the conformance baseline
+  (`docs/standards/conformance.json`, 2026-10-19). Reopen if the
   owner asks for strictness, or a null-handling defect reaches production that `strict` would
   have caught.
 - 4.1 (81 early migrations without revert or smoke scripts) — they are applied and stable, and
@@ -2118,7 +2143,169 @@ smoke-tested
 - 12.8 (process not delivered) — resolved by this run's process delivery commit `a63a9f8`, before
   the plan; listed here so the ID appears once.
 
+## Close-out
+
+Written 2026-10-19 by the close-out PR. Evidence labels as everywhere in this plan: *executed* is a
+command or query run for this PR (the conformance scorecard, read-only queries on production and
+the public GitHub API); everything else cites the merged PR that holds its evidence.
+
+### Owner decisions recorded (2026-10-18)
+
+- The five plans were approved with every recommendation as written, and all are merged: M4.8
+  (#593), the #576 follow-up (#594), the RLS advisor rewrite (#595 persona matrix, #596 rewrite),
+  the schema drift fix (#598), and audit-in-transaction with the game save's admin check (#600).
+  Also merged: the file-name audit fix (#597). Import telemetry stops sending the file name
+  (#599, merged as f561674).
+- M6 questions: `fsevents`' install script stays denied (recorded here: `allowScripts`
+  `fsevents: false`, `tests/allowScripts.test.js`, `dependency-policy.md`; the test fails with the
+  entry removed, *executed*); `esbuild` stays approved by name; v1.1.0 is cut in its own PR after
+  this close-out (not here).
+- #590's behaviour questions: keep as built.
+- The production `uploads` bucket (found in the exports PR's entry, #592) was deleted by the owner
+  on 2026-10-18; only `exports` and `raw-imports` remain (verified read-only by the coordinator).
+- The GitGuardian incident on the revert files' md5 digests was marked a false positive by the
+  owner.
+- RLS plan Q5 (a `tenant_admin` is narrower than `is_org_admin` on four tables: writes to
+  `season_settings` and `registration_forms`, reads of `audit_log` and
+  `organization_schema_history`) and Q6 (any signed-in user reads open registration forms) were
+  kept as they are. Each is a separate product question, recorded below as open, not as a defect.
+
+### The M1 tails
+
+| Tail | Disposition |
+| --- | --- |
+| M1.1 and M1.2 carried no status line | Done here: both say merged as #551. |
+| M1.3's remaining acceptance (a blocked merge shown, `check:settings`) | Waived by the owner 2026-10-13 (unchanged). The live ruleset was read back 2026-10-19 and requires six checks (*executed*). |
+| M1.5, signed-in leg: a Sentry event tagged with user and organization ids | Deferred, owner, to the v1.1.0 release smoke: it needs a real signed-in account and a real error, which no agent has. A Sentry search of production (30 days) for issues with a user id found none (*executed*; says nothing either way, since no signed-in error has occurred). |
+| M1.5, Edge leg: a BetterStack error carrying the organization id | Deferred, same owner and smoke. The code is #553's `withFailureLogging`, Deno-tested there. |
+| Edge logging residuals (the auto-scheduler's other refusals and fairness-scoring's two season-read `console.error`s carry no request id; the persistence stand-in handler is not wrapped; `flush()` is awaited before a failing response) | Deferred to backlog B3 (resume queue). Not small: each is an Edge Function change that needs the Deno suite and a redeploy, and `auto-scheduler/index.ts` is the solver's function. Owner: the repository owner schedules it. |
+| Milestone exit boxes | Ticked where the evidence is cited; "deployed and smoke-tested" is `[~]` throughout, because merging is not a smoke test (below). |
+
+Nothing in M1 was left that was small enough to finish without an Edge change.
+
+### D2: the conformance baseline
+
+`docs/standards/conformance.json` did not exist. The template's own scorer wrote it:
+`node <template checkout>/scripts/check-conformance.mjs --root . --visibility public --write-baseline`
+(template 1.0.0, `6f5e572`; no score was written by hand; `visibility: public` was added to the
+file by hand so a rerun needs no flag). It records two failures:
+
+- `node.strict-types`: D2's recorded decision. `strict` stays off for the 34 TypeScript files
+  (`checkJs` covers the 907 JavaScript ones).
+- `supabase.advisors-in-ci`: the scorer reads `--fail-on none` in `pgtap.yml` as "reports and
+  never fails". The step does fail: `scripts/ci/supabaseAdvisors.mjs` reads the JSON against
+  `docs/security/supabase-advisor-waivers.json` and blocks an unwaived WARN or ERROR (M3.3, with
+  planted defects shown red; `tests/supabaseAdvisors.test.js` holds the gate). The probe cannot
+  see that. The baseline entry would also mask a future weakening of that gate, so that test, not
+  the entry, is what guards it. Recorded as a baseline entry, not a
+  waiver, and for the template (an issue or pull request there, per AGENTS.md).
+
+Rerun with the file: exit 0, `2 baseline, 25 pass, 2 n/a, 8 audit` (*executed*). The 8 `audit`
+standards are the ones a person or `check:settings` scores (repository settings and the deployed
+headers); they were not scored. The audit's own run was `17 fail, 9 pass, 3 n/a, 8 audit` on
+`565e980` with template 1.0.0-rc.3; the catalogue has changed since, so the two are comparable by
+area but not row by row.
+
+### The thirteen July-plan items
+
+Every one is placed. "B1"-"B5" are the backlog groups in [`resume-queue.md`](./resume-queue.md);
+their owner is the repository owner, who schedules them, and every one that touches persistence,
+the solver or a filed figure starts as a plan (AGENTS.md rule 14). The check column is what was
+looked at on `main` (`1fe2265`) for this PR (*statically reviewed* unless stated).
+
+| Item | Placement | Check |
+| --- | --- | --- |
+| DS-4 CSV formula injection | Moved to B2 (plan first: it changes what an export contains, including negative numbers) | `escapeCsvValue` in `packages/core/src/outputGeneration.js` quotes only `"`, `,`, CR, LF |
+| DS-5 `submit_registration` throttle | Moved to B2 (plan first: schema) | no throttle in the RPC's migrations |
+| DS-9 impersonation failures swallowed | Moved to B3 | `TopBar.jsx` still ends `impersonateUser(profile).catch(() => {})` |
+| DS-14 `dashboardCache` unused | Moved to B3 | `frontend/src/lib/cache.js` is imported only by `tests/cache.test.js` |
+| DS-15 serial dashboard queries | Moved to B3 | not re-read; the July entry stands |
+| DD-1 route table in `frontend-architecture.md` | Moved to B4 | it still lists `/compliance`, `/reporting`, `/registration/:formId`; `App.jsx` routes `/admin/compliance`, `/register/:formId` |
+| DD-2 roadmap lists team-size configuration as backlog | Moved to B4 | `docs/expansion/03_ROADMAP.md` line 117 still lists it |
+| DD-3 `data-modeling.md` and `team-generation.md` omit shipped subsystems | Moved to B4 | not re-read; the July entry stands |
+| DD-4 `persistence-rpc-layer.md` lacks the `20260613*` RPCs | Moved to B4 | not re-read; the July entry stands |
+| DD-5 `v1.1-planning.md` quotes old M2.2 wording | Moved to B4 | not re-read; the July entry stands |
+| DD-7 `ENVIRONMENT.md` omits the `TEST_*` variables | **Done**, by #558 | `ENVIRONMENT.md` lines 193-198 now list `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` and say which layer reads them |
+| DD-9 `playwright.config.ts` loads only `.env` | Moved to B5 (needs a Playwright run to verify) | `dotenv.config()` with no path, line 6 |
+| TG-3 three E2E journeys (DST-boundary splitting, rainout acknowledgement, late registrant on a locked roster) | Moved to B5 | none of the three has a scenario |
+
+None was dropped. The deferral reason for the lot: each is a behaviour or contract change, or
+needs a test run the plan's own rules require (plan-first, a planted defect shown red), and none
+blocks the end state the plan measures against.
+
+### Final scorecard
+
+The audit's own areas and scale (the severity of the worst finding in the area; "none open" when
+every finding in it is closed or deferred as stated). *Before* is the audit's summary table
+(2026-10-12, `565e980`). *After* is what the merged PRs close; it was not re-audited area by
+area, so read "None open" as "no finding the audit raised is still open"; the "Not measured" list
+below says what no one re-ran. CI evidence is each PR's own
+required checks (the live ruleset requires six; the audit's baseline had none required).
+
+| # | Area | Before | After (the audit's findings still open; residuals named in the row) | Evidence |
+| --- | --- | --- | --- | --- |
+| 1 | Architecture & boundaries | Medium (1.1, 1.2) | None open | 1.1: parity tests #551, widened by #560, #590, #593, #594; the two engines stay by D4. 1.2: knip in CI, #557. |
+| 2 | Type safety | High (2.1) | **High (2.1), deferred by D2** | 2.1 is baselined, not fixed (`conformance.json`). 2.2 typed env module #558; 2.3 client-side payload validation #576. |
+| 3 | Auth & authorization | Medium (3.1) | None open | pgTAP on every PR and required #573; 26-table persona matrix #595 and rewrite #596 (waivers removed; production's performance advisors report no `auth_rls_initplan` or `multiple_permissive_policies`, read 2026-10-19, *executed*). Found and fixed on the way: any member could save the game schedule (#600), and an org-unchecked `persist_evaluation_run` overload (#598). Open product questions: RLS Q5, Q6. |
+| 4 | Data layer | Medium (4.2) | Low (4.1, deferred with reason) | Harness in CI #573; trigger drift reconciled and a catalogue check added #598 (production's migration list includes `20261018060000`, *executed*). 4.1: the 81 early migrations, and four later ones, still lack revert and smoke scripts. |
+| 5 | Error handling | High (5.1, 5.2) | None open | 5.1 #552, then a build failure #558; 5.2 #556; unknown-outcome handling #576, #589. Flagged, not done: a dropped connection can follow a committed save (all three persistence clients). |
+| 6 | Testing | High (6.1) | None open | Coverage enforced #574; pgTAP required #573; real-backend E2E #578, required #581; engine scenarios drive the engines #579; 6.5 `test.todo` removed #588. 6.2: the staging suite was deleted (#578), its checks moved. |
+| 7 | CI/CD | High (7.1, 7.2) | None open | Ruleset live with six checks (read 2026-10-19, *executed*); Node 24 pinned #552; Vercel settings and rollback written down #557; actions pinned and zizmor #574; `build` is a build #588. Owner: clear the dashboard's build-command override (M5.4). |
+| 8 | Security | High (8.1) | None open | Audit gate #559 (`npm audit (high and critical block)` passed on `main`'s head, *executed*); install guards, Dependabot #559; env #558; SECURITY.md, LICENSE #556; advisors gate #573 with both waivers gone #596. `fsevents` denied, `esbuild` approved. Not measured here: hosted-only lints (definer functions callable by signed-in users, leaked-password protection off, per the 2026-10-13 m3b entry). |
+| 9 | Observability | High (9.1) | **Closed in code; acceptance not measured** | 9.1 #553, 9.2 #545; signed-out event received (preview). The signed-in and BetterStack legs are deferred to the v1.1.0 release smoke (owner). A search for a production event with a user id found none. |
+| 10 | Performance | Low | Low | Bundle gate now measures the shipped shape (Replay lazy, caps re-baselined) #588. New, untriaged: production reports 90 `unindexed_foreign_keys` and 19 `unused_index` at INFO (read 2026-10-19, *executed*), which the audit could not see. |
+| 11 | Accessibility & UX completeness | High (11.1, 11.2) | None open for the audited findings | Lint + axe on every route in both themes #580 (zero known violations after #581); keyboard game grid #579; `DataGrid` tab stop, token text, chart theme #591. Content the seed leaves out, scanned 2026-10-19 (the #591 follow-up); the few overlays still unscanned are listed in that entry. |
+| 12 | Docs, operability & stated-rule conformance | High (12.1) | None open | One `AGENTS.md`, loadable skills, July plan closed, knip #557; LICENSE #556; LF endings and release line #588. Scorecard: all area-12 standards pass (2026-10-19, *executed*). |
+| 13 | Core flows | Blocker (13.1) | None open | 13.1 #551; 13.2 real-backend E2E #578 (and its audit-row assertion #592); 13.3 #579. Beyond the audit: dated scoring #560, #590, dated solver #593, game evaluator #594, audited saves #600. |
+
+**Conformance scorecard** (template standards, *executed* 2026-10-19): 17 fail before; 0 fail and
+2 baselined now (`node.strict-types` by D2; `supabase.advisors-in-ci`, a probe that cannot read
+this repository's gate). See D2 above for the template-version caveat.
+
+**Not measured for this scorecard** (nothing here re-ran them, so no number is claimed): the unit,
+E2E, coverage and pgTAP totals after the work (each PR ran them; the audit's baseline figures are
+stale); the migration harness count; the hosted *security* advisors; the deployed response headers
+(`vite-spa.security-headers`) and repository settings other than the ruleset
+(`core.settings-*`, which need an admin token); a signed-in Sentry event and a BetterStack Edge
+error with an organization id; `main`'s own CI run at its head (`Build & Test` was still running
+when read); and the Manual QA script, end to end, on the deployed app.
+
+### Open owner questions (not defects)
+
+- RLS Q5: a `tenant_admin` is narrower than `is_org_admin` on `season_settings` and
+  `registration_forms` (writes) and `audit_log` and `organization_schema_history` (reads), while
+  it reads `telemetry_log`. Kept as is. Whether `tenant_admin` should match `is_org_admin` is a
+  product question.
+- RLS Q6: any signed-in user reads open registration forms. Kept as is; a product question.
+- The v1.1.0 release: cut in its own PR after this one, then the release smoke (the Manual QA
+  script above, a signed-in Sentry event, a BetterStack Edge error with an organization id).
+- Settings only the owner can change: clear the Vercel dashboard's build-command override (M5.4),
+  turn on leaked-password protection (Auth), `check:settings` with an admin-read token, merge the
+  Dependabot minor/patch group when green (the majors inventory PR is a draft, never merged, D6),
+  delete `claude/vibrant-allen-hr7y7s-notes` and the other agent branches.
+
+### Major upgrades (D6 held them out of this plan)
+
+Dependabot's grouped majors PR #584 was closed on 2026-10-19: its install fails, because
+`eslint-plugin-jsx-a11y@6.10.2` peers on `eslint ^3` to `^9` and `eslint@10` cannot resolve
+(Build & Test run 38600851700). `.github/dependabot.yml` now ignores `eslint` and `@eslint/js` at
+`>= 10` until a jsx-a11y release supports ESLint 10. The other majors in that group are not taken
+here and not together: each is a planned upgrade of its own, one PR at a time, in the resume
+queue after the accessibility follow-up: `typescript` 7, `vite` 8, `vitest` 5, `jsdom` 30,
+`@sentry/react` 11, `lucide-react` 1, `dotenv` 18, `globals` 17, `@vitejs/plugin-react` 6, and
+`@testing-library/jest-dom` 7. None was attempted. *Statically reviewed* (the ignore entries are
+read, not exercised: whether Dependabot honours them shows on its next monthly run).
+
+### Is the plan done?
+
+Yes. Every item is done, or deferred with a reason and an owner: M1.5's two legs (owner, the
+v1.1.0 release smoke); the Edge logging residuals (B3); the thirteen July items (B2-B5, DD-7
+done); the ten planned major upgrades (resume queue, one PR each); 2.1 (D2, baselined); 4.1 (deferred with reason, above). No item is blocked.
+
 ## When this plan is done
 
 Mark the status line DONE with the date, move the lessons worth keeping into
 `docs/LESSONS_LEARNED.md`, and leave this plan in its dated folder as the record.
+
+Done 2026-10-19: the status line is DONE, and lessons 32-35 in `docs/LESSONS_LEARNED.md` carry
+what is worth keeping.

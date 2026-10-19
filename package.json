@@ -96,6 +96,7 @@
     "@rollup/rollup-linux-x64-gnu": "^4.60.1"
   },
   "allowScripts": {
-    "esbuild": true
+    "esbuild": true,
+    "fsevents": false
   }
 }

@@ -124,8 +124,9 @@ with `npm install-scripts approve <pkg> --no-allow-scripts-pin` or
 `npm install-scripts deny <pkg>`. `esbuild` is approved (plan M6: its
 postinstall links the platform binary the lockfile already installs and runs
 `--version`). `tests/allowScripts.test.js` fails when a package in the
-lockfile has an install script and no decision; `fsevents` (macOS only) is
-listed there as awaiting the owner's.
+lockfile has an install script and no decision. `fsevents` (macOS only,
+`node-gyp rebuild`; its tarball ships the built binary) is denied by name: the
+owner decided on 2026-10-18 that it stays denied.
 
 None of them changes what `npm ci` installs: CI and Vercel install
 `package-lock.json` as it is. To take an urgent fix younger than the wait, once
@@ -142,13 +143,16 @@ update it tries. `npm ci` on another Node warns (`EBADENGINE`) instead.
 ## Dependency updates
 
 [`.github/dependabot.yml`](../../.github/dependabot.yml): npm and GitHub Actions,
-weekly, with a 3-day cooldown. Minor and patch npm bumps arrive as one grouped
-pull request, the actions as another, and each major as its own. Three are
+monthly, with a 3-day cooldown. Minor and patch npm bumps arrive as one grouped
+pull request, npm majors as another, and the actions as a third. Five are
 held back, each with its reason beside it: `@types/node` 25 (moves with
 `.nvmrc`), `eslint-plugin-react-hooks` 7.1 (new lint rules flag 63 existing
-patterns; pinned at 7.0.1 in `package.json`), and `@tanstack/react-virtual`
+patterns; pinned at 7.0.1 in `package.json`), `@tanstack/react-virtual`
 3.14 (its chunk outgrows its bundle budget; pinned at 3.13.23 in
-`package.json`). A held-back
+`package.json`), and `eslint` and `@eslint/js` 10 (`eslint-plugin-jsx-a11y`
+6.10.2 accepts ESLint up to 9 only, so `npm ci` fails, #584; remove both when a
+jsx-a11y release supports ESLint 10). Each other npm major is taken as its own
+planned upgrade (the resume queue lists them). A held-back
 package in the minor-and-patch group would otherwise fail a gate and hold the
 whole batch with it. Security updates (Settings -> Advanced
 Security) ignore the cooldown and arrive at once.

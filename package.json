@@ -45,22 +45,22 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@sentry/react": "^10.47.0",
-    "@supabase/supabase-js": "^2.87.1",
+    "@supabase/supabase-js": "^2.118.0",
     "@tanstack/react-virtual": "3.13.23",
     "dotenv": "^17.2.3",
     "lucide-react": "^0.556.0",
     "papaparse": "^5.5.3",
     "prop-types": "^15.8.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4",
     "recharts": "^3.8.0",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.13.0",
+    "@axe-core/playwright": "^4.14.0",
     "@eslint/js": "^9.39.2",
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.1.14",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -73,18 +73,18 @@
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-jsx-a11y": "^6.10.2",
-    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-prettier": "^5.5.7",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "7.0.1",
     "globals": "^14.0.0",
     "jsdom": "^27.3.0",
     "knip": "~6.41.0",
     "playwright-bdd": "^9.0.0",
-    "postcss": "^8.5.29",
+    "postcss": "^8.5.30",
     "prettier": "3.7.4",
     "tailwindcss": "^4.1.14",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.24.1",
+    "typescript-eslint": "^8.71.2",
     "vite": "^7.3.7",
     "vitest": "^4.1.8"
   },
@@ -93,7 +93,7 @@
     "packages/*"
   ],
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.60.1"
+    "@rollup/rollup-linux-x64-gnu": "^4.64.7"
   },
   "allowScripts": {
     "esbuild": true,

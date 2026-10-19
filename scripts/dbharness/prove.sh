@@ -3654,6 +3654,26 @@ plant "M28 the throttle counts every caller's registrations" "$M28" \
   "    WHERE r.form_id = p_form_id" \
   "smoke 20261019010000"
 
+plant "M28 the window is compared zone-less again" "$M28" \
+  "      AND r.created_at > now() - v_window;" \
+  "      AND r.created_at > timezone('utc', now()) - v_window;" \
+  "smoke 20261019010000"
+
+plant "M28 the insert takes the zone-less column default again" "$M28" \
+  "        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at,
+        created_at
+    )
+    VALUES (
+        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now(),
+        now()
+    )" \
+  "        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at
+    )
+    VALUES (
+        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now()
+    )" \
+  "smoke 20261019010000"
+
 plant "R28 the revert restores a drifted submit_registration body" "$R28" \
   "          USING ERRCODE = '23505';
 END;" \

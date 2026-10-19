@@ -175,3 +175,20 @@ evolves. If you are about to make a decision one of these covers, read it first.
     (#596) was preceded by a persona matrix of 910 cells on today's policies (#595) and a revert
     that restores the catalogue exactly. A change you cannot diff against a recorded baseline is
     only reviewed, not proven.
+36. **A CSV a person opens neutralises formula cells through one helper.** A team, coach or note
+    that starts `=`, `+`, `-` or `@` (or a tab or CR) runs as a formula in Excel, LibreOffice and
+    Sheets. Every export writes its cells through `escapeCsvCell` (`packages/core/src/csv.js`):
+    an apostrophe prefix, except a plain signed number, so `-5` and `+15551234567` survive. Two
+    paths deliberately do not use it, because a prefix would corrupt data that is read back:
+    `ColumnMapper.serializeCanonicalCsv` (our own re-packaging of an upload for the importer) and
+    `fieldAdmin`'s `toCsv` (a lossless round trip). Escape where data meets a spreadsheet, not
+    where it is stored (B2, DS-4).
+37. **A throttle on a public RPC counts the caller's own rows, under a lock, in absolute time.**
+    `submit_registration` is open to `anon`, and the Edge rate limiter cannot reach a PostgREST
+    RPC. The throttle counts the caller's recent `registrations` rows (no log table; a refused call
+    inserts nothing) under `pg_advisory_xact_lock`, so concurrent calls cannot both read nine. The
+    window is `now() - interval`, and the insert sets `created_at` to `now()` itself: the column
+    default `timezone('utc', now())` is a zone-less timestamp that the session time zone
+    reinterprets, and a PostgREST caller sets that zone (`Prefer: timezone=`). Under `+14` the
+    default dates a row 14 hours back, outside every window. Never build a security window on
+    `timezone('utc', now())` (B2, DS-5; the repo-wide idiom is logged in the remediation plan).

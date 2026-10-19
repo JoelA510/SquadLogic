@@ -9,6 +9,8 @@
 --     organization and the same member on a second form still register;
 --   * the window is 60 seconds: with the ten registrations back-dated 61 s the
 --     same caller registers again, and with them back-dated 59 s is refused;
+--   * the throttle does not depend on the session time zone (a PostgREST caller sets it):
+--     under +14 and -12 ten succeed and the eleventh is refused PT429;
 --   * a call that fails validation (a form that is not open) is refused with its
 --     own code (22023), not PT429, and a refused call does not extend the window;
 --   * the posture is unchanged: SECURITY DEFINER, search_path=public, EXECUTE for
@@ -39,6 +41,8 @@ DECLARE
     v_before_players integer;
     v_before_links integer;
     v_id uuid;
+    v_tz text;
+    v_extra uuid;
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_a, 'reg-a@example.test', '{"password_length": 16}'),
@@ -101,7 +105,7 @@ BEGIN
     RAISE NOTICE 'a second member on the same form, and the same member on a second form, still register';
 
     -- (c) The window is 60 seconds.
-    UPDATE public.registrations SET created_at = timezone('utc', now()) - interval '59 seconds'
+    UPDATE public.registrations SET created_at = now() - interval '59 seconds'
      WHERE profile_id = v_a AND form_id = v_form;
     v_code := NULL;
     BEGIN
@@ -112,7 +116,7 @@ BEGIN
     IF v_code IS DISTINCT FROM 'PT429' THEN
         RAISE EXCEPTION 'ten registrations 59 seconds old did not still throttle (got %)', coalesce(v_code, 'success');
     END IF;
-    UPDATE public.registrations SET created_at = timezone('utc', now()) - interval '61 seconds'
+    UPDATE public.registrations SET created_at = now() - interval '61 seconds'
      WHERE profile_id = v_a AND form_id = v_form;
     v_id := public.submit_registration(v_org, v_form, v_a, '{}'::jsonb, NULL, 'After', 'Window');
     IF v_id IS NULL THEN
@@ -131,6 +135,41 @@ BEGIN
         RAISE EXCEPTION 'a closed form was not refused 22023 (got %)', coalesce(v_code, 'success');
     END IF;
     RAISE NOTICE 'a closed form is still refused 22023, not PT429';
+
+    -- (d2) The window does not depend on the session time zone, which a
+    --      PostgREST caller sets (Prefer: timezone=...). The column default
+    --      timezone('utc', now()) is zone-less, so under +14 it would date a row
+    --      14 hours back and under -12 in the future; the RPC sets created_at
+    --      itself. Ten succeed and the eleventh is refused under each zone.
+    FOR v_tz IN SELECT unnest(ARRAY['+14', '-12']) LOOP
+        v_extra := gen_random_uuid();
+        INSERT INTO auth.users (id, email, raw_user_meta_data)
+            VALUES (v_extra, 'reg-tz' || v_tz || '@example.test', '{"password_length": 16}');
+        INSERT INTO public.profiles (id, email) VALUES (v_extra, 'reg-tz' || v_tz || '@example.test')
+            ON CONFLICT DO NOTHING;
+        INSERT INTO public.organization_members (organization_id, profile_id, role)
+            VALUES (v_org, v_extra, 'parent');
+        PERFORM set_config('request.jwt.claim.sub', v_extra::text, true);
+        PERFORM set_config('timezone', v_tz, true);
+        FOR v_i IN 1..10 LOOP
+            PERFORM public.submit_registration(v_org, v_form, v_extra, '{}'::jsonb, NULL, 'Zone' || v_i, 'Throttle');
+        END LOOP;
+        v_code := NULL;
+        BEGIN
+            PERFORM public.submit_registration(v_org, v_form, v_extra, '{}'::jsonb, NULL, 'Zone11', 'Throttle');
+        EXCEPTION WHEN OTHERS THEN
+            GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE;
+        END;
+        IF v_code IS DISTINCT FROM 'PT429' THEN
+            RAISE EXCEPTION 'under session time zone % the eleventh registration was not refused PT429 (got %)', v_tz, coalesce(v_code, 'success');
+        END IF;
+        IF (SELECT count(*) FROM public.registrations WHERE profile_id = v_extra AND created_at <> now()) <> 0 THEN
+            RAISE EXCEPTION 'under session time zone % a registration was not dated now()', v_tz;
+        END IF;
+        PERFORM set_config('timezone', 'UTC', true);
+    END LOOP;
+    PERFORM set_config('request.jwt.claim.sub', v_a::text, true);
+    RAISE NOTICE 'the throttle holds under session time zones +14 and -12: ten succeed, the eleventh is refused PT429, rows are dated now()';
 
     -- (e) Posture and index.
     IF NOT (SELECT p.prosecdef AND p.proconfig = ARRAY['search_path=public']

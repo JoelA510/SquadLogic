@@ -2160,6 +2160,21 @@ smoke deferred to the owner's v1.1.0 release smoke)
     manual (hand-moved) assignment is the lock a user can create. Flagged for the owner: add a team
     lock (a plan first), or remove the engine's `locked` handling. *Statically reviewed.*
 
+- 2026-10-19, found by B2 (branch `claude/vibrant-allen-hr7y7s-b2-hardening`, PR #609, Codex review):
+  - **`timezone('utc', now())` is a zone-less timestamp that the session time zone reinterprets,
+    and a PostgREST caller sets the session time zone** (`Prefer: timezone=...`). It is the
+    default of `created_at` columns (`registrations.created_at` among them) and is used 239 times
+    across `supabase/migrations`. Under `+14` a row defaulted this way is dated 14 hours in the
+    past, under `-12` in the future, so any window, ordering or retention rule that compares those
+    columns against the clock can be skewed by the caller. B2's throttle does not rely on it (its
+    window is `now() - interval` and the RPC sets `created_at` to `now()` itself), and a smoke and
+    pgTAP case run under `+14` and `-12`. The table defaults and the other 238 uses are **not**
+    changed here (a repo-wide idiom; a flagged refactor). For the owner to place: audit which of
+    them feed a comparison a caller can influence (`prune_old_audit_logs`, heartbeat and staleness
+    checks), and move the column defaults to `now()` in a plan of their own. *Statically
+    reviewed* for the count and the idiom; *executed* for the `+14` and `-12` behaviour of the
+    throttle.
+
 ## Deferred with reason
 
 - 2.1 (strict types) — D2's default: the repository's stated rule is `strict: false`; raising it

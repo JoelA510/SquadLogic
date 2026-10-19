@@ -8,13 +8,17 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(6);
+SELECT plan(10);
 
 INSERT INTO public.registration_forms (id, organization_id, title, status, division_id) VALUES
     ('e0000019-0000-0000-0000-0000000000a1', 'a1111111-1111-1111-1111-111111111111',
      'Throttle form one', 'open', 'a1111111-1111-1111-1111-11111111abcd'),
     ('e0000019-0000-0000-0000-0000000000a2', 'a1111111-1111-1111-1111-111111111111',
-     'Throttle form two', 'open', 'a1111111-1111-1111-1111-11111111abcd');
+     'Throttle form two', 'open', 'a1111111-1111-1111-1111-11111111abcd'),
+    ('e0000019-0000-0000-0000-0000000000a3', 'a1111111-1111-1111-1111-111111111111',
+     'Throttle form plus 14', 'open', 'a1111111-1111-1111-1111-11111111abcd'),
+    ('e0000019-0000-0000-0000-0000000000a4', 'a1111111-1111-1111-1111-111111111111',
+     'Throttle form minus 12', 'open', 'a1111111-1111-1111-1111-11111111abcd');
 
 -- 1. Charlie (a coach: any org member may register) submits ten times.
 SET LOCAL role = 'authenticated';
@@ -80,7 +84,7 @@ RESET role;
 
 -- 6. Registrations older than the window no longer count.
 UPDATE public.registrations
-   SET created_at = timezone('utc', now()) - interval '61 seconds'
+   SET created_at = now() - interval '61 seconds'
  WHERE profile_id = '33333333-3333-3333-3333-333333333333';
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
@@ -92,6 +96,72 @@ SELECT lives_ok(
          '{}'::jsonb, NULL, 'After', 'Window') $$,
     'registrations older than 60 seconds no longer count toward the throttle'
 );
+RESET role;
+
+-- 7-8. The session time zone is caller-controlled (PostgREST `Prefer: timezone=`).
+--    The column default timezone('utc', now()) is zone-less, so under +14 it would
+--    date a row 14 or 12 hours off and the window would never count it.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+SET LOCAL timezone = '+14';
+SELECT lives_ok(
+    $$ DO $do$
+       BEGIN
+         FOR i IN 1..10 LOOP
+           PERFORM public.submit_registration(
+             'a1111111-1111-1111-1111-111111111111'::uuid,
+             'e0000019-0000-0000-0000-0000000000a3'::uuid,
+             '33333333-3333-3333-3333-333333333333'::uuid,
+             '{}'::jsonb, NULL, 'Zone' || i, 'Throttle');
+         END LOOP;
+       END
+       $do$ $$,
+    'ten registrations succeed under session time zone +14'
+);
+SELECT throws_ok(
+    $$ SELECT public.submit_registration(
+         'a1111111-1111-1111-1111-111111111111'::uuid,
+         'e0000019-0000-0000-0000-0000000000a3'::uuid,
+         '33333333-3333-3333-3333-333333333333'::uuid,
+         '{}'::jsonb, NULL, 'Zone11', 'Throttle') $$,
+    'PT429',
+    'Too many registrations submitted for this form. Wait a minute and try again.',
+    'the eleventh is refused PT429 under session time zone +14'
+);
+SET LOCAL timezone = 'UTC';
+RESET role;
+
+-- 9-10. The session time zone is caller-controlled (PostgREST `Prefer: timezone=`).
+--    The column default timezone('utc', now()) is zone-less, so under -12 it would
+--    date a row 14 or 12 hours off and the window would never count it.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+SET LOCAL timezone = '-12';
+SELECT lives_ok(
+    $$ DO $do$
+       BEGIN
+         FOR i IN 1..10 LOOP
+           PERFORM public.submit_registration(
+             'a1111111-1111-1111-1111-111111111111'::uuid,
+             'e0000019-0000-0000-0000-0000000000a4'::uuid,
+             '33333333-3333-3333-3333-333333333333'::uuid,
+             '{}'::jsonb, NULL, 'Zone' || i, 'Throttle');
+         END LOOP;
+       END
+       $do$ $$,
+    'ten registrations succeed under session time zone -12'
+);
+SELECT throws_ok(
+    $$ SELECT public.submit_registration(
+         'a1111111-1111-1111-1111-111111111111'::uuid,
+         'e0000019-0000-0000-0000-0000000000a4'::uuid,
+         '33333333-3333-3333-3333-333333333333'::uuid,
+         '{}'::jsonb, NULL, 'Zone11', 'Throttle') $$,
+    'PT429',
+    'Too many registrations submitted for this form. Wait a minute and try again.',
+    'the eleventh is refused PT429 under session time zone -12'
+);
+SET LOCAL timezone = 'UTC';
 RESET role;
 
 SELECT * FROM finish();

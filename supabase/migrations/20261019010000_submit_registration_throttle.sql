@@ -86,13 +86,18 @@ BEGIN
     -- extend its own window. The advisory lock serialises one caller's calls to
     -- one form, so two concurrent calls cannot both read nine and both insert.
     -- PT429 is PostgREST's own convention: the HTTP response is 429.
+    -- The window is absolute timestamptz arithmetic (now() - v_window), and the
+    -- INSERT below sets created_at to now() itself. The column default is
+    -- timezone('utc', now()), a zone-less timestamp that the SESSION time zone
+    -- reinterprets, and a PostgREST caller sets that zone (Prefer: timezone=...):
+    -- with +14 the default dates a row 14 hours in the past, outside every window.
     PERFORM pg_advisory_xact_lock(hashtextextended(v_caller::text || ':' || p_form_id::text, 0));
 
     SELECT count(*) INTO v_recent
     FROM public.registrations r
     WHERE r.profile_id = v_caller
       AND r.form_id = p_form_id
-      AND r.created_at > timezone('utc', now()) - v_window;
+      AND r.created_at > now() - v_window;
 
     IF v_recent >= v_limit THEN
         RAISE EXCEPTION 'Too many registrations submitted for this form. Wait a minute and try again.'
@@ -142,10 +147,12 @@ BEGIN
     ON CONFLICT (profile_id, player_id) DO NOTHING;
 
     INSERT INTO public.registrations (
-        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at
+        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at,
+        created_at
     )
     VALUES (
-        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now()
+        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now(),
+        now()
     )
     RETURNING id INTO v_registration_id;
 

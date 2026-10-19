@@ -86,4 +86,10 @@ test ties the mock's observed limit to the migration's.
 - `registrations` is empty in production (read 2026-10-19), so the index builds instantly and no
   existing row changes meaning.
 - A registration deleted inside the window lowers the count; only an admin or a cascade deletes one.
+- The session time zone is caller-controlled (PostgREST `Prefer: timezone=`), and
+  `registrations.created_at`'s default `timezone('utc', now())` is zone-less: under `+14` it dates
+  a row 14 hours back, outside the window. The throttle therefore compares against `now() -
+interval` and the RPC sets `created_at` to `now()` itself (Codex review on the PR). The table
+  default and the 238 other uses are left for a plan of their own (remediation plan, "Discovered
+  during execution", 2026-10-19).
 - Rollback: `docs/sql/20261019010000_revert.sql` restores the body and drops the index.

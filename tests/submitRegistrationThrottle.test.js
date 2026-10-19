@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
@@ -32,6 +32,13 @@ describe('mock submit_registration throttle', () => {
   beforeEach(() => {
     sessionStorage.clear();
     window.__MOCK_DB__ = undefined;
+    // Only Date is faked: the window is a comparison of timestamps.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('refuses the registration after the migration limit with PT429, per form', async () => {
@@ -52,5 +59,21 @@ describe('mock submit_registration throttle', () => {
     // A refusal wrote nothing; another form is a separate allowance.
     const { error: otherForm } = await call('form-two', 'Other');
     expect(otherForm).toBeNull();
+  });
+
+  it('holds for 60 seconds, as the migration declares: refused just inside, accepted just after', async () => {
+    const limit = Number(/v_limit\s+constant integer := (\d+);/.exec(MIGRATION)?.[1]);
+    const seconds = Number(
+      /v_window\s+constant interval := interval '(\d+) seconds';/.exec(MIGRATION)?.[1]
+    );
+    expect(seconds).toBe(60);
+
+    for (let i = 0; i < limit; i += 1) {
+      expect((await call('form-one', `Child${i}`)).error).toBeNull();
+    }
+    vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z').getTime() + (seconds - 1) * 1000);
+    expect((await call('form-one', 'Inside')).error?.code).toBe('PT429');
+    vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z').getTime() + (seconds + 1) * 1000);
+    expect((await call('form-one', 'After')).error).toBeNull();
   });
 });

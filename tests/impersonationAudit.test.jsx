@@ -119,3 +119,28 @@ describe('impersonateUser', () => {
     expect(seen.auth.isImpersonating).toBe(false);
   });
 });
+
+describe('stopImpersonation', () => {
+  it('leaves the preview, without rejecting, when the end-audit call throws', async () => {
+    vi.mocked(supabase.rpc)
+      .mockResolvedValueOnce(/** @type {any} */ ({ data: 'audit-1', error: null }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await mountSignedInAdmin();
+    await act(async () => seen.auth.impersonateUser(target));
+    expect(seen.auth.isImpersonating).toBe(true); // exercised: the preview was on
+
+    let rejection = null;
+    await act(async () => {
+      rejection = await seen.auth.stopImpersonation().then(
+        () => null,
+        (e) => e
+      );
+    });
+    expect(supabase.rpc).toHaveBeenLastCalledWith(
+      'record_audit_event',
+      expect.objectContaining({ p_action: 'impersonation.ended' })
+    );
+    expect(rejection).toBeNull();
+    expect(seen.auth.isImpersonating).toBe(false);
+  });
+});

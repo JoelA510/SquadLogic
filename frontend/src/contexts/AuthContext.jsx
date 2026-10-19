@@ -256,11 +256,12 @@ export const AuthProvider = ({ children }) => {
 
       if (auditError)
         console.error('[Auth] impersonation.ended audit row not written:', auditError);
-
-      setImpersonatedUser(null);
     } catch (err) {
-      console.error('[Auth] Stop impersonation failed:', err);
-      throw err;
+      // Best-effort cleanup (see above): a thrown end-audit (network failure) is logged, not
+      // rethrown, so the banner's unhandled click never leaves the admin stuck in the preview.
+      console.error('[Auth] impersonation.ended audit call failed:', err);
+    } finally {
+      setImpersonatedUser(null);
     }
   };
 

@@ -32,9 +32,10 @@ release supports ESLint 10. The rest of that group is taken one at a time, each 
 upgrade (D6 held majors out of the remediation plan), in an order the owner picks:
 
 - `typescript` 7;
-- `vite` 8;
-- `@vitejs/plugin-react` 6;
-- `vitest` 5;
+- `vite` 8: done (8.3.4), with the next three in one PR (their peer ranges are coupled), branch
+  `claude/vibrant-allen-hr7y7s-up-vite8` (PR number: coordinator);
+- `@vitejs/plugin-react` 6: done (6.1.2), same branch;
+- `vitest` 5: done (5.0.5, with `@vitest/coverage-v8` 5.0.5), same branch;
 - `jsdom` 30: done (30.1.3), PR #612;
 - `@sentry/react` 11: done (11.8.0), PR #616;
 - `lucide-react` 1: done (1.58.0; 1.59.0 was inside the 3-day release wait), PR #615;

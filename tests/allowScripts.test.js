@@ -14,11 +14,11 @@
  * - every decision names such a package (no stale entries, as
  *   `npm install-scripts prune` would remove).
  *
- * esbuild's postinstall (`node install.js`) was read for 0.28.2: it finds the
- * platform binary the lockfile already installs as an optional dependency
- * (`@esbuild/<platform>`), hard-links it over `bin/esbuild` and runs it with
- * `--version`. Only when that package is missing does it fetch the binary from
- * registry.npmjs.org, checked against the sha256 in esbuild's package.json.
+ * esbuild was approved here (its postinstall linked the platform binary and ran
+ * `--version`) until Vite 8 (2026-10-19): Vite now bundles with Rolldown and
+ * Oxc and lists esbuild only as an optional peer, so the lockfile no longer
+ * holds it and the entry went with it. A decision for a package that is not
+ * there is a stale entry, which the last test below refuses.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -50,9 +50,9 @@ describe('allowScripts', () => {
   const decided = Object.keys(pkg.allowScripts ?? {}).map(packageName);
 
   it('the detector reads names from lockfile and allowScripts keys', () => {
-    expect(packageName('node_modules/esbuild')).toBe('esbuild');
+    expect(packageName('node_modules/fsevents')).toBe('fsevents');
     expect(packageName('node_modules/a/node_modules/@scope/b')).toBe('@scope/b');
-    expect(packageName('esbuild@0.28.2')).toBe('esbuild');
+    expect(packageName('fsevents@2.3.3')).toBe('fsevents');
     expect(packageName('@scope/b@^1 || ^2')).toBe('@scope/b');
     expect(
       withInstallScripts({
@@ -62,15 +62,11 @@ describe('allowScripts', () => {
   });
 
   it('records a decision for every package with an install script', () => {
-    // Meta: the lockfile scan found the install scripts there are (esbuild
-    // and fsevents today), so an empty gap list is not an empty scan.
-    expect(scripted).toContain('esbuild');
+    // Meta: the lockfile scan found the install script there is (fsevents
+    // today), so an empty gap list is not an empty scan.
+    expect(scripted).toContain('fsevents');
     const undecided = scripted.filter((name) => !decided.includes(name));
     expect(undecided).toEqual([]);
-  });
-
-  it('allows esbuild by name, reviewed', () => {
-    expect(pkg.allowScripts?.esbuild).toBe(true);
   });
 
   it("denies fsevents by name, the owner's decision of 2026-10-18", () => {

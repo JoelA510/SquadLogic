@@ -225,6 +225,13 @@ describe('config/bundle-budget.json', () => {
         .filter((r) => r.firstPaint)
         .map((r) => r.label)
         .sort()
-    ).toEqual(['lucide vendor', 'main css', 'main entry', 'react vendor', 'supabase vendor']);
+    ).toEqual([
+      'lucide vendor',
+      'main css',
+      'main entry',
+      'react vendor',
+      'rolldown runtime',
+      'supabase vendor',
+    ]);
   });
 });

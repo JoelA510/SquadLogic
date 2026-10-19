@@ -37,7 +37,7 @@ upgrade (D6 held majors out of the remediation plan), in an order the owner pick
 - `vitest` 5;
 - `jsdom` 30: done (30.1.3), branch `claude/vibrant-allen-hr7y7s-up-jsdom` (PR number to be filled in by the coordinator);
 - `@sentry/react` 11;
-- `lucide-react` 1;
+- `lucide-react` 1: done (1.58.0; 1.59.0 was inside the 3-day release wait), branch `claude/vibrant-allen-hr7y7s-up-lucide` (PR number to be filled in by the coordinator);
 - `dotenv` 18: done (18.0.8), PR #606;
 - `globals` 17: done (17.13.0), PR #610;
 - `@testing-library/jest-dom` 7: done (7.0.1), branch `claude/vibrant-allen-hr7y7s-up-jest-dom`, PR number to be added.

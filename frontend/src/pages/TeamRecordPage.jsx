@@ -469,7 +469,7 @@ export default function TeamRecordPage() {
                         className={`text-xs font-bold px-2 py-1 rounded-full ${
                           isMedicalCleared
                             ? 'bg-status-success-bg text-status-success'
-                            : 'bg-status-warning-bg text-status-warning'
+                            : 'bg-status-warning-bg text-status-warning-text'
                         }`}
                       >
                         Medical Clearance: {isMedicalCleared ? 'Yes' : 'Pending'}
@@ -656,12 +656,12 @@ export function CalendarModal({ team, onClose }) {
           className="w-full bg-bg-surface border border-border-subtle rounded-lg p-3 text-text-primary mb-4 text-sm"
         />
         {!calendarToken && (
-          <p className="text-sm text-status-warning mb-3">
+          <p className="text-sm text-status-warning-text mb-3">
             No calendar link is currently available. Regenerate the link before sharing it.
           </p>
         )}
         {rotateMessage && (
-          <p className="text-sm text-status-warning mb-3" aria-live="polite">
+          <p className="text-sm text-status-warning-text mb-3" aria-live="polite">
             {rotateMessage}
           </p>
         )}
@@ -715,7 +715,7 @@ function RsvpButton({ active, type, onClick }) {
     declined: { icon: X, color: 'text-status-error', bg: 'bg-status-error-bg', label: 'Not Going' },
     maybe: {
       icon: Minus,
-      color: 'text-status-warning',
+      color: 'text-status-warning-text',
       bg: 'bg-status-warning-bg',
       label: 'Maybe',
     },

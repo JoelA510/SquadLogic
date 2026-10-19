@@ -1704,6 +1704,40 @@ smoke-tested
     `/invite/:code`, and every overlay that opens on a click (dialogs, menus, drawers).
     Recommendation: one follow-up that adds those four content scenarios and an "open each
     route's primary dialog" scan.
+    **Done 2026-10-19** (Wave 4 accessibility follow-up, branch `claude/vibrant-allen-hr7y7s-a11y2`):
+    - New scenarios in `accessibility.feature`, each seeding its content through the page and
+      scanning both themes: `/exports` with a published baseline and a parity report;
+      `/coaches/practice-preferences` with a pending request and one in force; `/fields` with
+      seasonal availability (profile, blackout window, equipment); `/admin/reports` with six
+      players and a custom attribute, so the chart is drawn instead of the privacy mask;
+      `/invite/:code` signed out (the sign-in form under the invite banner) and signed in with a
+      code that cannot be redeemed. `/invite/:code` left `NOT_SCANNED` in
+      `tests/accessibilityRoutes.test.js` (only `*` remains there, a redirect).
+    - One main dialog per route that has one, open, with the dark scan taken behind it: "Add a
+      blackout window" (`/scheduling/blackouts`), "Teams —" (`/coaches`), "Add New Field"
+      (`/fields`), "Switch to co-ed divisions" (`/settings`), "Calendar Subscription"
+      (`/team/t1`), "Approve with change" (`/coaches/practice-preferences`), and "Override a
+      saved practice" (`/schedule/practice`).
+    - Violations found: "Upload to Storage" was white on `bg-orange-500`, 2.88:1 (now
+      `btn btn-primary`); the reports page's attribute `<select>` had no name (`select-name`,
+      critical; now labelled "Attribute to chart"); the Calendar Subscription dialog's notices
+      were `text-status-warning` on the sunken surface, 3.39:1 (now `-text`). Folded in from the
+      close-out: the other 9 uses of bare `text-status-warning` as text (3.84:1 on the light
+      surface) take `text-status-warning-text`, two tints drop from /20 to /10 so the pair keeps
+      4.5:1, and `tests/paletteTextShades.test.js` now refuses the bare class.
+      `KNOWN_VIOLATIONS` stays empty.
+    - Each fix has a unit test red without it (`tests/enterpriseDashboardSelectLabel.test.jsx`,
+      `TeamPortalCalendarModal.test.jsx`, `OutputGenerationPanel.test.jsx`,
+      `paletteTextShades.test.js`), and each of the three scenarios that found a violation was
+      red with its fix reverted. The masking scenario was red with its seed step removed.
+      *Executed.*
+    - Still unscanned, with reason (all *statically reviewed*): `PracticeEnactDialog` (opens from
+      the practice repair panel, which needs a repair plan) and `RetireEstateNodeDialog` (opens
+      from `/fields` on a retirable estate node) each need seeded state of their own;
+      `OfflineGuard`'s dialog needs the browser offline; the mobile `SideNav` drawer, the row and
+      header `Dropdown` menus other than the coaches one, `IngestionOverlay`, and the game
+      grid's per-card dialogs have no scenario. A route with several dialogs has the most used
+      create or edit one scanned; the rest share `Modal`.
   - `WorkflowStep`'s card-wide click ran for every click inside an open step, so its "Confirm
     Teams & Proceed" button (step 2 to 3) was undone by the card re-selecting step 2 (both state
     updates batch; the last wins). Fixed here: an open card takes no click of its own, and its

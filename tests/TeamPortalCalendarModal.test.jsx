@@ -38,7 +38,12 @@ describe('CalendarModal', () => {
       'webcal://localhost:3000/functions/v1/calendar-feed?token=mock-token'
     );
 
-    expect(screen.getByText(/No calendar link is currently available/i)).toBeInTheDocument();
+    const notice = screen.getByText(/No calendar link is currently available/i);
+    expect(notice).toBeInTheDocument();
+    // The warning token itself is 2.1:1 on the light surface (axe `color-contrast`); the `-text`
+    // token is the AA one in both themes.
+    expect(notice).toHaveClass('text-status-warning-text');
+    expect(notice).not.toHaveClass('text-status-warning');
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Regenerate Link' })).toHaveAttribute(
       'type',
@@ -69,7 +74,9 @@ describe('CalendarModal', () => {
     expect(calendarLink).not.toHaveValue(
       'webcal://localhost:3000/functions/v1/calendar-feed?token=mock-token'
     );
-    expect(screen.getByText(/New link generated/i)).toBeInTheDocument();
+    const message = screen.getByText(/New link generated/i);
+    expect(message).toBeInTheDocument();
+    expect(message).toHaveClass('text-status-warning-text');
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeEnabled();
   });
 

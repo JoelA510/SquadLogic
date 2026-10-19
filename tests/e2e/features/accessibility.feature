@@ -89,6 +89,23 @@ Feature: Every top-level route passes an automated accessibility scan
       | /organizations/new            | Welcome to SquadLogic    | Establish Organization                  |
       | /auth/reset-password          | Reset Your Password      | Confirm Password                        |
 
+  Scenario: An invite link opened while signed out passes axe in the light and dark themes
+    Given I am signed out and open the invite link "SPRING2026"
+    Then the scan sees "You've been invited to join an organization" on the page
+    And axe finds no serious or critical violations on "/invite/SPRING2026" in the "light" theme
+    When I switch the sign-in page to the dark theme
+    Then the scan sees "You've been invited to join an organization" on the page
+    And axe finds no serious or critical violations on "/invite/SPRING2026" in the "dark" theme
+
+  Scenario: An invite link that cannot be redeemed passes axe in the light and dark themes
+    Given I am logged into SquadLogic as an admin
+    When I open "/invite/NOSUCHCODE" and see its "Invite could not be redeemed" heading
+    Then the scan sees "Back to onboarding" on the page
+    And axe finds no serious or critical violations on "/invite/NOSUCHCODE" in the "light" theme
+    When I switch to the dark theme and reopen "/invite/NOSUCHCODE" with its "Invite could not be redeemed" heading
+    Then the scan sees "Back to onboarding" on the page
+    And axe finds no serious or critical violations on "/invite/NOSUCHCODE" in the "dark" theme
+
   # Routes the mock seed leaves empty, scanned again with content on them. The theme is switched
   # on the page itself, so content the page holds only in memory (an invite just generated, a
   # schedule staged for review) is scanned in both themes.
@@ -154,3 +171,89 @@ Feature: Every top-level route passes an automated accessibility scan
     When I switch to the dark theme on this page
     Then the game "Team A" vs "Team B" is staged for review on "Field 1"
     And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme
+
+  # Routes whose content the seed leaves out or masks, scanned with it on the page.
+
+  Scenario: Exports with a published baseline and its parity report passes axe in both themes
+    Given I am logged into SquadLogic as an admin
+    When I open "/exports" and see its "Exports" heading
+    And I publish a baseline from the Exports page and compare it with the schedule
+    Then the scan sees "The working schedule still matches what was published." on the page
+    And axe finds no serious or critical violations on "/exports" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "The working schedule still matches what was published." on the page
+    And axe finds no serious or critical violations on "/exports" in the "dark" theme
+
+  Scenario: Practice preferences with a pending request and one in force passes axe in both themes
+    Given I am logged into SquadLogic as an admin
+    And a coach has a pending practice preference request and another has one in force
+    When I open "/coaches/practice-preferences" and see its "Practice preferences" heading
+    Then the scan sees "Pending requests (1)" on the page
+    And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "Pending requests (1)" on the page
+    And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "dark" theme
+
+  Scenario: Field management with seasonal availability on it passes axe in both themes
+    Given I am logged into SquadLogic as an admin
+    And seasonal availability is imported for a field
+    When I open "/fields" and see its "Field Management" heading
+    Then the scan sees "Harvest festival" on the page
+    And axe finds no serious or critical violations on "/fields" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "Harvest festival" on the page
+    And axe finds no serious or critical violations on "/fields" in the "dark" theme
+
+  Scenario: The reports page above its three-player masking threshold passes axe in both themes
+    Given I am logged into SquadLogic as an admin
+    And the organization has 6 players with a custom attribute
+    When I open "/admin/reports" and see its "Enterprise Dashboard" heading
+    Then the chart of the custom attribute is drawn instead of the privacy mask
+    And axe finds no serious or critical violations on "/admin/reports" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the chart of the custom attribute is drawn instead of the privacy mask
+    And axe finds no serious or critical violations on "/admin/reports" in the "dark" theme
+
+  # The main dialog of each route that has one, open: the most-used create or edit dialog where a
+  # route has several. The dark scan keeps the dialog open (the overlay covers the theme toggle,
+  # so it is clicked through the DOM).
+
+  Scenario Outline: The "<dialog>" dialog on <route> passes axe in the light and dark themes
+    Given I am logged into SquadLogic as an admin
+    When I open "<route>" and see its "<heading>" heading
+    And I open the "<dialog>" dialog with "<opener>"
+    Then axe finds no serious or critical violations on "<route>" in the "light" theme
+    When I switch to the dark theme behind the open dialog
+    Then the scan sees "<dialog>" on the page
+    And axe finds no serious or critical violations on "<route>" in the "dark" theme
+
+    Examples:
+      | opener                       | route                 | heading           | dialog                    |
+      | Add blackout                 | /scheduling/blackouts | Blackout Dates    | Add a blackout window     |
+      | Row actions > Manage teams   | /coaches              | Coaches           | Teams —                   |
+      | Add Field                    | /fields               | Field Management  | Add New Field             |
+      | Features > Co-ed (combined)  | /settings             | Settings          | Switch to co-ed divisions |
+      | Subscribe to Calendar        | /team/t1              | Team A            | Calendar Subscription     |
+
+  Scenario: The decision dialog on practice preferences passes axe in the light and dark themes
+    Given I am logged into SquadLogic as an admin
+    And a coach has a pending practice preference request and another has one in force
+    When I open "/coaches/practice-preferences" and see its "Practice preferences" heading
+    And I open the "Approve with change" dialog with "with a change"
+    Then axe finds no serious or critical violations on "/coaches/practice-preferences" in the "light" theme
+    When I switch to the dark theme behind the open dialog
+    Then the scan sees "Approve with change" on the page
+    And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "dark" theme
+
+  Scenario: The override dialog on practice scheduling passes axe in the light and dark themes
+    Given I am logged in as an administrator
+    And a practice schedule has been generated
+    And the automated schedule has been generated
+    And the roster's "Team A" has a saved practice and a second slot is available
+    And I am on the Practice Scheduling page
+    When I override "Team A" onto the second practice slot and apply
+    Then a dialog asks to replace the saved practice of "Team A"
+    And axe finds no serious or critical violations on "/schedule/practice" in the "light" theme
+    When I switch to the dark theme behind the open dialog
+    Then the scan sees "Override a saved practice" on the page
+    And axe finds no serious or critical violations on "/schedule/practice" in the "dark" theme

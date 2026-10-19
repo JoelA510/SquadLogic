@@ -1,5 +1,8 @@
 # Resume queue (after the 2026-10-14 pause)
 
+> **Next:** the ten major upgrades, one plan-first PR each (the owner picks the order). The
+> accessibility follow-up above is done.
+
 The order to take the remaining work in, by dependency. The plan holds the detail of each item
 and its "Discovered during execution" section holds the findings; this file only orders them.
 Tags:
@@ -79,7 +82,8 @@ At most two agent PRs in flight; read [`agent-brief.md`](./agent-brief.md) first
   - `DataGrid` traps Tab once a cell is active;
   - 29 files use `-400` text shades;
   - the analytics charts use hard-coded colours;
-  - the axe scan sees only the mock seed's pages;
+  - the axe scan sees only the mock seed's pages (**done 2026-10-19**, branch
+    `claude/vibrant-allen-hr7y7s-a11y2`; what stays unscanned is in the plan's #591 entry);
   - 15 waived `__MOCK_DB__` reads remain in E2E steps.
 - **The M1 tails:**
   - a signed-in Sentry event carrying the user and org ids;

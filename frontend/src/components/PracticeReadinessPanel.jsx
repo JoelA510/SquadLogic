@@ -6,7 +6,7 @@ function KpiCard({ label, value, status, description }) {
   const toneClass =
     status === 'good'
       ? 'text-status-success border-status-success/30 bg-status-success/5'
-      : 'text-status-warning border-status-warning/30 bg-status-warning/5';
+      : 'text-status-warning-text border-status-warning/30 bg-status-warning/5';
   return (
     <article className={`card-glass border ${toneClass} rounded-lg p-4`} aria-label={label}>
       <div className="text-[10px] uppercase tracking-widest text-text-muted">{label}</div>

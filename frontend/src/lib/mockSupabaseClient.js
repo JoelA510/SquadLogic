@@ -2761,6 +2761,27 @@ export const mockSupabase = {
         p_last_name,
       } = params;
 
+      // The real RPC's throttle (20261019010000, DS-5): a caller's eleventh
+      // registration to one form inside 60 seconds is refused PT429, before any
+      // row is written. The limit and window are the migration's own;
+      // tests/submitRegistrationThrottle.test.js ties the two together.
+      const recent = (db.registrations || []).filter(
+        (r) =>
+          r.profile_id === p_profile_id &&
+          r.form_id === p_form_id &&
+          Date.now() - Date.parse(r.created_at) < 60 * 1000
+      ).length;
+      if (recent >= 10) {
+        return {
+          data: null,
+          error: {
+            code: 'PT429',
+            message: 'Too many registrations submitted for this form. Wait a minute and try again.',
+            hint: 'At most 10 registrations per form per 00:01:00.',
+          },
+        };
+      }
+
       let playerId = p_player_id;
       if (!playerId && p_first_name && p_last_name) {
         playerId = mockId();

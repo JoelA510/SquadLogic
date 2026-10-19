@@ -35,14 +35,14 @@ upgrade (D6 held majors out of the remediation plan), in an order the owner pick
 - `vite` 8;
 - `@vitejs/plugin-react` 6;
 - `vitest` 5;
-- `jsdom` 30;
+- `jsdom` 30: done (30.1.3), branch `claude/vibrant-allen-hr7y7s-up-jsdom` (PR number to be filled in by the coordinator);
 - `@sentry/react` 11;
 - `lucide-react` 1;
 - `dotenv` 18: done (18.0.8), PR #606;
-- `globals` 17: its own PR, after #606 (one held major per PR);
-- `@testing-library/jest-dom` 7.
+- `globals` 17: done (17.13.0), PR #610;
+- `@testing-library/jest-dom` 7: done (7.0.1), branch `claude/vibrant-allen-hr7y7s-up-jest-dom`, PR number to be added.
 
-Not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.
+The rest are not attempted. Each runs the Definition of Done gates and the bundle check on its own branch.
 
 ## After those, as the owner schedules them
 
@@ -50,7 +50,9 @@ All five groups hold the thirteen July items and the tails the close-out deferre
 the repository owner. A group that touches persistence, the solver, a schema or a filed figure
 starts as a plan.
 
-- **B2, export and registration hardening (plan first, schema for DS-5):**
+- **B2, export and registration hardening (plan first, schema for DS-5):** **done 2026-10-19**, branch
+  `claude/vibrant-allen-hr7y7s-b2-hardening` (PR number: coordinator), plan
+  `docs/changes/2026-10-19-b2-hardening.md`.
   - DS-4: spreadsheet-formula characters in the CSV export (`escapeCsvValue` in
     `packages/core/src/outputGeneration.js`). It changes what an export contains, negative numbers
     included, so the plan decides the escaping rule;

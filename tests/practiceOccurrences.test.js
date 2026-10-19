@@ -57,6 +57,9 @@ function utcMs(iso) {
   return Date.UTC(y, m - 1, d);
 }
 
+/** The zone the dates below are read in; the dates are well clear of a clock change. */
+const SEASON_TZ = 'America/Los_Angeles';
+
 describe('useTeamPortal expandPractices: season wall dates', () => {
   it('runs in a zone that exposes the defect (meta)', () => {
     // If this fails the zone did not take, and the assertions below prove nothing.
@@ -64,7 +67,7 @@ describe('useTeamPortal expandPractices: season wall dates', () => {
   });
 
   it('a Monday practice in America/Los_Angeles lands on Mondays, last week included', () => {
-    const events = expandPractices(ROWS);
+    const events = expandPractices(ROWS, [], SEASON_TZ);
 
     for (const row of ROWS) {
       const expected = expectedMondays(row);
@@ -80,7 +83,7 @@ describe('useTeamPortal expandPractices: season wall dates', () => {
   });
 
   it('expands each row only within its own range: nothing in the gap or outside', () => {
-    const events = expandPractices(ROWS);
+    const events = expandPractices(ROWS, [], SEASON_TZ);
     expect(events).toHaveLength(ROWS.reduce((n, r) => n + expectedMondays(r).length, 0));
     for (const e of events) {
       const row = ROWS.find((r) => r.id === e.id);
@@ -92,10 +95,14 @@ describe('useTeamPortal expandPractices: season wall dates', () => {
   });
 
   it('keeps the wall reading of the slot', () => {
-    const [first] = expandPractices(ROWS);
+    const [first] = expandPractices(ROWS, [], SEASON_TZ);
     expect(first).toMatchObject({ startTime: '17:00:00', endTime: '18:30:00', type: 'practice' });
     expect(first.location).toBe('Test Park - Field A');
-    const [bare] = expandPractices([{ ...ROWS[0], slot: { ...slot('mon'), field: null } }]);
+    const [bare] = expandPractices(
+      [{ ...ROWS[0], slot: { ...slot('mon'), field: null } }],
+      [],
+      SEASON_TZ
+    );
     expect(bare.location).toBe('Venue - Field');
   });
 });

@@ -1813,6 +1813,20 @@ const createMockQuery = (table, data = null) => {
             return { ...item, player: player, players: player };
           });
         }
+        if (table === 'teams' && queryContent.includes('season:season_settings')) {
+          // `division:divisions (..., season:season_settings (...))`, as the
+          // team portal reads it: the team's division and that division's
+          // season, whose `timezone` the portal places every practice on.
+          const divisions = getMockData('divisions');
+          const seasons = getMockData('season_settings');
+          results = results.map((item) => {
+            const division = divisions.find((d) => String(d.id) === String(item.division_id));
+            const season = division
+              ? seasons.find((s) => String(s.id) === String(division.season_settings_id))
+              : null;
+            return { ...item, division: division ? { ...division, season: season || null } : null };
+          });
+        }
         if (table === 'teams' && queryContent.includes('event_rsvps')) {
           const rsvps = getMockData('event_rsvps');
           results = results.map((item) => ({

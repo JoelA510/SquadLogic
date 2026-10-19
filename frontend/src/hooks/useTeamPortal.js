@@ -4,6 +4,11 @@ import { logger } from '../lib/logger.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { PRACTICE_TBD_CAUSES } from '@squadlogic/core/utils/practiceOccurrences.js';
 import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptions.js';
+import {
+  PRACTICE_TIME_NOTE_CAUSES,
+  PRACTICE_TIME_NOTE_CAUSE_UNKNOWN,
+  placePracticeTime,
+} from '@squadlogic/core/timing/index.js';
 
 /**
  * The `practice_exceptions` columns the helper reads, and the relocated slot
@@ -14,6 +19,25 @@ import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptio
 export const PORTAL_PRACTICE_EXCEPTIONS_SELECT =
   'id, assignment_id, window, kind, tbd_reason, cause_kind, withdrawn_at, ' +
   'slot:practice_slots!practice_slot_id(day_of_week, start_time, end_time, field:fields(name, location:locations(name)))';
+
+/**
+ * The team read. The season embed carries `timezone`: the season clock every
+ * practice date is placed on (`expandPractices`), the zone the feed reads from
+ * the same table. `tests/teamPortalPracticeDst.test.js` pins that it is asked for.
+ */
+export const PORTAL_TEAM_SELECT = `
+  *,
+  division:divisions (
+    id,
+    name,
+    season:season_settings (
+      id,
+      season_start,
+      season_end,
+      timezone
+    )
+  )
+`;
 
 /**
  * Said when the exceptions read fails (plan §10 Q5): the feed's CALDESC
@@ -53,20 +77,7 @@ export function useTeamPortal(teamId) {
       // 1. Fetch Team Details
       const { data: teamData, error: teamError } = await supabase
         .from('teams')
-        .select(
-          `
-          *,
-          division:divisions (
-            id,
-            name,
-            season:season_settings (
-              id,
-              season_start,
-              season_end
-            )
-          )
-        `
-        )
+        .select(PORTAL_TEAM_SELECT)
         .eq('id', teamId)
         .single();
 
@@ -224,7 +235,13 @@ export function useTeamPortal(teamId) {
       }
       setPracticeChangesUnread(changesUnread);
 
-      const expandedPractices = expandPractices(practiceAssignments, practiceExceptions);
+      // The team's own season clock, as the feed places on it. No default: a
+      // season with no timezone shows its practices as TIME TBD, as the feed does.
+      const expandedPractices = expandPractices(
+        practiceAssignments,
+        practiceExceptions,
+        teamData?.division?.season?.timezone ?? null
+      );
 
       // 5. Combine and Sort Events. Wall dates and zero-padded wall times are
       // compared as strings (a dated TIME TBD has no time, so a `Date` built
@@ -433,6 +450,15 @@ function locationOf(slot) {
   return `${slot?.field?.location?.name || 'Venue'} - ${slot?.field?.name || 'Field'}`;
 }
 
+/** The slot a relocated occurrence replaces, as the page names it (Q3). */
+function movedFromOf(o) {
+  return {
+    dayOfWeek: o.replaces?.day_of_week ?? null,
+    startTime: o.replaces?.start_time ?? null,
+    location: locationOf(o.replaces),
+  };
+}
+
 /**
  * Expand each practice assignment into one event per occurrence, with the
  * team's saved practice exceptions applied (8.6 3b PR 12c, plan §4 R2).
@@ -444,14 +470,23 @@ function locationOf(slot) {
  * wall dates computed without a `Date` (GAP-30). The loop this once replaced
  * parsed the range start as UTC midnight and read it back with local
  * `getDay()`, so in any US zone a Monday practice rendered on the Tuesday
- * (fix #64). The season timezone is not needed: the weekday of a calendar
- * date is the same in every zone, and `startTime` stays the slot's wall reading.
+ * (fix #64). The *date* needs no timezone: the weekday of a calendar date is
+ * the same in every zone. Whether that date *has* the slot's wall time does:
+ * the spring-forward date has no 02:30 and the fall-back date has two 01:30s.
+ * So every timed occurrence is placed on the season clock, per date, by the
+ * feed's own contract (`placePracticeTime`, core's `resolveZonedInstant`): a
+ * time that names no instant is a dated TIME TBD, and `startTime` stays the
+ * slot's wall reading for every other date, including an ambiguous one (the
+ * feed takes the earlier occurrence and notes it; so does `timingNotes`).
  *
  * What it emits, per the helper's occurrence kind:
  *
  * - `series`: a timed practice at the row's slot.
  * - `relocated`: a timed practice at the relocated slot's time and ground,
  *   `kind: 'relocated'`, with `movedFrom` naming the slot it replaces (Q3).
+ *   (Either one whose wall time cannot be placed on `timeZone` that date is a
+ *   dated TIME TBD instead, with the slot's ground and the timing reason code;
+ *   a moved one keeps its `movedFrom`.)
  * - `time_tbd`: a **dated** TIME TBD (`date` set, `timeTbd: true`) with the
  *   reason code and wording. A tail window after the row's range shows here
  *   (plan §2, W4). No location: the feed gives none either.
@@ -463,11 +498,16 @@ function locationOf(slot) {
  * passes what it read. The helper's findings (for example
  * `PRACTICE_TBD_SHADOWED`) are logged, not shown, as the feed logs them.
  *
+ * `timeZone` is the season's IANA zone. There is no default: `null` or a zone
+ * the runtime does not know makes every timed practice TIME TBD, as the feed
+ * does for a season with no timezone.
+ *
  * @param {Array<Record<string, any>>} assignments
  * @param {Array<Record<string, any>>} [exceptions]
+ * @param {string|null} [timeZone]
  * @returns {Array<Record<string, any>>}
  */
-export function expandPractices(assignments, exceptions = []) {
+export function expandPractices(assignments, exceptions = [], timeZone = null) {
   const rows = (assignments ?? []).filter((row) => row && typeof row === 'object');
   const byId = new Map(rows.map((row) => [row.id, row]));
   const { occurrences, undated, findings } = applyPracticeExceptions({
@@ -477,6 +517,12 @@ export function expandPractices(assignments, exceptions = []) {
 
   if (findings.length > 0) {
     logger.warn('[useTeamPortal] practice exceptions reported findings', { findings });
+  }
+  if (occurrences.length > 0 && !(typeof timeZone === 'string' && timeZone.trim())) {
+    // Said, not silent: with no season clock every timed practice below is TIME TBD.
+    logger.warn('[useTeamPortal] no season timezone; timed practices are shown as TIME TBD', {
+      timeZone,
+    });
   }
 
   const expanded = occurrences.map((o) => {
@@ -494,24 +540,52 @@ export function expandPractices(assignments, exceptions = []) {
         exceptionId: o.exceptionId,
       };
     }
+    // Per date, on the season clock (the feed's contract): a wall time the
+    // date does not have is TIME TBD, not a fake time.
+    const placed = placePracticeTime({
+      date: o.date,
+      startTime: o.slot?.start_time,
+      endTime: o.slot?.end_time,
+      timeZone,
+    });
+    if (placed.placed === false) {
+      return {
+        ...base,
+        // A moved practice keeps its "Moved from" line: the family still learns it moved.
+        ...(o.kind === 'relocated' ? { kind: 'relocated', movedFrom: movedFromOf(o) } : {}),
+        startTime: null,
+        endTime: null,
+        location: locationOf(o.slot),
+        description: 'TIME TBD - Practice',
+        timeTbd: true,
+        reasonCode: placed.code,
+        reason: placed.cause,
+        exceptionId: o.kind === 'relocated' ? o.exceptionId : undefined,
+      };
+    }
+    const timingNotes = placed.notes.length
+      ? {
+          timingNotes: placed.notes.map(
+            (code) => PRACTICE_TIME_NOTE_CAUSES[code] ?? PRACTICE_TIME_NOTE_CAUSE_UNKNOWN
+          ),
+        }
+      : {};
     if (o.kind === 'relocated') {
       return {
         ...base,
+        ...timingNotes,
         kind: 'relocated',
         startTime: o.slot.start_time,
         endTime: o.slot.end_time,
         location: locationOf(o.slot),
         description: 'Practice (moved)',
         exceptionId: o.exceptionId,
-        movedFrom: {
-          dayOfWeek: o.replaces?.day_of_week ?? null,
-          startTime: o.replaces?.start_time ?? null,
-          location: locationOf(o.replaces),
-        },
+        movedFrom: movedFromOf(o),
       };
     }
     return {
       ...base,
+      ...timingNotes,
       startTime: o.slot.start_time,
       endTime: o.slot.end_time,
       location: locationOf(o.slot),

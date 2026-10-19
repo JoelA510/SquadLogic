@@ -181,3 +181,74 @@ Then('RSVP should be open on an unchanged practice of the same series', async ({
   await expect(card).toHaveCount(1, { timeout: 15000 });
   await expect(card.getByTitle('Going', { exact: true })).toHaveCount(1);
 });
+
+/*
+ * A weekly Sunday 02:30 series across the spring-forward date, in the mock
+ * season's zone (America/Los_Angeles, `mockSupabaseClient.js`). 2026-03-08 has
+ * no 02:30, so the portal must say TIME TBD for it, as the calendar feed does
+ * (`tests/teamPortalPracticeDst.test.js` holds the two readers to each other).
+ * Synthetic names; DOM assertions only; `organization_id` on every row.
+ */
+const DST = {
+  series: '[2026-03-01,2026-03-29)',
+  gapDate: '2026-03-08',
+  ordinaryDate: '2026-03-15',
+  ordinaryTime: '02:30 - 04:00',
+  // UNPLACEABLE_CAUSES.WALL_TIME_NONEXISTENT (supabase/functions/_shared/calendar/icsFeed.ts).
+  gapWording:
+    'the scheduled time does not exist on that date, because daylight saving skips that hour',
+};
+
+Given(
+  'the {string} have a Sunday 02:30 practice series across the spring-forward date',
+  async ({ page }, teamName: string) => {
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ team, seed, mockOrgId }) => {
+        const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+        const teamId =
+          localStorage.getItem('test_target_team_id') || team.toLowerCase().replace(/\s+/g, '-');
+        db.practice_slots = (db.practice_slots || []).filter(
+          (s: Record<string, unknown>) => s.id !== 'slot-e2e-sun'
+        );
+        db.practice_slots.push({
+          id: 'slot-e2e-sun',
+          organization_id: orgId,
+          day_of_week: 'sun',
+          start_time: '02:30',
+          end_time: '04:00',
+        });
+        db.practice_assignments = (db.practice_assignments || []).filter(
+          (a: Record<string, unknown>) => a.team_id !== teamId
+        );
+        db.practice_assignments.push({
+          id: 'pa-e2e-sun',
+          organization_id: orgId,
+          team_id: teamId,
+          practice_slot_id: 'slot-e2e-sun',
+          effective_date_range: seed.series,
+        });
+        db.practice_exceptions = (db.practice_exceptions || []).filter(
+          (e: Record<string, unknown>) => e.team_id !== teamId
+        );
+        window.__saveMockDB__(db);
+      },
+      { team: teamName, seed: DST, mockOrgId: MOCK_ORG_ID }
+    );
+  }
+);
+
+Then('I should see the spring-forward date as TIME TBD with its reason', async ({ page }) => {
+  const text = `Time TBD on ${await longDate(page, DST.gapDate)}: ${DST.gapWording}`;
+  await expect(page.getByText(text, { exact: true })).toBeVisible({ timeout: 15000 });
+  const card = cardWith(page, `Time TBD on ${await longDate(page, DST.gapDate)}`);
+  await expect(card).toHaveCount(1);
+  await expect(card.getByText('02:30')).toHaveCount(0);
+});
+
+Then('I should see an ordinary Sunday of the series at 02:30', async ({ page }) => {
+  const card = cardWith(page, await longDate(page, DST.ordinaryDate));
+  await expect(card).toHaveCount(1, { timeout: 15000 });
+  await expect(card.getByText(DST.ordinaryTime)).toBeVisible();
+});

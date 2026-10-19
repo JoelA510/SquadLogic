@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2289,6 +2289,27 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the save-audit revert did not restore both previous save RPC bodies and their posture"
         dump 10 $SCRATCH/harness_save_rpcs; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261019010000" ]; then
+      # The body read back from the catalogue, not from the revert's own
+      # NOTICE: md5 of the 20260602010000 dollar-quoted text, the posture, no
+      # throttle left in it, and the index gone. `missing` fires when the
+      # lookup finds no function, so a broken query cannot read as restored.
+      if psql_cmd "SELECT 'SUBMIT-REG-VERDICT:' || CASE
+               WHEN to_regprocedure('public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)') IS NULL THEN 'missing'
+               WHEN to_regclass('public.registrations_profile_form_created_idx') IS NOT NULL THEN 'index-left'
+               WHEN (SELECT md5(p.prosrc) = '311952a6b46dec9141313d13789dad12' AND p.prosecdef
+                            AND p.proconfig = ARRAY['search_path=public']
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)'::regprocedure)
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_submit_reg 2>&1 && grep -q 'SUBMIT-REG-VERDICT:restored' $SCRATCH/harness_submit_reg; then
+        echo "  | (checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, and drops the throttle index"
+      else
+        echo "FAIL revert ${id}: the submit_registration revert did not restore the previous body and posture"
+        dump 10 $SCRATCH/harness_submit_reg; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

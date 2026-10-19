@@ -1,0 +1,160 @@
+-- Smoke checks for 20261019010000_submit_registration_throttle.sql
+--
+-- What it proves, as members of an organization (prelude.sql stubs
+-- `auth.uid()` from `request.jwt.claim.sub`):
+--   * a member's first ten registrations to one form in the window succeed,
+--     and the eleventh is refused with PT429 and writes no registration, no
+--     player and no link; the refusal carries the limit in its hint;
+--   * the refusal is per caller and per form: a second member of the same
+--     organization and the same member on a second form still register;
+--   * the window is 60 seconds: with the ten registrations back-dated 61 s the
+--     same caller registers again, and with them back-dated 59 s is refused;
+--   * a call that fails validation (a form that is not open) is refused with its
+--     own code (22023), not PT429, and a refused call does not extend the window;
+--   * the posture is unchanged: SECURITY DEFINER, search_path=public, EXECUTE for
+--     authenticated and anon (the public registration route), and the index the
+--     count uses exists on (profile_id, form_id, created_at).
+--
+-- Wrapped in BEGIN ... ROLLBACK: it leaves nothing behind for later stages.
+-- Every id is generated and every email is `@example.test`; there is no PII.
+
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+DO $$
+DECLARE
+    v_a uuid := gen_random_uuid();
+    v_b uuid := gen_random_uuid();
+    v_org uuid;
+    v_season uuid;
+    v_div uuid;
+    v_form uuid;
+    v_form2 uuid;
+    v_closed uuid;
+    v_code text;
+    v_hint text;
+    v_i integer;
+    v_before_regs integer;
+    v_before_players integer;
+    v_before_links integer;
+    v_id uuid;
+BEGIN
+    INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+        (v_a, 'reg-a@example.test', '{"password_length": 16}'),
+        (v_b, 'reg-b@example.test', '{"password_length": 16}');
+    INSERT INTO public.profiles (id, email) VALUES
+        (v_a, 'reg-a@example.test'), (v_b, 'reg-b@example.test')
+        ON CONFLICT DO NOTHING;
+    INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org Throttle', 'smoke-org-throttle')
+        RETURNING id INTO v_org;
+    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+        (v_org, v_a, 'parent'), (v_org, v_b, 'parent');
+    INSERT INTO public.season_settings (organization_id, name)
+        VALUES (v_org, 'Throttle Season') RETURNING id INTO v_season;
+    INSERT INTO public.divisions (organization_id, season_settings_id, name)
+        VALUES (v_org, v_season, 'Throttle Division') RETURNING id INTO v_div;
+    INSERT INTO public.registration_forms (organization_id, title, status, division_id) VALUES
+        (v_org, 'Open form', 'open', v_div) RETURNING id INTO v_form;
+    INSERT INTO public.registration_forms (organization_id, title, status, division_id) VALUES
+        (v_org, 'Second open form', 'open', v_div) RETURNING id INTO v_form2;
+    INSERT INTO public.registration_forms (organization_id, title, status, division_id) VALUES
+        (v_org, 'Closed form', 'closed', v_div) RETURNING id INTO v_closed;
+
+    PERFORM set_config('request.jwt.claim.sub', v_a::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+
+    -- (a) Ten succeed, the eleventh is refused and writes nothing.
+    FOR v_i IN 1..10 LOOP
+        PERFORM public.submit_registration(v_org, v_form, v_a, '{}'::jsonb, NULL, 'Child' || v_i, 'Throttle');
+    END LOOP;
+    IF (SELECT count(*) FROM public.registrations WHERE profile_id = v_a AND form_id = v_form) <> 10 THEN
+        RAISE EXCEPTION 'the first ten registrations were not all written';
+    END IF;
+    SELECT count(*) INTO v_before_regs FROM public.registrations WHERE organization_id = v_org;
+    SELECT count(*) INTO v_before_players FROM public.players WHERE organization_id = v_org;
+    SELECT count(*) INTO v_before_links FROM public.profile_players WHERE organization_id = v_org;
+    v_code := NULL;
+    BEGIN
+        PERFORM public.submit_registration(v_org, v_form, v_a, '{}'::jsonb, NULL, 'Child11', 'Throttle');
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE, v_hint = PG_EXCEPTION_HINT;
+    END;
+    IF v_code IS DISTINCT FROM 'PT429' THEN
+        RAISE EXCEPTION 'the eleventh registration was not refused PT429 (got %)', coalesce(v_code, 'success');
+    END IF;
+    IF v_hint IS NULL OR v_hint NOT LIKE 'At most 10 registrations per form per%' THEN
+        RAISE EXCEPTION 'the refusal does not name the limit in its hint: %', v_hint;
+    END IF;
+    IF (SELECT count(*) FROM public.registrations WHERE organization_id = v_org) <> v_before_regs
+       OR (SELECT count(*) FROM public.players WHERE organization_id = v_org) <> v_before_players
+       OR (SELECT count(*) FROM public.profile_players WHERE organization_id = v_org) <> v_before_links THEN
+        RAISE EXCEPTION 'the refused eleventh call still wrote a registration, a player or a link';
+    END IF;
+    RAISE NOTICE 'ten registrations to one form succeed; the eleventh is refused PT429 with the limit in its hint and writes nothing';
+
+    -- (b) Per caller and per form.
+    PERFORM set_config('request.jwt.claim.sub', v_b::text, true);
+    PERFORM public.submit_registration(v_org, v_form, v_b, '{}'::jsonb, NULL, 'Other', 'Member');
+    PERFORM set_config('request.jwt.claim.sub', v_a::text, true);
+    PERFORM public.submit_registration(v_org, v_form2, v_a, '{}'::jsonb, NULL, 'Second', 'Form');
+    RAISE NOTICE 'a second member on the same form, and the same member on a second form, still register';
+
+    -- (c) The window is 60 seconds.
+    UPDATE public.registrations SET created_at = timezone('utc', now()) - interval '59 seconds'
+     WHERE profile_id = v_a AND form_id = v_form;
+    v_code := NULL;
+    BEGIN
+        PERFORM public.submit_registration(v_org, v_form, v_a, '{}'::jsonb, NULL, 'Edge', 'Inside');
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE;
+    END;
+    IF v_code IS DISTINCT FROM 'PT429' THEN
+        RAISE EXCEPTION 'ten registrations 59 seconds old did not still throttle (got %)', coalesce(v_code, 'success');
+    END IF;
+    UPDATE public.registrations SET created_at = timezone('utc', now()) - interval '61 seconds'
+     WHERE profile_id = v_a AND form_id = v_form;
+    v_id := public.submit_registration(v_org, v_form, v_a, '{}'::jsonb, NULL, 'After', 'Window');
+    IF v_id IS NULL THEN
+        RAISE EXCEPTION 'a registration after the window returned no id';
+    END IF;
+    RAISE NOTICE 'the window is 60 seconds: ten registrations 59 s old still throttle, 61 s old do not';
+
+    -- (d) Validation failures keep their own code and are not throttled.
+    v_code := NULL;
+    BEGIN
+        PERFORM public.submit_registration(v_org, v_closed, v_a, '{}'::jsonb, NULL, 'Closed', 'Form');
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE;
+    END;
+    IF v_code IS DISTINCT FROM '22023' THEN
+        RAISE EXCEPTION 'a closed form was not refused 22023 (got %)', coalesce(v_code, 'success');
+    END IF;
+    RAISE NOTICE 'a closed form is still refused 22023, not PT429';
+
+    -- (e) Posture and index.
+    IF NOT (SELECT p.prosecdef AND p.proconfig = ARRAY['search_path=public']
+              FROM pg_proc p
+             WHERE p.oid = 'public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)'::regprocedure) THEN
+        RAISE EXCEPTION 'submit_registration lost SECURITY DEFINER or search_path=public';
+    END IF;
+    IF NOT has_function_privilege('authenticated', 'public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)', 'EXECUTE')
+       OR NOT has_function_privilege('anon', 'public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'submit_registration must stay executable by authenticated and anon (the public registration route)';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE c.relname = 'registrations_profile_form_created_idx'
+           AND i.indrelid = 'public.registrations'::regclass
+           AND (SELECT array_agg(a.attname::text ORDER BY k.ord)
+                  FROM unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+                  JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum)
+               = ARRAY['profile_id', 'form_id', 'created_at']) THEN
+        RAISE EXCEPTION 'registrations_profile_form_created_idx is missing or not on (profile_id, form_id, created_at)';
+    END IF;
+    RAISE NOTICE 'submit_registration is SECURITY DEFINER with search_path=public, executable by authenticated and anon, and the count is indexed';
+END;
+$$;
+
+ROLLBACK;

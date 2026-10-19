@@ -2223,8 +2223,8 @@ looked at on `main` (`1fe2265`) for this PR (*statically reviewed* unless stated
 
 | Item | Placement | Check |
 | --- | --- | --- |
-| DS-4 CSV formula injection | Moved to B2 (plan first: it changes what an export contains, including negative numbers) | `escapeCsvValue` in `packages/core/src/outputGeneration.js` quotes only `"`, `,`, CR, LF |
-| DS-5 `submit_registration` throttle | Moved to B2 (plan first: schema) | no throttle in the RPC's migrations |
+| DS-4 CSV formula injection | Moved to B2 (plan first: it changes what an export contains, including negative numbers). **Built 2026-10-19** on branch `claude/vibrant-allen-hr7y7s-b2-hardening` (plan `docs/changes/2026-10-19-b2-hardening.md`): `escapeCsvCell` in `packages/core/src/csv.js` | `escapeCsvValue` in `packages/core/src/outputGeneration.js` quotes only `"`, `,`, CR, LF |
+| DS-5 `submit_registration` throttle | Moved to B2 (plan first: schema). **Built 2026-10-19** on the same branch: migration `20261019010000`, ten registrations per caller per form per 60 seconds, PT429 | no throttle in the RPC's migrations |
 | DS-9 impersonation failures swallowed | Moved to B3 | `TopBar.jsx` still ends `impersonateUser(profile).catch(() => {})` |
 | DS-14 `dashboardCache` unused | Moved to B3 | `frontend/src/lib/cache.js` is imported only by `tests/cache.test.js` |
 | DS-15 serial dashboard queries | Moved to B3 | not re-read; the July entry stands |

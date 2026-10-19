@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { TTLCache, dashboardCache } from '../frontend/src/lib/cache.js';
+import { TTLCache } from '../frontend/src/lib/cache.js';
 
 describe('TTLCache', () => {
   let cache;
@@ -115,26 +115,19 @@ describe('TTLCache', () => {
   });
 });
 
-describe('dashboardCache singleton', () => {
-  afterEach(() => {
-    dashboardCache.clear();
-  });
-
-  it('is an instance of TTLCache', () => {
-    expect(dashboardCache).toBeInstanceOf(TTLCache);
-  });
-
+describe('TTLCache defaults', () => {
   it('has a default 30s TTL', () => {
     vi.useFakeTimers();
-    dashboardCache.set('test', 'data');
+    const cache = new TTLCache();
+    cache.set('test', 'data');
 
     // Still fresh at 29s
     vi.advanceTimersByTime(29_000);
-    expect(dashboardCache.get('test')).not.toBeNull();
+    expect(cache.get('test')).not.toBeNull();
 
     // Expired at 31s
     vi.advanceTimersByTime(2_000);
-    expect(dashboardCache.get('test')).toBeNull();
+    expect(cache.get('test')).toBeNull();
 
     vi.useRealTimers();
   });

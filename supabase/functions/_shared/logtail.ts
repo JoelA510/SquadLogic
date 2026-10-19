@@ -24,6 +24,9 @@ interface LogEntry {
 
 const LOGTAIL_URL = 'https://in.logs.betterstack.com';
 
+/** How long `flush` waits for BetterStack before dropping the batch. */
+const FLUSH_TIMEOUT_MS = 2000;
+
 /**
  * An environment variable, or '' where the process may not read the
  * environment. The Edge runtime always may; a `deno test` run without
@@ -79,8 +82,9 @@ function log(
  * Flush all buffered log entries to BetterStack.
  * Call this before returning the HTTP response from the Edge Function.
  * Returns silently on failure — logging should never break the function.
+ * Waits at most `timeoutMs` (default 2 s) for BetterStack.
  */
-async function flush(): Promise<void> {
+async function flush(timeoutMs: number = FLUSH_TIMEOUT_MS): Promise<void> {
   if (!SOURCE_TOKEN || buffer.length === 0) return;
 
   const entries = buffer.splice(0, buffer.length);
@@ -93,9 +97,12 @@ async function flush(): Promise<void> {
         Authorization: `Bearer ${SOURCE_TOKEN}`,
       },
       body: JSON.stringify(entries),
+      // Callers await this before returning a response, so a slow BetterStack
+      // must not hold the caller's answer: past the bound the batch is dropped.
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
-    // Swallow — logging must never crash the function
+    // Swallow — logging must never crash the function (a timeout lands here too)
     console.warn('[logtail] Failed to flush logs to BetterStack');
   }
 }
@@ -176,6 +183,33 @@ export function describeError(error: unknown): Record<string, unknown> {
     };
   }
   return { name: 'NonError', message: redactMessage(String(error)) };
+}
+
+/**
+ * Log an event inside a request with the same three fields a failure carries:
+ * function name, request ID and organization ID (null when not yet known).
+ * `details` are the event's own fields, kept as they were before the request
+ * context existed. Buffers only; the caller flushes, as it does for `edgeLogger`.
+ * Use it for a refusal the handler answers itself. Never put a raw error in
+ * `details`: route an error through `logFailure`, which redacts it.
+ */
+export function logRequest(
+  ctx: FailureContext,
+  level: LogLevel,
+  message: string,
+  details: Record<string, unknown> = {}
+): void {
+  log(
+    level,
+    message,
+    {
+      ...details,
+      function_name: ctx.functionName,
+      request_id: ctx.requestId,
+      organization_id: ctx.organizationId ?? null,
+    },
+    ctx.functionName
+  );
 }
 
 /**

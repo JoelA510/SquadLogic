@@ -1,9 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import { defineBddConfig } from 'playwright-bdd';
-import dotenv from 'dotenv';
+import { loadTestEnv } from './tests/e2e/loadTestEnv.js';
 
-// Load environment variables from .env
-dotenv.config();
+// Load environment variables: the shell, then .env.test (the TEST_* credentials), then .env
+loadTestEnv();
 
 const testDir = defineBddConfig({
   features: 'tests/e2e/features/**/*.feature',

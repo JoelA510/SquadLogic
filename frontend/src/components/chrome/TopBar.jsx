@@ -23,6 +23,7 @@ import { useTheme } from '../../contexts/ThemeContext.jsx';
 import { usePermission } from '../../hooks/usePermission.js';
 import { supabase } from '../../lib/supabaseClient.js';
 import Dropdown from '../ui/Dropdown.jsx';
+import { useToast } from '../ui/ToastHost.jsx';
 import Badge from '../ui/Badge.jsx';
 import { initialsOf } from '../ui/Avatar.jsx';
 import logo from '../../assets/SL-Logo.png';
@@ -91,6 +92,7 @@ export default function TopBar({ onToggleNav = undefined }) {
   } = useOrganization();
   const { themeMode, toggleThemeMode } = useTheme();
   const { can, PERMISSIONS } = usePermission();
+  const toast = useToast();
   const searchRef = useRef(null);
   const [previewTargets, setPreviewTargets] = useState([]);
 
@@ -176,7 +178,13 @@ export default function TopBar({ onToggleNav = undefined }) {
           id: `preview-${profile.id}`,
           label: `Preview as ${profile.role === 'coach' ? 'Coach' : 'Parent'}`,
           icon: profile.role === 'coach' ? UserRoundCheck : User,
-          onSelect: () => impersonateUser(profile).catch(() => {}),
+          onSelect: () =>
+            impersonateUser(profile).catch(() => {
+              toast(
+                `Could not start the preview as ${profile.role === 'coach' ? 'a coach' : 'a parent'}. Try again.`,
+                'warning'
+              );
+            }),
         }))
       : []),
     {

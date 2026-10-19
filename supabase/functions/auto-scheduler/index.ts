@@ -100,7 +100,7 @@ import {
   auditErrorText,
 } from '../_shared/auth.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
-import { edgeLogger, logFailure, withFailureLogging } from '../_shared/logtail.ts';
+import { edgeLogger, logFailure, logRequest, withFailureLogging } from '../_shared/logtail.ts';
 
 // ---------------------------------------------------------------------------
 // HTTP handler
@@ -193,7 +193,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     // organization's season by sending its id.
     const season = await readSeasonTimezone(supabase, input.organizationId, seasonSettingsId);
     if (season.errored) {
-      edgeLogger.error('Auto-scheduler could not read the season timezone', {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read the season timezone', {
         orgId: input.organizationId,
         seasonSettingsId,
         message: season.message,
@@ -214,7 +214,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // normal shape of the failure rather than an edge case. It is refused
       // with a reason code, never scheduled against a guessed zone.
       const failure = describeAnchorFailure(anchored.blocking);
-      edgeLogger.error('Auto-scheduler refused: slots could not be placed', {
+      logRequest(logCtx, 'error', 'Auto-scheduler refused: slots could not be placed', {
         orgId: input.organizationId,
         timezone: season.timezone,
         slotCount: input.slots.length,
@@ -247,7 +247,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       seasonSettingsId,
     });
     if (!lock.ok) {
-      edgeLogger.error('Auto-scheduler could not read the practice lock', {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read the practice lock', {
         orgId: input.organizationId,
         seasonSettingsId,
         message: lock.message,
@@ -269,7 +269,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     //     direction means the page is looking at a different schedule.
     const lockCheck = crossCheckLockedAssignments(lock.rows, input.lockedAssignments);
     if (!lockCheck.ok) {
-      edgeLogger.error('Auto-scheduler refused: locked assignments do not match', {
+      logRequest(logCtx, 'error', 'Auto-scheduler refused: locked assignments do not match', {
         orgId: input.organizationId,
         seasonSettingsId,
         missingFromClient: lockCheck.missingFromClient,
@@ -339,7 +339,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       }
     );
     if (!preferences.ok) {
-      edgeLogger.error('Auto-scheduler could not read coach preferences', {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read coach preferences', {
         orgId: input.organizationId,
         seasonSettingsId,
         code: preferences.code,
@@ -376,7 +376,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       slotIds: anchored.rows.map((s) => s.id),
     });
     if (!venueDaylight.ok) {
-      edgeLogger.error('Auto-scheduler could not read venue lighting', {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read venue lighting', {
         orgId: input.organizationId,
         seasonSettingsId,
         message: venueDaylight.message,
@@ -419,7 +419,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
             daylightSlots
           );
     if (liveFrom === null || undatable.length > 0) {
-      edgeLogger.error('Auto-scheduler refused: slots could not be dated', {
+      logRequest(logCtx, 'error', 'Auto-scheduler refused: slots could not be dated', {
         orgId: input.organizationId,
         seasonSettingsId,
         liveFrom,
@@ -463,7 +463,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       { organizationId: input.organizationId, slotIds: anchored.rows.map((s) => s.id) }
     );
     if (!lightingOverrides.ok) {
-      edgeLogger.error('Auto-scheduler could not read lighting overrides', {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read lighting overrides', {
         orgId: input.organizationId,
         seasonSettingsId,
         message: lightingOverrides.message,
@@ -501,7 +501,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     };
 
     // 6. Audit + structured logging: scheduler started
-    edgeLogger.info('Auto-scheduler invoked', {
+    logRequest(logCtx, 'info', 'Auto-scheduler invoked', {
       userId: user.id,
       orgId: input.organizationId,
       teamCount: input.teams.length,
@@ -750,7 +750,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     });
 
     // 12. Structured logging: completion
-    edgeLogger.info('Auto-scheduler completed', {
+    logRequest(logCtx, 'info', 'Auto-scheduler completed', {
       bestScore,
       iterations: iteration,
       elapsedMs: totalElapsedMs,

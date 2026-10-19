@@ -197,6 +197,10 @@ gate:
    and carry no `VITE_` prefix, so they never reach the bundle. The mock
    client needs none of them: it accepts one fixed demo password,
    `test-password-123`.
+   `playwright.config.ts` loads `.env.test`, then `.env`, into the Node process
+   (`tests/e2e/loadTestEnv.js`); a variable already exported in the shell wins.
+   The mock suite reads the three `TEST_*_EMAIL` names too, so a populated
+   `.env.test` changes the address it signs in as.
 
 To run fully offline with mock data, set `VITE_USE_MOCK_SUPABASE=true` in `.env.local` (or leave the Supabase variables empty and use the dev server). No Supabase credentials are required in this mode.
 

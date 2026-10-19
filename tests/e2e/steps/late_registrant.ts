@@ -29,10 +29,8 @@ const LATE_PLAYER = uuid(7);
 const ORIGINAL_PLAYERS = TEAMS.flatMap((team) => team.players);
 
 Given(
-  'the {string} roster was saved as the teams {string} and {string} with three players each',
-  async ({ page }, division: string, first: string, second: string) => {
-    expect(division).toBe(DIVISION);
-    expect([first, second]).toEqual(TEAMS.map((team) => team.name));
+  'the U12 Boys roster was saved as the teams Falcons and Herons with three players each',
+  async ({ page }) => {
     await waitForMockClient(page);
     await page.evaluate(
       ({ division, teams, players, createdAt, mockOrgId }) => {
@@ -173,14 +171,19 @@ Given('every saved team is locked', async ({ page }) => {
 });
 
 When('I re-run teaming from the dashboard workflow', async ({ page }) => {
-  // The button asks before it replaces the current draft.
-  page.once('dialog', (dialog) => dialog.accept());
+  // The button asks before it replaces the current draft; the scenario says yes.
+  let asked = false;
+  page.once('dialog', (dialog) => {
+    asked = true;
+    void dialog.accept();
+  });
   await page.goto('/workflow?step=2');
   const rerun = page.getByTestId('step-rerun-teaming');
   await expect(rerun).toBeVisible({ timeout: 15000 });
   await rerun.click();
   // The Teams page runs the re-run on arrival and stages the review.
   await expect(page.getByText(/Team review staged:/)).toBeVisible({ timeout: 20000 });
+  expect(asked).toBe(true);
 });
 
 Then(
@@ -227,14 +230,26 @@ Then('the saved teams keep their ids and original players', async ({ page }) => 
   }
 });
 
+/** How many cards for `playerId` the saved teams' own columns hold, summed. */
+async function cardsOnSavedTeams(page: Page, playerId: string) {
+  let total = 0;
+  for (const team of TEAMS) {
+    const column = await teamColumn(page, team.id);
+    total += await column.getByTestId(`player-card-${playerId}`).count();
+  }
+  return total;
+}
+
 Then('the late registrant is on exactly one of them', async ({ page }) => {
-  // Meta-assertion: the rosters are open (an original card is on screen), so
-  // the counts below read a table that has players in it.
-  await expect(page.getByTestId(`player-card-${ORIGINAL_PLAYERS[0]}`)).toBeVisible();
-  await expect(page.getByTestId(`player-card-${LATE_PLAYER}`)).toHaveCount(1);
+  // Meta-assertion: the columns are open and hold players (the previous step
+  // awaited each original card), so a count of zero would be a real zero.
+  await teamColumn(page, TEAMS[0].id);
+  await expect.poll(() => cardsOnSavedTeams(page, LATE_PLAYER)).toBe(1);
 });
 
 Then('the late registrant is on none of them', async ({ page }) => {
-  await expect(page.getByTestId(`player-card-${ORIGINAL_PLAYERS[0]}`)).toBeVisible();
-  await expect(page.getByTestId(`player-card-${LATE_PLAYER}`)).toHaveCount(0);
+  await teamColumn(page, TEAMS[0].id);
+  // Counted in the teams' own columns, not page-wide: a card rendered in some
+  // other list would not make this pass or fail.
+  await expect.poll(() => cardsOnSavedTeams(page, LATE_PLAYER)).toBe(0);
 });

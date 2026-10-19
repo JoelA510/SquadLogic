@@ -4,9 +4,10 @@
  * (audit finding DD-9): `.env.test`, the documented home of the `TEST_*`
  * credentials, used to be skipped because the config read only `.env`.
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadTestEnv } from './e2e/loadTestEnv.js';
 
@@ -52,5 +53,27 @@ describe('loadTestEnv', () => {
     const env = {};
     expect(() => loadTestEnv(repoWith({}), env)).not.toThrow();
     expect(env).toEqual({});
+  });
+
+  it('takes only TEST_* names from .env.test, so it cannot repoint the dev server', () => {
+    const dir = repoWith({
+      '.env.test':
+        'TEST_PASSWORD=pw\nVITE_USE_MOCK_SUPABASE=false\nVITE_SUPABASE_URL=https://x.invalid\n',
+    });
+    /** @type {NodeJS.ProcessEnv} */
+    const env = {};
+    loadTestEnv(dir, env);
+    expect(env.TEST_PASSWORD).toBe('pw');
+    expect(env.VITE_USE_MOCK_SUPABASE).toBeUndefined();
+    expect(env.VITE_SUPABASE_URL).toBeUndefined();
+  });
+
+  it('is what playwright.config.ts calls, in place of a bare dotenv.config()', () => {
+    const config = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'playwright.config.ts'),
+      'utf8'
+    );
+    expect(config).toMatch(/^loadTestEnv\(\);$/m);
+    expect(config).not.toMatch(/dotenv\.config\(/);
   });
 });

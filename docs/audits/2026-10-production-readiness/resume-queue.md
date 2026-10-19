@@ -86,7 +86,7 @@ starts as a plan.
   - DD-5: `v1.1-planning.md` quotes old M2.2 wording;
   - and `docs/security/rls-policies.md`'s example policy shape, out of date for every table the
     RLS rewrite touched.
-- **B5, test journeys and tooling: done**, branch `claude/vibrant-allen-hr7y7s-b5-tests` (PR number to be filled in by the coordinator; the rainout journey is not buildable, see the remediation plan's Close-out):
+- **B5, test journeys and tooling: DD-9 and two of TG-3's three journeys done**, branch `claude/vibrant-allen-hr7y7s-b5-tests` (PR number to be filled in by the coordinator). **Open for the owner:** the rainout journey has no feature to test (the remediation plan's Close-out has the search); build one (a plan first), or drop it and correct `docs/testing/e2e_master_plan.md`:
   - TG-3: scenarios for DST-boundary practice splitting, rainout acknowledgement, and a late
     registrant on a locked roster;
   - DD-9: `playwright.config.ts` loads only `.env`, so `.env.test` (the documented place for the

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 
@@ -15,11 +16,25 @@ import dotenv from 'dotenv';
  * file is not an error (the mock run needs neither). Only the Node process sees
  * these; Vite's own `.env*` loading for the dev server is unchanged.
  *
+ * From `.env.test` only the `TEST_*` names are taken. The webServer inherits
+ * this process's environment, and Vite lets a `VITE_*` value in it override its
+ * own `.env` files, so a stray `VITE_USE_MOCK_SUPABASE` or `VITE_SUPABASE_*` in
+ * `.env.test` would silently repoint the dev server. `.env` is loaded whole, as
+ * it always was.
+ *
  * @param {string} [cwd] - the directory holding the env files (the repo root)
  * @param {NodeJS.ProcessEnv} [target] - the environment to fill (`process.env`)
  */
 export function loadTestEnv(cwd = process.cwd(), target = process.env) {
-  for (const file of ['.env.test', '.env']) {
-    dotenv.config({ path: path.join(cwd, file), processEnv: target, quiet: true });
+  let testFile = '';
+  try {
+    testFile = readFileSync(path.join(cwd, '.env.test'), 'utf8');
+  } catch (err) {
+    // Expected: most runs have no .env.test. Anything else (EACCES, EISDIR) is real.
+    if (err?.code !== 'ENOENT') throw err;
   }
+  for (const [name, value] of Object.entries(dotenv.parse(testFile))) {
+    if (name.startsWith('TEST_') && target[name] === undefined) target[name] = value;
+  }
+  dotenv.config({ path: path.join(cwd, '.env'), processEnv: target, quiet: true });
 }

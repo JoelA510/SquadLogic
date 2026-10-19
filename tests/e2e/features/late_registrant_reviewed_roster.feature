@@ -12,7 +12,7 @@ Feature: A late registrant and a roster that has already been reviewed
 
   Background:
     Given I am logged into SquadLogic as an "admin"
-    And the "U12 Boys" roster was saved as the teams "Falcons" and "Herons" with three players each
+    And the U12 Boys roster was saved as the teams Falcons and Herons with three players each
     And a late registrant appears in the latest import
 
   Scenario: A late registrant is seated on a saved team and nobody else moves

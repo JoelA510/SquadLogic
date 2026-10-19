@@ -65,12 +65,12 @@ Given('a Sunday practice slot at 02:30 on the night the clocks go forward', asyn
 });
 
 Then(
-  'the page shows {int} practice slot as TIME TBD because daylight saving skips its hour',
+  'the page shows {int} practice slot(s) as TIME TBD because daylight saving skips its hour',
   async ({ page }, count: number) => {
     await expect(
       page.getByText(
         new RegExp(
-          `${count} slot shown as TIME TBD \\(WALL_TIME_NONEXISTENT\\): daylight saving skips`
+          `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD \\(WALL_TIME_NONEXISTENT\\): daylight saving skips`
         )
       )
     ).toBeVisible();

@@ -26,11 +26,10 @@ recommendation as written). Merged:
   abort check, game grid); Wave 4 #591 (accessibility follow-ups); Wave 2 #592 (exports bucket),
   #597 (`create_import_job` stops auditing the file name), #595 + #596 (RLS persona matrix, then
   the rewrite with both advisor waivers removed), #598 (schema drift), #600 (team and game saves
-  audit in their transaction; the game save needs an admin). #599 (import telemetry stops
-  sending the file name) was open when this was written.
+  audit in their transaction; the game save needs an admin), #599 (import telemetry stops
+  sending the file name; merged as f561674).
 
-Open in the plan: nothing that is not a stated deferral. #599 (import telemetry) was open when
-this was written. The acceptance legs and deferrals, and to whom, are in "Close-out"; the work
+Open in the plan: nothing that is not a stated deferral. The acceptance legs and deferrals, and to whom, are in "Close-out"; the work
 that remains, in order, is [`resume-queue.md`](./resume-queue.md). Every agent reads
 [`agent-brief.md`](./agent-brief.md).
 
@@ -1639,8 +1638,8 @@ smoke deferred to the owner's v1.1.0 release smoke)
       `file_name`, and `telemetry_log.payload` stores it: all 5 such production rows carry one
       (read-only count, 2026-10-18). The owner's 2026-10-14 decision named the audit log; whether
       it covers telemetry is a question for the owner. *Executed* (the count); the code path
-      *statically reviewed*. **Decided 2026-10-18:** stop sending it. #599 (cited as #599; open
-      when this was written) removes `file_name` from the payload; the 5 existing rows age out
+      *statically reviewed*. **Decided 2026-10-18:** stop sending it. #599 (merged as f561674)
+      removes `file_name` from the payload; the 5 existing rows age out
       under the 180-day retention, as #597's did.
 
 - 2026-10-14, found by PR w3b (M4.6, M4.3):
@@ -2122,7 +2121,7 @@ the public GitHub API); everything else cites the merged PR that holds its evide
   (#593), the #576 follow-up (#594), the RLS advisor rewrite (#595 persona matrix, #596 rewrite),
   the schema drift fix (#598), and audit-in-transaction with the game save's admin check (#600).
   Also merged: the file-name audit fix (#597). Import telemetry stops sending the file name
-  (#599, open when this was written).
+  (#599, merged as f561674).
 - M6 questions: `fsevents`' install script stays denied (recorded here: `allowScripts`
   `fsevents: false`, `tests/allowScripts.test.js`, `dependency-policy.md`; the test fails with the
   entry removed, *executed*); `esbuild` stays approved by name; v1.1.0 is cut in its own PR after

@@ -75,7 +75,7 @@ Additionally, a comprehensive **4-phase security audit** was completed in March 
 - **Edge Optimization**: CPU yield every 100 iterations + 140s wall-clock safety cutoff for free-tier compliance.
 - **Enterprise Observability**: Sentry React SDK with `ErrorBoundary` integration and `withProfiler`. BetterStack/Logtail structured JSON logger for Edge Functions with buffered flush.
 - **Resilience & Failover**: `OfflineGuard` glassmorphic overlay with adaptive connectivity monitoring (30s/10s polling). `useMaintenanceMode` hook with Supabase Realtime subscription to `organizations.settings.maintenance_mode` flag.
-- **Performance**: In-memory TTL cache with stale-while-revalidate for 200ms dashboard interaction ceiling.
+- **Performance**: In-memory TTL cache with stale-while-revalidate for Edge Function invocations (`edgeFunctionCache`); the dashboard reads are uncached by design (DS-14).
 - **Data Governance**: `audit_log` 180-day retention pruning function + composite index. `maintenance_mode` flag backfilled to all organizations.
 
 ## Phase 10: Pre-Flight Certification (Completed)

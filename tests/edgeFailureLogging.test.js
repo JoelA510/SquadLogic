@@ -185,6 +185,66 @@ describe('logFailure', () => {
   });
 });
 
+describe('logRequest', () => {
+  it('carries the function name, request ID and organization beside the details it was given', async () => {
+    const ctx = { functionName: 'auto-scheduler', requestId: 'r-9', organizationId: ORG };
+    logtail.logRequest(ctx, 'error', 'Auto-scheduler refused: slots could not be placed', {
+      orgId: ORG,
+      refusedCount: 2,
+    });
+    await logtail.edgeLogger.flush();
+    const [entry] = sentEntries();
+    expect(entry.level).toBe('error');
+    expect(entry.function_name).toBe('auto-scheduler');
+    expect(entry.message).toBe('Auto-scheduler refused: slots could not be placed');
+    expect(entry.context).toEqual({
+      orgId: ORG,
+      refusedCount: 2,
+      function_name: 'auto-scheduler',
+      request_id: 'r-9',
+      organization_id: ORG,
+    });
+  });
+
+  it('says organization_id null before the organization is known, and cannot be overridden by details', async () => {
+    logtail.logRequest({ functionName: 'fairness-scoring', requestId: 'r-10' }, 'info', 'x', {
+      request_id: 'spoofed',
+    });
+    await logtail.edgeLogger.flush();
+    const [entry] = sentEntries();
+    expect(entry.context.request_id).toBe('r-10');
+    expect(entry.context.organization_id).toBeNull();
+  });
+});
+
+describe('flush', () => {
+  it('gives up on a BetterStack that does not answer, so a failing response is not held', async () => {
+    // A transport that only ends when its signal aborts, as a hung one would.
+    fetchMock.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason));
+        })
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    logtail.logRequest({ functionName: 'auto-scheduler', requestId: 'r-11' }, 'error', 'held');
+    const started = Date.now();
+    await logtail.edgeLogger.flush(50);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Failed to flush'));
+    // The batch was taken off the buffer, not retried forever.
+    fetchMock.mockClear();
+    await logtail.edgeLogger.flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends with a timeout signal by default', async () => {
+    logtail.logRequest({ functionName: 'auto-scheduler', requestId: 'r-12' }, 'info', 'x');
+    await logtail.edgeLogger.flush();
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
 describe('every Edge Function serves its handler through withFailureLogging', () => {
   const functionDirs = readdirSync(FUNCTIONS, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !d.name.startsWith('_'))
@@ -202,7 +262,15 @@ describe('every Edge Function serves its handler through withFailureLogging', ()
     );
     // Wrapped under its own directory name, so entries are attributable.
     const names = [...src.matchAll(/withFailureLogging\('([^']+)'/g)].map((m) => m[1]);
-    expect(names).toEqual([name]);
+    expect(names.length).toBeGreaterThan(0);
+    expect(new Set(names)).toEqual(new Set([name]));
+    // Every handler the file can serve is wrapped, including the stand-in the
+    // persistence functions serve when their Supabase variables are missing.
+    const assigned = [...src.matchAll(/\bhandler = ([^\n]*)/g)].map((m) => m[1]);
+    assigned.forEach((rhs) => expect(rhs).toMatch(/^withFailureLogging\(/));
+    // No direct edgeLogger call: it carries no request ID and its entries read
+    // `function_name: "unknown"`. `logRequest` is the call that does.
+    expect(src).not.toMatch(/\bedgeLogger\.(info|warn|error)\(/);
     // The wrapped handler is the one served.
     expect(src).toMatch(/\nserve\(handler\);\n/);
     expect(src).not.toMatch(/\nserve\(async/);

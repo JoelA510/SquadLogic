@@ -73,9 +73,6 @@
       // Baseline 2026-10-13: files nothing imports, kept because docs still
       // describe them. Delete each together with the doc that names it.
       "ignoreFiles": [
-        // Routed nowhere; docs/architecture/frontend-architecture.md lists it
-        // as the /reporting page (July audit DD-1, still open).
-        "frontend/src/pages/AdminReportingDashboard.jsx",
         // Listed in frontend-architecture.md's hook table and ARCHITECTURE.md.
         "frontend/src/hooks/useGameSlots.js",
       ],

@@ -37,50 +37,35 @@ export default function AdminReportingDashboard() {
       setLoading(true);
       setError(null);
       try {
-        // Load Org Metrics
-        const { data: orgData, error: orgErr } = await supabase
-          .from('view_org_metrics')
-          .select('*')
-          .eq('organization_id', currentOrganization.id)
-          .single();
+        // The four reads are independent, so they go out together. (The page
+        // used to await them one after another, with a fifth, discarded
+        // `view_league_standings` read in front of the real one.)
+        const orgId = currentOrganization.id;
+        const [
+          { data: orgData, error: orgErr },
+          { data: compData, error: compErr },
+          { data: facData, error: facErr },
+          // PostgREST can't count over a view without aggregation, so the
+          // standings rows are pulled and counted by division in JS below.
+          { data: rawStdData },
+        ] = await Promise.all([
+          supabase.from('view_org_metrics').select('*').eq('organization_id', orgId).single(),
+          supabase.from('view_compliance_stats').select('*').eq('organization_id', orgId),
+          supabase.from('view_facility_usage').select('*').eq('organization_id', orgId),
+          supabase.from('view_league_standings').select('division').eq('organization_id', orgId),
+        ]);
         if (orgErr && orgErr.code !== 'PGRST116') throw orgErr; // Ignore no rows error if brand new org
+        if (compErr) throw compErr;
+        if (facErr) throw facErr;
+
         if (orgData)
           setMetrics({
             players: orgData.total_players,
             teams: orgData.total_teams,
             users: orgData.total_users,
           });
-
-        // Load Compliance Stats
-        const { data: compData, error: compErr } = await supabase
-          .from('view_compliance_stats')
-          .select('*')
-          .eq('organization_id', currentOrganization.id);
-        if (compErr) throw compErr;
         setCompliance(compData || []);
-
-        // Load Facility Usage
-        const { data: facData, error: facErr } = await supabase
-          .from('view_facility_usage')
-          .select('*')
-          .eq('organization_id', currentOrganization.id);
-        if (facErr) throw facErr;
         setFacilities(facData || []);
-
-        // Load Standings (For division distribution proxy in this view)
-        const { error: stdErr } = await supabase
-          .from('view_league_standings')
-          .select('division, count as teams_count')
-          .eq('organization_id', currentOrganization.id);
-        if (stdErr && stdErr.code !== 'PGRST116') {
-          // We can ignore if it fails or log it, but the pie chart just needs raw rawStdData below
-        }
-        // Note: PostgREST won't effortlessly count over views without aggregation,
-        // to keep it simple we'll just pull raw standings and count manually in JS for the pie chart
-        const { data: rawStdData } = await supabase
-          .from('view_league_standings')
-          .select('division')
-          .eq('organization_id', currentOrganization.id);
 
         if (rawStdData) {
           const counts = rawStdData.reduce((acc, curr) => {

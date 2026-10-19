@@ -121,10 +121,11 @@ stops it. npm still runs a script it does not name, with a warning
 (`strict-allow-scripts` is off), so when `npm ci` or `npm install` warns
 "not yet covered by allowScripts", read the script, then record the decision
 with `npm install-scripts approve <pkg> --no-allow-scripts-pin` or
-`npm install-scripts deny <pkg>`. `esbuild` is approved (plan M6: its
-postinstall links the platform binary the lockfile already installs and runs
-`--version`). `tests/allowScripts.test.js` fails when a package in the
-lockfile has an install script and no decision. `fsevents` (macOS only,
+`npm install-scripts deny <pkg>`. `esbuild` was approved until Vite 8
+(2026-10-19), which bundles with Rolldown and no longer installs it; its entry
+was removed with it. `tests/allowScripts.test.js` fails when a package in the
+lockfile has an install script and no decision, and when a decision names a
+package that has none. `fsevents` (macOS only,
 `node-gyp rebuild`; its tarball ships the built binary) is denied by name: the
 owner decided on 2026-10-18 that it stays denied.
 

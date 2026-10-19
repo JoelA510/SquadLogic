@@ -1,4 +1,4 @@
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 import { afterAll, vi } from 'vitest';
 
 // jsdom lacks ResizeObserver; @dnd-kit relies on it.

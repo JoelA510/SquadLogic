@@ -5,7 +5,7 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import { CLIENT_ENV_NAMES, formatEnvProblems, validateClientEnv } from './frontend/src/envRules.js';
 
-const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'));
+const pkg = JSON.parse(readFileSync(path.resolve(import.meta.dirname, 'package.json'), 'utf8'));
 
 /**
  * Fails a production build whose environment the app would refuse (plan item
@@ -54,24 +54,49 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './packages/core/src'),
-      src: path.resolve(__dirname, './packages/core/src'),
-      '@squadlogic/core': path.resolve(__dirname, './packages/core/src'),
+      '@': path.resolve(import.meta.dirname, './packages/core/src'),
+      src: path.resolve(import.meta.dirname, './packages/core/src'),
+      '@squadlogic/core': path.resolve(import.meta.dirname, './packages/core/src'),
     },
   },
   plugins: [validateEnvOnBuild(), react(), tailwindcss()],
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'supabase-vendor': ['@supabase/supabase-js'],
-          'lucide-vendor': ['lucide-react'],
-          'chart-vendor': ['recharts'],
-          'dnd-vendor': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
-          'virtual-vendor': ['@tanstack/react-virtual'],
+        // Vite 8 bundles with Rolldown, which has no object form of `manualChunks`; these
+        // groups keep the chunks `config/bundle-budget.json` matches by file name. A group
+        // captures the modules its `test` matches and, by default, their dependencies, as
+        // Rollup's object form did.
+        codeSplitting: {
+          groups: [
+            {
+              // react and react-router (react-router-dom re-exports it), plus react-dom's index
+              // module only: `react-dom/client` stays in the entry, as it did under Rollup.
+              name: 'react-vendor',
+              test: /node_modules[\\/](react|react-router|react-router-dom)[\\/]|node_modules[\\/]react-dom[\\/](index|cjs[\\/]react-dom\.production)\.js/,
+            },
+            { name: 'supabase-vendor', test: /node_modules[\\/]@supabase[\\/]supabase-js[\\/]/ },
+            { name: 'lucide-vendor', test: /node_modules[\\/]lucide-react[\\/]/ },
+            { name: 'chart-vendor', test: /node_modules[\\/]recharts[\\/]/ },
+            {
+              name: 'dnd-vendor',
+              test: /node_modules[\\/]@dnd-kit[\\/](core|sortable|utilities)[\\/]/,
+            },
+            { name: 'virtual-vendor', test: /node_modules[\\/]@tanstack[\\/]react-virtual[\\/]/ },
+            {
+              // Keeps the entry's own static graph in the entry. Rolldown otherwise splits what
+              // the entry shares with a lazy chunk (the Sentry core that sentryReplay imports,
+              // `AuthContext`) into content-named common chunks that index.html preloads, which
+              // no firstPaint rule in the bundle budget can match by a stable name. A group named
+              // like the entry joins it; `$initial` limits it to what the entry loads anyway.
+              name: 'index',
+              tags: ['$initial'],
+              test: (id) =>
+                !id.includes('node_modules') || /node_modules[\\/]@sentry[\\/]/.test(id),
+            },
+          ],
         },
       },
     },

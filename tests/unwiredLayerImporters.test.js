@@ -932,13 +932,15 @@ describe('unwired layers :: the scan examined the repository', () => {
 
     const vite = readFileSync(path.join(REPO_ROOT, 'vite.config.js'), 'utf8');
     const viteAliases = [
-      ...vite.matchAll(/'([^']+)'\s*:\s*path\.resolve\(__dirname,\s*'\.\/packages\/core\/src'\)/g),
+      ...vite.matchAll(
+        /'([^']+)'\s*:\s*path\.resolve\((?:__dirname|import\.meta\.dirname),\s*'\.\/packages\/core\/src'\)/g
+      ),
     ]
       .map((match) => match[1])
       .concat(
         [
           ...vite.matchAll(
-            /(?:^|[{,]\s*)([A-Za-z_$][\w$]*)\s*:\s*path\.resolve\(__dirname,\s*'\.\/packages\/core\/src'\)/g
+            /(?:^|[{,]\s*)([A-Za-z_$][\w$]*)\s*:\s*path\.resolve\((?:__dirname|import\.meta\.dirname),\s*'\.\/packages\/core\/src'\)/g
           ),
         ].map((match) => match[1])
       );

@@ -2407,11 +2407,14 @@ describe('fairness :: one fixture id is one fixture', () => {
     // inline, which is exactly how it came to bypass the disjointness check the
     // measured return goes through. Inlining a bucket here again fails this
     // line, in the idiom the Minis assertion above already uses.
-    expect(measureSubject.toString()).not.toMatch(/'fixture-/);
+    expect(measureSubject.toString()).not.toMatch(/['"]fixture-/);
     // The control: the literal this looks for is really how the module writes a
-    // bucket, so the assertion is not passing on a spelling nobody uses.
+    // bucket, so the assertion is not passing on a spelling nobody uses. Either
+    // quote: `toString()` returns the transformed source, and Vitest 5's Oxc
+    // transform writes double quotes where the file has single (Vitest 4's
+    // esbuild kept them), so a single-quote-only pattern matched nothing.
     expect(FAIRNESS_METRIC_REGISTRY[FAIRNESS_METRIC.HOSTING_SHARE].measure.toString()).toMatch(
-      /'fixture-names-no-opponent'/
+      /['"]fixture-names-no-opponent['"]/
     );
   });
 });

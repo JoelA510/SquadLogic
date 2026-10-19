@@ -58,7 +58,7 @@ parses the entry `<script type="module" src>`, every
   `main entry`, `main css`, `react vendor`, `lucide vendor` and
   `supabase vendor`.
 - A `firstPaint` rule only matches files `index.html` loads. This is how
-  `main entry` is told apart from the ~1 KB lazy shared chunk Rollup also names
+  `main entry` is told apart from the ~1 KB lazy shared chunk the bundler also names
   `index-*.js`: both are `index-<hash>.js`, so no regex can separate them.
   The lazy one is printed as `SKIP main entry (...)` and is neither checked
   against the main-entry cap nor counted in the total.
@@ -66,7 +66,7 @@ parses the entry `<script type="module" src>`, every
 **Lazy files that match no rule are listed as a warning, not a failure.** Route
 and shared chunks are lazy by design and were never budgeted one by one. The
 `WARN <n> lazy file(s) match no rule` block keeps them visible without
-requiring a rule per page. Each named vendor chunk (`manualChunks` in
+requiring a rule per page. Each named vendor chunk (a `codeSplitting` group in
 `vite.config.js`) has a rule, lazy or not; add one when you add a vendor
 chunk.
 
@@ -103,6 +103,31 @@ headroom at the time.
 ~23 KB above; the next growth in the entry needs a look. `sentryReplay-*.js`
 40.19 to 40.30 KB; total first-paint 276.85 to 282.25 KB of 289.06 KB. No
 budget was raised.
+
+Vite 7 to 8 (Rolldown and Oxc replace Rollup and esbuild, 2026-10-19), same build,
+gzip as `check:bundle` prints it:
+
+| File | Vite 7 | Vite 8 |
+| --- | --- | --- |
+| main entry | 179.77 KB | 173.01 KB |
+| main css | 20.06 KB | 20.09 KB |
+| react vendor | 17.52 KB | 17.46 KB |
+| supabase vendor | 57.13 KB | 53.35 KB |
+| lucide vendor | 9.33 KB | 9.32 KB |
+| rolldown runtime (new, first paint) | not emitted | 0.42 KB |
+| total first paint | 283.80 KB (5 files) | 273.65 KB (6 files) |
+| chart vendor (lazy) | 118.40 KB | 112.89 KB |
+| `sentryReplay-*.js` (lazy) | 40.30 KB | 39.00 KB |
+| dnd vendor (lazy) | 16.08 KB | 15.28 KB |
+| virtual vendor (lazy) | 5.04 KB | 4.87 KB |
+
+Rolldown has no object-form `manualChunks`; `vite.config.js` declares the vendor
+chunks as `codeSplitting` groups, plus an `index` group that keeps the entry's
+own static graph (the Sentry core, `AuthContext`) in the entry. Without it
+Rolldown moved those into content-named common chunks that `index.html` preloads
+(`exports-*.js`, `logger-*.js`), which no `firstPaint` rule can name stably. The
+one file it still emits that Rollup did not is `rolldown-runtime-*.js`, the
+helpers the chunks share; it has its own rule. No cap was raised.
 
 ## What is measured: the build production ships, Sentry on
 
@@ -161,7 +186,7 @@ stays in the entry so the pageload is traced from the start.
 | `[GZIP] main entry ... exceeds budget` | Bundle grew | Diagnose with `npm run frontend:build -- --debug` + Vite's chunk analysis. |
 | `total first-paint exceeds budget` but per-chunk OK | Multiple small growths summed | Tighten one of the large vendors first; first-paint cap is the global gate. |
 | `[NO MATCH] rule "..."` | Rule's regex matches no built file (for a `firstPaint` rule: no file `index.html` loads). Fails the gate. | Fix the regex (a chunk was renamed) or remove the rule (the chunk was deleted). For `sentry replay`: the build had no `VITE_SENTRY_DSN`; build as CI does (above). |
-| `[UNBUDGETED FIRST-PAINT] assets/...` | `index.html` now loads a file no `firstPaint` rule matches (new `manualChunks` entry, renamed vendor). Fails the gate. | Add or fix a `firstPaint` rule; see "Adding a new rule". |
+| `[UNBUDGETED FIRST-PAINT] assets/...` | `index.html` now loads a file no `firstPaint` rule matches (new `codeSplitting` group, renamed vendor). Fails the gate. | Add or fix a `firstPaint` rule; see "Adding a new rule". |
 | `[CONFIG] ...` | A rule without exactly one cap, a missing or non-number `totalFirstPaintGzipBytes`, or no `rules` array. Fails the gate. | Fix `config/bundle-budget.json`. |
 | `[FIRST-PAINT] index.html ...` | `dist/index.html` has no module entry, or references a file missing from `dist/assets`. Fails the gate. | Rebuild; if it persists, the build is broken. |
 | `WARN <n> lazy file(s) match no rule` | Informational. Lazy chunks are not budgeted one by one. | None required; add a rule if a lazy chunk deserves its own cap. |

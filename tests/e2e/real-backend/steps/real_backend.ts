@@ -300,6 +300,7 @@ When('I generate teams from the import and sync them to Supabase', async ({ page
     message?: string;
     updatedTeams?: number;
     updatedPlayers?: number;
+    runId?: string;
   };
   expect(response.status(), body.message).toBe(200);
   expect(body.status, body.message).toBe('success');
@@ -313,6 +314,44 @@ When('I generate teams from the import and sync them to Supabase', async ({ page
     )
   ).toBeVisible({ timeout: 30_000 });
   stateOf(page).teams = body.updatedTeams;
+
+  // The save wrote its audit row in its own transaction (20261018070000,
+  // docs/PLAN_AUDIT_IN_TRANSACTION.md): exactly one `team.saved` row on the
+  // run it returned, attributed to the administrator, read with their session.
+  expect(body.runId, 'the sync returned its run id').toBeTruthy();
+  const { token, anonKey } = await adminSession(page);
+  const query = new URLSearchParams({
+    select: 'action,resource_type,resource_id,user_id,metadata',
+    organization_id: `eq.${SEEDED_ADMIN.organizationId}`,
+    action: 'eq.team.saved',
+    resource_id: `eq.${body.runId}`,
+  });
+  const audit = await page.request.get(`${stackUrl()}/rest/v1/audit_log?${query}`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const rows = (await audit.json()) as Array<{
+    resource_type: string | null;
+    user_id: string | null;
+    metadata: Record<string, unknown> | null;
+  }>;
+  expect(audit.status(), JSON.stringify(rows)).toBe(200);
+  expect(
+    rows.map((row) => ({
+      resource_type: row.resource_type,
+      user_id: row.user_id,
+      team_count: row.metadata?.team_count,
+      team_player_count: row.metadata?.team_player_count,
+    })),
+    `the team.saved row for run ${body.runId}`
+  ).toEqual([
+    {
+      resource_type: 'scheduler_run',
+      user_id: SEEDED_ADMIN.userId,
+      team_count: body.updatedTeams,
+      team_player_count: body.updatedPlayers,
+    },
+  ]);
 });
 
 Then('the teams page lists the synced teams after a reload', async ({ page }) => {

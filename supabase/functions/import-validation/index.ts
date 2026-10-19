@@ -689,7 +689,7 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
 
   // 6. Audit log (Phase 4), as the caller. Awaited: the response follows
   //    immediately, and the isolate can be frozen once it is sent.
-  await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
+  await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), logCtx, {
     organizationId: body.organization_id,
     action: allErrors.length > 0 && validatedRows.length === 0 ? 'import.failed' : 'import.started',
     resourceType: 'import_job',

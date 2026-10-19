@@ -312,7 +312,7 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       runId = id;
 
       // 7. Audit Log (C-1)
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId,
         action: 'evaluation.run',
         resourceType: 'evaluation_run',

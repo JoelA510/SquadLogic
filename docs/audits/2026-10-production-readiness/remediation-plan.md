@@ -2033,6 +2033,44 @@ smoke-tested
     Whether any body differs in behaviour is *unverified*; comparing normalised bodies is a
     possible extension of `catalog_snapshot.sql`. *Executed* (read-only `md5(prosrc)` on both
     sides).
+- 2026-10-18, the audit-in-transaction PR (branch `claude/vibrant-allen-hr7y7s-audittxn`, migration
+  `20261018070000`; `docs/PLAN_AUDIT_IN_TRANSACTION.md`, approved by the owner on 2026-10-18 with
+  every recommendation as written). Wave 2's "write each audit row in the same transaction as its
+  save" is done: `persist_team_schedule` and `persist_game_schedule` write `team.saved` /
+  `game.saved` on `scheduler_run` with the run id, inside the save, and a failed audit write rolls
+  the save back (SLA01, answered 500 `AUDIT_WRITE_FAILED` "Nothing was saved" and logged through
+  `logFailure`); both refuse a caller with no user; `team-persistence` and `game-persistence` call
+  them with the caller's client; the after-the-fact audits (`recordAuditNow`) report a failure
+  through `logFailure` with the handler's context, which the type now requires. *Executed*
+  (harness, a local pgTAP stand-in, Deno and unit tests); pgTAP and the real-backend scenario by
+  CI.
+  - **Security: any member could save the game schedule.** `game-persistence` had no admin check
+    and `persist_game_schedule` checked only membership, so a coach (or a parent) of the
+    organization could overwrite the season's games by calling the RPC directly (plan section 1.1,
+    on a scratch build). Both now require an organization admin (Q6). The smoke and pgTAP both hold
+    a coach's game save refused 42501 with nothing written; putting the RPC back on
+    `is_org_member` fails the smoke. *Executed.*
+  - Found by this PR's review: the game page offered Apply and Rollback to anyone with
+    `MANAGE_SCHEDULE` (coaches and staff), who would now always be refused 403. Both are now
+    offered only to an organization admin, with a note saying why, as the practice page's Apply
+    is (#64). *Executed* (a page test, red with the old gate).
+  - Not changed: an RPC refusal on the user-client path (an admin demoted between the Edge
+    check and the RPC) still answers 500 with the RPC's message, as every non-audit error did
+    before (plan section 3.2); and `teamReviewPersistence.js` still sends `runMetadata.createdBy`,
+    which nothing reads now that the run's creator is always `auth.uid()`. *Statically reviewed.*
+  - Found while rewriting the pgTAP suites: with the service role refused, every refusal case in
+    `team_persistence_rpc.sql` and `game_persistence_rpc.sql` that ran as `service_role` with no
+    message pinned would have kept passing on the new 42501 (team's run-type case aside), and the
+    team suite's last case ("derive organization from season settings") would have errored. Each now
+    runs as an admin and pins its message. *Executed* (against a local pgTAP stand-in on a scratch
+    build; the real pgTAP run is CI's).
+  - `_shared/logtail.ts` read its environment at import, which `deno test` refuses without
+    `--allow-env`; `auth.ts` now imports it, so it reads through a helper that treats only a
+    permission refusal as "no token". *Executed* (the Deno suite, red before the helper).
+  - Not changed: `packages/core/src/teamPersistenceHandler.js` and `gamePersistenceHandler.js` still
+    send `created_by` and call the RPCs with whatever client they are given; nothing outside
+    `tests/` imports them, and a service-role client would now be refused 42501. *Statically
+    reviewed.*
 
 ## Deferred with reason
 

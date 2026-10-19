@@ -225,7 +225,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // and `recordAudit` is fire-and-forget returning `void`, so awaiting it
       // waits for nothing and the isolate can be frozen before the insert
       // lands. A refusal is the audit row most worth keeping.
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -277,7 +277,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         differing: lockCheck.differing,
         withoutId: lockCheck.withoutId,
       });
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -345,7 +345,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         code: preferences.code,
         message: preferences.message,
       });
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -381,7 +381,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         seasonSettingsId,
         message: venueDaylight.message,
       });
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -425,7 +425,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         liveFrom,
         undatableCount: undatable.length,
       });
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -468,7 +468,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         seasonSettingsId,
         message: lightingOverrides.message,
       });
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -512,7 +512,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       maxIterations: input.config.maxIterations,
       timeBudgetMs: input.config.timeBudgetMs,
     });
-    await recordAuditNow(auditClient, {
+    await recordAuditNow(auditClient, logCtx, {
       organizationId: input.organizationId,
       action: 'scheduler.auto_started',
       resourceType: 'practice_schedule',
@@ -566,7 +566,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
         // and swallows its own failures; the `.catch` that used to trail this
         // call was a TypeError on `undefined` at every 100th iteration.
-        recordAudit(auditClient, {
+        recordAudit(auditClient, logCtx, {
           organizationId: input.organizationId,
           action: 'scheduler.auto_progress',
           resourceType: 'practice_schedule',
@@ -699,7 +699,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     }
 
     // 11. Audit: scheduler completed
-    await recordAuditNow(auditClient, {
+    await recordAuditNow(auditClient, logCtx, {
       organizationId: input.organizationId,
       action: 'scheduler.auto_completed',
       resourceType: 'evaluation_run',
@@ -847,7 +847,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     // while every Edge audit write was failing.) `recordAuditNow` never
     // rejects.
     if (logCtx.organizationId) {
-      await recordAuditNow(auditClient, {
+      await recordAuditNow(auditClient, logCtx, {
         organizationId: logCtx.organizationId,
         action: 'scheduler.auto_failed',
         metadata: { error: auditErrorText(error) },

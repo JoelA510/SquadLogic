@@ -33,10 +33,10 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 
 - **Purpose**: Persist the output of the team-generation engine. Upserts a `scheduler_runs` row, the `teams` batch, and the `team_players` batch by calling the `persist_team_schedule` RPC. Blocks persistence if any `overrides` in the payload are still in `pending` status.
 - **Invoked by**: `frontend/src/utils/teamPersistenceClient.js` via the `apiClient.post('team-persistence', …)` helper.
-- **Authentication**: JWT + role allow-list (`authenticated`, `service_role`, `admin`, `scheduler`; configurable via `TEAM_PERSISTENCE_ALLOWED_ROLES`). Validates Zod payload schema, resolves the requested organization from run metadata, season settings, divisions, teams, and players, then requires the caller to be an admin/tenant-admin of that single organization before using the service client (IDOR guard).
+- **Authentication**: JWT + role allow-list (`authenticated`, `service_role`, `admin`, `scheduler`; configurable via `TEAM_PERSISTENCE_ALLOWED_ROLES`). Validates Zod payload schema, resolves the requested organization from run metadata, season settings, divisions, teams, and players, then requires the caller to be an admin/tenant-admin of that single organization (IDOR guard). The RPC is called with the caller's client (`createUserClient`), so `persist_team_schedule` checks the caller itself and refuses a call with no user (42501).
 - **Rate limit**: `checkRateLimit(user.id)` — default 60 req/min.
 - **RPC used**: `persist_team_schedule(run_data, teams, team_players)`; returns the persisted scheduler run id and treats the submitted roster rows as authoritative for the teams in the payload.
-- **Audit**: `recordAuditNow(action: 'team.saved', ...)`, as the caller, awaited before the response.
+- **Audit**: `team.saved` is written by `persist_team_schedule` itself, on `scheduler_run` with the run id, inside the save's transaction (`20261018070000`). A failed audit write rolls the save back (`SLA01`), and the function answers 500 `AUDIT_WRITE_FAILED` "Nothing was saved", logged through `logFailure`. The function writes no audit row of its own.
 
 ### 2.3 `practice-persistence`
 
@@ -51,10 +51,10 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 
 - **Purpose**: Persist reviewed game schedules and manual game moves after the routed game page stages them for apply/rollback.
 - **Invoked by**: `frontend/src/utils/gamePersistenceClient.js` via a direct POST to `/functions/v1/game-persistence`.
-- **Authentication**: Same JWT + role allow-list + Zod payload as the other persistence functions; verifies `runMetadata.organizationId`, `runMetadata.seasonSettingsId`, and all target home/away teams resolve to exactly one caller organization before using the service client. The RPC also rejects cross-org game slots, fields, teams, and season references.
+- **Authentication**: Same JWT + role allow-list + Zod payload as the other persistence functions; verifies `runMetadata.organizationId`, `runMetadata.seasonSettingsId`, and all target home/away teams resolve to exactly one caller organization, then requires the caller to be an admin of it (`verifyOrgAdmin`, `20261018070000`; before it, any member could save games). The RPC is called with the caller's client and also requires an organization admin, refuses a call with no user (42501), and rejects cross-org game slots, fields, teams, and season references.
 - **Rate limit**: `checkRateLimit(user.id)` — default 60 req/min.
 - **RPC used**: `persist_game_schedule(run_data, assignments)`; returns the persisted scheduler run id, links current assignment rows to that run via `game_assignments.run_id`, and rejects cross-org season, team, slot, or field references.
-- **Audit**: `recordAuditNow(action: 'game.saved', ...)`, as the caller, awaited before the response.
+- **Audit**: `game.saved` is written by `persist_game_schedule` itself, on `scheduler_run` with the run id, inside the save's transaction; a failed audit write rolls the save back and is answered as for `team-persistence`.
 
 ### 2.5 `fairness-scoring`
 
@@ -109,7 +109,7 @@ Exports used by every function (except `calendar-feed`, which is token-based):
 - `verifyOrgMembership(serviceClient, userId, organizationId)` — single-org membership check against `organization_members`.
 - `getUserOrgIds(serviceClient, userId)` — returns _all_ organization IDs the user belongs to. Used for IDOR guards that must check each target org.
 - `resolveOrgIdsFromTeamIds(serviceClient, teamIds)` — returns the distinct `organization_id`s implied by a batch of `team_id`s. Used by `practice-persistence` and `game-persistence` to guard against cross-tenant payloads.
-- `recordAudit(serviceClient, {organizationId, action, resourceType, resourceId, metadata})` — fire-and-forget audit log write via the `record_audit_event` RPC. Failures are logged but never block the response.
+- `recordAuditNow(userClient, failure, {organizationId, action, resourceType, resourceId, metadata})` — awaited audit log write via the `record_audit_event` RPC, as the caller. `failure` is the handler's `FailureContext` (required); a failed write is reported through `logFailure` and never fails the response. `recordAudit(userClient, failure, params)` is the fire-and-forget form. Saves that must be audited atomically (teams, games, practices) write their audit row inside their RPC instead.
 - `corsHeaders` — canonical `Access-Control-Allow-*` headers including `GET, POST, PATCH, PUT, DELETE, OPTIONS` in the methods list.
 - `jsonResponse(payload, status)` — JSON response helper that includes `corsHeaders`.
 

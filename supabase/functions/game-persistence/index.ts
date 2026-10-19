@@ -10,8 +10,10 @@ import {
   getUserFromRequest,
   getUserOrgIds,
   resolveOrgIdsFromTeamIds,
+  verifyOrgAdmin,
   createUserClient,
-  recordAuditNow,
+  isAuditWriteFailure,
+  auditWriteFailedResponse,
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
@@ -114,7 +116,6 @@ interface RunMetadata {
   parameters?: Record<string, unknown>;
   metrics?: Record<string, unknown>;
   results?: Record<string, unknown>;
-  createdBy?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -142,7 +143,6 @@ async function persistGameSnapshot(
         parameters: runMetadata.parameters ?? {},
         metrics: runMetadata.metrics ?? {},
         results: runMetadata.results ?? {},
-        created_by: runMetadata.createdBy ?? 'system',
         started_at: runMetadata.startedAt ?? now.toISOString(),
         completed_at: runMetadata.completedAt ?? now.toISOString(),
         updated_at: now.toISOString(),
@@ -155,7 +155,6 @@ async function persistGameSnapshot(
         parameters: runMetadata.parameters ?? {},
         metrics: runMetadata.metrics ?? {},
         results: runMetadata.results ?? {},
-        created_by: runMetadata.createdBy ?? 'system',
         started_at: runMetadata.startedAt ?? now.toISOString(),
         completed_at: runMetadata.completedAt ?? now.toISOString(),
         updated_at: now.toISOString(),
@@ -182,8 +181,8 @@ type HttpHandler = (request: Request) => Response | Promise<Response>;
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-// The audit row is written AS THE CALLER (`record_audit_event` attributes it
-// to auth.uid()), which needs the anon key.
+// The save is made AS THE CALLER, which needs the anon key: the RPC's admin
+// check, its `created_by` and its audit row all read auth.uid().
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
 const allowedRoles = parseAllowedRolesEnv(Deno.env.get('GAME_PERSISTENCE_ALLOWED_ROLES'));
 
@@ -346,6 +345,18 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
     }
     logCtx.organizationId = targetOrgId;
 
+    // Saving the season's games is an organization admin's action, as saving
+    // its teams and practices is (plan Q6). This was missing: any member -- a
+    // coach, a parent -- could overwrite the game schedule. The RPC checks it
+    // again; this is the early 403.
+    const isOrgAdmin = await verifyOrgAdmin(serviceClient, user.id, targetOrgId);
+    if (!isOrgAdmin) {
+      return jsonResponse(
+        { status: 'error', message: 'Admin permission is required to save the game schedule.' },
+        403
+      );
+    }
+
     const effectiveRunMetadata = {
       ...runMetadataRecord,
       organizationId: requestedOrgId ?? targetOrgId,
@@ -365,26 +376,28 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       );
     }
 
-    // 5. Persist
+    // 5. Persist -- AS THE CALLER (docs/PLAN_AUDIT_IN_TRANSACTION.md, 3.2),
+    // as practice-persistence does. `persist_game_schedule` checks the caller
+    // is an admin of the organization, records them as the run's creator and
+    // writes the `game.saved` audit row in the save's own transaction, so a
+    // save cannot land without its audit row; a service-role client has no
+    // user and is refused. `verifyOrgAdmin` above stays as the early 403.
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
     try {
       const result = await persistGameSnapshot(
-        serviceClient,
+        userClient,
         body.snapshot as Parameters<typeof persistGameSnapshot>[1],
         effectiveRunMetadata as RunMetadata,
         new Date()
       );
 
-      // Audit log, as the caller. Awaited: the response follows immediately,
-      // and the isolate can be frozen once it is sent.
-      await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
-        organizationId: targetOrgId,
-        action: 'game.saved',
-        resourceType: 'game',
-        metadata: { game_count: gameRows.length },
-      });
-
       return jsonResponse(result, 200);
     } catch (error) {
+      // The audit row could not be written, so the RPC rolled the save back:
+      // the outcome is known, and the caller is told nothing was saved.
+      if (isAuditWriteFailure(error)) {
+        return await auditWriteFailedResponse(logCtx, 'Game save', error);
+      }
       await logFailure(logCtx, 'Game persistence failed', error);
       return jsonResponse(
         {

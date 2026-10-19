@@ -29,6 +29,8 @@ const ROSTER = vi.hoisted(() => [
 ]);
 /** What the stubbed save does, per test. */
 const SAVE = vi.hoisted(() => ({ impl: /** @type {any} */ (null) }));
+/** The signed-in member's role, per test: an admin unless a test says otherwise. */
+const ROLE = vi.hoisted(() => ({ name: 'admin' }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
@@ -37,15 +39,20 @@ vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', async () => {
   const { ROLE_PERMISSIONS: perms, ROLES: roles } =
     await import('../frontend/src/constants/permissions.js');
-  const value = {
-    currentOrganization: { id: '00000000-0000-4000-8000-0000000000e1', name: 'Synthetic FC' },
-    currentSeasonSetting: { id: 'season-gtimeout', timezone: 'America/New_York' },
-    featureFlags: {},
-    permissions: perms[roles.ADMIN],
-    loading: false,
-    seasonSettingsLoading: false,
-  };
-  return { useOrganization: () => value };
+  const values = Object.fromEntries(
+    ['admin', 'coach'].map((name) => [
+      name,
+      {
+        currentOrganization: { id: '00000000-0000-4000-8000-0000000000e1', name: 'Synthetic FC' },
+        currentSeasonSetting: { id: 'season-gtimeout', timezone: 'America/New_York' },
+        featureFlags: {},
+        permissions: perms[name === 'admin' ? roles.ADMIN : roles.COACH],
+        loading: false,
+        seasonSettingsLoading: false,
+      },
+    ])
+  );
+  return { useOrganization: () => values[ROLE.name] };
 });
 vi.mock('../frontend/src/hooks/useTeamSummary.js', () => {
   const value = {
@@ -158,6 +165,7 @@ let gameRowReads = 0;
 
 beforeEach(() => {
   sessionStorage.clear();
+  ROLE.name = 'admin';
   gameRunReads = 0;
   gameRowReads = 0;
   const from = mockSupabase.from.bind(mockSupabase);
@@ -243,5 +251,39 @@ describe('the game page after a save whose outcome is unknown', () => {
     // Give a re-read the chance to happen before saying it did not.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(gameRunReads).toBe(readsBefore);
+  });
+});
+
+describe('the game page and the admin-only save (docs/PLAN_AUDIT_IN_TRANSACTION.md)', () => {
+  it('does not re-read after a save rolled back for its audit row: nothing was saved', async () => {
+    const message =
+      'Nothing was saved: the audit record could not be written. Try again; if it keeps failing, report it.';
+    const readsBefore = await generateAndApply(async () => {
+      throw Object.assign(new Error(message), { code: 'AUDIT_WRITE_FAILED', status: 500 });
+    });
+    expect(await screen.findByText(message)).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(gameRunReads).toBe(readsBefore);
+  });
+
+  it('offers a coach no Apply that the server would refuse, and says why', async () => {
+    ROLE.name = 'coach';
+    SAVE.impl = vi.fn(async () => ({ result: { runId: 'never' } }));
+    seed();
+    render(
+      <MemoryRouter>
+        <GameSchedulingPage />
+      </MemoryRouter>
+    );
+    const run = await screen.findByRole('button', { name: 'Run auto-scheduler optimization' });
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    expect(apply).toBeDisabled();
+    const note = screen.getByText('Only an organization admin can apply a game schedule.');
+    expect(apply).toHaveAttribute('aria-describedby', note.id);
+    fireEvent.click(apply);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(SAVE.impl).not.toHaveBeenCalled();
   });
 });

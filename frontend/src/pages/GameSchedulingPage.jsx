@@ -523,6 +523,10 @@ export default function GameSchedulingPage() {
   // Cancelling is destructive and the RPC requires org admin, so the button
   // is gated tighter than general schedule editing.
   const canCancelAssignments = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
+  // Applying (or rolling back) REPLACES the season's game schedule, and the
+  // server lets only an org admin do that (docs/PLAN_AUDIT_IN_TRANSACTION.md,
+  // Q6), as the practice page's Apply already says (#64).
+  const canApplySchedule = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
 
   useEffect(() => {
     setLastRollbackAssignments(null);
@@ -969,7 +973,7 @@ export default function GameSchedulingPage() {
   );
 
   const handleApplySchedule = useCallback(async () => {
-    if (!canManageSchedule || reviewAssignments == null) return;
+    if (!canManageSchedule || !canApplySchedule || reviewAssignments == null) return;
 
     setApplyStatus('applying');
     setApplyError(null);
@@ -1000,6 +1004,7 @@ export default function GameSchedulingPage() {
       rereadAfterUnknownOutcome(err);
     }
   }, [
+    canApplySchedule,
     canManageSchedule,
     game?.runId,
     localAssignments,
@@ -1010,7 +1015,7 @@ export default function GameSchedulingPage() {
   ]);
 
   const handleRollbackLastApply = useCallback(async () => {
-    if (!canManageSchedule || !lastRollbackAssignments) return;
+    if (!canManageSchedule || !canApplySchedule || !lastRollbackAssignments) return;
 
     setApplyStatus('rollingBack');
     setApplyError(null);
@@ -1044,6 +1049,7 @@ export default function GameSchedulingPage() {
       rereadAfterUnknownOutcome(err);
     }
   }, [
+    canApplySchedule,
     canManageSchedule,
     lastRollbackAssignments,
     persistReviewedAssignments,
@@ -1349,6 +1355,13 @@ export default function GameSchedulingPage() {
                 {unplaceableSlotMessage && (
                   <p className="text-status-warning-text mt-1">{unplaceableSlotMessage}</p>
                 )}
+                {canManageSchedule &&
+                  !canApplySchedule &&
+                  (isReviewing || lastRollbackAssignments) && (
+                    <p id="game-apply-admin-only" className="mt-1 text-text-muted">
+                      Only an organization admin can apply a game schedule.
+                    </p>
+                  )}
               </div>
             </div>
             {isReviewing && canManageSchedule && (
@@ -1364,7 +1377,8 @@ export default function GameSchedulingPage() {
                   variant="primary"
                   onClick={handleApplySchedule}
                   loading={applyStatus === 'applying'}
-                  disabled={applyStatus === 'applying'}
+                  disabled={applyStatus === 'applying' || !canApplySchedule}
+                  aria-describedby={canApplySchedule ? undefined : 'game-apply-admin-only'}
                 >
                   Apply Schedule
                 </Button>
@@ -1375,7 +1389,8 @@ export default function GameSchedulingPage() {
                 variant="secondary"
                 onClick={handleRollbackLastApply}
                 loading={applyStatus === 'rollingBack'}
-                disabled={applyStatus === 'rollingBack'}
+                disabled={applyStatus === 'rollingBack' || !canApplySchedule}
+                aria-describedby={canApplySchedule ? undefined : 'game-apply-admin-only'}
               >
                 Rollback Last Apply
               </Button>

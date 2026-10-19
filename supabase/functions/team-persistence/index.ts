@@ -272,8 +272,23 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
   console.error(
     'Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY for team persistence function.'
   );
-  handler = () =>
-    jsonResponse({ status: 'error', message: 'Supabase service configuration is missing.' }, 500);
+  // Wrapped like the real handler, so every request this misconfigured
+  // function refuses reaches BetterStack with a request ID (the console line
+  // above prints once, at boot).
+  handler = withFailureLogging('team-persistence', async (req: Request, logCtx) => {
+    // A CORS preflight is not a call; log the requests that are.
+    if (req.method !== 'OPTIONS') {
+      await logFailure(
+        logCtx,
+        'Supabase service configuration is missing',
+        new Error('Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY.')
+      );
+    }
+    return jsonResponse(
+      { status: 'error', message: 'Supabase service configuration is missing.' },
+      500
+    );
+  });
 } else {
   const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
     global: { fetch },

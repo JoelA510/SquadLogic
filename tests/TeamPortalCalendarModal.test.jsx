@@ -40,7 +40,7 @@ describe('CalendarModal', () => {
 
     const notice = screen.getByText(/No calendar link is currently available/i);
     expect(notice).toBeInTheDocument();
-    // The warning token itself is 2.1:1 on the light surface (axe `color-contrast`); the `-text`
+    // The bare warning token was 3.39:1 on the sunken light surface (axe `color-contrast`); the `-text`
     // token is the AA one in both themes.
     expect(notice).toHaveClass('text-status-warning-text');
     expect(notice).not.toHaveClass('text-status-warning');

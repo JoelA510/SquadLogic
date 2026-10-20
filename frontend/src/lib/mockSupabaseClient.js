@@ -4973,6 +4973,13 @@ export const mockSupabase = {
     }
 
     if (name === 'get_settings_audit_log') {
+      // As the RPC: is_org_admin() gates it.
+      if (!isOrgAdmin(params?.p_organization_id)) {
+        return {
+          data: null,
+          error: { message: 'Access denied. Organization admin role required.', code: '42501' },
+        };
+      }
       const logs = (db.audit_log || [])
         .filter((e) => String(e.organization_id) === String(params?.p_organization_id))
         .map((e) => ({

@@ -35,23 +35,35 @@ SELECT cmp_ok(
     '>=', 9::bigint,
     'at least the nine policies that test a role by name are found'
 );
+-- Each expression on its own (USING, then WITH CHECK): a USING that admits
+-- staff must not hide a WITH CHECK that does not.
 SELECT is(
-    (SELECT array_agg(tablename || ': ' || policyname ORDER BY tablename, policyname)
-       FROM pg_policies
-      WHERE schemaname = 'public'
-        AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%''admin''::text%'
-        AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%''staff''::text%'),
+    (SELECT array_agg(p.tablename || ': ' || p.policyname || ' (' || e.part || ')'
+                      ORDER BY p.tablename, p.policyname, e.part)
+       FROM pg_policies p,
+            LATERAL (VALUES ('using', p.qual), ('with check', p.with_check)) e(part, expr)
+      WHERE p.schemaname = 'public'
+        AND e.expr LIKE '%''admin''::text%'
+        AND e.expr NOT LIKE '%''staff''::text%'),
     NULL,
-    'no policy in public admits ''admin'' by name without ''staff'''
+    'no policy expression in public admits ''admin'' by name without ''staff'''
 );
--- Two functions name 'admin' for another reason: initialize_new_tenant makes
--- the creator an admin, and reconcile_prod_rls_drift recognises admin-gated
--- policies by their text. Any other is a role test that forgot staff.
-SELECT set_eq(
-    $$SELECT p.proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = 'public' AND p.prosrc LIKE '%''admin''%' AND p.prosrc NOT LIKE '%''staff''%'$$,
-    ARRAY['initialize_new_tenant', 'reconcile_prod_rls_drift'],
-    'every function in public that names ''admin'' as a role also names ''staff'''
+-- Every role list in a function body that names 'admin' -- an `IN (...)` or a
+-- parenthesised list -- names 'staff' too, list by list, so a function whose
+-- other list already says 'staff' cannot hide one that does not; and no body
+-- tests `= 'admin'` alone. Two functions name 'admin' for another reason and
+-- are left out: initialize_new_tenant makes the creator an admin, and
+-- reconcile_prod_rls_drift matches policy text.
+SELECT is(
+    (SELECT array_agg(DISTINCT p.proname::text ORDER BY p.proname::text)
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname NOT IN ('initialize_new_tenant', 'reconcile_prod_rls_drift')
+        AND (EXISTS (SELECT 1 FROM regexp_matches(p.prosrc, '\(([^()]*''admin''[^()]*)\)', 'g') m
+                      WHERE m[1] NOT LIKE '%''staff''%')
+             OR p.prosrc ~ '=\s*''admin''')),
+    NULL,
+    'every role list in a function body that names ''admin'' names ''staff'' too'
 );
 
 SET LOCAL role = 'authenticated';

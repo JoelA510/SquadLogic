@@ -57,10 +57,12 @@ BEGIN
     END;
     RAISE NOTICE 'a staff member passed the member RPC gate and, as the last admin-equivalent member, could not demote themself';
 
-    IF EXISTS (SELECT 1 FROM pg_policies
-                WHERE schemaname = 'public'
-                  AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%''admin''::text%'
-                  AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%''staff''::text%') THEN
+    -- Each expression on its own: a USING that admits staff must not hide a
+    -- WITH CHECK that does not.
+    IF EXISTS (SELECT 1 FROM pg_policies p, LATERAL (VALUES (p.qual), (p.with_check)) e(expr)
+                WHERE p.schemaname = 'public'
+                  AND e.expr LIKE '%''admin''::text%'
+                  AND e.expr NOT LIKE '%''staff''::text%') THEN
         RAISE EXCEPTION 'a policy in public still names ''admin'' as a role without ''staff''';
     END IF;
     RAISE NOTICE 'no policy in public names ''admin'' as a role without ''staff''';

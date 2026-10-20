@@ -19,6 +19,13 @@
 --     `registration_forms` and `season_settings` INSERT, UPDATE and DELETE.
 --     Their expressions are otherwise unchanged.
 --
+-- **What staff can now do**, through `is_org_admin` alone and accepted as part
+-- of "treated like an admin": everything an admin can, including deleting the
+-- organization row ("Organizations: admins delete"), minting admin invite codes
+-- (`create_org_invite`), and changing or removing any member, an admin
+-- included, while another admin-equivalent member (a staff member counts)
+-- remains.
+--
 -- **Not changed.** `tenant_admin` keeps exactly the access it had: it is still
 -- refused the five policies that name only `admin` (remediation plan, RLS Q5,
 -- an open product question this does not answer). No role, grant, signature or

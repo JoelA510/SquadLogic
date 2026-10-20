@@ -104,8 +104,11 @@ export const ROLE_PERMISSIONS = {
   ],
 };
 
-// Staff hold exactly the admin's permissions (see ADMIN_ROLES).
-ROLE_PERMISSIONS[ROLES.STAFF] = ROLE_PERMISSIONS[ROLES.ADMIN];
+// Staff hold exactly the admin's permissions (see ADMIN_ROLES): a frozen copy,
+// so changing one role's list in place cannot change the other's.
+ROLE_PERMISSIONS[ROLES.STAFF] = /** @type {string[]} */ (
+  Object.freeze([...ROLE_PERMISSIONS[ROLES.ADMIN]])
+);
 
 /**
  * Check if a role has a specific permission

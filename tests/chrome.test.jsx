@@ -254,6 +254,21 @@ describe('SideNav', () => {
     expect(screen.queryByRole('link', { name: /Import/ })).not.toBeInTheDocument();
   });
 
+  it('shows staff the admin navigation, Audit Log included (staff are admins)', () => {
+    configureRole(ROLES.STAFF);
+    mocks.auth.isAdmin = false;
+    mocks.auth.user = { email: 'staff@example.com', profile: { full_name: 'S', role: 'staff' } };
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('link', { name: 'Audit Log' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Teams & Rosters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Scheduling/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'My Team' })).not.toBeInTheDocument();
+  });
+
   it('scopes navigation to the previewed role while impersonating', () => {
     mocks.auth.isImpersonating = true;
     mocks.auth.user = {

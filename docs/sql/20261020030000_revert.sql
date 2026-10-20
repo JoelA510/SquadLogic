@@ -7,12 +7,33 @@
 -- 2026-10-20), and the nine policies to their 20261018030000 expressions.
 --
 -- What it does to people: every `staff` member loses admin access again at once.
--- No row is lost.
+-- No row is lost, but an organization whose only admin-equivalent members are
+-- staff (possible after the change: the last-admin guards count staff) is left
+-- with no admin at all. The revert counts those organizations first and
+-- refuses while there are any: promote a member to admin in each, then run it.
 --
 -- Verified: the harness checks the three bodies by md5 and that no policy in
 -- `public` names `staff` afterwards.
 
 BEGIN;
+
+DO $guard$
+DECLARE
+    v_orphans integer;
+BEGIN
+    SELECT count(DISTINCT s.organization_id) INTO v_orphans
+      FROM public.organization_members s
+     WHERE s.role = 'staff'
+       AND NOT EXISTS (SELECT 1 FROM public.organization_members a
+                        WHERE a.organization_id = s.organization_id
+                          AND a.role IN ('admin', 'tenant_admin'));
+    IF v_orphans > 0 THEN
+        RAISE EXCEPTION 'refusing to revert: % organization(s) have staff but no admin or tenant_admin, and would be left with no admin; promote one member of each to admin first', v_orphans
+            USING ERRCODE = '55000';
+    END IF;
+    RAISE NOTICE 'revert guard: no organization depends on staff for its admin';
+END;
+$guard$;
 
 CREATE OR REPLACE FUNCTION public.is_org_admin(p_org_id UUID)
 RETURNS BOOLEAN

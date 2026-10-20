@@ -58,7 +58,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 
 ### 2.5 `fairness-scoring`
 
-- **Purpose**: Evaluate a practice and/or game schedule against the Edge scoring engine in `supabase/functions/_shared/engines/scoring-engine.ts` (a separate implementation from `packages/core`'s — see §3.5). Returns `metrics_summary` and structured `findings`. With `persist: true`, also writes an `evaluation_runs` row through the three-arg `persist_evaluation_run` overload.
+- **Purpose**: Evaluate a practice and/or game schedule against the Edge scoring engine in `supabase/functions/_shared/engines/scoring-engine.ts` (a separate implementation from `packages/core`'s — see §3.5). Returns `metrics_summary` and structured `findings`. With `persist: true`, also writes an `evaluation_runs` row through the three-arg `persist_evaluation_run` overload, as the caller, keyed and retried once by `_shared/evaluation-run.ts` (migration `20261020010000`).
 - **Invoked by**: `frontend/src/components/EvaluationPanel.jsx` via `supabase.functions.invoke('fairness-scoring', …)`.
 - **Authentication**: `getUserFromRequest()` + `verifyOrgMembership(supabase, user.id, body.organizationId)`.
 - **Rate limit**: `checkRateLimit(user.id)` with the default 60 req/min.
@@ -71,7 +71,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 - **Invoked by**: `frontend/src/hooks/useAutoScheduler.js` via a direct `fetch` to `/functions/v1/auto-scheduler`.
 - **Authentication**: `getUserFromRequest()` + `verifyOrgMembership()` + `checkRateLimit()`.
 - **Rate limit**: Enforced via the shared `rateLimit.ts` helper.
-- **RPC used**: `persist_evaluation_run(p_run_data, p_findings, p_metrics)` for the final best result; `record_audit_event`, as the caller, for the `scheduler.auto_started` / `scheduler.auto_progress` / `scheduler.auto_completed` / `scheduler.auto_failed` / `scheduler.auto_refused` stream.
+- **RPC used**: `persist_evaluation_run(p_run_data, p_findings, p_metrics)` for the final best result, as the caller, keyed and retried once by `_shared/evaluation-run.ts`; `record_audit_event`, as the caller, for the `scheduler.auto_started` / `scheduler.auto_progress` / `scheduler.auto_completed` / `scheduler.auto_failed` / `scheduler.auto_refused` stream.
 - **Logging**: Structured events via `_shared/logtail.ts` → BetterStack (gated on `BETTERSTACK_SOURCE_TOKEN`).
 
 ### 2.7 `calendar-feed`
@@ -142,6 +142,10 @@ Deno-runtime unit test for the scoring engine. Runs under `deno test` rather tha
 ### 3.7 `_shared/import_map.json` (at `supabase/functions/import_map.json`)
 
 Shared dependency pinning. Lets individual function files import `'zod'` (and similar bare specifiers) consistently, rather than hard-coding full URLs per file.
+
+### 3.8 `_shared/evaluation-run.ts`
+
+`persistEvaluationRun(client, payload)`: the one caller of `persist_evaluation_run`. It takes a `UserClient` (so the service role cannot be passed; the RPC refuses it), adds a fresh `idempotency_key` to `p_run_data`, and retries once with the same key on a transport failure (`status: 0`) or a gateway 502/503/504, where the first call may have committed. Any other error is returned unretried, with its PostgREST code, for the caller to throw. The key is unique per organization on `evaluation_runs` (migration `20261020010000`), so a retry of a committed call returns the first run and writes nothing more. `_shared/tests/evaluation-run_test.ts` covers the wire; `tests/persistEvaluationRunCaller.test.js` pins that both handlers call it and nothing else calls the RPC.
 
 ## 4. When to Add a New Edge Function
 

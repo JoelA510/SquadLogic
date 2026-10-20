@@ -100,6 +100,7 @@ import {
   auditErrorText,
 } from '../_shared/auth.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
+import { persistEvaluationRun } from '../_shared/evaluation-run.ts';
 import { edgeLogger, logFailure, logRequest, withFailureLogging } from '../_shared/logtail.ts';
 
 // ---------------------------------------------------------------------------
@@ -689,16 +690,17 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     ];
 
     // As the caller: the RPC refuses anyone who is not a member of the organization by
-    // `auth.uid()`, and the service-role client has none, so it could never succeed.
-    const { data: runId, error: persistError } = await createUserClient(
-      req,
-      supabaseUrl,
-      anonKey
-    ).rpc('persist_evaluation_run', {
-      p_run_data: runData,
-      p_findings: [...findings, ...daylightFindings],
-      p_metrics: metrics,
-    });
+    // `auth.uid()`, and the service-role client has none, so it could never succeed. The helper
+    // keys the write and retries it once when the first answer cannot say whether it committed.
+    const { data: runId, error: persistError } = await persistEvaluationRun(
+      createUserClient(req, supabaseUrl, anonKey),
+      logCtx,
+      {
+        p_run_data: runData,
+        p_findings: [...findings, ...daylightFindings],
+        p_metrics: metrics,
+      }
+    );
 
     // A run whose record did not save fails, as fairness-scoring's does: the catch below logs it
     // with the request id (and the PostgREST code) and audits `scheduler.auto_failed`, rather

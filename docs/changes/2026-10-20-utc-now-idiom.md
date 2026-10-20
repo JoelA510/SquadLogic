@@ -129,8 +129,11 @@ No real users exist yet, so no stored data needs correcting.
   caller's zone. For a client that always sends offsets this is the intended behaviour, but the
   plan inventories every `current_date`, `now()::date`, `::date` and text-to-timestamptz parse in
   the 42 functions and decides each one. A calendar-date check meant for the organization's local
-  day (such as "not in the future" for an assignment date) uses the season timezone, as item 1 of
-  the research recommendations does, rather than UTC. Each one gets a test at a UTC day boundary.
+  day (such as `set_team_coaches`' "not in the future") is listed, not changed. No client sends
+  `Prefer: timezone` today (searched `frontend/src` and `supabase/functions`), so these checks
+  already run at UTC and pinning keeps their behaviour. Moving one to the season timezone is a
+  body rewrite, which belongs to the research recommendations' item 1 plan, not to this
+  metadata-only change. The pinned behaviour of each gets a test at a UTC day boundary.
 
 - **`SET timezone` also changes how timestamps print as text inside the function.** For example,
   `to_jsonb(row)` in audit metadata renders `+00:00` instead of the session's offset. Those

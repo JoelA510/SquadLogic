@@ -174,6 +174,48 @@ describe('TopBar', () => {
     expect(mocks.toast).not.toHaveBeenCalled();
   });
 
+  it('offers role preview to a staff member (staff are admins), passing the org role', async () => {
+    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.auth.isAdmin = false;
+    mocks.auth.user = {
+      email: 'staff@example.com',
+      profile: { full_name: 'Sam Staff', role: 'user' },
+    };
+    mocks.org = { ...mocks.org, orgMember: { role: 'staff' } };
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Sam Staff/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
+    await waitFor(() =>
+      expect(mocks.impersonateUser).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'coach-1' }),
+        {
+          orgRole: 'staff',
+        }
+      )
+    );
+  });
+
+  it('offers no role preview to a coach', () => {
+    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.auth.isAdmin = false;
+    mocks.auth.user = {
+      email: 'coach@example.com',
+      profile: { full_name: 'Cal Coach', role: 'user' },
+    };
+    mocks.org = { ...mocks.org, orgMember: { role: 'coach' } };
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Cal Coach/ }));
+    expect(screen.queryByRole('menuitem', { name: 'Preview as Coach' })).not.toBeInTheDocument();
+  });
+
   it('focuses the global search when "/" is pressed', () => {
     render(
       <MemoryRouter>
@@ -252,6 +294,21 @@ describe('SideNav', () => {
     expect(screen.getByRole('link', { name: 'My Team' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Audit Log/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Import/ })).not.toBeInTheDocument();
+  });
+
+  it('shows staff the admin navigation, Audit Log included (staff are admins)', () => {
+    configureRole(ROLES.STAFF);
+    mocks.auth.isAdmin = false;
+    mocks.auth.user = { email: 'staff@example.com', profile: { full_name: 'S', role: 'staff' } };
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('link', { name: 'Audit Log' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Teams & Rosters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Scheduling/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'My Team' })).not.toBeInTheDocument();
   });
 
   it('scopes navigation to the previewed role while impersonating', () => {

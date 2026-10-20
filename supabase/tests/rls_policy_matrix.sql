@@ -13,10 +13,10 @@
 -- to this file's expected table in the same pull request as a policy change is
 -- an access change, and has to be argued as one.
 --
--- **Personas** (seven): the fixtures' Alice (admin of Org A), Charlie (coach
--- of Org A) and Bob (admin of Org B), plus three seeded here: a
--- `tenant_admin` of Org A, a parent of Org A, and a signed-in user with no
--- membership anywhere ("outsider"); and the `anon` role.
+-- **Personas** (eight): the fixtures' Alice (admin of Org A), Charlie (coach
+-- of Org A) and Bob (admin of Org B), plus four seeded here: a
+-- `tenant_admin` of Org A, a parent of Org A, a `staff` member of Org A, and a
+-- signed-in user with no membership anywhere ("outsider"); and the `anon` role.
 --
 -- **Subjects**: the 26 tables, as a literal list taken from the advisor
 -- findings (the plan's section 1), never derived from `pg_policies`, so a
@@ -24,7 +24,7 @@
 -- and one in Org B (from the fixtures where they have one, seeded below
 -- otherwise).
 --
--- **Probes**, per persona and table (26 x 7 x 5 = 910 cells):
+-- **Probes**, per persona and table (26 x 8 x 5 = 1040 cells):
 --   sel  which of the two subject rows SELECT returns: 'AB', 'A', 'B' or '-';
 --   ins  an INSERT of a new Org A row: 'ok';
 --   upd  how many rows an UPDATE of Org A's subject row reaches, setting one
@@ -55,8 +55,8 @@
 --
 -- **Assertions** (32): five meta-assertions (the 26 subject tables exist and
 -- each has RLS enabled, every subject row was seeded, every persona ran as the
--- identity it claims on every table, the expected table covers all 182
--- table-persona pairs, the probes produced all 910 cells); one that no cell
+-- identity it claims on every table, the expected table covers all 208
+-- table-persona pairs, the probes produced all 1040 cells); one that no cell
 -- anywhere differs from the literal expected table below; and one
 -- `results_eq` per table, so a failure names its table. Every differing cell
 -- is printed as a diagnostic.
@@ -84,14 +84,17 @@ VALUES
     ('66666666-6666-6666-6666-666666666666', 'olive@test.local',
      jsonb_build_object('full_name', 'Olive Outsider', 'password_length', 12),     'authenticated', 'authenticated'),
     ('77777777-7777-7777-7777-777777777777', 'spare@test.local',
-     jsonb_build_object('full_name', 'Spare User', 'password_length', 12),         'authenticated', 'authenticated')
+     jsonb_build_object('full_name', 'Spare User', 'password_length', 12),         'authenticated', 'authenticated'),
+    ('88888888-8888-8888-8888-888888888888', 'sam@test.local',
+     jsonb_build_object('full_name', 'Sam Staff-A', 'password_length', 12),        'authenticated', 'authenticated')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.profiles (id, email, full_name)
 VALUES
     ('44444444-4444-4444-4444-444444444444', 'tara@test.local',  'Tara Tenant-Admin-A'),
     ('55555555-5555-5555-5555-555555555555', 'pat@test.local',   'Pat Parent-A'),
-    ('66666666-6666-6666-6666-666666666666', 'olive@test.local', 'Olive Outsider')
+    ('66666666-6666-6666-6666-666666666666', 'olive@test.local', 'Olive Outsider'),
+    ('88888888-8888-8888-8888-888888888888', 'sam@test.local',   'Sam Staff-A')
 ON CONFLICT (id) DO NOTHING;
 
 DELETE FROM public.profiles WHERE id = '77777777-7777-7777-7777-777777777777';
@@ -105,7 +108,8 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.organization_members (organization_id, profile_id, role)
 VALUES
     ('a1111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444', 'tenant_admin'),
-    ('a1111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555', 'parent')
+    ('a1111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555', 'parent'),
+    ('a1111111-1111-1111-1111-111111111111', '88888888-8888-8888-8888-888888888888', 'staff')
 ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
 -- ── 2. Subject rows (one in Org A, one in Org B) and what they need ───────
@@ -258,7 +262,8 @@ INSERT INTO matrix_persona VALUES
     (4, 'parent_a', 'authenticated', '55555555-5555-5555-5555-555555555555'),
     (5, 'admin_b',  'authenticated', '22222222-2222-2222-2222-222222222222'),
     (6, 'outsider', 'authenticated', '66666666-6666-6666-6666-666666666666'),
-    (7, 'anon',     'anon',          NULL);
+    (7, 'anon',     'anon',          NULL),
+    (8, 'staff_a',  'authenticated', '88888888-8888-8888-8888-888888888888');
 
 -- tbl: the table; a_row / b_row: the predicate naming its Org A / Org B
 -- subject row; upd_col: the column the UPDATE probe sets to itself, and the
@@ -801,6 +806,14 @@ INSERT INTO matrix_expected VALUES
     ('telemetry_log',               'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('telemetry_log',               'anon',     '-',  'rls',   '0',   '0',     '0');
 
+-- staff_a: every cell is admin_a's, on every table (owner decision 2026-10-20:
+-- "Staff should be treated like an admin"; migration 20261020030000). Copied
+-- from admin_a's literal rows above rather than written out a second time, so
+-- the rule is stated once: a change to an admin cell is a change to staff's.
+-- Before 20261020030000, staff_a differed from admin_a on 23 of the 26 tables.
+INSERT INTO matrix_expected
+SELECT tbl, 'staff_a', sel, ins, upd, mov, del FROM matrix_expected WHERE persona = 'admin_a';
+
 -- ── 6. Meta-assertions ────────────────────────────────────────────────────
 SELECT is(
     (SELECT count(*) FROM matrix_subject s
@@ -821,21 +834,21 @@ SELECT is(
        JOIN matrix_persona p ON p.persona = i.persona
        JOIN matrix_subject s ON s.tbl = i.tbl
       WHERE i.db_role = p.db_role AND i.uid IS NOT DISTINCT FROM p.uid),
-    182::bigint,
-    'every persona ran as the role and user it claims, on every table (26 x 7)'
+    208::bigint,
+    'every persona ran as the role and user it claims, on every table (26 x 8)'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_expected e
        JOIN matrix_subject USING (tbl) JOIN matrix_persona USING (persona)),
-    182::bigint,
-    'the expected table covers every table and persona (26 x 7)'
+    208::bigint,
+    'the expected table covers every table and persona (26 x 8)'
 );
 
 SELECT is(
     (SELECT count(sel) + count(ins) + count(upd) + count(mov) + count(del) FROM matrix_result),
-    910::bigint,
-    'the probes produced every cell (26 tables x 7 personas x 5 probes)'
+    1040::bigint,
+    'the probes produced every cell (26 tables x 8 personas x 5 probes)'
 );
 
 -- Every differing cell, anywhere in the matrix: printed, then counted. This

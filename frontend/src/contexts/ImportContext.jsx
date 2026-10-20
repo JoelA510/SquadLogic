@@ -29,6 +29,7 @@ import {
   getExternalRegistrationId,
   hasCoachLeadIntent,
 } from '../utils/coachLeads.js';
+import { isAdminRole } from '../constants/permissions.js';
 
 const MAX_ROWS = 10000;
 const MAX_COLS = 1200;
@@ -448,7 +449,7 @@ export function ImportProvider({ children }) {
 
         const role = orgMember?.role;
         const roleKnown = Boolean(role);
-        const canManageImports = role === 'admin' || role === 'tenant_admin';
+        const canManageImports = isAdminRole(role);
 
         if (canManageImports) {
           const { data: staleCleanup, error: staleCleanupError } = await supabase.rpc(

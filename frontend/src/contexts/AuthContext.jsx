@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { isAdminRole } from '../constants/permissions.js';
 
 /**
  * @typedef {Object} AuthContextValue
@@ -15,7 +16,7 @@ import { logger } from '../lib/logger.js';
  * @property {boolean} isCoach
  * @property {any} impersonatedUser
  * @property {boolean} isImpersonating
- * @property {(targetProfile: any) => Promise<void>} impersonateUser
+ * @property {(targetProfile: any, options?: { orgRole?: string }) => Promise<void>} impersonateUser
  * @property {() => Promise<void>} stopImpersonation
  */
 
@@ -210,8 +211,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const impersonateUser = async (targetProfile) => {
-    if (user?.profile?.role !== 'admin') {
+  // `orgRole` is the caller's role in the organization they preview from: an
+  // org admin-equivalent (staff included, ADMIN_ROLES) may preview as well as a
+  // profile admin. The server decides in the end: the impersonation.started
+  // audit below requires is_org_admin, and a refused audit refuses the preview.
+  /**
+   * @param {any} targetProfile
+   * @param {{ orgRole?: string }} [options]
+   */
+  const impersonateUser = async (targetProfile, { orgRole } = {}) => {
+    if (user?.profile?.role !== 'admin' && !isAdminRole(orgRole)) {
       throw new Error('Unauthorized: Only admins can impersonate users.');
     }
 

@@ -815,7 +815,7 @@ export default function DashboardPage() {
   const banner = <DataErrorBanner message={routeError} className="mx-6 mt-3" />;
 
   const Home =
-    effectiveRole === 'coach' || effectiveRole === 'staff'
+    effectiveRole === 'coach'
       ? CoachDashboard
       : effectiveRole === 'parent' || effectiveRole === 'player'
         ? ParentDashboard

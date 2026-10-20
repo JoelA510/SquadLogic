@@ -63,10 +63,14 @@ CREATE POLICY "players_delete_admin" ON public.players
   USING (public.is_org_admin(organization_id));
 ```
 
-A policy that reads the caller itself wraps `auth.uid()` in `(select ...)`. `registration_forms` and
-`season_settings` test `om.role = 'admin'` inline, narrower than `is_org_admin()`, which also admits
-`tenant_admin`, and kept so by the rewrite. `registration_forms` (INSERT shown; UPDATE carries the
-same expression in `USING` and `WITH CHECK`, DELETE in `USING`):
+`is_org_admin()` admits the roles `admin`, `tenant_admin` and `staff` (staff since
+`20261020030000`: staff are admins). A policy that reads the caller itself wraps `auth.uid()` in
+`(select ...)`. `registration_forms` and `season_settings` test the role inline,
+`om.role IN ('admin', 'staff')`, narrower than `is_org_admin()` by `tenant_admin` (remediation plan,
+RLS Q5, open), as do the `audit_log` and `organization_schema_history` SELECT policies.
+`supabase/tests/staff_is_admin.sql` fails on any policy or function that names `'admin'` as a role
+without `'staff'`. `registration_forms` (INSERT shown; UPDATE carries the same expression in
+`USING` and `WITH CHECK`, DELETE in `USING`):
 
 ```sql
 CREATE POLICY "registration_forms_admin_insert" ON public.registration_forms
@@ -77,7 +81,7 @@ CREATE POLICY "registration_forms_admin_insert" ON public.registration_forms
       SELECT 1 FROM public.organization_members om
       WHERE om.profile_id = (select auth.uid())
         AND om.organization_id = registration_forms.organization_id
-        AND om.role = 'admin'
+        AND om.role IN ('admin', 'staff')
     )
   );
 ```

@@ -35,6 +35,18 @@ export const PERMISSIONS = {
   DECIDE_PRACTICE_LIGHTING_OVERRIDE: 'decide_practice_lighting_override',
 };
 
+/**
+ * The organization roles the server treats as admins: `is_org_admin()` admits
+ * exactly these, and so does the Edge Functions' `verifyOrgAdmin` (its own
+ * ADMIN_ROLES; tests/adminRolesParity.test.js holds the two equal). `staff`
+ * joined them on 2026-10-20 (owner decision: "Staff should be treated like an
+ * admin"; migration 20261020030000).
+ */
+export const ADMIN_ROLES = Object.freeze([ROLES.ADMIN, ROLES.TENANT_ADMIN, ROLES.STAFF]);
+
+/** True when an organization role is admin-equivalent. */
+export const isAdminRole = (role) => ADMIN_ROLES.includes(role);
+
 export const ROLE_PERMISSIONS = {
   [ROLES.TENANT_ADMIN]: [
     PERMISSIONS.MANAGE_ORGANIZATION,
@@ -53,8 +65,8 @@ export const ROLE_PERMISSIONS = {
   [ROLES.ADMIN]: [
     PERMISSIONS.MANAGE_ORGANIZATION,
     PERMISSIONS.VIEW_ORGANIZATION,
-    // Backend parity: is_org_admin() treats 'admin' and 'tenant_admin' as
-    // equivalent, and initialize_new_tenant assigns new-org creators 'admin' —
+    // Backend parity: is_org_admin() treats 'admin', 'tenant_admin' and 'staff'
+    // as equivalent, and initialize_new_tenant assigns new-org creators 'admin' —
     // without this grant a self-serve org creator is locked out of Season
     // Setup by the frontend while the database would allow every mutation.
     PERMISSIONS.MANAGE_GLOBAL_SETTINGS,
@@ -78,12 +90,6 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
     PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE,
   ],
-  [ROLES.STAFF]: [
-    PERMISSIONS.VIEW_ORGANIZATION,
-    PERMISSIONS.VIEW_ALL_TEAMS,
-    PERMISSIONS.MANAGE_SCHEDULE,
-    PERMISSIONS.VIEW_SCHEDULE,
-  ],
   [ROLES.PLAYER]: [
     PERMISSIONS.VIEW_ORGANIZATION,
     PERMISSIONS.VIEW_OWN_TEAM,
@@ -97,6 +103,12 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.RSVP_EVENT,
   ],
 };
+
+// Staff hold exactly the admin's permissions (see ADMIN_ROLES): a frozen copy,
+// so changing one role's list in place cannot change the other's.
+ROLE_PERMISSIONS[ROLES.STAFF] = /** @type {string[]} */ (
+  Object.freeze([...ROLE_PERMISSIONS[ROLES.ADMIN]])
+);
 
 /**
  * Check if a role has a specific permission

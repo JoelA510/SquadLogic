@@ -24,6 +24,8 @@
  * wires it into `rpc()` and persists `db` afterwards.
  */
 
+import { ADMIN_ROLES } from '../constants/permissions.js';
+
 export const COACH_PREFERENCE_RPCS = Object.freeze([
   'request_coach_practice_preference',
   'admin_decide_coach_practice_preference',
@@ -109,7 +111,7 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
         String(member.organization_id) === String(orgId) &&
         String(member.profile_id) === String(currentUserId)
     )?.role ?? null;
-  const isOrgAdmin = (orgId) => ['admin', 'tenant_admin'].includes(String(roleIn(orgId) || ''));
+  const isOrgAdmin = (orgId) => ADMIN_ROLES.includes(String(roleIn(orgId) || ''));
   const isOrgMember = (orgId) => roleIn(orgId) !== null;
   const coachById = (coachId) =>
     (db.coaches || []).find((coach) => String(coach.id) === String(coachId)) ?? null;

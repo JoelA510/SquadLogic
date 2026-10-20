@@ -85,6 +85,9 @@ R27="$REPO/docs/sql/20261018070000_revert.sql"
 # B2 (DS-5): the submit_registration throttle, and its revert.
 M28="$REPO/supabase/migrations/20261019010000_submit_registration_throttle.sql"
 R28="$REPO/docs/sql/20261019010000_revert.sql"
+# The evaluation-run idempotency key, and its revert.
+M29="$REPO/supabase/migrations/20261020010000_evaluation_run_idempotency.sql"
+R29="$REPO/docs/sql/20261020010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3706,6 +3709,44 @@ END;" \
 END;" \
   "revert 20261019010000"
 
+# The evaluation-run idempotency key. The smoke RAISEs on each; the revert
+# claim on a body that drifted and on a key left behind.
+plant "M29 a replay writes its findings and metrics again" "$M29" \
+  "    IF v_run_id IS NULL THEN
+      RAISE EXCEPTION 'evaluation run for idempotency key % conflicted but cannot be read', v_key;
+    END IF;
+    RETURN v_run_id;
+  END IF;" \
+  "    IF v_run_id IS NULL THEN
+      RAISE EXCEPTION 'evaluation run for idempotency key % conflicted but cannot be read', v_key;
+    END IF;
+  END IF;" \
+  "smoke 20261020010000"
+
+plant "M29 the key is read but never stored" "$M29" \
+  "    NOW(),
+    v_key
+  )" \
+  "    NOW(),
+    NULL
+  )" \
+  "smoke 20261020010000"
+
+plant "R29 the revert leaves the idempotency column behind" "$R29" \
+  "ALTER TABLE public.evaluation_runs DROP COLUMN IF EXISTS idempotency_key;
+" \
+  "" \
+  "revert 20261020010000"
+
+plant "R29 the revert restores a drifted persist_evaluation_run body" "$R29" \
+  "  RETURN v_run_id;
+END;
+\$function\$;" \
+  "  RETURN v_run_id; -- drifted
+END;
+\$function\$;" \
+  "revert 20261020010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3836,6 +3877,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
   ["(checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, drops the throttle index, and restores the one FOR ALL registrations policy"]="R28 the revert restores a drifted submit_registration body"
+  ["(checked) the persist_evaluation_run revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and drops the idempotency index and column"]="R29 the revert restores a drifted persist_evaluation_run body|R29 the revert leaves the idempotency column behind"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

@@ -58,12 +58,14 @@ describe('README release line', () => {
 
   it('fails a release cut without the README, or a changelog ahead of package.json', () => {
     const line = releaseLine(read('README.md'));
-    const next = { version: '1.1.0', date: '2026-11-01' };
-    expect(releaseProblems(line, next, '1.1.0')).toEqual([
-      'the release line does not name v1.1.0 (2026-11-01)',
+    // The release after the current one, so the case holds whatever the current version is.
+    const [major, minor] = pkgVersion.split('.').map(Number);
+    const next = { version: `${major}.${minor + 1}.0`, date: '2099-01-01' };
+    expect(releaseProblems(line, next, next.version)).toEqual([
+      `the release line does not name v${next.version} (2099-01-01)`,
     ]);
     expect(releaseProblems(line, next, pkgVersion).join('\n')).toContain('is not package.json');
-    expect(releaseProblems(undefined, next, '1.1.0')).toEqual([
+    expect(releaseProblems(undefined, next, next.version)).toEqual([
       'README has no release status line',
     ]);
     expect(

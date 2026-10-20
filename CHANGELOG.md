@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-20
+
 ### Added
 
 - **Field heat-stress (WBGT) forecast** (`/schedule/heat`, admin-only, behind the new `heat_forecast` org feature): per venue, surface and kickoff window from the current game run (or per hour with no games), the forecast WBGT from the NOAA NWS gridpoint forecast, its U.S. Soccer Recognize to Recover band, and the regional air temperatures that would push the field into Red and Black; NWS update and retrieval times, a stale-forecast warning, the on-site-readings-govern disclaimer, refused rows kept visible with their reason, and a sources panel rendered from row provenance. The model (`packages/core/src/heat/`) is a port of the Python reference in `scripts/heat/reference/` (Liljegren 2008 WBGT, turf/grass surface model, NREL SPA, Ineichen clear sky) held to it by parity tests; the one substitution, a 0.5-degree Linke turbidity table, and its measured effect are in `docs/architecture/heat-forecast.md`.
@@ -66,6 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added player-import coach volunteer lead capture: finalized GotSport player imports now submit interested coach leads through `upsert_coach_leads`, atomically persist per-job lead summaries, and cover payload shaping with Vitest plus pgTAP.
 - Added a current-schema `persist_game_schedule` RPC and `game_assignments` run linkage/idempotency columns to unblock org-scoped, persisted game scheduling apply flows.
 - Added a current-schema `persist_team_schedule` RPC that returns the persisted run id and treats submitted roster rows as authoritative for each team in the payload.
+- **Blackout enact** (8.6 3b PR 11d; #534, #539, #548): practice repair reads live exceptions; the enact wrapper gains a blackout arm (record union, mock mirror); the UI enacts a blackout recommendation behind its gate, with the confirmation prompt and a launcher from the stored row.
+- **The auto-scheduler holds live relocated slots season-wide** (11d-0, #540), and the game grid asks before an override on Apply; an override closes the old series the day before (#546).
+- **Dated scheduling end to end**: a date model for the practice scoring engines (M4.7, #560); both practice engines read saved practice exceptions (#590); the auto-scheduler's solver judges dated occupancy (M4.8, #593).
+- **Exports bucket** with organization-scoped policies (admins upload and clean up) and an all-or-nothing Upload to Storage (#592).
+- **Keyboard "Move to..." on the game grid** (M4.3, #579), so a game can be rescheduled without dragging.
+- **Typed env module** (`frontend/src/env.js`): a production build fails without the Supabase configuration (M2.2, #558).
 
 ### Changed
 
@@ -100,6 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Team review now stages generated teams and manual roster edits for explicit Supabase persistence instead of writing scheduler/player tables directly from routed UI controls.
 - Replaced the routed game scheduling mock timer and direct assignment updates with core round-robin generation, staged review/apply/discard UI, and a game-persistence backed apply flow.
 - Replaced the routed practice scheduling mock timer with the real auto-scheduler trigger, staged review/apply/discard UI, and practice-persistence backed apply flow.
+- **Production-readiness CI** (#552, #559, #573, #574, #575, #578, #581): `main` requires six checks (Build & Test, Deno Mirror Tests, pgTAP against local Supabase, the npm audit, the workflow audit and the real-backend E2E); coverage thresholds are enforced; actions are pinned by SHA and audited by zizmor; a Supabase advisors gate and the migration harness run on every PR; Node 24 is pinned; Dependabot groups minor and patch updates.
+- **Edge audit rows are written as the caller** (#577), and `scheduler.auto_refused` is registered.
+- **Dependency upgrades**: Vite 8 with `@vitejs/plugin-react` 6, Vitest 5 and `@vitest/coverage-v8` 5 (#617; Rolldown code-splitting groups, first paint 273.65 KB from 283.80 KB); `@sentry/react` 11 with an explicit `dataCollection` baseline, so user info, cookies and request bodies stay off (#616); `lucide-react` 1 (#615); `jsdom` 30, with `engines.node` raised to `^24.15.0` (#612); `@testing-library/jest-dom` 7 (#611); `globals` 17 (#610); `dotenv` 18 (#606); TypeScript 6.0.3, with `tsconfig.json`'s deprecated `baseUrl` removed (#619; TypeScript 7 is held until `typescript-eslint` supports it); the minor and patch group, including `@supabase/supabase-js` 2.118, React 19.3.1 and `@axe-core/playwright` 4.14 (#582, #583, #618).
+- **Accessibility and E2E coverage** (#580, #604, #607): `jsx-a11y` lint and an axe scan of every top-level route in both themes, extended to exports, practice preferences, fields, reports, invites and each route's main dialog; DST-gap and late-registrant journeys; the Playwright config loads `.env.test`.
+- **M6 polish** (#588): a real build script, the core package entry, env reads, the bundle shape (Replay lazy), `allowScripts`, LF line endings and the README release line. The mock seed uses UUID organization and season ids (#587).
 
 ### Fixed
 
@@ -147,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made game schedule invalid drop-target reasons keyboard focusable and screen-reader described instead of hover-only.
 - Made import file-picker and completion notification controls keyboard focusable with explicit screen-reader labels and pressed/checkbox state.
 - Made import smart-mapping confidence tooltips keyboard focusable and screen-reader described instead of hover-only.
+- **Evaluation runs are recorded** (#621): auto-scheduler and fairness-scoring called `persist_evaluation_run` with the service-role client, which the RPC's membership check refuses, so no run was ever saved (the auto-scheduler swallowed the error). Both now call it as the caller, and a failed save fails the run, logged with its request id and audited as `scheduler.auto_failed`.
+- **The team portal places practices on the season clock** (#613): a practice whose wall time does not exist on its date (the spring-forward gap) shows as TIME TBD, as the calendar feed does; the calendar feed reads the team's own season's timezone.
+- **Label in Name (WCAG 2.5.3)** (#618): the organization and season switchers, the avatar, the inline-edit field buttons and the Auto-Generate button carry their visible text in their accessible names. The field form's Sub-fields and Status toggles are keyboard-operable switches (WCAG 2.1.1, #620). The DataGrid has one tab stop with a roving tabindex, and the token text, chart theme and axe scope follow-ups land (#591).
+- **The fairness panel evaluates the real schedule** (13.1), with core/Deno scoring parity (#551); the Edge game evaluator reports teams missing from its roster (#594).
+- **Persistence**: a deadline on every persistence call, a 422 for an empty roster (#556), client-side payload validation with unknown-outcome handling and a re-read (#576), and team and game saves that audit in their own transaction (#600).
+- **Observability**: error reports carry the user and organization ids, and Edge failures are logged with function, request and organization (#553); Sentry's CSP admits US-region ingest and events carry the release (#545); impersonation and dashboard failures are surfaced, dashboards read in parallel, and the Edge logging residuals carry request ids (B3, #608).
+- **Schema drift** between a fresh build and production reconciled, with a catalogue check (#598).
+- The game grid reads the season's current practice rows, not the latest run (#541), and names a locked practice when Apply is refused, never its UUID (#542). Wave 3 UI fixes: import Continue, the team sync line and timeout, the abort check, the game grid's tabs and drops (#589).
+- CI forces the full matrix when the push's before SHA is unknown (#536); the heat smoke matches audit rows by content (#547); the DB harness normalises a doubled FAIL prefix (#550).
 
 ### Removed
 
@@ -158,6 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the legacy `current_user_role()` helper after confirming current RLS/RPC code uses org-scoped auth helpers.
 - Removed the legacy four-argument `persist_evaluation_run` RPC overload, leaving the JSONB evaluation persistence contract used by Edge Functions.
 - Removed an unused direct `practice_assignments` update helper from the practice assignments hook.
+- `AdminReportingDashboard`, which no route reached, and the rainout acknowledgement journey, which the product does not have (#614). The staging E2E suite, whose checks moved to the real-backend E2E (#578). The unused `dashboardCache` (B3, #608).
 
 ### Documentation
 
@@ -170,6 +193,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified that GotSport CSV import validation, durable player promotion, coach CSV, field-slot, buddy-pair materialization, and player-import coach lead capture are shipped, while team import promotion remains pending v1.1 work.
 - Added release-prep closure documentation covering current Vercel evidence, Node runtime drift, Lighthouse/performance deferrals, cleanup secrets, Sentry verification, and final sign-off blockers.
 - Added durable GotSport player-import staging and admin-only finalize promotion into `players`, with pgTAP coverage and rollback/smoke SQL.
+- The production-readiness audit and its remediation plan (#544), closed out with a final scorecard (#601); one `AGENTS.md` with loadable workflow skills (#557, #586); the documentation drift corrected (B4, #605); progress notes for 8.6 3b, #60b and the grid override prompt (#529, #535, #537, #543, #554).
 
 ### Security
 
@@ -198,6 +222,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Routed field-management location/field mutations through org-admin facility RPCs with audit logging, leaving facility tables read-only to org members.
 - Routed team portal RSVP and chat message writes through org-scoped RPCs with participant checks and metadata-only audit logging, removing direct browser write policies for `event_rsvps` and `team_messages`.
 - Routed browser-driven import job creation, progress, and failure writes through org-admin RPCs with audit logging, removing the broad member-write `import_jobs` policy.
+- **CSV exports neutralise formula cells**, and `submit_registration` is throttled to ten registrations per caller per form per minute; members can no longer update or delete registration rows directly (DS-4, DS-5, #609).
+- **RLS**: a persona matrix over the 26 advisor-flagged tables (#595), then those policies rewritten with no access change and both advisor waivers removed (#596). Only an admin can save the game schedule (#600). Uploaded file names are no longer written to the audit log or import telemetry (#597, #599).
+- `SECURITY.md` and `LICENSE` (#556); an npm audit gate that blocks high and critical advisories, and install guards (#559).
 
 ## [1.0.1] - 2026-04-23
 

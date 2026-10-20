@@ -9,7 +9,9 @@ resume queue's flagged backlog.
 `admin_delete_team(p_team_id)` (migration `20260613000003`, unchanged since) checks the caller is
 an org admin, runs `DELETE FROM public.teams WHERE id = p_team_id`, then audits `team.deleted`.
 The delete cascades to `team_players`, `game_assignments`, `practice_assignments`, RSVPs and
-messages, and sets `players.team_id` to null.
+messages, and to every `games` row in which the team is home or away (`games.home_team_id` and
+`games.away_team_id` are both `ON DELETE CASCADE`), and sets `players.team_id` to null. So a team
+delete also removes its opponents' games.
 
 Migration `20260929000000` (practice writer v3) added `practice_exceptions` with
 `assignment_id ... REFERENCES practice_assignments(id) ON DELETE RESTRICT`, on purpose: its header
@@ -62,8 +64,10 @@ unchanged):
    `admin_cancel_practice_assignment`'s three steps (no per-row RPC call, so one admin check).
 3. `DELETE FROM teams` as today; the cascade now has nothing to stop it.
 4. `team.deleted`'s metadata gains `practice_assignments_deleted` (count),
-   `game_assignments_deleted` (count), `withdrawn_exception_ids` and `archived_exceptions`, so the
-   audit trail says what the delete took with it (today it records only the name and division).
+   `game_assignments_deleted` (count), `games_deleted` (count, and the ids, since each deleted
+   game also removes a fixture from another team's schedule), `withdrawn_exception_ids` and
+   `archived_exceptions`, so the audit trail says what the delete took with it (today it records
+   only the name and division). The counts are taken before the delete, in the same transaction.
 
 Uses `now()`, not `timezone('utc', now())` (see the companion plan
 `2026-10-20-utc-now-idiom.md`).
@@ -85,7 +89,8 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
   - the delete succeeds;
   - the team, its assignments and its exceptions are gone;
   - each live exception has a `practice.exception_withdrawn` audit row;
-  - `team.deleted` carries the counts and archived rows;
+  - `team.deleted` carries the counts and archived rows, including `games_deleted` for a seeded
+    game against another team, and that game is gone;
   - the run's `archived_exceptions` holds both rows.
 
   Plus a control: a non-admin is refused and nothing changes.
@@ -102,6 +107,9 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
 - Deleting a team now always succeeds for an admin, including one with live overrides that a
   family may be relying on. That is the point of the request, and the audit row records exactly
   what went.
+- The cascade also deletes the opposing teams' games. That is today's behaviour, not a change,
+  but it strengthens decision 2: a preview listing those games is the natural input to a
+  `p_confirm`.
 - The set-based withdrawal must match the sibling's archive shape exactly
   (`results.archived_exceptions` entries are the raw rows). A test compares the two paths on the
   same fixture.

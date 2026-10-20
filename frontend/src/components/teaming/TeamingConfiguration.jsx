@@ -27,15 +27,22 @@ export default function TeamingConfiguration({
     onUpdate(program.id, { [field]: value });
   };
 
-  const effectiveTeamCount = config?.teamCountOverride || program.estimatedTeams;
   const assessment = assessTeamCount({
     playerCount: program.playerCount,
-    teamCount: effectiveTeamCount,
+    teamCountOverride: config?.teamCountOverride,
     minRosterSize: config?.minRosterSize,
     maxRosterSize: config?.maxRosterSize,
     targetTeamSize: config?.targetTeamSize,
+    minTeams: config?.minTeams,
+    maxTeams: config?.maxTeams,
   });
   const { recommendedTeamCount, fitRange, warnings } = assessment;
+
+  const useRecommended = () => {
+    handleNumberChange('teamCountOverride', recommendedTeamCount);
+    // The button goes away once applied; keep keyboard focus on the field it changed.
+    document.getElementById('team-count-override')?.focus();
+  };
 
   return (
     <div className="bg-bg-surface border border-border-subtle rounded-xl p-6 h-full">
@@ -169,15 +176,14 @@ export default function TeamingConfiguration({
                 {fitRange && fitRange.min !== fitRange.max
                   ? ` (${fitRange.min} to ${fitRange.max} fit the roster limits)`
                   : ''}
+                . Each volunteer head coach gets a team, which can add more.
               </p>
-              {config?.teamCountOverride !== recommendedTeamCount && (
-                <Button
-                  variant="secondary"
-                  onClick={() => handleNumberChange('teamCountOverride', recommendedTeamCount)}
-                >
-                  Use {recommendedTeamCount}
-                </Button>
-              )}
+              {config?.teamCountOverride != null &&
+                config.teamCountOverride !== recommendedTeamCount && (
+                  <Button variant="secondary" onClick={useRecommended}>
+                    Use {recommendedTeamCount}
+                  </Button>
+                )}
             </div>
           )}
           <div role="status" aria-live="polite">

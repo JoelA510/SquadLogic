@@ -18,7 +18,8 @@ import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { IS_MOCK_MODE } from '../config.js';
-import { generateTeams } from '@squadlogic/core/teamGeneration.js';
+import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
+import { DEFAULT_ROSTER_LIMITS } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
 import { mapSchedulerRunToSummary } from '@squadlogic/core/utils/teamSummaryMapper.js';
 import { formatChangeNote } from '@squadlogic/core/teamDiagnostics.js';
@@ -33,9 +34,11 @@ import {
   isUuid,
 } from '../utils/teamReviewPersistence.js';
 
-const DEFAULT_MAX_ROSTER_SIZE = 14;
-const DEFAULT_MIN_ROSTER_SIZE = 10;
-const DEFAULT_TARGET_TEAM_SIZE = 12;
+const {
+  maxRosterSize: DEFAULT_MAX_ROSTER_SIZE,
+  minRosterSize: DEFAULT_MIN_ROSTER_SIZE,
+  targetTeamSize: DEFAULT_TARGET_TEAM_SIZE,
+} = DEFAULT_ROSTER_LIMITS;
 
 function getImportedRows(importedData) {
   if (!importedData) return [];
@@ -128,15 +131,19 @@ function positiveIntegerOrFallback(value, fallback) {
 }
 
 function deriveProgramStats(program, config = {}) {
-  const targetTeamSize = positiveIntegerOrFallback(config.targetTeamSize, DEFAULT_TARGET_TEAM_SIZE);
   const maxRosterSize = positiveIntegerOrFallback(config.maxRosterSize, DEFAULT_MAX_ROSTER_SIZE);
-  const minTeams = positiveIntegerOrFallback(config.minTeams, null);
-  const maxTeams = positiveIntegerOrFallback(config.maxTeams, null);
-  const overrideTeams = positiveIntegerOrFallback(config.teamCountOverride, null);
-  const baseEstimate =
-    overrideTeams || Math.max(1, Math.ceil(program.playerCount / targetTeamSize));
-  const minBoundedEstimate = minTeams ? Math.max(baseEstimate, minTeams) : baseEstimate;
-  const estimatedTeams = maxTeams ? Math.min(minBoundedEstimate, maxTeams) : minBoundedEstimate;
+  // The count generation will build (coaches unknown here), so the overview, the settings panel
+  // and the generator agree. Empty limits mean what they mean to the generator: no minimum, a
+  // target equal to the maximum.
+  const estimatedTeams = resolveTeamCount({
+    playerCount: program.playerCount,
+    maxRosterSize,
+    targetTeamSize: positiveIntegerOrFallback(config.targetTeamSize, null),
+    teamCountOverride: positiveIntegerOrFallback(config.teamCountOverride, null),
+    minTeams: positiveIntegerOrFallback(config.minTeams, null),
+    maxTeams: positiveIntegerOrFallback(config.maxTeams, null),
+    minRosterSize: positiveIntegerOrFallback(config.minRosterSize, null),
+  });
 
   return {
     ...program,

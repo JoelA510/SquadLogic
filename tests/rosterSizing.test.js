@@ -1,6 +1,7 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 
+import { resolveTeamCount } from '../packages/core/src/teamGeneration.js';
 import {
   assessTeamCount,
   calculateMaxRosterSize,
@@ -206,69 +207,105 @@ describe('buildOverridesFromSupabaseRows', () => {
 
 describe('assessTeamCount', () => {
   const limits = { minRosterSize: 10, maxRosterSize: 14, targetTeamSize: 12 };
+  const codes = (result) => result.warnings.map((w) => w.code);
 
-  it('recommends the count nearest the target that keeps every team within the limits', () => {
-    const result = assessTeamCount({ playerCount: 60, teamCount: 5, ...limits });
-    assert.deepEqual(result.fitRange, { min: 5, max: 6 });
-    assert.equal(result.recommendedTeamCount, 5);
+  it('recommends what generation would build with no override, inside the range that fits', () => {
+    const result = assessTeamCount({ playerCount: 40, ...limits });
+    assert.equal(result.teamCount, 4);
+    assert.equal(result.recommendedTeamCount, 4);
+    assert.deepEqual(result.fitRange, { min: 3, max: 4 });
     assert.deepEqual(result.warnings, []);
   });
 
-  it('warns when the chosen count puts too many players on a team, and says how many teams fit', () => {
-    const result = assessTeamCount({ playerCount: 30, teamCount: 2, ...limits });
-    assert.equal(result.largestTeam, 15);
-    assert.deepEqual(
-      result.warnings.map((w) => w.code),
-      ['TOO_MANY_PER_TEAM']
-    );
-    assert.match(result.warnings[0].message, /15 players, over the maximum of 14\. Use at least 3/);
+  it('says when generation will not use the override, and judges the count it will use', () => {
+    // 30 players: 2 teams would be 15 each (over 14), so generation makes 3 teams of 10.
+    const result = assessTeamCount({ playerCount: 30, teamCountOverride: 2, ...limits });
+    assert.equal(result.teamCount, 3);
+    assert.deepEqual(codes(result), ['OVERRIDE_ADJUSTED']);
+    assert.match(result.warnings[0].message, /Generation will make 3 teams, not the 2 set here/);
   });
 
-  it('warns when the chosen count leaves teams short, using the uneven split', () => {
-    const result = assessTeamCount({ playerCount: 30, teamCount: 4, ...limits });
-    assert.equal(result.smallestTeam, 7);
-    assert.equal(result.largestTeam, 8);
-    assert.deepEqual(
-      result.warnings.map((w) => w.code),
-      ['TOO_FEW_PER_TEAM']
-    );
+  it('warns about too many per team only when generation really builds that (maxTeams cap)', () => {
+    const result = assessTeamCount({ playerCount: 30, maxTeams: 2, ...limits });
+    assert.equal(result.teamCount, 2);
+    assert.equal(result.recommendedTeamCount, 2);
+    assert.deepEqual(codes(result), ['TOO_MANY_PER_TEAM']);
     assert.match(
       result.warnings[0].message,
-      /only 7 players, under the minimum of 10\. Use at most 3 teams/
+      /15 players, over the maximum of 14\. The maximum of 2 teams/
     );
   });
 
-  it('says so when no team count fits the limits', () => {
-    // 15 players: 1 team is over 14, 2 teams of 7-8 are under 10.
-    const result = assessTeamCount({ playerCount: 15, teamCount: 1, ...limits });
+  it('warns about short teams when head coaches force more teams than fit', () => {
+    const result = assessTeamCount({ playerCount: 30, coachCount: 4, ...limits });
+    assert.equal(result.teamCount, 4);
     assert.equal(result.fitRange, null);
-    assert.deepEqual(
-      result.warnings.map((w) => w.code),
-      ['NO_FIT', 'TOO_MANY_PER_TEAM']
-    );
-    assert.match(result.warnings[1].message, /^With 1 team, the team would have 15 players/);
+    assert.deepEqual(codes(result), ['TOO_FEW_PER_TEAM']);
+    assert.match(result.warnings[0].message, /only 7 players, under the minimum of 10/);
   });
 
-  it('warns once, not per team, when there are fewer players than one minimum roster', () => {
-    const result = assessTeamCount({ playerCount: 7, teamCount: 1, ...limits });
-    assert.deepEqual(
-      result.warnings.map((w) => w.code),
-      ['TOO_FEW_PLAYERS']
-    );
-    assert.equal(result.recommendedTeamCount, 1);
+  it('never recommends a count outside the min and max team bounds', () => {
+    const result = assessTeamCount({ playerCount: 60, maxTeams: 4, ...limits });
+    assert.equal(result.recommendedTeamCount, 4);
+    const low = assessTeamCount({ playerCount: 20, minTeams: 3, ...limits });
+    assert.equal(low.recommendedTeamCount, 3);
+  });
+
+  it('warns once when there are fewer players than one minimum roster', () => {
+    const result = assessTeamCount({ playerCount: 7, ...limits });
+    assert.deepEqual(codes(result), ['TOO_FEW_PLAYERS']);
+    assert.equal(result.teamCount, 1);
+  });
+
+  it('gives no advice for a configuration the page already rejects', () => {
+    for (const config of [
+      { minRosterSize: 14, maxRosterSize: 10 },
+      { minTeams: 4, maxTeams: 2 },
+      { minTeams: 3, teamCountOverride: 2 },
+      { maxTeams: 2, teamCountOverride: 3 },
+    ]) {
+      const result = assessTeamCount({ playerCount: 30, ...limits, ...config });
+      assert.equal(result.blocked, true, JSON.stringify(config));
+      assert.equal(result.recommendedTeamCount, null);
+      assert.deepEqual(result.warnings, []);
+    }
+  });
+
+  it('reads empty limits as the generator does: no minimum, target = maximum, no maximum = no advice', () => {
+    const noMin = assessTeamCount({ playerCount: 30, maxRosterSize: 14, minRosterSize: null });
+    assert.equal(noMin.recommendedTeamCount, 3);
+    assert.deepEqual(noMin.fitRange, { min: 3, max: 30 });
+    assert.deepEqual(noMin.warnings, []);
+    const noMax = assessTeamCount({ playerCount: 30, minRosterSize: 10, maxRosterSize: null });
+    assert.equal(noMax.blocked, true);
   });
 
   it('gives no advice and no warnings with no players', () => {
-    const result = assessTeamCount({ playerCount: 0, teamCount: 3, ...limits });
+    const result = assessTeamCount({ playerCount: 0, ...limits });
     assert.equal(result.recommendedTeamCount, null);
     assert.deepEqual(result.warnings, []);
   });
+});
 
-  it('only checks the limits that are set', () => {
-    const noMin = assessTeamCount({ playerCount: 30, teamCount: 10, maxRosterSize: 14 });
-    assert.deepEqual(noMin.warnings, []);
-    assert.deepEqual(noMin.fitRange, { min: 3, max: 30 });
-    const noMax = assessTeamCount({ playerCount: 30, teamCount: 1, minRosterSize: 10 });
-    assert.deepEqual(noMax.warnings, []);
+describe('resolveTeamCount (the count generateTeams builds)', () => {
+  const base = { maxRosterSize: 14, targetTeamSize: 12, minRosterSize: 10 };
+
+  it('starts from ceil(players / target), or the override', () => {
+    assert.equal(resolveTeamCount({ ...base, playerCount: 40 }), 4);
+    assert.equal(resolveTeamCount({ ...base, playerCount: 40, teamCountOverride: 3 }), 3);
+  });
+
+  it('raises the count for capacity and for each head coach, and caps it at maxTeams', () => {
+    assert.equal(resolveTeamCount({ ...base, playerCount: 30, teamCountOverride: 2 }), 3);
+    assert.equal(resolveTeamCount({ ...base, playerCount: 30, coachCount: 4 }), 4);
+    assert.equal(resolveTeamCount({ ...base, playerCount: 30, maxTeams: 2 }), 2);
+  });
+
+  it('lowers an override that would leave teams under the minimum roster', () => {
+    assert.equal(resolveTeamCount({ ...base, playerCount: 30, teamCountOverride: 4 }), 3);
+  });
+
+  it('builds one team for no players', () => {
+    assert.equal(resolveTeamCount({ ...base, playerCount: 0 }), 1);
   });
 });

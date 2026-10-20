@@ -31,7 +31,8 @@ Dependabot's grouped majors PR #584 was closed (2026-10-19): `eslint@10` cannot 
 release supports ESLint 10. The rest of that group is taken one at a time, each as a plan-first
 upgrade (D6 held majors out of the remediation plan), in an order the owner picks:
 
-- `typescript` 7: blocked upstream. typescript-eslint 8.72.0 (latest and canary) peers on
+- `typescript` 7: blocked upstream. **Owner decision 2026-10-20: wait for `typescript-eslint` to
+  support TS 7; the side-by-side alias setup is not taken.** typescript-eslint 8.72.0 (latest and canary) peers on
   `typescript <6.1.0` and, given 7.0.2, throws "typescript-eslint does not support TS 7.0" at
   load (executed 2026-10-19; typescript-eslint issue 10940). TS 7.0 ships no compiler API. Taken
   instead: `typescript` 6.0.3, with `baseUrl` dropped from `tsconfig.json` (deprecated in 6.0,

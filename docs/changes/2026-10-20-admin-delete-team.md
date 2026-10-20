@@ -71,8 +71,11 @@ unchanged):
 3. Delete the RSVPs the cascade would miss. `event_rsvps.reference_id` is polymorphic, with no
    foreign key. When this team's games cascade away, the opposing team's RSVPs to those games are
    left pointing at nothing. So, for the game ids captured before the delete, delete every RSVP
-   whose `reference_id` is one of them, whichever team it belongs to, and count it in the audit
-   (`event_rsvps_deleted` covers both).
+   with `event_type = 'game'`, in the team's organization, whose `reference_id` is one of them,
+   whichever team it belongs to, and count it in the audit (`event_rsvps_deleted` covers both).
+   The `event_type` filter matters: `reference_id` also holds practice-assignment ids, and the two
+   tables' ids are not disjoint by construction. The pgTAP includes a practice RSVP whose
+   `reference_id` equals a deleted game's id, and asserts it survives.
 4. `DELETE FROM teams` as today; the cascade now has nothing to stop it.
 5. `team.deleted`'s metadata records everything the delete takes with it, not only the name and
    division it records today. The counts are taken before the delete, in the same transaction:

@@ -60,8 +60,11 @@ privileges, not by what the pages happen to select.
   is not locked out of their own preferences and lighting screens. A third reads another coach:
   `TeamRecordPage.jsx:115` loads the team's coach with `coaches.select('*')` for the Staff tab
   (name, email, phone, status). It moves to a team-scoped contact read,
-  `get_team_staff(team_id)`, open to the members who can see the team. Which contact fields it
-  returns is decision 1.5. The page gets a test under the reduced grants.
+  `get_team_staff(team_id)`. It is open to org admins and staff, the team's live coaches, and
+  guardians of players on the team. That is not "anyone who can see the team": `/team/:teamId` is
+  unguarded (`App.jsx:332`) and every member reads every team. Which contact fields it returns is
+  decision 1.5. Tests: the page under the reduced grants, and an unrelated member (a parent of
+  another team) refused.
 - **Definer RPCs that return a whole player row.** A `SECURITY DEFINER` function is not bound by
   the column grants. `coach_update_player_compliance` (`20260611000100:415`) authorizes a lead
   coach and `RETURNS public.players`, so a coach could send the current compliance value and get
@@ -114,11 +117,13 @@ privileges, not by what the pages happen to select.
 both numbers are present. Overwrites are audited but not flagged.
 
 **Recommendation.** Admit org admins, `tenant_admin` and `staff` (if decision 1.4 says staff acts
-like an admin), plus the head and assistant coaches of either team in the game, read from
-`team_coach_assignments` as of the game date. Refuse everyone else with `42501`. The existing
-audit row stays. A "disputed" state is deferred until standings matter. Test with pgTAP:
+like an admin), plus the head and assistant coaches of either team in the game who hold a **live**
+assignment today (the shared predicate in item 1, not the game's date: a coach removed yesterday
+must not keep the right to rewrite last week's scores). Refuse everyone else with `42501`. The
+existing audit row stays. A "disputed" state is deferred until standings matter. Test with pgTAP:
 - the coach of the home team can set the score;
 - the coach of an unrelated team is refused;
+- a coach whose assignment on the home team ended yesterday is refused, in the RPC and in the UI;
 - an admin can set it.
 
 **The callers change with it.** `ScoresPage` (`/scores`) and `LeagueStandings` show every game's
@@ -200,6 +205,9 @@ row (migrations `20260416000001` and its `20260913000000` redefinition). Season 
 **Recommendation.** Build an `admin_create_season(p_from_season_id, p_patch)` RPC. It copies
 season-keyed settings into a **draft** season, and nothing becomes active until the admin
 confirms. It copies:
+- the season's `timezone`, or takes it from `p_patch`. A season with no timezone makes every
+  timed slot TIME TBD on the scheduling pages, so activation refuses a season without one. A test
+  activates a rolled-over season and places a game and a practice slot;
 - division bounds;
 - registration forms, each with its `division_id` mapped to the matching newly created division
   (a form with no division stays organization-wide). Each form starts as `draft` whatever its
@@ -238,6 +246,13 @@ is active and asserts where the divisions and players land.
    `created_at desc`. A new draft would become "current" the moment it was created. Every
    automatic fallback selects the active season instead, while an admin can still pick a draft
    explicitly. Each fallback gets a test with a newer draft present.
+
+   The invariant is enforced in the database, not only in readers: a partial unique index on
+   `season_settings (organization_id) WHERE status = 'active'`, and activation only through an
+   audited `admin_activate_season` RPC. That RPC completes the previous active season and
+   activates the draft in one transaction, with the organization's season rows locked. Tests:
+   activating with a previous active season leaves exactly one; two concurrent activations leave
+   one active and refuse the other.
 3. Should blackouts recur (for example, a fixed holiday each year)? *Recommended: not in the
    rollover change.* Admins re-enter next season's blackouts, as they enter season dates. A
    recurrence model, if wanted, is its own plan.

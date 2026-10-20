@@ -351,3 +351,101 @@ function shouldPreferCandidate({ existing, candidate, seasonId }) {
   const existingIsSpecific = existing.seasonId !== null;
   return candidateIsGeneric && existingIsSpecific;
 }
+
+/**
+ * Advise on a team count for a program before teams are generated: the range of team counts that
+ * keeps every team between the roster limits, a recommended count, and the warnings for the count
+ * the admin chose. Teams are assumed to be filled as evenly as possible, so with `n` players and
+ * `t` teams the smallest has `floor(n / t)` and the largest `ceil(n / t)`.
+ *
+ * Advisory only: it does not change what `generateTeams` does, which also weighs coach count and
+ * min/max team bounds.
+ *
+ * @param {{ playerCount: number, teamCount?: number|null, minRosterSize?: number|null,
+ *   maxRosterSize?: number|null, targetTeamSize?: number|null }} params
+ * @returns {{ fitRange: { min: number, max: number } | null, recommendedTeamCount: number | null,
+ *   smallestTeam: number | null, largestTeam: number | null,
+ *   warnings: Array<{ code: 'TOO_FEW_PLAYERS'|'TOO_FEW_PER_TEAM'|'TOO_MANY_PER_TEAM'|'NO_FIT',
+ *     message: string }> }}
+ */
+export function assessTeamCount({
+  playerCount,
+  teamCount = null,
+  minRosterSize = null,
+  maxRosterSize = null,
+  targetTeamSize = null,
+}) {
+  const n = Number.isInteger(playerCount) && playerCount > 0 ? playerCount : 0;
+  const min = positiveOrNull(minRosterSize);
+  const max = positiveOrNull(maxRosterSize);
+  const target = positiveOrNull(targetTeamSize) ?? max ?? min;
+  const warnings = [];
+
+  if (n === 0) {
+    return {
+      fitRange: null,
+      recommendedTeamCount: null,
+      smallestTeam: null,
+      largestTeam: null,
+      warnings,
+    };
+  }
+
+  if (min && n < min) {
+    warnings.push({
+      code: 'TOO_FEW_PLAYERS',
+      message: `Only ${n} ${plural(n, 'player')} registered, fewer than the minimum roster of ${min}: even one team would be short.`,
+    });
+  }
+
+  const lo = max ? Math.ceil(n / max) : 1;
+  const hi = min ? Math.floor(n / min) : n;
+  const fitRange = min && n < min ? null : lo <= hi ? { min: lo, max: hi } : null;
+
+  if (!fitRange && !(min && n < min)) {
+    warnings.push({
+      code: 'NO_FIT',
+      message: `No team count keeps every team between ${min} and ${max} players with ${n} players: ${lo} ${plural(lo, 'team')} would leave some under ${min}, ${lo - 1} would put some over ${max}.`,
+    });
+  }
+
+  const ideal = target ? Math.max(1, Math.round(n / target)) : lo;
+  const recommendedTeamCount = fitRange
+    ? Math.min(Math.max(ideal, fitRange.min), fitRange.max)
+    : Math.max(1, lo);
+
+  const t = positiveOrNull(teamCount);
+  let smallestTeam = null;
+  let largestTeam = null;
+  if (t) {
+    smallestTeam = Math.floor(n / t);
+    largestTeam = Math.ceil(n / t);
+    if (max && largestTeam > max) {
+      warnings.push({
+        code: 'TOO_MANY_PER_TEAM',
+        message: `With ${t} ${plural(t, 'team')}, ${someTeams(t)} would have ${largestTeam} players, over the maximum of ${max}. Use at least ${lo} teams.`,
+      });
+    }
+    if (min && smallestTeam < min && !(n < min)) {
+      warnings.push({
+        code: 'TOO_FEW_PER_TEAM',
+        message: `With ${t} ${plural(t, 'team')}, ${someTeams(t)} would have only ${smallestTeam} ${plural(smallestTeam, 'player')}, under the minimum of ${min}. Use at most ${hi} ${plural(hi, 'team')}.`,
+      });
+    }
+  }
+
+  return { fitRange, recommendedTeamCount, smallestTeam, largestTeam, warnings };
+}
+
+function positiveOrNull(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function someTeams(teamCount) {
+  return teamCount === 1 ? 'the team' : 'some teams';
+}
+
+function plural(count, word) {
+  return count === 1 ? word : `${word}s`;
+}

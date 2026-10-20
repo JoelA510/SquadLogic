@@ -2,6 +2,7 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 
 import {
+  assessTeamCount,
   calculateMaxRosterSize,
   buildOverridesFromSupabaseRows,
   deriveDivisionRosterConfigs,
@@ -200,5 +201,74 @@ describe('buildOverridesFromSupabaseRows', () => {
     assert.throws(() => buildOverridesFromSupabaseRows('oops'));
     assert.throws(() => buildOverridesFromSupabaseRows([{}]));
     assert.throws(() => buildOverridesFromSupabaseRows([{ divisionId: 'U8', maxRosterSize: 0 }]));
+  });
+});
+
+describe('assessTeamCount', () => {
+  const limits = { minRosterSize: 10, maxRosterSize: 14, targetTeamSize: 12 };
+
+  it('recommends the count nearest the target that keeps every team within the limits', () => {
+    const result = assessTeamCount({ playerCount: 60, teamCount: 5, ...limits });
+    assert.deepEqual(result.fitRange, { min: 5, max: 6 });
+    assert.equal(result.recommendedTeamCount, 5);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  it('warns when the chosen count puts too many players on a team, and says how many teams fit', () => {
+    const result = assessTeamCount({ playerCount: 30, teamCount: 2, ...limits });
+    assert.equal(result.largestTeam, 15);
+    assert.deepEqual(
+      result.warnings.map((w) => w.code),
+      ['TOO_MANY_PER_TEAM']
+    );
+    assert.match(result.warnings[0].message, /15 players, over the maximum of 14\. Use at least 3/);
+  });
+
+  it('warns when the chosen count leaves teams short, using the uneven split', () => {
+    const result = assessTeamCount({ playerCount: 30, teamCount: 4, ...limits });
+    assert.equal(result.smallestTeam, 7);
+    assert.equal(result.largestTeam, 8);
+    assert.deepEqual(
+      result.warnings.map((w) => w.code),
+      ['TOO_FEW_PER_TEAM']
+    );
+    assert.match(
+      result.warnings[0].message,
+      /only 7 players, under the minimum of 10\. Use at most 3 teams/
+    );
+  });
+
+  it('says so when no team count fits the limits', () => {
+    // 15 players: 1 team is over 14, 2 teams of 7-8 are under 10.
+    const result = assessTeamCount({ playerCount: 15, teamCount: 1, ...limits });
+    assert.equal(result.fitRange, null);
+    assert.deepEqual(
+      result.warnings.map((w) => w.code),
+      ['NO_FIT', 'TOO_MANY_PER_TEAM']
+    );
+    assert.match(result.warnings[1].message, /^With 1 team, the team would have 15 players/);
+  });
+
+  it('warns once, not per team, when there are fewer players than one minimum roster', () => {
+    const result = assessTeamCount({ playerCount: 7, teamCount: 1, ...limits });
+    assert.deepEqual(
+      result.warnings.map((w) => w.code),
+      ['TOO_FEW_PLAYERS']
+    );
+    assert.equal(result.recommendedTeamCount, 1);
+  });
+
+  it('gives no advice and no warnings with no players', () => {
+    const result = assessTeamCount({ playerCount: 0, teamCount: 3, ...limits });
+    assert.equal(result.recommendedTeamCount, null);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  it('only checks the limits that are set', () => {
+    const noMin = assessTeamCount({ playerCount: 30, teamCount: 10, maxRosterSize: 14 });
+    assert.deepEqual(noMin.warnings, []);
+    assert.deepEqual(noMin.fitRange, { min: 3, max: 30 });
+    const noMax = assessTeamCount({ playerCount: 30, teamCount: 1, minRosterSize: 10 });
+    assert.deepEqual(noMax.warnings, []);
   });
 });

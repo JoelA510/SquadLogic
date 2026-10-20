@@ -1,8 +1,10 @@
 # Five defects found by the Zuluru3 comparison: recommendations
 
-Status: **recommendations, for owner decision**. Requested by the owner 2026-10-20. Source: the
-Zuluru3 research report (2026-10-19), section 1.1, items 1-5. Each was re-checked on `main` at
-`4459faf` (v1.1.0) and, where it is a database fact, on production read-only (2026-10-20).
+Status: **decided 2026-10-20**; the owner's answers and the resulting order are in
+`2026-10-20-core-roadmap.md`. Originally: recommendations, for owner decision. Requested by the
+owner 2026-10-20. Source: the Zuluru3 research report (2026-10-19), section 1.1, items 1-5. Each was
+re-checked on `main` at `4459faf` (v1.1.0) and, where it is a database fact, on production read-only
+(2026-10-20).
 
 **What this document is, and is not.** It recommends what to do about each defect, in what order,
 and what you need to decide. It is not the design. Every fix touches persistence, the domain

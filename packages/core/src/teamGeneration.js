@@ -637,6 +637,57 @@ function rehydratePreservedTeams(preservedTeams, playerCloneById) {
  * @param {any} [params.incremental] - Snapshot-aware inputs (preserved shells, late players,
  *   team-count policy); null for fresh generation.
  */
+/**
+ * The number of teams a fresh (non-incremental) generation builds for a division. The one place
+ * this is computed: `buildTeamsForDivision` and the teaming settings panel's advice
+ * (`assessTeamCount`, rosterSizing.js) both call it.
+ *
+ * Starts from the override, or `ceil(players / targetTeamSize)`; never fewer than one team per
+ * head coach, `minTeams`, or enough teams to keep every roster at or under `maxRosterSize`; then
+ * no more than keeps every roster at or above `minRosterSize` (unless that would break one of the
+ * floors); and finally no more than `maxTeams`.
+ *
+ * @param {{ playerCount: number, coachCount?: number, maxRosterSize: number,
+ *   targetTeamSize?: number|null, teamCountOverride?: number|null, minTeams?: number|null,
+ *   maxTeams?: number|null, minRosterSize?: number|null }} params
+ * @returns {number}
+ */
+export function resolveTeamCount({
+  playerCount,
+  coachCount = 0,
+  maxRosterSize,
+  targetTeamSize,
+  teamCountOverride,
+  minTeams,
+  maxTeams,
+  minRosterSize,
+}) {
+  let calculatedTeams = Math.ceil(playerCount / (targetTeamSize ?? maxRosterSize)) || 1;
+
+  if (teamCountOverride) {
+    calculatedTeams = teamCountOverride;
+  }
+
+  const minimumTeamCount = Math.max(coachCount, minTeams ?? 1);
+  const minTeamsForCapacity = Math.ceil(playerCount / maxRosterSize);
+  let finalRequiredTeams = Math.max(calculatedTeams, minimumTeamCount, minTeamsForCapacity);
+
+  if (minRosterSize && playerCount >= minRosterSize) {
+    const maxTeamsForMinRoster = Math.max(1, Math.floor(playerCount / minRosterSize));
+    finalRequiredTeams = Math.max(
+      minimumTeamCount,
+      minTeamsForCapacity,
+      Math.min(finalRequiredTeams, maxTeamsForMinRoster)
+    );
+  }
+
+  if (maxTeams) {
+    finalRequiredTeams = Math.min(finalRequiredTeams, maxTeams);
+  }
+
+  return finalRequiredTeams;
+}
+
 function buildTeamsForDivision({
   division,
   players,
@@ -667,36 +718,17 @@ function buildTeamsForDivision({
     new Set(players.filter((player) => player.coachId).map((player) => player.coachId))
   );
 
-  const {
-    targetTeamSize = maxRosterSize,
-    teamCountOverride,
-    minTeams,
+  const { maxTeams } = rosterConstraints;
+  const finalRequiredTeams = resolveTeamCount({
+    playerCount: players.length,
+    coachCount: coachIds.length,
+    maxRosterSize,
+    targetTeamSize: rosterConstraints.targetTeamSize,
+    teamCountOverride: rosterConstraints.teamCountOverride,
+    minTeams: rosterConstraints.minTeams,
     maxTeams,
-    minRosterSize,
-  } = rosterConstraints;
-
-  let calculatedTeams = Math.ceil(players.length / targetTeamSize) || 1;
-
-  if (teamCountOverride) {
-    calculatedTeams = teamCountOverride;
-  }
-
-  const minimumTeamCount = Math.max(coachIds.length, minTeams ?? 1);
-  const minTeamsForCapacity = Math.ceil(players.length / maxRosterSize);
-  let finalRequiredTeams = Math.max(calculatedTeams, minimumTeamCount, minTeamsForCapacity);
-
-  if (minRosterSize && players.length >= minRosterSize) {
-    const maxTeamsForMinRoster = Math.max(1, Math.floor(players.length / minRosterSize));
-    finalRequiredTeams = Math.max(
-      minimumTeamCount,
-      minTeamsForCapacity,
-      Math.min(finalRequiredTeams, maxTeamsForMinRoster)
-    );
-  }
-
-  if (maxTeams) {
-    finalRequiredTeams = Math.min(finalRequiredTeams, maxTeams);
-  }
+    minRosterSize: rosterConstraints.minRosterSize,
+  });
 
   const teams = [];
   let teamIndex = 0;

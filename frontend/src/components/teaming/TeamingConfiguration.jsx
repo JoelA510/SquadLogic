@@ -1,4 +1,5 @@
 import React from 'react';
+import { assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import Button from '../ui/Button.jsx';
 
 export default function TeamingConfiguration({
@@ -24,6 +25,23 @@ export default function TeamingConfiguration({
 
   const handleTextChange = (field, value) => {
     onUpdate(program.id, { [field]: value });
+  };
+
+  const assessment = assessTeamCount({
+    playerCount: program.playerCount,
+    teamCountOverride: config?.teamCountOverride,
+    minRosterSize: config?.minRosterSize,
+    maxRosterSize: config?.maxRosterSize,
+    targetTeamSize: config?.targetTeamSize,
+    minTeams: config?.minTeams,
+    maxTeams: config?.maxTeams,
+  });
+  const { recommendedTeamCount, fitRange, warnings } = assessment;
+
+  const useRecommended = () => {
+    handleNumberChange('teamCountOverride', recommendedTeamCount);
+    // The button goes away once applied; keep keyboard focus on the field it changed.
+    document.getElementById('team-count-override')?.focus();
   };
 
   return (
@@ -150,6 +168,36 @@ export default function TeamingConfiguration({
           <p className="text-xs text-text-muted mt-1">
             Force a specific number of teams (currently estimated: {program.estimatedTeams})
           </p>
+          {recommendedTeamCount != null && (
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <p className="text-sm text-text-secondary" data-testid="team-count-recommendation">
+                Recommended: {recommendedTeamCount} {recommendedTeamCount === 1 ? 'team' : 'teams'}{' '}
+                for {program.playerCount} players
+                {fitRange && fitRange.min !== fitRange.max
+                  ? ` (${fitRange.min} to ${fitRange.max} fit the roster limits)`
+                  : ''}
+                . Each volunteer head coach gets a team, which can add more.
+              </p>
+              {config?.teamCountOverride != null &&
+                config.teamCountOverride !== recommendedTeamCount && (
+                  <Button variant="secondary" onClick={useRecommended}>
+                    Use {recommendedTeamCount}
+                  </Button>
+                )}
+            </div>
+          )}
+          <div role="status" aria-live="polite">
+            {warnings.length > 0 && (
+              <ul
+                className="mt-3 space-y-1 rounded-lg border border-status-warning/30 bg-status-warning-bg p-3 text-sm text-status-warning-text"
+                data-testid="team-count-warnings"
+              >
+                {warnings.map((warning) => (
+                  <li key={warning.code}>{warning.message}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <div className="pt-4 border-t border-border-subtle">

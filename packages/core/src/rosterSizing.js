@@ -1,4 +1,13 @@
+import { resolveTeamCount } from './teamGeneration.js';
+
 const DEFAULT_BUFFER = 2;
+
+/** The roster limits a program starts with until an admin sets its own. */
+export const DEFAULT_ROSTER_LIMITS = Object.freeze({
+  minRosterSize: 10,
+  maxRosterSize: 14,
+  targetTeamSize: 12,
+});
 
 /**
  * Parse the playable roster size from a format string like "7v7" or "9V9".
@@ -350,4 +359,129 @@ function shouldPreferCandidate({ existing, candidate, seasonId }) {
   const candidateIsGeneric = candidate.seasonId === null;
   const existingIsSpecific = existing.seasonId !== null;
   return candidateIsGeneric && existingIsSpecific;
+}
+
+/**
+ * Advice for a program's team count before teams are generated: the count generation will
+ * actually build (`resolveTeamCount`, the same function the generator uses), a recommended count,
+ * the range of counts that keeps every team within the roster limits, and warnings. Teams are
+ * assumed to be filled as evenly as possible, so with `n` players and `t` teams the smallest has
+ * `floor(n / t)` and the largest `ceil(n / t)`.
+ *
+ * Head coaches each get a team, which can raise the count; pass `coachCount` when it is known.
+ * Empty limits mean what they mean to the generator: no minimum roster, a target equal to the
+ * maximum. A configuration generation would refuse (no maximum, min above max, an override
+ * outside the team bounds) gets no advice: `blocked` is true and the page's own error says why.
+ *
+ * @param {{ playerCount: number, teamCountOverride?: number|null, minRosterSize?: number|null,
+ *   maxRosterSize?: number|null, targetTeamSize?: number|null, minTeams?: number|null,
+ *   maxTeams?: number|null, coachCount?: number }} params
+ */
+export function assessTeamCount({
+  playerCount,
+  teamCountOverride = null,
+  minRosterSize = null,
+  maxRosterSize = null,
+  targetTeamSize = null,
+  minTeams = null,
+  maxTeams = null,
+  coachCount = 0,
+}) {
+  const n = Number.isInteger(playerCount) && playerCount > 0 ? playerCount : 0;
+  const min = positiveOrNull(minRosterSize);
+  const max = positiveOrNull(maxRosterSize);
+  const target = positiveOrNull(targetTeamSize) ?? max;
+  const lowTeams = positiveOrNull(minTeams);
+  const highTeams = positiveOrNull(maxTeams);
+  const override = positiveOrNull(teamCountOverride);
+  /** @type {Array<{ code: 'TOO_FEW_PLAYERS'|'OVERRIDE_ADJUSTED'|'TOO_FEW_PER_TEAM'|'TOO_MANY_PER_TEAM', message: string }>} */
+  const warnings = [];
+  const none = {
+    blocked: false,
+    teamCount: null,
+    recommendedTeamCount: null,
+    fitRange: null,
+    smallestTeam: null,
+    largestTeam: null,
+    warnings,
+  };
+
+  if (
+    !max ||
+    (min && min > max) ||
+    (lowTeams && highTeams && lowTeams > highTeams) ||
+    (override && lowTeams && override < lowTeams) ||
+    (override && highTeams && override > highTeams)
+  ) {
+    return { ...none, blocked: true };
+  }
+  if (n === 0) return none;
+
+  const resolve = (teamCountOverride) =>
+    resolveTeamCount({
+      playerCount: n,
+      coachCount,
+      maxRosterSize: max,
+      targetTeamSize: target,
+      teamCountOverride,
+      minTeams: lowTeams,
+      maxTeams: highTeams,
+      minRosterSize: min,
+    });
+  const teamCount = resolve(override);
+  const recommendedTeamCount = resolve(null);
+  const smallestTeam = Math.floor(n / teamCount);
+  const largestTeam = Math.ceil(n / teamCount);
+
+  const fitLow = Math.max(Math.ceil(n / max), lowTeams ?? 1, coachCount);
+  const fitHigh = Math.min(min ? Math.floor(n / min) : n, highTeams ?? Infinity);
+  const fitRange = fitLow <= fitHigh ? { min: fitLow, max: fitHigh } : null;
+
+  if (min && n < min) {
+    warnings.push({
+      code: 'TOO_FEW_PLAYERS',
+      message: `Only ${n} ${plural(n, 'player')} registered, fewer than the minimum roster of ${min}: even one team would be short.`,
+    });
+  }
+  if (override && teamCount !== override) {
+    warnings.push({
+      code: 'OVERRIDE_ADJUSTED',
+      message: `Generation will make ${teamCount} ${plural(teamCount, 'team')}, not the ${override} set here, to keep within the roster limits and team bounds.`,
+    });
+  }
+  if (largestTeam > max) {
+    warnings.push({
+      code: 'TOO_MANY_PER_TEAM',
+      message: `With ${teamCount} ${plural(teamCount, 'team')}, ${someTeams(teamCount)} will have ${largestTeam} players, over the maximum of ${max}.${highTeams ? ` The maximum of ${highTeams} ${plural(highTeams, 'team')} prevents more.` : ''}`,
+    });
+  }
+  if (min && n >= min && smallestTeam < min) {
+    warnings.push({
+      code: 'TOO_FEW_PER_TEAM',
+      message: `With ${teamCount} ${plural(teamCount, 'team')}, ${someTeams(teamCount)} will have only ${smallestTeam} ${plural(smallestTeam, 'player')}, under the minimum of ${min}.`,
+    });
+  }
+
+  return {
+    blocked: false,
+    teamCount,
+    recommendedTeamCount,
+    fitRange,
+    smallestTeam,
+    largestTeam,
+    warnings,
+  };
+}
+
+function positiveOrNull(value) {
+  const parsed = Number(value);
+  return value !== null && value !== '' && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function someTeams(teamCount) {
+  return teamCount === 1 ? 'the team' : 'some teams';
+}
+
+function plural(count, word) {
+  return count === 1 ? word : `${word}s`;
 }

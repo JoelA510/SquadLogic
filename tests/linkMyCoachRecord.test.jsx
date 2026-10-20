@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
@@ -63,17 +63,15 @@ describe('the mock link_my_coach_record', () => {
 });
 
 describe('OrganizationContext', () => {
-  it('links before it loads the organizations, once per user, and survives a failure', async () => {
+  async function setup(rpcImpl) {
     vi.resetModules();
     const order = [];
     mocks.rpc.mockReset();
-    mocks.rpc.mockImplementationOnce(async () => {
-      order.push('link');
-      throw new Error('network down');
-    });
     mocks.rpc.mockImplementation(async () => {
-      order.push('link');
-      return { data: { status: 'no_match' }, error: null };
+      order.push('link-start');
+      const result = await rpcImpl();
+      order.push('link-done');
+      return result;
     });
     vi.doMock('../frontend/src/lib/supabaseClient.js', () => ({
       supabase: {
@@ -90,36 +88,71 @@ describe('OrganizationContext', () => {
     }));
     const { logger } = await import('../frontend/src/lib/logger.js');
     const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
-    const { OrganizationProvider } =
-      await import('../frontend/src/contexts/OrganizationContext.jsx');
-    // A new element each time, so React re-renders the provider and it reads
-    // the current user.
-    const tree = () => (
+    const ctx = await import('../frontend/src/contexts/OrganizationContext.jsx');
+    return { order, errorSpy, ...ctx };
+  }
+
+  afterEach(() => {
+    vi.doUnmock('../frontend/src/lib/supabaseClient.js');
+    vi.restoreAllMocks();
+  });
+
+  it('under StrictMode, loads the organizations only after the one in-flight link finishes', async () => {
+    /** @type {(value?: unknown) => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const { order, OrganizationProvider } = await setup(async () => {
+      await gate;
+      return { data: { status: 'linked' }, error: null };
+    });
+    mocks.user = { id: 'user-1' };
+    render(
+      <React.StrictMode>
+        <OrganizationProvider>
+          <div />
+        </OrganizationProvider>
+      </React.StrictMode>
+    );
+    await waitFor(() => expect(order).toContain('link-start'));
+    // The remounted effect must wait, not skip ahead to the organizations.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(order).not.toContain('orgs');
+    release();
+    await waitFor(() => expect(order).toContain('orgs'));
+    expect(order.indexOf('link-done')).toBeLessThan(order.indexOf('orgs'));
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('links again when the organizations are refetched (a redeemed invite), and survives a failure', async () => {
+    const { order, errorSpy, OrganizationProvider, useOrganization } = await setup(async () => ({
+      data: { status: 'no_match' },
+      error: null,
+    }));
+    mocks.rpc.mockImplementationOnce(async () => {
+      order.push('link-start');
+      throw new Error('network down');
+    });
+    /** @type {() => void} */
+    let refetch = () => {};
+    function Probe() {
+      refetch = useOrganization().refetchOrgs;
+      return null;
+    }
+    mocks.user = { id: 'user-1' };
+    render(
       <OrganizationProvider>
-        <div />
+        <Probe />
       </OrganizationProvider>
     );
-
-    mocks.user = { id: 'user-1' };
-    const { rerender } = render(tree());
     await waitFor(() => expect(order).toContain('orgs'));
-    expect(order.slice(0, 2)).toEqual(['link', 'orgs']);
     expect(errorSpy).toHaveBeenCalledWith(
       'Could not link this account to its coach record',
       expect.any(Error)
     );
-
-    // The same user again: no second link. Another user: linked once more.
-    mocks.user = { id: 'user-1' };
-    rerender(tree());
-    mocks.user = { id: 'user-2' };
-    rerender(tree());
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    act(() => refetch());
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(2));
-    mocks.user = { id: 'user-2' };
-    rerender(tree());
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(mocks.rpc).toHaveBeenCalledTimes(2);
-    errorSpy.mockRestore();
-    vi.doUnmock('../frontend/src/lib/supabaseClient.js');
   });
 });

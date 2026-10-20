@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.
+
+### Security
+
+- **Sensitive registration columns are dropped on the server too.** `import-validation` strips medical, condition, special-needs, emergency, financial and identity-document columns from player and coach imports before it validates, stages or returns a row (`supabase/functions/_shared/sensitive-headers.ts`); before, only the browser did, so a direct call stored them in `staging_players`. The rule now also covers "Conditions", "Special Needs" and snake_case headers such as `medical_info`, in both copies, held equal by `tests/sensitiveHeaderParity.test.js`.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added

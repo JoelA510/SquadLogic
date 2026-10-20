@@ -18,3 +18,9 @@ Feature: Player import against the real backend
     Then the import log reports 0 players inserted and 24 updated
     And the audit log records the import as the administrator
     And players from across the export still list the guardian the full export gave them
+
+  Scenario: Sensitive registration columns are never stored, through the app or around it
+    When I import the "sensitive" registration export
+    Then no player or staged import row stores a sensitive column
+    When I send the sensitive registration export straight to import-validation and apply it
+    Then no player or staged import row stores a sensitive column

@@ -101,11 +101,40 @@ export function registrations(now = new Date()): Registration[] {
 }
 
 /**
- * The CSV for one export. `full` carries the guardian columns; `narrow` is the
- * same players without them, the shape of a corrected or partial GotSport
- * export (docs/LESSONS_LEARNED.md #8), which must not wipe what `full` stored.
+ * Columns a registration form may carry that SquadLogic never stores (owner
+ * decision 2026-10-20: no medical, condition or emergency data; plan
+ * docs/changes/2026-10-20-phase-a-privacy.md, A1). Each cell holds
+ * `SENSITIVE_MARKER`, so a stored one is found by its value wherever it lands.
  */
-export function registrationCsv(shape: 'full' | 'narrow', rows = registrations()): string {
+export const SENSITIVE_HEADERS = [
+  'Medical Conditions',
+  'Conditions',
+  'Special Needs',
+  'Medication',
+  'Diagnosis',
+  'Disability',
+  'medical_info',
+  'Allergies',
+  'Emergency Contact Phone',
+  'emergency_contacts',
+  'Physician',
+] as const;
+
+export const SENSITIVE_MARKER = 'E2E-SENSITIVE-VALUE';
+
+export type ExportShape = 'full' | 'narrow' | 'sensitive';
+
+/**
+ * One export as the header row and the rows, keyed by header. `full` carries
+ * the guardian columns; `narrow` is the same players without them, the shape
+ * of a corrected or partial GotSport export (docs/LESSONS_LEARNED.md #8),
+ * which must not wipe what `full` stored; `sensitive` is `full` plus
+ * `SENSITIVE_HEADERS`.
+ */
+export function registrationRecords(
+  shape: ExportShape,
+  rows = registrations()
+): { header: string[]; records: Record<string, string>[] } {
   const base = [
     'Registration ID',
     'First Name',
@@ -115,11 +144,24 @@ export function registrationCsv(shape: 'full' | 'narrow', rows = registrations()
     'Division',
   ];
   const guardian = ['Guardian 1 First Name', 'Guardian 1 Last Name', 'Guardian 1 Email'];
-  const header = shape === 'full' ? [...base, ...guardian] : base;
-  const lines = rows.map((r) => {
+  const header =
+    shape === 'narrow'
+      ? base
+      : shape === 'full'
+        ? [...base, ...guardian]
+        : [...base, ...guardian, ...SENSITIVE_HEADERS];
+  const records = rows.map((r) => {
     const cells = [r.registrationId, r.firstName, r.lastName, r.dateOfBirth, r.gender, 'U10'];
-    if (shape === 'full') cells.push('Parent', r.lastName, r.guardianEmail);
-    return cells.join(',');
+    if (shape !== 'narrow') cells.push('Parent', r.lastName, r.guardianEmail);
+    if (shape === 'sensitive') cells.push(...SENSITIVE_HEADERS.map(() => SENSITIVE_MARKER));
+    return Object.fromEntries(header.map((h, i) => [h, cells[i]]));
   });
+  return { header, records };
+}
+
+/** The CSV for one export (see `registrationRecords`). */
+export function registrationCsv(shape: ExportShape, rows = registrations()): string {
+  const { header, records } = registrationRecords(shape, rows);
+  const lines = records.map((record) => header.map((h) => record[h]).join(','));
   return `${[header.join(','), ...lines].join('\n')}\n`;
 }

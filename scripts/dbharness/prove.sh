@@ -88,6 +88,9 @@ R28="$REPO/docs/sql/20261019010000_revert.sql"
 # The evaluation-run idempotency key, and its revert.
 M29="$REPO/supabase/migrations/20261020010000_evaluation_run_idempotency.sql"
 R29="$REPO/docs/sql/20261020010000_revert.sql"
+# A1: no medical data -- the two players columns dropped, and the revert.
+M30="$REPO/supabase/migrations/20261020020000_drop_player_medical_columns.sql"
+R30="$REPO/docs/sql/20261020020000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3746,6 +3749,34 @@ END;
 END;
 \$function\$;" \
   "revert 20261020010000"
+
+# No medical data. The smoke RAISEs on each; the revert claim on a column left
+# out and on a body that drifted.
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M30" \
+  "                - 'medical_info' - 'medical' - 'email' - 'contact_email'" \
+  "                - 'email' - 'contact_email'" \
+  "smoke 20261020020000"
+
+plant "M30 emergency_contacts is left behind" "$M30" \
+  "    DROP COLUMN medical_info,
+    DROP COLUMN emergency_contacts;" \
+  "    DROP COLUMN medical_info;" \
+  "smoke 20261020020000"
+
+plant "R30 the revert leaves emergency_contacts out" "$R30" \
+  "    ADD COLUMN IF NOT EXISTS medical_info jsonb DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS emergency_contacts jsonb DEFAULT '[]'::jsonb;" \
+  "    ADD COLUMN IF NOT EXISTS medical_info jsonb DEFAULT '{}'::jsonb;" \
+  "revert 20261020020000"
+
+plant "R30 the revert restores a drifted finalize_import_job body" "$R30" \
+  "    RETURN v_result;
+END;
+\$\$;" \
+  "    RETURN v_result; -- drifted
+END;
+\$\$;" \
+  "revert 20261020020000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

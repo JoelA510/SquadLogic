@@ -28,6 +28,10 @@ const SENSITIVE = [
   'Disability',
   'Allergies',
   'Physician Name',
+  'MedicalInfo',
+  'medicalConditions',
+  'PreexistingConditions',
+  'specialNeeds',
   // Emergency contacts
   'Emergency Contact Phone',
   'emergency_contacts',
@@ -58,6 +62,9 @@ const KEPT = [
   'Years Played',
   "Can you coach for this player's team?",
   'Phone',
+  'FirstName',
+  'dateOfBirth',
+  'guardianEmail',
 ];
 
 describe('the sensitive-header rule, browser and Edge copies', () => {
@@ -65,6 +72,11 @@ describe('the sensitive-header rule, browser and Edge copies', () => {
     const asText = (list) => list.map((re) => `${re.source}/${re.flags}`);
     expect(asText(edge.SENSITIVE_PATTERNS)).toEqual(asText(browser.SENSITIVE_PATTERNS));
     expect(asText(edge.ALLOWED_HEADERS)).toEqual(asText(browser.ALLOWED_HEADERS));
+  });
+
+  it('strips the same import types in both copies: people, not fields', () => {
+    expect([...edge.SENSITIVE_IMPORT_TYPES]).toEqual([...browser.SENSITIVE_IMPORT_TYPES]);
+    expect([...edge.SENSITIVE_IMPORT_TYPES].sort()).toEqual(['coaches', 'players']);
   });
 
   it.each(SENSITIVE)('both copies drop %j', (header) => {

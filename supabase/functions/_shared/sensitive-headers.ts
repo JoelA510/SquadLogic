@@ -9,7 +9,7 @@
  * holds the two lists equal; change both or neither.
  *
  * Matched case-insensitively against the trimmed header, minus any `__n`
- * dedupe suffix, with underscores read as spaces.
+ * dedupe suffix, with underscores and camelCase read as spaces.
  */
 
 export const SENSITIVE_PATTERNS: readonly RegExp[] = [
@@ -93,6 +93,9 @@ export const SENSITIVE_PATTERNS: readonly RegExp[] = [
 /** Headers that would match a pattern but are kept: a PAID/UNPAID flag, no amounts. */
 export const ALLOWED_HEADERS: readonly RegExp[] = [/^payment\s*status$/];
 
+/** The import types whose rows lose their sensitive columns (people, not fields). */
+export const SENSITIVE_IMPORT_TYPES: readonly string[] = Object.freeze(['players', 'coaches']);
+
 /** True when an import column must not be stored. */
 export function isSensitiveHeader(header: unknown): boolean {
   if (header === null || header === undefined) return false;
@@ -100,6 +103,7 @@ export function isSensitiveHeader(header: unknown): boolean {
   if (h.charCodeAt(0) === 0xfeff) h = h.slice(1);
   h = h
     .trim()
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .toLowerCase()
     .replace(/__\d+$/, '')
     .replace(/_+/g, ' ');

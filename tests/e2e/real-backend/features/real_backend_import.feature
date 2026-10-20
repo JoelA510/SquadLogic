@@ -21,6 +21,7 @@ Feature: Player import against the real backend
 
   Scenario: Sensitive registration columns are never stored, through the app or around it
     When I import the "sensitive" registration export
-    Then no player or staged import row stores a sensitive column
+    Then the app sent import-validation no sensitive column
+    And no player or staged import row stores a sensitive column
     When I send the sensitive registration export straight to import-validation and apply it
     Then no player or staged import row stores a sensitive column

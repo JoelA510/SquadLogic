@@ -9,7 +9,7 @@
 import { logger } from './logger.js';
 import { MOCK_CAPABLE_BUILD } from '../env.js';
 import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
-import { stripSensitiveColumns } from '../utils/gotsportCanonicalizer.js';
+import { canonicalizeForUpload } from '../utils/gotsportCanonicalizer.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
@@ -7827,9 +7827,7 @@ export const mockSupabase = {
 
         // As the Edge Function does: people imports drop sensitive columns
         // before anything is validated or staged.
-        const stripsSensitive = body.import_type === 'players' || body.import_type === 'coaches';
-        (body.rows || []).forEach((givenRow, index) => {
-          const rawRow = stripsSensitive ? stripSensitiveColumns([givenRow])[0] : givenRow;
+        canonicalizeForUpload(body.import_type, body.rows || []).forEach((rawRow, index) => {
           const row = {};
           Object.entries(rawRow).forEach(([key, value]) => {
             row[normalizeHeader(key)] = sanitize(value);

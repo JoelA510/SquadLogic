@@ -40,6 +40,16 @@ Before(async ({ page }) => {
     if (message.type() === 'error') lines.push(`console.error: ${message.text()}`);
   });
   page.on('pageerror', (error) => lines.push(`pageerror: ${error.message}`));
+  // What the app itself sends to import-validation, so a scenario can check
+  // the browser's own filter apart from the Edge Function's.
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/functions/v1/import-validation')) {
+      stateOf(page).validationBodies = [
+        ...(stateOf(page).validationBodies ?? []),
+        request.postData() ?? '',
+      ];
+    }
+  });
   page.on('response', (response) => {
     if (response.status() >= 400) {
       lines.push(`HTTP ${response.status()} ${response.request().method()} ${response.url()}`);
@@ -139,6 +149,14 @@ Then(
   }
 );
 
+Then('the app sent import-validation no sensitive column', async ({ page }) => {
+  // The browser's own filter, apart from the Edge Function's: what left the
+  // page. Not vacuous: the import above made at least one call.
+  const bodies = stateOf(page).validationBodies ?? [];
+  expect(bodies.length, 'import-validation calls the app made').toBeGreaterThan(0);
+  expect(bodies.filter((body) => body.includes(SENSITIVE_MARKER))).toEqual([]);
+});
+
 When(
   'I send the sensitive registration export straight to import-validation and apply it',
   async ({ page }) => {
@@ -180,6 +198,38 @@ When(
     expect(validatedBody.staged_rows).toBe(records.length);
     // What the function answers is checked too: it echoes the rows it kept.
     expect(JSON.stringify(validatedBody.validated_data)).not.toContain(SENSITIVE_MARKER);
+
+    // A coach row on the same job, staged in staging_import_rows: coaches are
+    // the other people import the function strips.
+    const coach = await page.request.post(`${stackUrl()}/functions/v1/import-validation`, {
+      headers: auth,
+      data: {
+        import_type: 'coaches',
+        organization_id: SEEDED_ADMIN.organizationId,
+        rows: [
+          {
+            'Full Name': 'Coach Sensitive-Direct',
+            Email: 'coach.sensitive-direct@example.test',
+            'Emergency Contact Phone': SENSITIVE_MARKER,
+            medical_info: SENSITIVE_MARKER,
+          },
+        ],
+        import_job_id: jobBody.id,
+        row_offset: records.length,
+      },
+      timeout: BACKEND_TIMEOUT,
+    });
+    const coachBody = (await coach.json()) as { staged_rows?: number };
+    expect(coach.status(), JSON.stringify(coachBody)).toBe(200);
+    expect(coachBody.staged_rows).toBe(1);
+    const staged = await page.request.get(
+      `${stackUrl()}/rest/v1/staging_import_rows?select=*&import_job_id=eq.${jobBody.id}`,
+      { headers: auth, timeout: BACKEND_TIMEOUT }
+    );
+    const stagedRows = (await staged.json()) as unknown[];
+    expect(staged.status(), JSON.stringify(stagedRows).slice(0, 2000)).toBe(200);
+    expect(stagedRows).toHaveLength(1);
+    expect(JSON.stringify(stagedRows)).not.toContain(SENSITIVE_MARKER);
 
     const finalized = await page.request.post(`${stackUrl()}/rest/v1/rpc/finalize_import_job`, {
       headers: auth,
@@ -345,7 +395,12 @@ Then('the audit log records the import as the administrator', async ({ page }) =
 /** What a scenario learned from one page and checks on a later one. */
 const scenarioState = new WeakMap<
   Page,
-  { teams?: number; teamNames?: string[]; auditBefore?: Set<string> }
+  {
+    teams?: number;
+    teamNames?: string[];
+    auditBefore?: Set<string>;
+    validationBodies?: string[];
+  }
 >();
 const stateOf = (page: Page) => {
   const state = scenarioState.get(page) ?? {};

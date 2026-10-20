@@ -24,7 +24,7 @@ import {
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
-import { stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
+import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -596,7 +596,7 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // People imports drop the sensitive columns (medical, emergency, financial,
   // identity documents...) before anything is validated, staged or returned.
   // The browser strips them too, but this function is callable directly.
-  const stripsSensitive = body.import_type === 'players' || body.import_type === 'coaches';
+  const stripsSensitive = SENSITIVE_IMPORT_TYPES.includes(body.import_type);
 
   for (let i = 0; i < body.rows.length; i++) {
     const rawRow = stripsSensitive

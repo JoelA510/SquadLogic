@@ -51,8 +51,8 @@ export function makeDedupeHeaderTransformer() {
 /**
  * Header substrings that mark a column as sensitive / out-of-scope to store.
  * Matched case-insensitively against the trimmed header (minus any `__n`
- * dedupe suffix, with underscores read as spaces so `medical_info` and
- * `emergency_contacts` match as their spaced forms do).
+ * dedupe suffix, with underscores and camelCase read as spaces so `medical_info`,
+ * `MedicalInfo` and `emergency_contacts` match as their spaced forms do).
  *
  * The import-validation Edge Function applies the same rule server-side, from
  * its twin `supabase/functions/_shared/sensitive-headers.ts`;
@@ -148,6 +148,9 @@ export const SENSITIVE_PATTERNS = [
  */
 export const ALLOWED_HEADERS = [/^payment\s*status$/];
 
+/** The import types whose rows lose their sensitive columns (people, not fields). */
+export const SENSITIVE_IMPORT_TYPES = Object.freeze(['players', 'coaches']);
+
 /**
  * True when a CSV header names a sensitive / out-of-scope column that must be
  * dropped before upload.
@@ -156,6 +159,7 @@ export const ALLOWED_HEADERS = [/^payment\s*status$/];
  */
 export function isSensitiveHeader(header) {
   const h = clean(header)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .toLowerCase()
     .replace(/__\d+$/, '')
     .replace(/_+/g, ' ');
@@ -194,7 +198,7 @@ export function stripSensitiveColumns(rows) {
  */
 export function canonicalizeForUpload(importType, rows) {
   if (!Array.isArray(rows)) return [];
-  if (importType === 'players' || importType === 'coaches') {
+  if (SENSITIVE_IMPORT_TYPES.includes(importType)) {
     return stripSensitiveColumns(rows);
   }
   return rows;

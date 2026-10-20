@@ -10,14 +10,20 @@ resume queue's flagged backlog.
 an org admin, runs `DELETE FROM public.teams WHERE id = p_team_id`, then audits `team.deleted`.
 The delete cascades to `team_players`, `game_assignments`, `practice_assignments`, RSVPs and
 messages, and to every `games` row in which the team is home or away (`games.home_team_id` and
-`games.away_team_id` are both `ON DELETE CASCADE`), and sets `players.team_id` to null. So a team
-delete also removes its opponents' games.
+`games.away_team_id` are both `ON DELETE CASCADE`). So a team delete also removes its opponents'
+games. It also cascades to `practice_exceptions` directly, through
+`practice_exceptions_team_id_fkey` (`ON DELETE CASCADE`, read from production 2026-10-20), on a
+path parallel to the RESTRICT one below. `players.team_id` has **no** foreign key (definitive
+schema, line 371). It is cleared only by the `sync_player_team_id` trigger when a `team_players`
+row is deleted, so a player whose `team_id` points at the team without a `team_players` row
+keeps a dangling id.
 
 Migration `20260929000000` (practice writer v3) added `practice_exceptions` with
 `assignment_id ... REFERENCES practice_assignments(id) ON DELETE RESTRICT`, on purpose: its header
 says "any path that deletes an overridden series ... a team or organisation delete ... is a loud
 23503, never an orphan". So deleting a team whose practice series carries any exception row (a
-relocation or a TIME TBD window, live or withdrawn) fails:
+relocation or a TIME TBD window, live or withdrawn) is expected to fail, though the evidence below
+shows that is not certain. When it does fail:
 
 - the whole transaction rolls back (nothing is deleted, nothing is audited);
 - `TeamAnalysisPage.handleDeleteTeam` shows `Failed to delete team: update or delete on table
@@ -27,7 +33,14 @@ relocation or a TIME TBD window, live or withdrawn) fails:
 **Evidence.** *Executed* (read-only, production catalogue, 2026-10-20): walking every foreign key
 reachable from `teams` through `ON DELETE CASCADE`, the only `RESTRICT`/`NO ACTION` constraint on
 the path is `practice_exceptions_assignment_fk`. So this is the one blocker; nothing else in the
-cascade refuses. *Statically reviewed*: the RPC body, the v3 header, and
+cascade refuses. **Whether it fires is order-dependent.** The same exception rows are also reached
+by the `team_id` cascade, and PostgreSQL fires the referential triggers in a fixed internal order.
+If the `team_id` cascade deletes the exceptions first, the RESTRICT check finds nothing and today's
+delete succeeds. The first task is therefore to reproduce the 23503 against a database built from
+the migrations. The plan records which order production has, and the pgTAP plant asserts that
+outcome rather than assuming it. If the delete does not fail today, this plan's problem becomes
+"exceptions are deleted with no withdrawal, archive or audit", and the design below still
+applies. *Statically reviewed*: the RPC body, the v3 header, and
 `TeamAnalysisPage.jsx:1180-1194`. Not reproduced against a database yet (the pgTAP below does that).
 
 The sibling already solved the same problem one level down: `admin_cancel_practice_assignment`
@@ -66,8 +79,11 @@ unchanged):
 2. For every `practice_assignments` row of the team: withdraw its live exceptions
    (`withdrawn_at = now()`, `withdrawn_by = auth.uid()`), audit each as
    `practice.exception_withdrawn` with reason `team_deleted`, delete all its exception rows and
-   append them to their run's `results.archived_exceptions`. This is a set-based version of
-   `admin_cancel_practice_assignment`'s three steps (no per-row RPC call, so one admin check).
+   append them to their run's `results.archived_exceptions`. Then write one `practice.cancelled`
+   audit row per series, with reason `team_deleted` and `before: to_jsonb(pa.*)`, as the sibling
+   does, so each deleted series' slot, day and time stay in the audit trail. This is a set-based
+   version of `admin_cancel_practice_assignment`'s whole contract (no per-row RPC call, so one
+   admin check). The parity test compares the audit rows as well as the archive.
 3. Delete the RSVPs the cascade would miss. `event_rsvps.reference_id` is polymorphic, with no
    foreign key. When this team's games cascade away, the opposing team's RSVPs to those games are
    left pointing at nothing. So, for the game ids captured before the delete, delete every RSVP
@@ -90,9 +106,13 @@ unchanged):
    - a count for each table the cascade empties: `practice_assignments_deleted`,
      `game_assignments_deleted`, `team_players_deleted`, `event_rsvps_deleted`,
      `team_messages_deleted` and `team_coach_assignments_deleted` (coaching history included);
-   - `player_ids_unassigned`: the players whose `players.team_id` the `team_players` cascade
-     clears through the `sync_player_team_id` trigger (`20260611000400`), captured before the
-     delete;
+   - `player_ids_unassigned`: every player whose `players.team_id` is this team, read from
+     `players` itself and not from `team_players`, captured before the delete. The RPC also clears
+     `team_id` explicitly for those players. The trigger (`20260611000400`) reaches only players
+     with a `team_players` row, and `players.team_id` has no foreign key to do it, so without this
+     a player assigned only through `team_id` would keep a dangling id;
+   - `practice_exceptions_deleted`, counting the rows the `team_id` cascade would remove (the
+     withdrawn and archived ones above), so the counter list covers every cascading table;
    - `games_deleted`, as a count and the ids, since each deleted game also removes a fixture from
      another team's schedule;
    - `withdrawn_exception_ids` and `archived_exceptions`.
@@ -124,11 +144,14 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
     rostered player, an RSVP, a message, a past coach assignment, and a game against another
     team (which is gone, and named in `games_deleted`);
   - the opposing team's RSVP to that game is gone too, and counted;
-  - the rostered player is named in `player_ids_unassigned` and their `team_id` is null;
+  - the rostered player is named in `player_ids_unassigned` and their `team_id` is null, and so
+    is a second player whose `team_id` points at the team with no `team_players` row;
   - the run's `archived_exceptions` holds both rows.
 
   Plus a control: a non-admin is refused and nothing changes.
-- **Plant:** run the same file against the old function body. It must fail with 23503.
+- **Plant:** run the same file against the old function body. It must fail: with 23503 if the
+  reproduction above shows today's delete fails, otherwise on the missing withdrawal, archive and
+  audit rows.
 - Mock client (`mockSupabaseClient.js` `admin_delete_team`): today it removes only
   `team_players`, `game_assignments` and `practice_assignments`. It is extended to every cascade
   the real RPC performs: `practice_exceptions`, `games` on either side, both teams' game RSVPs,

@@ -47,16 +47,32 @@ privileges, not by what the pages happen to select.
   `Prefer: timezone=` (see the companion UTC plan). So `d` is `(now() AT TIME ZONE tz)::date`,
   with `tz` the team's season timezone, or `'UTC'` when that is unset, in one `STABLE` helper,
   `coach_assignment_live(assignment, team)`. pgTAP runs the ended-yesterday case under `+14` and
-  `-12`.
+  `-12`. The helper, and the "is the caller a live coach of this team" lookup the policies use,
+  must be `SECURITY DEFINER` with a pinned `search_path`. Mapping `auth.uid()` to a coach reads
+  `coaches`, which this change makes admin-only, so an invoker-rights lookup would find no coach
+  and lock every live coach out of their own players. The same applies to the security-invoker view
+  `coach_team_map`, which older policies read: the plan lists every policy and view that joins
+  `coaches` and moves each one to the definer helper. pgTAP adds the positive case: a live coach
+  reads their own players' roster columns and gets their detail from `get_player_detail`.
 - **`players`, columns:** revoke table-level SELECT from `authenticated` and grant it back column by
   column. The columns every row-holder may read are the roster columns (name, team, division, the
   eligibility fields). Sensitive columns (`medical_info`, `guardian_contacts`, `contact_info`,
   `date_of_birth`, `emergency_contacts`, `registration_history`, notes, location coordinates, flags:
   every column not on the roster list) are read only through a `SECURITY DEFINER` RPC,
   `get_player_detail(player_id)`, which applies decisions 1.1 to 1.4 per column. A column revoke
-  breaks every `select('*')` on the table, so the plan must list and migrate each one
-  (`usePlayersData`, `DashboardPage`, `PlayerRecordPage`, `CoachesPage`, `TeamAnalysisPage`,
-  `EnterpriseDashboard`, the mock client), each to an explicit column list or the RPC.
+  breaks every `select('*')` on the table, and any explicit select of a revoked column, for admins
+  too. So the plan must list and migrate each one (`usePlayersData`, `DashboardPage`,
+  `PlayerRecordPage`, `CoachesPage`, `TeamAnalysisPage`, `EnterpriseDashboard`, the mock client),
+  each to an explicit column list or the RPC. Explicit selects found so far that name a column
+  off the roster list: `ImportContext.jsx:173` (`external_registration_id`, so an admin's import
+  would fail with 42501), `useCoedTransition.js:37` (`gender`), `DashboardPage.jsx:706` and
+  `TeamAnalysisPage.jsx:669/676`. The roster list is decided against every caller, so a column an
+  operational path needs (`external_registration_id`, `gender`) either joins the list or its
+  caller moves to a definer RPC. The inventory comes from a search of every `from('players')` and
+  every view over `players`. Security-invoker views over `players` change meaning under the new
+  row rules: `view_org_metrics`, which `EnterpriseDashboard` reads, would return per-viewer totals,
+  so each one becomes a definer function with its own authorization, or is documented as
+  per-viewer. Each migrated caller gets a test under the reduced grants.
 - **`coaches`:** the same split. Members read name and team only, through a `SECURITY DEFINER`
   read like `get_organization_members`; full rows go to admins. Two pages read the `coaches` table
   to find the signed-in user's own coach row: `CoachPreferenceRequests.jsx:139`,
@@ -194,9 +210,15 @@ meeting. In a single round robin, the smallest id plays every game at home. `gam
 home games but nothing warns.
 
 **Recommendation.**
-- Use the standard circle-method rule instead of sorting: alternate home and away by round, and
-  flip the fixed team's side every round. That gives every team a home count within one of every
-  other's.
+- Replace the sorting with a home/away rule that is proven balanced before it is built. A rule as
+  loose as "alternate by round and flip the fixed team" is not enough: simulated on today's
+  rotation, it leaves home counts spread by 2 for 4 to 12 teams and by 3 for 7 (simulated in
+  review). The plan names the exact orientation (the Berger-table rule for the pair on each
+  position, and the bye's handling for odd counts) and its acceptance criterion. With an even
+  count every team plays an odd number of games, so the spread is at most 1. With an odd count
+  every team plays `n - 1` games, an even number, so every team is home exactly `(n - 1) / 2`
+  times. A test checks the criterion for every `n` from 2 to 16, and the rule is only chosen once
+  that table passes.
 - Add a `gameMetrics` warning when two teams' home counts differ by more than one, tested directly
   through `evaluateGameSchedule`: an imbalanced schedule warns (and fails against today's code,
   which never warns), and a balanced one does not.
@@ -206,7 +228,13 @@ home games but nothing warns.
   team's home count is within one of every other's. Both fail on today's pair sorting (with 4
   teams, the smallest id is home 3 of 3). The existing tests that pin `homeTeamId` order in that
   file are updated in the same change, and the plan lists each one.
-- Existing saved schedules are untouched (maximum freeze); only newly generated weeks change.
+- **Existing weeks keep their home and away.** `GameSchedulingPage` regenerates the whole
+  division's round robin on every run (line 381). With the new rule the pairings stay the same but
+  their sides flip, so a regenerate-and-save after deploy would reverse already published games.
+  The plan states the mechanism: the regeneration takes the home/away of every persisted game as
+  fixed and orients only unsaved pairings (maximum freeze, AGENTS.md). A test saves a schedule
+  under the old rule, regenerates under the new one, and asserts every saved game keeps its
+  sides.
 
 ## 5. Season rollover
 
@@ -264,6 +292,14 @@ is active and asserts where the divisions and players land.
    `created_at desc`. A new draft would become "current" the moment it was created. Every
    automatic fallback selects the active season instead, while an admin can still pick a draft
    explicitly. Each fallback gets a test with a newer draft present.
+
+   Before the index, the migration inventories `season_settings.status` per organization and
+   backfills it. Production today has one season and it is `active` (*executed*, read-only,
+   2026-10-20), but the migration must not assume that. If any organization has two active
+   seasons it aborts, naming them. An organization with none gets its newest season made active,
+   recorded in the migration's output. Status becomes `NOT NULL`. A copied draft must also get a
+   new `name`, required in `p_patch` and unique per organization, because the stored-season
+   lookup matches on `name` (`s.name === storedSeason`).
 
    The invariant is enforced in the database, not only in readers: a partial unique index on
    `season_settings (organization_id) WHERE status = 'active'`, and activation only through an

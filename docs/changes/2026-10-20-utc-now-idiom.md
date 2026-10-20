@@ -81,10 +81,14 @@ No real users exist yet, so no stored data needs correcting.
 **Recommendation: option 1**, plus a guard so the idiom does not come back:
 
 - **CI guard:** a Vitest test (`tests/utcNowIdiom.test.js`) fails on any migration *after* this
-  one that contains `timezone('utc', now())` without `::date`. A catalogue check in the migration
-  harness fails if any public function with the idiom in its body lacks `timezone=UTC` in its
-  `proconfig`, or any column default or function argument default
-  (`pg_get_function_arguments`) contains it.
+  one that contains the idiom without `::date`. It matches on a normalized pattern, not one
+  literal: case-insensitive, with optional whitespace and casts. That covers `timezone('utc',
+  now())`, `timezone('UTC'::text, now())` and `now() AT TIME ZONE 'utc'`. A catalogue check in the
+  migration harness fails if any public function with the idiom in its body lacks `timezone=UTC`
+  in its `proconfig`, or any column default (`pg_get_expr`) or function argument default
+  (`pg_get_function_arguments`) contains it. The catalogue deparses the literal as
+  `timezone('utc'::text, now())`, so a literal-text check there would examine nothing; the
+  pattern is what makes it work.
 - **Later:** when a function is next rewritten for its own reasons, replace the idiom with `now()`
   in that same change. There is no flag day for the bodies.
 
@@ -111,9 +115,22 @@ No real users exist yet, so no stored data needs correcting.
   Plus the catalogue assertion that no function body with the idiom lacks the pin.
 - **Plants**, shown failing before merge:
   - a function left unpinned fails the catalogue assertion;
+  - a column default restored to the idiom fails it;
+  - an argument default restored to the idiom fails it;
+  - a new migration using each of the three spellings fails the Vitest guard;
   - the pgTAP fails on today's schema.
 
 ## Risks
+
+- **`SET timezone = 'UTC'` changes more than the idiom inside a pinned function.** It also changes
+  `current_date`, `::date` casts, and how a timestamp string with no offset is parsed. Examples:
+  `set_team_coaches` refuses `p_effective_on > current_date` (`20260923000000:235`), and
+  `persist_team_schedule` parses `run_data->>'started_at'`. After pinning, those use UTC, not the
+  caller's zone. For a client that always sends offsets this is the intended behaviour, but the
+  plan inventories every `current_date`, `now()::date`, `::date` and text-to-timestamptz parse in
+  the 42 functions and decides each one. A calendar-date check meant for the organization's local
+  day (such as "not in the future" for an assignment date) uses the season timezone, as item 1 of
+  the research recommendations does, rather than UTC. Each one gets a test at a UTC day boundary.
 
 - **`SET timezone` also changes how timestamps print as text inside the function.** For example,
   `to_jsonb(row)` in audit metadata renders `+00:00` instead of the session's offset. Those

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Coach accounts are linked to their coach records.** `link_my_coach_record()` (migration `20261020040000`; Phase A2b of `docs/changes/2026-10-20-phase-a-privacy.md`) links a signed-in user to the coach row whose email matches their verified sign-in email, in an organization they belong to; idempotent, refuses a row linked to another account, audited as `coach.linked`. The app calls it once per signed-in user, so the coach-only pages (practice preferences, lighting overrides) find the coach's record.
 
+### Changed
+
+- **Staff are admins** (owner decision 2026-10-20; Phase A2a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020030000`: `is_org_admin()` admits `staff`; the last-admin guards in `admin_remove_member` and `admin_change_member_role` count staff; the nine policies that test a role by name admit staff beside `admin` (revert and smoke in `docs/sql/`). The Edge Functions' `verifyOrgAdmin`, the frontend's permissions (`ADMIN_ROLES`), the navigation, the dashboard, the import panel, the settings audit log and the mock client follow. `tenant_admin` keeps exactly the access it had (RLS Q5, open).
+
 ### Removed
 
 - **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.

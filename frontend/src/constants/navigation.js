@@ -268,12 +268,8 @@ export const ROLE_NAV = {
   ],
 };
 ROLE_NAV.player = ROLE_NAV.parent;
-// Staff share the coach nav minus the preference and lighting pages: staff hold
-// no coach record, no REQUEST_PRACTICE_PREFERENCE and no
-// REQUEST_PRACTICE_LIGHTING_OVERRIDE (flat items are not permission-filtered).
-ROLE_NAV.staff = ROLE_NAV.coach.filter(
-  (item) => item.id !== 'practice-preferences' && item.id !== 'practice-lighting'
-);
+// Staff have no flat nav: they are admins (ADMIN_ROLES) and get the grouped
+// admin NAV, filtered by permission, as SideNav's isAdminNav decides.
 
 /** path -> { label, groupLabel } for breadcrumbs / PageHeader. */
 export const ROUTE_META = {};

@@ -109,6 +109,14 @@ export async function verifyOrgMembership(
 }
 
 /**
+ * The organization roles `is_org_admin()` admits, and so this check. `staff`
+ * joined them on 2026-10-20 (migration 20261020030000). The frontend's
+ * ADMIN_ROLES (`frontend/src/constants/permissions.js`) is held equal by
+ * tests/adminRolesParity.test.js.
+ */
+export const ADMIN_ROLES: readonly string[] = Object.freeze(['admin', 'tenant_admin', 'staff']);
+
+/**
  * Verify that a user can administer a specific organization.
  * Uses the service-role client to avoid recursive RLS while checking the
  * organization_members table itself.
@@ -123,7 +131,7 @@ export async function verifyOrgAdmin(
     .select('profile_id')
     .eq('profile_id', userId)
     .eq('organization_id', organizationId)
-    .in('role', ['admin', 'tenant_admin'])
+    .in('role', [...ADMIN_ROLES])
     .maybeSingle();
 
   if (error) {

@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabaseClient.js';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { Loader2, Search, AlertCircle, Clock, User, ArrowRight } from 'lucide-react';
 import { logger } from '../../lib/logger.js';
+import { isAdminRole } from '../../constants/permissions.js';
 
 /**
  * @typedef {Object} AuditLogEntry
@@ -33,7 +34,8 @@ const SettingsAuditLog = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAction, setFilterAction] = useState('all');
 
-  const isAdmin = orgMember?.role === 'admin';
+  // The page reads through get_settings_audit_log, which is_org_admin() gates.
+  const isAdmin = isAdminRole(orgMember?.role);
 
   useEffect(() => {
     if (!currentOrganization?.id || !isAdmin) {

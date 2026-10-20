@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020040000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2364,6 +2364,35 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the finalize_import_job revert did not restore the previous body and posture, or left a medical column out"
         dump 10 $SCRATCH/harness_no_medical; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261020030000" ]; then
+      # The three bodies read back from the catalogue against production's
+      # before the change (read back 2026-10-20), their posture, and no policy
+      # in public naming staff. `missing` fires when a lookup finds no
+      # function, so a broken query cannot read as restored.
+      if psql_cmd "SELECT 'STAFF-ADMIN-VERDICT:' || CASE
+               WHEN to_regprocedure('public.is_org_admin(uuid)') IS NULL
+                 OR to_regprocedure('public.admin_remove_member(uuid, uuid)') IS NULL
+                 OR to_regprocedure('public.admin_change_member_role(uuid, uuid, text)') IS NULL THEN 'missing'
+               WHEN EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public'
+                             AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%''staff''%') THEN 'policy-left'
+               WHEN (SELECT bool_and(p.prosecdef AND p.proconfig = ARRAY['search_path=public'])
+                            AND array_agg(md5(p.prosrc) ORDER BY p.proname)
+                                = ARRAY['4ea420746df7e9f34a01614999811b5f',
+                                        '75a16391fa48fcc6b045ede4f482a634',
+                                        '3ea7674ca3cd4876d38129798d1f98d4']
+                       FROM pg_proc p
+                      WHERE p.oid IN ('public.is_org_admin(uuid)'::regprocedure,
+                                      'public.admin_remove_member(uuid, uuid)'::regprocedure,
+                                      'public.admin_change_member_role(uuid, uuid, text)'::regprocedure))
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_staff_admin 2>&1 && grep -q 'STAFF-ADMIN-VERDICT:restored' $SCRATCH/harness_staff_admin; then
+        echo "  | (checked) the staff-is-admin revert restores the three functions' pre-change bodies byte for byte, SECURITY DEFINER with search_path=public, and leaves no policy naming staff"
+      else
+        echo "FAIL revert ${id}: the staff-is-admin revert did not restore the three functions, or left a policy naming staff"
+        dump 10 $SCRATCH/harness_staff_admin; STATUS=1
       fi
     fi
     if [ "$id" = "20261020040000" ]; then

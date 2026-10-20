@@ -24,6 +24,7 @@ import {
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
+import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -138,10 +139,6 @@ const HEADER_ALIASES: Record<string, string> = {
   mutual_buddy_code: 'mutual_buddy_code',
   'buddy code': 'mutual_buddy_code',
   buddy_code: 'mutual_buddy_code',
-  medical: 'medical_info',
-  'medical info': 'medical_info',
-  allergy: 'medical_info',
-  allergies: 'medical_info',
   skill: 'skill_tier',
   'skill level': 'skill_tier',
   'skill tier': 'skill_tier',
@@ -596,8 +593,15 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   const stagedImportRows: Record<string, unknown>[] = [];
   const allErrors: ValidationError[] = [];
 
+  // People imports drop the sensitive columns (medical, emergency, financial,
+  // identity documents...) before anything is validated, staged or returned.
+  // The browser strips them too, but this function is callable directly.
+  const stripsSensitive = SENSITIVE_IMPORT_TYPES.includes(body.import_type);
+
   for (let i = 0; i < body.rows.length; i++) {
-    const rawRow = body.rows[i] as Record<string, unknown>;
+    const rawRow = stripsSensitive
+      ? stripSensitiveColumns(body.rows[i] as Record<string, unknown>)
+      : (body.rows[i] as Record<string, unknown>);
 
     // Normalize headers via alias map
     const normalizedRow: Record<string, string> = {};

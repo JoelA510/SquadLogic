@@ -51,12 +51,17 @@ export function makeDedupeHeaderTransformer() {
 /**
  * Header substrings that mark a column as sensitive / out-of-scope to store.
  * Matched case-insensitively against the trimmed header (minus any `__n`
- * dedupe suffix). Kept deliberately specific — e.g. `birth certificate`, not
+ * dedupe suffix, with underscores and camelCase read as spaces so `medical_info`,
+ * `MedicalInfo` and `emergency_contacts` match as their spaced forms do).
+ *
+ * The import-validation Edge Function applies the same rule server-side, from
+ * its twin `supabase/functions/_shared/sensitive-headers.ts`;
+ * `tests/sensitiveHeaderParity.test.js` holds the two lists equal. Kept deliberately specific — e.g. `birth certificate`, not
  * `birth` — so teaming-relevant fields like Date of Birth, Division, Skill
  * Level, Registration ID and guardian contacts are never dropped.
  * @type {RegExp[]}
  */
-const SENSITIVE_PATTERNS = [
+export const SENSITIVE_PATTERNS = [
   // Medical / health
   /\bmedical\b/,
   /medication/,
@@ -128,6 +133,10 @@ const SENSITIVE_PATTERNS = [
   /agree.*terms/,
   // Emergency contacts (not needed for teaming/scheduling — data minimization)
   /emergency/,
+  // Conditions and needs a registration form collects free-text (owner decision
+  // 2026-10-20: no medical data of any kind; docs/changes/2026-10-20-phase-a-privacy.md)
+  /\bconditions?\b/,
+  /special\s*needs?/,
 ];
 
 /**
@@ -137,7 +146,10 @@ const SENSITIVE_PATTERNS = [
  * financial — Payment Plan, amounts, balances, card data — stays stripped.
  * @type {RegExp[]}
  */
-const ALLOWED_HEADERS = [/^payment\s*status$/];
+export const ALLOWED_HEADERS = [/^payment\s*status$/];
+
+/** The import types whose rows lose their sensitive columns (people, not fields). */
+export const SENSITIVE_IMPORT_TYPES = Object.freeze(['players', 'coaches']);
 
 /**
  * True when a CSV header names a sensitive / out-of-scope column that must be
@@ -147,8 +159,10 @@ const ALLOWED_HEADERS = [/^payment\s*status$/];
  */
 export function isSensitiveHeader(header) {
   const h = clean(header)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .toLowerCase()
-    .replace(/__\d+$/, '');
+    .replace(/__\d+$/, '')
+    .replace(/_+/g, ' ');
   if (!h) return false;
   if (ALLOWED_HEADERS.some((re) => re.test(h))) return false;
   return SENSITIVE_PATTERNS.some((re) => re.test(h));
@@ -184,7 +198,7 @@ export function stripSensitiveColumns(rows) {
  */
 export function canonicalizeForUpload(importType, rows) {
   if (!Array.isArray(rows)) return [];
-  if (importType === 'players' || importType === 'coaches') {
+  if (SENSITIVE_IMPORT_TYPES.includes(importType)) {
     return stripSensitiveColumns(rows);
   }
   return rows;

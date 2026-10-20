@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2339,6 +2339,31 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the persist_evaluation_run revert did not restore the previous body and posture, or left the idempotency key behind"
         dump 10 $SCRATCH/harness_eval_run; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261020020000" ]; then
+      # The body read back from the catalogue: md5 of production's prosrc
+      # before the change (the 20260726000300 body byte for byte, read back
+      # 2026-10-20), the posture, and both dropped columns back. `missing`
+      # fires when the lookup finds no function, so a broken query cannot read
+      # as restored.
+      if psql_cmd "SELECT 'NO-MEDICAL-VERDICT:' || CASE
+               WHEN to_regprocedure('public.finalize_import_job(uuid, jsonb)') IS NULL THEN 'missing'
+               WHEN (SELECT count(*) FROM pg_attribute
+                      WHERE attrelid = 'public.players'::regclass
+                        AND attname IN ('medical_info', 'emergency_contacts')
+                        AND NOT attisdropped) <> 2 THEN 'columns-missing'
+               WHEN (SELECT md5(p.prosrc) = '32e607cb8154b91fb7b3cda8e3265ee7' AND p.prosecdef
+                            AND p.proconfig = ARRAY['search_path=public']
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.finalize_import_job(uuid, jsonb)'::regprocedure)
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_no_medical 2>&1 && grep -q 'NO-MEDICAL-VERDICT:restored' $SCRATCH/harness_no_medical; then
+        echo "  | (checked) the finalize_import_job revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and both medical columns"
+      else
+        echo "FAIL revert ${id}: the finalize_import_job revert did not restore the previous body and posture, or left a medical column out"
+        dump 10 $SCRATCH/harness_no_medical; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

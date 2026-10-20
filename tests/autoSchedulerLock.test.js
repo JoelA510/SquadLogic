@@ -749,6 +749,26 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.match(response, /unreadableRange: run\.unreadableRange\.map\(/);
   });
 
+  it('fails the run when its evaluation record does not save, before auditing it completed', () => {
+    // It used to `console.error` and carry on: the response and the `scheduler.auto_completed`
+    // row went out with a null runId, and the failure reached only the function's console.
+    // fairness-scoring throws on the same RPC; this adopts its contract.
+    const persist = source.indexOf(".rpc('persist_evaluation_run'");
+    const completed = source.indexOf("action: 'scheduler.auto_completed'");
+    assert.ok(persist >= 0 && completed > persist, 'the run is not recorded before it is audited');
+    const between = source.slice(persist, completed);
+    assert.match(
+      between,
+      /if \(persistError\) \{\s*throw Object\.assign\(new Error\(`Persistence failed: \$\{persistError\.message\}`\)/
+    );
+    assert.doesNotMatch(between, /console\.(error|log|warn)/);
+    // The throw lands in the handler's catch, which logs it and audits the failure.
+    const handlerCatch = source.slice(source.lastIndexOf('} catch (error) {'));
+    assert.match(handlerCatch, /await logFailure\(logCtx, 'Auto-scheduler failed', error\);/);
+    assert.match(handlerCatch, /action: 'scheduler\.auto_failed'/);
+    assert.match(handlerCatch, /500\)/);
+  });
+
   it('audits the locked rows loaded and the placements proposed', () => {
     const completed = source.slice(source.indexOf("action: 'scheduler.auto_completed'"));
     assert.match(completed, /lockedLoaded: lock\.rows\.length/);

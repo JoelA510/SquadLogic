@@ -2376,7 +2376,19 @@ logging residuals are done above; the FK index triage is deferred with its trigg
 `impersonation.started` row; it now refuses. `stopImpersonation` has the same shape and is left
 best-effort on purpose (an admin whose end-audit fails must still be able to leave the preview).
 The auto-scheduler's `console.error('Persistence failed:', persistError)` is a swallowed
-persistence failure that reaches only the console; not in B3's list, not changed.
+persistence failure that reaches only the console; not in B3's list, not changed. **Fixed
+2026-10-19** (#621): the error was not rare but certain. Both auto-scheduler and
+fairness-scoring called `persist_evaluation_run` through the service-role client, and the RPC
+refuses any caller whose `auth.uid()` is not a member of the organization; the service role has
+none. Every auto-scheduler run answered 200 with no record (production holds no
+`evaluation_runs` row), and every fairness-scoring run with `persist` failed. Making the
+auto-scheduler throw surfaced it in the real-backend E2E (`Persistence failed: Not authorized:
+User is not a member of organization ...`, Codex review on #621). Both functions now persist as
+the caller, and a failure throws with its PostgREST `code` (the catch logs it with the request
+id, audits `scheduler.auto_failed` and answers 500). Pinned in
+`tests/persistEvaluationRunCaller.test.js` and `tests/autoSchedulerLock.test.js` (red on the old
+source); pgTAP `evaluation_persistence_contract.sql` asserts the service role is refused.
+*Executed* (vitest); Deno, pgTAP and the real-backend E2E run in CI.
 `AdminReportingDashboard` is routed nowhere (the knip `ignoreFiles` entry said so; B3's test now
 imports it, so the entry is removed): DS-15's change to it has no user-visible effect until it is
 routed or deleted, which is the owner's call. Both dashboards still drop the `error` of some reads

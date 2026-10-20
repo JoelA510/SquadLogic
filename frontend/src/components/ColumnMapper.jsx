@@ -18,10 +18,7 @@ const FIELD_DEFS = {
       { key: 'last_name', label: 'Last Name' },
       { key: 'date_of_birth', label: 'Date of Birth' },
     ],
-    optional: [
-      { key: 'medical_info', label: 'Medical Info' },
-      { key: 'skill_tier', label: 'Skill Tier' },
-    ],
+    optional: [{ key: 'skill_tier', label: 'Skill Tier' }],
   },
   coaches: {
     required: [

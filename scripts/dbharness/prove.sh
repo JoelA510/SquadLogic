@@ -88,6 +88,9 @@ R28="$REPO/docs/sql/20261019010000_revert.sql"
 # The evaluation-run idempotency key, and its revert.
 M29="$REPO/supabase/migrations/20261020010000_evaluation_run_idempotency.sql"
 R29="$REPO/docs/sql/20261020010000_revert.sql"
+# A1: no medical data -- the two players columns dropped, and the revert.
+M30="$REPO/supabase/migrations/20261020020000_drop_player_medical_columns.sql"
+R30="$REPO/docs/sql/20261020020000_revert.sql"
 # A2a: staff are admins, and the revert.
 M31="$REPO/supabase/migrations/20261020030000_staff_is_admin.sql"
 R31="$REPO/docs/sql/20261020030000_revert.sql"
@@ -3750,6 +3753,34 @@ END;
 \$function\$;" \
   "revert 20261020010000"
 
+# No medical data. The smoke RAISEs on each; the revert claim on a column left
+# out and on a body that drifted.
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M30" \
+  "                - 'medical_info' - 'medical' - 'email' - 'contact_email'" \
+  "                - 'email' - 'contact_email'" \
+  "smoke 20261020020000"
+
+plant "M30 emergency_contacts is left behind" "$M30" \
+  "    DROP COLUMN medical_info,
+    DROP COLUMN emergency_contacts;" \
+  "    DROP COLUMN medical_info;" \
+  "smoke 20261020020000"
+
+plant "R30 the revert leaves emergency_contacts out" "$R30" \
+  "    ADD COLUMN IF NOT EXISTS medical_info jsonb DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS emergency_contacts jsonb DEFAULT '[]'::jsonb;" \
+  "    ADD COLUMN IF NOT EXISTS medical_info jsonb DEFAULT '{}'::jsonb;" \
+  "revert 20261020020000"
+
+plant "R30 the revert restores a drifted finalize_import_job body" "$R30" \
+  "    RETURN v_result;
+END;
+\$\$;" \
+  "    RETURN v_result; -- drifted
+END;
+\$\$;" \
+  "revert 20261020020000"
+
 # Staff are admins. The smoke RAISEs on each; the revert claim on a policy left
 # naming staff and on a body that drifted.
 plant "M31 is_org_admin still refuses staff" "$M31" \
@@ -3916,6 +3947,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
   ["(checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, drops the throttle index, and restores the one FOR ALL registrations policy"]="R28 the revert restores a drifted submit_registration body"
   ["(checked) the persist_evaluation_run revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and drops the idempotency index and column"]="R29 the revert restores a drifted persist_evaluation_run body|R29 the revert leaves the idempotency column behind"
+  ["(checked) the finalize_import_job revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and both medical columns"]="R30 the revert restores a drifted finalize_import_job body|R30 the revert leaves emergency_contacts out"
   ["(checked) the staff-is-admin revert restores the three functions' pre-change bodies byte for byte, SECURITY DEFINER with search_path=public, and leaves no policy naming staff"]="R31 the revert restores a drifted is_org_admin body|R31 the revert leaves the audit_log policy naming staff"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

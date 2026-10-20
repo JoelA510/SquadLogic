@@ -15,7 +15,14 @@ import { createBdd } from 'playwright-bdd';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { SEEDED_ADMIN, registrationCsv, registrations } from './registrations.js';
+import {
+  SEEDED_ADMIN,
+  SENSITIVE_MARKER,
+  registrationCsv,
+  registrationRecords,
+  registrations,
+  type ExportShape,
+} from './registrations.js';
 
 const { Given, When, Then, Before, After } = createBdd();
 
@@ -33,6 +40,16 @@ Before(async ({ page }) => {
     if (message.type() === 'error') lines.push(`console.error: ${message.text()}`);
   });
   page.on('pageerror', (error) => lines.push(`pageerror: ${error.message}`));
+  // What the app itself sends to import-validation, so a scenario can check
+  // the browser's own filter apart from the Edge Function's.
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/functions/v1/import-validation')) {
+      stateOf(page).validationBodies = [
+        ...(stateOf(page).validationBodies ?? []),
+        request.postData() ?? '',
+      ];
+    }
+  });
   page.on('response', (response) => {
     if (response.status() >= 400) {
       lines.push(`HTTP ${response.status()} ${response.request().method()} ${response.url()}`);
@@ -69,7 +86,9 @@ Given('I am signed in as the seeded administrator', async ({ page }) => {
 });
 
 When('I import the {string} registration export', async ({ page }, shape: string) => {
-  if (shape !== 'full' && shape !== 'narrow') throw new Error(`unknown export shape: ${shape}`);
+  if (shape !== 'full' && shape !== 'narrow' && shape !== 'sensitive') {
+    throw new Error(`unknown export shape: ${shape}`);
+  }
   await page.goto('/import');
   await expect(page.getByRole('heading', { name: 'Data Import' })).toBeVisible({ timeout: 30_000 });
   // A completed import is remembered across reloads; start a new one. Wait
@@ -89,7 +108,7 @@ When('I import the {string} registration export', async ({ page }, shape: string
   await fileInput.setInputFiles({
     name: `registrations-${shape}.csv`,
     mimeType: 'text/csv',
-    buffer: Buffer.from(registrationCsv(shape)),
+    buffer: Buffer.from(registrationCsv(shape as ExportShape)),
   });
   await page.getByRole('button', { name: 'Start Import' }).click({ timeout: 30_000 });
 
@@ -129,6 +148,119 @@ Then(
     }
   }
 );
+
+Then('the app sent import-validation no sensitive column', async ({ page }) => {
+  // The browser's own filter, apart from the Edge Function's: what left the
+  // page. Not vacuous: the import above made at least one call.
+  const bodies = stateOf(page).validationBodies ?? [];
+  expect(bodies.length, 'import-validation calls the app made').toBeGreaterThan(0);
+  expect(bodies.filter((body) => body.includes(SENSITIVE_MARKER))).toEqual([]);
+});
+
+When(
+  'I send the sensitive registration export straight to import-validation and apply it',
+  async ({ page }) => {
+    // The browser strips sensitive columns before upload; this is the call a
+    // client that skips the browser makes, as the administrator, so only the
+    // Edge Function stands between those columns and the database.
+    const { token, anonKey } = await adminSession(page);
+    const auth = { apikey: anonKey, Authorization: `Bearer ${token}` };
+    const job = await page.request.post(`${stackUrl()}/rest/v1/rpc/create_import_job`, {
+      headers: auth,
+      data: {
+        p_organization_id: SEEDED_ADMIN.organizationId,
+        p_import_type: 'players',
+        p_file_name: 'registrations-sensitive-direct.csv',
+      },
+      timeout: BACKEND_TIMEOUT,
+    });
+    const jobBody = (await job.json()) as { id?: string };
+    expect(job.status(), JSON.stringify(jobBody)).toBe(200);
+    expect(jobBody.id, 'create_import_job returned the job').toBeTruthy();
+
+    const { records } = registrationRecords('sensitive');
+    const validated = await page.request.post(`${stackUrl()}/functions/v1/import-validation`, {
+      headers: auth,
+      data: {
+        import_type: 'players',
+        organization_id: SEEDED_ADMIN.organizationId,
+        rows: records,
+        import_job_id: jobBody.id,
+        row_offset: 0,
+      },
+      timeout: BACKEND_TIMEOUT,
+    });
+    const validatedBody = (await validated.json()) as {
+      staged_rows?: number;
+      validated_data?: unknown[];
+    };
+    expect(validated.status(), JSON.stringify(validatedBody).slice(0, 2000)).toBe(200);
+    expect(validatedBody.staged_rows).toBe(records.length);
+    // What the function answers is checked too: it echoes the rows it kept.
+    expect(JSON.stringify(validatedBody.validated_data)).not.toContain(SENSITIVE_MARKER);
+
+    // A coach row on the same job, staged in staging_import_rows: coaches are
+    // the other people import the function strips.
+    const coach = await page.request.post(`${stackUrl()}/functions/v1/import-validation`, {
+      headers: auth,
+      data: {
+        import_type: 'coaches',
+        organization_id: SEEDED_ADMIN.organizationId,
+        rows: [
+          {
+            'Full Name': 'Coach Sensitive-Direct',
+            Email: 'coach.sensitive-direct@example.test',
+            'Emergency Contact Phone': SENSITIVE_MARKER,
+            medical_info: SENSITIVE_MARKER,
+          },
+        ],
+        import_job_id: jobBody.id,
+        row_offset: records.length,
+      },
+      timeout: BACKEND_TIMEOUT,
+    });
+    const coachBody = (await coach.json()) as { staged_rows?: number };
+    expect(coach.status(), JSON.stringify(coachBody)).toBe(200);
+    expect(coachBody.staged_rows).toBe(1);
+    const staged = await page.request.get(
+      `${stackUrl()}/rest/v1/staging_import_rows?select=*&import_job_id=eq.${jobBody.id}`,
+      { headers: auth, timeout: BACKEND_TIMEOUT }
+    );
+    const stagedRows = (await staged.json()) as unknown[];
+    expect(staged.status(), JSON.stringify(stagedRows).slice(0, 2000)).toBe(200);
+    expect(stagedRows).toHaveLength(1);
+    expect(JSON.stringify(stagedRows)).not.toContain(SENSITIVE_MARKER);
+
+    const finalized = await page.request.post(`${stackUrl()}/rest/v1/rpc/finalize_import_job`, {
+      headers: auth,
+      data: { p_import_job_id: jobBody.id, p_validation_errors: [] },
+      timeout: BACKEND_TIMEOUT,
+    });
+    const finalizedBody = (await finalized.json()) as { promoted_rows?: number };
+    expect(finalized.status(), JSON.stringify(finalizedBody)).toBe(200);
+    expect(finalizedBody.promoted_rows).toBe(records.length);
+  }
+);
+
+Then('no player or staged import row stores a sensitive column', async ({ page }) => {
+  // Every column of every row, read as the administrator; a stored sensitive
+  // cell is found by its value wherever it landed (a column, custom
+  // attributes, a raw or normalized staged payload).
+  const { token, anonKey } = await adminSession(page);
+  const org = `eq.${SEEDED_ADMIN.organizationId}`;
+  for (const table of ['players', 'staging_players']) {
+    const response = await page.request.get(
+      `${stackUrl()}/rest/v1/${table}?select=*&organization_id=${org}`,
+      { headers: { apikey: anonKey, Authorization: `Bearer ${token}` }, timeout: BACKEND_TIMEOUT }
+    );
+    const rows = (await response.json()) as unknown[];
+    expect(response.status(), JSON.stringify(rows).slice(0, 2000)).toBe(200);
+    // Not vacuous: the imports above wrote rows here.
+    expect(rows.length, `${table} rows read`).toBeGreaterThanOrEqual(registrations().length);
+    const stored = rows.filter((row) => JSON.stringify(row).includes(SENSITIVE_MARKER));
+    expect(stored, `${table} rows carrying a sensitive column`).toEqual([]);
+  }
+});
 
 /**
  * The audit actions a player import writes, each as the caller:
@@ -263,7 +395,12 @@ Then('the audit log records the import as the administrator', async ({ page }) =
 /** What a scenario learned from one page and checks on a later one. */
 const scenarioState = new WeakMap<
   Page,
-  { teams?: number; teamNames?: string[]; auditBefore?: Set<string> }
+  {
+    teams?: number;
+    teamNames?: string[];
+    auditBefore?: Set<string>;
+    validationBodies?: string[];
+  }
 >();
 const stateOf = (page: Page) => {
   const state = scenarioState.get(page) ?? {};

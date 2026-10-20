@@ -1,6 +1,6 @@
 # Phase A: privacy and access
 
-Status: **plan, for owner approval** (AGENTS.md rule 14: persistence and authorization). It
+Status: **approved 2026-10-20**; A1 built (migration `20261020020000`) (AGENTS.md rule 14: persistence and authorization). It
 applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to research items 1
 and 2. It ships as three PRs, in this order; each is reviewed once before it opens.
 
@@ -102,6 +102,10 @@ reads. Known so far:
 
 Admin pages are unchanged. The plan's first task is a full search, and the list is completed
 before any table is restricted.
+
+**Found while building A1** (*executed*, production policies read 2026-10-20): `staging_players`
+and `staging_import_rows` are readable by every organization member
+(`is_org_member`), raw import payloads included. A3 narrows both to admins and staff.
 
 **Tests:**
 - `rls_policy_matrix.sql` (`:696-704`) is rewritten to the table above;

@@ -134,7 +134,7 @@ describe('DS-9: a failed "View As" is surfaced', () => {
     await waitFor(() =>
       expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/Could not start/), 'warning')
     );
-    expect(mocks.impersonateUser).toHaveBeenCalledWith(reg.profiles);
+    expect(mocks.impersonateUser).toHaveBeenCalledWith(reg.profiles, { orgRole: undefined });
   });
 
   it('says nothing when the preview starts', async () => {

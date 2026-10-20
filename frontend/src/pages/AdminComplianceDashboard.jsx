@@ -18,6 +18,7 @@ import { usePlayersData } from '../hooks/usePlayersData.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
+import { isAdminRole } from '../constants/permissions.js';
 
 /**
  * One-click compliance toggle cell (paid / waiver / medical). Audited via
@@ -140,8 +141,10 @@ function PlayerComplianceGrid() {
 }
 
 export default function AdminComplianceDashboard() {
-  const { currentOrganization } = useOrganization();
-  const { isAdmin, impersonateUser, isImpersonating, user } = useAuth();
+  const { currentOrganization, orgMember } = useOrganization();
+  const { isAdmin: isProfileAdmin, impersonateUser, isImpersonating, user } = useAuth();
+  // "View As": a profile admin, or an admin-equivalent of this organization.
+  const isAdmin = isProfileAdmin || isAdminRole(orgMember?.role);
   const toast = useToast();
   const [forms, setForms] = useState([]);
   const [selectedFormId, setSelectedFormId] = useState('');
@@ -365,12 +368,14 @@ export default function AdminComplianceDashboard() {
                         {isAdmin && reg.profiles?.id && (
                           <button
                             onClick={() =>
-                              impersonateUser(reg.profiles).catch(() => {
-                                toast(
-                                  'Could not start the preview as this parent. Try again.',
-                                  'warning'
-                                );
-                              })
+                              impersonateUser(reg.profiles, { orgRole: orgMember?.role }).catch(
+                                () => {
+                                  toast(
+                                    'Could not start the preview as this parent. Try again.',
+                                    'warning'
+                                  );
+                                }
+                              )
                             }
                             className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-500/10 text-status-warning-text text-xs font-bold border border-amber-500/20 hover:bg-amber-500/20 transition-all"
                             title="View as this parent"

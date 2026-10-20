@@ -17,6 +17,12 @@
 
 BEGIN;
 
+-- Hold membership writes until the revert commits, so no demotion can slip in
+-- between the guard's count and the functions' replacement (a demotion the
+-- forward guards allow because staff count). SHARE ROW EXCLUSIVE blocks
+-- INSERT, UPDATE and DELETE on the table and still lets everyone read it.
+LOCK TABLE public.organization_members IN SHARE ROW EXCLUSIVE MODE;
+
 DO $guard$
 DECLARE
     v_orphans integer;

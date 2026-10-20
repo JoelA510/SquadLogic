@@ -27,6 +27,7 @@ import { useToast } from '../ui/ToastHost.jsx';
 import Badge from '../ui/Badge.jsx';
 import { initialsOf } from '../ui/Avatar.jsx';
 import logo from '../../assets/SL-Logo.png';
+import { isAdminRole } from '../../constants/permissions.js';
 
 function CtxSwitcher({ label, icon: Icon, value, items }) {
   return (
@@ -81,15 +82,19 @@ CtxSwitcher.propTypes = {
  */
 export default function TopBar({ onToggleNav = undefined }) {
   const navigate = useNavigate();
-  const { user, signOut, isAdmin, impersonateUser } = useAuth();
+  const { user, signOut, isAdmin: isProfileAdmin, impersonateUser } = useAuth();
   const {
     organizations = [],
     currentOrganization,
+    orgMember,
     availableSeasons = [],
     currentSeasonSetting,
     switchOrganization,
     switchSeason,
   } = useOrganization();
+  // Role preview: a profile admin, or an admin-equivalent of this organization
+  // (staff included).
+  const isAdmin = isProfileAdmin || isAdminRole(orgMember?.role);
   const { themeMode, toggleThemeMode } = useTheme();
   const { can, PERMISSIONS } = usePermission();
   const toast = useToast();
@@ -179,7 +184,7 @@ export default function TopBar({ onToggleNav = undefined }) {
           label: `Preview as ${profile.role === 'coach' ? 'Coach' : 'Parent'}`,
           icon: profile.role === 'coach' ? UserRoundCheck : User,
           onSelect: () =>
-            impersonateUser(profile).catch(() => {
+            impersonateUser(profile, { orgRole: orgMember?.role }).catch(() => {
               toast(
                 `Could not start the preview as ${profile.role === 'coach' ? 'a coach' : 'a parent'}. Try again.`,
                 'warning'

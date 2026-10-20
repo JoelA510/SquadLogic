@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS auth.users (
   raw_user_meta_data jsonb DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+-- Supabase's auth.users carries email_confirmed_at; link_my_coach_record
+-- (20261020040000) reads it. Added rather than declared above so a harness
+-- database built before this line existed gains it too.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
 
 -- `auth.uid()` reads a session GUC so a harness script can act as a user:
 --   SET LOCAL request.jwt.claim.sub = '<uuid>';

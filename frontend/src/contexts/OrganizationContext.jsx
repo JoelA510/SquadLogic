@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from './AuthContext.jsx';
 import { ROLE_PERMISSIONS } from '../constants/permissions.js';
@@ -51,6 +59,8 @@ export const useOrganization = () => useContext(OrganizationContext);
 
 export const OrganizationProvider = ({ children }) => {
   const { user } = useAuth();
+  // The user link_my_coach_record last ran for (see fetchOrgs).
+  const linkedFor = useRef(null);
   const [organizations, setOrganizations] = useState([]);
   const [currentOrganization, setCurrentOrganization] = useState(null);
   const [orgMember, setOrgMember] = useState(null);
@@ -146,6 +156,27 @@ export const OrganizationProvider = ({ children }) => {
     const fetchOrgs = async () => {
       setLoading(true);
       setFetchError(null);
+      // Link a signed-in coach's account to their coach row first
+      // (20261020040000), once per user, so the coach pages that read
+      // coaches.user_id after the organization loads find it on the first
+      // sign-in. Best effort: a failure leaves the account unlinked, which those
+      // pages already handle, so it is logged with its context, not shown.
+      if (linkedFor.current !== user.id) {
+        linkedFor.current = user.id;
+        try {
+          const { data, error } = await supabase.rpc('link_my_coach_record');
+          if (error) throw error;
+          if (data?.status && !['linked', 'already_linked', 'no_match'].includes(data.status)) {
+            logger.warn('Coach record not linked', {
+              status: data.status,
+              coachId: data.coach_id ?? null,
+            });
+          }
+        } catch (err) {
+          logger.error('Could not link this account to its coach record', err);
+        }
+        if (cancelled) return;
+      }
       try {
         const { data, error } = await supabase
           .from('organization_members')

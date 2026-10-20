@@ -16,6 +16,9 @@ vi.mock('../frontend/src/lib/supabaseClient', () => ({
       signOut: vi.fn(),
     },
     from: vi.fn(),
+    // OrganizationContext links the signed-in user to their coach record
+    // before it loads the organizations (link_my_coach_record).
+    rpc: vi.fn().mockResolvedValue({ data: { status: 'no_match' }, error: null }),
   },
 }));
 

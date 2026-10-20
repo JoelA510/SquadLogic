@@ -736,7 +736,9 @@ INSERT INTO matrix_expected VALUES
     ('profiles',                    'parent_a', '-',  'rls',   '0',   'n/a',   '0'),
     ('profiles',                    'admin_b',  'B',  'rls',   '0',   'n/a',   '0'),
     ('profiles',                    'outsider', '-',  'rls',   '0',   'n/a',   '0'),
-    ('profiles',                    'anon',     '-',  'rls',   '0',   'n/a',   '0'),
+    -- anon's UPDATE reads 'grant': 20261020040000 revoked anon's UPDATE on profiles
+    -- (it never had a policy to use it); before, the policy refused it ('0').
+    ('profiles',                    'anon',     '-',  'rls',   'grant', 'n/a',   '0'),
 
     -- registration_forms: member or status 'open' (Org A's form is open: deliberate, plan Q6); writes need role = 'admin' (not tenant_admin, plan Q5).
     ('registration_forms',          'admin_a',  'A',  'ok',    '1',   'rls',   '1'),

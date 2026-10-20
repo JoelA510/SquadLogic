@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Coach accounts are linked to their coach records.** `link_my_coach_record()` (migration `20261020040000`; Phase A2b of `docs/changes/2026-10-20-phase-a-privacy.md`) links a signed-in user to the coach row whose email matches their verified sign-in email, in an organization they belong to; idempotent, refuses a row linked to another account, audited as `coach.linked`. The app calls it once per signed-in user, so the coach-only pages (practice preferences, lighting overrides) find the coach's record.
+
 ### Removed
 
 - **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.
 
 ### Security
 
+- **A profile's role and organization are no longer self-editable.** Migration `20261020040000` grants UPDATE on `profiles` for `first_name`, `last_name`, `full_name` and `avatar_url` only; before, a signed-in user could change their own `role` and `organization_id` through the table. `anon` loses UPDATE on `profiles`.
 - **Sensitive registration columns are dropped on the server too.** `import-validation` strips medical, condition, special-needs, emergency, financial and identity-document columns from player and coach imports before it validates, stages or returns a row (`supabase/functions/_shared/sensitive-headers.ts`); before, only the browser did, so a direct call stored them in `staging_players`. The rule now also covers "Conditions", "Special Needs" and snake_case headers such as `medical_info`, in both copies, held equal by `tests/sensitiveHeaderParity.test.js`.
 
 ## [1.1.0] - 2026-10-20

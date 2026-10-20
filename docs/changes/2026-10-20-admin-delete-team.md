@@ -63,11 +63,17 @@ unchanged):
    append them to their run's `results.archived_exceptions`. This is a set-based version of
    `admin_cancel_practice_assignment`'s three steps (no per-row RPC call, so one admin check).
 3. `DELETE FROM teams` as today; the cascade now has nothing to stop it.
-4. `team.deleted`'s metadata gains `practice_assignments_deleted` (count),
-   `game_assignments_deleted` (count), `games_deleted` (count, and the ids, since each deleted
-   game also removes a fixture from another team's schedule), `withdrawn_exception_ids` and
-   `archived_exceptions`, so the audit trail says what the delete took with it (today it records
-   only the name and division). The counts are taken before the delete, in the same transaction.
+4. `team.deleted`'s metadata records everything the delete takes with it, not only the name and
+   division it records today. The counts are taken before the delete, in the same transaction:
+   - a count for each table the cascade empties: `practice_assignments_deleted`,
+     `game_assignments_deleted`, `team_players_deleted`, `event_rsvps_deleted`,
+     `team_messages_deleted` and `team_coach_assignments_deleted` (coaching history included);
+   - `games_deleted`, as a count and the ids, since each deleted game also removes a fixture from
+     another team's schedule;
+   - `withdrawn_exception_ids` and `archived_exceptions`.
+
+   The plan re-walks the foreign keys from `teams` at build time (as the evidence above did), and
+   a pgTAP assertion fails if a cascading table has no counter.
 
 Uses `now()`, not `timezone('utc', now())` (see the companion plan
 `2026-10-20-utc-now-idiom.md`).
@@ -89,8 +95,9 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
   - the delete succeeds;
   - the team, its assignments and its exceptions are gone;
   - each live exception has a `practice.exception_withdrawn` audit row;
-  - `team.deleted` carries the counts and archived rows, including `games_deleted` for a seeded
-    game against another team, and that game is gone;
+  - `team.deleted` carries every count and the archived rows, each non-zero on the fixture: a
+    rostered player, an RSVP, a message, a past coach assignment, and a game against another
+    team (which is gone, and named in `games_deleted`);
   - the run's `archived_exceptions` holds both rows.
 
   Plus a control: a non-admin is refused and nothing changes.

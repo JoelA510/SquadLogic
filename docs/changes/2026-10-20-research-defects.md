@@ -39,15 +39,15 @@ privileges, not by what the pages happen to select.
 - **`players`, rows:** SELECT for org admins and staff, for the coaches of the player's current
   team (through `team_coach_assignments`), and for guardians linked through `profile_players`.
   Everyone else sees no player rows.
-- **`players`, columns:** revoke table-level SELECT from `authenticated` and grant it back
-  column by column. The columns every row-holder may read are the roster columns (name, team,
-  division, the eligibility fields). Sensitive columns (`medical_info`, `guardian_contacts`,
-  `contact_info`, `date_of_birth`, `emergency_contacts`, `registration_history`, notes, location
-  coordinates, flags: every column not on the roster list) are read only through a `SECURITY DEFINER` RPC, `get_player_detail(player_id)`, which applies decisions
-  1.1 to 1.4 per column. A column revoke breaks every `select('*')` on the table, so the plan
-  must list and migrate each one (`usePlayersData`, `DashboardPage`, `PlayerRecordPage`,
-  `CoachesPage`, `TeamAnalysisPage`, `EnterpriseDashboard`, the mock client), each to an explicit
-  column list or the RPC.
+- **`players`, columns:** revoke table-level SELECT from `authenticated` and grant it back column by
+  column. The columns every row-holder may read are the roster columns (name, team, division, the
+  eligibility fields). Sensitive columns (`medical_info`, `guardian_contacts`, `contact_info`,
+  `date_of_birth`, `emergency_contacts`, `registration_history`, notes, location coordinates, flags:
+  every column not on the roster list) are read only through a `SECURITY DEFINER` RPC,
+  `get_player_detail(player_id)`, which applies decisions 1.1 to 1.4 per column. A column revoke
+  breaks every `select('*')` on the table, so the plan must list and migrate each one
+  (`usePlayersData`, `DashboardPage`, `PlayerRecordPage`, `CoachesPage`, `TeamAnalysisPage`,
+  `EnterpriseDashboard`, the mock client), each to an explicit column list or the RPC.
 - **`coaches`:** the same split. Members read name and team only, through a `SECURITY DEFINER`
   read like `get_organization_members`; full rows go to admins. Two pages read the `coaches` table
   to find the signed-in user's own coach row: `CoachPreferenceRequests.jsx:139` and
@@ -57,7 +57,11 @@ privileges, not by what the pages happen to select.
 - **`teams.calendar_token`:** move it out of the member-readable row (column revoke, as above).
   Expose it through an RPC, `get_team_calendar_link(team_id)`, for admins, the team's coaches, and
   guardians of players on the team. Those are the people the portal's Calendar Subscription
-  dialog serves.
+  dialog serves. A column revoke fails the whole of any `select('*')` on `teams`, for admins too,
+  so every wildcard read of `teams` is migrated to an explicit column list in the same change:
+  `useTeamPortal`'s `PORTAL_TEAM_SELECT` (`*` plus embeds), `DashboardPage.jsx:79`,
+  `PlayerRecordPage.jsx:69`, `TeamBuilderPage`, and any other the plan's search finds. Each page
+  gets a test under the reduced grant, and the calendar dialog reads the link through the RPC.
 - **`rotate_calendar_token`:** it is `SECURITY DEFINER`, authorizes any `is_org_member` caller,
   and returns the new token (`20260324000002`, the only definition; *statically reviewed*). Left
   alone it is a second path to every team's feed: any parent can rotate a team's token and read
@@ -97,6 +101,12 @@ audit row stays. A "disputed" state is deferred until standings matter. Test wit
 - the coach of an unrelated team is refused;
 - an admin can set it.
 
+**The callers change with it.** `ScoresPage` (`/scores`) and `LeagueStandings` show every game's
+score as editable to anyone with `MANAGE_SCHEDULE`, which coaches hold. After the RPC change, an
+unrelated coach would still see the controls, and each edit would be applied optimistically and
+then refused. Both pages show editing only on games the caller may score and keep the rest
+read-only. UI tests cover a coach of one team in the game and a coach of an unrelated team.
+
 Plan it with item 1: both are "who may touch what".
 
 ## 3. Eligibility honoured and explained
@@ -118,6 +128,13 @@ with no coach anchors and no error.
   pattern: the player stays visible with a reason and is never silently dropped (AGENTS.md).
   The plan picks one of the two after reading how `generateTeams`' existing late and unassigned
   outputs are shaped, so there is one "not seated" contract, not two.
+- **Never unseat a protected player.** On a rerun, `TeamAnalysisPage` passes an `existingSnapshot`
+  in review mode, and a player absent from the pool is treated as dropped from the roster. So the
+  move to `unplacedPlayers` applies only to players with no manual, reviewed, published or locked
+  placement. A player who is already seated that way and is now blocked stays where they are. The
+  run stops for review and lists them, and only an authorised unlock or removal changes the
+  roster (AGENTS.md: incremental generation never reshuffles such a roster). A rerun test seats a
+  player on a locked roster, makes them blocked, and asserts the player stays put and is listed.
 - **Check the `coach_team_requests` error** and throw it.
 - **Turn the pipeline failure into a visible error that stops generation**, instead of the
   `console.warn` and raw-roster fallback.
@@ -164,7 +181,12 @@ row (migrations `20260416000001` and its `20260913000000` redefinition). Season 
 season-keyed settings into a **draft** season, and nothing becomes active until the admin
 confirms. It copies:
 - division bounds;
-- registration forms.
+- registration forms, each with its `division_id` mapped to the matching newly created division
+  (a form with no division stays organization-wide). Each form starts as `draft` whatever its
+  source status was. `submit_registration` accepts any `open` form regardless of its season's
+  status, so a copied open form would take registrations into an unconfirmed season. Tests: a
+  copied form points at the new season's division, a registration through it places the player
+  there, and a copied form refuses submissions until it is explicitly opened.
 
 Two things the report listed are not copied:
 - **Heat settings** are not season data. `organization_heat_settings` is keyed by
@@ -182,7 +204,12 @@ completed). Imports bind to an explicitly chosen season.
 1. Which settings carry over? *Recommended: the list above.*
 2. Can two seasons be active at once? *Recommended: no.* One active season per organization
    keeps every "current season" reader correct. The plan must list those readers: season pickers,
-   the `localStorage` season, imports, and the Edge Functions' season reads.
+   the `localStorage` season, imports, and the Edge Functions' season reads. Two of those fall
+   back to the most recently created season without looking at its status:
+   `OrganizationContext`'s season fetch and the Edge `readSeasonTimezone`, both ordered by
+   `created_at desc`. A new draft would become "current" the moment it was created. Every
+   automatic fallback selects the active season instead, while an admin can still pick a draft
+   explicitly. Each fallback gets a test with a newer draft present.
 3. Should blackouts recur (for example, a fixed holiday each year)? *Recommended: not in the
    rollover change.* Admins re-enter next season's blackouts, as they enter season dates. A
    recurrence model, if wanted, is its own plan.

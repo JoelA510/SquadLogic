@@ -35,9 +35,12 @@ hours into the past, or 12 into the future.
   - `sync_player_team_id`, `update_game_score`, `upsert_team_event_rsvp`;
   - the import pipeline;
   - the retire and unretire RPCs.
-- **One comparison:** `fail_stale_import_jobs` defaults its stale cutoff to
-  `timezone('utc', now()) - 5 minutes`. A caller at UTC-12 would move the cutoff 12 hours later
-  and fail their own organization's running imports.
+- **One comparison, in an argument default:** `fail_stale_import_jobs(p_stale_before timestamptz
+  DEFAULT timezone('utc', now()) - interval '5 minutes')` (`20260503100000`). A caller at UTC-12
+  would move the cutoff 12 hours later and fail their own organization's running imports.
+  `ImportContext.jsx:455` calls it without the argument. **Pinning the function does not fix
+  this.** PostgreSQL inserts an omitted argument's default into the caller's query, where it is
+  evaluated in the caller's session, before the function's `SET timezone` takes effect.
 - **No use is the deliberate "UTC calendar date" form** (`timezone('utc', now())::date`), which
   would be correct and must not be changed. Searched: none in the live functions.
 - **Already correct:** `audit_log.created_at` and `telemetry_log.created_at` default to `now()`,
@@ -59,7 +62,10 @@ No real users exist yet, so no stored data needs correcting.
 
 1. **Pin the zone, change no bodies.** For each of the 42 functions,
    `ALTER FUNCTION ... SET timezone = 'UTC'`. For each of the 82 columns,
-   `ALTER COLUMN ... SET DEFAULT now()`.
+   `ALTER COLUMN ... SET DEFAULT now()`. One function also needs its argument default rewritten:
+   `fail_stale_import_jobs`' `p_stale_before` becomes `DEFAULT now() - interval '5 minutes'`,
+   a `CREATE OR REPLACE` that keeps the signature and changes only that default. The body is
+   copied from its latest definition and checked by the harness's md5 comparison.
    - Mechanical, and no function body is rewritten, so no copy of a function can drift from its
      latest definition. That has bitten this repo before; see #598.
    - Metadata-only: no table rewrite, no lock beyond a brief catalogue lock.
@@ -77,7 +83,8 @@ No real users exist yet, so no stored data needs correcting.
 - **CI guard:** a Vitest test (`tests/utcNowIdiom.test.js`) fails on any migration *after* this
   one that contains `timezone('utc', now())` without `::date`. A catalogue check in the migration
   harness fails if any public function with the idiom in its body lacks `timezone=UTC` in its
-  `proconfig`, or any column default contains it.
+  `proconfig`, or any column default or function argument default
+  (`pg_get_function_arguments`) contains it.
 - **Later:** when a function is next rewritten for its own reasons, replace the idiom with `now()`
   in that same change. There is no flag day for the bodies.
 
@@ -97,7 +104,8 @@ No real users exist yet, so no stored data needs correcting.
   - `trigger_set_timestamp`;
   - `set_team_coaches`' `ended_at`;
   - a `persist_practice_schedule` save;
-  - `fail_stale_import_jobs`' cutoff;
+  - `fail_stale_import_jobs`' cutoff, called **without** the argument under `+14` and `-12`, so
+    the default itself is what is tested;
   - one default.
 
   Plus the catalogue assertion that no function body with the idiom lacks the pin.

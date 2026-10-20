@@ -91,6 +91,7 @@
     "initialize_new_tenant(p_name text, p_slug text, p_timezone text, p_season_year integer) returns uuid",
     "is_org_admin(p_org_id uuid) returns boolean",
     "is_org_member(org_id uuid) returns boolean",
+    "link_my_coach_record() returns jsonb",
     "log_schema_change() returns trigger",
     "log_telemetry_event(p_org_id uuid, p_event_name text, p_payload jsonb) returns uuid",
     "mark_import_job_ready_to_apply(p_import_job_id uuid, p_import_type text, p_validation_errors jsonb) returns jsonb",

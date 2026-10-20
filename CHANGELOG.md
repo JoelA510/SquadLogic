@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Coach accounts are linked to their coach records.** `link_my_coach_record()` (migration `20261020040000`; Phase A2b of `docs/changes/2026-10-20-phase-a-privacy.md`) links a signed-in user to the coach row whose email matches their verified sign-in email, in an organization they belong to; idempotent, refuses a row linked to another account, audited as `coach.linked`. The app calls it once per signed-in user, so the coach-only pages (practice preferences, lighting overrides) find the coach's record.
+
 ### Changed
 
 - **Staff are admins** (owner decision 2026-10-20; Phase A2a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020030000`: `is_org_admin()` admits `staff`; the last-admin guards in `admin_remove_member` and `admin_change_member_role` count staff; the nine policies that test a role by name admit staff beside `admin` (revert and smoke in `docs/sql/`). The Edge Functions' `verifyOrgAdmin`, the frontend's permissions (`ADMIN_ROLES`), the navigation, the dashboard, the import panel, the settings audit log and the mock client follow. `tenant_admin` keeps exactly the access it had (RLS Q5, open).
@@ -17,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A profile's role and organization are no longer self-editable.** Migration `20261020040000` grants UPDATE on `profiles` for `first_name`, `last_name`, `full_name` and `avatar_url` only; before, a signed-in user could change their own `role` and `organization_id` through the table. `anon` loses UPDATE on `profiles`.
 - **Sensitive registration columns are dropped on the server too.** `import-validation` strips medical, condition, special-needs, emergency, financial and identity-document columns from player and coach imports before it validates, stages or returns a row (`supabase/functions/_shared/sensitive-headers.ts`); before, only the browser did, so a direct call stored them in `staging_players`. The rule now also covers "Conditions", "Special Needs" and snake_case headers such as `medical_info`, in both copies, held equal by `tests/sensitiveHeaderParity.test.js`.
 
 ## [1.1.0] - 2026-10-20

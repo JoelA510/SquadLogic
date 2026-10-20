@@ -4972,6 +4972,76 @@ export const mockSupabase = {
       return { data: true, error: null };
     }
 
+    if (name === 'link_my_coach_record') {
+      // As 20261020040000: link the caller to the coach row with their email,
+      // case-insensitively, in an organization they belong to. The mock has no
+      // unverified accounts, so the email check is the session's.
+      const session = storedSession ? JSON.parse(storedSession) : null;
+      if (!session?.user?.id) {
+        return {
+          data: null,
+          error: { message: 'link_my_coach_record requires a signed-in caller', code: '42501' },
+        };
+      }
+      const email = String(session?.user?.email || '')
+        .trim()
+        .toLowerCase();
+      if (!email) return { data: { status: 'email_not_verified' }, error: null };
+      const memberOrgs = new Set(
+        (db.organization_members || [])
+          .filter((m) => String(m.profile_id) === String(currentUserId))
+          .map((m) => String(m.organization_id))
+      );
+      // As the SQL: assignable coaches only; the caller's own row first, then
+      // an unlinked one, then the oldest.
+      const rank = (c) =>
+        String(c.user_id || '') === String(currentUserId) ? 0 : c.user_id ? 2 : 1;
+      const coach = (db.coaches || [])
+        .filter(
+          (c) =>
+            String(c.email || '')
+              .trim()
+              .toLowerCase() === email &&
+            ['active', 'pending-confirmation'].includes(c.status || 'active') &&
+            memberOrgs.has(String(c.organization_id))
+        )
+        .sort(
+          (a, b) =>
+            rank(a) - rank(b) ||
+            String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+            String(a.id).localeCompare(String(b.id))
+        )[0];
+      if (!coach) return { data: { status: 'no_match' }, error: null };
+      const result = (status) => ({
+        data: { status, coach_id: coach.id, organization_id: coach.organization_id },
+        error: null,
+      });
+      if (String(coach.user_id || '') === String(currentUserId)) return result('already_linked');
+      if (coach.user_id) return result('linked_to_another');
+      if ((db.coaches || []).some((c) => String(c.user_id || '') === String(currentUserId))) {
+        return result('caller_already_linked');
+      }
+      coach.user_id = currentUserId;
+      db.audit_log = db.audit_log || [];
+      db.audit_log.push({
+        id: mockId(),
+        organization_id: coach.organization_id,
+        user_id: currentUserId,
+        action: 'coach.linked',
+        resource_type: 'coaches',
+        resource_id: coach.id,
+        metadata: {
+          user_id: currentUserId,
+          matched_email: email,
+          coach_email: coach.email,
+          previous_user_id: null,
+        },
+        created_at: new Date().toISOString(),
+      });
+      saveDB(db);
+      return result('linked');
+    }
+
     if (name === 'get_settings_audit_log') {
       // As the RPC: is_org_admin() gates it.
       if (!isOrgAdmin(params?.p_organization_id)) {

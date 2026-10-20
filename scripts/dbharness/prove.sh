@@ -94,6 +94,9 @@ R30="$REPO/docs/sql/20261020020000_revert.sql"
 # A2a: staff are admins, and the revert.
 M31="$REPO/supabase/migrations/20261020030000_staff_is_admin.sql"
 R31="$REPO/docs/sql/20261020030000_revert.sql"
+# A2b: identity guards (link_my_coach_record, profile columns), and the revert.
+M32="$REPO/supabase/migrations/20261020040000_identity_guards.sql"
+R32="$REPO/docs/sql/20261020040000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3816,6 +3819,48 @@ plant "R31 the revert restores a drifted is_org_admin body" "$R31" \
     );" \
   "revert 20261020030000"
 
+# Identity guards. The smoke RAISEs on each; the revert claim on the function
+# left behind and on the grant not restored.
+plant "M32 an unverified email links" "$M32" \
+  "     WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL;" \
+  "     WHERE u.id = v_uid;" \
+  "smoke 20261020040000"
+
+plant "M32 a coach row in another organization links" "$M32" \
+  "       AND c.status IN ('active', 'pending-confirmation')
+       AND EXISTS (SELECT 1 FROM public.organization_members m
+                    WHERE m.organization_id = c.organization_id AND m.profile_id = v_uid)" \
+  "       AND c.status IN ('active', 'pending-confirmation')" \
+  "smoke 20261020040000"
+
+plant "M32 an interested lead links as a coach" "$M32" \
+  "       AND c.status IN ('active', 'pending-confirmation')
+       AND EXISTS" \
+  "       AND EXISTS" \
+  "smoke 20261020040000"
+
+plant "M32 a row linked to another account is taken over" "$M32" \
+  "    IF v_coach.user_id IS NOT NULL THEN
+        RETURN jsonb_build_object('status', 'linked_to_another'" \
+  "    IF false THEN
+        RETURN jsonb_build_object('status', 'linked_to_another'" \
+  "smoke 20261020040000"
+
+plant "M32 profiles role stays self-editable" "$M32" \
+  "REVOKE UPDATE ON public.profiles FROM anon, authenticated;" \
+  "REVOKE UPDATE ON public.profiles FROM anon;" \
+  "smoke 20261020040000"
+
+plant "R32 the revert leaves link_my_coach_record" "$R32" \
+  "DROP FUNCTION IF EXISTS public.link_my_coach_record();" \
+  "" \
+  "revert 20261020040000"
+
+plant "R32 the revert does not restore the profiles grant" "$R32" \
+  "GRANT UPDATE ON public.profiles TO anon, authenticated;" \
+  "GRANT UPDATE ON public.profiles TO anon;" \
+  "revert 20261020040000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3949,6 +3994,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the persist_evaluation_run revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and drops the idempotency index and column"]="R29 the revert restores a drifted persist_evaluation_run body|R29 the revert leaves the idempotency column behind"
   ["(checked) the finalize_import_job revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and both medical columns"]="R30 the revert restores a drifted finalize_import_job body|R30 the revert leaves emergency_contacts out"
   ["(checked) the staff-is-admin revert restores the three functions' pre-change bodies byte for byte, SECURITY DEFINER with search_path=public, and leaves no policy naming staff"]="R31 the revert restores a drifted is_org_admin body|R31 the revert leaves the audit_log policy naming staff"
+  ["(checked) the identity revert drops link_my_coach_record and restores the table-level UPDATE grant on profiles to anon and authenticated"]="R32 the revert leaves link_my_coach_record|R32 the revert does not restore the profiles grant"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

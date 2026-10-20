@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2393,6 +2393,21 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the staff-is-admin revert did not restore the three functions, or left a policy naming staff"
         dump 10 $SCRATCH/harness_staff_admin; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261020040000" ]; then
+      # The function gone and the table-level UPDATE grant back, read from the
+      # catalogue. `table-grant-missing` names the half that did not come back.
+      if psql_cmd "SELECT 'IDENTITY-VERDICT:' || CASE
+               WHEN to_regprocedure('public.link_my_coach_record()') IS NOT NULL THEN 'function-left'
+               WHEN NOT has_table_privilege('authenticated', 'public.profiles', 'UPDATE')
+                 OR NOT has_table_privilege('anon', 'public.profiles', 'UPDATE') THEN 'table-grant-missing'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_identity 2>&1 && grep -q 'IDENTITY-VERDICT:restored' $SCRATCH/harness_identity; then
+        echo "  | (checked) the identity revert drops link_my_coach_record and restores the table-level UPDATE grant on profiles to anon and authenticated"
+      else
+        echo "FAIL revert ${id}: the identity revert left link_my_coach_record or did not restore the profiles UPDATE grant"
+        dump 10 $SCRATCH/harness_identity; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

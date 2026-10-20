@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from './AuthContext.jsx';
 import { ROLE_PERMISSIONS } from '../constants/permissions.js';
@@ -49,8 +57,27 @@ const OrganizationContext = createContext({});
  */
 export const useOrganization = () => useContext(OrganizationContext);
 
+/** Links the caller to their coach record; never rejects (failures are logged). */
+async function linkCoachRecord() {
+  try {
+    const { data, error } = await supabase.rpc('link_my_coach_record');
+    if (error) throw error;
+    if (data?.status && !['linked', 'already_linked', 'no_match'].includes(data.status)) {
+      logger.warn('Coach record not linked', {
+        status: data.status,
+        coachId: data.coach_id ?? null,
+      });
+    }
+  } catch (err) {
+    // An RPC error or a transport failure: the account stays unlinked.
+    logger.error('Could not link this account to its coach record', err);
+  }
+}
+
 export const OrganizationProvider = ({ children }) => {
   const { user } = useAuth();
+  // The link_my_coach_record call for the current user and refetch (see fetchOrgs).
+  const linkCall = useRef(/** @type {{ key: string, done: Promise<void> } | null} */ (null));
   const [organizations, setOrganizations] = useState([]);
   const [currentOrganization, setCurrentOrganization] = useState(null);
   const [orgMember, setOrgMember] = useState(null);
@@ -146,6 +173,20 @@ export const OrganizationProvider = ({ children }) => {
     const fetchOrgs = async () => {
       setLoading(true);
       setFetchError(null);
+      // Link a signed-in coach's account to their coach row first
+      // (20261020040000), so the coach pages that read coaches.user_id after
+      // the organization loads find it. One call per user and per refetch (a
+      // redeemed invite refetches, and may make a new match); a restarted
+      // effect for the same key awaits the call already in flight rather than
+      // starting a second or skipping it. Best effort: a failure leaves the
+      // account unlinked, which those pages already handle, so it is logged
+      // with its context, not shown.
+      const linkKey = `${user.id}:${refetchTick}`;
+      if (linkCall.current?.key !== linkKey) {
+        linkCall.current = { key: linkKey, done: linkCoachRecord() };
+      }
+      await linkCall.current.done;
+      if (cancelled) return;
       try {
         const { data, error } = await supabase
           .from('organization_members')

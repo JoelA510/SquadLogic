@@ -134,10 +134,13 @@ describe('OrganizationContext', () => {
       order.push('link-start');
       throw new Error('network down');
     });
-    /** @type {() => void} */
-    let refetch = () => {};
+    // The provider's refetchOrgs, handed out from an effect (not during render).
+    const probe = { refetch: () => {} };
     function Probe() {
-      refetch = useOrganization().refetchOrgs;
+      const { refetchOrgs } = useOrganization();
+      React.useEffect(() => {
+        probe.refetch = refetchOrgs;
+      }, [refetchOrgs]);
       return null;
     }
     mocks.user = { id: 'user-1' };
@@ -152,7 +155,7 @@ describe('OrganizationContext', () => {
       expect.any(Error)
     );
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
-    act(() => refetch());
+    act(() => probe.refetch());
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledTimes(2));
   });
 });

@@ -688,17 +688,25 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       },
     ];
 
-    const { data: runId, error: persistError } = await supabase.rpc('persist_evaluation_run', {
+    // As the caller: the RPC refuses anyone who is not a member of the organization by
+    // `auth.uid()`, and the service-role client has none, so it could never succeed.
+    const { data: runId, error: persistError } = await createUserClient(
+      req,
+      supabaseUrl,
+      anonKey
+    ).rpc('persist_evaluation_run', {
       p_run_data: runData,
       p_findings: [...findings, ...daylightFindings],
       p_metrics: metrics,
     });
 
     // A run whose record did not save fails, as fairness-scoring's does: the catch below logs it
-    // with the request id and audits `scheduler.auto_failed`, rather than auditing a completed run
-    // whose `resourceId` names no row.
+    // with the request id (and the PostgREST code) and audits `scheduler.auto_failed`, rather
+    // than auditing a completed run whose `resourceId` names no row.
     if (persistError) {
-      throw new Error(`Persistence failed: ${persistError.message}`);
+      throw Object.assign(new Error(`Persistence failed: ${persistError.message}`), {
+        code: persistError.code,
+      });
     }
 
     // 11. Audit: scheduler completed

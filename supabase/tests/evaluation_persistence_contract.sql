@@ -5,7 +5,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(7);
+SELECT plan(8);
 
 SELECT ok(
     to_regprocedure('public.persist_evaluation_run(uuid,text,jsonb,integer)') IS NULL,
@@ -106,6 +106,20 @@ SELECT is(
     )::int,
     1,
     'current JSONB overload stores evaluation metrics'
+);
+
+-- The Edge functions' service-role client carries no auth.uid(), so the membership check
+-- refuses it: auto-scheduler and fairness-scoring must call this RPC as the caller (#621).
+SET LOCAL role = 'service_role';
+SET LOCAL "request.jwt.claims" TO '{"role":"service_role"}';
+SELECT throws_like(
+    $$ SELECT public.persist_evaluation_run(
+         jsonb_build_object('organization_id', 'a1111111-1111-1111-1111-111111111111'),
+         '[]'::jsonb,
+         '[]'::jsonb
+       ) $$,
+    'Not authorized%',
+    'the service role (no auth.uid()) is refused: callers must persist as the user'
 );
 
 SELECT * FROM finish();

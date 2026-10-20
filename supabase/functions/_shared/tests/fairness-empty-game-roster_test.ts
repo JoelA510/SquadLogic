@@ -138,7 +138,7 @@ Deno.test('fairness-scoring refuses with a 422 before reading, evaluating or per
   for (const later of [
     'await readSeasonTimezone(',
     'evaluateGameSchedule({',
-    "supabase.rpc('persist_evaluation_run'",
+    ".rpc('persist_evaluation_run'",
     'await recordAuditNow(',
   ]) {
     assert(respond < at(later), `the 422 must come before ${later}`);

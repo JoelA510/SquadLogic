@@ -302,14 +302,18 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
         });
       }
 
-      const { data: id, error: persistError } = await supabase.rpc('persist_evaluation_run', {
+      // As the caller: the RPC refuses anyone who is not a member of the organization by
+      // `auth.uid()`, and the service-role client has none, so it could never succeed.
+      const { data: id, error: persistError } = await auditClient.rpc('persist_evaluation_run', {
         p_run_data: runData,
         p_findings: findings,
         p_metrics: metrics,
       });
 
       if (persistError) {
-        throw new Error(`Persistence failed: ${persistError.message}`);
+        throw Object.assign(new Error(`Persistence failed: ${persistError.message}`), {
+          code: persistError.code,
+        });
       }
       runId = id;
 

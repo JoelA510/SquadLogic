@@ -1761,7 +1761,12 @@ smoke deferred to the owner's v1.1.0 release smoke)
       re-renders on every keystroke (the field form) no longer pulls focus back to the first
       control. Not fixed here: the field form's "Sub-fields" and "Status" toggles are
       `display: none` checkboxes, so a keyboard cannot reach them (WCAG 2.1.1; a scan cannot see
-      it either). *Statically reviewed*; its own item.
+      it either). *Statically reviewed*; its own item. **Fixed 2026-10-19** (branch
+      `claude/vibrant-allen-hr7y7s-field-toggles`): both are the shared `Toggle` (a
+      `<button role="switch">`, in the tab order, `aria-checked`). `FieldManagementPage.test.jsx`
+      finds both switches, focuses them and saves their state, and fails on the old page; the
+      facility E2E steps now set them by focusing the switch and pressing Space, and all four
+      facility scenarios fail on the old page. *Executed.*
     - Still unscanned, with reason (all *statically reviewed*): `PracticeEnactDialog` (opens from
       the practice repair panel, which needs a repair plan) and `RetireEstateNodeDialog` (opens
       from `/fields` on a retirable estate node) each need seeded state of their own;

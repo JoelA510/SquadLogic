@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import FieldManagementPage from '../frontend/src/pages/FieldManagementPage.jsx';
 
 vi.mock('../frontend/src/hooks/useFields.js', () => ({ useFields: vi.fn() }));
@@ -431,6 +431,41 @@ describe('FieldManagementPage field dialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('offers Sub-fields and Status as focusable switches whose state reaches the save (WCAG 2.1.1)', async () => {
+    render(<FieldManagementPage />);
+    fireEvent.click(screen.getByRole('button', { name: /edit north field|edit field/i }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit Field' });
+
+    // Each was a `display: none` checkbox inside a label: no tab stop, nothing a keyboard
+    // or a screen reader could reach. A <button role="switch"> is in the tab order.
+    const halves = within(dialog).getByRole('switch', { name: 'Sub-fields' });
+    const status = within(dialog).getByRole('switch', { name: 'Status' });
+    for (const control of [halves, status]) {
+      expect(control.tagName).toBe('BUTTON');
+      expect(control).toBeVisible();
+      expect(control).not.toHaveAttribute('tabindex', '-1');
+      control.focus();
+      expect(document.activeElement).toBe(control);
+    }
+    expect(halves).toHaveAttribute('aria-checked', 'false');
+    expect(status).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(halves);
+    fireEvent.click(status);
+    expect(halves).toHaveAttribute('aria-checked', 'true');
+    expect(status).toHaveAttribute('aria-checked', 'false');
+    expect(within(dialog).getByText('A/B Halves')).toBeInTheDocument();
+    expect(within(dialog).getByText('Inactive')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /save field/i }));
+    await waitFor(() =>
+      expect(baseHook.updateField).toHaveBeenCalledWith(
+        'field-1',
+        expect.objectContaining({ supports_halves: true, active: false })
+      )
+    );
   });
 
   it('names the dialog "Edit Field" when a field is edited', () => {

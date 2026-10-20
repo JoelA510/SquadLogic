@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Button from '../components/ui/Button.jsx';
 import Modal from '../components/ui/Modal.jsx';
+import Toggle from '../components/ui/Toggle.jsx';
 import { MapPin, Plus, Edit2, Trash2, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
 import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
@@ -887,49 +888,33 @@ export default function FieldManagementPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-4 mt-2 p-3 bg-bg-surface border border-border-subtle rounded-lg">
-              <label className="flex flex-col gap-2 cursor-pointer">
+              <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium text-text-primary">Sub-fields</span>
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.supports_halves ? 'bg-brand-500' : 'bg-bg-app border border-border-subtle'}`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transition-transform ${formData.supports_halves ? 'translate-x-6' : 'translate-x-0'}`}
-                    />
-                  </div>
+                  <Toggle
+                    label="Sub-fields"
+                    checked={formData.supports_halves}
+                    onChange={(next) => setFormData({ ...formData, supports_halves: next })}
+                  />
                   <span className="text-xs text-text-secondary">
                     {formData.supports_halves ? 'A/B Halves' : 'Full Field Only'}
                   </span>
                 </div>
-                <input
-                  type="checkbox"
-                  className="hidden"
-                  checked={formData.supports_halves}
-                  onChange={(e) => setFormData({ ...formData, supports_halves: e.target.checked })}
-                />
-              </label>
+              </div>
 
-              <label className="flex flex-col gap-2 cursor-pointer">
+              <div className="flex flex-col gap-2">
                 <span className="text-sm font-medium text-text-primary">Status</span>
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.active ? 'bg-green-500' : 'bg-bg-app border border-border-subtle'}`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transition-transform ${formData.active ? 'translate-x-6' : 'translate-x-0'}`}
-                    />
-                  </div>
+                  <Toggle
+                    label="Status"
+                    checked={formData.active}
+                    onChange={(next) => setFormData({ ...formData, active: next })}
+                  />
                   <span className="text-xs text-text-secondary">
                     {formData.active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
-                <input
-                  type="checkbox"
-                  className="hidden"
-                  checked={formData.active}
-                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                />
-              </label>
+              </div>
             </div>
           </div>
         </Modal>

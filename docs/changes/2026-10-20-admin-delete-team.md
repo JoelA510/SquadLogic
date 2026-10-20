@@ -76,12 +76,23 @@ unchanged):
    The `event_type` filter matters: `reference_id` also holds practice-assignment ids, and the two
    tables' ids are not disjoint by construction. The pgTAP includes a practice RSVP whose
    `reference_id` equals a deleted game's id, and asserts it survives.
+
+   Deleting the rows visible now is not enough: `upsert_team_event_rsvp` checks the game with a
+   plain `SELECT` before inserting, and nothing references the game by foreign key. An opposing
+   guardian's RSVP could commit after this step and keep the deleted game's id. So this step locks
+   the captured `games` rows `FOR UPDATE` first, and the RSVP writer takes `FOR SHARE` on the game
+   it validates. The RSVP then either waits and finds the game gone (and is refused), or commits
+   first and is deleted here. The plan changes `upsert_team_event_rsvp` for that, and a two-session
+   test covers it.
 4. `DELETE FROM teams` as today; the cascade now has nothing to stop it.
 5. `team.deleted`'s metadata records everything the delete takes with it, not only the name and
    division it records today. The counts are taken before the delete, in the same transaction:
    - a count for each table the cascade empties: `practice_assignments_deleted`,
      `game_assignments_deleted`, `team_players_deleted`, `event_rsvps_deleted`,
      `team_messages_deleted` and `team_coach_assignments_deleted` (coaching history included);
+   - `player_ids_unassigned`: the players whose `players.team_id` the `team_players` cascade
+     clears through the `sync_player_team_id` trigger (`20260611000400`), captured before the
+     delete;
    - `games_deleted`, as a count and the ids, since each deleted game also removes a fixture from
      another team's schedule;
    - `withdrawn_exception_ids` and `archived_exceptions`.
@@ -113,13 +124,17 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
     rostered player, an RSVP, a message, a past coach assignment, and a game against another
     team (which is gone, and named in `games_deleted`);
   - the opposing team's RSVP to that game is gone too, and counted;
+  - the rostered player is named in `player_ids_unassigned` and their `team_id` is null;
   - the run's `archived_exceptions` holds both rows.
 
   Plus a control: a non-admin is refused and nothing changes.
 - **Plant:** run the same file against the old function body. It must fail with 23503.
-- Mock client (`mockSupabaseClient.js` `admin_delete_team`): also tombstone the team's
-  `practice_exceptions`, so the mock cannot pass a delete the real RPC refuses. The existing
-  `tests/mockDeleteTombstones.test.js` gains the exceptions table.
+- Mock client (`mockSupabaseClient.js` `admin_delete_team`): today it removes only
+  `team_players`, `game_assignments` and `practice_assignments`. It is extended to every cascade
+  the real RPC performs: `practice_exceptions`, `games` on either side, both teams' game RSVPs,
+  `team_messages` and `team_coach_assignments`. That way mock and E2E state never shows a deleted
+  team's dependants. `tests/mockDeleteTombstones.test.js` gains each table, enumerated from the
+  same foreign-key walk as the pgTAP and not typed by hand.
 - E2E: none new (the delete flow has no scenario today; the pgTAP is the proof).
 - `docs/sql/<version>_revert.sql` restores the 20260613000003 body; `_smoke.sql` calls it on a
   seeded team with an exception. Catalogue snapshot regenerated; migration harness run.

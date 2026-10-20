@@ -41,8 +41,13 @@ privileges, not by what the pages happen to select.
   Everyone else sees no player rows. "Coach of the team" always means a **live** assignment:
   `team_coach_assignments` keeps ended rows on purpose (`effective_to`), so every coach check in
   this change (the policy, `get_player_detail`, the calendar link, `update_game_score`) uses one
-  shared predicate, `effective_from <= current_date AND (effective_to IS NULL OR effective_to >=
-  current_date)`, never a bare `EXISTS`.
+  shared predicate, never a bare `EXISTS`: `effective_from <= d AND (effective_to IS NULL OR
+  effective_to >= d)`, where `d` is today's date in a zone the caller cannot set. `current_date`
+  will not do, because it follows the session time zone, which a PostgREST caller sets with
+  `Prefer: timezone=` (see the companion UTC plan). So `d` is `(now() AT TIME ZONE tz)::date`,
+  with `tz` the team's season timezone, or `'UTC'` when that is unset, in one `STABLE` helper,
+  `coach_assignment_live(assignment, team)`. pgTAP runs the ended-yesterday case under `+14` and
+  `-12`.
 - **`players`, columns:** revoke table-level SELECT from `authenticated` and grant it back column by
   column. The columns every row-holder may read are the roster columns (name, team, division, the
   eligibility fields). Sensitive columns (`medical_info`, `guardian_contacts`, `contact_info`,
@@ -54,10 +59,14 @@ privileges, not by what the pages happen to select.
   `EnterpriseDashboard`, the mock client), each to an explicit column list or the RPC.
 - **`coaches`:** the same split. Members read name and team only, through a `SECURITY DEFINER`
   read like `get_organization_members`; full rows go to admins. Two pages read the `coaches` table
-  to find the signed-in user's own coach row: `CoachPreferenceRequests.jsx:139` and
-  `usePracticeLightingOverrides.js:248` (coach-scoped by `user_id`). They move to a narrow
+  to find the signed-in user's own coach row: `CoachPreferenceRequests.jsx:139`,
+  `usePracticeLightingOverrides.js:248` (coach-scoped by `user_id`), and `DashboardPage.jsx:589-605`
+  (matches on `user_id`, `profile_id` or email, then loads the coach's team card). They move to a
+  narrow
   self-identity read, `get_my_coach_identity(org_id)` returning `{ id, full_name }`, so a coach
-  is not locked out of their own preferences and lighting screens. A third reads another coach:
+  is not locked out of their own preferences, lighting screens or dashboard. Each of the three gets
+  a test under the reduced grants. The plan also re-runs the search for `from('coaches')` and lists
+  any other caller. A fourth reads another coach:
   `TeamRecordPage.jsx:115` loads the team's coach with `coaches.select('*')` for the Staff tab
   (name, email, phone, status). It moves to a team-scoped contact read,
   `get_team_staff(team_id)`. It is open to org admins and staff, the team's live coaches, and
@@ -163,7 +172,8 @@ with no coach anchors and no error.
 - **Check the `coach_team_requests` error** and throw it.
 - **Turn the pipeline failure into a visible error that stops generation**, instead of the
   `console.warn` and raw-roster fallback.
-- Show the unplaced players and their reasons on the Teams page.
+- Show the unplaced players and their reasons on the Teams page, with a page test that generates
+  a blocked player and asserts the player and their `reviewReason` are visible.
 - **Tests:**
   - a core test where one blocked player lands in `unplacedPlayers` with its reason and on no
     team, and fails against today's generator;
@@ -187,7 +197,9 @@ home games but nothing warns.
 - Use the standard circle-method rule instead of sorting: alternate home and away by round, and
   flip the fixed team's side every round. That gives every team a home count within one of every
   other's.
-- Add a `gameMetrics` warning when two teams' home counts differ by more than one.
+- Add a `gameMetrics` warning when two teams' home counts differ by more than one, tested directly
+  through `evaluateGameSchedule`: an imbalanced schedule warns (and fails against today's code,
+  which never warns), and a balanced one does not.
 - **Direct generator tests.** The season-2026 fixture does not call `generateRoundRobinWeeks`
   (it is used only by `GameSchedulingPage`), so re-running it proves nothing here. New tests in
   `tests/gameScheduling.test.js` generate a 4-team and a 5-team round robin and assert every
@@ -204,11 +216,17 @@ row (migrations `20260416000001` and its `20260913000000` redefinition). Season 
 
 **Recommendation.** Build an `admin_create_season(p_from_season_id, p_patch)` RPC. It copies
 season-keyed settings into a **draft** season, and nothing becomes active until the admin
-confirms. It copies:
+confirms. It writes a `season.created` audit row in the same transaction, naming the source and
+new season ids and what it copied (division and form ids, old to new). A test makes one copy step
+fail and asserts that neither the season, its copies nor the audit row exist. It copies:
 - the season's `timezone`, or takes it from `p_patch`. A season with no timezone makes every
   timed slot TIME TBD on the scheduling pages, so activation refuses a season without one. A test
   activates a rolled-over season and places a game and a practice slot;
-- division bounds;
+- every division with its whole configuration, not only its age bounds: `gender_policy`, format,
+  `min_roster_size`, `max_roster_size`, `target_team_size`, `team_count_override`, `min_teams`
+  and `max_teams` (`TeamAnalysisPage.jsx:188-193` reads them when it generates teams). The plan
+  lists the columns from the catalogue and copies every one except the season link and the
+  dates. A test compares source and copy column by column;
 - registration forms, each with its `division_id` mapped to the matching newly created division
   (a form with no division stays organization-wide). Each form starts as `draft` whatever its
   source status was. `submit_registration` accepts any `open` form regardless of its season's
@@ -249,10 +267,15 @@ is active and asserts where the divisions and players land.
 
    The invariant is enforced in the database, not only in readers: a partial unique index on
    `season_settings (organization_id) WHERE status = 'active'`, and activation only through an
-   audited `admin_activate_season` RPC. That RPC completes the previous active season and
-   activates the draft in one transaction, with the organization's season rows locked. Tests:
-   activating with a previous active season leaves exactly one; two concurrent activations leave
-   one active and refuse the other.
+   audited `admin_activate_season(p_season_id, p_expected_active_id)` RPC. It locks the
+   organization's season rows and refuses with `40001` unless the active season is still
+   `p_expected_active_id` (null meaning none), so of two admins activating different drafts the
+   second is refused instead of silently completing the first's choice. It also refuses a draft
+   without a timezone, without both `season_start` and `season_end`, or with the end before the
+   start, in the RPC and not only on the page. It then completes the previous active season and
+   activates the draft in one transaction. Tests: each refusal; activating with a previous active
+   season leaves exactly one; two concurrent activations with the same expected season leave one
+   active and refuse the other with `40001`.
 3. Should blackouts recur (for example, a fixed holiday each year)? *Recommended: not in the
    rollover change.* Admins re-enter next season's blackouts, as they enter season dates. A
    recurrence model, if wanted, is its own plan.

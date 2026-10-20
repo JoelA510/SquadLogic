@@ -2,18 +2,23 @@
 
 Status: **recommendations, for owner decision**. Requested by the owner 2026-10-20. Source: the
 Zuluru3 research report (2026-10-19), section 1.1, items 1-5. Each was re-checked on `main` at
-`4459faf` (v1.1.0) and, where it is a database fact, on production read-only (2026-10-20). Every
-fix touches persistence, the domain model or the solver, so each needs its own plan before it is
-built (AGENTS.md rule 14). This file chooses the order and the shape; the plans come next.
+`4459faf` (v1.1.0) and, where it is a database fact, on production read-only (2026-10-20).
+
+**What this document is, and is not.** It recommends what to do about each defect, in what order,
+and what you need to decide. It is not the design. Every fix touches persistence, the domain
+model or the solver, so each gets its own plan, written after your decisions and approved before
+it is built (AGENTS.md rule 14). Function names, signatures, error codes and locking belong in
+those plans. What this document carries forward is a list, per item, of the requirements that plan
+must meet. Each requirement is a fact found in review that a plan could otherwise miss.
 
 ## Summary
 
-| # | Defect | Still true? | Severity | Recommended next step | Size |
+| # | Defect | Still true? | Severity | Next step | Size |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Any org member reads every player's full record (medical, guardian, DOB) and every team's calendar token | Yes (production policies and grants read 2026-10-20) | **High**: privacy, AGENTS.md data rules | Plan now; build before any real users | Medium |
-| 2 | Any coach or staff member in the organization can set any game's score | Yes (`update_game_score` role list, migration `20260504010000`) | Medium: integrity | Plan with 1; small build | Small |
-| 3 | Team generation ignores the eligibility review it computes, and swallows two failures | Yes (`TeamAnalysisPage.jsx:806-812`) | Medium: wrong rosters, silently | Plan after 1-2 | Medium |
-| 4 | Home and away are decided by team id | Yes (`gameScheduling.js:58-59`, pair sorted, smaller id home) | Low-medium: fairness | Plan after 3; direct generator tests | Small |
+| 1 | Any org member reads every player's full record (medical, guardian, DOB) and every team's calendar token | Yes (production policies and grants read 2026-10-20) | **High**: privacy, AGENTS.md data rules | Plan now; build before any real users | Large |
+| 2 | Any coach or staff member in the organization can set any game's score | Yes (`update_game_score` role list, migration `20260504010000`) | Medium: integrity | Plan with 1 | Small |
+| 3 | Team generation ignores the eligibility review it computes, and swallows two failures | Yes (`TeamAnalysisPage.jsx:776`, `806-835`) | Medium: wrong rosters, silently | Plan after 1-2 | Medium |
+| 4 | Home and away are decided by team id | Yes (`gameScheduling.js:58`) | Low-medium: fairness | Plan after 3 | Small |
 | 5 | No way to create a second season | Yes (only `initialize_new_tenant` inserts `season_settings`) | Medium, **dated**: blocks spring 2027 | Plan after 1; build before the next season opens | Large |
 
 **Recommended order:** 1 and 2 (one plan, both authorization), then 3, then 4. Plan 5 in
@@ -23,302 +28,178 @@ parallel, because it has a calendar deadline rather than a severity.
 
 **Re-checked, *executed*.** On production, `players_select_member`, `Coaches: members access` and
 `Teams: members access` are each `is_org_member(organization_id)` for `authenticated`, which also
-holds table-level SELECT. So any member, including a parent, reads every player's
-`medical_info`, `guardian_contacts`, `contact_info` and `date_of_birth`, and every team's
-`calendar_token` (the credential to that team's ICS feed), through the REST API.
+holds table-level SELECT. Any member, a parent included, reads every player's `medical_info`,
+`guardian_contacts`, `contact_info` and `date_of_birth`, and every team's `calendar_token` (the
+credential to its calendar feed), through the REST API. No page shows the data, but the API
+serves it. With no real users yet, this is the cheapest it will ever be to fix.
 
-**Why it matters.** It breaks AGENTS.md's data-minimisation and RLS rules. No page shows the data,
-but the API serves it. There are no real users yet, so this is the cheapest it will ever be to
-fix.
+**Recommendation.** Restrict both rows and columns, and give each page the narrow read it actually
+needs. Players are readable by admins and staff, the team's current coaches, and the player's own
+guardians. Sensitive columns and the calendar token come only through server-side reads that check
+who is asking. Coaches see a name-and-team list of other coaches; contact details only reach the
+people on that team.
 
-**Recommendation: restrict rows and columns, then add the narrow reads pages need.** RLS
-filters rows, never columns: a policy that lets a coach read a player row hands over every column
-of it. So each table needs both a row rule and a column rule, and the column rule is enforced by
-privileges, not by what the pages happen to select.
-
-- **`players`, rows:** SELECT for org admins and staff, for the coaches of the player's current
-  team (through `team_coach_assignments`), and for guardians linked through `profile_players`.
-  Everyone else sees no player rows. "Coach of the team" always means a **live** assignment:
-  `team_coach_assignments` keeps ended rows on purpose (`effective_to`), so every coach check in
-  this change (the policy, `get_player_detail`, the calendar link, `update_game_score`) uses one
-  shared predicate, never a bare `EXISTS`: `effective_from <= d AND (effective_to IS NULL OR
-  effective_to >= d)`, where `d` is today's date in a zone the caller cannot set. `current_date`
-  will not do, because it follows the session time zone, which a PostgREST caller sets with
-  `Prefer: timezone=` (see the companion UTC plan). So `d` is `(now() AT TIME ZONE tz)::date`,
-  with `tz` the team's season timezone, or `'UTC'` when that is unset, in one `STABLE` helper,
-  `coach_assignment_live(assignment, team)`. pgTAP runs the ended-yesterday case under `+14` and
-  `-12`. The helper, and the "is the caller a live coach of this team" lookup the policies use,
-  must be `SECURITY DEFINER` with a pinned `search_path`. Mapping `auth.uid()` to a coach reads
-  `coaches`, which this change makes admin-only, so an invoker-rights lookup would find no coach
-  and lock every live coach out of their own players. The same applies to the security-invoker view
-  `coach_team_map`, which older policies read: the plan lists every policy and view that joins
-  `coaches` and moves each one to the definer helper. pgTAP adds the positive case: a live coach
-  reads their own players' roster columns and gets their detail from `get_player_detail`.
-- **`players`, columns:** revoke table-level SELECT from `authenticated` and grant it back column by
-  column. The columns every row-holder may read are the roster columns (name, team, division, the
-  eligibility fields). Sensitive columns (`medical_info`, `guardian_contacts`, `contact_info`,
-  `date_of_birth`, `emergency_contacts`, `registration_history`, notes, location coordinates, flags:
-  every column not on the roster list) are read only through a `SECURITY DEFINER` RPC,
-  `get_player_detail(player_id)`, which applies decisions 1.1 to 1.4 per column. A column revoke
-  breaks every `select('*')` on the table, and any explicit select of a revoked column, for admins
-  too. So the plan must list and migrate each one (`usePlayersData`, `DashboardPage`,
-  `PlayerRecordPage`, `CoachesPage`, `TeamAnalysisPage`, `EnterpriseDashboard`, the mock client),
-  each to an explicit column list or the RPC. Explicit selects found so far that name a column
-  off the roster list: `ImportContext.jsx:173` (`external_registration_id`, so an admin's import
-  would fail with 42501), `useCoedTransition.js:37` (`gender`), `DashboardPage.jsx:706` and
-  `TeamAnalysisPage.jsx:669/676`. The roster list is decided against every caller, so a column an
-  operational path needs (`external_registration_id`, `gender`) either joins the list or its
-  caller moves to a definer RPC. The inventory comes from a search of every `from('players')` and
-  every view over `players`. Security-invoker views over `players` change meaning under the new
-  row rules: `view_org_metrics`, which `EnterpriseDashboard` reads, would return per-viewer totals,
-  so each one becomes a definer function with its own authorization, or is documented as
-  per-viewer. Each migrated caller gets a test under the reduced grants.
-- **`coaches`:** the same split. Members read name and team only, through a `SECURITY DEFINER`
-  read like `get_organization_members`; full rows go to admins. Two pages read the `coaches` table
-  to find the signed-in user's own coach row: `CoachPreferenceRequests.jsx:139`,
-  `usePracticeLightingOverrides.js:248` (coach-scoped by `user_id`), and `DashboardPage.jsx:589-605`
-  (matches on `user_id`, `profile_id` or email, then loads the coach's team card). They move to a
-  narrow
-  self-identity read, `get_my_coach_identity(org_id)` returning `{ id, full_name }`, so a coach
-  is not locked out of their own preferences, lighting screens or dashboard. Each of the three gets
-  a test under the reduced grants. The plan also re-runs the search for `from('coaches')` and lists
-  any other caller. A fourth reads another coach:
-  `TeamRecordPage.jsx:115` loads the team's coach with `coaches.select('*')` for the Staff tab
-  (name, email, phone, status). It moves to a team-scoped contact read,
-  `get_team_staff(team_id)`. It is open to org admins and staff, the team's live coaches, and
-  guardians of players on the team. That is not "anyone who can see the team": `/team/:teamId` is
-  unguarded (`App.jsx:332`) and every member reads every team. Which contact fields it returns is
-  decision 1.5. Tests: the page under the reduced grants, and an unrelated member (a parent of
-  another team) refused.
-- **Definer RPCs that return a whole player row.** A `SECURITY DEFINER` function is not bound by
-  the column grants. `coach_update_player_compliance` (`20260611000100:415`) authorizes a lead
-  coach and `RETURNS public.players`, so a coach could send the current compliance value and get
-  back every sensitive column. It is narrowed to return the roster columns and the compliance
-  fields it changed. The plan lists every function in `public` that returns `players` or
-  `setof players` (two admin RPCs in the same migration do too; admins may read everything, so
-  they stay) and tests the coach RPC's return shape.
-- **`teams.calendar_token`:** move it out of the member-readable row (column revoke, as above).
-  Expose it through an RPC, `get_team_calendar_link(team_id)`, for admins, the team's coaches, and
-  guardians of players on the team. Those are the people the portal's Calendar Subscription
-  dialog serves. A column revoke fails the whole of any `select('*')` on `teams`, for admins too,
-  so every wildcard read of `teams` is migrated to an explicit column list in the same change:
-  `useTeamPortal`'s `PORTAL_TEAM_SELECT` (`*` plus embeds), `DashboardPage.jsx:79`,
-  `PlayerRecordPage.jsx:69`, `TeamBuilderPage`, and any other the plan's search finds. Each page
-  gets a test under the reduced grant, and the calendar dialog reads the link through the RPC.
-- **`rotate_calendar_token`:** it is `SECURITY DEFINER`, authorizes any `is_org_member` caller,
-  and returns the new token (`20260324000002`, the only definition; *statically reviewed*). Left
-  alone it is a second path to every team's feed: any parent can rotate a team's token and read
-  the new one, which also breaks the subscriptions of the team's real families. It gets the same
-  authorization as `get_team_calendar_link`, with admins and the team's coaches allowed to
-  rotate and guardians not, and refuses with `42501` instead of returning a status object.
-  `TeamRecordPage.jsx:630` and the mock client follow.
-- **Tests:** `rls_policy_matrix.sql` encodes whole-row reads as expected (`:696-704`). Its rows
-  change to the new expectations, and the old policies must fail them, shown red before merge.
-  New pgTAP proves the column rule, not just the row rule:
-  - a coach of the player's team can read the roster columns but gets `42501` selecting
-    `medical_info`, `emergency_contacts` or `registration_history` directly;
-  - a coach whose assignment ended yesterday reads no player row of that team and gets nothing
-    from `get_player_detail`;
-  - `get_player_detail` returns or withholds each sensitive column per decisions 1.1 to 1.4;
-  - a parent, and a coach of another team, cannot read `calendar_token` or rotate it;
-  - `get_my_coach_identity` returns only the caller's own row.
-- **`docs/security/rls-policies.md`:** corrected.
+**The plan must cover:**
+1. RLS filters rows, not columns. The column rule is enforced with privileges, and a column revoke
+   fails every `select('*')` and every explicit select of a revoked column, for admins too. Every
+   reader of `players`, `coaches` and `teams` is inventoried by search and migrated, each with a
+   test under the reduced grants. Readers known so far:
+   - `players`: `usePlayersData`, `DashboardPage` (`:706`), `PlayerRecordPage`, `CoachesPage`,
+     `TeamAnalysisPage` (`:669/676`), `EnterpriseDashboard`, `ImportContext.jsx:173`
+     (`external_registration_id`), `useCoedTransition.js:37` (`gender`), the mock client;
+   - `teams`: `useTeamPortal`'s `PORTAL_TEAM_SELECT`, `DashboardPage.jsx:79`,
+     `PlayerRecordPage.jsx:69`, `TeamBuilderPage`;
+   - `coaches`, the caller's own row: `CoachPreferenceRequests.jsx:139`,
+     `usePracticeLightingOverrides.js:248`, `DashboardPage.jsx:589-605`;
+   - `coaches`, another coach's contact details: `TeamRecordPage.jsx:115` (the Staff tab).
+2. Security-invoker views over these tables change meaning under the new rules
+   (`view_org_metrics`, read by `EnterpriseDashboard`; `coach_team_map`, read by older policies).
+   Each is moved to a server-side function or documented as per-viewer.
+3. The lookup "is the caller a coach of this team" reads `coaches`, which becomes admin-only, so
+   it runs with definer rights. Otherwise every coach is locked out of their own players. The
+   positive case (a current coach reads their own players) is tested, not only the refusals.
+4. "Current coach" means a live assignment. `team_coach_assignments` keeps ended rows. Every
+   check uses one shared rule, and "today" is computed in a zone the caller cannot set: not
+   `current_date`, which follows the session zone a PostgREST caller controls. It is tested at the
+   date boundary under extreme session zones.
+5. Definer functions are not bound by column grants. `coach_update_player_compliance` returns the
+   whole player row to a coach today. Every function returning `players` is listed, and any that a
+   non-admin can call is narrowed.
+6. `rotate_calendar_token` lets any member rotate any team's token and read the new one. It gets
+   the calendar link's authorization; guardians can read the link but not rotate it.
+7. The Staff tab's contact read is limited to the team's own people. `/team/:teamId` is unguarded,
+   and every member reads every team.
+8. `rls_policy_matrix.sql` (`:696-704`) encodes the whole-row reads as expected. Its expectations
+   change, and the old policies are shown failing them.
 
 **Decisions for you:**
-
 1. Do a team's coaches see its players' `medical_info`? *Recommended: yes, own team only.* They
    are the adults present at practice.
 2. Do a team's coaches see `guardian_contacts`? *Recommended: yes, own team only.*
 3. Do guardians see only their linked children? *Recommended: yes.*
 4. Does `staff` read like an admin? *Recommended: yes for reads, as today for other tables.*
-5. Which coach contact fields do team members see on the Staff tab? *Recommended: name, email
-   and phone of the team's live coaches.* That is what the tab shows today, and parents use it to
-   reach the coach.
+5. Which coach contact fields do team members see on the Staff tab? *Recommended: name, email and
+   phone of the team's current coaches*, which is what the tab shows today.
 
 ## 2. Score authorization
 
 **Re-checked, *statically reviewed*.** `update_game_score` admits `admin`, `tenant_admin`,
-`staff` and `coach` org-wide (`20260504010000:99`), not only the two teams' coaches. "Final" means
-both numbers are present. Overwrites are audited but not flagged.
+`staff` and `coach` org-wide (`20260504010000:99`), not only the two teams' coaches. Overwrites
+are audited but not flagged.
 
-**Recommendation.** Admit org admins, `tenant_admin` and `staff` (if decision 1.4 says staff acts
-like an admin), plus the head and assistant coaches of either team in the game who hold a **live**
-assignment today (the shared predicate in item 1, not the game's date: a coach removed yesterday
-must not keep the right to rewrite last week's scores). Refuse everyone else with `42501`. The
-existing audit row stays. A "disputed" state is deferred until standings matter. Test with pgTAP:
-- the coach of the home team can set the score;
-- the coach of an unrelated team is refused;
-- a coach whose assignment on the home team ended yesterday is refused, in the RPC and in the UI;
-- an admin can set it.
+**Recommendation.** Admins (and staff, per decision 1.4) plus the current coaches of either team in
+the game may set a score; everyone else is refused. The existing audit row stays. A "disputed"
+state waits until standings matter. Plan it with item 1: both are "who may touch what".
 
-**The callers change with it.** `ScoresPage` (`/scores`) and `LeagueStandings` show every game's
-score as editable to anyone with `MANAGE_SCHEDULE`, which coaches hold. After the RPC change, an
-unrelated coach would still see the controls, and each edit would be applied optimistically and
-then refused. Both pages show editing only on games the caller may score and keep the rest
-read-only. UI tests cover a coach of one team in the game and a coach of an unrelated team.
-
-Plan it with item 1: both are "who may touch what".
+**The plan must cover:**
+1. "Current coach" is item 1's live-assignment rule, judged today, not on the game's date: a
+   coach removed yesterday must not keep the right to rewrite last week's scores.
+2. `ScoresPage` and `LeagueStandings` show every score as editable to anyone with
+   `MANAGE_SCHEDULE`, which coaches hold. They change with the RPC, so editing appears only where
+   the caller may score. Without that, an unrelated coach's edit is applied optimistically and then
+   refused.
+3. Tests cover a coach of either team, an unrelated coach, a former coach, and an admin, in the
+   RPC and in the UI.
 
 ## 3. Eligibility honoured and explained
 
-**Re-checked, *statically reviewed*.** `TeamAnalysisPage.jsx:806-812` runs `prepareTeamingInput`
-with `remapBlocked: false` and passes `prepared.players` to `generateTeams` (line 835). Those
-players carry `placement`, `needsReview` and `reviewReason`, but `generateTeams` never reads them,
-so a play-down the policy forbids is seated like any other player, without a flag. (The report
-said the annotations were dropped on the page; they are dropped in the generator.) If the
-pipeline throws, `console.warn` fires and generation goes ahead on the raw roster, and the
-operator is never told. A second silent path sits above it: the `coach_team_requests` read
-(line 776) destructures only `data`, so a query error leaves `coachLinks` null and generation runs
-with no coach anchors and no error.
+**Re-checked, *statically reviewed*.** `TeamAnalysisPage` annotates each player with `placement`,
+`needsReview` and `reviewReason` and passes them to `generateTeams` (line 835), which never reads
+them. A play-down the policy forbids is seated like any other player, with no flag. (The report
+said the page dropped the annotations; it is the generator that ignores them.) Two failures are
+swallowed:
+- if the pipeline throws, `console.warn` fires and generation runs on the raw roster;
+- the `coach_team_requests` read (line 776) ignores its `error`, so a failed read means no coach
+  anchors and no error.
 
-**Recommendation.**
-- **Honour the annotation in the domain layer.** Either `generateTeams` or a pre-filter in
-  `packages/core` moves every player whose placement is blocked out of the pool and into an
-  explicit `unplacedPlayers` result, each with its `reviewReason`. That follows the TIME TBD
-  pattern: the player stays visible with a reason and is never silently dropped (AGENTS.md).
-  The plan picks one of the two after reading how `generateTeams`' existing late and unassigned
-  outputs are shaped, so there is one "not seated" contract, not two.
-- **Never unseat a protected player.** On a rerun, `TeamAnalysisPage` passes an `existingSnapshot`
-  in review mode, and a player absent from the pool is treated as dropped from the roster. So the
-  move to `unplacedPlayers` applies only to players with no manual, reviewed, published or locked
-  placement. A player who is already seated that way and is now blocked stays where they are. The
-  run stops for review and lists them, and only an authorised unlock or removal changes the
-  roster (AGENTS.md: incremental generation never reshuffles such a roster). A rerun test seats a
-  player on a locked roster, makes them blocked, and asserts the player stays put and is listed.
-- **Check the `coach_team_requests` error** and throw it.
-- **Turn the pipeline failure into a visible error that stops generation**, instead of the
-  `console.warn` and raw-roster fallback.
-- Show the unplaced players and their reasons on the Teams page, with a page test that generates
-  a blocked player and asserts the player and their `reviewReason` are visible.
-- **Tests:**
-  - a core test where one blocked player lands in `unplacedPlayers` with its reason and on no
-    team, and fails against today's generator;
-  - a page or hook test where the `coach_team_requests` read returns an error and generation
-    stops with that error shown, and fails against today's destructuring;
-  - the same for a thrown pipeline.
-- Re-run the season fixture (AGENTS.md: domain change).
+**Recommendation.** The domain layer honours the annotation. A blocked player is never seated; they
+appear in an explicit "not placed" result with the reason, on the Teams page, following the TIME
+TBD pattern (visible, never silently dropped). Both swallowed failures become visible errors that
+stop generation.
+
+**The plan must cover:**
+1. One "not placed" contract. `generateTeams` already has late and unassigned outputs, and the
+   plan extends one of them rather than adding a second.
+2. Never unseat a protected player. On a rerun the page passes the existing snapshot in review
+   mode, where a player missing from the pool is treated as dropped. A player already on a manual,
+   reviewed, published or locked roster who is now blocked stays put. The run stops for review and
+   lists them (the incremental-roster invariant in AGENTS.md).
+3. Tests, each failing against today's code:
+   - a blocked player ends up unplaced with its reason;
+   - a protected blocked player stays on their roster;
+   - the read error stops generation;
+   - a thrown pipeline stops generation;
+   - the Teams page shows the unplaced player and the reason.
+4. The season fixture is re-run (AGENTS.md: domain change).
 
 **Decision:** does missing paperwork block a placement or only flag it? *Recommended: flag only.*
-Paperwork arrives late in real seasons, and blocking would hold players off rosters for a
-clerical gap.
+Paperwork arrives late in real seasons, and blocking would hold players off rosters for a clerical
+gap.
 
 ## 4. Home/away balance
 
-**Re-checked, *statically reviewed*.** In `generateRoundRobinWeeks`, each pair is sorted
-(`ordered = [home, away].sort(...)`, line 58), so the team with the smaller id is home in every
-meeting. In a single round robin, the smallest id plays every game at home. `gameMetrics` counts
-home games but nothing warns.
+**Re-checked, *statically reviewed*.** In `generateRoundRobinWeeks` each pair is sorted (line 58),
+so the team with the smaller id is home in every meeting; in a single round robin the smallest id
+plays every game at home. `gameMetrics` counts home games, but nothing warns.
 
-**Recommendation.**
-- Replace the sorting with a home/away rule that is proven balanced before it is built. A rule as
-  loose as "alternate by round and flip the fixed team" is not enough: simulated on today's
-  rotation, it leaves home counts spread by 2 for 4 to 12 teams and by 3 for 7 (simulated in
-  review). The plan names the exact orientation (the Berger-table rule for the pair on each
-  position, and the bye's handling for odd counts) and its acceptance criterion. With an even
-  count every team plays an odd number of games, so the spread is at most 1. With an odd count
-  every team plays `n - 1` games, an even number, so every team is home exactly `(n - 1) / 2`
-  times. A test checks the criterion for every `n` from 2 to 16, and the rule is only chosen once
-  that table passes.
-- Add a `gameMetrics` warning when two teams' home counts differ by more than one, tested directly
-  through `evaluateGameSchedule`: an imbalanced schedule warns (and fails against today's code,
-  which never warns), and a balanced one does not.
-- **Direct generator tests.** The season-2026 fixture does not call `generateRoundRobinWeeks`
-  (it is used only by `GameSchedulingPage`), so re-running it proves nothing here. New tests in
-  `tests/gameScheduling.test.js` generate a 4-team and a 5-team round robin and assert every
-  team's home count is within one of every other's. Both fail on today's pair sorting (with 4
-  teams, the smallest id is home 3 of 3). The existing tests that pin `homeTeamId` order in that
-  file are updated in the same change, and the plan lists each one.
-- **Existing weeks keep their home and away.** `GameSchedulingPage` regenerates the whole
-  division's round robin on every run (line 381). With the new rule the pairings stay the same but
-  their sides flip, so a regenerate-and-save after deploy would reverse already published games.
-  The plan states the mechanism: the regeneration takes the home/away of every persisted game as
-  fixed and orients only unsaved pairings (maximum freeze, AGENTS.md). A test saves a schedule
-  under the old rule, regenerates under the new one, and asserts every saved game keeps its
-  sides.
+**Recommendation.** Orient each pairing with a rule that balances home games, and warn when a
+schedule is unbalanced.
+
+**The plan must cover:**
+1. The rule is proven before it is chosen. With an even number of teams every team's home count
+   is within one of every other's. With an odd number every team is home exactly `(n - 1) / 2`
+   times. A test checks that for every team count from 2 to 16. A loosely stated "alternate by
+   round" rule fails it: simulated in review on today's rotation, the spread was 2 or 3.
+2. Saved games keep their sides. `GameSchedulingPage` regenerates the whole round robin on every
+   run (line 381), so without a freeze a regenerate-and-save after the change would flip published
+   games.
+3. The warning is tested directly through `evaluateGameSchedule`, not only through the generator.
+   The season fixture never calls the generator, so it proves nothing here. The existing tests that
+   pin today's orientation are updated.
 
 ## 5. Season rollover
 
-**Re-checked, *statically reviewed*.** Only `initialize_new_tenant` inserts a `season_settings`
-row (migrations `20260416000001` and its `20260913000000` redefinition). Season dates and
-`age_cutoff_mode` have no UI writer. Starting spring 2027 today would need SQL.
+**Re-checked, *statically reviewed*.** Only `initialize_new_tenant` inserts a `season_settings` row
+(migrations `20260416000001` and `20260913000000`). Season dates and `age_cutoff_mode` have no UI
+writer. Starting spring 2027 today would need SQL.
 
-**Recommendation.** Build an `admin_create_season(p_from_season_id, p_patch)` RPC. It copies
-season-keyed settings into a **draft** season, and nothing becomes active until the admin
-confirms. It writes a `season.created` audit row in the same transaction, naming the source and
-new season ids and what it copied (division and form ids, old to new). A test makes one copy step
-fail and asserts that neither the season, its copies nor the audit row exist. It copies:
-- the season's `timezone`, or takes it from `p_patch`. A season with no timezone makes every
-  timed slot TIME TBD on the scheduling pages, so activation refuses a season without one. A test
-  activates a rolled-over season and places a game and a practice slot;
-- every division with its whole configuration, not only its age bounds: `gender_policy`, format,
-  `min_roster_size`, `max_roster_size`, `target_team_size`, `team_count_override`, `min_teams`
-  and `max_teams` (`TeamAnalysisPage.jsx:188-193` reads them when it generates teams). The plan
-  lists the columns from the catalogue and copies every one except the season link and the
-  dates. A test compares source and copy column by column;
-- registration forms, each with its `division_id` mapped to the matching newly created division
-  (a form with no division stays organization-wide). Each form starts as `draft` whatever its
-  source status was. `submit_registration` accepts any `open` form regardless of its season's
-  status, so a copied open form would take registrations into an unconfirmed season. Tests: a
-  copied form points at the new season's division, a registration through it places the player
-  there, and a copied form refuses submissions until it is explicitly opened.
+**Recommendation.** An admin creates the next season from the current one, as a **draft**. It gets
+copies of the divisions (with their whole configuration) and the registration forms, and a
+timezone. The admin enters the new dates and a new name, then activates it. Activation completes
+the old season. Teams, rosters, registrations, schedules and blackouts are not copied. Heat
+settings are organization-wide already (`organization_heat_settings` is keyed by organization;
+*executed*), so they need no copy.
 
-Two things the report listed are not copied:
-- **Heat settings** are not season data. `organization_heat_settings` is keyed by
-  `organization_id` alone (its primary key; *executed*, read-only), so the new season already
-  uses them. Copying would mean inserting a second row for the same organization.
-- **Blackouts** have no recurrence model. A `field_blackouts` row is a fixed date range, so
-  "blackouts that recur" cannot be selected. Copying them would carry last season's dates into
-  the new one. They are left behind, and decision 5.3 asks whether a recurrence model is wanted.
-
-Teams, rosters, registrations and schedules are not copied. Season dates must be entered, not
-copied. A season page edits dates, the age cutoff and the status (draft, then active, then
-completed).
-
-**Imports bind to an explicitly chosen season.** Today they cannot: `create_import_job` takes no
-season, `import_jobs` has no season column, and `finalize_import_job` picks the active season, or
-the newest (`20260726000300:123-129`). With last season still active and the new draft selected,
-an import would land in last season. The rollover carries the selected season id through
-`ImportContext`, `create_import_job`, a new `import_jobs.season_settings_id` and finalization,
-which refuses a season of another organization. A test imports into a draft while another season
-is active and asserts where the divisions and players land.
+**The plan must cover:**
+1. Nothing becomes live before activation. Copied forms start closed: `submit_registration`
+   accepts any open form whatever its season's status. Every automatic "current season" fallback
+   selects the active season. `OrganizationContext` and the Edge `readSeasonTimezone` pick the
+   newest season today, which would make a fresh draft current.
+2. Each copied form points at the new season's copy of its division, not at the old division.
+3. Every division column except the season link and dates is copied, from a list read from the
+   catalogue (`TeamAnalysisPage.jsx:188-193` uses the roster settings).
+4. Activation is refused without a timezone and valid start and end dates. A season without a
+   timezone makes every timed slot TIME TBD.
+5. One active season per organization is enforced in the database, after inventorying and
+   backfilling existing statuses (production has one season, `active`; *executed*). Two admins
+   activating at once cannot both succeed.
+6. Imports carry the chosen season through to finalization. Today `finalize_import_job` picks the
+   active-or-newest season itself (`20260726000300:123-129`), so a draft could never be imported
+   into.
+7. Creation and activation are both audited, each in its own transaction.
+8. The stored-season lookup matches on `name`, so names are unique per organization.
 
 **Decisions:**
-1. Which settings carry over? *Recommended: the list above.*
-2. Can two seasons be active at once? *Recommended: no.* One active season per organization
-   keeps every "current season" reader correct. The plan must list those readers: season pickers,
-   the `localStorage` season, imports, and the Edge Functions' season reads. Two of those fall
-   back to the most recently created season without looking at its status:
-   `OrganizationContext`'s season fetch and the Edge `readSeasonTimezone`, both ordered by
-   `created_at desc`. A new draft would become "current" the moment it was created. Every
-   automatic fallback selects the active season instead, while an admin can still pick a draft
-   explicitly. Each fallback gets a test with a newer draft present.
-
-   Before the index, the migration inventories `season_settings.status` per organization and
-   backfills it. Production today has one season and it is `active` (*executed*, read-only,
-   2026-10-20), but the migration must not assume that. If any organization has two active
-   seasons it aborts, naming them. An organization with none gets its newest season made active,
-   recorded in the migration's output. Status becomes `NOT NULL`. A copied draft must also get a
-   new `name`, required in `p_patch` and unique per organization, because the stored-season
-   lookup matches on `name` (`s.name === storedSeason`).
-
-   The invariant is enforced in the database, not only in readers: a partial unique index on
-   `season_settings (organization_id) WHERE status = 'active'`, and activation only through an
-   audited `admin_activate_season(p_season_id, p_expected_active_id)` RPC. It locks the
-   organization's season rows and refuses with `40001` unless the active season is still
-   `p_expected_active_id` (null meaning none), so of two admins activating different drafts the
-   second is refused instead of silently completing the first's choice. It also refuses a draft
-   without a timezone, without both `season_start` and `season_end`, or with the end before the
-   start, in the RPC and not only on the page. It then completes the previous active season and
-   activates the draft in one transaction. Tests: each refusal; activating with a previous active
-   season leaves exactly one; two concurrent activations with the same expected season leave one
-   active and refuse the other with `40001`.
+1. Which settings carry over? *Recommended: divisions, forms and the timezone, as above.*
+2. Can two seasons be active at once? *Recommended: no*, so every "current season" reader stays
+   correct.
 3. Should blackouts recur (for example, a fixed holiday each year)? *Recommended: not in the
-   rollover change.* Admins re-enter next season's blackouts, as they enter season dates. A
-   recurrence model, if wanted, is its own plan.
+   rollover change.* There is no recurrence model (a blackout is a fixed date range), so admins
+   re-enter them with the season dates. A recurrence model, if wanted, is its own plan.
 
 **Deadline.** Before registration for the next season opens. Please tell me the date.
 
 ## What I need from you
 
-Answers to 1.1 to 1.5, 3, and 5.1 to 5.3, plus the date in item 5. With those, I write plans for
-1 and 2 together first, and build them once you approve the plan.
+Answers to 1.1 to 1.5, 3, and 5.1 to 5.3, plus the date in item 5. With those, I write the plan for
+1 and 2 first, and build it once you approve it.

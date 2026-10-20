@@ -88,6 +88,9 @@ R28="$REPO/docs/sql/20261019010000_revert.sql"
 # The evaluation-run idempotency key, and its revert.
 M29="$REPO/supabase/migrations/20261020010000_evaluation_run_idempotency.sql"
 R29="$REPO/docs/sql/20261020010000_revert.sql"
+# A2a: staff are admins, and the revert.
+M31="$REPO/supabase/migrations/20261020030000_staff_is_admin.sql"
+R31="$REPO/docs/sql/20261020030000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3747,6 +3750,41 @@ END;
 \$function\$;" \
   "revert 20261020010000"
 
+# Staff are admins. The smoke RAISEs on each; the revert claim on a policy left
+# naming staff and on a body that drifted.
+plant "M31 is_org_admin still refuses staff" "$M31" \
+  "          AND role IN ('admin', 'tenant_admin', 'staff')
+    );" \
+  "          AND role IN ('admin', 'tenant_admin')
+    );" \
+  "smoke 20261020030000"
+
+plant "M31 the demotion guard does not count staff" "$M31" \
+  "    IF v_old_role IN ('admin', 'tenant_admin', 'staff') AND p_role NOT IN ('admin', 'tenant_admin', 'staff') THEN" \
+  "    IF v_old_role IN ('admin', 'tenant_admin') AND p_role NOT IN ('admin', 'tenant_admin') THEN" \
+  "smoke 20261020030000"
+
+plant "M31 a policy still names admin without staff" "$M31" \
+  "              AND om.organization_id = audit_log.organization_id
+              AND om.role IN ('admin', 'staff')" \
+  "              AND om.organization_id = audit_log.organization_id
+              AND om.role = 'admin'" \
+  "smoke 20261020030000"
+
+plant "R31 the revert leaves the audit_log policy naming staff" "$R31" \
+  "              AND om.organization_id = audit_log.organization_id
+              AND om.role = 'admin'" \
+  "              AND om.organization_id = audit_log.organization_id
+              AND om.role IN ('admin', 'staff')" \
+  "revert 20261020030000"
+
+plant "R31 the revert restores a drifted is_org_admin body" "$R31" \
+  "          AND role IN ('admin', 'tenant_admin')
+    );" \
+  "          AND role IN ('admin', 'tenant_admin') -- drifted
+    );" \
+  "revert 20261020030000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3878,6 +3916,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
   ["(checked) the submit_registration revert restores the 20260602010000 body byte for byte, SECURITY DEFINER with search_path=public, drops the throttle index, and restores the one FOR ALL registrations policy"]="R28 the revert restores a drifted submit_registration body"
   ["(checked) the persist_evaluation_run revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and drops the idempotency index and column"]="R29 the revert restores a drifted persist_evaluation_run body|R29 the revert leaves the idempotency column behind"
+  ["(checked) the staff-is-admin revert restores the three functions' pre-change bodies byte for byte, SECURITY DEFINER with search_path=public, and leaves no policy naming staff"]="R31 the revert restores a drifted is_org_admin body|R31 the revert leaves the audit_log policy naming staff"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

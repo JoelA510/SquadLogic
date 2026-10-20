@@ -103,7 +103,7 @@ export default function SideNav({
             <>
               {!collapsed && (
                 <div className="nav-group-label" style={{ pointerEvents: 'none' }}>
-                  {effectiveRole === 'coach' || effectiveRole === 'staff' ? 'Coach' : 'Family'}
+                  {effectiveRole === 'coach' ? 'Coach' : 'Family'}
                 </div>
               )}
               {flatItems.map((item) => (

@@ -20,6 +20,7 @@ import {
   practiceRangeBounds,
   practiceRangeLowerBound,
 } from '@squadlogic/core/utils/practiceOccurrences.js';
+import { ADMIN_ROLES } from '../constants/permissions.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
@@ -2523,7 +2524,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(organizationId) &&
           String(item.profile_id) === String(currentUserId)
       );
-      return ['admin', 'tenant_admin'].includes(String(member?.role || ''));
+      return ADMIN_ROLES.includes(String(member?.role || ''));
     };
 
     // The four RPCs that used to fall through to the silent catch-all below.
@@ -2911,7 +2912,7 @@ export const mockSupabase = {
           String(item.profile_id) === String(session?.user?.id)
       );
 
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Admin role is required' } };
       }
       if (!SCHEMA_ENTITIES.has(entityType)) {
@@ -3002,7 +3003,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(orgId) &&
           String(item.profile_id) === String(userId)
       );
-      const isAdmin = ['admin', 'tenant_admin'].includes(String(member?.role || ''));
+      const isAdmin = ADMIN_ROLES.includes(String(member?.role || ''));
       const isParentOnTeam = () =>
         (db.profile_players || []).some(
           (profilePlayer) =>
@@ -3468,7 +3469,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(location.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { code: '42501', message: 'Admin role is required' } };
       }
       const lat = p.p_latitude ?? null;
@@ -3568,7 +3569,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(orgId) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Admin role is required' } };
       }
 
@@ -7107,7 +7108,7 @@ export const mockSupabase = {
           String(item.organization_id) === orgId &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
 
@@ -7200,7 +7201,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(p_organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
 
@@ -7274,7 +7275,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(p_organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
 
@@ -7407,7 +7408,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(form.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
       const allowed = ['title', 'description', 'status', 'waiver_text', 'fields', 'season_id'];
@@ -7450,7 +7451,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(form.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
       const subCount = (db.registrations || []).filter(
@@ -7501,7 +7502,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(p_organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
       const target = (db.organization_members || []).find(
@@ -7510,11 +7511,11 @@ export const mockSupabase = {
           String(item.profile_id) === String(p_profile_id)
       );
       if (!target) return { data: null, error: { message: 'Member not found' } };
-      if (['admin', 'tenant_admin'].includes(target.role)) {
+      if (ADMIN_ROLES.includes(target.role)) {
         const adminCount = (db.organization_members || []).filter(
           (item) =>
             String(item.organization_id) === String(p_organization_id) &&
-            ['admin', 'tenant_admin'].includes(item.role)
+            ADMIN_ROLES.includes(item.role)
         ).length;
         if (adminCount <= 1) {
           return { data: null, error: { message: 'Cannot remove the last admin' } };
@@ -7554,7 +7555,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(p_organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
       const target = (db.organization_members || []).find(
@@ -7563,14 +7564,11 @@ export const mockSupabase = {
           String(item.profile_id) === String(p_profile_id)
       );
       if (!target) return { data: null, error: { message: 'Member not found' } };
-      if (
-        ['admin', 'tenant_admin'].includes(target.role) &&
-        !['admin', 'tenant_admin'].includes(p_role)
-      ) {
+      if (ADMIN_ROLES.includes(target.role) && !ADMIN_ROLES.includes(p_role)) {
         const adminCount = (db.organization_members || []).filter(
           (item) =>
             String(item.organization_id) === String(p_organization_id) &&
-            ['admin', 'tenant_admin'].includes(item.role)
+            ADMIN_ROLES.includes(item.role)
         ).length;
         if (adminCount <= 1) {
           return { data: null, error: { message: 'Cannot demote the last admin' } };
@@ -7608,7 +7606,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(assignment.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
       db.game_assignments = (db.game_assignments || []).filter(
@@ -7645,7 +7643,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(assignment.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
       db.practice_assignments = (db.practice_assignments || []).filter(
@@ -7682,7 +7680,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(team.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
       const patch = p_patch || {};
@@ -7744,7 +7742,7 @@ export const mockSupabase = {
           String(item.organization_id) === String(team.organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
       // Cascade: unset team_id on players

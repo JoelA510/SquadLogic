@@ -32,6 +32,11 @@ and 2. It ships as three PRs, in this order; each is reviewed once before it ope
 
 ## A2. Identity: who the caller is (medium)
 
+**Built as three PRs** (decided while building): A2a, staff are admins (migration
+`20261020030000`); A2b, the profile column guard and `link_my_coach_record`; A2c, the contact card,
+whose display rule ships with A3's server-side reads so no field is stored before something reads
+it.
+
 Access rules are only as good as knowing who is a coach, an admin or a guardian. Three gaps
 come first:
 

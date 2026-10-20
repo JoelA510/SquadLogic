@@ -33,7 +33,9 @@ const SettingsAuditLog = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAction, setFilterAction] = useState('all');
 
-  const isAdmin = orgMember?.role === 'admin';
+  // The roles the audit_log SELECT policy names (tenant_admin is not one:
+  // remediation plan, RLS Q5).
+  const isAdmin = orgMember?.role === 'admin' || orgMember?.role === 'staff';
 
   useEffect(() => {
     if (!currentOrganization?.id || !isAdmin) {

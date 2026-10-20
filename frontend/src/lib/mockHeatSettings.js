@@ -21,6 +21,7 @@
  */
 
 import { GUIDANCE_URL_PATTERN } from '@squadlogic/core/heat/schemas.js';
+import { ADMIN_ROLES } from '../constants/permissions.js';
 
 export const HEAT_SETTINGS_RPCS = Object.freeze(['admin_set_org_heat_settings']);
 
@@ -44,7 +45,7 @@ export function handleHeatSettingsRpc(db, name, params, ctx) {
       String(m.organization_id) === String(orgId) &&
       String(m.profile_id) === String(ctx.currentUserId)
   );
-  if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+  if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
     return fail('42501', `Access denied: caller is not an admin of organization ${orgId}`);
   }
 

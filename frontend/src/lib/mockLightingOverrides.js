@@ -36,6 +36,7 @@ import {
   windowOfDates,
   windowsOverlap,
 } from '../utils/lightingOverrides.js';
+import { ADMIN_ROLES } from '../constants/permissions.js';
 
 export const LIGHTING_OVERRIDE_RPCS = Object.freeze([
   'request_practice_lighting_override',
@@ -77,7 +78,7 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
         String(member.organization_id) === String(orgId) &&
         String(member.profile_id) === String(currentUserId)
     )?.role ?? null;
-  const isOrgAdmin = (orgId) => ['admin', 'tenant_admin'].includes(String(roleIn(orgId) || ''));
+  const isOrgAdmin = (orgId) => ADMIN_ROLES.includes(String(roleIn(orgId) || ''));
   const isOrgMember = (orgId) => roleIn(orgId) !== null;
   const slotById = (slotId) =>
     (db.practice_slots || []).find((slot) => String(slot.id) === String(slotId)) ?? null;

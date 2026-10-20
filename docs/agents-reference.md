@@ -48,7 +48,9 @@ config) + Prettier, knip for unused code; TypeScript checkJs/allowJs, `strict: f
   imports); components in `frontend/src/components/` (feature subdirs such as `scheduling/`,
   `teaming/`, `ui/`); hooks (`use…`) in `frontend/src/hooks/`; pages in `frontend/src/pages/`;
   contexts in `frontend/src/contexts/`; Edge Functions in `supabase/functions/<name>/index.ts`.
-- **RBAC:** roles `admin`, `coach`, `player`, `parent`, `staff`; permissions in
+- **RBAC:** roles `admin`, `coach`, `player`, `parent`, `staff` (and `tenant_admin`); `staff` are
+  admins, as `ADMIN_ROLES` in `frontend/src/constants/permissions.js` says and `is_org_admin()` and
+  the Edge `verifyOrgAdmin` agree (`tests/adminRolesParity.test.js`); permissions in
   `frontend/src/constants/permissions.js`, enforced by the `usePermission` hook and
   `<ProtectedRoute>`.
 

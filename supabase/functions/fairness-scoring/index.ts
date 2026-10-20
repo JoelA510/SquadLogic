@@ -24,6 +24,7 @@ import {
   recordAuditNow,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { persistEvaluationRun } from '../_shared/evaluation-run.ts';
 import { edgeLogger, logFailure, logRequest, withFailureLogging } from '../_shared/logtail.ts';
 
 const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
@@ -303,8 +304,10 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       }
 
       // As the caller: the RPC refuses anyone who is not a member of the organization by
-      // `auth.uid()`, and the service-role client has none, so it could never succeed.
-      const { data: id, error: persistError } = await auditClient.rpc('persist_evaluation_run', {
+      // `auth.uid()`, and the service-role client has none, so it could never succeed. The
+      // helper keys the write and retries it once when the first answer cannot say whether it
+      // committed.
+      const { data: id, error: persistError } = await persistEvaluationRun(auditClient, {
         p_run_data: runData,
         p_findings: findings,
         p_metrics: metrics,

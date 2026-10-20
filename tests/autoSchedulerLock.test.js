@@ -753,7 +753,7 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     // It used to `console.error` and carry on: the response and the `scheduler.auto_completed`
     // row went out with a null runId, and the failure reached only the function's console.
     // fairness-scoring throws on the same RPC; this adopts its contract.
-    const persist = source.indexOf(".rpc('persist_evaluation_run'");
+    const persist = source.indexOf('await persistEvaluationRun(');
     const completed = source.indexOf("action: 'scheduler.auto_completed'");
     assert.ok(persist >= 0 && completed > persist, 'the run is not recorded before it is audited');
     const between = source.slice(persist, completed);

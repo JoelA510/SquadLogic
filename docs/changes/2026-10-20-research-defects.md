@@ -38,7 +38,11 @@ privileges, not by what the pages happen to select.
 
 - **`players`, rows:** SELECT for org admins and staff, for the coaches of the player's current
   team (through `team_coach_assignments`), and for guardians linked through `profile_players`.
-  Everyone else sees no player rows.
+  Everyone else sees no player rows. "Coach of the team" always means a **live** assignment:
+  `team_coach_assignments` keeps ended rows on purpose (`effective_to`), so every coach check in
+  this change (the policy, `get_player_detail`, the calendar link, `update_game_score`) uses one
+  shared predicate, `effective_from <= current_date AND (effective_to IS NULL OR effective_to >=
+  current_date)`, never a bare `EXISTS`.
 - **`players`, columns:** revoke table-level SELECT from `authenticated` and grant it back column by
   column. The columns every row-holder may read are the roster columns (name, team, division, the
   eligibility fields). Sensitive columns (`medical_info`, `guardian_contacts`, `contact_info`,
@@ -53,7 +57,18 @@ privileges, not by what the pages happen to select.
   to find the signed-in user's own coach row: `CoachPreferenceRequests.jsx:139` and
   `usePracticeLightingOverrides.js:248` (coach-scoped by `user_id`). They move to a narrow
   self-identity read, `get_my_coach_identity(org_id)` returning `{ id, full_name }`, so a coach
-  is not locked out of their own preferences and lighting screens.
+  is not locked out of their own preferences and lighting screens. A third reads another coach:
+  `TeamRecordPage.jsx:115` loads the team's coach with `coaches.select('*')` for the Staff tab
+  (name, email, phone, status). It moves to a team-scoped contact read,
+  `get_team_staff(team_id)`, open to the members who can see the team. Which contact fields it
+  returns is decision 1.5. The page gets a test under the reduced grants.
+- **Definer RPCs that return a whole player row.** A `SECURITY DEFINER` function is not bound by
+  the column grants. `coach_update_player_compliance` (`20260611000100:415`) authorizes a lead
+  coach and `RETURNS public.players`, so a coach could send the current compliance value and get
+  back every sensitive column. It is narrowed to return the roster columns and the compliance
+  fields it changed. The plan lists every function in `public` that returns `players` or
+  `setof players` (two admin RPCs in the same migration do too; admins may read everything, so
+  they stay) and tests the coach RPC's return shape.
 - **`teams.calendar_token`:** move it out of the member-readable row (column revoke, as above).
   Expose it through an RPC, `get_team_calendar_link(team_id)`, for admins, the team's coaches, and
   guardians of players on the team. Those are the people the portal's Calendar Subscription
@@ -74,6 +89,8 @@ privileges, not by what the pages happen to select.
   New pgTAP proves the column rule, not just the row rule:
   - a coach of the player's team can read the roster columns but gets `42501` selecting
     `medical_info`, `emergency_contacts` or `registration_history` directly;
+  - a coach whose assignment ended yesterday reads no player row of that team and gets nothing
+    from `get_player_detail`;
   - `get_player_detail` returns or withholds each sensitive column per decisions 1.1 to 1.4;
   - a parent, and a coach of another team, cannot read `calendar_token` or rotate it;
   - `get_my_coach_identity` returns only the caller's own row.
@@ -86,6 +103,9 @@ privileges, not by what the pages happen to select.
 2. Do a team's coaches see `guardian_contacts`? *Recommended: yes, own team only.*
 3. Do guardians see only their linked children? *Recommended: yes.*
 4. Does `staff` read like an admin? *Recommended: yes for reads, as today for other tables.*
+5. Which coach contact fields do team members see on the Staff tab? *Recommended: name, email
+   and phone of the team's live coaches.* That is what the tab shows today, and parents use it to
+   reach the coach.
 
 ## 2. Score authorization
 
@@ -198,7 +218,15 @@ Two things the report listed are not copied:
 
 Teams, rosters, registrations and schedules are not copied. Season dates must be entered, not
 copied. A season page edits dates, the age cutoff and the status (draft, then active, then
-completed). Imports bind to an explicitly chosen season.
+completed).
+
+**Imports bind to an explicitly chosen season.** Today they cannot: `create_import_job` takes no
+season, `import_jobs` has no season column, and `finalize_import_job` picks the active season, or
+the newest (`20260726000300:123-129`). With last season still active and the new draft selected,
+an import would land in last season. The rollover carries the selected season id through
+`ImportContext`, `create_import_job`, a new `import_jobs.season_settings_id` and finalization,
+which refuses a season of another organization. A test imports into a draft while another season
+is active and asserts where the divisions and players land.
 
 **Decisions:**
 1. Which settings carry over? *Recommended: the list above.*
@@ -218,5 +246,5 @@ completed). Imports bind to an explicitly chosen season.
 
 ## What I need from you
 
-Answers to 1.1 to 1.4, 3, and 5.1 to 5.3, plus the date in item 5. With those, I write plans for
+Answers to 1.1 to 1.5, 3, and 5.1 to 5.3, plus the date in item 5. With those, I write plans for
 1 and 2 together first, and build them once you approve the plan.

@@ -56,14 +56,25 @@ every other path, and the archive keeps the exception history the guard exists t
 A new migration replaces `admin_delete_team(uuid)` (same signature, so callers and grants are
 unchanged):
 
-1. Load the team; refuse unknown (`P0002`) and non-admin (`42501`), as today.
+1. Load the team `FOR UPDATE`; refuse unknown (`P0002`) and non-admin (`42501`), as today. The
+   row lock is held to the end of the transaction. Without it, a `persist_practice_schedule` save
+   that commits between step 2 and step 4 could add a new exception, and the delete would hit
+   the same 23503. The plan confirms that the practice writer takes a conflicting lock on the
+   team (or its assignments) before it inserts an exception; if it does not, step 2 locks the
+   team's `practice_assignments` rows `FOR UPDATE` too. A two-session test (a save waiting on
+   the open delete) shows the save waits or fails cleanly, and the delete succeeds.
 2. For every `practice_assignments` row of the team: withdraw its live exceptions
    (`withdrawn_at = now()`, `withdrawn_by = auth.uid()`), audit each as
    `practice.exception_withdrawn` with reason `team_deleted`, delete all its exception rows and
    append them to their run's `results.archived_exceptions`. This is a set-based version of
    `admin_cancel_practice_assignment`'s three steps (no per-row RPC call, so one admin check).
-3. `DELETE FROM teams` as today; the cascade now has nothing to stop it.
-4. `team.deleted`'s metadata records everything the delete takes with it, not only the name and
+3. Delete the RSVPs the cascade would miss. `event_rsvps.reference_id` is polymorphic, with no
+   foreign key. When this team's games cascade away, the opposing team's RSVPs to those games are
+   left pointing at nothing. So, for the game ids captured before the delete, delete every RSVP
+   whose `reference_id` is one of them, whichever team it belongs to, and count it in the audit
+   (`event_rsvps_deleted` covers both).
+4. `DELETE FROM teams` as today; the cascade now has nothing to stop it.
+5. `team.deleted`'s metadata records everything the delete takes with it, not only the name and
    division it records today. The counts are taken before the delete, in the same transaction:
    - a count for each table the cascade empties: `practice_assignments_deleted`,
      `game_assignments_deleted`, `team_players_deleted`, `event_rsvps_deleted`,
@@ -85,7 +96,7 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
    Today the UI's `window.confirm` is the only guard, and the RPC deletes locked practice rows and
    published games with the team. The field and venue retirement RPCs refuse with an affected-row
    list unless `p_confirm => true`. Recommendation: **not in this change**. Keep the signature, and
-   record the counts in the audit row (step 4). Adding `p_confirm` and a preview dialog is a
+   record the counts in the audit row (step 5). Adding `p_confirm` and a preview dialog is a
    separate UI change if you want it.
 
 ## Tests
@@ -98,6 +109,7 @@ Uses `now()`, not `timezone('utc', now())` (see the companion plan
   - `team.deleted` carries every count and the archived rows, each non-zero on the fixture: a
     rostered player, an RSVP, a message, a past coach assignment, and a game against another
     team (which is gone, and named in `games_deleted`);
+  - the opposing team's RSVP to that game is gone too, and counted;
   - the run's `archived_exceptions` holds both rows.
 
   Plus a control: a non-admin is refused and nothing changes.

@@ -307,7 +307,7 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       // `auth.uid()`, and the service-role client has none, so it could never succeed. The
       // helper keys the write and retries it once when the first answer cannot say whether it
       // committed.
-      const { data: id, error: persistError } = await persistEvaluationRun(auditClient, {
+      const { data: id, error: persistError } = await persistEvaluationRun(auditClient, logCtx, {
         p_run_data: runData,
         p_findings: findings,
         p_metrics: metrics,

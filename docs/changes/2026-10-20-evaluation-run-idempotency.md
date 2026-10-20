@@ -42,6 +42,8 @@ function then cannot tell whether the run exists:
 - **Edge:** `_shared/evaluation-run.ts` exports `persistEvaluationRun(client: UserClient, payload)`.
   - It adds a fresh `crypto.randomUUID()` key to every call.
   - It retries once, with the same key and body, on status 0, 502, 503 or 504.
+  - It logs the retry (`logRequest`, warn) with the request's context, the first status and the
+    key, so a run a retry wrote can be traced to its request.
   - It returns every other answer as it came. Both handlers still throw a failure with its code.
   - Both handlers call it, and it is the only caller of the RPC.
 
@@ -49,7 +51,7 @@ function then cannot tell whether the run exists:
 
 | Layer | File | What it proves |
 | --- | --- | --- |
-| Deno | `_shared/tests/evaluation-run_test.ts` (11) | One request as the caller with a uuid key; the caller's payload not mutated; a new key per call; one retry, same body, on each retryable status; no retry on a refusal, a 22P02 or a 500; a second failure returned; a service-role client refused at the type level |
+| Deno | `_shared/tests/evaluation-run_test.ts` (11) | One request as the caller with a uuid key; the retry logged with the request id and key; the caller's payload not mutated; a new key per call; one retry, same body, on each retryable status; no retry on a refusal, a 22P02 or a 500; a second failure returned; a service-role client refused at the type level |
 | Vitest | `tests/persistEvaluationRunCaller.test.js` | Both handlers call the helper once, as the caller, and throw with the code; no other Edge file calls the RPC |
 | Harness smoke | `docs/sql/20261020010000_smoke.sql` | A replay returns the first id and writes no run, finding or metric; per-key and per-organization; no key unchanged; an outsider and a malformed key refused, nothing written; posture and index |
 | Harness revert | `scripts/dbharness/run.sh` | Production's previous body restored byte for byte (md5), posture kept, index and column dropped |
@@ -77,5 +79,12 @@ function then cannot tell whether the run exists:
   new payload. The key names one request, and the helper sends the same payload on its retry.
 - **A second gateway failure** still fails the request. The run may then exist, but there is no
   duplicate, and the log records the failure with its request id.
+- **The browser-to-Edge hop has no key.** If the response to the browser is lost after the run
+  committed, and the user runs auto-scheduler again, the new request mints a new key and writes a
+  second run. A key supplied by the client (a request header passed to the helper, which already
+  takes one) would close that. It is a frontend change and is left for a follow-up.
+- **No delay before the retry.** A 503 from PostgREST that never reached the database (a restart)
+  usually repeats at once. A delay long enough to outlast a restart would hold the request for
+  seconds; one retry is kept cheap instead.
 - **The mock client's `persist_evaluation_run`** ignores the key. No frontend path calls the RPC,
   so nothing in mock mode depends on it.

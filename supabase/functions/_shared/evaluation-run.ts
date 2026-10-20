@@ -13,9 +13,11 @@
  * or may not exist. The key makes the retry safe: if the first call committed, the RPC returns
  * that run's id and writes nothing more. Any other error (a refusal, a bad payload, a 500 from
  * the function itself) is the answer and is returned as it came. A second failure is returned
- * too; the caller throws it.
+ * too; the caller throws it. The retry is logged with the request's context, the first status
+ * and the key, so a run written by a retry can be traced to its request.
  */
 import type { UserClient } from './auth.ts';
+import { type FailureContext, logRequest } from './logtail.ts';
 
 export interface EvaluationRunPayload {
   p_run_data: Record<string, unknown>;
@@ -28,6 +30,7 @@ export const RETRYABLE_PERSIST_STATUSES: ReadonlySet<number> = new Set([0, 502, 
 
 export async function persistEvaluationRun(
   client: UserClient,
+  logCtx: FailureContext,
   payload: EvaluationRunPayload,
   idempotencyKey: string = crypto.randomUUID()
 ) {
@@ -37,5 +40,9 @@ export async function persistEvaluationRun(
   };
   const first = await client.rpc('persist_evaluation_run', args);
   if (!first.error || !RETRYABLE_PERSIST_STATUSES.has(first.status)) return first;
+  logRequest(logCtx, 'warn', 'persist_evaluation_run: retrying with the same idempotency key', {
+    first_status: first.status,
+    idempotency_key: idempotencyKey,
+  });
   return await client.rpc('persist_evaluation_run', args);
 }

@@ -694,6 +694,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     // keys the write and retries it once when the first answer cannot say whether it committed.
     const { data: runId, error: persistError } = await persistEvaluationRun(
       createUserClient(req, supabaseUrl, anonKey),
+      logCtx,
       {
         p_run_data: runData,
         p_findings: [...findings, ...daylightFindings],

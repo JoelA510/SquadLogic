@@ -20,9 +20,9 @@ describe('persist_evaluation_run is called as the caller, never with the service
   it.each([
     [
       'auto-scheduler',
-      /persistEvaluationRun\(\s*createUserClient\(req, supabaseUrl, anonKey\),\s*\{/,
+      /persistEvaluationRun\(\s*createUserClient\(req, supabaseUrl, anonKey\),\s*logCtx,\s*\{/,
     ],
-    ['fairness-scoring', /persistEvaluationRun\(auditClient, \{/],
+    ['fairness-scoring', /persistEvaluationRun\(auditClient, logCtx, \{/],
   ])('%s', (fn, callerScoped) => {
     const source = read(fn);
     // Exactly one call, through the helper, so the pin below covers every call there is.
@@ -53,6 +53,9 @@ describe('persist_evaluation_run is called as the caller, never with the service
       );
     assert.deepEqual(callers, [path.join('_shared', 'evaluation-run.ts')]);
     const helper = readFileSync(path.join(root, '_shared/evaluation-run.ts'), 'utf8');
-    assert.match(helper, /export async function persistEvaluationRun\(\s*client: UserClient,/);
+    assert.match(
+      helper,
+      /export async function persistEvaluationRun\(\s*client: UserClient,\s*logCtx: FailureContext,/
+    );
   });
 });

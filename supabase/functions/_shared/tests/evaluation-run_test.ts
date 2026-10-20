@@ -8,6 +8,7 @@ import { assert, assertEquals, assertMatch } from 'https://deno.land/std@0.203.0
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import { createUserClient } from '../auth.ts';
 import { persistEvaluationRun } from '../evaluation-run.ts';
+import type { FailureContext } from '../logtail.ts';
 
 const URL_ = 'https://project.example.test';
 const ANON = 'anon-key-not-a-secret';
@@ -15,6 +16,11 @@ const SERVICE = 'service-role-key-not-a-secret';
 const CALLER_JWT = 'caller.jwt.token';
 const ORG = 'a1111111-1111-1111-1111-111111111111';
 const RUN = 'b2222222-2222-2222-2222-222222222222';
+const CTX: FailureContext = {
+  functionName: 'auto-scheduler',
+  requestId: 'req-1',
+  organizationId: ORG,
+};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 interface Seen {
@@ -56,6 +62,19 @@ async function withAnswers(answers: Answer[], fn: () => Promise<void>): Promise<
   return seen;
 }
 
+/** Runs `fn` with `console.warn` captured: `logRequest` writes a warning through it. */
+async function capturingWarnings(fn: () => Promise<void>): Promise<unknown[][]> {
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args);
+  try {
+    await fn();
+  } finally {
+    console.warn = original;
+  }
+  return warnings;
+}
+
 const ok = () => new Response(JSON.stringify(RUN), { status: 200 });
 const gateway = (status: number) => new Response('<html>gateway</html>', { status });
 const pgError = (status: number, code: string, message: string) =>
@@ -85,7 +104,7 @@ Deno.test('a service-role client is refused at the type level', () => {
   // Never called: the body exists only for the type check.
   const typeOnly = () => {
     // @ts-expect-error -- a service-role client is not a UserClient.
-    void persistEvaluationRun(service, payload());
+    void persistEvaluationRun(service, CTX, payload());
   };
   assert(typeof typeOnly === 'function');
 });
@@ -96,7 +115,7 @@ Deno.test(
     const sent = payload();
     let result: Awaited<ReturnType<typeof persistEvaluationRun>> | undefined;
     const seen = await withAnswers([ok()], async () => {
-      result = await persistEvaluationRun(client(), sent);
+      result = await persistEvaluationRun(client(), CTX, sent);
     });
     assertEquals(seen.length, 1);
     const [rpc] = seen;
@@ -122,8 +141,8 @@ Deno.test(
 
 Deno.test('two calls carry two different keys', async () => {
   const seen = await withAnswers([ok(), ok()], async () => {
-    await persistEvaluationRun(client(), payload());
-    await persistEvaluationRun(client(), payload());
+    await persistEvaluationRun(client(), CTX, payload());
+    await persistEvaluationRun(client(), CTX, payload());
   });
   assertEquals(seen.length, 2);
   assert(seen[0].body.p_run_data.idempotency_key !== seen[1].body.p_run_data.idempotency_key);
@@ -137,10 +156,21 @@ for (const [label, first] of [
 ] as const) {
   Deno.test(`${label} is retried once with the same key and body`, async () => {
     let result: Awaited<ReturnType<typeof persistEvaluationRun>> | undefined;
-    const seen = await withAnswers([first(), ok()], async () => {
-      result = await persistEvaluationRun(client(), payload());
+    let seen: Seen[] = [];
+    const warnings = await capturingWarnings(async () => {
+      seen = await withAnswers([first(), ok()], async () => {
+        result = await persistEvaluationRun(client(), CTX, payload());
+      });
     });
     assertEquals(seen.length, 2, 'exactly one retry');
+    // The retry is logged with the request's context, the first status and the key.
+    assertEquals(warnings.length, 1);
+    const [message, context] = warnings[0] as [string, Record<string, unknown>];
+    assertMatch(message, /retrying with the same idempotency key/);
+    assertEquals(context.request_id, CTX.requestId);
+    assertEquals(context.organization_id, ORG);
+    assertEquals(context.idempotency_key, seen[0].body.p_run_data.idempotency_key);
+    assert(typeof context.first_status === 'number');
     assertEquals(seen[1].body, seen[0].body, 'the retry repeats the first request, key and all');
     assertEquals(seen[1].authorization, `Bearer ${CALLER_JWT}`);
     assertEquals(result?.data, RUN);
@@ -151,7 +181,7 @@ for (const [label, first] of [
 Deno.test('a second retryable failure is returned, not retried again', async () => {
   let result: Awaited<ReturnType<typeof persistEvaluationRun>> | undefined;
   const seen = await withAnswers(['transport-failure', gateway(502)], async () => {
-    result = await persistEvaluationRun(client(), payload());
+    result = await persistEvaluationRun(client(), CTX, payload());
   });
   assertEquals(seen.length, 2);
   assertEquals(result?.status, 502);
@@ -165,10 +195,14 @@ for (const [label, answer, code] of [
 ] as const) {
   Deno.test(`${label} is the answer: no retry, code kept`, async () => {
     let result: Awaited<ReturnType<typeof persistEvaluationRun>> | undefined;
-    const seen = await withAnswers([answer()], async () => {
-      result = await persistEvaluationRun(client(), payload());
+    let seen: Seen[] = [];
+    const warnings = await capturingWarnings(async () => {
+      seen = await withAnswers([answer()], async () => {
+        result = await persistEvaluationRun(client(), CTX, payload());
+      });
     });
     assertEquals(seen.length, 1, 'no retry');
+    assertEquals(warnings.length, 0, 'nothing retried, nothing logged');
     assertEquals(result?.error?.code, code);
   });
 }

@@ -52,6 +52,7 @@ describe('mock read policies :: the restricted tables', () => {
 
     expect(await read('players')).toEqual([]);
     expect(await read('team_players', 'player_id')).toEqual([]);
+    expect(await read('profile_players', 'player_id')).toEqual([]);
   });
 
   it('shows a coach their own coach row and assignments, and no roster', async () => {

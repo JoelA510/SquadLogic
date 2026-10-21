@@ -8,7 +8,8 @@
 --   * coaches / team_coach_assignments: a coach reads their own row and
 --     assignment, not another coach's, and nothing once removed from the
 --     organization; a parent reads none; an admin reads all;
---   * profile_players: a member reads their own link, not another's;
+--   * profile_players: a member reads their own link, not another's, and
+--     none once removed;
 --   * staging_players: a member reads nothing, an admin reads the row;
 --   * team_calendar_tokens: every team's token was copied; a new team gets
 --     one; the team's coach and guardian read it, an unrelated member does not;
@@ -17,7 +18,8 @@
 --     unchanged; the current coach rotates it;
 --   * update_game_score: the coach of the home team scores; a coach of
 --     neither team is refused (42501); an admin scores;
---   * reconcile_prod_rls_drift's spec names the new coaches policy.
+--   * reconcile_prod_rls_drift's spec names the new coaches policy; it drops
+--     a re-added member-wide coaches read and refuses any other;
 --   (The migration itself refuses to commit with any other read policy left on
 --   a restricted table.)
 --
@@ -205,11 +207,6 @@ BEGIN
     END IF;
     RAISE NOTICE 'scores: the home coach and an admin score, a coach of neither team is refused; an admin reads every row';
 
-    IF pg_get_functiondef('public.reconcile_prod_rls_drift()'::regprocedure) NOT LIKE '%coaches_select_admin_or_self%'
-       OR pg_get_functiondef('public.reconcile_prod_rls_drift()'::regprocedure) LIKE '%Coaches: members access%' THEN
-        RAISE EXCEPTION 'reconcile_prod_rls_drift would still re-create the member-wide coaches read';
-    END IF;
-    RAISE NOTICE 'reconcile_prod_rls_drift names the new coaches policy';
 
     -- A link outlives a removed membership; the read does not.
     DELETE FROM public.organization_members WHERE organization_id = v_org AND profile_id = v_g;
@@ -217,11 +214,12 @@ BEGIN
     SET LOCAL ROLE authenticated;
     SELECT count(*) INTO v_n FROM public.players WHERE id = v_p1;
     SELECT v_n + count(*) INTO v_n FROM public.team_players WHERE player_id = v_p1;
+    SELECT v_n + count(*) INTO v_n FROM public.profile_players WHERE profile_id = v_g;
     RESET ROLE;
     IF v_n <> 0 THEN
-        RAISE EXCEPTION 'a guardian removed from the organization still read their child (% rows)', v_n;
+        RAISE EXCEPTION 'a guardian removed from the organization still read their child, roster row or link (% rows)', v_n;
     END IF;
-    RAISE NOTICE 'a guardian removed from the organization reads neither their child nor its roster row';
+    RAISE NOTICE 'a guardian removed from the organization reads neither their child, its roster row nor their link';
 
     -- The same for a coach: the coaches.user_id link outlives the membership.
     DELETE FROM public.organization_members WHERE organization_id = v_org AND profile_id = v_cu;
@@ -234,6 +232,41 @@ BEGIN
         RAISE EXCEPTION 'a coach removed from the organization still read their coach row or assignment (% rows)', v_n;
     END IF;
     RAISE NOTICE 'a coach removed from the organization reads neither their coach row nor their assignment';
+
+    -- Drift brings the member-wide coaches read back: the reconcile drops it.
+    CREATE POLICY "Coaches: members access" ON public.coaches
+        FOR SELECT TO authenticated USING (public.is_org_member(organization_id));
+    PERFORM public.reconcile_prod_rls_drift();
+    IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'coaches'
+                AND policyname = 'Coaches: members access') THEN
+        RAISE EXCEPTION 'reconcile_prod_rls_drift left the member-wide coaches read in place';
+    END IF;
+    RAISE NOTICE 'reconcile_prod_rls_drift drops a re-added member-wide coaches read';
+
+    -- The narrowed read gone: the reconcile puts it back, and only it.
+    DROP POLICY coaches_select_admin_or_self ON public.coaches;
+    PERFORM public.reconcile_prod_rls_drift();
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'coaches'
+                    AND policyname = 'coaches_select_admin_or_self')
+       OR EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'coaches'
+                   AND policyname = 'Coaches: members access') THEN
+        RAISE EXCEPTION 'reconcile_prod_rls_drift did not restore exactly the narrowed coaches read';
+    END IF;
+    RAISE NOTICE 'reconcile_prod_rls_drift restores the narrowed coaches read, not the member-wide one';
+
+    -- Any other read on coaches: the reconcile refuses to call it reconciled.
+    CREATE POLICY smoke_rpr_extra_coaches_read ON public.coaches
+        FOR SELECT TO authenticated USING (true);
+    BEGIN
+        PERFORM public.reconcile_prod_rls_drift();
+        RAISE EXCEPTION 'reconcile_prod_rls_drift called a second coaches read reconciled';
+    EXCEPTION WHEN raise_exception THEN
+        IF SQLERRM NOT LIKE '%still has read policy "smoke_rpr_extra_coaches_read"%' THEN
+            RAISE;
+        END IF;
+    END;
+    DROP POLICY smoke_rpr_extra_coaches_read ON public.coaches;
+    RAISE NOTICE 'reconcile_prod_rls_drift refuses a second read policy on coaches';
 END;
 $$;
 

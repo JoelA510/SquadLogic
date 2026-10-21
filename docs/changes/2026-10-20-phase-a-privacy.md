@@ -152,9 +152,10 @@ Decisions the plan left open:
    readable as before. A3b restricts: the new policies, the calendar token table,
    `rotate_calendar_token` and `update_game_score`'s rule, `staging_*`, and the matrix rewrite.
    Between the two, nothing is hidden that a page still reads directly.
-6. **A removed member keeps no read.** Every own-row branch (players and roster rows for a
-   guardian, the coach row and assignments for a coach) also requires current membership, since
-   the `profile_players` and `coaches.user_id` links outlive a removal.
+6. **A removed member keeps no read.** Every own-row branch (players, roster rows and their own
+   `profile_players` links for a guardian, the coach row and assignments for a coach) also
+   requires current membership, since the `profile_players` and `coaches.user_id` links outlive a
+   removal.
 7. **The restriction is enforced, not declared.** Postgres ORs permissive policies, so A3b's
    migration refuses to commit if any other `SELECT` or `ALL` policy is left on a restricted
    table. Production had exactly the one it drops on each (read 2026-10-21).

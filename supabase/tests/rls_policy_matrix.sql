@@ -728,13 +728,14 @@ INSERT INTO matrix_expected VALUES
     ('practice_exceptions',         'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('practice_exceptions',         'anon',     'grant','grant', 'grant','grant', 'grant'),
 
-    -- profile_players: own row (profile_id = auth.uid()) or member; Org B's row is the outsider's own; no write policy.
+    -- profile_players: own row while a member, or an admin (20261021020000); Org B's row is the
+    -- outsider's own, but the outsider is no Org B member, so it reads nothing; no write policy.
     ('profile_players',             'admin_a',  'A',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'coach_a',  '-',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'outsider', 'B',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- profiles: own row only, read and update; Org A's subject row is Charlie's profile, Org B's is Bob's; no INSERT or DELETE policy.

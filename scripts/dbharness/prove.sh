@@ -3977,6 +3977,23 @@ DECLARE
     v_extra text;" \
   "applying 20261021020000_restrict_people_reads.sql"
 
+plant "M34 a removed guardian still reads their own links" "$M34" \
+  "        (public.is_org_member(organization_id) AND profile_id = (SELECT auth.uid()))" \
+  "        profile_id = (SELECT auth.uid())" \
+  "smoke 20261021020000"
+
+plant "M34 the reconcile leaves a re-added member-wide coaches read" "$M34" \
+  "           AND policyname = 'Coaches: members access'
+    LOOP" \
+  "           AND policyname = 'Coaches: members access' AND false
+    LOOP" \
+  "smoke 20261021020000"
+
+plant "M34 the reconcile accepts a second coaches read" "$M34" \
+  "           AND policyname <> 'coaches_select_admin_or_self'" \
+  "           AND false" \
+  "smoke 20261021020000"
+
 plant "M34 a coach reads every coach row" "$M34" \
   "        public.is_org_admin(organization_id)
         OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))

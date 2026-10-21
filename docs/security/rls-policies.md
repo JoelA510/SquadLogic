@@ -130,7 +130,7 @@ unshared card returns none.
 Since `20261021020000` (A3b) those functions are the only non-admin path. A member who is not an
 admin or staff reads `players` and `team_players` only for their own children (and only while a
 member of the child's organization), `coaches` and `team_coach_assignments` only for their own
-coach record (again only while a member), `profile_players` only their own links, and `staging_players` and
+coach record (again only while a member), `profile_players` only their own links (the same), and `staging_players` and
 `staging_import_rows` not at all. A team's calendar feed token lives in `team_calendar_tokens`,
 readable by admins and staff, the team's current coaches and its guardians;
 `rotate_calendar_token` admits admins, staff and a current coach. `update_game_score` admits admins

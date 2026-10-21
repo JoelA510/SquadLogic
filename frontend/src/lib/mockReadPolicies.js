@@ -12,7 +12,8 @@
  *     while they are a member;
  *   - team_coach_assignments: an admin or staff member, or the caller's own
  *     while they are a member;
- *   - profile_players: the caller's own links, or an admin or staff member;
+ *   - profile_players: the caller's own links while a member, or an admin or
+ *     staff member;
  *   - staging_players, staging_import_rows: an admin or staff member;
  *   - team_calendar_tokens: an admin or staff member, the team's current
  *     coach, or a guardian on the team.
@@ -63,7 +64,8 @@ export function applyMockReadPolicy(db, table, rows, currentUserId, now = new Da
     team_coach_assignments: (row) =>
       access.isOrgAdmin(orgOf(row)) ||
       (access.isOrgMember(orgOf(row)) && access.myCoachIds.has(String(row.coach_id))),
-    profile_players: (row) => own(row.profile_id) || access.isOrgAdmin(orgOf(row)),
+    profile_players: (row) =>
+      (access.isOrgMember(orgOf(row)) && own(row.profile_id)) || access.isOrgAdmin(orgOf(row)),
     staging_players: (row) => access.isOrgAdmin(orgOf(row)),
     staging_import_rows: (row) => access.isOrgAdmin(orgOf(row)),
     team_calendar_tokens: (row) =>

@@ -12,7 +12,8 @@
 --   * coaches: only their own row (`coaches.user_id`, linked by
 --     link_my_coach_record); team_coach_assignments: only their own rows;
 --     both, again, only while they are a member;
---   * profile_players: only their own links (it read every member's before);
+--   * profile_players: only their own links, while a member (it read every
+--     member's before);
 --   * staging_players, staging_import_rows: nothing (raw import payloads were
 --     readable by every member, found while building A1).
 --   Admins and staff (is_org_admin) read everything in their organization,
@@ -94,7 +95,7 @@ DROP POLICY IF EXISTS "Profile Players: users view own" ON public.profile_player
 CREATE POLICY profile_players_select_own_or_admin ON public.profile_players
     FOR SELECT TO authenticated
     USING (
-        profile_id = (SELECT auth.uid())
+        (public.is_org_member(organization_id) AND profile_id = (SELECT auth.uid()))
         OR public.is_org_admin(organization_id)
     );
 
@@ -213,7 +214,9 @@ COMMENT ON FUNCTION public.rotate_calendar_token(uuid) IS
 -- ---------------------------------------------------------------------------
 -- 2b. reconcile_prod_rls_drift(): its spec named "Coaches: members access",
 -- so running it would have re-created the member-wide read. The coaches row
--- now names the policy above; the rest is 20261018030000's text.
+-- now names the policy above, step 3c drops the old one if drift brings it
+-- back, and step 4 refuses any other read on coaches; the rest is
+-- 20261018030000's text.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.reconcile_prod_rls_drift()
@@ -398,6 +401,19 @@ BEGIN
         v_dropped := v_dropped || (v_pol.tablename || ': ' || v_pol.policyname);
     END LOOP;
 
+    -- 3c. CHANGED (20261021020000): the member-wide coaches read the spec
+    --     above replaced. Re-added by drift, it would be ORed with the
+    --     narrowed policy and every member would read every coach row again.
+    FOR v_pol IN
+        SELECT tablename, policyname
+          FROM pg_policies
+         WHERE schemaname = 'public' AND tablename = 'coaches'
+           AND policyname = 'Coaches: members access'
+    LOOP
+        EXECUTE format('DROP POLICY %I ON public.%I', v_pol.policyname, v_pol.tablename);
+        v_dropped := v_dropped || (v_pol.tablename || ': ' || v_pol.policyname);
+    END LOOP;
+
     -- 4. Enforced, not declared: the end state is checked before commit,
     --    across EVERY table in `public` rather than a list. A write policy
     --    with any clause lacking an admin gate aborts here unless the
@@ -421,6 +437,18 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Enforce Org Membership: ALL') THEN
         RAISE EXCEPTION 'reconcile_prod_rls_drift: "Enforce Org Membership: ALL" survived its own drop';
     END IF;
+    -- CHANGED (20261021020000): coaches has one read, the narrowed one.
+    FOR v_pol IN
+        SELECT policyname
+          FROM pg_policies
+         WHERE schemaname = 'public' AND tablename = 'coaches'
+           AND permissive = 'PERMISSIVE' AND cmd IN ('SELECT', 'ALL')
+           AND policyname <> 'coaches_select_admin_or_self'
+    LOOP
+        RAISE EXCEPTION
+            'reconcile_prod_rls_drift: public.coaches still has read policy "%" beside coaches_select_admin_or_self; refusing to call it reconciled',
+            v_pol.policyname;
+    END LOOP;
 
     RETURN jsonb_build_object(
         'created', to_jsonb(v_created),

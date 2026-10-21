@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021040000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2469,6 +2469,23 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the restriction revert left a policy, the token table or a function body different from before"
         dump 10 $SCRATCH/harness_restrict; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261021030000" ]; then
+      # Both bodies byte for byte: admin_delete_team as production ran it (md5
+      # read 2026-10-21; its migration file's text differs) and
+      # upsert_team_event_rsvp as 20261005000000 defined it.
+      if psql_cmd "SELECT 'DELTEAM-VERDICT:' || CASE
+               WHEN md5(pg_get_functiondef('public.admin_delete_team(uuid)'::regprocedure))
+                    <> '83448d4265528e033924d035a4a40c04' THEN 'delete-body:' || md5(pg_get_functiondef('public.admin_delete_team(uuid)'::regprocedure))
+               WHEN md5(pg_get_functiondef('public.upsert_team_event_rsvp(uuid, uuid, uuid, text, date, text)'::regprocedure))
+                    <> '867b3603e208b86387cf9122a2572243' THEN 'rsvp-body:' || md5(pg_get_functiondef('public.upsert_team_event_rsvp(uuid, uuid, uuid, text, date, text)'::regprocedure))
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_delteam 2>&1 && grep -q 'DELTEAM-VERDICT:restored' $SCRATCH/harness_delteam; then
+        echo "  | (checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"
+      else
+        echo "FAIL revert ${id}: the team-delete revert left admin_delete_team or upsert_team_event_rsvp different from before"
+        dump 10 $SCRATCH/harness_delteam; STATUS=1
       fi
     fi
     if [ "$id" = "20261021040000" ]; then

@@ -7893,43 +7893,128 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
-      // Cascade: unset team_id on players
-      for (const player of db.players || []) {
-        if (String(player.team_id) === String(p_team_id)) player.team_id = null;
-      }
-      // Cascade: remove team_players, game_assignments, practice_assignments
-      // Only the team itself was tombstoned, so the three cascades came back
-      // on the next read pointing at a team that is gone.
+      // As 20261021030000: the team's practice exceptions are withdrawn,
+      // audited and archived, each series is audited as cancelled, every game
+      // RSVP to its games goes (whichever team it belongs to), players lose the
+      // team id, and team.deleted records what each table lost. Every row the
+      // database's cascade removes is removed and tombstoned here too, so the
+      // mock never shows a deleted team's dependants.
+      const sameTeam = (value) => String(value) === String(p_team_id);
+      const now = new Date().toISOString();
+      const userId = session?.user?.id ?? null;
+      db.audit_log = db.audit_log || [];
+      const audit = (action, resourceType, resourceId, metadata) =>
+        db.audit_log.push({
+          id: mockId(),
+          organization_id: team.organization_id,
+          user_id: userId,
+          action,
+          resource_type: resourceType,
+          resource_id: resourceId,
+          metadata,
+          created_at: now,
+        });
       const cascadeDoomed = (table, matches) => {
         const doomed = (db[table] || []).filter(matches);
-        if (doomed.length === 0) return;
+        if (doomed.length === 0) return doomed;
         markMockDeleted(
           db,
           table,
           doomed.map((row) => tombstoneKey(table, row))
         );
         db[table] = (db[table] || []).filter((row) => !matches(row));
+        return doomed;
       };
-      cascadeDoomed('team_players', (tp) => String(tp.team_id) === String(p_team_id));
-      cascadeDoomed(
-        'game_assignments',
-        (a) =>
-          String(a.home_team_id) === String(p_team_id) ||
-          String(a.away_team_id) === String(p_team_id)
+
+      const seriesIds = new Set(
+        (db.practice_assignments || []).filter((a) => sameTeam(a.team_id)).map((a) => String(a.id))
       );
-      cascadeDoomed('practice_assignments', (a) => String(a.team_id) === String(p_team_id));
-      db.teams = (db.teams || []).filter((t) => String(t.id) !== String(p_team_id));
+      const ownException = (e) => sameTeam(e.team_id) || seriesIds.has(String(e.assignment_id));
+      const withdrawn = [];
+      for (const exception of db.practice_exceptions || []) {
+        if (!ownException(exception) || exception.withdrawn_at) continue;
+        exception.withdrawn_at = now;
+        exception.withdrawn_by = userId;
+        withdrawn.push({ ...exception });
+        audit('practice.exception_withdrawn', 'practice_exception', exception.id, {
+          reason: 'team_deleted',
+          team_id: p_team_id,
+          assignment_id: exception.assignment_id,
+          row: { ...exception },
+        });
+      }
+      const archived = cascadeDoomed('practice_exceptions', ownException).map((row) => ({
+        ...row,
+      }));
+      for (const run of db.scheduler_runs || []) {
+        const mine = archived.filter((row) => String(row.run_id) === String(run.id));
+        if (mine.length === 0) continue;
+        run.results = {
+          ...(run.results || {}),
+          archived_exceptions: [...(run.results?.archived_exceptions || []), ...mine],
+        };
+      }
+      const series = cascadeDoomed('practice_assignments', (a) => sameTeam(a.team_id));
+      for (const before of series) {
+        const ofSeries = (row) => String(row.assignment_id) === String(before.id);
+        audit('practice.cancelled', 'practice_assignments', before.id, {
+          reason: 'team_deleted',
+          team_id: p_team_id,
+          assignment_id: before.id,
+          before,
+          withdrawn_exception_ids: withdrawn.filter(ofSeries).map((row) => row.id),
+          archived_exceptions: archived.filter(ofSeries),
+        });
+      }
+
+      const games = cascadeDoomed(
+        'games',
+        (g) => sameTeam(g.home_team_id) || sameTeam(g.away_team_id)
+      );
+      const gameIds = new Set(games.map((g) => String(g.id)));
+      const rsvps = cascadeDoomed(
+        'event_rsvps',
+        (r) =>
+          sameTeam(r.team_id) ||
+          (r.event_type === 'game' &&
+            String(r.organization_id ?? team.organization_id) === String(team.organization_id) &&
+            gameIds.has(String(r.reference_id)))
+      );
+      const playerIds = (db.players || [])
+        .filter((player) => sameTeam(player.team_id))
+        .map((player) => player.id)
+        .sort();
+      for (const player of db.players || []) {
+        if (sameTeam(player.team_id)) player.team_id = null;
+      }
+      const counts = {
+        practice_exceptions_deleted: archived.length,
+        practice_assignments_deleted: series.length,
+        games_deleted: games.length,
+        game_assignments_deleted: cascadeDoomed(
+          'game_assignments',
+          (a) => sameTeam(a.home_team_id) || sameTeam(a.away_team_id)
+        ).length,
+        team_players_deleted: cascadeDoomed('team_players', (tp) => sameTeam(tp.team_id)).length,
+        event_rsvps_deleted: rsvps.length,
+        team_messages_deleted: cascadeDoomed('team_messages', (m) => sameTeam(m.team_id)).length,
+        team_coach_assignments_deleted: cascadeDoomed('team_coach_assignments', (a) =>
+          sameTeam(a.team_id)
+        ).length,
+        team_calendar_tokens_deleted: cascadeDoomed('team_calendar_tokens', (t) =>
+          sameTeam(t.team_id)
+        ).length,
+      };
+      db.teams = (db.teams || []).filter((t) => !sameTeam(t.id));
       markMockDeleted(db, 'teams', [tombstoneKey('teams', team)]);
-      db.audit_log = db.audit_log || [];
-      db.audit_log.push({
-        id: mockId(),
-        organization_id: team.organization_id,
-        user_id: session?.user?.id,
-        action: 'team.deleted',
-        resource_type: 'team',
-        resource_id: p_team_id,
-        metadata: { team_name: team.name },
-        created_at: new Date().toISOString(),
+      audit('team.deleted', 'teams', p_team_id, {
+        name: team.name,
+        division_id: team.division_id,
+        ...counts,
+        game_ids: games.map((g) => g.id).sort(),
+        player_ids_unassigned: playerIds,
+        withdrawn_exception_ids: withdrawn.map((row) => row.id),
+        archived_exceptions: archived,
       });
       saveDB(db);
       return { data: null, error: null };

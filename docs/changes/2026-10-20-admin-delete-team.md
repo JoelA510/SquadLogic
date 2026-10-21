@@ -1,8 +1,29 @@
 # `admin_delete_team` refuses a team whose practices have exceptions (23503)
 
-Status: **plan, for owner approval** (AGENTS.md rule 14: persistence). Requested by the owner
+Status: **built** in `20261021030000_admin_delete_team_exceptions.sql` (option 1, approved by the
+owner 2026-10-21; decision 2: no confirmation step in this change). Requested by the owner
 2026-10-20. Source: Codex review on #605 (the `persistence-rpc-layer.md` row), recorded in the
 resume queue's flagged backlog.
+
+**Reproduction result (executed, migration-built database, 2026-10-21).** Today's delete does
+*not* raise 23503: the `practice_exceptions.team_id` cascade removes the rows before the RESTRICT
+check on `assignment_id` runs, so the delete succeeds and the exceptions go with no withdrawal,
+archive or audit. This is the alternate case the evidence section allows for; the design applies
+unchanged, and the pgTAP's plant (the file run against the old body) fails on the missing
+withdrawal, archive and audit rows, not on 23503.
+
+**As built, where it differs from the text below.**
+- The RSVP writer takes `FOR KEY SHARE` on the game, not `FOR SHARE`. It conflicts with the
+  delete's `FOR UPDATE` in the same way, but does not block score entry (`update_game_score`'s
+  `UPDATE` takes `FOR NO KEY UPDATE`, which `FOR SHARE` would conflict with).
+- The practice writer takes no team lock of its own; it does not need one. Its exception and
+  series inserts check the `team_id` foreign key, which takes `FOR KEY SHARE` on the team row,
+  so they wait on the delete's `FOR UPDATE`. The smoke shows a second session's exception insert
+  timing out 55P03 behind an open delete.
+- `team_calendar_tokens` (added by A3b) is one more cascading table, counted as
+  `team_calendar_tokens_deleted`.
+- The revert restores production's own `admin_delete_team` text, which differs from the
+  20260613000003 file.
 
 ## What is wrong
 

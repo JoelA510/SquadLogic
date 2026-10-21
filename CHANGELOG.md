@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting a team keeps the record of what went with it** (`docs/changes/2026-10-20-admin-delete-team.md`). Migration `20261021030000`:
+  - The team's practice exceptions are withdrawn, audited and archived onto their run, and each of its practice series is audited as cancelled, as cancelling a single series already did. Before, they vanished with the team, unaudited.
+  - Every game RSVP to the team's games is removed, including the opposing team's, which were left pointing at games that no longer existed.
+  - Players assigned to the team only through `players.team_id` lose that id.
+  - `team.deleted` records what each table lost.
+  - An RSVP sent while a team is being deleted waits for the delete and is then refused.
+
+  Revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/admin_delete_team_exceptions.sql`. The mock client mirrors every cascade.
+
 - **Timestamps no longer depend on the caller's time zone** (`docs/changes/2026-10-20-utc-now-idiom.md`). `timezone('utc', now())` is a time without a zone, and a caller that set its session zone (PostgREST's `Prefer: timezone=`) stored every such timestamp shifted by up to 14 hours. Migration `20261021040000`:
   - pins the 42 functions that use it to UTC;
   - turns the 79 column defaults into `now()`;

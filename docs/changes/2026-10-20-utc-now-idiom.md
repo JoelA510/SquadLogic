@@ -10,7 +10,9 @@ Status: **built** in `20261021040000_utc_now_idiom.sql` (option 1, approved by t
   42 functions use the idiom as a timestamp and 79 column defaults use it (the "82" above was an
   earlier count). `team_local_today` also matched the pattern, but its one use is the deliberate
   UTC calendar date, `(now() AT TIME ZONE 'UTC')::date`, so it is not pinned. The guard and the
-  catalogue checks exempt that `::date` form.
+  catalogue checks exempt that `::date` form. `20261021030000` (the team delete, merged first)
+  rewrote `upsert_team_event_rsvp` with `now()`, so 41 of the 42 still use the idiom; the RSVP
+  writer keeps its pin because it casts a game's start to a date.
 - **`fail_stale_import_jobs`** is redefined from production's `pg_get_functiondef` text, with only
   its argument default changed, and the revert restores that text byte for byte. `CREATE OR REPLACE` resets a function's `SET` clauses, so the
   redefinition comes before the pins in the migration.

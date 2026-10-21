@@ -251,7 +251,7 @@ BEGIN
     SELECT p.prosecdef, p.proconfig, p.prorettype::regtype::text AS ret,
            coalesce(p.proacl::text, '') AS acl
       INTO v_p FROM pg_proc p WHERE p.oid = c_sig::regprocedure;
-    IF NOT v_p.prosecdef OR v_p.proconfig IS DISTINCT FROM ARRAY['search_path=public'] OR v_p.ret <> 'jsonb' THEN
+    IF NOT v_p.prosecdef OR NOT (v_p.proconfig <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (v_p.proconfig)) OR v_p.ret <> 'jsonb' THEN
         RAISE EXCEPTION 'upsert_team_event_rsvp changed posture: definer %, config %, returns %', v_p.prosecdef, v_p.proconfig, v_p.ret;
     END IF;
     IF NOT has_function_privilege('authenticated', c_sig, 'EXECUTE') OR v_p.acl LIKE '%{=X/%' OR v_p.acl LIKE '%,=X/%' THEN

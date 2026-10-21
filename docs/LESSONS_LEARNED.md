@@ -207,3 +207,11 @@ evolves. If you are about to make a decision one of these covers, read it first.
     user sees; `aria-hidden` on the visible text does not satisfy axe, and neither do brackets
     around it. Run the axe E2E scans on any axe bump, and pin label-in-name with
     `tests/helpers/labelInName.js`, which jsdom can check without axe.
+40. **Pin a function's zone after redefining it, and fix an argument default at its source.**
+    `timezone('utc', now())` was fixed by pinning 42 functions `SET timezone = 'UTC'` rather than
+    rewriting their bodies (`20261021040000`). Two traps: `CREATE OR REPLACE FUNCTION` resets the
+    function's `SET` clauses, so a pin placed before a redefinition of the same function is lost;
+    and an omitted argument's default is evaluated in the caller's query, in the caller's session,
+    before the function's own `SET` applies, so `fail_stale_import_jobs`' default had to become
+    `now() - interval` itself. Posture checks that compare `proconfig` to one exact array break on
+    any added setting; check the settings you require, and refuse the ones you forbid.

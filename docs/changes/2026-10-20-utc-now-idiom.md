@@ -1,8 +1,37 @@
 # `timezone('utc', now())` stores a time shifted by the caller's session timezone
 
-Status: **plan, for owner approval** (AGENTS.md rule 14: persistence). Requested by the owner
-2026-10-20. Source: B2 (DS-5) found it while building the registration throttle; lesson 37 in
+Status: **built** in `20261021040000_utc_now_idiom.sql` (option 1, approved by the owner
+2026-10-21). Requested by the owner 2026-10-20. Source: B2 (DS-5) found it while building the registration throttle; lesson 37 in
 `docs/LESSONS_LEARNED.md` and the remediation plan's "Discovered during execution" record it.
+
+## As built (2026-10-21)
+
+- **Scope, re-read at build time** (*executed*): a migration-built database and production match:
+  42 functions use the idiom as a timestamp and 79 column defaults use it (the "82" above was an
+  earlier count). `team_local_today` also matched the pattern, but its one use is the deliberate
+  UTC calendar date, `(now() AT TIME ZONE 'UTC')::date`, so it is not pinned. The guard and the
+  catalogue checks exempt that `::date` form.
+- **`fail_stale_import_jobs`** is redefined from production's `pg_get_functiondef` text, with only
+  its argument default changed, and the revert restores that text byte for byte. `CREATE OR REPLACE` resets a function's `SET` clauses, so the
+  redefinition comes before the pins in the migration.
+- **What pinning changes inside the 42**, by expression (none of it changes behaviour for a
+  session at UTC, which is every caller today):
+
+  | Expression | Functions | Pinned behaviour |
+  | --- | --- | --- |
+  | `current_date` | `set_team_coaches` ("not in the future"), `persist_team_schedule` | the UTC date |
+  | timestamptz cast to `date` | `upsert_team_event_rsvp` (a game's date) | the date in UTC |
+  | text parsed to `timestamptz` | `persist_game_schedule`, `persist_practice_schedule`, `persist_team_schedule` (run times, kickoff, end), `rollback_coach_import_job` | a string without an offset reads as UTC; the client sends ISO strings with `Z`, and the rollback restores text written with an offset |
+  | text cast to `date` or `daterange`, `to_char` of a date | `apply_player_patch`, `persist_practice_schedule`, `rollback_field_import_job`, `upsert_team_event_rsvp` | unaffected by the zone |
+
+  Moving `set_team_coaches`' check to the season's zone is a body rewrite for its own plan.
+- **Posture checks.** Five older smokes asserted a function's configuration was exactly
+  `{search_path=public}`; they now accept `search_path=public` plus the pin and nothing else.
+- **Tests.** `supabase/tests/utc_now_idiom.sql` (12): a default, `trigger_set_timestamp`,
+  `set_team_coaches`' `ended_at` and a `persist_practice_schedule` run under UTC+14, the stale-job
+  cutoff without its argument under UTC-12 and UTC+14, and the three catalogue checks. Run against
+  the reverted schema, 9 of the 12 fail. `tests/utcNowIdiom.test.js` guards later migrations; the
+  migration's smoke repeats the catalogue checks on every harness run.
 
 ## What is wrong
 

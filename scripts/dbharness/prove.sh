@@ -103,6 +103,9 @@ R33="$REPO/docs/sql/20261021010000_revert.sql"
 # A3b: restricted reads (policies, calendar token table, score rule), and the revert.
 M34="$REPO/supabase/migrations/20261021020000_restrict_people_reads.sql"
 R34="$REPO/docs/sql/20261021020000_revert.sql"
+# The UTC now idiom: functions pinned, defaults now(), and the revert.
+M36="$REPO/supabase/migrations/20261021040000_utc_now_idiom.sql"
+R36="$REPO/docs/sql/20261021040000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4063,6 +4066,38 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
   update teams" \
   "revert 20261021020000"
 
+# **The UTC now idiom (20261021040000).** One plant per claim the smoke prints,
+# two for the revert.
+plant "M36 a function using the idiom is left unpinned" "$M36" \
+  "ALTER FUNCTION public.trigger_set_timestamp() SET timezone = 'UTC';" \
+  "-- trigger_set_timestamp left unpinned" \
+  "smoke 20261021040000"
+
+plant "M36 a column default keeps the idiom" "$M36" \
+  "ALTER TABLE public.organizations ALTER COLUMN created_at SET DEFAULT now();" \
+  "-- organizations.created_at left on the idiom" \
+  "smoke 20261021040000"
+
+plant "M36 the stale-job argument default keeps the idiom" "$M36" \
+  "p_stale_before timestamp with time zone DEFAULT (now() - '00:05:00'::interval))" \
+  "p_stale_before timestamp with time zone DEFAULT (timezone('utc'::text, now()) - '00:05:00'::interval))" \
+  "smoke 20261021040000"
+
+plant "M36 fail_stale_import_jobs is left unpinned" "$M36" \
+  "ALTER FUNCTION public.fail_stale_import_jobs(uuid,timestamp with time zone) SET timezone = 'UTC';" \
+  "-- fail_stale_import_jobs left unpinned" \
+  "smoke 20261021040000"
+
+plant "R36 the revert leaves the functions pinned" "$R36" \
+  "ALTER FUNCTION public.trigger_set_timestamp() RESET timezone;" \
+  "-- trigger_set_timestamp left pinned" \
+  "FAIL revert 20261021040000"
+
+plant "R36 the revert leaves the column defaults on now()" "$R36" \
+  "ALTER TABLE public.organizations ALTER COLUMN created_at SET DEFAULT timezone('utc'::text, now());" \
+  "-- organizations.created_at left on now()" \
+  "FAIL revert 20261021040000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4199,6 +4234,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the identity revert drops link_my_coach_record and restores the table-level UPDATE grant on profiles to anon and authenticated"]="R32 the revert leaves link_my_coach_record|R32 the revert does not restore the profiles grant"
   ["(checked) the server-side reads revert drops every read, helper and contact card column"]="R33 the revert leaves get_team_roster|R33 the revert leaves the contact card columns"
   ["(checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"]="R34 the revert leaves players restricted|R34 the revert leaves the token table|R34 the revert restores a drifted rotate body"
+  ["(checked) the UTC revert unpins every function, restores the 79 column defaults, and restores fail_stale_import_jobs byte for byte"]="R36 the revert leaves the functions pinned|R36 the revert leaves the column defaults on now()"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Staff are admins** (owner decision 2026-10-20; Phase A2a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020030000`: `is_org_admin()` admits `staff`; the last-admin guards in `admin_remove_member` and `admin_change_member_role` count staff; the nine policies that test a role by name admit staff beside `admin` (revert and smoke in `docs/sql/`). The Edge Functions' `verifyOrgAdmin`, the frontend's permissions (`ADMIN_ROLES`), the navigation, the dashboard, the import panel, the settings audit log and the mock client follow. `tenant_admin` keeps exactly the access it had (RLS Q5, open).
 
+### Fixed
+
+- **Timestamps no longer depend on the caller's time zone** (`docs/changes/2026-10-20-utc-now-idiom.md`). `timezone('utc', now())` is a time without a zone, and a caller that set its session zone (PostgREST's `Prefer: timezone=`) stored every such timestamp shifted by up to 14 hours. Migration `20261021040000`:
+  - pins the 42 functions that use it to UTC;
+  - turns the 79 column defaults into `now()`;
+  - makes the stale-import cutoff's default `now() - 5 minutes`.
+
+  No caller sets a zone today, so nothing stored so far is wrong. A Vitest guard refuses the idiom in later migrations; revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/utc_now_idiom.sql`.
+
 ### Removed
 
 - **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.

@@ -266,7 +266,7 @@ BEGIN
     IF (SELECT count(*) FROM pg_proc p
          WHERE p.oid IN ('public.persist_team_schedule(jsonb, jsonb, jsonb)'::regprocedure,
                          'public.persist_game_schedule(jsonb, jsonb)'::regprocedure)
-           AND p.prosecdef AND p.proconfig = ARRAY['search_path=public']) <> 2 THEN
+           AND p.prosecdef AND p.proconfig <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (p.proconfig)) <> 2 THEN
         RAISE EXCEPTION 'a save RPC lost SECURITY DEFINER or search_path=public';
     END IF;
     IF NOT has_function_privilege('authenticated', 'public.persist_team_schedule(jsonb, jsonb, jsonb)', 'EXECUTE')

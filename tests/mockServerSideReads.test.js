@@ -224,6 +224,30 @@ describe('mock server-side reads', () => {
     ]);
   });
 
+  it('keeps applying an unshared card after the guardian changes their sign-in email, and audits each save', () => {
+    call('gwen', 'set_my_contact_card', { p_phone: null, p_email: null, p_share: false });
+    db.profiles.find((profile) => profile.id === 'gwen').email = 'gwen.new@example.test';
+    expect(roster('cora').data[0].guardian_contacts[0]).toEqual({ name: 'Gwen' });
+    const audits = db.audit_log.filter((row) => row.action === 'profile.contact_card_updated');
+    expect(audits).toHaveLength(1);
+    expect(audits[0].metadata).toEqual({
+      share_contact: false,
+      has_phone: false,
+      has_email: false,
+    });
+  });
+
+  it('answers an admin’s role preview of a coach, and refuses a non-admin', () => {
+    expect(
+      call('admin', 'admin_get_coached_team_ids', { p_organization_id: ORG, p_user_id: 'cora' })
+        .data
+    ).toEqual(['team-a']);
+    expect(
+      call('otto', 'admin_get_coached_team_ids', { p_organization_id: ORG, p_user_id: 'cora' })
+        .error?.code
+    ).toBe('42501');
+  });
+
   it('the directory admits a current coach while on, refuses them while off, and admits staff either way', () => {
     const names = (user) =>
       call(user, 'get_coach_directory', { p_organization_id: ORG }).data?.map((d) => d.full_name);

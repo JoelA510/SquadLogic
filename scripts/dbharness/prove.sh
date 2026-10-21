@@ -3917,6 +3917,21 @@ plant "M33 the card helper is callable by clients" "$M33" \
   "REVOKE ALL ON FUNCTION public.guardian_contacts_view(uuid, jsonb, boolean) FROM anon;" \
   "smoke 20261021010000"
 
+plant "M33 a sign-in email change defeats the card" "$M33" \
+  "                 AND (lower(trim(pp.matched_email)) IN (lower(trim(g.c ->> 'email')),
+                                                       lower(trim(g.c ->> 'alternate_email')))
+                      OR (u.email_confirmed_at" \
+  "                 AND (false
+                      OR (u.email_confirmed_at" \
+  "smoke 20261021010000"
+
+plant "M33 the preview read admits a non-admin" "$M33" \
+  "    IF auth.uid() IS NULL OR NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'admin_get_coached_team_ids requires an organization admin'" \
+  "    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'admin_get_coached_team_ids requires an organization admin'" \
+  "smoke 20261021010000"
+
 plant "R33 the revert leaves get_team_roster" "$R33" \
   "DROP FUNCTION IF EXISTS public.get_team_roster(uuid);" \
   "" \

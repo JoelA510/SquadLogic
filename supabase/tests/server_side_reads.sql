@@ -19,7 +19,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(32);
+SELECT plan(36);
 
 INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
     ('e1000000-0000-4000-8000-000000000001', 'sid@test.local',  '{"password_length": 12}', now()),
@@ -226,6 +226,30 @@ SELECT is(public.link_my_guardian_records()->>'status', 'linked',
           'a guardian whose imported email matches, case ignored, is linked');
 SELECT is((SELECT count(*)::int FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-0000000000a2')),
           1, 'once linked, the guardian reads their child''s team roster');
+
+-- A guardian's card keeps applying after their sign-in email changes: the
+-- link recorded the imported address it matched.
+SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000006"}';
+SELECT lives_ok($$ SELECT public.set_my_contact_card(NULL, NULL, false) $$,
+                'Hal unshares his card');
+RESET role;
+UPDATE auth.users SET email = 'hal.new@test.local' WHERE id = 'e1000000-0000-4000-8000-000000000006';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
+SELECT is((SELECT r.guardian_contacts -> 0
+             FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-0000000000a2') r),
+          '{"name": "Hal"}'::jsonb,
+          'an unshared card still hides the imported email after the sign-in email changes');
+
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is((SELECT array_agg(t) FROM public.admin_get_coached_team_ids('a1111111-1111-1111-1111-111111111111',
+                                                                     'e1000000-0000-4000-8000-000000000004') t),
+          ARRAY['aaaaaaaa-0000-0000-0000-0000000000a2'::uuid],
+          'an admin''s role preview reads the coach''s current teams');
+SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
+SELECT throws_ok($$ SELECT * FROM public.admin_get_coached_team_ids('a1111111-1111-1111-1111-111111111111',
+                                                                   'e1000000-0000-4000-8000-000000000002') $$,
+                 '42501', NULL, 'a coach is refused another member''s coached teams');
 
 RESET role;
 UPDATE public.season_settings SET timezone = 'Pacific/Kiritimati'

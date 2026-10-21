@@ -580,6 +580,10 @@ function AdminHome() {
 /** Coach Home — my teams at a glance, and the league's coach directory. */
 function CoachDashboard() {
   const { currentOrganization } = useOrganization();
+  const { user, isImpersonating } = useAuth();
+  // An admin's role preview keeps the admin's session (auth.uid()), so the
+  // previewed coach's teams come from the admin-only read for that profile.
+  const previewUserId = isImpersonating ? (user?.profile?.id ?? null) : null;
   const { isEnabled } = useFeatures();
   const directoryOn = isEnabled(FEATURE_FLAGS.COACH_DIRECTORY);
   const [teams, setTeams] = useState(/** @type {{ id: string, name: string }[]} */ ([]));
@@ -593,13 +597,21 @@ function CoachDashboard() {
     (async () => {
       const orgId = currentOrganization?.id;
       if (!orgId) return;
+      // Nothing of the previous organization stays on screen while this one loads.
+      setTeams([]);
+      setDirectory(null);
+      setDirectoryError(false);
+      setLoadError(null);
       try {
         // The teams the caller currently coaches (20261021010000): a live
         // team_coach_assignments row of their linked coach record, judged in
         // each team's season timezone.
-        const { data: teamIds, error: idsError } = await supabase.rpc('get_my_coached_team_ids', {
-          p_organization_id: orgId,
-        });
+        const { data: teamIds, error: idsError } = previewUserId
+          ? await supabase.rpc('admin_get_coached_team_ids', {
+              p_organization_id: orgId,
+              p_user_id: previewUserId,
+            })
+          : await supabase.rpc('get_my_coached_team_ids', { p_organization_id: orgId });
         if (idsError) throw idsError;
         const ids = (teamIds || []).map(String);
         let mine = [];
@@ -649,7 +661,7 @@ function CoachDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [currentOrganization?.id, directoryOn]);
+  }, [currentOrganization?.id, directoryOn, previewUserId]);
 
   if (!loaded) return <LoadingScreen />;
 
@@ -751,12 +763,12 @@ function CoachDirectory({ coaches }) {
         {coaches.length === 0 ? (
           <span className="muted">No coaches are assigned yet.</span>
         ) : (
-          <ul style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <ul className="flex flex-col gap-2.5">
             {coaches.map((coach) => (
-              <li key={coach.coach_id} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <li key={coach.coach_id} className="flex items-center gap-2.5">
                 <Avatar name={coach.full_name || '?'} size="sm" />
-                <div style={{ flex: 1, fontSize: 13 }}>
-                  <div style={{ fontWeight: 600 }}>{coach.full_name || 'Coach'}</div>
+                <div className="flex-1 text-sm">
+                  <div className="font-semibold">{coach.full_name || 'Coach'}</div>
                   <div className="muted">
                     {(coach.team_names || []).join(', ')}
                     {coach.email && (

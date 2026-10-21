@@ -2421,12 +2421,16 @@ NEEDLES
                  OR to_regprocedure('public.is_current_team_coach(uuid)') IS NOT NULL
                  OR to_regprocedure('public.is_team_guardian(uuid)') IS NOT NULL
                  OR to_regprocedure('public.get_my_coached_team_ids(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.coached_team_ids_of(uuid,uuid)') IS NOT NULL
+                 OR to_regprocedure('public.admin_get_coached_team_ids(uuid,uuid)') IS NOT NULL
                  OR to_regprocedure('public.org_flag(uuid,text,boolean)') IS NOT NULL
                  OR to_regprocedure('public.set_my_contact_card(text,text,boolean)') IS NOT NULL
                  OR to_regprocedure('public.team_local_today(uuid)') IS NOT NULL THEN 'function-left'
                WHEN EXISTS (SELECT 1 FROM information_schema.columns
-                             WHERE table_schema = 'public' AND table_name = 'profiles'
-                               AND column_name IN ('contact_phone', 'contact_email', 'share_contact'))
+                             WHERE table_schema = 'public'
+                               AND ((table_name = 'profiles'
+                                     AND column_name IN ('contact_phone', 'contact_email', 'share_contact'))
+                                 OR (table_name = 'profile_players' AND column_name = 'matched_email')))
                  THEN 'column-left'
                ELSE 'restored' END;" \
          >$SCRATCH/harness_reads 2>&1 && grep -q 'READS-VERDICT:restored' $SCRATCH/harness_reads; then

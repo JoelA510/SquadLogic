@@ -37,6 +37,7 @@ export const SERVER_SIDE_READ_RPCS = Object.freeze([
   'get_team_staff',
   'get_coach_directory',
   'get_my_coached_team_ids',
+  'admin_get_coached_team_ids',
 ]);
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -144,9 +145,17 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== null && v !== undefined));
   const guardianContactsView = (player, primaryOnly) => {
     const contacts = Array.isArray(player.guardian_contacts) ? player.guardian_contacts : [];
+    // Each linked account with the addresses it answers to: the imported
+    // address its link was matched on (kept across a sign-in email change)
+    // and its current email.
     const linked = (db.profile_players || [])
       .filter((link) => String(link.player_id) === String(player.id))
-      .map((link) => profileById(link.profile_id))
+      .map((link) => {
+        const profile = profileById(link.profile_id);
+        return profile
+          ? { profile, addresses: [norm(link.matched_email), norm(profile.email)].filter(Boolean) }
+          : null;
+      })
       .filter(Boolean);
     // As the SQL: the primary contact is the FIRST element (`ord = 1`), taken
     // before anything that is not a contact object is dropped.
@@ -154,11 +163,10 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
       .slice(0, primaryOnly ? 1 : undefined)
       .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
       .map((c) => {
-        const matches = linked.filter(
-          (profile) =>
-            norm(profile.email) !== '' &&
-            [norm(c.email), norm(c.alternate_email)].includes(norm(profile.email))
-        );
+        const contactAddresses = [norm(c.email), norm(c.alternate_email)].filter(Boolean);
+        const matches = linked
+          .filter(({ addresses }) => addresses.some((a) => contactAddresses.includes(a)))
+          .map(({ profile }) => profile);
         const card = matches.find((m) => m.share_contact !== null && m.share_contact !== undefined);
         if (!card) {
           return stripNulls({
@@ -195,16 +203,27 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     db.profile_players = db.profile_players || [];
     let linked = 0;
     for (const player of db.players || []) {
-      if (!isOrgMember(player.organization_id) || myChildIds.has(String(player.id))) continue;
+      if (!isOrgMember(player.organization_id)) continue;
       const contacts = Array.isArray(player.guardian_contacts) ? player.guardian_contacts : [];
       const matches = contacts.some(
         (c) => c && (norm(c.email) === email || norm(c.alternate_email) === email)
       );
       if (!matches) continue;
+      if (myChildIds.has(String(player.id))) {
+        // A link made at registration records the address it matches now.
+        const existing = db.profile_players.find(
+          (link) =>
+            String(link.profile_id) === String(currentUserId) &&
+            String(link.player_id) === String(player.id)
+        );
+        if (existing && !existing.matched_email) existing.matched_email = email;
+        continue;
+      }
       db.profile_players.push({
         profile_id: currentUserId,
         player_id: player.id,
         organization_id: player.organization_id,
+        matched_email: email,
         created_at: now.toISOString(),
       });
       myChildIds.add(String(player.id));
@@ -251,6 +270,25 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
       contact_email: cardEmail,
       share_contact: p.p_share,
     });
+    // One audit row per organization the caller belongs to, without the values.
+    db.audit_log = db.audit_log || [];
+    for (const member of db.organization_members || []) {
+      if (String(member.profile_id) !== String(currentUserId)) continue;
+      db.audit_log.push({
+        id: newId(),
+        organization_id: member.organization_id,
+        user_id: currentUserId,
+        action: 'profile.contact_card_updated',
+        resource_type: 'profiles',
+        resource_id: currentUserId,
+        metadata: {
+          share_contact: p.p_share,
+          has_phone: phone !== null,
+          has_email: cardEmail !== null,
+        },
+        created_at: now.toISOString(),
+      });
+    }
     return {
       data: { contact_phone: phone, contact_email: cardEmail, share_contact: p.p_share },
       error: null,
@@ -259,6 +297,37 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
 
   if (name === 'get_my_coached_team_ids') {
     return { data: myCoachedTeamIds(p.p_organization_id), error: null };
+  }
+
+  if (name === 'admin_get_coached_team_ids') {
+    if (!isOrgAdmin(p.p_organization_id)) {
+      return denied('admin_get_coached_team_ids requires an organization admin');
+    }
+    const theirCoachIds = new Set(
+      (db.coaches || [])
+        .filter((coach) => String(coach.user_id ?? '') === String(p.p_user_id))
+        .map((coach) => String(coach.id))
+    );
+    const theyAreMember = (db.organization_members || []).some(
+      (m) =>
+        String(m.organization_id) === String(p.p_organization_id) &&
+        String(m.profile_id) === String(p.p_user_id)
+    );
+    const ids = theyAreMember
+      ? [
+          ...new Set(
+            (db.team_coach_assignments || [])
+              .filter(
+                (row) =>
+                  String(row.organization_id) === String(p.p_organization_id) &&
+                  theirCoachIds.has(String(row.coach_id)) &&
+                  isLive(row)
+              )
+              .map((row) => String(row.team_id))
+          ),
+        ]
+      : [];
+    return { data: ids, error: null };
   }
 
   if (name === 'get_coach_directory') {

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   from: vi.fn(),
   flags: {},
+  impersonating: false,
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -28,7 +29,17 @@ vi.mock('../frontend/src/hooks/usePermission.js', () => ({
 }));
 
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
-  useAuth: () => ({ user: { id: 'cora', email: 'cora@example.test' }, isImpersonating: false }),
+  useAuth: () =>
+    mocks.impersonating
+      ? {
+          user: {
+            id: 'admin',
+            email: 'admin@example.test',
+            profile: { id: 'cora', role: 'coach' },
+          },
+          isImpersonating: true,
+        }
+      : { user: { id: 'cora', email: 'cora@example.test' }, isImpersonating: false },
 }));
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
@@ -66,9 +77,11 @@ function teamsTable(rows) {
 
 beforeEach(() => {
   mocks.flags = {};
+  mocks.impersonating = false;
   mocks.rpc.mockReset();
   mocks.rpc.mockImplementation(async (name) => {
     if (name === 'get_my_coached_team_ids') return { data: ['team-a'], error: null };
+    if (name === 'admin_get_coached_team_ids') return { data: ['team-b'], error: null };
     if (name === 'get_coach_directory') return { data: DIRECTORY, error: null };
     return { data: null, error: null };
   });
@@ -92,6 +105,17 @@ describe('Coach home', () => {
     );
     expect(screen.queryByRole('link', { name: 'Open B-Team' })).not.toBeInTheDocument();
     expect(mocks.from).not.toHaveBeenCalledWith('coaches');
+  });
+
+  it('in an admin’s role preview, shows the previewed coach’s teams, not the admin’s', async () => {
+    mocks.impersonating = true;
+    render(<DashboardPage />);
+    expect(await screen.findByRole('link', { name: 'Open B-Team' })).toBeInTheDocument();
+    expect(mocks.rpc).toHaveBeenCalledWith('admin_get_coached_team_ids', {
+      p_organization_id: 'org-a',
+      p_user_id: 'cora',
+    });
+    expect(mocks.rpc).not.toHaveBeenCalledWith('get_my_coached_team_ids', expect.anything());
   });
 
   it('lists the coach directory while the league setting is on', async () => {

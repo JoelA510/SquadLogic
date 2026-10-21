@@ -114,11 +114,13 @@ that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_s
 | `get_team_staff(team)`         | the same                                                       | every current coach's name, role, phone and email                                                                                                                                                                                              |
 | `get_coach_directory(org)`     | admins, staff; a current coach while `coach_directory` is on   | every current coach's contact details                                                                                                                                                                                                            |
 | `get_my_coached_team_ids(org)` | any member                                                     | the teams the caller currently coaches                                                                                                                                                                                                           |
+| `admin_get_coached_team_ids(org, user)` | admins, staff                                         | the teams another member currently coaches (an admin's role preview)                                                                                                                                                                             |
 
 "Current coach" is a `team_coach_assignments` row of the caller's linked coach (`coaches.user_id`,
 set by `link_my_coach_record()`) whose inclusive window holds today in the team's season timezone
 (`team_local_today()`, UTC when unset). "Guardian" is a `profile_players` link, written by in-app
-registration or by `link_my_guardian_records()` from a matching verified email. A refused call
+registration or by `link_my_guardian_records()` from a matching verified email; the link keeps
+the imported address it matched (`profile_players.matched_email`). A refused call
 raises 42501, the same for a team that does not exist. A user's contact card
 (`profiles.contact_phone`, `contact_email`, `share_contact`, written only by
 `set_my_contact_card()`) replaces imported details wherever these functions return them; an

@@ -29,7 +29,7 @@ Given(
         db.team_players = (db.team_players || []).filter(
           (tp: Record<string, unknown>) => tp.player_id !== playerId
         );
-        db.team_players.push({ team_id: teamId, player_id: playerId });
+        db.team_players.push({ team_id: teamId, player_id: playerId, organization_id: orgId });
         // The sanctioned write (lifts tombstones, as the client's own saves do).
         window.__saveMockDB__(db);
       },

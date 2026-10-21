@@ -10,7 +10,8 @@
 -- rows (and so the actions' registrations, if any exist). They are correct links that in-app
 -- registration would also have made; unlinking is a separate decision.
 --
--- What it loses: every saved contact card (the columns are dropped).
+-- What it loses: every saved contact card (the columns are dropped), and the
+-- address each guardian link was matched on (`profile_players.matched_email`).
 --
 -- Verified: the harness checks every function and column is gone.
 
@@ -22,11 +23,15 @@ DROP FUNCTION IF EXISTS public.get_team_roster(uuid);
 DROP FUNCTION IF EXISTS public.link_my_guardian_records();
 DROP FUNCTION IF EXISTS public.guardian_contacts_view(uuid, jsonb, boolean);
 DROP FUNCTION IF EXISTS public.org_flag(uuid, text, boolean);
+DROP FUNCTION IF EXISTS public.admin_get_coached_team_ids(uuid, uuid);
 DROP FUNCTION IF EXISTS public.get_my_coached_team_ids(uuid);
+DROP FUNCTION IF EXISTS public.coached_team_ids_of(uuid, uuid);
 DROP FUNCTION IF EXISTS public.is_team_guardian(uuid);
 DROP FUNCTION IF EXISTS public.is_current_team_coach(uuid);
 DROP FUNCTION IF EXISTS public.team_local_today(uuid);
 DROP FUNCTION IF EXISTS public.set_my_contact_card(text, text, boolean);
+
+ALTER TABLE public.profile_players DROP COLUMN IF EXISTS matched_email;
 
 ALTER TABLE public.profiles
     DROP CONSTRAINT IF EXISTS profiles_contact_phone_check,

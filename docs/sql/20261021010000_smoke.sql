@@ -10,14 +10,18 @@
 --     contact only, and nothing of it with guardian_contact_sharing off; a
 --     member with no tie to the team is refused; rating is admin-only;
 --   * a saved contact card replaces the imported email and phone, and an
---     unshared card leaves neither; each save is audited without the values;
+--     unshared card leaves neither, also after the guardian changes their
+--     sign-in email; each save is audited without the values;
 --   * get_team_staff admits the guardian and refuses the unrelated member; a
 --     coach whose assignment ended yesterday is no longer current;
 --   * get_coach_directory admits a current coach and refuses them once
 --     coach_directory is off;
 --   * the posture: every reader is SECURITY DEFINER with search_path=public,
---     executable by authenticated and not anon; the three internal helpers
---     (org_flag, guardian_contacts_view, team_local_today) by neither.
+--     executable by authenticated and not anon; the four internal helpers
+--     (org_flag, guardian_contacts_view, team_local_today,
+--     coached_team_ids_of) by neither;
+--   * admin_get_coached_team_ids answers an admin's preview of a coach, and
+--     refuses a non-admin.
 --
 -- Wrapped in BEGIN ... ROLLBACK. Every id is generated; every email is
 -- `@example.test`; there is no PII.
@@ -167,7 +171,15 @@ BEGIN
            AND NOT metadata ? 'contact_phone' AND NOT (metadata::text LIKE '%0199%')) <> 2 THEN
         RAISE EXCEPTION 'each card save was not audited once, without the phone number';
     END IF;
-    RAISE NOTICE 'a shared card replaces the imported email and phone; an unshared card shows neither; each save audited once, without the values';
+    -- The card keeps applying after the guardian changes their sign-in email:
+    -- the link recorded the imported address it matched.
+    UPDATE auth.users SET email = 'ssr-g1-new@example.test' WHERE id = v_g1;
+    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r WHERE r.player_id = v_p1;
+    IF v_contacts->0 ? 'email' OR v_contacts->0 ? 'phone' THEN
+        RAISE EXCEPTION 'a sign-in email change brought back the details an unshared card hides: %', v_contacts;
+    END IF;
+    UPDATE auth.users SET email = 'SSR-G1@Example.test' WHERE id = v_g1;
+    RAISE NOTICE 'a shared card replaces the imported email and phone; an unshared card shows neither, also after a sign-in email change; each save audited once, without the values';
 
     -- Staff
     PERFORM set_config('request.jwt.claim.sub', v_g1::text, true);
@@ -222,6 +234,19 @@ BEGIN
     IF v_n <> 1 THEN RAISE EXCEPTION 'the admin was refused the directory with the setting off'; END IF;
     RAISE NOTICE 'directory: a current coach reads it while on, not while off; an admin reads it either way';
 
+    -- Role preview
+    SELECT count(*) INTO v_n FROM public.admin_get_coached_team_ids(v_org, v_coach_u) t WHERE t = v_ta;
+    IF v_n <> 1 THEN RAISE EXCEPTION 'an admin preview did not see the coach''s team'; END IF;
+    PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
+    BEGIN
+        PERFORM * FROM public.admin_get_coached_team_ids(v_org, v_coach_u);
+        v_denied := false;
+    EXCEPTION WHEN insufficient_privilege THEN
+        v_denied := true;
+    END;
+    IF NOT v_denied THEN RAISE EXCEPTION 'a non-admin read another member''s coached teams'; END IF;
+    RAISE NOTICE 'role preview: an admin reads a coach''s current teams; the coach is refused the admin read';
+
     -- Posture
     SELECT count(*) INTO v_n
       FROM pg_proc p
@@ -231,20 +256,22 @@ BEGIN
                      'public.link_my_guardian_records()'::regprocedure,
                      'public.set_my_contact_card(text,text,boolean)'::regprocedure,
                      'public.is_current_team_coach(uuid)'::regprocedure,
-                     'public.is_team_guardian(uuid)'::regprocedure)
+                     'public.is_team_guardian(uuid)'::regprocedure,
+                     'public.admin_get_coached_team_ids(uuid,uuid)'::regprocedure)
        AND p.prosecdef AND p.proconfig = ARRAY['search_path=public']
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
-    IF v_n <> 8 THEN
-        RAISE EXCEPTION 'posture: % of 8 callable functions are definer, pinned, authenticated-only', v_n;
+    IF v_n <> 9 THEN
+        RAISE EXCEPTION 'posture: % of 9 callable functions are definer, pinned, authenticated-only', v_n;
     END IF;
     IF has_function_privilege('authenticated', 'public.guardian_contacts_view(uuid,jsonb,boolean)', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.org_flag(uuid,text,boolean)', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.team_local_today(uuid)', 'EXECUTE')
+       OR has_function_privilege('authenticated', 'public.coached_team_ids_of(uuid,uuid)', 'EXECUTE')
        OR has_function_privilege('anon', 'public.guardian_contacts_view(uuid,jsonb,boolean)', 'EXECUTE') THEN
         RAISE EXCEPTION 'an internal helper is executable by a client role';
     END IF;
-    RAISE NOTICE 'posture: 8 of 8 callable functions definer, pinned, authenticated-only; the three internal helpers callable by no client role';
+    RAISE NOTICE 'posture: 9 of 9 callable functions definer, pinned, authenticated-only; the four internal helpers callable by no client role';
 END;
 $$;
 

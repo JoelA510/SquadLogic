@@ -27,14 +27,18 @@
 -- player in their organizations whose imported guardian email or alternate
 -- email matches their verified auth email, case-insensitively: the rule
 -- `link_my_coach_record()` uses for coaches. Idempotent; each new link writes
--- one `guardian.linked` audit row.
+-- one `guardian.linked` audit row. The link records the imported address it
+-- matched (`profile_players.matched_email`), and a link made at registration
+-- records it on the next call, so the contact card keeps applying to that
+-- imported contact after the user changes their sign-in email.
 --
 -- **Contact card (A2c).** `profiles.contact_phone`, `contact_email` and
 -- `share_contact`. `share_contact` is NULL until the user saves the card, and
 -- imported details show; `true` shows the card's phone and email in their
 -- place; `false` shows neither. A card applies to a guardian contact whose
--- email or alternate email is the verified email of an account linked to that
--- player, and to a coach through `coaches.user_id`. Profiles are readable only
+-- email or alternate email is the address an account linked to that player
+-- was matched on, or that account's verified email, and to a coach through
+-- `coaches.user_id`. Profiles are readable only
 -- by their owner, so the reads below are the only way a card reaches anyone.
 -- `set_my_contact_card()` is its only writer (the column grant of A2b does not
 -- include these columns). It changes what other members are shown, so each
@@ -59,7 +63,9 @@
 --     role, phone and email (status to admins and staff only).
 --   * `get_coach_directory(org)`: admins and staff; a current coach of any
 --     team in the organization while `coach_directory` is on.
---   * `get_my_coached_team_ids(org)`: the teams the caller currently coaches.
+--   * `get_my_coached_team_ids(org)`: the teams the caller currently coaches;
+--     `admin_get_coached_team_ids(org, user)` answers the same for another
+--     member, for an admin's role preview (admins and staff only).
 --
 -- Revert: docs/sql/20261021010000_revert.sql. Smoke: docs/sql/20261021010000_smoke.sql.
 -- pgTAP: supabase/tests/server_side_reads.sql.
@@ -85,6 +91,10 @@ ALTER TABLE public.profiles
     ADD CONSTRAINT profiles_contact_email_check
         CHECK (contact_email IS NULL
                OR (length(contact_email) <= 254 AND contact_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'));
+
+ALTER TABLE public.profile_players ADD COLUMN IF NOT EXISTS matched_email text;
+COMMENT ON COLUMN public.profile_players.matched_email IS
+    'The imported guardian address (lowercased) link_my_guardian_records matched this link on; the contact card applies to that contact even after the sign-in email changes. NULL for a registration link not yet matched. 20261021010000.';
 
 COMMENT ON COLUMN public.profiles.share_contact IS
     'Contact card: NULL = never saved (imported details show), true = card phone/email show, false = no contact details show. 20261021010000.';
@@ -212,7 +222,8 @@ AS $$
     );
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_my_coached_team_ids(p_organization_id uuid)
+-- Internal: the teams `p_user_id` currently coaches in the organization.
+CREATE OR REPLACE FUNCTION public.coached_team_ids_of(p_organization_id uuid, p_user_id uuid)
 RETURNS SETOF uuid
 LANGUAGE sql
 STABLE
@@ -225,8 +236,9 @@ AS $$
           FROM public.team_coach_assignments a
           JOIN public.coaches c ON c.id = a.coach_id
          WHERE a.organization_id = p_organization_id
-           AND c.user_id = auth.uid()
-           AND public.is_org_member(p_organization_id)
+           AND c.user_id = p_user_id
+           AND EXISTS (SELECT 1 FROM public.organization_members m
+                        WHERE m.organization_id = p_organization_id AND m.profile_id = p_user_id)
     ), days AS MATERIALIZED (
         SELECT t.team_id, public.team_local_today(t.team_id) AS today
           FROM (SELECT DISTINCT team_id FROM mine) t
@@ -236,6 +248,33 @@ AS $$
       JOIN days d ON d.team_id = m.team_id
      WHERE m.effective_from <= d.today
        AND (m.effective_to IS NULL OR m.effective_to >= d.today);
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_my_coached_team_ids(p_organization_id uuid)
+RETURNS SETOF uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.coached_team_ids_of(p_organization_id, auth.uid());
+$$;
+
+-- An admin's role preview shows a coach's home as that coach sees it, while
+-- the session (auth.uid()) stays the admin's.
+CREATE OR REPLACE FUNCTION public.admin_get_coached_team_ids(p_organization_id uuid, p_user_id uuid)
+RETURNS SETOF uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF auth.uid() IS NULL OR NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'admin_get_coached_team_ids requires an organization admin' USING ERRCODE = '42501';
+    END IF;
+    RETURN QUERY SELECT public.coached_team_ids_of(p_organization_id, p_user_id);
+END;
 $$;
 
 -- Internal: an organization's boolean flag, the default when absent or not a boolean.
@@ -293,9 +332,11 @@ AS $$
                 JOIN auth.users u ON u.id = pp.profile_id
                 JOIN public.profiles pr ON pr.id = pp.profile_id
                WHERE pp.player_id = p_player_id
-                 AND u.email_confirmed_at IS NOT NULL
-                 AND lower(trim(u.email)) IN (lower(trim(g.c ->> 'email')),
-                                              lower(trim(g.c ->> 'alternate_email')))
+                 AND (lower(trim(pp.matched_email)) IN (lower(trim(g.c ->> 'email')),
+                                                       lower(trim(g.c ->> 'alternate_email')))
+                      OR (u.email_confirmed_at IS NOT NULL
+                          AND lower(trim(u.email)) IN (lower(trim(g.c ->> 'email')),
+                                                       lower(trim(g.c ->> 'alternate_email')))))
                ORDER BY (pr.share_contact IS NULL), pp.created_at, pp.profile_id
                LIMIT 1
           ) card ON true
@@ -342,12 +383,14 @@ BEGIN
                         WHERE jsonb_typeof(g.c) = 'object'
                           AND v_email IN (lower(trim(g.c ->> 'email')),
                                           lower(trim(g.c ->> 'alternate_email'))))
-           AND NOT EXISTS (SELECT 1 FROM public.profile_players pp
-                            WHERE pp.profile_id = v_uid AND pp.player_id = p.id)
          ORDER BY p.organization_id, p.id
     LOOP
-        INSERT INTO public.profile_players (profile_id, player_id, organization_id)
-        VALUES (v_uid, r.id, r.organization_id)
+        -- A link made at registration records the address it matches now.
+        UPDATE public.profile_players
+           SET matched_email = v_email
+         WHERE profile_id = v_uid AND player_id = r.id AND matched_email IS NULL;
+        INSERT INTO public.profile_players (profile_id, player_id, organization_id, matched_email)
+        VALUES (v_uid, r.id, r.organization_id, v_email)
         ON CONFLICT (profile_id, player_id) DO NOTHING;
         IF FOUND THEN
             v_linked := v_linked + 1;
@@ -551,6 +594,7 @@ $$;
 -- ---------------------------------------------------------------------------
 
 REVOKE ALL ON FUNCTION public.org_flag(uuid, text, boolean) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.coached_team_ids_of(uuid, uuid) FROM PUBLIC, anon, authenticated;
 -- Internal too: callable with any team id, it would tell a caller from another
 -- organization that the team exists and roughly where its season is.
 REVOKE ALL ON FUNCTION public.team_local_today(uuid) FROM PUBLIC, anon, authenticated;
@@ -560,6 +604,7 @@ REVOKE ALL ON FUNCTION public.set_my_contact_card(text, text, boolean) FROM PUBL
 REVOKE ALL ON FUNCTION public.is_current_team_coach(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.is_team_guardian(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.get_my_coached_team_ids(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_get_coached_team_ids(uuid, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.link_my_guardian_records() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.get_team_roster(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.get_team_staff(uuid) FROM PUBLIC, anon;
@@ -569,6 +614,7 @@ GRANT EXECUTE ON FUNCTION public.set_my_contact_card(text, text, boolean) TO aut
 GRANT EXECUTE ON FUNCTION public.is_current_team_coach(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_team_guardian(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_my_coached_team_ids(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_get_coached_team_ids(uuid, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.link_my_guardian_records() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_team_roster(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_team_staff(uuid) TO authenticated;

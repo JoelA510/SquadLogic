@@ -142,3 +142,20 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
     expect((await score('game-other')).error?.code).toBe('42501');
   });
 });
+
+describe('mock .or() :: an in-list with several values', () => {
+  it('reads every value of an in-list, as the Scores page filters a coach s games', async () => {
+    // Split on every comma, `home_team_id.in.(zzz,t2)` became the clauses
+    // `home_team_id.in.(zzz` and `t2)`, and a coach of two teams matched none.
+    const { data, error } = await supabase
+      .from('games')
+      .select('*')
+      .or('home_team_id.in.(zzz,t1),away_team_id.in.(zzz,yyy)');
+    expect(error).toBeNull();
+    const seeded = getMockData('games').filter((g) => g.home_team_id === 't1');
+    expect(seeded.length, 'no seeded game is home to t1, so this matches nothing').toBeGreaterThan(
+      0
+    );
+    expect((data || []).map((g) => g.id).sort()).toEqual(seeded.map((g) => g.id).sort());
+  });
+});

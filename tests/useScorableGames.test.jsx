@@ -60,6 +60,8 @@ describe('useScorableGames', () => {
     expect([OWN, AWAY, OTHER].map(result.current.canScoreGame)).toEqual([true, true, false]);
     expect(result.current.coachesTeam('team-a')).toBe(true);
     expect(result.current.coachesTeam('team-x')).toBe(false);
+    expect(result.current.teamIds).toEqual(['team-a']);
+    expect(result.current.error).toBe(false);
   });
 
   it('lets an admin score every game without asking the server', () => {
@@ -69,6 +71,7 @@ describe('useScorableGames', () => {
     expect(result.current.ready).toBe(true);
     expect([OWN, AWAY, OTHER].every(result.current.canScoreGame)).toBe(true);
     expect(result.current.coachesTeam('team-x')).toBe(true);
+    expect(result.current.teamIds).toBeNull();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
@@ -86,13 +89,24 @@ describe('useScorableGames', () => {
     expect([OWN, AWAY, OTHER].map(result.current.canScoreGame)).toEqual([true, false, true]);
   });
 
-  it('offers nothing when the coached teams cannot be read', async () => {
+  it('offers nothing when the coached teams cannot be read, and says the read failed', async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: '500', message: 'boom' } });
     const { result } = renderHook(() => useScorableGames());
 
     await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.error).toBe(true);
     expect([OWN, AWAY, OTHER].some(result.current.canScoreGame)).toBe(false);
     expect(result.current.coachesTeam('team-a')).toBe(false);
+    expect(result.current.teamIds).toEqual([]);
+  });
+
+  it('asks the server nothing and allows nothing when not enabled', async () => {
+    const { result } = renderHook(() => useScorableGames({ enabled: false }));
+
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(result.current.canScoreGame(OWN)).toBe(false);
+    expect(result.current.error).toBe(false);
   });
 
   it('settles with nothing to score when there is no organization', async () => {

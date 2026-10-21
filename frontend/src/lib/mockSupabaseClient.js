@@ -2028,8 +2028,9 @@ const createMockQuery = (table, data = null) => {
         return true;
       };
 
+      // A comma inside `in.(a,b)` belongs to the list, not between clauses.
       const clauses = String(condition || '')
-        .split(',')
+        .split(/,(?![^(]*\))/)
         .map((clause) => clause.trim())
         .filter(Boolean)
         .map((clause) => {

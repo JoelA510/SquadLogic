@@ -94,14 +94,15 @@ export default function TeamRecordPage() {
     sendMessage,
   } = useTeamPortal(teamId);
   const { can, PERMISSIONS } = usePermission();
-  // Who may regenerate the calendar link: an admin or the team's current
-  // coach (rotate_calendar_token, 20261021020000).
-  const { coachesTeam } = useScorableGames();
   const { isEnabled, genderModel } = useFeatures();
 
   const [tab, setTab] = useState('schedule');
   const [chatInput, setChatInput] = useState('');
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
+  // Who may regenerate the calendar link: an admin or the team's current
+  // coach (rotate_calendar_token, 20261021020000). Asked only once the dialog
+  // is open.
+  const { coachesTeam } = useScorableGames({ enabled: calendarModalOpen });
   const [staff, setStaff] = useState(/** @type {any[] | null} */ (null));
   const [staffError, setStaffError] = useState(false);
   const chatEndRef = useRef(null);
@@ -669,7 +670,10 @@ export function CalendarModal({ team, canRotate = false, onClose }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!team?.id) return;
+      if (!team?.id) {
+        setTokenState('none');
+        return;
+      }
       setTokenState('loading');
       const { data, error } = await supabase
         .from('team_calendar_tokens')
@@ -760,7 +764,9 @@ export function CalendarModal({ team, canRotate = false, onClose }) {
             <button
               type="button"
               onClick={handleRotateToken}
-              disabled={isRotating}
+              // Not while the stored token is still being read: a read landing
+              // after a rotation would put the old, now invalid token back.
+              disabled={isRotating || tokenState === 'loading'}
               className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
               title="Generate a new calendar link (invalidates the old one)"
             >

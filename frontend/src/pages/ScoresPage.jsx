@@ -13,6 +13,7 @@ import { useScorableGames } from '../hooks/useScorableGames.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 
 /**
  * Scores & Results — spreadsheet-style score entry over past games,
@@ -29,17 +30,29 @@ export default function ScoresPage() {
   const [search, setSearch] = useState('');
   // An admin enters any game's score; a coach only their own team's games
   // (update_game_score, 20261021020000), so the grid lists only those.
-  const { ready: scorableReady, canScoreGame } = useScorableGames();
+  const {
+    ready: scorableReady,
+    error: scorableError,
+    teamIds: scorableTeamIds,
+    canScoreGame,
+  } = useScorableGames();
+  // null: an admin, every game; '': a coach of no team (or the read failed).
+  const teamKey = scorableTeamIds ? scorableTeamIds.join(',') : null;
 
   const orgId = currentOrganization?.id;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!orgId) return;
+      if (!orgId || !scorableReady) return;
+      if (teamKey === '') {
+        setGames([]);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('games')
           .select(
             `id, start_time, score_home, score_away,
@@ -47,9 +60,13 @@ export default function ScoresPage() {
              away_team:away_team_id (id, name)`
           )
           .eq('organization_id', orgId)
-          .lte('start_time', new Date().toISOString())
-          .order('start_time', { ascending: false })
-          .limit(200);
+          .lte('start_time', new Date().toISOString());
+        // A coach's games are found by the server, not cut out of the
+        // league's latest 200, where a busy league would leave none.
+        if (teamKey !== null) {
+          query = query.or(`home_team_id.in.(${teamKey}),away_team_id.in.(${teamKey})`);
+        }
+        const { data, error } = await query.order('start_time', { ascending: false }).limit(200);
         if (error) throw error;
         if (!cancelled) setGames(data || []);
       } catch (err) {
@@ -61,7 +78,7 @@ export default function ScoresPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, scorableReady, teamKey]);
 
   const persistScore = useCallback(
     async (gameId, scoreHome, scoreAway) => {
@@ -177,6 +194,12 @@ export default function ScoresPage() {
         />
       }
     >
+      {scorableError && (
+        <DataErrorBanner
+          message="Your teams could not be loaded, so no games are listed for scoring. Reload to try again."
+          className="m-3 mb-0"
+        />
+      )}
       <DataGrid
         label="Scores grid"
         columns={columns}

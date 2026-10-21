@@ -6,7 +6,8 @@
 --     teammate, and nothing once removed from the organization; a coach who is
 --     no guardian reads neither; an admin reads both;
 --   * coaches / team_coach_assignments: a coach reads their own row and
---     assignment, not another coach's; a parent reads none; an admin reads all;
+--     assignment, not another coach's, and nothing once removed from the
+--     organization; a parent reads none; an admin reads all;
 --   * profile_players: a member reads their own link, not another's;
 --   * staging_players: a member reads nothing, an admin reads the row;
 --   * team_calendar_tokens: every team's token was copied; a new team gets
@@ -17,6 +18,8 @@
 --   * update_game_score: the coach of the home team scores; a coach of
 --     neither team is refused (42501); an admin scores;
 --   * reconcile_prod_rls_drift's spec names the new coaches policy.
+--   (The migration itself refuses to commit with any other read policy left on
+--   a restricted table.)
 --
 -- Wrapped in BEGIN ... ROLLBACK. Every id is generated; every email is
 -- `@example.test`; there is no PII.
@@ -219,6 +222,18 @@ BEGIN
         RAISE EXCEPTION 'a guardian removed from the organization still read their child (% rows)', v_n;
     END IF;
     RAISE NOTICE 'a guardian removed from the organization reads neither their child nor its roster row';
+
+    -- The same for a coach: the coaches.user_id link outlives the membership.
+    DELETE FROM public.organization_members WHERE organization_id = v_org AND profile_id = v_cu;
+    PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
+    SET LOCAL ROLE authenticated;
+    SELECT count(*) INTO v_n FROM public.coaches WHERE organization_id = v_org;
+    SELECT v_n + count(*) INTO v_n FROM public.team_coach_assignments WHERE organization_id = v_org;
+    RESET ROLE;
+    IF v_n <> 0 THEN
+        RAISE EXCEPTION 'a coach removed from the organization still read their coach row or assignment (% rows)', v_n;
+    END IF;
+    RAISE NOTICE 'a coach removed from the organization reads neither their coach row nor their assignment';
 END;
 $$;
 

@@ -14,41 +14,50 @@ import { logger } from '../lib/logger.js';
  * the server refuses the rest regardless.
  *
  * `coachesTeam(teamId)` answers the same question for a team: whether the
- * caller may act as its coach (an admin may act for any team).
+ * caller may act as its coach (an admin may act for any team). `teamIds` is
+ * the coached teams, sorted, for a query to filter on; `null` for an admin,
+ * who is not limited to any. `error` is true when the coached teams could not
+ * be read, so a page can say so rather than look like a coach with no games.
  *
- * @returns {{ ready: boolean, canScoreGame: (game: any) => boolean, coachesTeam: (teamId: any) => boolean }}
+ * With `enabled: false` (a page that has nothing to score for this caller) it
+ * asks the server nothing and allows nothing, except to an admin.
+ *
+ * @param {{ enabled?: boolean }} [options]
+ * @returns {{ ready: boolean, error: boolean, teamIds: string[] | null, canScoreGame: (game: any) => boolean, coachesTeam: (teamId: any) => boolean }}
  */
-export function useScorableGames() {
+export function useScorableGames({ enabled = true } = {}) {
   const { currentOrganization, orgMember } = useOrganization();
   const { user, isImpersonating } = useAuth();
   const orgId = currentOrganization?.id ?? null;
   const previewUserId = isImpersonating ? (user?.profile?.id ?? null) : null;
   const admin = !previewUserId && isAdminRole(orgMember?.role);
   const [teamIds, setTeamIds] = useState(/** @type {Set<string> | null} */ (null));
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setTeamIds(null);
+      setError(false);
       if (admin) return;
-      if (!orgId) {
-        // No organization, no team to coach: settled, so a page does not wait on it.
+      if (!orgId || !enabled) {
+        // No organization, or nothing to score here: settled, so a page does not wait on it.
         setTeamIds(new Set());
         return;
       }
-      const { data, error } = previewUserId
+      const { data, error: readError } = previewUserId
         ? await supabase.rpc('admin_get_coached_team_ids', {
             p_organization_id: orgId,
             p_user_id: previewUserId,
           })
         : await supabase.rpc('get_my_coached_team_ids', { p_organization_id: orgId });
       if (cancelled) return;
-      if (error) {
-        // No team ids means no score entry; the read failure is logged, not shown.
+      if (readError) {
         logger.warn('[useScorableGames] coached teams not loaded', {
-          code: error.code,
-          message: error.message,
+          code: readError.code,
+          message: readError.message,
         });
+        setError(true);
         setTeamIds(new Set());
         return;
       }
@@ -57,7 +66,7 @@ export function useScorableGames() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, admin, previewUserId]);
+  }, [orgId, admin, previewUserId, enabled]);
 
   return useMemo(() => {
     const teamOf = (side) => (side && typeof side === 'object' ? side.id : side);
@@ -65,6 +74,8 @@ export function useScorableGames() {
       admin || (!!teamIds && teamId != null && teamIds.has(String(teamId)));
     return {
       ready: admin || teamIds !== null,
+      error: !admin && error,
+      teamIds: admin ? null : [...(teamIds ?? [])].sort(),
       coachesTeam,
       canScoreGame: (game) => {
         if (admin) return true;
@@ -74,5 +85,5 @@ export function useScorableGames() {
         return teamIds.has(String(home)) || teamIds.has(String(away));
       },
     };
-  }, [admin, teamIds]);
+  }, [admin, teamIds, error]);
 }

@@ -8,6 +8,7 @@ import { CalendarModal } from '../frontend/src/pages/TeamRecordPage.jsx';
 // or the current coach) offers Regenerate.
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
+  /** @type {any} */
   tokenRead: { data: null, error: null },
 }));
 
@@ -80,6 +81,26 @@ describe('CalendarModal', () => {
     mocks.tokenRead = { data: null, error: { code: '500', message: 'boom' } };
     render(<CalendarModal team={{ id: 'team-1' }} canRotate onClose={vi.fn()} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded');
+  });
+
+  it('does not offer Regenerate until the stored token has been read', async () => {
+    let resolveRead = (_value) => {};
+    mocks.tokenRead = new Promise((resolve) => {
+      resolveRead = resolve;
+    });
+    render(<CalendarModal team={{ id: 'team-1' }} canRotate onClose={vi.fn()} />);
+
+    // A rotation that the read then overwrote would leave the old token showing.
+    expect(screen.getByRole('button', { name: 'Regenerate Link' })).toBeDisabled();
+    resolveRead({ data: { token: 'secure-calendar-token' }, error: null });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Regenerate Link' })).toBeEnabled()
+    );
+  });
+
+  it('says there is no link rather than wait forever when there is no team', async () => {
+    render(<CalendarModal team={null} canRotate onClose={vi.fn()} />);
+    expect(await screen.findByText(/No calendar link is currently available/i)).toBeInTheDocument();
   });
 
   it('opens as a named modal dialog with focus inside, and closes on Escape', () => {

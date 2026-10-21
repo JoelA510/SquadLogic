@@ -3962,9 +3962,31 @@ plant "M34 a removed guardian still reads their child" "$M34" \
             AND player_id IN" \
   "smoke 20261021020000"
 
+plant "M34 a removed coach still reads their coach row" "$M34" \
+  "        OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))" \
+  "        OR (true AND user_id = (SELECT auth.uid()))" \
+  "smoke 20261021020000"
+
+plant "M34 a removed coach still reads their assignments" "$M34" \
+  "        OR (public.is_org_member(organization_id)
+            AND coach_id IN" \
+  "        OR (true
+            AND coach_id IN" \
+  "smoke 20261021020000"
+
+plant "M34 a leftover read policy passes the end-state check" "$M34" \
+  "DO \$\$
+DECLARE
+    v_extra text;" \
+  "CREATE POLICY planted_leftover_read ON public.players FOR SELECT TO authenticated USING (true);
+DO \$\$
+DECLARE
+    v_extra text;" \
+  "applying 20261021020000_restrict_people_reads.sql"
+
 plant "M34 a coach reads every coach row" "$M34" \
   "        public.is_org_admin(organization_id)
-        OR user_id = (SELECT auth.uid())
+        OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))
     );" \
   "        public.is_org_member(organization_id)
     );" \
@@ -4006,7 +4028,7 @@ plant "M34 any coach scores any game" "$M34" \
 
 plant "M34 the reconcile spec keeps the member-wide coaches read" "$M34" \
   "            ('coaches', 'coaches_select_admin_or_self', 'SELECT', 'authenticated',
-             'public.is_org_admin(organization_id) OR user_id = (SELECT auth.uid())', NULL)," \
+             'public.is_org_admin(organization_id) OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))', NULL)," \
   "            ('coaches', 'Coaches: members access', 'SELECT', 'authenticated',
              'is_org_member(organization_id)', NULL)," \
   "smoke 20261021020000"

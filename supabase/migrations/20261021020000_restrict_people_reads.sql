@@ -11,6 +11,7 @@
 --     outlives a removed membership);
 --   * coaches: only their own row (`coaches.user_id`, linked by
 --     link_my_coach_record); team_coach_assignments: only their own rows;
+--     both, again, only while they are a member;
 --   * profile_players: only their own links (it read every member's before);
 --   * staging_players, staging_import_rows: nothing (raw import payloads were
 --     readable by every member, found while building A1).
@@ -35,6 +36,9 @@
 -- for any game. It now admits admins and staff for any game, and anyone else
 -- only for a game of a team they currently coach. The body is the latest
 -- definition (20260504010000) with only that check changed.
+--
+-- **4. End state.** The migration refuses to commit if any other SELECT or
+-- ALL policy remains on a restricted table.
 --
 -- Revert: docs/sql/20261021020000_revert.sql. Smoke: docs/sql/20261021020000_smoke.sql.
 -- pgTAP: supabase/tests/rls_policy_matrix.sql (rewritten), supabase/tests/restricted_reads.sql.
@@ -70,7 +74,7 @@ CREATE POLICY coaches_select_admin_or_self ON public.coaches
     FOR SELECT TO authenticated
     USING (
         public.is_org_admin(organization_id)
-        OR user_id = (SELECT auth.uid())
+        OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))
     );
 
 DROP POLICY IF EXISTS "Team coach assignments: members read" ON public.team_coach_assignments;
@@ -78,8 +82,9 @@ CREATE POLICY team_coach_assignments_select_admin_or_self ON public.team_coach_a
     FOR SELECT TO authenticated
     USING (
         public.is_org_admin(organization_id)
-        OR coach_id IN (SELECT c.id FROM public.coaches c
-                         WHERE c.user_id = (SELECT auth.uid()))
+        OR (public.is_org_member(organization_id)
+            AND coach_id IN (SELECT c.id FROM public.coaches c
+                              WHERE c.user_id = (SELECT auth.uid())))
     );
 
 DROP POLICY IF EXISTS "Profile Players: users view own" ON public.profile_players;
@@ -238,7 +243,7 @@ BEGIN
             -- and a coach reads their own row; the member-wide policy is gone
             -- and must not come back from here.
             ('coaches', 'coaches_select_admin_or_self', 'SELECT', 'authenticated',
-             'public.is_org_admin(organization_id) OR user_id = (SELECT auth.uid())', NULL),
+             'public.is_org_admin(organization_id) OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))', NULL),
             -- 20260331000000_definitive_schema.sql:1036
             ('teams', 'Teams: members access', 'SELECT', 'authenticated',
              'is_org_member(organization_id)', NULL),
@@ -519,7 +524,7 @@ BEGIN
     -- 20261021020000: an admin or staff member scores any game; anyone else
     -- only a game of a team they currently coach (Phase A3, item 2).
     IF v_effective_role <> 'service_role'
-       AND v_member_role NOT IN ('admin', 'tenant_admin', 'staff')
+       AND NOT public.is_org_admin(p_organization_id)
        AND NOT public.is_current_team_coach(v_game.home_team_id)
        AND NOT public.is_current_team_coach(v_game.away_team_id) THEN
         RAISE EXCEPTION 'Access denied: only a current coach of either team can score this game'
@@ -569,5 +574,42 @@ $$;
 
 COMMENT ON FUNCTION public.update_game_score(uuid, uuid, smallint, smallint, jsonb) IS
   'Org-scoped game score mutation: admins/staff for any game, a current coach of either team for that game; atomic audit logging. 20261021020000.';
+
+-- ---------------------------------------------------------------------------
+-- 4. Enforced, not declared: the policies above are each table's only read.
+--    Postgres ORs permissive policies, so any other SELECT or ALL policy left
+--    on these tables (production has carried dashboard-only ones before;
+--    20261018030000) would keep the read member-wide. Production had none on
+--    2026-10-21; this refuses the migration rather than assume so.
+-- ---------------------------------------------------------------------------
+
+DO $$
+DECLARE
+    v_extra text;
+BEGIN
+    SELECT string_agg(format('%s: "%s" (%s)', tablename, policyname, cmd), '; '
+                      ORDER BY tablename, policyname)
+      INTO v_extra
+      FROM pg_policies
+     WHERE schemaname = 'public'
+       AND permissive = 'PERMISSIVE'
+       AND cmd IN ('SELECT', 'ALL')
+       AND tablename IN ('players', 'team_players', 'coaches', 'team_coach_assignments',
+                         'profile_players', 'staging_players', 'staging_import_rows',
+                         'team_calendar_tokens')
+       AND (tablename, policyname) NOT IN (VALUES
+            ('players'::name, 'players_select_admin_or_guardian'::name),
+            ('team_players', 'team_players_select_admin_or_guardian'),
+            ('coaches', 'coaches_select_admin_or_self'),
+            ('team_coach_assignments', 'team_coach_assignments_select_admin_or_self'),
+            ('profile_players', 'profile_players_select_own_or_admin'),
+            ('staging_players', 'staging_players_select_admin'),
+            ('staging_import_rows', 'staging_import_rows_select_admin'),
+            ('team_calendar_tokens', 'team_calendar_tokens_select'));
+    IF v_extra IS NOT NULL THEN
+        RAISE EXCEPTION '20261021020000: another read policy is still on a restricted table, so the read stays wider than intended: %', v_extra;
+    END IF;
+END;
+$$;
 
 COMMIT;

@@ -3,21 +3,32 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CalendarModal } from '../frontend/src/pages/TeamRecordPage.jsx';
 
+// The token is read from team_calendar_tokens (20261021020000), which admins,
+// the team's current coaches and its guardians can read; `canRotate` (an admin
+// or the current coach) offers Regenerate.
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
+  tokenRead: { data: null, error: null },
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     rpc: mocks.rpc,
+    from: () => ({
+      select: () => ({
+        eq: () => ({ maybeSingle: () => Promise.resolve(mocks.tokenRead) }),
+      }),
+    }),
   },
 }));
 
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+const LINK = 'webcal://localhost:3000/functions/v1/calendar-feed?token=secure-calendar-token';
 
 describe('CalendarModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.tokenRead = { data: null, error: null };
   });
 
   afterEach(() => {
@@ -28,18 +39,13 @@ describe('CalendarModal', () => {
     }
   });
 
-  it('does not fabricate a mock calendar token when a team has no token', () => {
-    render(<CalendarModal team={{ id: 'team-1', calendar_token: null }} onClose={vi.fn()} />);
+  it('does not fabricate a token when the team has none, and offers Regenerate to its coach', async () => {
+    render(<CalendarModal team={{ id: 'team-1' }} canRotate onClose={vi.fn()} />);
 
+    const notice = await screen.findByText(/No calendar link is currently available/i);
     const calendarLink = screen.getByLabelText(/copy this link to your calendar app/i);
     expect(calendarLink).toHaveValue('');
     expect(calendarLink).toHaveAttribute('placeholder', 'Regenerate a link before subscribing.');
-    expect(calendarLink).not.toHaveValue(
-      'webcal://localhost:3000/functions/v1/calendar-feed?token=mock-token'
-    );
-
-    const notice = screen.getByText(/No calendar link is currently available/i);
-    expect(notice).toBeInTheDocument();
     // The bare warning token was 3.39:1 on the sunken light surface (axe `color-contrast`); the `-text`
     // token is the AA one in both themes.
     expect(notice).toHaveClass('text-status-warning-text');
@@ -51,9 +57,34 @@ describe('CalendarModal', () => {
     );
   });
 
+  it('shows the link it reads, and no Regenerate to a guardian', async () => {
+    mocks.tokenRead = { data: { token: 'secure-calendar-token' }, error: null };
+    render(<CalendarModal team={{ id: 'team-1' }} onClose={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/copy this link to your calendar app/i)).toHaveValue(LINK)
+    );
+    expect(screen.queryByRole('button', { name: 'Regenerate Link' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy Link' })).toBeEnabled();
+  });
+
+  it('tells a member the policy refuses that the link is not theirs to see', async () => {
+    render(<CalendarModal team={{ id: 'team-1' }} onClose={vi.fn()} />);
+    expect(
+      await screen.findByText(/shared with the team's coaches, its families and league admins/)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate Link' })).not.toBeInTheDocument();
+  });
+
+  it('says so when the token cannot be read', async () => {
+    mocks.tokenRead = { data: null, error: { code: '500', message: 'boom' } };
+    render(<CalendarModal team={{ id: 'team-1' }} canRotate onClose={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded');
+  });
+
   it('opens as a named modal dialog with focus inside, and closes on Escape', () => {
     const onClose = vi.fn();
-    render(<CalendarModal team={{ id: 'team-1', calendar_token: 'tok' }} onClose={onClose} />);
+    render(<CalendarModal team={{ id: 'team-1' }} onClose={onClose} />);
 
     const dialog = screen.getByRole('dialog', { name: 'Calendar Subscription' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
@@ -64,11 +95,12 @@ describe('CalendarModal', () => {
 
   it('uses the rotate token RPC result before enabling copy', async () => {
     mocks.rpc.mockResolvedValue({
-      data: { status: 'ok', calendar_token: 'secure-calendar-token' },
+      data: { status: 'success', calendar_token: 'secure-calendar-token' },
       error: null,
     });
 
-    render(<CalendarModal team={{ id: 'team-1', calendar_token: null }} onClose={vi.fn()} />);
+    render(<CalendarModal team={{ id: 'team-1' }} canRotate onClose={vi.fn()} />);
+    await screen.findByText(/No calendar link is currently available/i);
 
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate Link' }));
 
@@ -77,18 +109,21 @@ describe('CalendarModal', () => {
     });
 
     const calendarLink = screen.getByLabelText(/copy this link to your calendar app/i);
-    await waitFor(() => {
-      expect(calendarLink).toHaveValue(
-        'webcal://localhost:3000/functions/v1/calendar-feed?token=secure-calendar-token'
-      );
-    });
-    expect(calendarLink).not.toHaveValue(
-      'webcal://localhost:3000/functions/v1/calendar-feed?token=mock-token'
-    );
+    await waitFor(() => expect(calendarLink).toHaveValue(LINK));
     const message = screen.getByText(/New link generated/i);
-    expect(message).toBeInTheDocument();
     expect(message).toHaveClass('text-status-warning-text');
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeEnabled();
+  });
+
+  it('shows the refusal when the server will not rotate', async () => {
+    mocks.rpc.mockResolvedValue({
+      data: { status: 'error', message: 'Access denied' },
+      error: null,
+    });
+    render(<CalendarModal team={{ id: 'team-1' }} canRotate onClose={vi.fn()} />);
+    await screen.findByText(/No calendar link is currently available/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate Link' }));
+    expect(await screen.findByText('Access denied')).toBeInTheDocument();
   });
 
   it('catches rejected clipboard copy attempts', async () => {
@@ -97,19 +132,14 @@ describe('CalendarModal', () => {
       configurable: true,
       value: { writeText },
     });
+    mocks.tokenRead = { data: { token: 'secure-calendar-token' }, error: null };
 
-    render(
-      <CalendarModal
-        team={{ id: 'team-1', calendar_token: 'secure-calendar-token' }}
-        onClose={vi.fn()}
-      />
-    );
+    render(<CalendarModal team={{ id: 'team-1' }} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Copy Link' })).toBeEnabled());
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy Link' }));
 
-    expect(writeText).toHaveBeenCalledWith(
-      'webcal://localhost:3000/functions/v1/calendar-feed?token=secure-calendar-token'
-    );
+    expect(writeText).toHaveBeenCalledWith(LINK);
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
   });
 });

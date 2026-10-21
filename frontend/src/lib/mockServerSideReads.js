@@ -76,13 +76,19 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
   const isOrgMember = (orgId) => roleIn(orgId) !== null;
   const teamById = (teamId) =>
     (db.teams || []).find((team) => String(team.id) === String(teamId)) ?? null;
+  // Once per team for this set of helpers: a read checks every row.
+  const todayByTeam = new Map();
   const teamToday = (teamId) => {
+    const key = String(teamId);
+    if (todayByTeam.has(key)) return todayByTeam.get(key);
     const team = teamById(teamId);
     const division = (db.divisions || []).find((d) => String(d.id) === String(team?.division_id));
     const season = (db.season_settings || []).find(
       (s) => String(s.id) === String(division?.season_settings_id)
     );
-    return localDateIn(season?.timezone, now);
+    const today = localDateIn(season?.timezone, now);
+    todayByTeam.set(key, today);
+    return today;
   };
   const isLive = (row) => {
     const today = teamToday(row.team_id);

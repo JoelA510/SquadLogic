@@ -30,7 +30,12 @@ export function useScorableGames() {
     let cancelled = false;
     (async () => {
       setTeamIds(null);
-      if (!orgId || admin) return;
+      if (admin) return;
+      if (!orgId) {
+        // No organization, no team to coach: settled, so a page does not wait on it.
+        setTeamIds(new Set());
+        return;
+      }
       const { data, error } = previewUserId
         ? await supabase.rpc('admin_get_coached_team_ids', {
             p_organization_id: orgId,

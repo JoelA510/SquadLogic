@@ -3988,9 +3988,9 @@ plant "M34 any member reads a calendar token" "$M34" \
   "smoke 20261021020000"
 
 plant "M34 a new team gets no calendar token" "$M34" \
-  "CREATE TRIGGER teams_create_calendar_token" \
-  "CREATE TRIGGER teams_create_calendar_token_unused BEFORE TRUNCATE ON public.teams FOR EACH STATEMENT EXECUTE FUNCTION suppress_redundant_updates_trigger();
-CREATE TRIGGER teams_create_calendar_token_x" \
+  "    INSERT INTO public.team_calendar_tokens (team_id) VALUES (NEW.id)
+    ON CONFLICT (team_id) DO NOTHING;" \
+  "    PERFORM NEW.id;" \
   "smoke 20261021020000"
 
 plant "M34 any member rotates a token" "$M34" \

@@ -700,3 +700,31 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
     expect(() => builder.neq('id', 'player-1')).toThrow(/neq is not a function/);
   });
 });
+
+describe('mock getDB :: re-merging the seed never grows a table', () => {
+  it('reads every seeded table back at the same size after save-and-read cycles', async () => {
+    // **A seeded table `mergeSource` cannot match row-for-row doubles on every
+    // save-and-read.** Its rows have no `id` and no composite branch, so each
+    // merge pushes the seed's rows beside the stored copy: 1, 2, 4, 8. That
+    // happened to `team_calendar_tokens` (keyed by `team_id`) and showed up as
+    // a test suite that spun rather than as a wrong row count.
+    const { error } = await supabase.from('teams').update({ name: 'Tigers' }).eq('id', SEEDED_TEAM);
+    expect(error).toBeNull();
+    const stored = /** @type {Record<string, unknown>} */ (window.__MOCK_DB__);
+    const tables = Object.keys(stored).filter(
+      (table) => Array.isArray(stored[table]) && /** @type {unknown[]} */ (stored[table]).length > 0
+    );
+    expect(tables, 'no seeded table was found, so this compares nothing').toContain(
+      'team_calendar_tokens'
+    );
+    const sizes = Object.fromEntries(tables.map((table) => [table, getMockData(table).length]));
+
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      const db = Object.fromEntries(tables.map((table) => [table, getMockData(table)]));
+      window.__saveMockDB__(db);
+    }
+
+    const grown = tables.filter((table) => getMockData(table).length !== sizes[table]);
+    expect(grown).toEqual([]);
+  });
+});

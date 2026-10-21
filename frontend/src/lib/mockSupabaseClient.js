@@ -15,7 +15,7 @@ import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { createAccessHelpers, handleServerSideReadRpc } from './mockServerSideReads.js';
-import { applyMockReadPolicy } from './mockReadPolicies.js';
+import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
@@ -708,6 +708,7 @@ const mergeSource = (db, source) => {
               String(r.profile_id) === String(record.profile_id) &&
               String(r.player_id) === String(record.player_id)
             );
+          if (key === 'team_calendar_tokens') return String(r.team_id) === String(record.team_id);
           if (key === 'view_org_metrics')
             return String(r.organization_id) === String(record.organization_id);
           if (key === 'view_compliance_stats')
@@ -772,6 +773,7 @@ const TOMBSTONE_KEY_FNS = {
   team_players: (row) => `${row.team_id}:${row.player_id}`,
   profile_players: (row) => `${row.profile_id}:${row.player_id}`,
   player_buddies: (row) => `${row.player_id}:${row.buddy_player_id}`,
+  team_calendar_tokens: (row) => String(row.team_id),
 };
 const tombstoneKey = (table, row) =>
   TOMBSTONE_KEY_FNS[table] ? TOMBSTONE_KEY_FNS[table](row) : String(row.id);
@@ -1705,8 +1707,10 @@ const mockSessionUserId = () => {
 const createMockQuery = (table, data = null) => {
   // A generic read honours the restricted tables' SELECT policies
   // (20261021020000; mockReadPolicies.js says what is and is not mirrored).
-  let results =
-    data || applyMockReadPolicy(getDB(), table, getMockData(table), mockSessionUserId());
+  let results = data || getMockData(table);
+  if (!data && RESTRICTED_TABLES.includes(table)) {
+    results = applyMockReadPolicy(getDB(), table, results, mockSessionUserId());
+  }
   let isSingle = false;
   let isMaybeSingle = false;
   let queryContent = '';

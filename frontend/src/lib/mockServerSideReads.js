@@ -56,20 +56,16 @@ export function localDateIn(zone, now = new Date()) {
 }
 
 /**
+ * The caller-relative access questions every mock arm of the Phase A3 reads
+ * and restrictions asks (20261021010000, 20261021020000), answered over `db`
+ * as the SQL helpers answer them: is_org_admin, is_org_member,
+ * team_local_today, is_current_team_coach and is_team_guardian.
+ *
  * @param {Record<string, any[]>} db
- * @param {string} name
- * @param {Record<string, any> | null | undefined} params
- * @param {{ currentUserId: string | null, sessionEmail?: string | null, now?: Date, newId?: () => string }} ctx
+ * @param {string | null} currentUserId
+ * @param {Date} [now]
  */
-export function handleServerSideReadRpc(db, name, params, ctx) {
-  if (!SERVER_SIDE_READ_RPCS.includes(name)) return null;
-  const { currentUserId } = ctx;
-  const now = ctx.now ?? new Date();
-  const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
-  const p = params || {};
-  if (!currentUserId) return denied(`${name} requires a signed-in caller`);
-  const email = norm(ctx.sessionEmail);
-
+export function createAccessHelpers(db, currentUserId, now = new Date()) {
   const roleIn = (orgId) =>
     (db.organization_members || []).find(
       (member) =>
@@ -80,13 +76,19 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
   const isOrgMember = (orgId) => roleIn(orgId) !== null;
   const teamById = (teamId) =>
     (db.teams || []).find((team) => String(team.id) === String(teamId)) ?? null;
+  // Once per team for this set of helpers: a read checks every row.
+  const todayByTeam = new Map();
   const teamToday = (teamId) => {
+    const key = String(teamId);
+    if (todayByTeam.has(key)) return todayByTeam.get(key);
     const team = teamById(teamId);
     const division = (db.divisions || []).find((d) => String(d.id) === String(team?.division_id));
     const season = (db.season_settings || []).find(
       (s) => String(s.id) === String(division?.season_settings_id)
     );
-    return localDateIn(season?.timezone, now);
+    const today = localDateIn(season?.timezone, now);
+    todayByTeam.set(key, today);
+    return today;
   };
   const isLive = (row) => {
     const today = teamToday(row.team_id);
@@ -132,6 +134,51 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     const value = org?.feature_flags?.[key];
     return typeof value === 'boolean' ? value : fallback;
   };
+  return {
+    roleIn,
+    isOrgAdmin,
+    isOrgMember,
+    teamById,
+    teamToday,
+    isLive,
+    coachById,
+    myCoachIds,
+    isCurrentTeamCoach,
+    myChildIds,
+    rosterOf,
+    isTeamGuardian,
+    orgFlag,
+  };
+}
+
+/**
+ * @param {Record<string, any[]>} db
+ * @param {string} name
+ * @param {Record<string, any> | null | undefined} params
+ * @param {{ currentUserId: string | null, sessionEmail?: string | null, now?: Date, newId?: () => string }} ctx
+ */
+export function handleServerSideReadRpc(db, name, params, ctx) {
+  if (!SERVER_SIDE_READ_RPCS.includes(name)) return null;
+  const { currentUserId } = ctx;
+  const now = ctx.now ?? new Date();
+  const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
+  const p = params || {};
+  if (!currentUserId) return denied(`${name} requires a signed-in caller`);
+  const email = norm(ctx.sessionEmail);
+
+  const {
+    isOrgAdmin,
+    isOrgMember,
+    teamById,
+    isLive,
+    coachById,
+    myCoachIds,
+    isCurrentTeamCoach,
+    myChildIds,
+    rosterOf,
+    isTeamGuardian,
+    orgFlag,
+  } = createAccessHelpers(db, currentUserId, now);
   const profileById = (id) =>
     (db.profiles || []).find((profile) => String(profile.id) === String(id)) ?? null;
   const coachContact = (coach) => {

@@ -699,9 +699,12 @@ INSERT INTO matrix_expected VALUES
     ('player_buddies',              'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- players: member SELECT, admin ALL.
+    -- 20261021020000 (Phase A3): a member who is not an admin reads players,
+    -- team_players and profile_players only for their own children (coach_a
+    -- has none, so reads none), and staging rows not at all.
     ('players',                     'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('players',                     'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
-    ('players',                     'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('players',                     'coach_a',  '-',  'rls',   '0',   '0',     '0'),
     ('players',                     'parent_a', 'A',  'rls',   '0',   '0',     '0'),
     ('players',                     'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('players',                     'outsider', '-',  'rls',   '0',   '0',     '0'),
@@ -725,13 +728,14 @@ INSERT INTO matrix_expected VALUES
     ('practice_exceptions',         'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('practice_exceptions',         'anon',     'grant','grant', 'grant','grant', 'grant'),
 
-    -- profile_players: own row (profile_id = auth.uid()) or member; Org B's row is the outsider's own; no write policy.
+    -- profile_players: own row while a member, or an admin (20261021020000); Org B's row is the
+    -- outsider's own, but the outsider is no Org B member, so it reads nothing; no write policy.
     ('profile_players',             'admin_a',  'A',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'coach_a',  '-',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'outsider', 'B',  'rls',   '0',   '0',     '0'),
+    ('profile_players',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('profile_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- profiles: own row only, read and update; Org A's subject row is Charlie's profile, Org B's is Bob's; no INSERT or DELETE policy.
@@ -784,8 +788,8 @@ INSERT INTO matrix_expected VALUES
     -- staging_players: member SELECT, admin ALL.
     ('staging_players',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('staging_players',             'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
-    ('staging_players',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('staging_players',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'coach_a',  '-',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'parent_a', '-',  'rls',   '0',   '0',     '0'),
     ('staging_players',             'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('staging_players',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('staging_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -793,7 +797,7 @@ INSERT INTO matrix_expected VALUES
     -- team_players: member SELECT, admin ALL.
     ('team_players',                'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('team_players',                'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
-    ('team_players',                'coach_a',  'A',  'rls',   '0',   '0',     '0'),
+    ('team_players',                'coach_a',  '-',  'rls',   '0',   '0',     '0'),
     ('team_players',                'parent_a', 'A',  'rls',   '0',   '0',     '0'),
     ('team_players',                'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('team_players',                'outsider', '-',  'rls',   '0',   '0',     '0'),

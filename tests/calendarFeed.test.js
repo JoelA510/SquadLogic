@@ -710,8 +710,11 @@ describe('calendar feed: a failed read is visible in the feed', () => {
     const call = /await composeTeamFeed\(\{([\s\S]*?)\}\);/.exec(ENTRY);
     expect(call, 'composeTeamFeed call').not.toBeNull();
     expect(call[1]).toMatch(/client: supabase as unknown as TeamFeedClient/);
-    // The only table the handler reads itself is `teams` (the token check).
-    expect([...ENTRY.matchAll(/\.from\(\s*'(\w+)'\s*\)/g)].map((m) => m[1])).toEqual(['teams']);
+    // The only table the handler reads itself is `team_calendar_tokens` (the
+    // token check, 20261021020000), embedding its team.
+    expect([...ENTRY.matchAll(/\.from\(\s*'(\w+)'\s*\)/g)].map((m) => m[1])).toEqual([
+      'team_calendar_tokens',
+    ]);
     // A second build or render path here would be one the seam's tests never run.
     expect(ENTRY).not.toMatch(/\b(buildFeedEvents|renderIcsCalendar)\(/);
   });

@@ -655,7 +655,9 @@ Given('I am viewing the Team Roster page', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
   await page.evaluate((mockOrgId) => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const db = JSON.parse(
+      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+    );
     const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const _userId = 'mock-admin-id';
 
@@ -696,7 +698,10 @@ Given('I am viewing the Team Roster page', async ({ page }) => {
 
     // No extra import needed — import-1 from initialMockData provides player data
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    // Through saveDB, which also replaces the page's in-memory copy: written to
+    // sessionStorage alone, an RPC that saves on load (link_my_guardian_records)
+    // merged the stale copy back and restored the seeded run-1, with no roster.
+    window.__saveMockDB__(db);
   }, MOCK_ORG_ID);
   await page.goto('/teams');
   // Wait for the roster data to load before entering edit mode

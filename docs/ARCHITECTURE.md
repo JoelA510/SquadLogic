@@ -380,7 +380,7 @@ CREATE TABLE IF NOT EXISTS public.teams (
     coach_id            uuid REFERENCES public.coaches(id) ON DELETE SET NULL,
     assistant_coach_ids uuid[] DEFAULT '{}'::uuid[],
     practice_slot_id    uuid,
-    calendar_token      uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
+    -- calendar_token moved to team_calendar_tokens in 20261021020000
     notes               text,
     created_at          timestamptz NOT NULL DEFAULT timezone('utc', now()),
     updated_at          timestamptz NOT NULL DEFAULT timezone('utc', now()),
@@ -1203,9 +1203,11 @@ and offers a client-side `Blob` download (`:307-315`). `export_jobs`
 
 The only outbound integration is the ICS calendar feed:
 `supabase/functions/calendar-feed/index.ts` (220 lines). Public, unauthenticated, keyed on
-`teams.calendar_token` (added by `20251218000000_calendar_sync.sql`), with a service-role client to
-bypass RLS (`:44`), expiry enforcement (`:59-67`, from
-`20260324000002_calendar_token_expiry.sql`), and ICS header-injection sanitization (`:5-10`).
+`team_calendar_tokens.token` (on `teams.calendar_token` from `20251218000000_calendar_sync.sql` until
+`20261021020000_restrict_people_reads.sql` moved it to its own table, readable only by admins,
+the team's current coaches and its guardians), with a service-role client to bypass RLS,
+expiry enforcement (`team_calendar_tokens.expires_at`, first added as
+`20260324000002_calendar_token_expiry.sql`), and ICS header-injection sanitization.
 Timezone defaults to `'America/New_York'` when the org has no `season_settings.timezone`
 (`:74`).
 

@@ -5,6 +5,7 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS, hasPermission } from '../constants/permissions.js';
 import { Trophy, CheckCircle2 } from 'lucide-react';
 import { logger } from '../lib/logger.js';
+import { useScorableGames } from '../hooks/useScorableGames.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 
@@ -28,6 +29,9 @@ export default function LeagueStandings() {
   const [updatingGameId, setUpdatingGameId] = useState(null);
 
   const canEditScores = hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE);
+  // Per game: an admin scores any game, a coach only their own team's
+  // (update_game_score refuses the rest, 20261021020000).
+  const { canScoreGame, error: scorableError } = useScorableGames({ enabled: canEditScores });
   const { genderModel } = useFeatures();
 
   useEffect(() => {
@@ -238,6 +242,11 @@ export default function LeagueStandings() {
           <CheckCircle2 className="text-text-muted w-5 h-5" /> Recent Games{' '}
           {canEditScores && '- Score Entry'}
         </h2>
+        {canEditScores && scorableError && (
+          <p className="text-sm text-status-warning-text mb-4" role="alert">
+            Your teams could not be loaded, so no score can be entered here. Reload to try again.
+          </p>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((game) => (
@@ -255,7 +264,7 @@ export default function LeagueStandings() {
                   {game.home_team?.name}
                 </span>
                 <div className="flex items-center gap-2 w-1/3 justify-center">
-                  {canEditScores ? (
+                  {canEditScores && canScoreGame(game) ? (
                     <>
                       <input
                         type="number"

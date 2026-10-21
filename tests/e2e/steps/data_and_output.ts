@@ -369,7 +369,9 @@ Given('the team rosters have been generated and finalized', async ({ page }) => 
   await page.goto('/');
   await waitForMockClient(page);
   await page.evaluate((mockOrgId) => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const db = JSON.parse(
+      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+    );
     const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
     // Own the team-run fixture for this scenario so earlier E2E scenarios cannot win the
@@ -405,7 +407,11 @@ Given('the team rosters have been generated and finalized', async ({ page }) => 
       },
     });
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    // Through saveDB, which also replaces the page's in-memory copy: written to
+    // sessionStorage alone, the stale copy was merged back over it by the next
+    // read, and an RPC that saved on load (link_my_guardian_records) put the
+    // seeded two-team run back in place of this one.
+    window.__saveMockDB__(db);
   }, MOCK_ORG_ID);
 });
 

@@ -5,7 +5,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(13);
+SELECT plan(14);
 
 INSERT INTO public.teams (id, organization_id, division_id, name)
 VALUES
@@ -145,6 +145,33 @@ RESET ROLE;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333","app_metadata":{"role":"coach"}}';
 
+-- 20261021020000: a coach scores only a game of a team they currently coach.
+SELECT throws_ok(
+    $$
+        SELECT public.update_game_score(
+            'a1111111-1111-1111-1111-111111111111',
+            'a1111111-1111-1111-1111-00000000aa01',
+            5::smallint,
+            5::smallint
+        )
+    $$,
+    '42501',
+    NULL,
+    'an Org A coach who coaches neither team is refused'
+);
+
+RESET ROLE;
+INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status)
+VALUES ('c3333333-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111',
+        '33333333-3333-3333-3333-333333333333', 'Charlie Coach-A', 'charlie@test.local', 'active');
+INSERT INTO public.team_coach_assignments
+    (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
+VALUES ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001',
+        'c3333333-0000-4000-8000-000000000001', 'lead',
+        public.team_local_today('aaaaaaaa-0000-0000-0000-000000000001') - 1, NULL, 'pgtap', NULL);
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333","app_metadata":{"role":"coach"}}';
+
 SELECT lives_ok(
     $$
         SELECT public.update_game_score(
@@ -154,7 +181,7 @@ SELECT lives_ok(
             1::smallint
         )
     $$,
-    'Org A coach can update scores through the schedule-manager surface'
+    'the home team''s current coach can update the score'
 );
 
 SELECT is(

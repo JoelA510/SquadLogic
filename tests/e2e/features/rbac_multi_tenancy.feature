@@ -8,11 +8,13 @@ Feature: RBAC and Multi-Tenancy Enforcement
     And "Coach Alice" belongs to "Org A" with role "Coach"
     And "Admin Bob" belongs to "Org B" with role "Admin"
 
+  # As Org B's admin: since Phase A3 a coach no longer lists the league's teams
+  # (VIEW_ALL_TEAMS is an admin's), so the isolation is checked by a role that does.
   Scenario: Multi-Tenancy Data Isolation (RLS)
-    Given I am logged into the SquadLogic dashboard as "Coach Alice"
+    Given I am logged into the SquadLogic dashboard as "Admin Bob"
     When I request the list of teams, players, or schedules
-    Then I should only receive records associated with "Org A"
-    And any direct query for "Org B" records should return empty or unauthorized
+    Then I should only receive records associated with "Org B"
+    And any direct query for "Org A" records should return empty or unauthorized
 
   Scenario: Route Protection via usePermission
     Given I am logged into the SquadLogic dashboard as "Coach Alice"

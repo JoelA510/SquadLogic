@@ -93,7 +93,7 @@ BEGIN
     RAISE NOTICE 'a coach''s create_import_job is refused 42501 and creates no job';
 
     -- (d) The posture is unchanged.
-    IF NOT (SELECT p.prosecdef AND p.proconfig <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (p.proconfig)
+    IF NOT (SELECT p.prosecdef AND COALESCE(p.proconfig, '{}') <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (COALESCE(p.proconfig, '{}'))
               FROM pg_proc p
              WHERE p.oid = 'public.create_import_job(uuid, text, text)'::regprocedure) THEN
         RAISE EXCEPTION 'create_import_job lost SECURITY DEFINER or search_path=public';

@@ -2,8 +2,10 @@
 --
 -- Run against the fully migrated database, so they hold for every migration
 -- after this one too:
---   * every public function whose body uses `timezone('utc', now())` (or
---     `now() AT TIME ZONE 'utc'`) as a timestamp is pinned `timezone=UTC`;
+--   * every public function whose body uses `timezone('utc', now())` (or the
+--     same with clock_timestamp(), statement_timestamp(), transaction_timestamp()
+--     or current_timestamp, or 'Etc/UTC', or `<clock> AT TIME ZONE 'utc'`) as a
+--     timestamp is pinned `timezone=UTC`;
 --     the deliberate UTC calendar date (`...)::date`) is exempt;
 --   * no column default and no function argument default uses the idiom;
 --   * under a session at UTC+14, a column default and trigger_set_timestamp
@@ -23,11 +25,11 @@ DECLARE
     v_args text;
     v_n integer;
 BEGIN
-    SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY 1), count(*)
-      INTO v_unpinned, v_n
+    SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text)
+      INTO v_unpinned
       FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace
-       AND p.prosrc ~* '(timezone\s*\(\s*''utc''(\s*::\s*text)?\s*,\s*now\s*\(\s*\)\s*\)|now\s*\(\s*\)\s+at\s+time\s+zone\s+''utc'')(?!\)?\s*::\s*date)'
+       AND p.prosrc ~* '(timezone\s*\(\s*''(etc/)?utc''(\s*::\s*text)?\s*,\s*(now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp)\s*\)|(now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp)\s+at\s+time\s+zone\s+''(etc/)?utc'')(?!\)?\s*::\s*date)'
        AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, ARRAY[]::text[])) c
                         WHERE lower(c) = 'timezone=utc');
     IF v_unpinned IS NOT NULL THEN
@@ -41,17 +43,17 @@ BEGIN
     END IF;
     RAISE NOTICE 'idiom: no function uses it as a timestamp unpinned (% pinned)', v_n;
 
-    SELECT string_agg(c.relname || '.' || a.attname, ', ' ORDER BY 1) INTO v_defaults
+    SELECT string_agg(c.relname || '.' || a.attname, ', ' ORDER BY c.relname, a.attname) INTO v_defaults
       FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid
       JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
      WHERE c.relnamespace = 'public'::regnamespace
-       AND pg_get_expr(d.adbin, d.adrelid) ~* 'timezone\(''utc''|at time zone ''utc''';
+       AND pg_get_expr(d.adbin, d.adrelid) ~* 'timezone\(''(etc/)?utc''|at time zone ''(etc/)?utc''';
     IF v_defaults IS NOT NULL THEN
         RAISE EXCEPTION 'column defaults still use the idiom: %', v_defaults;
     END IF;
-    SELECT string_agg(p.oid::regprocedure::text, ', ') INTO v_args FROM pg_proc p
+    SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_args FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace
-       AND pg_get_function_arguments(p.oid) ~* 'timezone\(''utc''|at time zone ''utc''';
+       AND pg_get_function_arguments(p.oid) ~* 'timezone\(''(etc/)?utc''|at time zone ''(etc/)?utc''';
     IF v_args IS NOT NULL THEN
         RAISE EXCEPTION 'argument defaults still use the idiom: %', v_args;
     END IF;

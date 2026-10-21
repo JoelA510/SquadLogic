@@ -176,7 +176,7 @@ BEGIN
     RAISE NOTICE 'the throttle holds under session time zones +14 and -12: ten succeed, the eleventh is refused PT429, rows are dated now()';
 
     -- (e) Posture and index.
-    IF NOT (SELECT p.prosecdef AND p.proconfig <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (p.proconfig)
+    IF NOT (SELECT p.prosecdef AND COALESCE(p.proconfig, '{}') <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (COALESCE(p.proconfig, '{}'))
               FROM pg_proc p
              WHERE p.oid = 'public.submit_registration(uuid, uuid, uuid, jsonb, uuid, text, text)'::regprocedure) THEN
         RAISE EXCEPTION 'submit_registration lost SECURITY DEFINER or search_path=public';

@@ -77,6 +77,9 @@ CREATE POLICY coaches_select_admin_or_self ON public.coaches
         OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))
     );
 
+-- The membership check below is also implied: the subquery reads `coaches`
+-- under that table's own policy, which already requires it. It is stated so the
+-- rule does not depend on the other policy; no smoke can tell the two apart.
 DROP POLICY IF EXISTS "Team coach assignments: members read" ON public.team_coach_assignments;
 CREATE POLICY team_coach_assignments_select_admin_or_self ON public.team_coach_assignments
     FOR SELECT TO authenticated

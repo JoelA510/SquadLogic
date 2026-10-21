@@ -3967,13 +3967,6 @@ plant "M34 a removed coach still reads their coach row" "$M34" \
   "        OR (true AND user_id = (SELECT auth.uid()))" \
   "smoke 20261021020000"
 
-plant "M34 a removed coach still reads their assignments" "$M34" \
-  "        OR (public.is_org_member(organization_id)
-            AND coach_id IN" \
-  "        OR (true
-            AND coach_id IN" \
-  "smoke 20261021020000"
-
 plant "M34 a leftover read policy passes the end-state check" "$M34" \
   "DO \$\$
 DECLARE

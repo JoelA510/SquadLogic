@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import {
   AlertTriangle,
   ArrowRight,
+  BookUser,
   Calendar,
   CheckCircle2,
   ClipboardCheck,
@@ -32,6 +34,7 @@ import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
+import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 
 /**
  * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
@@ -574,38 +577,71 @@ function AdminHome() {
   );
 }
 
-/** Coach Home — my team at a glance. */
+/** Coach Home — my teams at a glance, and the league's coach directory. */
 function CoachDashboard() {
-  const { user } = useAuth();
   const { currentOrganization } = useOrganization();
-  const [team, setTeam] = useState(null);
+  const { isEnabled } = useFeatures();
+  const directoryOn = isEnabled(FEATURE_FLAGS.COACH_DIRECTORY);
+  const [teams, setTeams] = useState(/** @type {{ id: string, name: string }[]} */ ([]));
+  const [directory, setDirectory] = useState(/** @type {any[] | null} */ (null));
+  const [loadError, setLoadError] = useState(/** @type {string | null} */ (null));
+  const [directoryError, setDirectoryError] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!currentOrganization?.id) return;
+      const orgId = currentOrganization?.id;
+      if (!orgId) return;
       try {
-        const { data: coaches } = await supabase
-          .from('coaches')
-          .select('*')
-          .eq('organization_id', currentOrganization.id);
-        const mine = (coaches || []).find(
-          (coach) =>
-            coach.user_id === user?.id ||
-            coach.profile_id === user?.profile?.id ||
-            coach.email === user?.email
-        );
-        if (mine) {
-          const { data: teams } = await supabase
+        // The teams the caller currently coaches (20261021010000): a live
+        // team_coach_assignments row of their linked coach record, judged in
+        // each team's season timezone.
+        const { data: teamIds, error: idsError } = await supabase.rpc('get_my_coached_team_ids', {
+          p_organization_id: orgId,
+        });
+        if (idsError) throw idsError;
+        const ids = (teamIds || []).map(String);
+        let mine = [];
+        if (ids.length > 0) {
+          const { data: teamRows, error: teamsError } = await supabase
             .from('teams')
-            .select('*')
-            .eq('organization_id', currentOrganization.id);
-          if (!cancelled)
-            setTeam((teams || []).find((entry) => entry.coach_id === mine.id) || null);
+            .select('id, name')
+            .eq('organization_id', orgId)
+            .in('id', ids);
+          if (teamsError) throw teamsError;
+          mine = (teamRows || []).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        }
+        if (!cancelled) {
+          setTeams(mine);
+          setLoadError(null);
+        }
+        // The directory is its own read: the server may refuse it (the league
+        // just turned it off) without taking the coach's teams with it.
+        let coaches = null;
+        let coachesFailed = false;
+        if (directoryOn && mine.length > 0) {
+          const { data: rows, error: directoryReadError } = await supabase.rpc(
+            'get_coach_directory',
+            { p_organization_id: orgId }
+          );
+          if (directoryReadError) {
+            logger.warn('[CoachDashboard] coach directory not loaded', {
+              code: directoryReadError.code,
+              message: directoryReadError.message,
+            });
+            coachesFailed = true;
+          } else {
+            coaches = rows || [];
+          }
+        }
+        if (!cancelled) {
+          setDirectory(coaches);
+          setDirectoryError(coachesFailed);
         }
       } catch (err) {
         logger.error('[CoachDashboard] load failed:', err);
+        if (!cancelled) setLoadError('Your teams could not be loaded. Try again shortly.');
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -613,7 +649,7 @@ function CoachDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [currentOrganization?.id, user]);
+  }, [currentOrganization?.id, directoryOn]);
 
   if (!loaded) return <LoadingScreen />;
 
@@ -633,35 +669,41 @@ function CoachDashboard() {
       }
     >
       <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {team ? (
-          <div className="card">
-            <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span
-                className="record-avatar"
-                style={{ background: 'var(--primary)', width: 44, height: 44 }}
-              >
-                <Shield size={20} aria-hidden="true" />
-              </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{team.name}</div>
-                <div className="muted" style={{ fontSize: 12.5 }}>
-                  Your team — open it for the roster, schedule, RSVPs, and chat.
+        {loadError && <DataErrorBanner message={loadError} />}
+        {teams.length > 0
+          ? teams.map((team) => (
+              <div className="card" key={team.id}>
+                <div
+                  className="card-body"
+                  style={{ display: 'flex', alignItems: 'center', gap: 12 }}
+                >
+                  <span
+                    className="record-avatar"
+                    style={{ background: 'var(--primary)', width: 44, height: 44 }}
+                  >
+                    <Shield size={20} aria-hidden="true" />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{team.name}</div>
+                    <div className="muted" style={{ fontSize: 12.5 }}>
+                      Your team — open it for the roster, schedule, RSVPs, and chat.
+                    </div>
+                  </div>
+                  <Link to={`/team/${team.id}`} aria-label={`Open ${team.name}`}>
+                    <Button variant="primary" size="sm" icon={ArrowRight}>
+                      Open team
+                    </Button>
+                  </Link>
                 </div>
               </div>
-              <Link to={`/team/${team.id}`}>
-                <Button variant="primary" size="sm" icon={ArrowRight}>
-                  Open team
-                </Button>
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div className="card">
-            <div className="card-body muted">
-              No team is assigned to you yet — your league admin will assign one.
-            </div>
-          </div>
-        )}
+            ))
+          : !loadError && (
+              <div className="card">
+                <div className="card-body muted">
+                  No team is assigned to you yet — your league admin will assign one.
+                </div>
+              </div>
+            )}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Link to="/schedule/practice">
@@ -681,10 +723,80 @@ function CoachDashboard() {
             </Link>
           </div>
         </div>
+        {directory && <CoachDirectory coaches={directory} />}
+        {directoryError && (
+          <div className="card">
+            <div className="card-body muted">The coach directory could not be loaded.</div>
+          </div>
+        )}
       </div>
     </Page>
   );
 }
+
+/**
+ * Every current coach in the league with their contact details, from
+ * `get_coach_directory` (which admits a current coach only while the league's
+ * Coach Directory setting is on). A coach's contact card replaces imported
+ * details, and an unshared card leaves them blank.
+ */
+function CoachDirectory({ coaches }) {
+  return (
+    <section className="card" aria-labelledby="coach-directory-heading">
+      <div className="card-head">
+        <BookUser size={17} aria-hidden="true" />
+        <h3 id="coach-directory-heading">Coach directory</h3>
+      </div>
+      <div className="card-body">
+        {coaches.length === 0 ? (
+          <span className="muted">No coaches are assigned yet.</span>
+        ) : (
+          <ul style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {coaches.map((coach) => (
+              <li key={coach.coach_id} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Avatar name={coach.full_name || '?'} size="sm" />
+                <div style={{ flex: 1, fontSize: 13 }}>
+                  <div style={{ fontWeight: 600 }}>{coach.full_name || 'Coach'}</div>
+                  <div className="muted">
+                    {(coach.team_names || []).join(', ')}
+                    {coach.email && (
+                      <>
+                        {' · '}
+                        <a className="linklike" href={`mailto:${coach.email}`}>
+                          {coach.email}
+                        </a>
+                      </>
+                    )}
+                    {coach.phone && (
+                      <>
+                        {' · '}
+                        <a className="linklike" href={`tel:${coach.phone}`}>
+                          {coach.phone}
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+CoachDirectory.propTypes = {
+  coaches: PropTypes.arrayOf(
+    PropTypes.shape({
+      coach_id: PropTypes.string.isRequired,
+      full_name: PropTypes.string,
+      email: PropTypes.string,
+      phone: PropTypes.string,
+      team_names: PropTypes.arrayOf(PropTypes.string),
+    })
+  ).isRequired,
+};
 
 /** Parent Home — my players and the schedule. */
 function ParentDashboard() {

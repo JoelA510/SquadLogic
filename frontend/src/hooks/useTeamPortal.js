@@ -61,6 +61,11 @@ export function useTeamPortal(teamId) {
   const [error, setError] = useState(null);
   const [team, setTeam] = useState(null);
   const [roster, setRoster] = useState([]);
+  // Why the roster is empty when the read did not return it: 'refused' (the
+  // read does not admit this caller) or 'failed'; null when it was read.
+  const [rosterUnavailable, setRosterUnavailable] = useState(
+    /** @type {'refused' | 'failed' | null} */ (null)
+  );
   const [events, setEvents] = useState([]);
   // Q5: the practices still show, and the page says their changes are unread.
   const [practiceChangesUnread, setPracticeChangesUnread] = useState(false);
@@ -84,35 +89,34 @@ export function useTeamPortal(teamId) {
       if (teamError) throw teamError;
       setTeam(teamData);
 
-      // 2. Fetch Roster
-      const { data: rosterData, error: rosterError } = await supabase
-        .from('team_players')
-        .select(
-          `
-          player:players (
-            id,
-            first_name,
-            last_name,
-            gender,
-            jersey_number,
-            years_played,
-            rating,
-            willing_to_coach
-          )
-        `
-        )
-        .eq('team_id', teamId);
+      // 2. Fetch Roster. Through the server-side read (20261021010000), which
+      // applies the Phase A access table: names and jersey number for an admin,
+      // a current coach or a guardian on the team; guardian contacts per role
+      // and league setting; balance fields to admins only. A caller it does not
+      // admit gets 42501: the roster tab says so, and the rest of the page
+      // (schedule, chat) still loads, as it reads tables every member can.
+      const { data: rosterRows, error: rosterError } = await supabase.rpc('get_team_roster', {
+        p_team_id: teamId,
+      });
 
-      if (rosterError) throw rosterError;
+      if (rosterError) {
+        logger.warn('[useTeamPortal] roster not loaded', {
+          teamId,
+          code: rosterError.code,
+          message: rosterError.message,
+        });
+        setRosterUnavailable(rosterError.code === '42501' ? 'refused' : 'failed');
+      } else {
+        setRosterUnavailable(null);
+      }
 
       // Deduplicate roster by player ID to prevent React key collisions
       const uniqueRoster = [];
       const seenIds = new Set();
-      rosterData.forEach((r) => {
-        const p = Array.isArray(r.player) ? r.player[0] : r.player;
-        if (p && !seenIds.has(p.id)) {
-          seenIds.add(p.id);
-          uniqueRoster.push(p);
+      (rosterRows || []).forEach((row) => {
+        if (row?.player_id && !seenIds.has(row.player_id)) {
+          seenIds.add(row.player_id);
+          uniqueRoster.push({ ...row, id: row.player_id });
         }
       });
 
@@ -268,31 +272,9 @@ export function useTeamPortal(teamId) {
       if (rsvpError) throw rsvpError;
       setRsvps(rsvpData);
 
-      // 7. Fetch My Players (for RSVPing)
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData.user) {
-        const { data: myPlayerData } = await supabase
-          .from('profile_players')
-          .select('player_id')
-          .eq('profile_id', authData.user.id);
-
-        if (myPlayerData) {
-          const myIds = myPlayerData.map((mp) => mp.player_id);
-          const matchedPlayers = [];
-          const seenMyIds = new Set();
-
-          rosterData?.forEach((r) => {
-            const p = Array.isArray(r.player) ? r.player[0] : r.player;
-            if (p && myIds.includes(p.id) && !seenMyIds.has(p.id)) {
-              seenMyIds.add(p.id);
-              matchedPlayers.push(p);
-            }
-          });
-          setMyPlayers(matchedPlayers);
-        }
-      } else {
-        logger.warn('[DEBUG] [useTeamPortal] No authenticated user found for RSVP section');
-      }
+      // 7. My Players (for RSVPing): the roster read marks the caller's own
+      // children (their profile_players links).
+      setMyPlayers(uniqueRoster.filter((player) => player.is_my_child === true));
 
       // 8. Fetch Messages
       const { data: msgData, error: msgError } = await supabase
@@ -434,6 +416,7 @@ export function useTeamPortal(teamId) {
     error,
     team,
     roster,
+    rosterUnavailable,
     events,
     practiceChangesUnread,
     rsvps,

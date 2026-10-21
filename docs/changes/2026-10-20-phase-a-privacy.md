@@ -1,6 +1,6 @@
 # Phase A: privacy and access
 
-Status: **approved 2026-10-20**; A1 built (migration `20261020020000`) (AGENTS.md rule 14: persistence and authorization). It
+Status: **approved 2026-10-20**; A1 built (migration `20261020020000`); A2 built (`20261020030000`, `20261020040000`); A3 in progress (AGENTS.md rule 14: persistence and authorization). It
 applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to research items 1
 and 2. It ships as three PRs, in this order; each is reviewed once before it opens.
 
@@ -112,6 +112,46 @@ and `staging_import_rows` are readable by every organization member
 - pgTAP covers each row of the table, for every role, with the two settings on and off;
 - the old policies are shown failing the new matrix;
 - each migrated page has a test as a non-admin.
+
+## A3 as built (decided while building, 2026-10-21)
+
+The caller search (*executed*: every `supabase.from(...)` on `players`, `coaches`,
+`team_players`, `team_coach_assignments` and `profile_players` in `frontend/src`, every RPC the
+frontend calls, and every Edge Function) found these non-admin readers. Admin pages (behind
+`MANAGE_ORGANIZATION` or the admin home) keep direct table access and are not listed.
+
+| Caller | Reads | Becomes |
+| --- | --- | --- |
+| `CoachDashboard` (`DashboardPage`) | every coach row, matched in the browser by user id, profile id **or email** | own row by `user_id` (own-row policy) and `get_my_coached_team_ids` |
+| `CoachPreferenceRequests`, `usePracticeLightingOverrides` | own coach row by `user_id`; own assignments | unchanged: own-row policies |
+| `ParentDashboard`, `RegistrationFlow`, the portal's "my players" | `profile_players` and the linked players | unchanged: own-children policies |
+| Team portal roster (`useTeamPortal`) | `team_players` joined to players: names, gender, jersey, years played, rating, coaching interest | `get_team_roster`: names, jersey number, guardian contacts per the table |
+| `TeamRecordPage` Staff tab | head coach row, `select('*')` | `get_team_staff`: every current coach, name, phone, email |
+| `TeamRecordPage` calendar link | `teams.calendar_token` through the portal's `select('*')`: **any member reads any team's feed token** | `team_calendar_tokens`, readable per the table |
+| `TeamAnalysisPage` (`/teams`) | the teaming workspace; coaches reach it through `VIEW_ALL_TEAMS` | admin-only route; coaches lose `VIEW_ALL_TEAMS` ("coaches see their own team only") |
+| `ScoresPage`, `LeagueStandings` | `update_game_score` admits **any** coach for **any** game | admits a current coach of either team; the pages offer editing only there |
+| `calendar-feed` (Edge Function, service role) | `teams.calendar_token` | `team_calendar_tokens` |
+
+Decisions the plan left open:
+
+1. **Guardian identity is `profile_players`.** In-app registration writes it; imported players
+   have none. `link_my_guardian_records()` adds the missing half, mirroring
+   `link_my_coach_record()`: after sign-in it links the caller to each player in their
+   organizations whose imported guardian email or alternate email matches their verified auth
+   email, case-insensitively. Idempotent and audited (`guardian.linked`). Without it, the guardian
+   column of the table would admit only families who registered in the app.
+2. **The contact card is three-state.** `profiles.share_contact` is NULL until the user saves the
+   card, and imported data shows; `true` shows the card's phone and email; `false` shows nothing.
+   A linked coach or guardian who never opens the card keeps the imported details they had.
+3. **"Primary contact" is the first imported guardian contact** (the registration's guardian 1).
+   It carries name, email and phone where imported; the alternate email is not shared.
+4. **The coach directory is a section on the coach home**, so the flag gates something; it lists
+   every coach with a current assignment, name, phone and email.
+5. **Built as two PRs.** A3a is additive: identity helpers, guardian linking, contact card (A2c),
+   the two flags, the server-side reads, and the callers moved onto them, with every table still
+   readable as before. A3b restricts: the new policies, the calendar token table,
+   `rotate_calendar_token` and `update_game_score`'s rule, `staging_*`, and the matrix rewrite.
+   Between the two, nothing is hidden that a page still reads directly.
 
 ## Not in Phase A
 

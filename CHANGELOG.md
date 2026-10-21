@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Server-side reads for people's data** (owner decisions 2026-10-20; Phase A3a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261021010000` adds `get_team_roster`, `get_team_staff`, `get_coach_directory` and `get_my_coached_team_ids`, which apply the plan's access table: admins and staff, a team's current coach (judged in the season's timezone) and its guardians each see what the table gives them, and everyone else is refused. The team page's roster and staff tab, the coach home and the RSVP list read through them; the Balance tab is admin-only. Revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/server_side_reads.sql`.
+- **Guardian accounts are linked to their children.** `link_my_guardian_records()` links a signed-in user to each player whose imported guardian email or alternate email matches their verified sign-in email, in an organization they belong to; idempotent, audited as `guardian.linked`. The app calls it beside `link_my_coach_record()`.
+- **Contact card** (Phase A2c). The account page has a phone, an email and a sharing choice. A saved card replaces the imported details wherever the app shows the person's contact details; "Don't share" shows none. Written only by `set_my_contact_card()`.
+- **Coach directory** on the coach home: every current coach's contact details.
+- **Two league settings**, on by default: Teammate Contacts (guardians see each teammate's primary guardian contact) and Coach Directory. The server-side reads check them.
 - **Coach accounts are linked to their coach records.** `link_my_coach_record()` (migration `20261020040000`; Phase A2b of `docs/changes/2026-10-20-phase-a-privacy.md`) links a signed-in user to the coach row whose email matches their verified sign-in email, in an organization they belong to; idempotent, refuses a row linked to another account, audited as `coach.linked`. The app calls it once per signed-in user, so the coach-only pages (practice preferences, lighting overrides) find the coach's record.
 
 ### Changed

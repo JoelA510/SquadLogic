@@ -15,7 +15,7 @@ SquadLogic uses Supabase Auth with five logical roles stored in the `organizatio
 | `coach`  | View team data they are assigned to. Can update RSVP and participate in team chat.       |
 | `player` | Limited access to own team data and schedule views.                                      |
 | `parent` | View child's team schedule and public calendar feeds.                                    |
-| `staff`  | Extended read access similar to coach, for non-coaching staff.                           |
+| `staff`  | An admin: `is_org_admin()` admits staff since `20261020030000`.                          |
 
 Roles are defined in `frontend/src/constants/permissions.js` and enforced via:
 
@@ -101,6 +101,31 @@ A table whose only policy is an admin `FOR ALL` (`coach_team_requests`) has no s
 reads the caller calls `(select auth.uid())`, not `auth.uid()`, so Postgres evaluates it once
 per statement (the `auth_rls_initplan` advisor). The advisors gate in the pgTAP job fails a
 pull request that brings either back (`docs/operations/ci-cd.md`, "Supabase advisors").
+
+## Server-side reads (Phase A3)
+
+Who may read people's data is the access table in `docs/changes/2026-10-20-phase-a-privacy.md`
+(A3). Admins and staff read the tables directly. Everyone else reads through definer functions
+that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_side_reads.sql`):
+
+| Function                       | Admits                                                         | Returns                                                                                                                                                                                                                                          |
+| ------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_team_roster(team)`        | admins, staff; a current coach of the team; a guardian on it   | names, jersey number; guardian contacts in full to admins, staff, the coach and a player's own guardians, a teammate's primary contact to other guardians unless `guardian_contact_sharing` is off; balance fields to admins and staff only |
+| `get_team_staff(team)`         | the same                                                       | every current coach's name, role, phone and email                                                                                                                                                                                              |
+| `get_coach_directory(org)`     | admins, staff; a current coach while `coach_directory` is on   | every current coach's contact details                                                                                                                                                                                                            |
+| `get_my_coached_team_ids(org)` | any member                                                     | the teams the caller currently coaches                                                                                                                                                                                                           |
+
+"Current coach" is a `team_coach_assignments` row of the caller's linked coach (`coaches.user_id`,
+set by `link_my_coach_record()`) whose inclusive window holds today in the team's season timezone
+(`team_local_today()`, UTC when unset). "Guardian" is a `profile_players` link, written by in-app
+registration or by `link_my_guardian_records()` from a matching verified email. A refused call
+raises 42501, the same for a team that does not exist. A user's contact card
+(`profiles.contact_phone`, `contact_email`, `share_contact`, written only by
+`set_my_contact_card()`) replaces imported details wherever these functions return them; an
+unshared card returns none.
+
+Until A3b, the tables themselves stay readable to every member (`is_org_member`); A3b restricts
+them so these functions are the only non-admin path.
 
 ## Organization Scoping
 

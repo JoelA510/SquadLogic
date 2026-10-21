@@ -14,6 +14,7 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
+import { handleServerSideReadRpc } from './mockServerSideReads.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
@@ -2559,6 +2560,16 @@ export const mockSupabase = {
       if (lighting) {
         if (!lighting.error) saveDB(db);
         return lighting;
+      }
+      // Server-side reads (migration 20261021010000): the guardian link, the
+      // contact card, the roster/staff/directory reads, refusals included.
+      const reads = handleServerSideReadRpc(db, name, params, {
+        currentUserId: storedSession ? currentUserId : null,
+        sessionEmail: storedSession ? JSON.parse(storedSession)?.user?.email : null,
+      });
+      if (reads) {
+        if (!reads.error) saveDB(db);
+        return reads;
       }
       // Heat forecast settings (migration 20261006000000), refusals included.
       const heat = handleHeatSettingsRpc(db, name, params, { currentUserId });

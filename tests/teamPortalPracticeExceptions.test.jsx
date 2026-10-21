@@ -18,7 +18,7 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TeamRecordPage from '../frontend/src/pages/TeamRecordPage.jsx';
@@ -223,7 +223,7 @@ const shiftWindows = (exceptions, days) =>
 
 // --- The fake client: honours eq, is and range; `fail` makes a table err. ---
 
-function fakeClient(db, { fail = [], user = 'parent-1' } = {}) {
+function fakeClient(db, { fail = [], user = 'parent-1', rosterError = null } = {}) {
   const from = (table) => {
     const filters = [];
     let single = false;
@@ -253,7 +253,24 @@ function fakeClient(db, { fail = [], user = 'parent-1' } = {}) {
   };
   return {
     from,
-    rpc: () => Promise.resolve({ data: [], error: null }),
+    // The roster comes through get_team_roster (20261021010000), which marks
+    // the caller's own children; every other RPC answers empty.
+    rpc: (name, params) => {
+      if (name !== 'get_team_roster') return Promise.resolve({ data: [], error: null });
+      if (rosterError) return Promise.resolve({ data: null, error: rosterError });
+      const rows = (db.team_players ?? [])
+        .filter((r) => r.team_id === params?.p_team_id)
+        .map((r) => ({
+          player_id: r.player.id,
+          first_name: r.player.first_name,
+          last_name: r.player.last_name,
+          is_my_child: (db.profile_players ?? []).some(
+            (link) => link.profile_id === user && link.player_id === r.player.id
+          ),
+          guardian_contacts: [],
+        }));
+      return Promise.resolve({ data: rows, error: null });
+    },
     getUser: () => Promise.resolve({ data: { user: { id: user } } }),
   };
 }
@@ -346,6 +363,15 @@ describe('the seed exercises every case (meta)', () => {
     expect(PORTAL_PRACTICE_EXCEPTIONS_SELECT).toContain(
       'slot:practice_slots!practice_slot_id(day_of_week, start_time, end_time, field:fields(name, location:locations(name)))'
     );
+  });
+});
+
+describe('team portal: a refused roster read (20261021010000)', () => {
+  it('still loads the schedule, and the roster tab says why it is empty', async () => {
+    await renderPortal({ rosterError: { code: '42501', message: 'not permitted' } });
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Roster/ }));
+    expect(screen.getByText(/The roster is shown to the team's coaches/)).toBeInTheDocument();
   });
 });
 

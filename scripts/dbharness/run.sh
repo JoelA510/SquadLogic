@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2408,6 +2408,32 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the identity revert left link_my_coach_record or did not restore the profiles UPDATE grant"
         dump 10 $SCRATCH/harness_identity; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261021010000" ]; then
+      # Every function and contact card column gone, read from the catalogue.
+      if psql_cmd "SELECT 'READS-VERDICT:' || CASE
+               WHEN to_regprocedure('public.get_team_roster(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.get_team_staff(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.get_coach_directory(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.link_my_guardian_records()') IS NOT NULL
+                 OR to_regprocedure('public.guardian_contacts_view(uuid,jsonb,boolean)') IS NOT NULL
+                 OR to_regprocedure('public.is_current_team_coach(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.is_team_guardian(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.get_my_coached_team_ids(uuid)') IS NOT NULL
+                 OR to_regprocedure('public.org_flag(uuid,text,boolean)') IS NOT NULL
+                 OR to_regprocedure('public.set_my_contact_card(text,text,boolean)') IS NOT NULL
+                 OR to_regprocedure('public.team_local_today(uuid)') IS NOT NULL THEN 'function-left'
+               WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                             WHERE table_schema = 'public' AND table_name = 'profiles'
+                               AND column_name IN ('contact_phone', 'contact_email', 'share_contact'))
+                 THEN 'column-left'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_reads 2>&1 && grep -q 'READS-VERDICT:restored' $SCRATCH/harness_reads; then
+        echo "  | (checked) the server-side reads revert drops every read, helper and contact card column"
+      else
+        echo "FAIL revert ${id}: the server-side reads revert left a function or a contact card column"
+        dump 10 $SCRATCH/harness_reads; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

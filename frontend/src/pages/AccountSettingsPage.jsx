@@ -7,6 +7,7 @@ import { logger } from '../lib/logger.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import Button from '../components/ui/Button.jsx';
 import InvitesSettings from '../components/settings/InvitesSettings.jsx';
+import ContactCardSettings from '../components/settings/ContactCardSettings.jsx';
 
 const getProfileForm = (user) => ({
   avatar_url: user?.profile?.avatar_url || '',
@@ -239,6 +240,8 @@ export default function AccountSettingsPage() {
           </div>
         </form>
       </section>
+
+      <ContactCardSettings userId={user?.id ?? null} />
 
       <section className="glass-panel p-6 space-y-6" aria-labelledby="account-security-heading">
         <div>

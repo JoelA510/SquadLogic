@@ -47,6 +47,12 @@ vi.mock('../frontend/src/components/settings/InvitesSettings.jsx', () => ({
   default: () => <div>Invite Admin Panel</div>,
 }));
 
+// The contact card has its own tests (tests/contactCard.test.jsx); here it would
+// read the profile through this file's `from` mock, which the profile form owns.
+vi.mock('../frontend/src/components/settings/ContactCardSettings.jsx', () => ({
+  default: () => <section aria-label="Contact card" />,
+}));
+
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     rpc: mocks.rpc,

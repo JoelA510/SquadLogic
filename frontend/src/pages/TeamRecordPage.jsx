@@ -28,6 +28,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
 
 /** `practice_slots.day_of_week` in words, for the "Moved from" line. */
 const WEEKDAY_NAMES = Object.freeze({
@@ -82,6 +83,7 @@ export default function TeamRecordPage() {
     error,
     team,
     roster,
+    rosterUnavailable,
     events,
     practiceChangesUnread,
     rsvps,
@@ -96,32 +98,45 @@ export default function TeamRecordPage() {
   const [tab, setTab] = useState('schedule');
   const [chatInput, setChatInput] = useState('');
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
-  const [coach, setCoach] = useState(null);
+  const [staff, setStaff] = useState(/** @type {any[] | null} */ (null));
+  const [staffError, setStaffError] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Staff tab: resolve the head coach row when the team carries one.
+  // Staff tab: every current coach, through the server-side read
+  // (20261021010000), which admits admins, the team's current coaches and its
+  // guardians, and shows a coach's contact card in place of imported details.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!team?.coach_id) {
-        setCoach(null);
+      if (!team?.id) return;
+      // Clear the previous team's staff while this team's loads.
+      setStaff(null);
+      setStaffError(false);
+      const { data, error: staffReadError } = await supabase.rpc('get_team_staff', {
+        p_team_id: team.id,
+      });
+      if (cancelled) return;
+      if (staffReadError) {
+        logger.warn('[TeamRecordPage] team staff not loaded', {
+          teamId: team.id,
+          code: staffReadError.code,
+          message: staffReadError.message,
+        });
+        setStaffError(true);
+        setStaff([]);
         return;
       }
-      try {
-        const { data } = await supabase.from('coaches').select('*').eq('id', team.coach_id);
-        if (!cancelled) setCoach((data || [])[0] || null);
-      } catch {
-        /* staff card is optional */
-      }
+      setStaffError(false);
+      setStaff(data || []);
     })();
     return () => {
       cancelled = true;
     };
-  }, [team?.coach_id]);
+  }, [team?.id]);
 
   if (loading) return <LoadingScreen />;
   if (error) return <div className="p-8 text-status-error glass-panel">Error: {error}</div>;
@@ -155,7 +170,9 @@ export default function TeamRecordPage() {
     { id: 'schedule', label: 'Schedule' },
     { id: 'roster', label: `Roster (${roster.length})` },
     { id: 'staff', label: 'Staff' },
-    { id: 'balance', label: 'Balance' },
+    // Balance reads gender, years played and rating, which the roster read
+    // returns to admins and staff only.
+    ...(isAdminish ? [{ id: 'balance', label: 'Balance' }] : []),
   ];
 
   return (
@@ -469,6 +486,7 @@ export default function TeamRecordPage() {
                           {player.jersey_number != null ? `#${player.jersey_number} · ` : ''}
                           Player
                         </div>
+                        <GuardianContacts contacts={player.guardian_contacts} />
                       </div>
                     </div>
                     {canViewMedicalClearance && (
@@ -487,7 +505,11 @@ export default function TeamRecordPage() {
               })}
               {roster.length === 0 && (
                 <div className="col-span-full text-center text-text-muted py-8">
-                  No players assigned yet.
+                  {rosterUnavailable === 'refused'
+                    ? "The roster is shown to the team's coaches, its families and league admins."
+                    : rosterUnavailable === 'failed'
+                      ? 'The roster could not be loaded. Try again shortly.'
+                      : 'No players assigned yet.'}
                 </div>
               )}
             </div>
@@ -501,44 +523,59 @@ export default function TeamRecordPage() {
               <h3>Coaching staff</h3>
             </div>
             <div className="card-body">
-              {coach ? (
-                <div className="rf-grid">
-                  <InlineField
-                    label="Head coach"
-                    value={coach.full_name}
-                    editable={false}
-                    render={() => (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Avatar name={coach.full_name || '?'} size="sm" />
-                        {coach.full_name}
-                      </span>
-                    )}
-                  />
-                  <InlineField label="Email" value={coach.email} editable={false} />
-                  <InlineField label="Phone" value={coach.phone} editable={false} />
-                  <InlineField
-                    label="Status"
-                    value={coach.status}
-                    editable={false}
-                    render={(v) => (
-                      <Badge tone={v === 'active' ? 'success' : 'warning'} dot>
-                        {v}
-                      </Badge>
-                    )}
-                  />
-                </div>
-              ) : (
+              {staff === null ? (
+                <span className="muted">Loading staff…</span>
+              ) : staffError ? (
+                <span className="muted">The coaching staff could not be loaded.</span>
+              ) : staff.length === 0 ? (
                 <span className="muted">No coach assigned.</span>
+              ) : (
+                staff.map((member, index) => (
+                  <div key={`${member.coach_id}-${member.role}-${index}`}>
+                    {index > 0 && <div className="divider" />}
+                    <div className="rf-grid">
+                      <InlineField
+                        label={member.role === 'lead' ? 'Head coach' : 'Assistant coach'}
+                        value={member.full_name}
+                        editable={false}
+                        render={() => (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Avatar name={member.full_name || '?'} size="sm" />
+                            {member.full_name}
+                          </span>
+                        )}
+                      />
+                      <InlineField label="Email" value={member.email} editable={false} />
+                      <InlineField label="Phone" value={member.phone} editable={false} />
+                      {member.status != null && (
+                        <InlineField
+                          label="Status"
+                          value={member.status}
+                          editable={false}
+                          render={(v) => (
+                            <Badge tone={v === 'active' ? 'success' : 'warning'} dot>
+                              {v}
+                            </Badge>
+                          )}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))
               )}
-              <div className="divider" />
-              <div style={{ fontSize: 13 }} className="secondary">
-                {volunteers} guardian(s) on this roster volunteered to coach.
-              </div>
+              {isAdminish && (
+                <>
+                  <div className="divider" />
+                  <div style={{ fontSize: 13 }} className="secondary">
+                    {volunteers} guardian(s) on this roster volunteered to coach.
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
 
-        {tab === 'balance' && (
+        {tab === 'balance' && isAdminish && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 860 }}>
             <div
               style={{
@@ -752,4 +789,61 @@ RsvpButton.propTypes = {
   active: PropTypes.bool.isRequired,
   type: PropTypes.oneOf(['attending', 'declined', 'maybe']).isRequired,
   onClick: PropTypes.func.isRequired,
+};
+
+/**
+ * The guardian contacts the roster read returned for one player: every contact
+ * to an admin, the team's coach and the player's own guardians; a teammate's
+ * primary contact to other guardians on the team, unless the league turned
+ * that off. Nothing renders when the read returned none.
+ */
+function GuardianContacts({ contacts }) {
+  const list = Array.isArray(contacts)
+    ? contacts.filter((c) => c && (c.name || c.email || c.phone))
+    : [];
+  if (list.length === 0) return null;
+  return (
+    <ul className="text-xs text-text-secondary mt-1" aria-label="Guardian contacts">
+      {list.map((contact, index) => (
+        <li key={`${contact.email ?? ''}-${contact.name ?? ''}-${index}`}>
+          {contact.name || 'Guardian'}
+          {contact.email && (
+            <>
+              {' · '}
+              <a className="linklike" href={`mailto:${contact.email}`}>
+                {contact.email}
+              </a>
+            </>
+          )}
+          {contact.phone && (
+            <>
+              {' · '}
+              <a className="linklike" href={`tel:${contact.phone}`}>
+                {contact.phone}
+              </a>
+            </>
+          )}
+          {contact.alternate_email && (
+            <>
+              {' · '}
+              <a className="linklike" href={`mailto:${contact.alternate_email}`}>
+                {contact.alternate_email}
+              </a>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+GuardianContacts.propTypes = {
+  contacts: PropTypes.arrayOf(
+    PropTypes.shape({
+      name: PropTypes.string,
+      email: PropTypes.string,
+      phone: PropTypes.string,
+      alternate_email: PropTypes.string,
+    })
+  ),
 };

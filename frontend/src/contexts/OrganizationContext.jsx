@@ -74,9 +74,24 @@ async function linkCoachRecord() {
   }
 }
 
+/** Links the caller to the players whose imported guardian email is theirs; never rejects. */
+async function linkGuardianRecords() {
+  try {
+    const { data, error } = await supabase.rpc('link_my_guardian_records');
+    if (error) throw error;
+    if (data?.status && !['linked', 'already_linked', 'no_match'].includes(data.status)) {
+      logger.warn('Guardian records not linked', { status: data.status });
+    }
+  } catch (err) {
+    // An RPC error or a transport failure: the account stays unlinked.
+    logger.error('Could not link this account to its players', err);
+  }
+}
+
 export const OrganizationProvider = ({ children }) => {
   const { user } = useAuth();
-  // The link_my_coach_record call for the current user and refetch (see fetchOrgs).
+  // The link_my_coach_record and link_my_guardian_records calls for the current
+  // user and refetch (see fetchOrgs).
   const linkCall = useRef(/** @type {{ key: string, done: Promise<void> } | null} */ (null));
   const [organizations, setOrganizations] = useState([]);
   const [currentOrganization, setCurrentOrganization] = useState(null);
@@ -173,9 +188,10 @@ export const OrganizationProvider = ({ children }) => {
     const fetchOrgs = async () => {
       setLoading(true);
       setFetchError(null);
-      // Link a signed-in coach's account to their coach row first
-      // (20261020040000), so the coach pages that read coaches.user_id after
-      // the organization loads find it. One call per user and per refetch (a
+      // Link a signed-in coach's account to their coach row (20261020040000)
+      // and a guardian's to their players (20261021010000) first, so the pages
+      // that read coaches.user_id and profile_players after the organization
+      // loads find them. One call per user and per refetch (a
       // redeemed invite refetches, and may make a new match); a restarted
       // effect for the same key awaits the call already in flight rather than
       // starting a second or skipping it. Best effort: a failure leaves the
@@ -183,7 +199,10 @@ export const OrganizationProvider = ({ children }) => {
       // with its context, not shown.
       const linkKey = `${user.id}:${refetchTick}`;
       if (linkCall.current?.key !== linkKey) {
-        linkCall.current = { key: linkKey, done: linkCoachRecord() };
+        linkCall.current = {
+          key: linkKey,
+          done: Promise.all([linkCoachRecord(), linkGuardianRecords()]).then(() => undefined),
+        };
       }
       await linkCall.current.done;
       if (cancelled) return;

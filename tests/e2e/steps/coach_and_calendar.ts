@@ -80,6 +80,21 @@ Given('I have been assigned to the {string}', async ({ page }, teamName: string)
       }
       db.team_members = db.team_members || [];
       db.team_members.push({ team_id: teamId, profile_id: 'mock-coach-id', role: 'coach' });
+      // The assignment set_team_coaches writes beside teams.coach_id: the
+      // server-side reads (20261021010000) admit a coach by it, not by coach_id.
+      db.team_coach_assignments = (db.team_coach_assignments || []).filter(
+        (row: Record<string, unknown>) => row.team_id !== teamId
+      );
+      db.team_coach_assignments.push({
+        id: `tca-${teamId}-lead`,
+        organization_id: orgId,
+        team_id: teamId,
+        coach_id: 'mock-coach-id',
+        role: 'lead',
+        effective_from: '2026-01-01',
+        effective_to: null,
+        started_via: 'e2e',
+      });
 
       // CRITICAL FIX: Save teamId for direct navigation
       localStorage.setItem('test_target_team_id', teamId);

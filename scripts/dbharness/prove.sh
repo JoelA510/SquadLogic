@@ -97,6 +97,9 @@ R31="$REPO/docs/sql/20261020030000_revert.sql"
 # A2b: identity guards (link_my_coach_record, profile columns), and the revert.
 M32="$REPO/supabase/migrations/20261020040000_identity_guards.sql"
 R32="$REPO/docs/sql/20261020040000_revert.sql"
+# A3a: server-side reads (roster, staff, directory, guardian link, contact card), and the revert.
+M33="$REPO/supabase/migrations/20261021010000_server_side_reads.sql"
+R33="$REPO/docs/sql/20261021010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3861,6 +3864,84 @@ plant "R32 the revert does not restore the profiles grant" "$R32" \
   "GRANT UPDATE ON public.profiles TO anon;" \
   "revert 20261020040000"
 
+# Server-side reads. The smoke RAISEs on each; the revert claim on a function
+# or column left behind.
+plant "M33 a former coach still reads the roster" "$M33" \
+  "           AND (a.effective_to IS NULL OR a.effective_to >= d.today)
+           AND public.is_org_member(a.organization_id)" \
+  "           AND public.is_org_member(a.organization_id)" \
+  "smoke 20261021010000"
+
+plant "M33 a guardian gets every teammate contact" "$M33" \
+  "                   THEN public.guardian_contacts_view(p.id, p.guardian_contacts, true)" \
+  "                   THEN public.guardian_contacts_view(p.id, p.guardian_contacts, false)" \
+  "smoke 20261021010000"
+
+plant "M33 the sharing setting is ignored" "$M33" \
+  "    v_share := public.org_flag(v_org, 'guardian_contact_sharing', true);" \
+  "    v_share := true;" \
+  "smoke 20261021010000"
+
+plant "M33 an unshared card still shows details" "$M33" \
+  "                   ELSE jsonb_strip_nulls(jsonb_build_object('name', g.c ->> 'name'))
+               END AS contact" \
+  "                   ELSE jsonb_strip_nulls(jsonb_build_object('name', g.c ->> 'name', 'email', g.c ->> 'email'))
+               END AS contact" \
+  "smoke 20261021010000"
+
+plant "M33 an unrelated member reads the roster" "$M33" \
+  "    IF NOT (v_admin OR v_coach OR v_guardian) THEN
+        RAISE EXCEPTION 'not permitted to read this team''s roster' USING ERRCODE = '42501';" \
+  "    IF v_org IS NULL THEN
+        RAISE EXCEPTION 'not permitted to read this team''s roster' USING ERRCODE = '42501';" \
+  "smoke 20261021010000"
+
+plant "M33 the directory ignores its setting" "$M33" \
+  "            OR (public.org_flag(p_organization_id, 'coach_directory', true)
+                AND EXISTS" \
+  "            OR (true
+                AND EXISTS" \
+  "smoke 20261021010000"
+
+plant "M33 an unverified email links a guardian" "$M33" \
+  "     WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL;
+    IF v_email IS NULL OR v_email = '' THEN
+        RETURN jsonb_build_object('status', 'email_not_verified', 'linked', 0);" \
+  "     WHERE u.id = v_uid;
+    IF v_email IS NULL OR v_email = '' THEN
+        RETURN jsonb_build_object('status', 'email_not_verified', 'linked', 0);" \
+  "smoke 20261021010000"
+
+plant "M33 the card helper is callable by clients" "$M33" \
+  "REVOKE ALL ON FUNCTION public.guardian_contacts_view(uuid, jsonb, boolean) FROM PUBLIC, anon, authenticated;" \
+  "REVOKE ALL ON FUNCTION public.guardian_contacts_view(uuid, jsonb, boolean) FROM anon;" \
+  "smoke 20261021010000"
+
+plant "M33 a sign-in email change defeats the card" "$M33" \
+  "                 AND (lower(trim(pp.matched_email)) IN (lower(trim(g.c ->> 'email')),
+                                                       lower(trim(g.c ->> 'alternate_email')))
+                      OR (u.email_confirmed_at" \
+  "                 AND (false
+                      OR (u.email_confirmed_at" \
+  "smoke 20261021010000"
+
+plant "M33 the preview read admits a non-admin" "$M33" \
+  "    IF auth.uid() IS NULL OR NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'admin_get_coached_team_ids requires an organization admin'" \
+  "    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'admin_get_coached_team_ids requires an organization admin'" \
+  "smoke 20261021010000"
+
+plant "R33 the revert leaves get_team_roster" "$R33" \
+  "DROP FUNCTION IF EXISTS public.get_team_roster(uuid);" \
+  "" \
+  "revert 20261021010000"
+
+plant "R33 the revert leaves the contact card columns" "$R33" \
+  "    DROP COLUMN IF EXISTS contact_phone," \
+  "" \
+  "revert 20261021010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3995,6 +4076,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the finalize_import_job revert restores production's pre-change body byte for byte, SECURITY DEFINER with search_path=public, and both medical columns"]="R30 the revert restores a drifted finalize_import_job body|R30 the revert leaves emergency_contacts out"
   ["(checked) the staff-is-admin revert restores the three functions' pre-change bodies byte for byte, SECURITY DEFINER with search_path=public, and leaves no policy naming staff"]="R31 the revert restores a drifted is_org_admin body|R31 the revert leaves the audit_log policy naming staff"
   ["(checked) the identity revert drops link_my_coach_record and restores the table-level UPDATE grant on profiles to anon and authenticated"]="R32 the revert leaves link_my_coach_record|R32 the revert does not restore the profiles grant"
+  ["(checked) the server-side reads revert drops every read, helper and contact card column"]="R33 the revert leaves get_team_roster|R33 the revert leaves the contact card columns"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

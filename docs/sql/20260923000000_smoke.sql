@@ -48,10 +48,12 @@ BEGIN
       FROM pg_policy
      WHERE polrelid = 'public.team_coach_assignments'::regclass
        AND polcmd = 'r'
-       AND pg_get_expr(polqual, polrelid) ILIKE '%is_org_member%'
+       -- An org-scoped read: is_org_member until 20261021020000, then
+       -- is_org_admin or the coach's own rows.
+       AND pg_get_expr(polqual, polrelid) ~* 'is_org_(member|admin)'
        AND pg_get_expr(polqual, polrelid) ILIKE '%organization_id%';
     IF v_select <> 1 THEN
-        RAISE EXCEPTION 'expected exactly one SELECT policy scoped by is_org_member(organization_id), found %', v_select;
+        RAISE EXCEPTION 'expected exactly one org-scoped SELECT policy, found %', v_select;
     END IF;
 
     IF has_table_privilege('authenticated', 'public.team_coach_assignments', 'INSERT')

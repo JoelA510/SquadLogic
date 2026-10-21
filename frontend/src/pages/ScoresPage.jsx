@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
+import { useScorableGames } from '../hooks/useScorableGames.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
@@ -26,6 +27,9 @@ export default function ScoresPage() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // An admin enters any game's score; a coach only their own team's games
+  // (update_game_score, 20261021020000), so the grid lists only those.
+  const { ready: scorableReady, canScoreGame } = useScorableGames();
 
   const orgId = currentOrganization?.id;
 
@@ -94,18 +98,20 @@ export default function ScoresPage() {
 
   const rows = useMemo(
     () =>
-      games.map((game) => ({
-        ...game,
-        _date: game.start_time ? new Date(game.start_time).toLocaleDateString() : '—',
-        _division: divisionDisplayName(
-          game.home_team?.division?.name || game.home_team?.division || '',
-          genderModel
-        ),
-        _home: game.home_team?.name || '—',
-        _away: game.away_team?.name || '—',
-        _final: game.score_home != null && game.score_away != null,
-      })),
-    [games, genderModel]
+      games
+        .filter((game) => canScoreGame(game))
+        .map((game) => ({
+          ...game,
+          _date: game.start_time ? new Date(game.start_time).toLocaleDateString() : '—',
+          _division: divisionDisplayName(
+            game.home_team?.division?.name || game.home_team?.division || '',
+            genderModel
+          ),
+          _home: game.home_team?.name || '—',
+          _away: game.away_team?.name || '—',
+          _final: game.score_home != null && game.score_away != null,
+        })),
+    [games, genderModel, canScoreGame]
   );
 
   const columns = useMemo(
@@ -154,7 +160,7 @@ export default function ScoresPage() {
     []
   );
 
-  if (loading) return <LoadingScreen />;
+  if (loading || !scorableReady) return <LoadingScreen />;
 
   return (
     <Page

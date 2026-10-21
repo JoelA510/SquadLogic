@@ -14,7 +14,8 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
-import { handleServerSideReadRpc } from './mockServerSideReads.js';
+import { createAccessHelpers, handleServerSideReadRpc } from './mockServerSideReads.js';
+import { applyMockReadPolicy } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
@@ -162,8 +163,16 @@ const initialMockData = {
       name: 'Tigers',
       division_id: 'u8-div-id',
       organization_id: MOCK_ORG_ID,
-      calendar_token: 'mock-calendar-token-tigers',
-      calendar_token_expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
+    },
+  ],
+  // 20261021020000: each team's calendar feed token, moved off `teams`. The
+  // mock's own team writers do not add one (the database's insert trigger
+  // does); rotate_calendar_token creates a missing one.
+  team_calendar_tokens: [
+    {
+      team_id: '00000000-0000-0000-0000-000000000001',
+      token: 'mock-calendar-token-tigers',
+      expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
     },
   ],
   // 8.8: the backfill 20260923000000 performs, for the seeded teams. The mock
@@ -1685,8 +1694,19 @@ const PRACTICE_SLOT_FKS = ['slot_id', 'practice_slot_id'];
 const PRACTICE_SLOT_EMBED = /(?:(\w+)\s*:\s*)?\bpractice_slots((?:\s*!\s*\w+)*)\s*\(/g;
 
 // ── Chainable Mock Query Builder ────────────────────────────────────────────
+// The signed-in mock user, or null with no mock session (the generic reads
+// then stay unfiltered, the mock's default of acting as the seeded admin).
+const mockSessionUserId = () => {
+  if (typeof window === 'undefined') return null;
+  const stored = sessionStorage.getItem('__MOCK_SESSION__');
+  return stored ? JSON.parse(stored)?.user?.id || null : null;
+};
+
 const createMockQuery = (table, data = null) => {
-  let results = data || getMockData(table);
+  // A generic read honours the restricted tables' SELECT policies
+  // (20261021020000; mockReadPolicies.js says what is and is not mirrored).
+  let results =
+    data || applyMockReadPolicy(getDB(), table, getMockData(table), mockSessionUserId());
   let isSingle = false;
   let isMaybeSingle = false;
   let queryContent = '';
@@ -4620,6 +4640,35 @@ export const mockSupabase = {
     }
 
     if (MOCK_CAPABLE_BUILD && name === 'update_game_score') {
+      // As 20261021020000: an admin or staff member scores any game, anyone
+      // else only a game of a team they currently coach.
+      const game = (db.games || []).find((g) => String(g.id) === String(params?.p_game_id));
+      if (
+        !game ||
+        String(game.organization_id ?? MOCK_ORG_ID) !== String(params?.p_organization_id)
+      ) {
+        return {
+          data: null,
+          error: {
+            message: `Game not found in organization ${params?.p_organization_id}`,
+            code: '42501',
+          },
+        };
+      }
+      const access = createAccessHelpers(db, currentUserId);
+      if (
+        !isOrgAdmin(params?.p_organization_id) &&
+        !access.isCurrentTeamCoach(game.home_team_id) &&
+        !access.isCurrentTeamCoach(game.away_team_id)
+      ) {
+        return {
+          data: null,
+          error: {
+            message: 'Access denied: only a current coach of either team can score this game',
+            code: '42501',
+          },
+        };
+      }
       await mockSupabase
         .from('games')
         .update({ score_home: params?.p_score_home, score_away: params?.p_score_away })
@@ -4954,19 +5003,24 @@ export const mockSupabase = {
     }
 
     if (name === 'rotate_calendar_token') {
-      const newToken = mockId('mock-calendar-token-');
+      // As 20261021020000: an admin or staff member, or the team's current
+      // coach; an unknown team and a refused caller answer alike.
       const teamId = params?.p_team_id;
-      if (teamId) {
-        const teams = db.teams || [];
-        const team = teams.find((t) => String(t.id) === String(teamId));
-        if (team) {
-          team.calendar_token = newToken;
-          team.calendar_token_expires_at = new Date(Date.now() + 90 * 86400000).toISOString();
-          saveDB(db);
-        }
+      const team = (db.teams || []).find((t) => String(t.id) === String(teamId));
+      const access = createAccessHelpers(db, currentUserId);
+      if (!team || !(isOrgAdmin(team.organization_id) || access.isCurrentTeamCoach(team.id))) {
+        return { data: { status: 'error', message: 'Access denied' }, error: null };
       }
+      const newToken = mockId('mock-calendar-token-');
+      const expiresAt = new Date(Date.now() + 90 * 86400000).toISOString();
+      db.team_calendar_tokens = db.team_calendar_tokens || [];
+      const row = db.team_calendar_tokens.find((r) => String(r.team_id) === String(team.id));
+      if (row) Object.assign(row, { token: newToken, expires_at: expiresAt });
+      else
+        db.team_calendar_tokens.push({ team_id: team.id, token: newToken, expires_at: expiresAt });
+      saveDB(db);
       return {
-        data: { status: 'ok', calendar_token: newToken, message: 'Token rotated' },
+        data: { status: 'success', calendar_token: newToken, expires_at: expiresAt },
         error: null,
       };
     }

@@ -83,7 +83,8 @@ export const ROLE_PERMISSIONS = {
   [ROLES.COACH]: [
     PERMISSIONS.VIEW_ORGANIZATION,
     PERMISSIONS.MANAGE_OWN_TEAM,
-    PERMISSIONS.VIEW_ALL_TEAMS, // Coaches usually can see other teams in the league
+    // Not VIEW_ALL_TEAMS: a coach sees their own team only (Phase A3, owner
+    // decision 2026-10-20); the league's rosters are an admin's.
     PERMISSIONS.MANAGE_SCHEDULE, // their own games
     PERMISSIONS.VIEW_SCHEDULE,
     PERMISSIONS.RSVP_EVENT,

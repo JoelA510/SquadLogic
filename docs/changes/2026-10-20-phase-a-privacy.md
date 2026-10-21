@@ -1,6 +1,6 @@
 # Phase A: privacy and access
 
-Status: **approved 2026-10-20**; A1 built (migration `20261020020000`); A2 built (`20261020030000`, `20261020040000`); A3 in progress (AGENTS.md rule 14: persistence and authorization). It
+Status: **approved 2026-10-20**; A1 built (migration `20261020020000`); A2 built (`20261020030000`, `20261020040000`); A3 built (`20261021010000`, `20261021020000`) (AGENTS.md rule 14: persistence and authorization). It
 applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to research items 1
 and 2. It ships as three PRs, in this order; each is reviewed once before it opens.
 

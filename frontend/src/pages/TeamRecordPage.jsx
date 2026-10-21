@@ -24,6 +24,7 @@ import Badge from '../components/ui/Badge.jsx';
 import Avatar from '../components/ui/Avatar.jsx';
 import InlineField from '../components/ui/InlineField.jsx';
 import { usePermission } from '../hooks/usePermission.js';
+import { useScorableGames } from '../hooks/useScorableGames.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
@@ -93,6 +94,9 @@ export default function TeamRecordPage() {
     sendMessage,
   } = useTeamPortal(teamId);
   const { can, PERMISSIONS } = usePermission();
+  // Who may regenerate the calendar link: an admin or the team's current
+  // coach (rotate_calendar_token, 20261021020000).
+  const { coachesTeam } = useScorableGames();
   const { isEnabled, genderModel } = useFeatures();
 
   const [tab, setTab] = useState('schedule');
@@ -636,7 +640,11 @@ export default function TeamRecordPage() {
       </div>
 
       {calendarModalOpen && (
-        <CalendarModal team={team} onClose={() => setCalendarModalOpen(false)} />
+        <CalendarModal
+          team={team}
+          canRotate={coachesTeam(team?.id)}
+          onClose={() => setCalendarModalOpen(false)}
+        />
       )}
     </div>
   );
@@ -644,16 +652,47 @@ export default function TeamRecordPage() {
 
 /**
  * Phase 2.3 (H-2): Calendar modal with token rotation support.
- * Coaches/admins can regenerate the calendar link if it's been compromised or expired.
+ *
+ * The token is read from `team_calendar_tokens` (20261021020000), which admins,
+ * the team's current coaches and its guardians can read; anyone else gets no
+ * row and is told so. `canRotate` (an admin or the team's current coach)
+ * offers Regenerate; the server refuses everyone else regardless.
  */
-export function CalendarModal({ team, onClose }) {
-  const [calendarToken, setCalendarToken] = useState(team?.calendar_token ?? '');
+export function CalendarModal({ team, canRotate = false, onClose }) {
+  const [calendarToken, setCalendarToken] = useState('');
+  const [tokenState, setTokenState] = useState(
+    /** @type {'loading' | 'ready' | 'none' | 'failed'} */ ('loading')
+  );
   const [isRotating, setIsRotating] = useState(false);
   const [rotateMessage, setRotateMessage] = useState('');
 
   useEffect(() => {
-    setCalendarToken(team?.calendar_token ?? '');
-  }, [team?.calendar_token]);
+    let cancelled = false;
+    (async () => {
+      if (!team?.id) return;
+      setTokenState('loading');
+      const { data, error } = await supabase
+        .from('team_calendar_tokens')
+        .select('token')
+        .eq('team_id', team.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        logger.warn('[CalendarModal] calendar token not read', {
+          teamId: team.id,
+          code: error.code,
+          message: error.message,
+        });
+        setTokenState('failed');
+        return;
+      }
+      setCalendarToken(data?.token ?? '');
+      setTokenState(data?.token ? 'ready' : 'none');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [team?.id]);
 
   const calendarUrl = calendarToken
     ? `webcal://${window.location.host}/functions/v1/calendar-feed?token=${calendarToken}`
@@ -670,6 +709,7 @@ export function CalendarModal({ team, onClose }) {
       if (error) throw error;
       if ((data?.status === 'success' || data?.status === 'ok') && data?.calendar_token) {
         setCalendarToken(data.calendar_token);
+        setTokenState('ready');
         setRotateMessage('New link generated. Update your calendar subscription.');
       } else {
         setRotateMessage(data?.message || 'Failed to regenerate link.');
@@ -698,9 +738,16 @@ export function CalendarModal({ team, onClose }) {
           placeholder="Regenerate a link before subscribing."
           className="w-full bg-bg-surface border border-border-subtle rounded-lg p-3 text-text-primary mb-4 text-sm"
         />
-        {!calendarToken && (
+        {tokenState === 'none' && (
           <p className="text-sm text-status-warning-text mb-3">
-            No calendar link is currently available. Regenerate the link before sharing it.
+            {canRotate
+              ? 'No calendar link is currently available. Regenerate the link before sharing it.'
+              : "The calendar link is shared with the team's coaches, its families and league admins."}
+          </p>
+        )}
+        {tokenState === 'failed' && (
+          <p className="text-sm text-status-warning-text mb-3" role="alert">
+            The calendar link could not be loaded. Try again shortly.
           </p>
         )}
         {rotateMessage && (
@@ -709,16 +756,24 @@ export function CalendarModal({ team, onClose }) {
           </p>
         )}
         <div className="flex justify-between items-center">
-          <button
-            type="button"
-            onClick={handleRotateToken}
-            disabled={isRotating}
-            className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-            title="Generate a new calendar link (invalidates the old one)"
-          >
-            <RefreshCw size={14} className={isRotating ? 'animate-spin' : ''} aria-hidden="true" />
-            Regenerate Link
-          </button>
+          {canRotate ? (
+            <button
+              type="button"
+              onClick={handleRotateToken}
+              disabled={isRotating}
+              className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+              title="Generate a new calendar link (invalidates the old one)"
+            >
+              <RefreshCw
+                size={14}
+                className={isRotating ? 'animate-spin' : ''}
+                aria-hidden="true"
+              />
+              Regenerate Link
+            </button>
+          ) : (
+            <span />
+          )}
           <div className="flex gap-3">
             <Button variant="secondary" onClick={onClose}>
               Close
@@ -742,8 +797,8 @@ export function CalendarModal({ team, onClose }) {
 CalendarModal.propTypes = {
   team: PropTypes.shape({
     id: PropTypes.string,
-    calendar_token: PropTypes.string,
   }),
+  canRotate: PropTypes.bool,
   onClose: PropTypes.func.isRequired,
 };
 

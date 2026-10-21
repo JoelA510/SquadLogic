@@ -58,7 +58,7 @@ DECLARE
                                    'import_jobs','imports','team_messages','organization_schemas',
                                    'schedule_evaluations'];
     c_prod_missing text[][] := ARRAY[
-        ['coaches', 'Coaches: members access'],
+        ['coaches', 'coaches_select_admin_or_self'],  -- since 20261021020000
         ['teams', 'Teams: members access'],
         ['game_assignments', 'Game Assignments: members access'],
         ['imports', 'Imports: members access'],

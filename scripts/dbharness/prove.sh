@@ -100,6 +100,9 @@ R32="$REPO/docs/sql/20261020040000_revert.sql"
 # A3a: server-side reads (roster, staff, directory, guardian link, contact card), and the revert.
 M33="$REPO/supabase/migrations/20261021010000_server_side_reads.sql"
 R33="$REPO/docs/sql/20261021010000_revert.sql"
+# A3b: restricted reads (policies, calendar token table, score rule), and the revert.
+M34="$REPO/supabase/migrations/20261021020000_restrict_people_reads.sql"
+R34="$REPO/docs/sql/20261021020000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -2856,12 +2859,12 @@ plant "R13 the preference warning stops counting coaches distinctly" "$R13" \
 # point: a reconcile that skipped either step would pass everywhere but
 # production. The function's live body is 20261018030000's copy ($M24), which
 # replaces 20260928000000's; the plants are aimed there.
-plant "M14 the reconcile skips dropping the broad policy" "$M24" \
+plant "M14 the reconcile skips dropping the broad policy" "$M34" \
   "        EXECUTE format('DROP POLICY %I ON %I.%I', v_pol.policyname, v_pol.schemaname, v_pol.tablename);" \
   "        NULL; -- plant: the broad policy is left standing" \
   "FAIL smoke 20260928000000"
 
-plant "M14 the reconcile skips creating the missing read policies" "$M24" \
+plant "M14 the reconcile skips creating the missing read policies" "$M34" \
   "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
   "            IF v_spec.tbl = 'scheduler_runs' THEN EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl; END IF; -- plant: only the repo chain's own creates survive, so the no-op check passes and the drift replay's restore check is what must fail" \
   "FAIL smoke 20260928000000"
@@ -2869,7 +2872,7 @@ plant "M14 the reconcile skips creating the missing read policies" "$M24" \
 # The end-state check was a hand-picked table list once; this puts it back.
 # The smoke's probe table -- member-writable, on no list -- must then pass
 # the reconcile, and the smoke says so.
-plant "M14 the end-state check goes back to a hand-picked table list" "$M24" \
+plant "M14 the end-state check goes back to a hand-picked table list" "$M34" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT'" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT' AND p.tablename = ANY (ARRAY['coaches', 'teams'])" \
   "FAIL smoke 20260928000000"
@@ -2879,7 +2882,7 @@ plant "M14 the end-state check goes back to a hand-picked table list" "$M24" \
 # build's scheduler_runs admin policies come from that migration's own split,
 # not from this spec, so the smoke's no-op check is what sees it: the spec no
 # longer matches the policy of the same name, and the reconcile refuses.
-plant "M14 the scheduler_runs admin write also admits members" "$M24" \
+plant "M14 the scheduler_runs admin write also admits members" "$M34" \
   "scheduler_runs_insert_admin', 'INSERT', 'authenticated',
              NULL, 'public.is_org_admin(organization_id)'" \
   "scheduler_runs_insert_admin', 'INSERT', 'authenticated',
@@ -2891,7 +2894,7 @@ plant "M14 the scheduler_runs admin write also admits members" "$M24" \
 # Since 20261018030000 the head build's admin policies come from that
 # migration's own split, so a spec without them is seen by the smoke's no-op
 # check (it verifies 18 policies, not 20), not by the writer.
-plant "M14 scheduler_runs gets no admin write policy" "$M24" \
+plant "M14 scheduler_runs gets no admin write policy" "$M34" \
   "('scheduler_runs', 'scheduler_runs_insert_admin', 'INSERT', 'authenticated',
              NULL, 'public.is_org_admin(organization_id)'),
             ('scheduler_runs', 'scheduler_runs_update_admin', 'UPDATE', 'authenticated',
@@ -3942,6 +3945,92 @@ plant "R33 the revert leaves the contact card columns" "$R33" \
   "" \
   "revert 20261021010000"
 
+# Restricted reads. The smoke RAISEs on each; the revert claim on a policy,
+# column or body left different.
+plant "M34 a guardian reads a teammate" "$M34" \
+  "        public.is_org_admin(organization_id)
+        OR (public.is_org_member(organization_id)
+            AND id IN (SELECT pp.player_id FROM public.profile_players pp
+                   WHERE pp.profile_id = (SELECT auth.uid())))" \
+  "        public.is_org_member(organization_id)" \
+  "smoke 20261021020000"
+
+plant "M34 a removed guardian still reads their child" "$M34" \
+  "        OR (public.is_org_member(organization_id)
+            AND player_id IN" \
+  "        OR (true
+            AND player_id IN" \
+  "smoke 20261021020000"
+
+plant "M34 a coach reads every coach row" "$M34" \
+  "        public.is_org_admin(organization_id)
+        OR user_id = (SELECT auth.uid())
+    );" \
+  "        public.is_org_member(organization_id)
+    );" \
+  "smoke 20261021020000"
+
+plant "M34 staging rows stay member-readable" "$M34" \
+  "CREATE POLICY staging_players_select_admin ON public.staging_players
+    FOR SELECT TO authenticated
+    USING (public.is_org_admin(organization_id));" \
+  "CREATE POLICY staging_players_select_admin ON public.staging_players
+    FOR SELECT TO authenticated
+    USING (public.is_org_member(organization_id));" \
+  "smoke 20261021020000"
+
+plant "M34 any member reads a calendar token" "$M34" \
+  "        OR public.is_current_team_coach(team_id)
+        OR public.is_team_guardian(team_id)
+    );" \
+  "        OR public.is_org_member((SELECT t.organization_id FROM public.teams t WHERE t.id = team_id))
+    );" \
+  "smoke 20261021020000"
+
+plant "M34 a new team gets no calendar token" "$M34" \
+  "CREATE TRIGGER teams_create_calendar_token" \
+  "CREATE TRIGGER teams_create_calendar_token_unused BEFORE TRUNCATE ON public.teams FOR EACH STATEMENT EXECUTE FUNCTION suppress_redundant_updates_trigger();
+CREATE TRIGGER teams_create_calendar_token_x" \
+  "smoke 20261021020000"
+
+plant "M34 any member rotates a token" "$M34" \
+  "       OR NOT (public.is_org_admin(v_org_id) OR public.is_current_team_coach(p_team_id)) THEN" \
+  "       OR NOT public.is_org_member(v_org_id) THEN" \
+  "smoke 20261021020000"
+
+plant "M34 any coach scores any game" "$M34" \
+  "       AND NOT public.is_current_team_coach(v_game.home_team_id)
+       AND NOT public.is_current_team_coach(v_game.away_team_id) THEN" \
+  "       AND v_member_role <> 'coach' THEN" \
+  "smoke 20261021020000"
+
+plant "M34 the reconcile spec keeps the member-wide coaches read" "$M34" \
+  "            ('coaches', 'coaches_select_admin_or_self', 'SELECT', 'authenticated',
+             'public.is_org_admin(organization_id) OR user_id = (SELECT auth.uid())', NULL)," \
+  "            ('coaches', 'Coaches: members access', 'SELECT', 'authenticated',
+             'is_org_member(organization_id)', NULL)," \
+  "smoke 20261021020000"
+
+plant "R34 the revert leaves players restricted" "$R34" \
+  "CREATE POLICY players_select_member ON public.players
+    FOR SELECT TO authenticated USING (public.is_org_member(organization_id));" \
+  "" \
+  "revert 20261021020000"
+
+plant "R34 the revert leaves the token table" "$R34" \
+  "DROP TABLE IF EXISTS public.team_calendar_tokens;" \
+  "" \
+  "revert 20261021020000"
+
+plant "R34 the revert restores a drifted rotate body" "$R34" \
+  "  v_new_token := gen_random_uuid();
+
+  update teams" \
+  "  v_new_token := gen_random_uuid(); -- drifted
+
+  update teams" \
+  "revert 20261021020000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4077,6 +4166,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the staff-is-admin revert restores the three functions' pre-change bodies byte for byte, SECURITY DEFINER with search_path=public, and leaves no policy naming staff"]="R31 the revert restores a drifted is_org_admin body|R31 the revert leaves the audit_log policy naming staff"
   ["(checked) the identity revert drops link_my_coach_record and restores the table-level UPDATE grant on profiles to anon and authenticated"]="R32 the revert leaves link_my_coach_record|R32 the revert does not restore the profiles grant"
   ["(checked) the server-side reads revert drops every read, helper and contact card column"]="R33 the revert leaves get_team_roster|R33 the revert leaves the contact card columns"
+  ["(checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"]="R34 the revert leaves players restricted|R34 the revert leaves the token table|R34 the revert restores a drifted rotate body"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

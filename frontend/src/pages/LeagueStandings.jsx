@@ -5,6 +5,7 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS, hasPermission } from '../constants/permissions.js';
 import { Trophy, CheckCircle2 } from 'lucide-react';
 import { logger } from '../lib/logger.js';
+import { useScorableGames } from '../hooks/useScorableGames.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 
@@ -28,6 +29,9 @@ export default function LeagueStandings() {
   const [updatingGameId, setUpdatingGameId] = useState(null);
 
   const canEditScores = hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE);
+  // Per game: an admin scores any game, a coach only their own team's
+  // (update_game_score refuses the rest, 20261021020000).
+  const { canScoreGame } = useScorableGames();
   const { genderModel } = useFeatures();
 
   useEffect(() => {
@@ -255,7 +259,7 @@ export default function LeagueStandings() {
                   {game.home_team?.name}
                 </span>
                 <div className="flex items-center gap-2 w-1/3 justify-center">
-                  {canEditScores ? (
+                  {canEditScores && canScoreGame(game) ? (
                     <>
                       <input
                         type="number"

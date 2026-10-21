@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2438,6 +2438,37 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the server-side reads revert left a function or a contact card column"
         dump 10 $SCRATCH/harness_reads; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261021020000" ]; then
+      # The member-wide reads back by name, the token columns back on teams and
+      # the table gone, and the three function bodies byte for byte: the md5s
+      # are production's, read 2026-10-21 (the revert restores production's
+      # own rotate_calendar_token text, which differs from its migration file).
+      if psql_cmd "SELECT 'RESTRICT-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND (tablename, policyname) IN (
+                       ('players', 'players_select_member'), ('team_players', 'team_players_select_member'),
+                       ('coaches', 'Coaches: members access'),
+                       ('team_coach_assignments', 'Team coach assignments: members read'),
+                       ('profile_players', 'Profile Players: users view own'),
+                       ('staging_players', 'staging_players_select_member'),
+                       ('staging_import_rows', 'Staging Import Rows: members can view'))) <> 7 THEN 'policies-missing'
+               WHEN to_regclass('public.team_calendar_tokens') IS NOT NULL THEN 'table-left'
+               WHEN (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public'
+                       AND table_name = 'teams' AND column_name IN ('calendar_token', 'calendar_token_expires_at')
+                       AND is_nullable = 'NO') <> 2 THEN 'columns-missing'
+               WHEN md5(pg_get_functiondef('public.update_game_score(uuid,uuid,smallint,smallint,jsonb)'::regprocedure))
+                    <> '7d683ee6443ed1ca2faf9b29ac8b5d34' THEN 'score-body:' || md5(pg_get_functiondef('public.update_game_score(uuid,uuid,smallint,smallint,jsonb)'::regprocedure))
+               WHEN md5(pg_get_functiondef('public.rotate_calendar_token(uuid)'::regprocedure))
+                    <> 'd47c818320136fa14dee844ada7ab955' THEN 'rotate-body:' || md5(pg_get_functiondef('public.rotate_calendar_token(uuid)'::regprocedure))
+               WHEN md5(pg_get_functiondef('public.reconcile_prod_rls_drift()'::regprocedure))
+                    <> '01cb96b8daef392da71b62d0c561b711' THEN 'reconcile-body:' || md5(pg_get_functiondef('public.reconcile_prod_rls_drift()'::regprocedure))
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_restrict 2>&1 && grep -q 'RESTRICT-VERDICT:restored' $SCRATCH/harness_restrict; then
+        echo "  | (checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"
+      else
+        echo "FAIL revert ${id}: the restriction revert left a policy, the token table or a function body different from before"
+        dump 10 $SCRATCH/harness_restrict; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

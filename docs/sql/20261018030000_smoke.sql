@@ -203,6 +203,10 @@ BEGIN
         (v_org, v_member, 'coach'), (v_org, v_admin, 'admin'), (v_org, v_tenant, 'tenant_admin');
     INSERT INTO public.players (organization_id, first_name, last_name)
         VALUES (v_org, 'Rewrite', 'Smoke') RETURNING id INTO v_player;
+    -- Since 20261021020000 a member reads a player only as its guardian, so
+    -- the member is linked to it; what this checks is that they cannot write.
+    INSERT INTO public.profile_players (profile_id, player_id, organization_id)
+        VALUES (v_member, v_player, v_org);
     INSERT INTO public.season_settings (organization_id, name)
         VALUES (v_org, 'Rewrite Season') RETURNING id INTO v_season;
 

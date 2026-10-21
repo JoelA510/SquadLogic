@@ -81,22 +81,32 @@ const handler = withFailureLogging('calendar-feed', async (req, logCtx) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // 1. Validate Token and Fetch Team (Phase 2.3: includes expiry check)
-    const { data: team, error: teamErr } = await supabase
-      .from('teams')
+    // 1. Validate the token and fetch its team. The token lives in
+    // team_calendar_tokens (20261021020000), which only admins, the team's
+    // coaches and its guardians can read; the service role reads it here.
+    const { data: tokenRow, error: teamErr } = await supabase
+      .from('team_calendar_tokens')
       .select(
-        'id, name, organization_id, division_id, calendar_token_expires_at, organizations(name), division:divisions(season_settings_id)'
+        'expires_at, team:teams(id, name, organization_id, division_id, organizations(name), division:divisions(season_settings_id))'
       )
-      .eq('calendar_token', token)
+      .eq('token', token)
       .single()
-      // Untyped client: the SDK cannot see that teams.organization_id is a
-      // to-one FK, so it types the embed as an array. PostgREST returns one
-      // object (or null). Type-only; `overrideTypes` returns `this`.
+      // Untyped client: the SDK cannot see that these embeds are to-one FKs,
+      // so it types them as arrays. PostgREST returns one object (or null).
+      // Type-only; `overrideTypes` returns `this`.
       .overrideTypes<{
-        organizations: { name: string | null } | null;
-        division: { season_settings_id: string | null } | null;
+        expires_at: string | null;
+        team: {
+          id: string;
+          name: string;
+          organization_id: string;
+          division_id: string | null;
+          organizations: { name: string | null } | null;
+          division: { season_settings_id: string | null } | null;
+        } | null;
       }>();
 
+    const team = tokenRow?.team ?? null;
     if (teamErr || !team) {
       return new Response('Invalid calendar token or team not found.', { status: 404 });
     }
@@ -104,8 +114,8 @@ const handler = withFailureLogging('calendar-feed', async (req, logCtx) => {
     logCtx.organizationId = team.organization_id;
 
     // Phase 2.3 (H-2): Check token expiry
-    if (team.calendar_token_expires_at) {
-      const expiresAt = new Date(team.calendar_token_expires_at);
+    if (tokenRow?.expires_at) {
+      const expiresAt = new Date(tokenRow.expires_at);
       if (expiresAt < new Date()) {
         return new Response(
           'Calendar token has expired. Please ask your coach or admin to regenerate the calendar link.',

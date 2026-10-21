@@ -126,8 +126,15 @@ raises 42501, the same for a team that does not exist. A user's contact card
 `set_my_contact_card()`) replaces imported details wherever these functions return them; an
 unshared card returns none.
 
-Until A3b, the tables themselves stay readable to every member (`is_org_member`); A3b restricts
-them so these functions are the only non-admin path.
+Since `20261021020000` (A3b) those functions are the only non-admin path. A member who is not an
+admin or staff reads `players` and `team_players` only for their own children (and only while a
+member of the child's organization), `coaches` and `team_coach_assignments` only for their own
+coach record, `profile_players` only their own links, and `staging_players` and
+`staging_import_rows` not at all. A team's calendar feed token lives in `team_calendar_tokens`,
+readable by admins and staff, the team's current coaches and its guardians;
+`rotate_calendar_token` admits admins, staff and a current coach. `update_game_score` admits admins
+and staff for any game and anyone else only for a game of a team they currently coach. Pinned by
+`supabase/tests/rls_policy_matrix.sql` and `supabase/tests/restricted_reads.sql`.
 
 ## Organization Scoping
 

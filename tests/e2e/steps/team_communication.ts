@@ -58,8 +58,15 @@ Given(
           organization_id: orgId,
           // The portal places a team's practices on its division's season clock.
           division_id: 'u8-div-id',
-          calendar_token: `mock-calendar-token-${teamId}`,
-          calendar_token_expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
+        });
+        // The team's calendar feed token lives in its own table (20261021020000).
+        db.team_calendar_tokens = (db.team_calendar_tokens || []).filter(
+          (row: Record<string, unknown>) => row.team_id !== teamId
+        );
+        db.team_calendar_tokens.push({
+          team_id: teamId,
+          token: `mock-calendar-token-${teamId}`,
+          expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
         });
 
         db.team_messages =

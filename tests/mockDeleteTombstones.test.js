@@ -365,7 +365,7 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/rbac_and_fields.ts': 3,
   'tests/e2e/steps/registration_compliance.ts': 2,
   'tests/e2e/steps/reporting.ts': 1,
-  'tests/e2e/steps/scheduling_and_overrides.ts': 5,
+  'tests/e2e/steps/scheduling_and_overrides.ts': 4,
   'tests/e2e/steps/team_and_roster.ts': 7,
   'tests/e2e/steps/team_communication.ts': 3,
   'tests/e2e/steps/visual_rbac_enforcement.ts': 1,

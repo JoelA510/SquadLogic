@@ -4117,9 +4117,9 @@ plant "M35 team.deleted records no counts" "$M35" \
 
 plant "M35 the delete lets a coach through" "$M35" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
-        RAISE EXCEPTION 'Access denied: admin required for organization %', v_team.organization_id" \
+        -- Production's own text" \
   "    IF false THEN
-        RAISE EXCEPTION 'Access denied: admin required for organization %', v_team.organization_id" \
+        -- Production's own text" \
   "smoke 20261021030000"
 
 plant "M35 the RSVP writer takes no game lock" "$M35" \

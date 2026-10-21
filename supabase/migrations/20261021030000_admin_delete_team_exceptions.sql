@@ -19,7 +19,7 @@
 -- **What it does now** (one transaction, the sibling
 -- `admin_cancel_practice_assignment`'s contract for each series):
 --   1. Locks the team FOR UPDATE, then refuses unknown (P0002) and non-admin
---      (42501) callers as before. A practice save that inserts an exception or
+--      (42501, production's plain 'Access denied') callers as before. A practice save that inserts an exception or
 --      a series for the team checks the team foreign key (FOR KEY SHARE), so it
 --      waits on this lock and then fails cleanly on the missing team.
 --   2. Withdraws the live exceptions on the team's series (and any naming the
@@ -38,8 +38,10 @@
 --      walks the foreign keys from `teams` and fails if a cascading table has
 --      no counter.
 --
--- `upsert_team_event_rsvp` is the 20261005000000 body with two changes: the
--- game lock above, and `now()` for `timezone('utc', now())` in its two writes
+-- `upsert_team_event_rsvp` is the 20261005000000 body with three changes: it
+-- reads the team FOR KEY SHARE (so it locks team then game, the delete's
+-- order, and the two cannot deadlock), the game lock above, and `now()` for
+-- `timezone('utc', now())` in its two writes
 -- (plan docs/changes/2026-10-20-utc-now-idiom.md: a body rewritten for its own
 -- reasons drops the idiom).
 --
@@ -71,8 +73,9 @@ BEGIN
         RAISE EXCEPTION 'team % not found', p_team_id USING ERRCODE = 'P0002';
     END IF;
     IF NOT public.is_org_admin(v_team.organization_id) THEN
-        RAISE EXCEPTION 'Access denied: admin required for organization %', v_team.organization_id
-            USING ERRCODE = '42501';
+        -- Production's own text, which names no organisation to a caller
+        -- outside it.
+        RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501';
     END IF;
 
     -- 2. The practice series, as admin_cancel_practice_assignment does each.
@@ -246,10 +249,15 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
+    -- 20261021030000: the team before the game. The insert below checks
+    -- event_rsvps.team_id, which takes FOR KEY SHARE on the team; taken here
+    -- first, an RSVP locks in the order admin_delete_team does (team, then its
+    -- games), so the two cannot deadlock over the team's own games.
     SELECT organization_id
       INTO v_org_id
       FROM public.teams
-     WHERE id = p_team_id;
+     WHERE id = p_team_id
+       FOR KEY SHARE;
 
     IF v_org_id IS NULL OR NOT public.is_org_member(v_org_id) THEN
         RAISE EXCEPTION 'Team is outside the caller organization'

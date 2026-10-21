@@ -126,6 +126,10 @@ const REGISTRY = {
     class: 'writer',
     why: 'X10: closes an assignment on an admin cancel',
   },
+  'sql:admin_delete_team': {
+    class: 'writer',
+    why: 'X10: closes every assignment of a deleted team, as the admin cancel does (20261021030000)',
+  },
 };
 
 /**

@@ -177,9 +177,10 @@ DECLARE
     v_g uuid := (SELECT id FROM dt_ids WHERE name = 'g');
     v_g2 uuid := (SELECT id FROM dt_ids WHERE name = 'g2');
     v_p3 uuid := (SELECT id FROM dt_ids WHERE name = 'p3');
+    v_p1 uuid := (SELECT id FROM dt_ids WHERE name = 'p1');
     v_conn text := 'dt_racer';
     v_state text; v_msg text;
-    v_exc_wait text; v_exc_control text; v_rsvp_wait text; v_rsvp_control text;
+    v_exc_wait text; v_exc_control text; v_rsvp_wait text; v_rsvp_control text; v_own_wait text;
 BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM public.admin_delete_team(v_t);
@@ -229,6 +230,19 @@ BEGIN
         v_rsvp_wait := v_state || ' ' || v_msg;
     END;
     PERFORM dblink_exec(v_conn, 'ROLLBACK');
+    -- The deleted team's own player's RSVP to its game: it reads the team
+    -- FOR KEY SHARE first, so it waits on the team, in the delete's lock order.
+    BEGIN
+        PERFORM dblink_exec(v_conn, 'BEGIN');
+        PERFORM * FROM dblink(v_conn, format(
+            'SELECT public.upsert_team_event_rsvp(%L, %L, %L, ''game'', %L, ''attending'')::text',
+            v_t, v_p1, v_g, '2026-11-07')) AS t(result text);
+        v_own_wait := 'committed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+        v_own_wait := v_state || ' ' || v_msg;
+    END;
+    PERFORM dblink_exec(v_conn, 'ROLLBACK');
     -- The control: an RSVP to a game the delete does not touch.
     BEGIN
         PERFORM dblink_exec(v_conn, 'BEGIN');
@@ -251,6 +265,10 @@ BEGIN
         RAISE EXCEPTION 'RSVP race: the RSVP to the deleted game gave "%", the control gave "%"', v_rsvp_wait, v_rsvp_control;
     END IF;
     RAISE NOTICE 'RSVP race: while the delete was open, an opposing RSVP to the team''s game timed out 55P03 on the game lock; an RSVP to an untouched game was written at once';
+    IF v_own_wait NOT LIKE '55P03%' THEN
+        RAISE EXCEPTION 'own-team RSVP race: the deleted team''s own RSVP gave "%"', v_own_wait;
+    END IF;
+    RAISE NOTICE 'own-team RSVP race: the deleted team''s own RSVP to its game waited on the team and timed out 55P03';
 END;
 $$;
 ROLLBACK;

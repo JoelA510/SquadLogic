@@ -285,8 +285,8 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
     // and dropped `team_players` beside it. A table-blind classifier passes
     // that; this one must not.
     const planted = SOURCE.replace(
-      "      cascadeDoomed('team_players', (tp) => String(tp.team_id) === String(p_team_id));",
-      '      db.team_players = (db.team_players || []).filter(\n        (tp) => String(tp.team_id) !== String(p_team_id)\n      );'
+      "        team_players_deleted: cascadeDoomed('team_players', (tp) => sameTeam(tp.team_id)).length,",
+      '        team_players_deleted: 0,\n      };\n      db.team_players = (db.team_players || []).filter(\n        (tp) => !sameTeam(tp.team_id)\n      );\n      void {'
     );
     expect(planted, 'the plant did not apply; this control proves nothing').not.toEqual(SOURCE);
     const uncovered = removalSites(planted).filter((site) => !isCovered(planted, site));
@@ -725,5 +725,137 @@ describe('mock getDB :: re-merging the seed never grows a table', () => {
 
     const grown = tables.filter((table) => getMockData(table).length !== sizes[table]);
     expect(grown).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// admin_delete_team: every table the database's cascade empties
+// ---------------------------------------------------------------------------
+//
+// The subject set is read from the migrations, not typed here: every column
+// declared `REFERENCES teams(id) ON DELETE CASCADE`, in a CREATE TABLE or an
+// ALTER TABLE, less tables a later migration drops. It is the same set
+// supabase/tests/admin_delete_team_exceptions.sql walks in the catalogue, so a
+// new cascading table fails both.
+const MIGRATIONS_DIR = path.join(REPO, 'supabase/migrations');
+const teamCascades = () => {
+  const found = new Map();
+  for (const file of readdirSync(MIGRATIONS_DIR).sort()) {
+    const sql = readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').replace(/--[^\n]*/g, '');
+    for (const [, table, body] of sql.matchAll(
+      /CREATE TABLE(?: IF NOT EXISTS)? (?:public\.)?(\w+)\s*\(([\s\S]*?)\n\);/gi
+    )) {
+      for (const line of body.split('\n')) {
+        const column = line.match(
+          /^\s*"?(\w+)"?\s+uuid[^,]*REFERENCES (?:public\.)?teams\s*\(id\)\s*ON DELETE CASCADE/i
+        )?.[1];
+        if (column) found.set(`${table}.${column}`, { table, column });
+      }
+    }
+    for (const [, table, column] of sql.matchAll(
+      /ALTER TABLE(?: ONLY)?(?: IF EXISTS)? (?:public\.)?(\w+)[\s\S]*?FOREIGN KEY \((\w+)\)\s*REFERENCES (?:public\.)?teams\s*\(id\)\s*ON DELETE CASCADE/gi
+    )) {
+      found.set(`${table}.${column}`, { table, column });
+    }
+    for (const [, dropped] of sql.matchAll(/DROP TABLE(?: IF EXISTS)? (?:public\.)?(\w+)/gi)) {
+      for (const key of [...found.keys()]) if (key.startsWith(`${dropped}.`)) found.delete(key);
+    }
+  }
+  return [...found.values()];
+};
+
+describe('mock admin_delete_team :: removes every dependant the cascade removes', () => {
+  it('finds the cascading tables in the migrations, and would fail if it found none', () => {
+    const tables = new Set(teamCascades().map(({ table }) => table));
+    expect(tables.size, 'the migration scan matched nothing').toBeGreaterThanOrEqual(9);
+    expect(tables).toContain('team_players');
+    expect(tables).toContain('practice_exceptions');
+  });
+
+  it('leaves no row pointing at the deleted team, records each table, and keeps them gone', async () => {
+    const cascades = teamCascades();
+    const OTHER = 't2';
+    const GAME = 'cascade-game';
+    const SERIES = 'cascade-series';
+    await supabase.from('teams').update({ name: 'Tigers' }).eq('id', SEEDED_TEAM);
+    const store = /** @type {any} */ (window.__MOCK_DB__);
+    const rowFor = ({ table, column }) => {
+      const base = {
+        id: `cascade-${table}-${column}`,
+        organization_id: ORG,
+        [column]: SEEDED_TEAM,
+      };
+      if (table === 'games' || table === 'game_assignments') {
+        const otherSide = column === 'home_team_id' ? 'away_team_id' : 'home_team_id';
+        return {
+          ...base,
+          id: table === 'games' && column === 'home_team_id' ? GAME : base.id,
+          [otherSide]: OTHER,
+        };
+      }
+      if (table === 'practice_assignments')
+        return { ...base, id: SERIES, practice_slot_id: 'ps-1' };
+      if (table === 'practice_exceptions')
+        return {
+          ...base,
+          assignment_id: SERIES,
+          kind: 'time_tbd',
+          tbd_reason: 'contended',
+          withdrawn_at: null,
+        };
+      if (table === 'team_players')
+        return { team_id: SEEDED_TEAM, player_id: 'cascade-player', organization_id: ORG };
+      if (table === 'team_calendar_tokens') return { team_id: SEEDED_TEAM, token: 'cascade-token' };
+      return base;
+    };
+    for (const cascade of cascades) {
+      store[cascade.table] = store[cascade.table] || [];
+      const present = store[cascade.table].some((row) => row[cascade.column] === SEEDED_TEAM);
+      if (!present) store[cascade.table].push(rowFor(cascade));
+    }
+    // The opponent's RSVP to the team's game goes; its practice RSVP that
+    // happens to share the game's id stays.
+    store.event_rsvps.push(
+      {
+        id: 'cascade-opp-game',
+        organization_id: ORG,
+        team_id: OTHER,
+        reference_id: GAME,
+        event_type: 'game',
+      },
+      {
+        id: 'cascade-opp-practice',
+        organization_id: ORG,
+        team_id: OTHER,
+        reference_id: GAME,
+        event_type: 'practice',
+      }
+    );
+    window.__saveMockDB__(store);
+    for (const { table, column } of cascades) {
+      expect(
+        getMockData(table).some((row) => row[column] === SEEDED_TEAM),
+        `${table}.${column} has no row on the team, so this proves nothing`
+      ).toBe(true);
+    }
+
+    const { error } = await supabase.rpc('admin_delete_team', { p_team_id: SEEDED_TEAM });
+    expect(error).toBeNull();
+
+    const left = cascades.filter(({ table, column }) =>
+      getMockData(table).some((row) => row[column] === SEEDED_TEAM)
+    );
+    expect(left).toEqual([]);
+    const rsvpIds = getMockData('event_rsvps').map((row) => row.id);
+    expect(rsvpIds).not.toContain('cascade-opp-game');
+    expect(rsvpIds).toContain('cascade-opp-practice');
+
+    const audit = getMockData('audit_log').find(
+      (row) => row.action === 'team.deleted' && row.resource_id === SEEDED_TEAM
+    );
+    const unrecorded = [...new Set(cascades.map(({ table }) => table))].filter(
+      (table) => !(`${table}_deleted` in (audit?.metadata ?? {}))
+    );
+    expect(unrecorded).toEqual([]);
   });
 });

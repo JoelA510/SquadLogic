@@ -103,6 +103,9 @@ R33="$REPO/docs/sql/20261021010000_revert.sql"
 # A3b: restricted reads (policies, calendar token table, score rule), and the revert.
 M34="$REPO/supabase/migrations/20261021020000_restrict_people_reads.sql"
 R34="$REPO/docs/sql/20261021020000_revert.sql"
+# admin_delete_team takes its exceptions, RSVPs and players' team ids with it, and the revert.
+M35="$REPO/supabase/migrations/20261021030000_admin_delete_team_exceptions.sql"
+R35="$REPO/docs/sql/20261021030000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3351,22 +3354,23 @@ plant "R20 the revert does not drop the enact wrapper" "$R20" \
 
 # **8.6 3b PR 12d: RSVP follows the applied practice calendar (plan W14, W15,
 # Q4).** One plant per claim the smoke's evidence prints, and one for the
-# revert. Every M21 anchor sits in the only live definition of
-# upsert_team_event_rsvp (anchor_liveness: LIVE).
+# revert. 20261021030000 redefines upsert_team_event_rsvp with this body
+# verbatim (plus a game lock), so the M21 anchors are planted in that file, the
+# live definition.
 # W14's plan plant: the old body, the series weekday alone.
-plant "M21 the RSVP rule keeps the series-only check" "$M21" \
+plant "M21 the RSVP rule keeps the series-only check" "$M35" \
   "        IF v_assignment_found THEN" \
   "        IF false THEN" \
   "FAIL smoke 20261005000000"
 
 # W14: a TIME TBD date falls through to the series rule and is accepted.
-plant "M21 the RSVP rule accepts a TIME TBD date" "$M21" \
+plant "M21 the RSVP rule accepts a TIME TBD date" "$M35" \
   "                   count(*) FILTER (WHERE p_occurrence_date <@ pe.\"window\")" \
   "                   count(*) FILTER (WHERE p_occurrence_date <@ pe.\"window\" AND pe.kind <> 'time_tbd')" \
   "FAIL smoke 20261005000000"
 
 # Q7: an open relocated window read as "until the row ends".
-plant "M21 the RSVP rule accepts a moved practice under an open window" "$M21" \
+plant "M21 the RSVP rule accepts a moved practice under an open window" "$M35" \
   "                IF v_cover.kind IS DISTINCT FROM 'relocated'
                    OR upper_inf(v_cover.\"window\")
                    OR upper(v_cover.\"window\") = 'infinity'::date THEN" \
@@ -3374,7 +3378,7 @@ plant "M21 the RSVP rule accepts a moved practice under an open window" "$M21" \
   "FAIL smoke 20261005000000"
 
 # Q4: a write that tidies stored RSVPs the calendar no longer shows.
-plant "M21 the RSVP write deletes stored RSVPs inside a live window" "$M21" \
+plant "M21 the RSVP write deletes stored RSVPs inside a live window" "$M35" \
   "    SELECT *
       INTO v_existing
       FROM public.event_rsvps" \
@@ -4063,6 +4067,76 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
   update teams" \
   "revert 20261021020000"
 
+# **admin_delete_team takes its exceptions, RSVPs and players' team ids with it
+# (20261021030000).** One plant per claim the smoke prints.
+plant "M35 the delete withdraws nothing" "$M35" \
+  "           AND pe.withdrawn_at IS NULL
+        RETURNING pe.*" \
+  "           AND false
+        RETURNING pe.*" \
+  "smoke 20261021030000"
+
+plant "M35 the delete archives nothing onto the run" "$M35" \
+  "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
+  "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
+  "smoke 20261021030000"
+
+plant "M35 the delete audits no series" "$M35" \
+  "            'practice.cancelled',
+            'practice_assignments',
+            v_pa.id," \
+  "            'practice.cancelled_unaudited',
+            'practice_assignments',
+            v_pa.id," \
+  "smoke 20261021030000"
+
+plant "M35 the delete leaves the opponent's game RSVP" "$M35" \
+  "    DELETE FROM public.event_rsvps
+     WHERE event_type = 'game'" \
+  "    DELETE FROM public.event_rsvps
+     WHERE false AND event_type = 'game'" \
+  "smoke 20261021030000"
+
+plant "M35 the delete takes a practice RSVP sharing a game id" "$M35" \
+  "     WHERE event_type = 'game'
+       AND organization_id = v_team.organization_id" \
+  "     WHERE organization_id = v_team.organization_id" \
+  "smoke 20261021030000"
+
+plant "M35 the delete leaves players.team_id" "$M35" \
+  "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
+  "    PERFORM 1;" \
+  "smoke 20261021030000"
+
+plant "M35 team.deleted records no counts" "$M35" \
+  "            || v_counts
+" \
+  "            || '{}'::jsonb
+" \
+  "smoke 20261021030000"
+
+plant "M35 the delete lets a coach through" "$M35" \
+  "    IF NOT public.is_org_admin(v_team.organization_id) THEN
+        -- Production's own text" \
+  "    IF false THEN
+        -- Production's own text" \
+  "smoke 20261021030000"
+
+plant "M35 the RSVP writer takes no game lock" "$M35" \
+  "        PERFORM 1 FROM public.games g WHERE g.id = p_reference_id FOR KEY SHARE;" \
+  "        PERFORM 1;" \
+  "smoke 20261021030000"
+
+plant "R35 the revert leaves the new admin_delete_team" "$R35" \
+  "CREATE OR REPLACE FUNCTION public.admin_delete_team(p_team_id uuid)" \
+  "CREATE OR REPLACE FUNCTION public.admin_delete_team_unused(p_team_id uuid)" \
+  "FAIL revert 20261021030000"
+
+plant "R35 the revert leaves the locking RSVP writer" "$R35" \
+  "CREATE OR REPLACE FUNCTION public.upsert_team_event_rsvp(" \
+  "CREATE OR REPLACE FUNCTION public.upsert_team_event_rsvp_unused(" \
+  "FAIL revert 20261021030000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4199,6 +4273,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the identity revert drops link_my_coach_record and restores the table-level UPDATE grant on profiles to anon and authenticated"]="R32 the revert leaves link_my_coach_record|R32 the revert does not restore the profiles grant"
   ["(checked) the server-side reads revert drops every read, helper and contact card column"]="R33 the revert leaves get_team_roster|R33 the revert leaves the contact card columns"
   ["(checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"]="R34 the revert leaves players restricted|R34 the revert leaves the token table|R34 the revert restores a drifted rotate body"
+  ["(checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"]="R35 the revert leaves the new admin_delete_team|R35 the revert leaves the locking RSVP writer"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

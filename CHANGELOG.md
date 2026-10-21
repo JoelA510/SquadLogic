@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Staff are admins** (owner decision 2026-10-20; Phase A2a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020030000`: `is_org_admin()` admits `staff`; the last-admin guards in `admin_remove_member` and `admin_change_member_role` count staff; the nine policies that test a role by name admit staff beside `admin` (revert and smoke in `docs/sql/`). The Edge Functions' `verifyOrgAdmin`, the frontend's permissions (`ADMIN_ROLES`), the navigation, the dashboard, the import panel, the settings audit log and the mock client follow. `tenant_admin` keeps exactly the access it had (RLS Q5, open).
 
+### Fixed
+
+- **Deleting a team keeps the record of what went with it** (`docs/changes/2026-10-20-admin-delete-team.md`). Migration `20261021030000`:
+  - The team's practice exceptions are withdrawn, audited and archived onto their run, and each of its practice series is audited as cancelled, as cancelling a single series already did. Before, they vanished with the team, unaudited.
+  - Every game RSVP to the team's games is removed, including the opposing team's, which were left pointing at games that no longer existed.
+  - Players assigned to the team only through `players.team_id` lose that id.
+  - `team.deleted` records what each table lost.
+  - An RSVP sent while a team is being deleted waits for the delete and is then refused.
+
+  Revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/admin_delete_team_exceptions.sql`. The mock client mirrors every cascade.
+
 ### Removed
 
 - **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.

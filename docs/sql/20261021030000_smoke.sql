@@ -30,7 +30,7 @@ DECLARE
     v_coach uuid := gen_random_uuid();
     v_org uuid; v_s uuid; v_d uuid; v_t uuid; v_o uuid; v_x uuid; v_loc uuid; v_f uuid;
     v_tue uuid; v_thu uuid; v_run uuid; v_pa uuid; v_pa2 uuid; v_pao uuid;
-    v_g uuid; v_g2 uuid; v_p1 uuid; v_p2 uuid; v_p3 uuid;
+    v_g uuid; v_g2 uuid; v_p1 uuid; v_p2 uuid; v_p3 uuid; v_p4 uuid;
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
         (v_admin, 'dt-admin@example.test', '{"password_length": 16}', now()),
@@ -71,14 +71,15 @@ BEGIN
     INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'DT', 'One') RETURNING id INTO v_p1;
     INSERT INTO public.players (organization_id, division_id, first_name, last_name, team_id) VALUES (v_org, v_d, 'DT', 'Two', v_t) RETURNING id INTO v_p2;
     INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'DT', 'Three') RETURNING id INTO v_p3;
-    INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_t, v_p1, v_org), (v_o, v_p3, v_org);
+    INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'DT', 'Four') RETURNING id INTO v_p4;
+    INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_t, v_p1, v_org), (v_o, v_p3, v_org), (v_o, v_p4, v_org);
     INSERT INTO public.event_rsvps (organization_id, team_id, player_id, reference_id, event_type, occurrence_date, status) VALUES
         (v_org, v_o, v_p3, v_g, 'game', '2026-11-07', 'attending'),
         (v_org, v_o, v_p3, v_g, 'practice', '2026-09-08', 'maybe');
     INSERT INTO dt_ids (name, id) VALUES
         ('admin', v_admin), ('coach', v_coach), ('org', v_org), ('season', v_s), ('t', v_t), ('o', v_o), ('x', v_x),
         ('thu', v_thu), ('run', v_run), ('pa', v_pa), ('pa2', v_pa2), ('pao', v_pao), ('g', v_g), ('g2', v_g2),
-        ('p1', v_p1), ('p2', v_p2), ('p3', v_p3);
+        ('p1', v_p1), ('p2', v_p2), ('p3', v_p3), ('p4', v_p4);
 END;
 $$;
 
@@ -177,6 +178,7 @@ DECLARE
     v_g uuid := (SELECT id FROM dt_ids WHERE name = 'g');
     v_g2 uuid := (SELECT id FROM dt_ids WHERE name = 'g2');
     v_p3 uuid := (SELECT id FROM dt_ids WHERE name = 'p3');
+    v_p4 uuid := (SELECT id FROM dt_ids WHERE name = 'p4');
     v_p1 uuid := (SELECT id FROM dt_ids WHERE name = 'p1');
     v_conn text := 'dt_racer';
     v_state text; v_msg text;
@@ -218,12 +220,14 @@ BEGIN
     END;
     PERFORM dblink_exec(v_conn, 'ROLLBACK');
 
-    -- An opposing RSVP to the deleted team's game.
+    -- An opposing RSVP to the deleted team's game, from a player with no RSVP
+    -- to it yet: p3's existing row is deleted (and so locked) by the delete,
+    -- which would make p3's upsert wait on that row and hide a missing game lock.
     BEGIN
         PERFORM dblink_exec(v_conn, 'BEGIN');
         PERFORM * FROM dblink(v_conn, format(
             'SELECT public.upsert_team_event_rsvp(%L, %L, %L, ''game'', %L, ''declined'')::text',
-            v_o, v_p3, v_g, '2026-11-07')) AS t(result text);
+            v_o, v_p4, v_g, '2026-11-07')) AS t(result text);
         v_rsvp_wait := 'committed';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;

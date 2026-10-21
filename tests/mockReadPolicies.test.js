@@ -69,6 +69,19 @@ describe('mock read policies :: the restricted tables', () => {
     expect(await read('staging_import_rows')).toEqual([]);
   });
 
+  it('shows a removed coach neither their coach row nor their assignments', async () => {
+    setSession('mock-admin-id');
+    const { error } = await supabase.rpc('admin_remove_member', {
+      p_organization_id: ORG,
+      p_profile_id: 'mock-coach-id',
+    });
+    expect(error).toBeNull();
+    setSession('mock-coach-id');
+
+    expect(await read('coaches')).toEqual([]);
+    expect(await read('team_coach_assignments')).toEqual([]);
+  });
+
   it('shows a team s calendar token to its guardian and admin, not to another team s coach', async () => {
     setSession('mock-parent-id');
     expect(await read('team_calendar_tokens', 'team_id')).toEqual([TIGERS]);

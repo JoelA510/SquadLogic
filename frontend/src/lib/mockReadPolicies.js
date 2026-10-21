@@ -8,8 +8,10 @@
  *   - players, team_players: an admin or staff member of the row's
  *     organization, or a member who is the player's guardian
  *     (`profile_players`);
- *   - coaches: an admin or staff member, or the coach row linked to the caller;
- *   - team_coach_assignments: an admin or staff member, or the caller's own;
+ *   - coaches: an admin or staff member, or the coach row linked to the caller
+ *     while they are a member;
+ *   - team_coach_assignments: an admin or staff member, or the caller's own
+ *     while they are a member;
  *   - profile_players: the caller's own links, or an admin or staff member;
  *   - staging_players, staging_import_rows: an admin or staff member;
  *   - team_calendar_tokens: an admin or staff member, the team's current
@@ -56,9 +58,11 @@ export function applyMockReadPolicy(db, table, rows, currentUserId, now = new Da
   const visible = {
     players: (row) => access.isOrgAdmin(orgOf(row)) || guardianOf(row, row.id),
     team_players: (row) => access.isOrgAdmin(orgOf(row)) || guardianOf(row, row.player_id),
-    coaches: (row) => access.isOrgAdmin(orgOf(row)) || own(row.user_id),
+    coaches: (row) =>
+      access.isOrgAdmin(orgOf(row)) || (access.isOrgMember(orgOf(row)) && own(row.user_id)),
     team_coach_assignments: (row) =>
-      access.isOrgAdmin(orgOf(row)) || access.myCoachIds.has(String(row.coach_id)),
+      access.isOrgAdmin(orgOf(row)) ||
+      (access.isOrgMember(orgOf(row)) && access.myCoachIds.has(String(row.coach_id))),
     profile_players: (row) => own(row.profile_id) || access.isOrgAdmin(orgOf(row)),
     staging_players: (row) => access.isOrgAdmin(orgOf(row)),
     staging_import_rows: (row) => access.isOrgAdmin(orgOf(row)),

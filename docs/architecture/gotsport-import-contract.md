@@ -36,7 +36,8 @@ header normalization: lower-cased and trimmed, then the alias map in
    whitespace as `_`: a `Jersey Size` column matches a declared `jersey_size`).
 
 It is applied at every entry: in the browser before upload
-(`frontend/src/utils/importAllowlist.js`), in `import-validation` before it
+(`frontend/src/utils/importAllowlist.js`; the import reads the organization's
+declared fields when it starts and fails with a message if it cannot), in `import-validation` before it
 stages a row or returns `validated_data` (`supabase/functions/_shared/import-allowlist.ts`,
 after the sensitive-column filter, which stays), in the mock client, and in SQL:
 `finalize_import_job` and `finalize_coach_import_job` read only allowlisted keys
@@ -101,14 +102,33 @@ did you hear", unless the organization declared the field.
 
 ## What was stored before, and the purge
 
-Migration `20261022010000` purged what earlier imports stored: every coach's
-`custom_attributes` reduced to its declared fields, `coaches.phone` cleared and
-`phone` removed from `contact_info`, the same in the coach snapshots
-`import_application_records` keeps for rollback, both staging tables' rows of
-every completed or failed import, and personal values (emails, and a player
-event's names, birth date, contact and guardian values) in `audit_log.metadata`,
-replaced with `[redacted]`. A daily job deletes `staging_import_rows` older than
-30 days, as one already did for `staging_players`. None of it can be restored.
+Migration `20261022010000` purged what earlier imports stored, and none of it
+can be restored:
+
+- every coach's `custom_attributes` reduced to its declared fields,
+  `coaches.phone` cleared and `phone` removed from `contact_info`, and the same
+  in the coach snapshots `import_application_records` keeps for rollback;
+- every player's `custom_attributes` reduced to its declared fields and the
+  import's own keys, `contact_info` emptied and `guardian_contacts` emptied;
+- the staged player and coach rows of every completed or failed import deleted.
+  Field and field-availability rows stay (a refused field row waits on its job
+  for replay), and so do the rows of an import still waiting to be applied,
+  reduced to the allowlist (their `raw_payload`, which nothing reads, keeps only
+  columns whose lower-cased header is itself an allowlisted key or a declared
+  field);
+- personal values in `audit_log.metadata` (emails, and a player event's names,
+  birth date, contact and guardian values) replaced with `[redacted]`, and a
+  value an "Invalid date format" or "Invalid email format" row error quoted
+  removed from `import_jobs.error_summary`. `import-validation` no longer
+  quotes the value.
+
+Retention: a daily job deletes a finished import's staged coach rows 30 days
+after they were staged, and `cleanup-staging-players` now does the same for
+staged players. Neither touches the rows of an import still waiting to be
+applied (the player job used to delete them whatever the import's state).
+
+The SQL copy of the key lists is `import_allowed_keys(type)`; the parity test
+holds it equal to the two code copies.
 
 ## Age cutoff (configurable per season)
 

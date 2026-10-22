@@ -3,8 +3,8 @@
 # Release Prep Closure
 
 **Last refreshed:** 2026-10-22, for release **1.2.0**.
-**Status:** release candidate. The code side is closed; the operator checks below remain the
-owner's before the `v1.2.0` tag.
+**Status:** release candidate. The code side is closed; the operator checks below not marked
+done remain the owner's before the `v1.2.0` tag.
 
 This page records the evidence behind the release and what it does not cover. It claims only what
 was checked on the date above; each item says how.
@@ -54,14 +54,15 @@ was checked on the date above; each item says how.
 
 - **Lighthouse:** no repo-native command. Run it manually against production and record the URL,
   mode, device profile and score before claiming it.
-- **Sentry:** the SDK is wired and its release tag pinned (`tests/sentryConfig.test.js`), but
-  whether `VITE_SENTRY_DSN` is set in Vercel Production was **not verified**: the Vercel API refused
-  to list the project's environment variables (403). Follow [sentry-smoke.md](./sentry-smoke.md).
-- **Storage retention is not running** (*executed*): the scheduled `Cleanup storage buckets
-  (retention)` workflow failed on each of its last three runs (2026-10-20 to 2026-10-22), both
-  jobs with "SUPABASE_URL secret is not configured". Until the two Actions secrets are set, or
-  the schedule is disabled, `raw-imports` and `exports` keep every object
-  ([storage-retention.md](./storage-retention.md)). See the operator checks.
+- **Sentry:** the SDK is wired and its release tag pinned (`tests/sentryConfig.test.js`).
+  `VITE_SENTRY_DSN` is set in Vercel Production (*owner-confirmed* 2026-10-22; the Vercel API
+  refused to list environment variables to us, 403). That an event reaches Sentry was not
+  checked: [sentry-smoke.md](./sentry-smoke.md).
+- **Storage retention:** the scheduled `Cleanup storage buckets (retention)` workflow failed its
+  runs from 2026-10-20 to 2026-10-22 for lack of its two Actions secrets. The owner set them on
+  2026-10-22, and a manual dry run (run 183) passed both jobs (*executed*). Both buckets held no
+  objects (*executed*, `storage.objects`), so that run proved the secrets are present and the list
+  call is accepted, not a deletion ([storage-retention.md](./storage-retention.md)).
 - **Phases B to E:** planned (`docs/changes/2026-10-22-phase-*.md`), not built; each waits for the
   owner's approval. They are not part of 1.2.0.
 
@@ -69,13 +70,11 @@ was checked on the date above; each item says how.
 
 - Confirm the production deployment for the release commit (the merge of this release PR) is
   `READY` in Vercel.
-- Confirm `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_SENTRY_DSN` in Vercel Production,
-  and that `VITE_USE_MOCK_SUPABASE` is unset or `false` there.
-- Confirm the live `main` ruleset requires the checks in `.github/rulesets/main.json` (AGENTS.md
-  section 11; `docs/operations/ci-cd.md`, Branch Protection). GitHub does not read that file.
-- Configure the `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` Actions secrets for the
-  retention workflow and confirm one green run (manual dispatch with `dry_run: true` first), or
-  disable its schedule deliberately ([storage-retention.md](./storage-retention.md)).
+- Confirm `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Vercel Production, and that
+  `VITE_USE_MOCK_SUPABASE` is unset or `false` there.
+- Done 2026-10-22 (*owner-confirmed*): `VITE_SENTRY_DSN` set in Vercel Production; the live
+  `main` ruleset matches `.github/rulesets/main.json`. Done (*executed*): the retention secrets
+  and a green dry run (run 183).
 - Tag `4459faf` (#622, the 1.1.0 cut) as `v1.1.0`, so that release has its own tag.
 - Publish the draft `v1.2.0` release with its target set to the merge commit of this release PR
   (publishing creates the tag there), using the `[1.2.0]` notes.

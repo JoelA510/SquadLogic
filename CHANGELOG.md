@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A demo league's registrations** (`fixtures/demo-2026/`): 1,259 player and 251 coach registrations in a GotSport export's own columns, every person a placeholder, shaped as 128 teams (eight per division to U12, two from U14, and four U4 practice cohorts). Made from a real 2026 rec export outside the repository; the seed for demo mode and a realistic import for tests. `tests/demoFixture.test.js` holds its shape, its placeholders and its cross-references, and records two import gaps it exposes: `Payment Plan` (which carries the registered program and division) is dropped as a payment column, and the coach import requires a full-name column a GotSport export does not have.
+
 ## [1.2.0] - 2026-10-22
 
 ### Added

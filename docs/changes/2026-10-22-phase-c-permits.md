@@ -77,7 +77,10 @@ within the limit; returns the previous path; audits `file_attached` or `file_rep
 `get_facility_permits(org)`: admin or current coach, else 42501; returns each permit with scope
 names, a `retired` flag per scope, and `status` / `days_left` computed against
 `org_local_today(org)` (the active season's `timezone`, UTC when unset or unreadable, the
-`team_local_today` contract).
+`team_local_today` contract). Until E1 enforces one active season, the helper is deterministic
+when an organization has several: the newest active row by `created_at`, then `id`; pgTAP sets two
+active seasons in zones whose dates differ and asserts the status follows that row. Production has
+one active season (_executed_, 2026-10-22).
 
 **Storage.** Private bucket `facility-permits`, `file_size_limit` 10 MiB, `allowed_mime_types` PDF,
 JPEG, PNG. Path `<org>/<permit>/<random uuid>.<ext>`. Policies: INSERT by an admin of folder 1 when

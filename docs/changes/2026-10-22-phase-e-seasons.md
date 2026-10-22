@@ -45,20 +45,20 @@ LAST, s.created_at DESC LIMIT 1`. `import_jobs` has no season column (`202603310
 
 ## Current-season readers, and what each selects after E
 
-| Reader                                                                                                        | Today                             | After E                                                                           |
-| ------------------------------------------------------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------- |
-| `OrganizationContext.jsx:126-152`                                                                             | stored id or name, else newest    | stored **id** (new key) if the row exists, else `status = 'active'`; never newest |
-| `ThemeContext.jsx:52-80`, `SeasonModule.jsx:125-176`                                                          | free-text label on the shared key | label control removed; the season name gets an audited writer (E3)                |
-| `TopBar.jsx:172-177` switcher                                                                                 | every season, newest first        | active first, status shown; drafts listed for admins only                         |
-| 19 `currentSeasonSetting` consumers (hooks, pages, `seasonClockSlots.js`)                                     | the context row                   | unchanged; they inherit the context                                               |
-| `ImportContext.jsx:893-898`, `importJobLifecycleActions.js:2`                                                 | job has no season                 | job created with the viewed season's id                                           |
-| `readSeasonTimezone` (`seasonSettings.ts:79-107`)                                                             | given id, else newest             | given id, else `eq('status','active')`; none is `timezone: null`                  |
-| its callers: `auto-scheduler/index.ts:181-195`, `fairness-scoring/index.ts:137-139`, `teamFeed.ts:135-138`    | as above                          | unchanged; inherit                                                                |
-| `practice-`, `game-`, `team-persistence` (`:164-210`, `:92-108`, `:189-205`); `calendar-feed/index.ts:90,142` | by explicit id or team's division | unchanged                                                                         |
-| `finalize_import_job`                                                                                         | active-or-newest                  | the job's `season_settings_id`; legacy job without one: the active season         |
-| `submit_registration`                                                                                         | any open form                     | open form, its season active, its program's window open                           |
-| server-side reads (`20261021010000:174`)                                                                      | team's division's season          | unchanged                                                                         |
-| `upsert_division_for_import`, `admin_upsert_division_settings`                                                | explicit season id                | unchanged; refuse a `completed` season                                            |
+| Reader                                                                                                        | Today                             | After E                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `OrganizationContext.jsx:126-152`                                                                             | stored id or name, else newest    | stored **id** (new key) if the row is `active`, or a draft and the caller is an admin or staff; else `status = 'active'`; never newest |
+| `ThemeContext.jsx:52-80`, `SeasonModule.jsx:125-176`                                                          | free-text label on the shared key | label control removed; the season name gets an audited writer (E3)                                                                     |
+| `TopBar.jsx:172-177` switcher                                                                                 | every season, newest first        | active first, status shown; drafts listed for admins only                                                                              |
+| 19 `currentSeasonSetting` consumers (hooks, pages, `seasonClockSlots.js`)                                     | the context row                   | unchanged; they inherit the context                                                                                                    |
+| `ImportContext.jsx:893-898`, `importJobLifecycleActions.js:2`                                                 | job has no season                 | job created with the viewed season's id                                                                                                |
+| `readSeasonTimezone` (`seasonSettings.ts:79-107`)                                                             | given id, else newest             | given id, else `eq('status','active')`; none is `timezone: null`                                                                       |
+| its callers: `auto-scheduler/index.ts:181-195`, `fairness-scoring/index.ts:137-139`, `teamFeed.ts:135-138`    | as above                          | unchanged; inherit                                                                                                                     |
+| `practice-`, `game-`, `team-persistence` (`:164-210`, `:92-108`, `:189-205`); `calendar-feed/index.ts:90,142` | by explicit id or team's division | unchanged                                                                                                                              |
+| `finalize_import_job`                                                                                         | active-or-newest                  | the job's `season_settings_id`; legacy job without one: the active season                                                              |
+| `submit_registration`                                                                                         | any open form                     | open form, its season active, its program's window open                                                                                |
+| server-side reads (`20261021010000:174`)                                                                      | team's division's season          | unchanged                                                                                                                              |
+| `upsert_division_for_import`, `admin_upsert_division_settings`                                                | explicit season id                | refuse a `completed` season; a division they create joins the season's default program (E2)                                            |
 
 ## Data model (E1, E2)
 
@@ -68,11 +68,28 @@ LAST, s.created_at DESC LIMIT 1`. `import_jobs` has no season column (`202603310
   writer is a SECURITY DEFINER RPC (inventory above).
 - `programs` (id, organization_id, season_settings_id, name, registration_opens_on and
   registration_closes_on dates, is_default, copied_from_program_id, timestamps DEFAULT `now()`),
-  unique `(season_settings_id, lower(btrim(name)))`, one `is_default` per season, CHECK closes
-  > = opens, UNIQUE `(id, season_settings_id)`. `divisions.program_id` NOT NULL with the composite FK
-  > `(program_id, season_settings_id) REFERENCES programs (id, season_settings_id)`, so a division
-  > cannot sit in another season's program. Backfill: one default program per existing season
-  > (window NULL), every division in it. Divisions auto-created by import go to the default.
+  unique `(season_settings_id, lower(btrim(name)))`, one `is_default` per season, a CHECK that
+  `registration_closes_on` is not before `registration_opens_on`, UNIQUE `(id, season_settings_id)`.
+  `divisions.program_id` NOT NULL with the composite FK `(program_id, season_settings_id)
+REFERENCES programs (id, season_settings_id)`, so a division cannot sit in another season's
+  program. Backfill: one default program per existing season (window NULL), every division in it.
+- **Every division writer supplies a program.** `upsert_division_for_import` and
+  `admin_upsert_division_settings` (whose create path, `20260504020000:109-130`, inserts no
+  program) put a new division in the season's default program; E2 replaces both bodies from their
+  latest definitions. A pgTAP case creates a division through each and finds it in the default
+  program (both fail with a not-null violation if a writer is missed).
+- **`programs` is read and written like the other tenant tables.** RLS enabled; SELECT for members
+  of the program's organization (`is_org_member`), as `divisions` is; no INSERT, UPDATE or DELETE
+  policy, so `admin_upsert_program` (definer, `is_org_admin`) is the only writer; `anon` gets no
+  grant. pgTAP: an Org B member reads none of Org A's programs, every direct write is refused, and
+  `definer_function_grants.sql` covers the new RPCs.
+- **A form's division is in the form's organization and season, by the schema.** E2 adds UNIQUE
+  `(id, season_settings_id)` on `divisions` and a composite FK `registration_forms (division_id,
+season_id) REFERENCES divisions (id, season_settings_id)`, and drops the
+  `registration_forms_admin_insert` and `registration_forms_admin_update` policies
+  (`20261018030000:219,230`, widened in `20261020030000:214,225`), so the form RPCs are the only
+  writers. pgTAP: a direct PATCH to another org's or another season's division is refused (42501
+  with the policies gone; 23503 through the FK).
 - **For Phase B:** a program is a stable uuid within a season (`divisions.program_id`, never
   null). B keys per-program aggregates on `program_id` and team counts on `division_id`; it never
   keys on a name. Rollover gives programs new ids, linked by `copied_from_program_id`.
@@ -86,8 +103,9 @@ LAST, s.created_at DESC LIMIT 1`. `import_jobs` has no season column (`202603310
 `'draft'`; `submit_registration` joins the form's season and refuses unless `status = 'active'`
 (22023); the migration backfills NULL `registration_forms.season_id` to the org's active season.
 _Tests:_ `tests/organizationContextSeasonDefault.test.jsx`: seasons [active older, draft newer]
-selects the active one, and a legacy name key equal to the draft's name does not select it (both
-fail today, :141-151). The Deno test at `anchor-wall-times_test.ts:247-258` is rewritten to assert
+selects the active one; a legacy name key equal to the draft's name does not select it; a stored
+draft id selects the draft for an admin and falls back to the active season for a coach or a
+guardian (the first two fail today, :141-151). The Deno test at `anchor-wall-times_test.ts:247-258` is rewritten to assert
 `eq('status','active')` and no `created_at` order (it asserts the defect today). pgTAP
 `supabase/tests/season_rollover.sql`: an open form in a draft season is refused (fails today).
 
@@ -99,8 +117,8 @@ season; plant (map to the old id) fails it. Mock twin in `tests/seasonRollover.t
 
 **3. Every division column copies, from the catalogue.** _Change:_ `rollover_division_columns()`
 returns the copied list; the RPC builds its INSERT from it with `format('%I')`. Excluded: id,
-season_settings_id, season_start, season_end, created_at, updated_at; program_id is remapped.
-_Tests:_ pgTAP compares `information_schema.columns` for `divisions` with copied plus excluded,
+season*settings_id, season_start, season_end, created_at, updated_at; program_id is remapped.
+\_Tests:* pgTAP compares `information_schema.columns` for `divisions` with copied plus excluded,
 and fails when the test adds a column in its own transaction (the plant); a value test checks
 the six roster settings of `TeamAnalysisPage.jsx:189-201`, the age band and birthdate window.
 
@@ -118,8 +136,12 @@ second `active` row for one org raises 23505, two orgs each with one pass; smoke
 any seasons); revert drops the indexes and restores the policies. Concurrency: below.
 
 **6. Imports carry the season.** _Change:_ `import_jobs.season_settings_id` (FK, nullable for
-legacy jobs); `create_import_job` gains `p_season_settings_id` (DROP of the 3-argument signature,
-new one validated: same org, not completed; NULL means the active season);
+legacy jobs); `create_import_job` gains `p_season_settings_id uuid DEFAULT NULL` (the 3-argument
+signature is dropped and recreated with the new trailing argument, so every existing named call,
+including `tests/fieldAvailabilityLifecycle.test.js:57`, `real_backend.ts` and a cached frontend
+mid-deploy, still resolves; validated: same org, not completed; NULL means the active season);
+the exact-signature grant and readiness contracts (`definer_function_grants.sql`,
+`import_rpc_readiness_contract.sql`) move to the new signature;
 `finalize_import_job` uses the job's season. _Tests:_ pgTAP: a job made for a draft season
 finalizes its divisions into the draft (fails today, `20261020020000:104-109`); a completed
 season is refused; a legacy job without a season lands in the active one. Mock twin, and

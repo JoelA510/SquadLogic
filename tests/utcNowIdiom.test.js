@@ -8,8 +8,8 @@
  * it and changed every default to `now()`; this guard keeps a later migration
  * from bringing it back. It matches the spellings, not one literal: any case,
  * any spacing, with or without `::text`, `now()` or any of its siblings
- * (`clock_timestamp()`, `current_timestamp`, ...), `'Etc/UTC'`, and the
- * `<clock> AT TIME ZONE 'utc'` form. The
+ * (`clock_timestamp()`, `current_timestamp` with or without a precision,
+ * ...), `'Etc/UTC'`, and the `<clock> AT TIME ZONE 'utc'` form. The
  * deliberate UTC calendar date, the same expression cast `::date`, is allowed,
  * and SQL comments are not read.
  *
@@ -27,7 +27,7 @@ const MIGRATIONS = path.join(REPO, 'supabase/migrations');
 const CUTOFF = '20261021040000';
 
 // The clock: now() and its siblings, all the same instant-with-zone type.
-const CLOCK = String.raw`(?:now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp)`;
+const CLOCK = String.raw`(?:now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp(?:\s*\(\s*\d*\s*\))?)`;
 const ZONE = String.raw`'(?:etc/)?utc'`;
 const IDIOM = new RegExp(
   String.raw`(timezone\s*\(\s*${ZONE}(?:\s*::\s*text)?\s*,\s*${CLOCK}\s*\)|${CLOCK}\s+at\s+time\s+zone\s+${ZONE})(?!\)?\s*::\s*date)`,
@@ -78,6 +78,11 @@ describe('utc now idiom :: no migration after the pin uses it as a timestamp', (
     expect(timestampUses("v := timezone('Etc/UTC', current_timestamp);")).toHaveLength(1);
     expect(timestampUses("v := CURRENT_TIMESTAMP AT TIME ZONE 'UTC';")).toHaveLength(1);
     expect(timestampUses("v := statement_timestamp() at time zone 'etc/utc';")).toHaveLength(1);
+    expect(timestampUses("v := timezone('utc', current_timestamp(3));")).toHaveLength(1);
+    expect(timestampUses("v := current_timestamp(3) AT TIME ZONE 'utc';")).toHaveLength(1);
+    expect(timestampUses("v_today := timezone('utc', current_timestamp(3))::date;")).toHaveLength(
+      0
+    );
     expect(timestampUses("v_today := timezone('utc', now())::date;")).toHaveLength(0);
     expect(timestampUses("v_today := (now() AT TIME ZONE 'UTC')::date;")).toHaveLength(0);
     expect(timestampUses("-- not timezone('utc', now()) here\nSELECT 1;")).toHaveLength(0);

@@ -106,7 +106,7 @@ RESET timezone;
 -- ---- the catalogue: nothing uses the idiom unpinned ------------------------
 SELECT is((SELECT array_agg(p.oid::regprocedure::text ORDER BY p.oid::regprocedure::text) FROM pg_proc p
             WHERE p.pronamespace = 'public'::regnamespace
-              AND p.prosrc ~* '(timezone\s*\(\s*''(etc/)?utc''(\s*::\s*text)?\s*,\s*(now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp)\s*\)|(now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp)\s+at\s+time\s+zone\s+''(etc/)?utc'')(?!\)?\s*::\s*date)'
+              AND p.prosrc ~* '(timezone\s*\(\s*''(etc/)?utc''(\s*::\s*text)?\s*,\s*(now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp(\s*\(\s*\d*\s*\))?)\s*\)|(now\s*\(\s*\)|clock_timestamp\s*\(\s*\)|statement_timestamp\s*\(\s*\)|transaction_timestamp\s*\(\s*\)|current_timestamp(\s*\(\s*\d*\s*\))?)\s+at\s+time\s+zone\s+''(etc/)?utc'')(?!\)?\s*::\s*date)'
               AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, ARRAY[]::text[])) c
                                WHERE lower(c) = 'timezone=utc')),
           NULL, 'every public function using the idiom as a timestamp is pinned to UTC');

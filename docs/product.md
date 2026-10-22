@@ -45,14 +45,14 @@ public club pages).
 
 ## Glossary
 
-| Term        | Means                                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| Season      | One league year's schedule window and settings (`season_settings`).                                                |
-| Program     | A registration product spanning divisions (for example Junior: U7-U8 boys and girls) — owner, 2026-10-22; Phase E. |
-| Division    | An age group and gender (for example U12 girls) that teams form within; each is in one program.                    |
-| Age group   | A player's natural age with the league's cutoff (August 1 in the example league).                                  |
-| Cohort      | A practice-only team in a division that plays no games (the U4 cohorts).                                           |
-| Demo league | A private, 30-minute copy of the placeholder league in `fixtures/demo-2026`.                                       |
+| Term        | Means                                                                                                                                                          |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Season      | One league year's schedule window and settings (`season_settings`).                                                                                            |
+| Program     | A registration product spanning divisions (for example Junior: U7-U8 boys and girls); admins create, edit, delete and merge them — owner, 2026-10-22; Phase E. |
+| Division    | An age group and gender (for example U12 girls) that teams form within; in at most one program, which admins change.                                           |
+| Age group   | A player's natural age with the league's cutoff (August 1 in the example league).                                                                              |
+| Cohort      | A practice-only team in a division that plays no games (the U4 cohorts).                                                                                       |
+| Demo league | A private, 30-minute copy of the placeholder league in `fixtures/demo-2026`.                                                                                   |
 
 ## History
 

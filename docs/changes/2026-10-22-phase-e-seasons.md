@@ -83,8 +83,9 @@ REFERENCES programs (id, season_settings_id)`, so a division cannot sit in anoth
   program (both fail with a not-null violation if a writer is missed).
 - **`programs` is read and written like the other tenant tables.** RLS enabled; SELECT for members
   of the program's organization (`is_org_member`), as `divisions` is; no INSERT, UPDATE or DELETE
-  policy, so `admin_upsert_program` (definer, `is_org_admin`) is the only writer; `anon` gets no
-  grant. pgTAP: an Org B member reads none of Org A's programs, every direct write is refused, and
+  policy, so the four program RPCs below (definer, `is_org_admin`) are the only writers;
+  `organization_id` is `ON DELETE CASCADE`, as `divisions`' is (`20260331000000:284`), so a demo
+  purge removes them; `anon` gets no grant. pgTAP: an Org B member reads none of Org A's programs, every direct write is refused, and
   `definer_function_grants.sql` covers the new RPCs.
 - **A form's division is in the form's organization and season, by the schema.** E2 adds UNIQUE
   `(id, season_settings_id)` on `divisions` and a composite FK `registration_forms (division_id,
@@ -165,8 +166,9 @@ under `squadlogic-current-season-id`, never the name. _Tests:_ pgTAP: "2027 Seas
 - **Window on the season's clock.** Open from 00:00 on `registration_opens_on` through the end
   of `registration_closes_on`, in the season's timezone: `(now() AT TIME ZONE ss.timezone)::date`
   inside the function, never `current_date` (it is UTC under the pin). NULL bound: no limit.
-- **Default.** A program created by rollover or by an admin gets `opens_on` = May 1 of the year
-  after its creation (season clock), `closes_on` NULL, computed once in SQL
+- **Default.** A program other than the season's default, created by rollover or by an admin,
+  gets `opens_on` = May 1 of the year after its creation (season clock), `closes_on` NULL,
+  computed once in SQL
   (`default_registration_opens_on(tz)`) and stored as a date the admin edits. Programs that
   exist at deploy get no window, so no open form closes on deploy.
 - **With form status.** A submission needs both: the form `open` and the window open. A window
@@ -174,14 +176,55 @@ under `squadlogic-current-season-id`, never the name. _Tests:_ pgTAP: "2027 Seas
   no window. One SQL function `registration_form_availability(form_id)` returns open, reason,
   opens_on; `submit_registration` and `RegistrationFlow.jsx` both use it, so the parent sees
   "Registration for Recreational opens 1 May 2027" before filling the form.
-- **Writers.** `admin_upsert_program` (Zod schema in the frontend, audited `program.upserted`);
-  form RPCs accept `division_id` (same org and same season as the form); a Programs section in
-  Settings > Season and a division picker in `RegistrationForms.jsx`. League admins' field and
+- **Writers.** The program RPCs below; form RPCs accept `division_id` (same org and same season as
+  the form); a Programs section in Settings > Season and a division picker in
+  `RegistrationForms.jsx`. League admins' field and
   reservation views take no program filter (5.2): none is added.
 - _Tests:_ pgTAP: opens tomorrow refused with a hint, today allowed, closed yesterday refused,
   NULL allowed, org-level form unaffected, a zone whose date differs from UTC's
   (`Pacific/Kiritimati`); another season's program raises 23503; `program_id` never NULL.
   Vitest: RegistrationFlow shows the opening date (fails today: no message).
+
+## Program management (E2)
+
+Owner, 2026-10-22: admins create, modify, delete and merge programs, and assign a division to a
+program, move it to another, or remove it from one. A division is in at most one program.
+
+- **"No program" is the season's default program.** `divisions.program_id` stays NOT NULL (the
+  composite FK is what keeps a division in its own season's program); removing a division moves
+  it to the default, which the UI shows as "No program". The default has no window, and its
+  window cannot be set (CHECK `NOT is_default OR (registration_opens_on IS NULL AND
+registration_closes_on IS NULL)`), so a division with no program is governed by its form's
+  status alone. The default cannot be renamed, deleted or merged away. Decision 8.
+- **Four writers**, each SECURITY DEFINER, `is_org_admin`, refusing a `completed` season, under
+  the season lock rollover takes (Concurrency, below) so a rollover never copies a half-moved set,
+  each with a frontend Zod schema and one audit row:
+
+  | RPC                                                              | Does                                                                                                                                                      | Audit                                                         |
+  | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+  | `admin_upsert_program(season_id, id, name, opens_on, closes_on)` | create (id NULL) or rename and re-window; name unique per season (23505)                                                                                  | `program.upserted`                                            |
+  | `admin_set_division_program(division_id, program_id)`            | assign or move; `program_id` NULL removes (to the default); another season's program raises 23503                                                         | `division.program_changed` (from, to)                         |
+  | `admin_delete_program(program_id)`                               | moves its divisions to the default, then deletes it, in one transaction                                                                                   | `program.deleted` (name, window, moved division ids)          |
+  | `admin_merge_programs(source_id, target_id)`                     | moves every source division to the target, deletes the source; the target keeps its name and window; same season; source is not the target or the default | `program.merged` (source name and window, moved division ids) |
+
+  The four actions are registered in `audit_actions` by the same migration.
+
+- **What a move changes.** Only the window: forms, teams, players and schedules key on the
+  division. A division moved into a program whose window is closed stops taking submissions at
+  once (`registration_form_availability` reads the current program), so the confirmation names
+  the open forms whose state changes, and a delete or merge names the window it drops. Phase B's
+  per-program aggregates follow on their next read.
+- **Rollover** copies every program (the default included) and each division's assignment through
+  `copied_from_program_id`.
+- **Demo organizations** may use all four: programs hold no personal data.
+- _Tests:_ pgTAP per RPC: a non-admin, another organization's program, and a completed season are
+  refused; deleting or merging away the default, and merging a program into itself, are refused;
+  setting a window on the default violates the CHECK; a delete leaves its divisions in the default
+  and one audit row naming them; a merge leaves the source gone, every division in the target, one
+  audit row; a division moved into a program closed yesterday makes its open form unavailable
+  (planted: availability reading the program the division was in when the form opened). Mock twin
+  in `tests/programs.test.js`; Vitest for the Programs section: the confirmation lists the forms a
+  move closes.
 
 ## PR split (nothing can create a draft until every reader ignores drafts)
 
@@ -206,8 +249,9 @@ uses for its lock races), plus the pgTAP index case.
 
 ## Decisions
 
-1. **(blocking)** A division is in exactly one program, and division names stay unique within a
-   season across programs ("U10 Competitive", "U10 Rec"). _Recommended:_ yes. The alternative,
+1. **(answered: owner, 2026-10-22)** A division is in at most one program (Program management,
+   above), and division names stay unique within a season across programs ("U10 Competitive",
+   "U10 Rec"). _Recommended:_ yes for the names. The alternative,
    names unique per program, changes the import's name matching (`20261020020000:156,380-388`),
    `upsert_division_for_import`, and `findDivisionRowForProgram` (`TeamAnalysisPage.jsx:156-187`).
 2. Program names: _recommended free text_, unique per season, rather than a fixed enum.
@@ -220,6 +264,10 @@ uses for its lock races), plus the pgTAP index case.
 6. A completed season cannot be reactivated in E (_recommended_); a mistake is a new draft.
 7. `age_cutoff_mode` and `season_year` editable on drafts only; name and dates on draft and
    active (_recommended_).
+8. "No program" as the season's default program with no window (_recommended_), rather than a
+   nullable `program_id`: NULL would need its own branch in every per-program read, and the
+   composite FK could no longer keep a division in its own season's program. The cost: the
+   default is a row the UI must never show as an ordinary program.
 
 ## Investigation notes
 

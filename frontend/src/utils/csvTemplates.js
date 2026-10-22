@@ -9,7 +9,8 @@
  * friendlier form is easier to hand to club admins.
  *
  * Required columns mirror `REQUIRED_HEADERS` in `ImportContext.jsx` and
- * `REQUIRED_FIELDS` in `supabase/functions/import-validation/index.ts`. Add
+ * `REQUIRED_FIELDS` in `supabase/functions/import-validation/index.ts` (the
+ * coach import also takes First Name and Last Name for Full Name). Add
  * the common optional columns so users discover what else they can include.
  */
 

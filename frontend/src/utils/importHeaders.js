@@ -12,6 +12,8 @@
  * without re-running the file.
  */
 
+import { HEADER_ALIASES } from './telemetryUtils.js';
+
 /**
  * Canonical columns each import type must contain after header matching.
  * @type {Record<string, string[]>}
@@ -21,6 +23,19 @@ export const REQUIRED_HEADERS = {
   coaches: ['full_name', 'email'],
   fields: ['location', 'name', 'type', 'start', 'end'],
   field_availability: ['season_label', 'location', 'name', 'available_from', 'available_until'],
+};
+
+/**
+ * A required column the import can build from others when the file lacks it: a GotSport coach
+ * export has First Name and Last Name but no full name, and import-validation composes it
+ * (`supabase/functions/_shared/import-rows.ts`). The parts count only when they resolve through
+ * the alias map import-validation also uses: a part found only by the matcher's fuzzy or learned
+ * mappings would not reach the server under that name, so the file goes to the ColumnMapper,
+ * which writes an explicit full name.
+ * @type {Record<string, string[]>}
+ */
+export const COMPOSABLE_HEADERS = {
+  full_name: ['first_name', 'last_name'],
 };
 
 /**
@@ -49,7 +64,17 @@ export function normalizeImportHeader(mappings, header) {
 export function findMissingRequiredHeaders(fields, type, mappings) {
   const required = REQUIRED_HEADERS[type] || [];
   const normalized = (fields || []).map((h) => normalizeImportHeader(mappings, h));
-  return required.filter((req) => !normalized.includes(req));
+  const aliased = (fields || []).map((h) => {
+    const key = String(h ?? '')
+      .toLowerCase()
+      .trim();
+    return Object.hasOwn(HEADER_ALIASES, key) ? HEADER_ALIASES[key] : key;
+  });
+  return required.filter((req) => {
+    if (normalized.includes(req)) return false;
+    const parts = COMPOSABLE_HEADERS[req];
+    return !(parts && parts.every((part) => aliased.includes(part)));
+  });
 }
 
 /**

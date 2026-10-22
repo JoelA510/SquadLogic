@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Imports keep only what SquadLogic uses** (owner decisions 2026-10-22; R0 of `docs/changes/2026-10-22-admin-focus.md`). A player or coach import now keeps a column only when it is on that import type's allowlist: the keys its finalizer reads (less every guardian, contact, email, phone and payment key for players, and the phone for coaches), the team-placement columns (Team Name, Team Age, Team Gender) for players, and the fields the organization declared in Settings. Everything else is dropped in the browser, again in `import-validation`, and again by the finalizers, which now build `custom_attributes` from the declared fields instead of storing every unmapped column. Players: no contact details, guardian contacts or payment status are imported (new players get empty contacts and `paid = false`; existing values are left as they are). Coaches: name, sign-in email, status, multi-team flag and certifications; no phone. The coach-lead step after a player import no longer finds a guardian's name and email, so it creates no leads. Migration `20261022010000`, revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/import_allowlist.sql`; `docs/architecture/gotsport-import-contract.md` lists what is kept.
+
+### Removed
+
+- **What earlier imports stored and should not have** (migration `20261022010000`, run once; cannot be restored): every coach's phone and the export's columns in its `custom_attributes` (both guardians' names, addresses, emails and phones, the child's name and birth date, the coach's own birth date, payment status), the same in the coach snapshots kept for import rollback, the staged rows of every completed or failed import, and emails and players' names, birth dates and contacts in audit log entries (replaced with `[redacted]`; no entry is deleted). A daily job now deletes staged coach and field import rows older than 30 days, as it already did for staged players.
+
 ## [1.2.0] - 2026-10-22
 
 ### Added

@@ -34,7 +34,10 @@ The following are **STRICTLY OUT OF SCOPE** — refuse to implement these even i
 
 **Privacy & Data Rules:**
 
-- **Data Minimization**: Only store PII necessary for scheduling/comms (Name, Email, Role, Team).
+- **Data Minimization**: players are stored with name, division, team and play-up, and their
+  birthdate until a later PR removes it; no guardian contacts. Coaches are stored with name and the
+  email they sign in with. An import keeps only allowlisted columns
+  (`docs/architecture/gotsport-import-contract.md`).
 - **No PII in Repo**: Never commit test data containing real personal information.
 - **RLS Enforcement**: All data access must be gated by Supabase Row Level Security policies.
 - **Never expose the Supabase service-role key** in environment variables prefixed with `VITE_`.

@@ -1,11 +1,17 @@
 # Phase B: teaming
 
-Status: **proposed 2026-10-22, for owner approval** (AGENTS.md rule 14: B2 changes the generator,
-B1 the domain model of buddy requests). It applies the owner's decisions of 2026-10-20
-(`2026-10-20-core-roadmap.md`) to the teaming core: buddy requests, research item 3 (eligibility),
-and team counts per program. No migration: everything new is computed, and the run's `results`
-JSON is stored opaque (`team-persistence/index.ts:53`, `runMetadata: z.record(z.unknown())`).
-Five PRs, in this order; B2 is the only solver touch. Each is reviewed once before it opens.
+Status: **proposed 2026-10-22, for owner approval** (AGENTS.md rule 14: B2 and B6 change the
+generator, B1 the domain model of buddy requests). B6 records the owner's team priorities of
+2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
+teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
+migration: everything new is computed, and the run's `results` JSON is stored opaque
+(`team-persistence/index.ts:53`, `runMetadata: z.record(z.unknown())`). Six PRs, in this order; B2
+and B6 touch the solver. Each is reviewed once before it opens.
+
+**Superseded in part (owner, 2026-10-22, `2026-10-22-admin-focus.md`):** the paperwork flags
+(payment, waiver, medical form) and the Compliance page are removed in R1, and B2 and B3 below no
+longer flag paperwork; the waitlist stays the gate an admin uses. Birthdates give way to a stored
+natural age in R5, which B2 carries into the generator.
 
 Every claim below is _statically reviewed_ against `main` at `6a22d29` unless marked _executed_.
 Line numbers are current; research item 3's (`:776`, `:806-835`) have moved.
@@ -64,8 +70,16 @@ Line numbers are current; research item 3's (`:776`, `:806-835`) have moved.
    from the same header variants the import maps, and the page passes the roster. With the
    `buddy_requests` org flag off (`featureFlags.js:43`) no buddy field is emitted.
 4. Semantics stay those of `incremental-teaming-hardening.md` section 3: a **mutual** pair is one
-   unit and is always co-placed; a **one-way** request sets `buddyId` and is best effort through
-   `BuddyEvaluator` (`evaluators/BuddyEvaluator.js:22-43`), never a unit (decision 1).
+   unit and is always co-placed, one buddy per player. A **one-way** request is honoured only when
+   the league's `buddy_rule` setting (introduced here, in B1, so no intermediate merge changes the
+   default) is `one_way_best_effort`: then it sets `buddyId` and is best effort through
+   `BuddyEvaluator` (`evaluators/BuddyEvaluator.js:22-43`), never a unit, with the owner's rules
+   (B6). Under the default `mutual` it is listed for the admin and not honoured (decision 1).
+   `buddy_rule` is a string setting, so B1 adds it the way `gender_model` is added: a
+   `FeatureFlagSchema` branch accepting exactly `mutual` and `one_way_best_effort` (anything else is
+   refused, not coerced), the default `mutual`, a selector (not a toggle) in the feature settings
+   page, and the audited update path; tests: the schema refuses another string, a stored
+   `one_way_best_effort` reads back as itself through the settings page and the persistence path.
 5. The staged review shows a "Buddy requests" list from the pipeline and generator diagnostics:
    paired, one-way (placed together or not), and each unresolved request with its reason and
    candidates. Derived from the run's `results`, so it survives a reload.
@@ -102,7 +116,11 @@ so filtering blocked players out in the page would unseat rostered ones.
    conservation invariant (assigned or in overflow, once) holds; existing reasons and metadata are
    unchanged; `summarizeTeamGeneration` rolls the new reason up as it does any other.
 2. Blocked means `placement` is `play_up_blocked` or `play_down_blocked`. Nothing else blocks:
-   `unknown` (no DOB, or no `season_year`) and missing paperwork **flag** (owner decision 3, and B3).
+   `unknown` (no natural age, or no `season_year`) **flags** (owner decision 3, and B3). The
+   natural age comes from the stored player (R5 of the admin-focus plan): the durable-player query
+   (`TeamAnalysisPage.jsx:682-689`) selects it and `toGeneratorPlayer` (`:238-274`) emits it as
+   `naturalAge`, so generation from stored players, without the original file, still checks
+   eligibility; a page-path test generates from stored players only and gets a blocked placement.
 3. Fresh path: blocked players leave the pool before units and coach anchors are built, so they
    are not counted toward the team count, and a blocked coach's child does not anchor a team
    (`coachId` in the metadata says so). A mutual buddy of a blocked player is placed alone, with
@@ -118,7 +136,7 @@ so filtering blocked players out in the page would unseat rostered ones.
 - a blocked player on a reviewed roster stays, keeps the team UUID, and appears in
   `eligibilityHolds` (fails today: no such key);
 - a blocked late player overflows; a blocked player's mutual buddy is placed alone;
-- `unknown` placement and missing paperwork are placed (stays green; guards the owner's decision);
+- `unknown` placement is placed and flagged (stays green; guards the owner's decision);
 - the same seeded roster with no blocked player gives deep-equal output before and after (a golden
   captured from `main` in the PR's first commit).
 
@@ -136,20 +154,17 @@ never lists who or why.
 2. The review section (`:1263-1281`) gains "Not placed" (each player, the reason in words, the
    natural age) and "Needs review" (`eligibilityHolds`: who, which team, why), derived from the
    staged or persisted run's `results`. Following TIME TBD: visible, never dropped.
-3. **Flags, never blocks:** "Eligibility not checked" (`unknown`), and missing paperwork. Paperwork
-   adopts the compliance page's rule (`AdminComplianceDashboard.jsx:111-114`: payment, waiver, and
-   the medical form when `medical_forms` is on), moved to one core helper both pages call; the
-   player lookups (`:677,684`) add the three booleans. Placed players carry the flag beside their
-   name; nothing is held off a roster.
+3. **Flags, never blocks:** "Eligibility not checked" (`unknown`). Placed players carry the flag
+   beside their name; nothing is held off a roster. (No paperwork flag: the paperwork columns and
+   the Compliance page are removed in R1.)
 4. Lists are `<section>`s with headings, announced through a polite live region once.
 
 **Tests:**
 
 - `tests/teamAnalysisEligibility.test.jsx` (page): a refused `coach_team_requests` read shows the
   error and stages no review; a pipeline that throws does the same; a blocked player is listed under
-  "Not placed" with the reason; a player without a waiver is placed and flagged. All four fail today.
-- `tests/paperworkGaps.test.js`: the helper, with the medical flag on and off; the compliance page's
-  existing test (`dashboardReadsAndPreview.test.jsx`) stays green on it.
+  "Not placed" with the reason; a player with no natural age is placed and flagged "Eligibility
+  not checked". All four fail today.
 - e2e `late_registrant_reviewed_roster.feature`: a scenario adds a blocked late registrant to a
   reviewed roster and sees them under "Not placed" with no roster change.
 
@@ -192,8 +207,67 @@ over its limits shows a warning status in the overview; rows operable by keyboar
 ## B5. TeamBuilder adopts the resolver (small; optional, decision 5)
 
 `buddyStats` and `serpentineAssign` call `resolveBuddyRequests`, so both pages match names the same
-way and pair only mutual requests. `tests/balanceAndCoed.test.js` gains two-same-name and one-way
-cases (fail today).
+way and apply the league's `buddy_rule` (B1): mutual only by default, one-way best effort when the
+league chooses it. `tests/balanceAndCoed.test.js` gains two-same-name and one-way cases under both
+settings (fail today).
+
+## B6. Team priorities and coaching leads (owner, 2026-10-22; medium; **solver**)
+
+The owner set the order a team in a division is filled by:
+
+1. **Coaches' children with their buddies.** Each coach's child (or children) anchors that coach's
+   team, with the child's buddy as the league's buddy rule allows (below).
+2. **An even number of coaching leads per team, where possible.** A coaching lead is a player whose
+   registration says a parent volunteers to coach (`players.willing_to_coach`). Leads are spread so
+   no two teams differ by more than one, except where a buddy unit holds more than one lead
+   ("where buddying allows").
+3. **Experience and skill balance** (years played, skill tier or rating), with compensation: a team
+   with fewer leads receives more of the experienced or skilled players, to make up for the
+   missing parent coaches.
+
+**What a lead is, and is not.** Only the flag: a lead's contact details stay on the registration
+platform and are not stored (`docs/changes/2026-10-22-admin-focus.md`, R0). Admins see a "Lead"
+mark on the player while teaming. The coach-lead capture that copied a volunteering guardian's name
+and email into a coach row is retired in R0; the signal is kept.
+
+**League settings** (organization feature flags, audited, through the
+`squadlogic-feature-guardians` registry):
+
+- `teaming_spread_coaching_leads`: on by default. With it off, priority 2 and the compensation in
+  3 are skipped. An import with no volunteer column has no leads, so the default changes nothing
+  for it.
+- `buddy_rule` (added in B1, used here): `mutual` by default (a pair is formed only when both
+  players name each other, one buddy per player), or `one_way_best_effort`, the rule the owner gave
+  earlier the same day: a one-way request is ignored when the requested player is not registered
+  or requested someone else, is matched when the requested player listed no buddy, and every
+  one-way request is listed for the admin (name variants).
+- Both settings reach both entry points: Team Analysis reads the effective flags (`useFeatures`)
+  and passes them to `generateTeams` (today it passes none, `TeamAnalysisPage.jsx:841-848`), and
+  TeamBuilder passes them instead of its fixed `respectBuddies`/`respectCoach`
+  (`TeamBuilderPage.jsx:122-128`). Page tests for each: default on, and stored off.
+
+**Change:** a lead is not a coach. Today the page turns any `willing_to_coach` player into a
+synthetic `coachId` (`TeamAnalysisPage.jsx:255-273`), which `assignmentUnits.js:84-100` treats as a
+head-coach unit, so every lead would become priority 1 and anchor a team. B6 removes that synthetic
+coach: `toGeneratorPlayer` emits a separate `isCoachingLead` flag, and only a coach linked through
+`coach_team_requests` anchors a team. One rule in `packages/core` serves both the generator
+(`teamGeneration.js` with `assignmentUnits.js`) and TeamBuilder's auto-balance
+(`balanceSignals.js:69-140`, which already deals units holding a volunteer first, one per team where
+possible). Units are dealt in priority order; a lead unit goes to a team with the fewest leads; the
+balance signal is the league's own (`balanceSignalKind` and `playerSignal`: years played by default,
+skill rating when the league enables it, never a signal that is off), and `toGeneratorPlayer`
+carries `years_played`. Skill is dealt to the team with the lowest `signal total + c × leads`, where
+`c` is the division's mean unit signal (one lead counts as one average player). `c` is a named
+constant, tuned against `fixtures/demo-2026/` (years played, no rating; the season fixture holds no
+player roster) before the PR opens.
+
+**Tests:** a page-path test through `toGeneratorPlayer`: a lead with no linked coach does not anchor
+a team (fails today); core unit: three teams and four leads give 2/1/1, never 3/1/0; two leads who
+are mutual buddies stay together even when that is uneven; with compensation, the team with fewer
+leads has the higher mean experience (planted: `c = 0` fails it); with the setting off, leads are
+ignored; `buddy_rule = mutual` ignores a one-way request and `one_way_best_effort` honours it when
+the requested player listed no buddy. The full season fixture suite runs (AGENTS.md, scheduling
+engine conventions), and the demo league is teamed end to end.
 
 ## Must stay unchanged (regression tests)
 
@@ -219,10 +293,8 @@ cases (fail today).
 
 ## Decisions for you
 
-1. **One-way requests** (blocking for B1): best effort, or ignored? _Recommended: best effort._ A
-   mutual pair is guaranteed; a one-way request is honoured when it fits and listed when it is not.
-   This is what the generator's evaluator already does once a request arrives, and one family cannot
-   force another's child onto a team.
+1. **One-way requests:** _answered (owner, 2026-10-22)_: a league setting, `buddy_rule` (B6),
+   default mutual only with one buddy per player; `one_way_best_effort` is the league's choice.
 2. **Name matching:** exact after normalising, ambiguity settled only by reciprocity, near misses
    listed, never linked? _Recommended: yes_, as identity resolution does (incident 6, the fixture
    README): a wrong pair is worse than a listed miss, and the admin fixes the request text.

@@ -82,10 +82,21 @@ existing player's values are left as they are until those columns are dropped
 | a declared coach field                                     | `custom_attributes.<declared name>` | The organization's own use |
 
 No phone is stored (`coaches.phone` is not written and a re-import removes
-`phone` from `contact_info`). The coach finalizer reads no first and last name,
-registration id, requested division, years coached or child columns, so those
-are dropped too; a later feature that needs one adds it to the finalizer and
-the allowlist together.
+`phone` from `contact_info`). First and last name are kept only to compose the
+full name (`import-rows`, below); the finalizer reads no registration id,
+requested division, years coached or child columns, so those are dropped; a
+later feature that needs one adds it to the finalizer and the allowlist
+together.
+
+> **Duplicate headers:** the coach export repeats `Playing Up` and
+> `Preferred Co-Coach` once per coached player. A PapaParse `transformHeader`
+> disambiguates them positionally (`__2`) so values never collide.
+>
+> **Two email columns, one `email`:** a blank one never replaces the other, and
+> where both are filled the later column (`Contact Email`) is kept. The full
+> name is composed from `First Name` and `Last Name` when the file has no
+> full-name column. Both rules live in `_shared/import-rows.ts`
+> (`import-validation`) and its browser twin `frontend/src/utils/importRows.js`.
 
 ## Dropped on import (never stored)
 

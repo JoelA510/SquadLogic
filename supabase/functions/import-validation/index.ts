@@ -30,6 +30,7 @@ import {
   isAllowlistedImportType,
   keepAllowedColumns,
 } from '../_shared/import-allowlist.ts';
+import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -637,11 +638,11 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       ? keepAllowedColumns(body.import_type, strippedRow, normalizeHeader, declaredFields)
       : strippedRow;
 
-    // Normalize headers via alias map
-    const normalizedRow: Record<string, string> = {};
-    for (const [key, value] of Object.entries(rawRow)) {
-      const normalizedKey = normalizeHeader(key);
-      normalizedRow[normalizedKey] = sanitizeString(value);
+    // Normalize headers via alias map; a blank never replaces a value two columns share, and a
+    // coach row with first and last names but no full name gets one (_shared/import-rows.ts)
+    let normalizedRow = normalizeImportRow(rawRow, normalizeHeader, sanitizeString);
+    if (body.import_type === 'coaches') {
+      normalizedRow = composeFullName(normalizedRow, sanitizeString);
     }
 
     // Validate

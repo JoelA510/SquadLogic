@@ -17,6 +17,7 @@ import {
   importPayloadText,
   keptPlayerAttributes,
 } from '../utils/importAllowlist.js';
+import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
@@ -8087,10 +8088,9 @@ export const mockSupabase = {
           canonicalizeForUpload(body.import_type, body.rows || []),
           declaredFields
         ).forEach((rawRow, index) => {
-          const row = {};
-          Object.entries(rawRow).forEach(([key, value]) => {
-            row[normalizeHeader(key)] = sanitize(value);
-          });
+          const normalized = normalizeImportRow(rawRow, normalizeHeader, sanitize);
+          const row =
+            body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized;
 
           required.forEach((field) => {
             if (!row[field]) {

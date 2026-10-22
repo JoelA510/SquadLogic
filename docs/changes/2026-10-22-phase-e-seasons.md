@@ -73,6 +73,9 @@ LAST, s.created_at DESC LIMIT 1`. `import_jobs` has no season column (`202603310
   `divisions.program_id` NOT NULL with the composite FK `(program_id, season_settings_id)
 REFERENCES programs (id, season_settings_id)`, so a division cannot sit in another season's
   program. Backfill: one default program per existing season (window NULL), every division in it.
+  The demo seed (`demo_seed`, demo-mode plan D3) is the exception: E2 gives it its real programs
+  from the fixture's `Payment Plan` (Minis U4, Micro U5-U6, Junior U7-U8, Select U14-U19; U9, U10
+  and U12 in the default program), so a demo shows programs spanning divisions.
 - **Every division writer supplies a program.** `upsert_division_for_import` and
   `admin_upsert_division_settings` (whose create path, `20260504020000:109-130`, inserts no
   program) put a new division in the season's default program; E2 replaces both bodies from their

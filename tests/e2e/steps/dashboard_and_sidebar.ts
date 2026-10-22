@@ -9,7 +9,7 @@ Given('an organization and season are active', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
   await page.evaluate((mockOrgId) => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const db = window.__MOCK_DB__ as Record<string, unknown>;
     const orgId = mockOrgId;
     db.organizations = [{ id: orgId, name: 'SquadLogic FC', status: 'active', is_onboarded: true }];
     db.organization_members = [
@@ -23,7 +23,7 @@ Given('an organization and season are active', async ({ page }) => {
     db.season_settings = [
       { id: 's1', name: 'Fall 2024', organization_id: orgId, timezone: 'America/Los_Angeles' },
     ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    window.__saveMockDB__(db);
     localStorage.setItem('squadlogic_active_org', orgId);
     localStorage.setItem('squadlogic-current-season', 'Fall 2024');
   }, MOCK_ORG_ID);

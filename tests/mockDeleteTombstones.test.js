@@ -359,7 +359,7 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/auth_setup.ts': 1,
   'tests/e2e/steps/auto_scheduler.ts': 1,
   'tests/e2e/steps/coach_and_calendar.ts': 4,
-  'tests/e2e/steps/dashboard_and_sidebar.ts': 10,
+  'tests/e2e/steps/dashboard_and_sidebar.ts': 9,
   'tests/e2e/steps/network_resilience.ts': 2,
   'tests/e2e/steps/onboarding.ts': 2,
   'tests/e2e/steps/rbac_and_fields.ts': 3,

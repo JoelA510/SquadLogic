@@ -211,6 +211,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Plans for phases B to E** (`docs/changes/2026-10-22-phase-*.md`, #635): teaming (buddy requests, eligibility, team-size warnings), field permits, home/away balance and seasons with programs. Each awaits the owner's approval before it is built; the roadmap's order table points at them.
+- `docs/operations/release-prep.md` refreshed for 1.1.0: production migrations reconciled against the repository (143 each), the security advisors re-read, and the operator checks before tagging.
 - `docs/architecture/heat-forecast.md` (new); `data-modeling.md` now carries the venue coordinates (`latitude`/`longitude`, `coordinates_set_at/by`, `20260930000000`), `effective_to` on `locations`/`fields`/`field_subunits`, and `organization_heat_settings`; RPC inventory, RLS catalogue, routes table and ROADMAP open items updated.
 - Added the Phase 8 plans of record: `PHASE_8_PLAN.md` (#358); `PHASE_8_6_PR3B_PLAN.md` and `PHASE_8_9_PLAN.md` (#451); `PHASE_8_9_D14_PLAN.md` (#493); `PHASE_8_6_PR11_ENACT_PLAN.md` (#502); `PLAN_60_62_GATE_GAPS.md` (#513); and `PHASE_8_6_PR12_READERS_PLAN.md` (#516).
 - Added `docs/PHASE_8_PROGRESS.md`, the per-task Phase 8 progress log, opened in #360 and updated after each merge. Also corrected and extended `BUILD_PLAN_STATUS.md` and `MODEL_GAPS.md` (#394, #401, #415), and recorded the 2026-09-29 operator rulings plus the Deno job in CLAUDE.md §11 (#491). Added `docs/operations/migration-ledger-normalisation.md`, the production ledger re-key executed on 2026-09-28 (#457), and `docs/testing/test-timeouts.md`, the measured per-test timeout rule (#476).

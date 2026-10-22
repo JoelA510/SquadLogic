@@ -8060,7 +8060,8 @@ export const mockSupabase = {
         // before anything is validated or staged.
         canonicalizeForUpload(body.import_type, body.rows || []).forEach((rawRow, index) => {
           const normalized = normalizeImportRow(rawRow, normalizeHeader, sanitize);
-          const row = body.import_type === 'coaches' ? composeFullName(normalized) : normalized;
+          const row =
+            body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized;
 
           required.forEach((field) => {
             if (!row[field]) {

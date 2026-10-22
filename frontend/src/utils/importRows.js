@@ -40,12 +40,14 @@ export function normalizeImportRow(
  * Give a row with no full name one composed from its first and last names. A row with a full
  * name, or with neither part, is returned unchanged.
  * @param {Record<string, string>} row
+ * @param {(value: unknown) => string} [clean] - applied to the composed name (two capped parts
+ *   can exceed the cap together)
  * @returns {Record<string, string>}
  */
-export function composeFullName(row) {
+export function composeFullName(row, clean = (v) => (v == null ? '' : String(v))) {
   if (!isBlank(row.full_name)) return row;
   const parts = [row.first_name, row.last_name]
     .filter((p) => !isBlank(p))
     .map((p) => String(p).trim());
-  return parts.length ? { ...row, full_name: parts.join(' ') } : row;
+  return parts.length ? { ...row, full_name: clean(parts.join(' ')) } : row;
 }

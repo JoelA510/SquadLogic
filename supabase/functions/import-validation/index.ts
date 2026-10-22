@@ -607,7 +607,9 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     // Normalize headers via alias map; a blank never replaces a value two columns share, and a
     // coach row with first and last names but no full name gets one (_shared/import-rows.ts)
     let normalizedRow = normalizeImportRow(rawRow, normalizeHeader, sanitizeString);
-    if (body.import_type === 'coaches') normalizedRow = composeFullName(normalizedRow);
+    if (body.import_type === 'coaches') {
+      normalizedRow = composeFullName(normalizedRow, sanitizeString);
+    }
 
     // Validate
     const rowErrors = validateRow(normalizedRow, body.import_type, i);

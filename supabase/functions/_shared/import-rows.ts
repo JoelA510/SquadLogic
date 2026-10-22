@@ -26,10 +26,14 @@ export function normalizeImportRow(
   return out;
 }
 
-export function composeFullName(row: Record<string, string>): Record<string, string> {
+export function composeFullName(
+  row: Record<string, string>,
+  clean: (value: unknown) => string = (v) => (v == null ? '' : String(v))
+): Record<string, string> {
   if (!isBlank(row.full_name)) return row;
   const parts = [row.first_name, row.last_name]
     .filter((p) => !isBlank(p))
     .map((p) => String(p).trim());
-  return parts.length ? { ...row, full_name: parts.join(' ') } : row;
+  // The cleaner runs again on the composed value: two capped parts can exceed the cap together.
+  return parts.length ? { ...row, full_name: clean(parts.join(' ')) } : row;
 }

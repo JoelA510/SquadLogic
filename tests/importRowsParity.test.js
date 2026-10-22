@@ -92,6 +92,13 @@ describe('import row normalization: browser and Edge copies agree', () => {
     });
   }
 
+  it('applies the cleaner to the composed name, so two capped parts stay under the cap', () => {
+    const cap = (v) => String(v ?? '').slice(0, 500);
+    const row = { first_name: 'a'.repeat(500), last_name: 'b'.repeat(500) };
+    expect(browser.composeFullName(row, cap).full_name).toHaveLength(500);
+    expect(edge.composeFullName(row, cap).full_name).toHaveLength(500);
+  });
+
   it('exports the same functions', () => {
     expect(Object.keys(browser).sort()).toEqual(Object.keys(edge).sort());
   });

@@ -12,8 +12,9 @@ was checked on the date above; each item says how.
 ## Verified Evidence (2026-10-22)
 
 - **Release contents:** `CHANGELOG.md` section `[1.1.0] - 2026-10-22`, which folds in everything
-  merged since 2026-10-20: Phase A (privacy and access), the `admin_delete_team` and UTC-idiom
-  fixes, and the plans for phases B to E. `package.json` is already `1.1.0`. No tag exists on the
+  merged since 2026-10-20: idempotent evaluation-run saves (#624), the team-count recommendation
+  (#626), Phase A (privacy and access), the `admin_delete_team` and UTC-idiom fixes, and the plans
+  for phases B to E. `package.json` is already `1.1.0`. No tag exists on the
   remote yet (*executed*: `git ls-remote --tags origin` lists none).
 - **Migrations, repo against production** (*executed*): 143 SQL migrations under
   `supabase/migrations/` on `main`, and 143 versions in production's
@@ -55,6 +56,11 @@ was checked on the date above; each item says how.
 - **Sentry:** the SDK is wired and its release tag pinned (`tests/sentryConfig.test.js`), but
   whether `VITE_SENTRY_DSN` is set in Vercel Production was **not verified**: the Vercel API refused
   to list the project's environment variables (403). Follow [sentry-smoke.md](./sentry-smoke.md).
+- **Storage retention is not running** (*executed*): the scheduled `Cleanup storage buckets
+  (retention)` workflow failed on each of its last three runs (2026-10-20 to 2026-10-22), both
+  jobs with "SUPABASE_URL secret is not configured". Until the two Actions secrets are set, or
+  the schedule is disabled, `raw-imports` and `exports` keep every object
+  ([storage-retention.md](./storage-retention.md)). See the operator checks.
 - **Phases B to E:** planned (`docs/changes/2026-10-22-phase-*.md`), not built; each waits for the
   owner's approval. They are not part of 1.1.0.
 
@@ -66,9 +72,14 @@ was checked on the date above; each item says how.
   and that `VITE_USE_MOCK_SUPABASE` is unset or `false` there.
 - Confirm the live `main` ruleset requires the checks in `.github/rulesets/main.json` (AGENTS.md
   section 11; `docs/operations/ci-cd.md`, Branch Protection). GitHub does not read that file.
+- Configure the `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` Actions secrets for the
+  retention workflow and confirm one green run (manual dispatch with `dry_run: true` first), or
+  disable its schedule deliberately ([storage-retention.md](./storage-retention.md)).
 - Tag the release commit `v1.1.0` (or the repository's tag form) and publish the `[1.1.0]` notes.
 
 ## Rollback
 
-This page and the changelog are docs only: revert the PR that changed them. The release's
-migrations each have a revert under `docs/sql/`; none is run by tagging.
+This page and the changelog are docs only: revert the PR that changed them. Migrations from
+`20260530000000` on have a revert under `docs/sql/`, except four recorded as deferred gaps in the
+remediation plan: `20260602010000`, `20260603190000`, `20260612000000` and `20260612000001`.
+Earlier migrations predate the revert rule. Tagging runs none of them.

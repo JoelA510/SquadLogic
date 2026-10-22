@@ -2515,15 +2515,29 @@ NEEDLES
       # Structure only (the purge cannot be undone): both finalizers back to
       # the bodies before the allowlist -- 20261020020000's finalize_import_job
       # and 20260726000300's finalize_coach_import_job, md5 of prosrc computed
-      # from those files 2026-10-22 -- still pinned to UTC, the two new
-      # functions and the retention job gone. `missing` fires when a lookup
+      # from those files 2026-10-22 -- still pinned to UTC; the custom-attributes
+      # trigger function back to 20260405120000's body (md5 computed from that
+      # file, trailing spaces aside: the revert carries none, for git diff
+      # --check) with its search_path; the six new functions and the new retention
+      # job gone, and cleanup-staging-players back on its 20260416000002 command. `missing` fires when a lookup
       # finds no function, so a broken query cannot read as restored.
       if psql_cmd "SELECT 'ALLOWLIST-VERDICT:' || CASE
                WHEN to_regprocedure('public.finalize_import_job(uuid, jsonb)') IS NULL
                  OR to_regprocedure('public.finalize_coach_import_job(uuid, jsonb)') IS NULL THEN 'missing'
-               WHEN to_regprocedure('public.import_declared_attributes(uuid, text, jsonb)') IS NOT NULL
+               WHEN to_regprocedure('public.import_declared_attributes(jsonb, jsonb)') IS NOT NULL
+                 OR to_regprocedure('public.import_declared_fields(uuid, text)') IS NOT NULL
+                 OR to_regprocedure('public.import_kept_player_attributes(jsonb, jsonb)') IS NOT NULL
+                 OR to_regprocedure('public.import_allowed_payload(text, jsonb, jsonb)') IS NOT NULL
+                 OR to_regprocedure('public.import_allowed_keys(text)') IS NOT NULL
                  OR to_regprocedure('public.minimise_import_people_data()') IS NOT NULL THEN 'new-functions-left'
                WHEN EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-import-rows') THEN 'cron-left'
+               WHEN NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-players'
+                                   AND btrim(command) = 'DELETE FROM public.staging_players WHERE created_at < now() - interval ''30 days''')
+                 THEN 'players-cron'
+               WHEN (SELECT md5(regexp_replace(p.prosrc, '[ \t]+\n', E'\n', 'g')) <> '130088e86b2bfe2d701f156adfd9d4c0' OR p.prosecdef
+                            OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public']
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.validate_custom_attributes()'::regprocedure) THEN 'trigger'
                WHEN (SELECT count(*) FROM pg_proc p
                       WHERE p.prosecdef
                         AND p.proconfig = ARRAY['search_path=public', 'TimeZone=UTC']
@@ -2534,9 +2548,9 @@ NEEDLES
                  THEN 'restored'
                ELSE 'wrong' END;" \
          >$SCRATCH/harness_allowlist 2>&1 && grep -q 'ALLOWLIST-VERDICT:restored' $SCRATCH/harness_allowlist; then
-        echo "  | (checked) the allowlist revert restores both finalizers' previous bodies byte for byte, pinned to UTC, and drops the two new functions and the retention job"
+        echo "  | (checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"
       else
-        echo "FAIL revert ${id}: the allowlist revert did not restore both finalizers' previous bodies and posture, or left a new function or the retention job"
+        echo "FAIL revert ${id}: the allowlist revert did not restore both finalizers' or the trigger's previous bodies and posture, left a new function or the new retention job, or did not restore the staging_players job"
         dump 10 $SCRATCH/harness_allowlist; STATUS=1
       fi
     fi

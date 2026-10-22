@@ -314,6 +314,9 @@ const READERS = {
   finalize_coach_import_job: 'coaches',
   finalize_field_import_job: 'fields',
   finalize_field_availability_import_job: 'fields',
+  // Reduces an unfinished job's staged payloads through import_allowed_payload;
+  // reads no key by name (asserted below).
+  minimise_import_people_data: 'purge',
 };
 
 function migrationBodies() {
@@ -351,6 +354,11 @@ describe('the allowlist equals what the latest SQL reads', () => {
   it('finds every classified reader in the migrations, and no unclassified one', () => {
     expect(census.unclassified).toEqual([]);
     expect([...census.readers].sort()).toEqual(Object.keys(READERS).sort());
+  });
+
+  it('the purge reads no staged key by name', () => {
+    expect([...payloadKeysRead(latest.get('minimise_import_people_data') ?? '')]).toEqual([]);
+    expect(latest.get('minimise_import_people_data')).toMatch(/import_allowed_payload\s*\(/);
   });
 
   it('the player readers read exactly the player allowlist', () => {
@@ -407,5 +415,98 @@ describe('the allowlist equals what the latest SQL reads', () => {
         " || public.import_payload_text(lower(x), 'not-read')"
     );
     expect([...keys].sort()).toEqual(['a', "can you coach for this player's team?"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The SQL copy of the lists: `import_allowed_keys`, which the purge reduces an
+// unfinished job's staged rows with.
+// ---------------------------------------------------------------------------
+
+/**
+ * The literal keys of each `WHEN '<type>' THEN ARRAY[...]` arm of a body.
+ * @param {string} body
+ * @returns {Record<string, string[]>}
+ */
+function sqlAllowedKeys(body) {
+  /** @type {Record<string, string[]>} */
+  const lists = {};
+  for (const m of body.matchAll(
+    /WHEN\s+'(\w+)'\s+THEN\s+ARRAY\s*\[([\s\S]*?)\]\s*::\s*text\[\]/gi
+  )) {
+    lists[m[1]] = literals(m[2]);
+  }
+  return lists;
+}
+
+describe('the SQL copy of the lists equals the code copies', () => {
+  const latest = migrationBodies();
+  const body = latest.get('import_allowed_keys') ?? '';
+
+  it('reads both arms of the latest import_allowed_keys', () => {
+    expect(Object.keys(sqlAllowedKeys(body)).sort()).toEqual(['coaches', 'players']);
+  });
+
+  it('holds the player and coach lists exactly, in order', () => {
+    const lists = sqlAllowedKeys(body);
+    expect(lists.players).toEqual([...browser.PLAYER_IMPORT_KEYS]);
+    expect(lists.coaches).toEqual([...browser.COACH_IMPORT_KEYS]);
+  });
+
+  it('POSITIVE CONTROL: a key missing from the SQL copy fails', () => {
+    const planted = body.replace(", 'friend_code'", '');
+    expect(planted).not.toBe(body);
+    expect(sqlAllowedKeys(planted).players).not.toEqual([...browser.PLAYER_IMPORT_KEYS]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// import-validation's row errors are stored in import_jobs.error_summary, so
+// none may quote a person's value (R0). The handler's module calls `serve`, so
+// its source is read.
+// ---------------------------------------------------------------------------
+
+const PERSON_KEYS = [
+  'first_name',
+  'last_name',
+  'full_name',
+  'preferred_name',
+  'nickname',
+  'email',
+  'date_of_birth',
+  'dob',
+  'birth_year',
+];
+
+/** Each `message:` template literal that interpolates `row[<person key>]`. */
+function quotingMessages(src) {
+  const out = [];
+  for (const m of src.matchAll(/message:\s*`([^`]*)`/g)) {
+    for (const key of PERSON_KEYS) {
+      if (new RegExp(String.raw`\$\{\s*row\s*(?:\[\s*'${key}'\s*\]|\.${key}\b)`).test(m[1])) {
+        out.push(m[1]);
+      }
+    }
+  }
+  return out;
+}
+
+describe('import-validation row errors quote no person value', () => {
+  const src = readFileSync(
+    path.join(REPO, 'supabase/functions/import-validation/index.ts'),
+    'utf8'
+  );
+
+  it('reads the handler, whose date and email checks say where without the value', () => {
+    expect(src).toMatch(/message: 'Invalid date format'/);
+    expect(src).toMatch(/message: 'Invalid email format'/);
+    expect(quotingMessages(src)).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL: a message quoting the birth date or the email is found', () => {
+    expect(
+      quotingMessages("message: `Invalid date format: ${row['date_of_birth']}`,")
+    ).toHaveLength(1);
+    expect(quotingMessages('message: `Invalid email format: ${row.email}`,')).toHaveLength(1);
   });
 });

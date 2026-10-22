@@ -25,10 +25,11 @@ import {
   describeHeaderParse,
 } from '../utils/importHeaders.js';
 import {
-  ALLOWLIST_ENTITY_TYPES,
   canonicalImportKey,
+  fetchDeclaredImportFields,
   filterImportRows,
   isAllowedImportKey,
+  isAllowlistedImportType,
 } from '../utils/importAllowlist.js';
 import { isAdminRole } from '../constants/permissions.js';
 
@@ -494,6 +495,31 @@ export function ImportProvider({ children }) {
         setActiveJobId(job.id);
         setActiveJob(job);
 
+        // The organization's declared fields, read for this import: the
+        // allowlist keeps their columns, and a failed read fails the import
+        // rather than dropping them silently (import-validation refuses too).
+        let declaredFields = [];
+        if (isAllowlistedImportType(type)) {
+          try {
+            declaredFields = await fetchDeclaredImportFields({
+              supabase,
+              organizationId: currentOrganization.id,
+              importType: type,
+            });
+          } catch (err) {
+            await failImportJob({
+              supabase,
+              importJobId: job.id,
+              stage: 'schema_lookup',
+              message: err.message,
+            });
+            setImportStatus('error');
+            setIsImporting(false);
+            addLog(`Import failed: ${err.message}`);
+            return;
+          }
+        }
+
         addLog('Parsing CSV data...');
         Papa.parse(file, {
           header: true,
@@ -513,9 +539,6 @@ export function ImportProvider({ children }) {
             // organization declared (utils/importAllowlist.js). The Edge
             // Function and the finalizers apply the same rule again.
             const isPrivacyFiltered = type === 'players' || type === 'coaches';
-            const declaredFields = isPrivacyFiltered
-              ? Object.keys(organizationSchemas[ALLOWLIST_ENTITY_TYPES[type]] || {})
-              : [];
             const data = isPrivacyFiltered
               ? filterImportRows(type, canonicalizeForUpload(type, results.data), declaredFields)
               : results.data;

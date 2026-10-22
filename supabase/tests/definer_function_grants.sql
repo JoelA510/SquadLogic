@@ -6,7 +6,7 @@
 --   * authenticated keeps admin RPCs + RLS helpers but loses trigger functions;
 --   * anon retains the intentionally-excluded public registration RPC;
 --   * the import finalizers stay authenticated-only, and the import allowlist's
---     helper and the purge (20261022010000) are executable by no client role.
+--     helpers and the purge (20261022010000) are executable by no client role.
 -- Grant checks need no fixtures, so this suite seeds nothing.
 
 BEGIN;
@@ -67,10 +67,20 @@ SELECT ok(
 
 -- The allowlist helper and the purge run only inside the finalizers and the
 -- migration, as their owner.
-SELECT ok(
-  NOT has_function_privilege('anon', 'public.import_declared_attributes(uuid,text,jsonb)', 'EXECUTE')
-  AND NOT has_function_privilege('authenticated', 'public.import_declared_attributes(uuid,text,jsonb)', 'EXECUTE'),
-  'no client role can execute import_declared_attributes'
+SELECT is(
+  ARRAY(
+    SELECT f FROM unnest(ARRAY[
+      'public.import_allowed_keys(text)',
+      'public.import_declared_fields(uuid,text)',
+      'public.import_declared_attributes(jsonb,jsonb)',
+      'public.import_kept_player_attributes(jsonb,jsonb)',
+      'public.import_allowed_payload(text,jsonb,jsonb)'
+    ]) f
+    WHERE has_function_privilege('anon', f::regprocedure, 'EXECUTE')
+       OR has_function_privilege('authenticated', f::regprocedure, 'EXECUTE')
+  ),
+  ARRAY[]::text[],
+  'no client role can execute any of the five import allowlist helpers'
 );
 SELECT ok(
   NOT has_function_privilege('anon', 'public.minimise_import_people_data()', 'EXECUTE')

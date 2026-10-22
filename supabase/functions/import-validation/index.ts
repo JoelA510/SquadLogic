@@ -317,7 +317,9 @@ function validateRow(
       errors.push({
         row: rowIndex + 1,
         field: 'date_of_birth',
-        message: `Invalid date format: ${row['date_of_birth']}`,
+        // The row and field say where; the value stays out of the message,
+        // which is stored in import_jobs.error_summary (R0).
+        message: 'Invalid date format',
       });
     }
   }
@@ -328,7 +330,7 @@ function validateRow(
       errors.push({
         row: rowIndex + 1,
         field: 'email',
-        message: `Invalid email format: ${row['email']}`,
+        message: 'Invalid email format',
       });
     }
   }

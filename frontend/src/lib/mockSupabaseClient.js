@@ -14,6 +14,8 @@ import {
   ALLOWLIST_ENTITY_TYPES,
   declaredAttributes,
   filterImportRows,
+  importPayloadText,
+  keptPlayerAttributes,
 } from '../utils/importAllowlist.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
@@ -5576,20 +5578,29 @@ export const mockSupabase = {
             String(item.organization_id) === String(job.organization_id) &&
             item.entity_type === 'player'
         );
+        // The SQL reads each with import_payload_text: the first key present
+        // with a non-blank value, trimmed.
         const teamPlacement = Object.fromEntries(
           [
-            ['team_name', payload['team name']],
-            ['team_age', payload['team age']],
-            ['team_gender', payload['team gender']],
-          ].filter(([, value]) => value !== undefined && String(value).trim() !== '')
+            ['team_name', importPayloadText(payload, ['team name'])],
+            ['team_age', importPayloadText(payload, ['team age'])],
+            ['team_gender', importPayloadText(payload, ['team gender'])],
+          ].filter(([, value]) => value !== null)
         );
-        const coachingAnswer = String(payload.willing_to_coach ?? '')
-          .trim()
-          .toLowerCase();
+        const playUp = importPayloadText(payload, [
+          'play_up',
+          'play up',
+          'are you coaching so this player can play up a division?',
+        ]);
+        const coachingAnswer = importPayloadText(payload, [
+          'willing_to_coach',
+          'coach_volunteer',
+          "can you coach for this player's team?",
+        ])?.toLowerCase();
         const customAttributes = {
           ...declaredAttributes(playerSchema?.schema_definition, payload),
           ...teamPlacement,
-          ...(payload.play_up ? { play_up: payload.play_up } : {}),
+          ...(playUp !== null ? { play_up: playUp } : {}),
           ...(coachingAnswer ? { coaching_answer: coachingAnswer } : {}),
         };
         const basePlayer = {
@@ -5616,8 +5627,9 @@ export const mockSupabase = {
           willing_to_coach: willingToCoach,
           buddy_request: payload.buddy_request || null,
           mutual_buddy_code: payload.mutual_buddy_code || payload.buddy_code || null,
+          // An existing player's undeclared keys go too (as the SQL).
           custom_attributes: {
-            ...(existing?.custom_attributes || {}),
+            ...keptPlayerAttributes(playerSchema?.schema_definition, existing?.custom_attributes),
             ...customAttributes,
           },
           import_source: 'gotsport',
@@ -8096,7 +8108,7 @@ export const mockSupabase = {
               validationErrors.push({
                 row: index + 1,
                 field: 'date_of_birth',
-                message: `Invalid date format: ${row.date_of_birth}`,
+                message: 'Invalid date format',
               });
             }
           }

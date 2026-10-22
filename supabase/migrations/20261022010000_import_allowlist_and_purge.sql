@@ -12,21 +12,36 @@
 -- the league does not control, so the import becomes an **allowlist**.
 --
 -- **The change.**
---   * `import_declared_attributes(org, entity, payload)` (new, SECURITY
---     INVOKER, no grant to any client role) returns the payload's entries
---     whose key matches a field the organization declared in
---     `organization_schemas` for the entity, keyed by the declared name and
---     typed as declared; everything else is dropped. It is the SQL half of
---     the allowlist's rule (c) (`_shared/import-allowlist.ts`).
+--   * Helpers (new; SECURITY INVOKER; no grant to any client role -- the
+--     SECURITY DEFINER finalizers and the purge call them as their owner):
+--       - `import_allowed_keys(type)`: the canonical keys a players or coaches
+--         import keeps, the SQL copy of `_shared/import-allowlist.ts`
+--         (`tests/importAllowlistParity.test.js` holds the three copies equal);
+--       - `import_declared_fields(org, entity)`: the organization's declared
+--         fields (`organization_schemas`), keyed by field identity, read once
+--         per finalize or purge rather than once per row;
+--       - `import_declared_attributes(declared, payload)`: the payload's
+--         entries matching a declared field, keyed by the declared name and
+--         typed as declared; everything else dropped;
+--       - `import_kept_player_attributes(declared, attrs)`: a player's
+--         declared attributes plus the import's own keys (`play_up`,
+--         `coaching_answer`, `team_name`, `team_age`, `team_gender`);
+--       - `import_allowed_payload(type, declared, payload)`: a staged payload
+--         reduced to the allowlisted keys and the declared fields.
+--   * `validate_custom_attributes()` (the custom-attributes trigger), copied
+--     from 20260405120000 with its 20260421001209 search_path: a declared
+--     `date` is checked on the string's text, not its JSON text, whose
+--     quotes made every date fail `^\d{4}-\d{2}-\d{2}`. Nothing else changes.
 --   * `finalize_import_job(uuid, jsonb)`, copied from its latest body
 --     (20261020020000), no longer reads any email, phone, guardian, parent or
 --     payment key: it writes `contact_info = '{}'` and `guardian_contacts =
 --     '[]'` on a new player and leaves both untouched on an existing one (the
 --     columns are dropped in a later PR), and `paid = false` on a new player
---     and untouched on an existing one. `custom_attributes` is the declared
---     fields, the team placement (`team_name`, `team_age`, `team_gender`,
---     kept for Phase B), `play_up` and `coaching_answer`, not the payload
---     minus a denylist.
+--     and untouched on an existing one (the column goes in R1).
+--     `custom_attributes` is the declared fields, the team placement
+--     (`team_name`, `team_age`, `team_gender`, kept for Phase B), `play_up`
+--     and `coaching_answer`; on a re-import an existing player's undeclared
+--     keys are dropped too.
 --   * `finalize_coach_import_job(uuid, jsonb)`, copied from its latest body
 --     (20260726000300), no longer reads or writes a phone: `coaches.phone` is
 --     not written, `contact_info` carries the email and loses any phone, and
@@ -41,41 +56,114 @@
 --     once:
 --       - every coach's `custom_attributes` reduced to its declared fields
 --         (production declares none, so `{}`), `phone` NULL and `phone` out of
---         `contact_info`;
---       - the same in the coach snapshots `import_application_records` keeps
---         for rollback (previous, applied and rollback payloads), so a
---         rollback cannot restore what was purged;
---       - both staging tables' rows of every completed, completed with
---         warnings or failed job deleted. Rows of a job still queued,
---         processing, importing, ready to apply or needing a fix stay, so a
---         deferred apply (20260503090000) is not lost;
+--         `contact_info`; the same in the coach snapshots
+--         `import_application_records` keeps for rollback;
+--       - every player's `custom_attributes` reduced to its declared fields and
+--         the import's own keys, `contact_info = '{}'`, `guardian_contacts =
+--         '[]'` (production holds no players);
+--       - the staged rows of every completed, completed-with-warnings or failed
+--         job deleted: `staging_players`, and the COACH rows of
+--         `staging_import_rows` (field and field-availability rows stay: a
+--         refused field row is kept on its job for replay);
+--       - the staged people rows of a job still queued, processing,
+--         importing, ready to apply or needing a fix kept (a deferred apply,
+--         20260503090000, is not lost), with both payloads reduced to the
+--         allowlist. `raw_payload`, which nothing reads, keeps only entries
+--         whose lower-cased key is itself allowlisted or declared;
 --       - personal values in `audit_log.metadata` replaced with
 --         '[redacted]': the email keys on every row, and the name, birth
 --         date, contact, guardian and note keys inside a player event's
---         `patch`, `fields`, `old` and `new`. No row is deleted.
---   * A daily job deletes `staging_import_rows` older than 30 days, as
---     `cleanup-staging-players` (20260416000002) does for `staging_players`.
+--         `patch`, `fields`, `old` and `new`. No row is deleted;
+--       - the value in an "Invalid date format: ..." or "Invalid email
+--         format: ..." row error in `import_jobs.error_summary` removed
+--         (import-validation no longer puts it there).
+--   * Retention, both at 30 days and both only for a finished job's rows: the
+--     new `cleanup-staging-import-rows` deletes a finished job's coach rows,
+--     and `cleanup-staging-players` (20260416000002), which deleted every row
+--     30 days old whatever its job's state, now spares an unfinished job's.
 --
 -- The import path's other two halves are code: the browser and the
 -- import-validation Edge Function keep only the allowlisted columns
 -- (`frontend/src/utils/importAllowlist.js`, `_shared/import-allowlist.ts`);
 -- `tests/importAllowlistParity.test.js` holds both lists equal to the keys
--- these functions read.
+-- these functions read and to `import_allowed_keys`.
 --
 -- Reversible in structure only: docs/sql/20261022010000_revert.sql restores
--- the function bodies and drops the new ones. It cannot restore purged data.
+-- the function bodies, the trigger function and the staging_players job, and
+-- drops the new functions. It cannot restore purged data.
 -- Smoke checks: docs/sql/20261022010000_smoke.sql.
 -- pgTAP: supabase/tests/import_allowlist.sql.
 
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1. The declared-fields half of the allowlist.
+-- 1. The allowlist's SQL half.
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION public.import_declared_attributes(
+-- The canonical keys each people import keeps: the SQL copy of
+-- PLAYER_IMPORT_KEYS and COACH_IMPORT_KEYS. Any other type keeps none.
+CREATE OR REPLACE FUNCTION public.import_allowed_keys(p_import_type text)
+RETURNS text[]
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+    SELECT CASE p_import_type
+        WHEN 'players' THEN ARRAY[
+            'first_name', 'last_name', 'preferred_name', 'nickname', 'external_registration_id',
+            'gotsport_id', 'registration_id', 'player_id', 'date_of_birth', 'dob', 'birth_year',
+            'age group', 'age_group', 'age', 'gender', 'grade', 'division_id', 'division_name',
+            'division', 'group', 'program', 'skill_tier', 'skill_level', 'years_played',
+            'years played',
+            'how many years has your player played in an organized soccer program?', 'waitlist',
+            'waitlisted', 'play_up', 'play up',
+            'are you coaching so this player can play up a division?', 'willing_to_coach',
+            'coach_volunteer', 'can you coach for this player''s team?', 'buddy_request',
+            'buddy_id', 'buddy_external_registration_id', 'buddy_registration_id',
+            'friend_request', 'mutual_buddy_code', 'buddy_code', 'friend_code', 'team name',
+            'team age', 'team gender'
+        ]::text[]
+        WHEN 'coaches' THEN ARRAY[
+            'full_name', 'email', 'status', 'coach_status', 'can_coach_multiple_teams',
+            'multiple_teams', 'multi_team', 'certifications', 'certification', 'first_name',
+            'last_name'
+        ]::text[]
+        ELSE ARRAY[]::text[]
+    END;
+$$;
+
+-- An organization's declared fields for an entity, keyed by field identity
+-- (what the schema builder stores for a name: lower case, trimmed, whitespace
+-- runs as one underscore), each `{"name": <declared name>, "type": <type>}`.
+CREATE OR REPLACE FUNCTION public.import_declared_fields(
     p_organization_id uuid,
-    p_entity_type text,
+    p_entity_type text
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT COALESCE(jsonb_object_agg(
+        regexp_replace(regexp_replace(lower(f.key), '^\s+|\s+$', '', 'g'), '\s+', '_', 'g'),
+        jsonb_build_object('name', f.key, 'type', f.value)
+        ORDER BY f.key COLLATE "C"
+    ), '{}'::jsonb)
+    FROM public.organization_schemas s
+    CROSS JOIN LATERAL jsonb_each_text(
+        CASE WHEN jsonb_typeof(s.schema_definition) = 'object'
+             THEN s.schema_definition ELSE '{}'::jsonb END
+    ) f
+    WHERE s.organization_id = p_organization_id
+      AND s.entity_type = p_entity_type;
+$$;
+
+-- The payload's entries that match a declared field, stored under the
+-- declared name and typed as declared. A value that does not parse as its
+-- type is dropped rather than stored as text (the validate_custom_attributes
+-- trigger would refuse it). A date is stored as its `YYYY-MM-DD` string.
+CREATE OR REPLACE FUNCTION public.import_declared_attributes(
+    p_declared jsonb,
     p_payload jsonb
 )
 RETURNS jsonb
@@ -83,37 +171,19 @@ LANGUAGE sql
 STABLE
 SET search_path = public
 AS $$
-    -- A declared field's identity is what the schema builder stores for a
-    -- name: lower case, trimmed, whitespace runs as one underscore. An import
-    -- column `Jersey Size` matches a declared `jersey_size` and is stored
-    -- under the declared name, typed as declared; a value that does not parse
-    -- as its type is dropped rather than stored as text (the
-    -- validate_custom_attributes trigger would refuse it).
-    WITH declared AS (
+    WITH cells AS (
         SELECT
-            f.key AS name,
-            f.value AS field_type,
-            regexp_replace(regexp_replace(lower(f.key), '^\s+|\s+$', '', 'g'), '\s+', '_', 'g')
-                AS identity
-        FROM public.organization_schemas s
-        CROSS JOIN LATERAL jsonb_each_text(
-            CASE WHEN jsonb_typeof(s.schema_definition) = 'object'
-                 THEN s.schema_definition ELSE '{}'::jsonb END
-        ) f
-        WHERE s.organization_id = p_organization_id
-          AND s.entity_type = p_entity_type
-    ),
-    cells AS (
-        SELECT
-            d.name,
-            d.field_type,
+            d.value ->> 'name' AS name,
+            d.value ->> 'type' AS field_type,
             c.key,
             NULLIF(btrim(c.value #>> '{}'), '') AS v
         FROM jsonb_each(
             CASE WHEN jsonb_typeof(p_payload) = 'object' THEN p_payload ELSE '{}'::jsonb END
         ) c
-        JOIN declared d
-          ON d.identity = regexp_replace(
+        JOIN jsonb_each(
+            CASE WHEN jsonb_typeof(p_declared) = 'object' THEN p_declared ELSE '{}'::jsonb END
+        ) d
+          ON d.key = regexp_replace(
                 regexp_replace(lower(c.key), '^\s+|\s+$', '', 'g'), '\s+', '_', 'g')
         WHERE jsonb_typeof(c.value) IN ('string', 'number', 'boolean')
     ),
@@ -141,13 +211,128 @@ AS $$
     WHERE value IS NOT NULL;
 $$;
 
--- Called only from the SECURITY DEFINER finalizers and the purge, which run
--- as their owner; no client role needs it.
-REVOKE ALL ON FUNCTION public.import_declared_attributes(uuid, text, jsonb)
+-- A player's custom attributes as the allowlist keeps them: the declared
+-- fields, and the keys the player import writes itself.
+CREATE OR REPLACE FUNCTION public.import_kept_player_attributes(
+    p_declared jsonb,
+    p_attributes jsonb
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT public.import_declared_attributes(p_declared, COALESCE(p_attributes, '{}'::jsonb))
+        || COALESCE((
+            SELECT jsonb_object_agg(a.key, a.value)
+            FROM jsonb_each(
+                CASE WHEN jsonb_typeof(p_attributes) = 'object' THEN p_attributes ELSE '{}'::jsonb END
+            ) a
+            WHERE a.key IN ('play_up', 'coaching_answer', 'team_name', 'team_age', 'team_gender')
+              AND jsonb_typeof(a.value) <> 'null'
+        ), '{}'::jsonb);
+$$;
+
+-- A staged payload reduced to the allowlist: keys whose lower-cased, trimmed
+-- form is an allowlisted key, and the declared fields' columns, as given.
+CREATE OR REPLACE FUNCTION public.import_allowed_payload(
+    p_import_type text,
+    p_declared jsonb,
+    p_payload jsonb
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+    SELECT COALESCE(jsonb_object_agg(c.key, c.value), '{}'::jsonb)
+    FROM jsonb_each(
+        CASE WHEN jsonb_typeof(p_payload) = 'object' THEN p_payload ELSE '{}'::jsonb END
+    ) c
+    WHERE lower(btrim(c.key)) = ANY (public.import_allowed_keys(p_import_type))
+       OR COALESCE(p_declared, '{}'::jsonb) ? regexp_replace(
+              regexp_replace(lower(c.key), '^\s+|\s+$', '', 'g'), '\s+', '_', 'g');
+$$;
+
+REVOKE ALL ON FUNCTION public.import_allowed_keys(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.import_declared_fields(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.import_declared_attributes(jsonb, jsonb)
+    FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.import_kept_player_attributes(jsonb, jsonb)
+    FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.import_allowed_payload(text, jsonb, jsonb)
     FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- 2. finalize_import_job: copied from 20261020020000; contact, guardian and
+-- 2. validate_custom_attributes: copied from 20260405120000 (search_path from
+--    20260421001209); the date check reads the string, not its JSON text.
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.validate_custom_attributes()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+    v_schema jsonb;
+    v_key text;
+    v_val jsonb;
+    v_expected_type text;
+    v_reserved_keys text[] := public.get_reserved_keys();
+BEGIN
+    -- 1. Load Schema for Org + Entity
+    SELECT schema_definition INTO v_schema
+    FROM public.organization_schemas
+    WHERE organization_id = NEW.organization_id
+      AND entity_type = TG_ARGV[0];
+
+    -- If no schema, allow empty or log skip (depending on policy)
+    IF v_schema IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- 2. Iterate Payload Keys (O(n) where n = number of custom fields)
+    FOR v_key, v_val IN SELECT * FROM jsonb_each(NEW.custom_attributes)
+    LOOP
+        -- A. RESERVED KEYS PROTECTION
+        IF v_key = ANY(v_reserved_keys) THEN
+            RAISE EXCEPTION '403 Forbidden: System Field Collision at key %', v_key;
+        END IF;
+
+        -- B. Primitive Type Enforcement (Optimized)
+        v_expected_type := v_schema->>v_key;
+
+        IF v_expected_type IS NOT NULL THEN
+            CASE v_expected_type
+                WHEN 'string' THEN
+                    IF jsonb_typeof(v_val) != 'string' THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected string, got %', v_key, jsonb_typeof(v_val);
+                    END IF;
+                WHEN 'number' THEN
+                    IF jsonb_typeof(v_val) != 'number' THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected number, got %', v_key, jsonb_typeof(v_val);
+                    END IF;
+                WHEN 'boolean' THEN
+                    IF jsonb_typeof(v_val) != 'boolean' THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected boolean, got %', v_key, jsonb_typeof(v_val);
+                    END IF;
+                WHEN 'date' THEN
+                    -- Basic date string validation. `#>> '{}'` is the string
+                    -- itself; `v_val::text` was its JSON text, quotes included,
+                    -- so no date ever matched (20261022010000).
+                    IF jsonb_typeof(v_val) != 'string' OR NOT ((v_val #>> '{}') ~ '^\d{4}-\d{2}-\d{2}') THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected date (YYYY-MM-DD), got %', v_key, v_val;
+                    END IF;
+            END CASE;
+        END IF;
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 3. finalize_import_job: copied from 20261020020000; contact, guardian and
 --    payment reads removed; custom_attributes from the allowlist.
 -- ---------------------------------------------------------------------------
 
@@ -173,6 +358,7 @@ DECLARE
     v_season_settings_id uuid;
     v_waitlist_enabled boolean := true;
     v_created_divisions integer := 0;
+    v_declared jsonb;
 BEGIN
     IF p_import_job_id IS NULL THEN
         RAISE EXCEPTION 'p_import_job_id is required' USING ERRCODE = '22023';
@@ -206,6 +392,9 @@ BEGIN
         RAISE EXCEPTION 'Failed import job % cannot be finalized', p_import_job_id
             USING ERRCODE = '22023';
     END IF;
+
+    -- The organization's declared player fields, read once for every row.
+    v_declared := public.import_declared_fields(v_job.organization_id, 'player');
 
     v_error_count := jsonb_array_length(v_validation_errors);
     v_status := CASE WHEN v_error_count > 0 THEN 'completed_with_warnings' ELSE 'completed' END;
@@ -345,9 +534,8 @@ BEGIN
             -- The allowlist (R0): only the fields the organization declared
             -- for players, keyed by their declared names. Every other column
             -- of the export is dropped here, whatever reached staging.
-            public.import_declared_attributes(
-                sp.organization_id, 'player', sp.normalized_payload
-            ) AS custom_attributes
+            public.import_declared_attributes(v_declared, sp.normalized_payload)
+                AS custom_attributes
         FROM public.staging_players sp
         WHERE sp.import_job_id = p_import_job_id
           AND sp.organization_id = v_job.organization_id
@@ -476,7 +664,10 @@ BEGIN
             willing_to_coach = COALESCE(de.willing_to_coach, p.willing_to_coach),
             coach_volunteer = COALESCE(de.willing_to_coach, p.coach_volunteer),
             buddy_request = COALESCE(de.buddy_request, p.buddy_request),
-            custom_attributes = COALESCE(p.custom_attributes, '{}'::jsonb) || de.final_custom_attributes,
+            -- An existing player's undeclared keys go too; the import's own
+            -- keys (play-up, coaching answer, team placement) stay.
+            custom_attributes = public.import_kept_player_attributes(v_declared, p.custom_attributes)
+                || de.final_custom_attributes,
             last_imported_at = v_now,
             import_source = 'gotsport',
             registration_history = COALESCE(p.registration_history, '[]'::jsonb)
@@ -625,8 +816,9 @@ BEGIN
 END;
 $$;
 
+
 -- ---------------------------------------------------------------------------
--- 3. finalize_coach_import_job: copied from 20260726000300; no phone;
+-- 4. finalize_coach_import_job: copied from 20260726000300; no phone;
 --    custom_attributes from the allowlist.
 -- ---------------------------------------------------------------------------
 
@@ -655,6 +847,7 @@ DECLARE
     v_certifications jsonb;
     v_contact_info jsonb;
     v_custom_attributes jsonb;
+    v_declared jsonb;
     v_previous_payload jsonb;
     v_existing_found boolean;
     v_inserted_count integer := 0;
@@ -699,6 +892,9 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
+    -- The organization's declared coach fields, read once for every row.
+    v_declared := public.import_declared_fields(v_job.organization_id, 'coach');
+
     -- Deliberately row-oriented for the coach slice: each applied row needs an
     -- exact rollback snapshot and independent conflict outcome. The Edge
     -- Function caps imports at 5,000 rows; set-based promotion can replace
@@ -735,9 +931,7 @@ BEGIN
         -- coaches, keyed by their declared names. Every other column of the
         -- export (a child's details, guardians' addresses and phones, the
         -- coach's own birth date) is dropped here, whatever reached staging.
-        v_custom_attributes := public.import_declared_attributes(
-            v_job.organization_id, 'coach', v_row.normalized_payload
-        );
+        v_custom_attributes := public.import_declared_attributes(v_declared, v_row.normalized_payload);
 
         IF v_email IS NULL
            OR v_full_name IS NULL
@@ -810,7 +1004,7 @@ BEGIN
                 last_imported_at = v_now,
                 import_source = 'coach_csv',
                 custom_attributes = public.import_declared_attributes(
-                    v_job.organization_id, 'coach', COALESCE(v_existing.custom_attributes, '{}'::jsonb)
+                    v_declared, COALESCE(v_existing.custom_attributes, '{}'::jsonb)
                 ) || v_custom_attributes,
                 updated_at = v_now
             WHERE id = v_existing.id
@@ -967,8 +1161,9 @@ BEGIN
 END;
 $$;
 
+
 -- ---------------------------------------------------------------------------
--- 4. The purge of what is stored today. A function so the pgTAP suite and
+-- 5. The purge of what is stored today. A function so the pgTAP suite and
 --    the smoke can run it against planted rows; this migration runs it once.
 -- ---------------------------------------------------------------------------
 
@@ -991,24 +1186,56 @@ DECLARE
         'coach_email', 'matched_email', 'email', 'contact_email', 'guardian_email',
         'parent_email', 'invited_email', 'phone'
     ];
+    v_finished text[] := ARRAY['completed', 'completed_with_warnings', 'failed'];
     v_coaches integer := 0;
+    v_players integer := 0;
     v_records integer := 0;
     v_staging_players integer := 0;
     v_staging_rows integer := 0;
+    v_staged_kept integer := 0;
+    v_n integer := 0;
     v_audit integer := 0;
+    v_jobs integer := 0;
 BEGIN
+    -- Each organization's declared fields, read once.
+    CREATE TEMP TABLE IF NOT EXISTS pg_temp.minimise_declared (
+        organization_id uuid PRIMARY KEY,
+        coach jsonb NOT NULL,
+        player jsonb NOT NULL
+    ) ON COMMIT DROP;
+    TRUNCATE pg_temp.minimise_declared;
+    INSERT INTO pg_temp.minimise_declared (organization_id, coach, player)
+    SELECT o.id,
+           public.import_declared_fields(o.id, 'coach'),
+           public.import_declared_fields(o.id, 'player')
+    FROM public.organizations o;
+
     UPDATE public.coaches c
     SET
         custom_attributes = public.import_declared_attributes(
-            c.organization_id, 'coach', COALESCE(c.custom_attributes, '{}'::jsonb)),
+            d.coach, COALESCE(c.custom_attributes, '{}'::jsonb)),
         phone = NULL,
         contact_info = COALESCE(c.contact_info, '{}'::jsonb) - 'phone'
-    WHERE c.phone IS NOT NULL
-       OR COALESCE(c.contact_info, '{}'::jsonb) ? 'phone'
-       OR COALESCE(c.custom_attributes, '{}'::jsonb) IS DISTINCT FROM
-          public.import_declared_attributes(
-              c.organization_id, 'coach', COALESCE(c.custom_attributes, '{}'::jsonb));
+    FROM pg_temp.minimise_declared d
+    WHERE d.organization_id = c.organization_id
+      AND (c.phone IS NOT NULL
+           OR COALESCE(c.contact_info, '{}'::jsonb) ? 'phone'
+           OR c.custom_attributes IS DISTINCT FROM public.import_declared_attributes(
+                  d.coach, COALESCE(c.custom_attributes, '{}'::jsonb)));
     GET DIAGNOSTICS v_coaches = ROW_COUNT;
+
+    UPDATE public.players p
+    SET
+        custom_attributes = public.import_kept_player_attributes(d.player, p.custom_attributes),
+        contact_info = '{}'::jsonb,
+        guardian_contacts = '[]'::jsonb
+    FROM pg_temp.minimise_declared d
+    WHERE d.organization_id = p.organization_id
+      AND (p.contact_info IS DISTINCT FROM '{}'::jsonb
+           OR p.guardian_contacts IS DISTINCT FROM '[]'::jsonb
+           OR p.custom_attributes IS DISTINCT FROM
+              public.import_kept_player_attributes(d.player, p.custom_attributes));
+    GET DIAGNOSTICS v_players = ROW_COUNT;
 
     -- A coach snapshot is `to_jsonb(coaches row)`; rollback restores from it.
     -- Each of a record's three payloads is scrubbed alone, and a NULL one
@@ -1029,11 +1256,11 @@ BEGIN
                     || jsonb_build_object(
                         'custom_attributes',
                         public.import_declared_attributes(
-                            r.organization_id, 'coach',
-                            COALESCE(k.payload -> 'custom_attributes', '{}'::jsonb)))
+                            d.coach, COALESCE(k.payload -> 'custom_attributes', '{}'::jsonb)))
                 ELSE k.payload
             END AS payload
         FROM public.import_application_records r
+        JOIN pg_temp.minimise_declared d ON d.organization_id = r.organization_id
         CROSS JOIN LATERAL (VALUES
             ('previous_payload', r.previous_payload),
             ('applied_payload', r.applied_payload),
@@ -1062,19 +1289,53 @@ BEGIN
            OR r.rollback_payload IS DISTINCT FROM s.rollback_payload);
     GET DIAGNOSTICS v_records = ROW_COUNT;
 
-    -- Staged rows of a job that is over. A job still queued, processing,
-    -- importing, ready to apply or needing a fix keeps its rows.
+    -- Staged people rows of a job that is over. Field and field-availability
+    -- rows are not people and stay: a refused field row is kept on its job
+    -- for replay.
     DELETE FROM public.staging_players sp
     USING public.import_jobs j
     WHERE j.id = sp.import_job_id
-      AND j.status IN ('completed', 'completed_with_warnings', 'failed');
+      AND j.status = ANY (v_finished);
     GET DIAGNOSTICS v_staging_players = ROW_COUNT;
 
     DELETE FROM public.staging_import_rows sr
     USING public.import_jobs j
     WHERE j.id = sr.import_job_id
-      AND j.status IN ('completed', 'completed_with_warnings', 'failed');
+      AND sr.import_type = 'coaches'
+      AND j.status = ANY (v_finished);
     GET DIAGNOSTICS v_staging_rows = ROW_COUNT;
+
+    -- Staged people rows of a job not yet over stay, reduced to the allowlist.
+    UPDATE public.staging_players sp
+    SET
+        raw_payload = public.import_allowed_payload('players', d.player, sp.raw_payload),
+        normalized_payload = CASE WHEN sp.normalized_payload IS NULL THEN NULL
+            ELSE public.import_allowed_payload('players', d.player, sp.normalized_payload) END
+    FROM pg_temp.minimise_declared d
+    WHERE d.organization_id = sp.organization_id
+      AND (sp.raw_payload IS DISTINCT FROM
+               public.import_allowed_payload('players', d.player, sp.raw_payload)
+           OR (sp.normalized_payload IS NOT NULL
+               AND sp.normalized_payload IS DISTINCT FROM
+                   public.import_allowed_payload('players', d.player, sp.normalized_payload)));
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    v_staged_kept := v_n;
+
+    UPDATE public.staging_import_rows sr
+    SET
+        raw_payload = public.import_allowed_payload('coaches', d.coach, sr.raw_payload),
+        normalized_payload = CASE WHEN sr.normalized_payload IS NULL THEN NULL
+            ELSE public.import_allowed_payload('coaches', d.coach, sr.normalized_payload) END
+    FROM pg_temp.minimise_declared d
+    WHERE d.organization_id = sr.organization_id
+      AND sr.import_type = 'coaches'
+      AND (sr.raw_payload IS DISTINCT FROM
+               public.import_allowed_payload('coaches', d.coach, sr.raw_payload)
+           OR (sr.normalized_payload IS NOT NULL
+               AND sr.normalized_payload IS DISTINCT FROM
+                   public.import_allowed_payload('coaches', d.coach, sr.normalized_payload)));
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    v_staged_kept := v_staged_kept + v_n;
 
     WITH scrubbed AS (
         SELECT
@@ -1113,12 +1374,47 @@ BEGIN
       AND a.metadata IS DISTINCT FROM s.metadata;
     GET DIAGNOSTICS v_audit = ROW_COUNT;
 
+    -- A row error that quoted the value it refused ("Invalid date format:
+    -- <value>", "Invalid email format: <value>") keeps its row and field and
+    -- loses the value.
+    WITH scrubbed AS (
+        SELECT
+            j.id,
+            jsonb_set(j.error_summary, '{rowErrors}', (
+                SELECT jsonb_agg(
+                    CASE
+                        WHEN jsonb_typeof(e.value) = 'object'
+                             AND (e.value ->> 'message') ~ '^Invalid (date|email) format: '
+                        THEN e.value || jsonb_build_object('message', regexp_replace(
+                            e.value ->> 'message', '^Invalid (date|email) format: .*$',
+                            'Invalid \1 format'))
+                        ELSE e.value
+                    END
+                    ORDER BY e.ordinality)
+                FROM jsonb_array_elements(j.error_summary -> 'rowErrors') WITH ORDINALITY e
+            )) AS error_summary
+        FROM public.import_jobs j
+        WHERE jsonb_typeof(j.error_summary -> 'rowErrors') = 'array'
+          AND jsonb_array_length(j.error_summary -> 'rowErrors') > 0
+    )
+    UPDATE public.import_jobs j
+    SET error_summary = s.error_summary
+    FROM scrubbed s
+    WHERE j.id = s.id
+      AND j.error_summary IS DISTINCT FROM s.error_summary;
+    GET DIAGNOSTICS v_jobs = ROW_COUNT;
+
+    DROP TABLE pg_temp.minimise_declared;
+
     RETURN jsonb_build_object(
         'coaches', v_coaches,
+        'players', v_players,
         'import_application_records', v_records,
         'staging_players', v_staging_players,
         'staging_import_rows', v_staging_rows,
-        'audit_log', v_audit
+        'staged_rows_reduced', v_staged_kept,
+        'audit_log', v_audit,
+        'import_jobs', v_jobs
     );
 END;
 $$;
@@ -1137,13 +1433,22 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 5. Retention for staging_import_rows, as for staging_players (30 days).
+-- 6. Retention at 30 days, for a finished job's people rows only. A job still
+--    queued, processing, importing, ready to apply or needing a fix keeps its
+--    rows, so a deferred apply never finds them gone. cron.schedule with an
+--    existing name replaces that job's command.
 -- ---------------------------------------------------------------------------
 
 SELECT cron.schedule(
     'cleanup-staging-import-rows',
     '0 3 * * *',
-    $$ DELETE FROM public.staging_import_rows WHERE created_at < now() - interval '30 days' $$
+    $$ DELETE FROM public.staging_import_rows s USING public.import_jobs j WHERE j.id = s.import_job_id AND s.import_type = 'coaches' AND j.status IN ('completed', 'completed_with_warnings', 'failed') AND s.created_at < now() - interval '30 days' $$
+);
+
+SELECT cron.schedule(
+    'cleanup-staging-players',
+    '0 3 * * *',
+    $$ DELETE FROM public.staging_players s USING public.import_jobs j WHERE j.id = s.import_job_id AND j.status IN ('completed', 'completed_with_warnings', 'failed') AND s.created_at < now() - interval '30 days' $$
 );
 
 COMMIT;

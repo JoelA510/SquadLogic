@@ -109,6 +109,43 @@ describe('a people import keeps only allowlisted columns', () => {
     expect(stored).not.toContain('NOPE-');
   });
 
+  it('fails the import, sending and storing nothing, when the declared fields cannot be read', async () => {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    const refused = { data: null, error: { message: 'MOCK-SCHEMA-READ-REFUSED' } };
+    const failingQuery = {
+      select: () => failingQuery,
+      eq: () => failingQuery,
+      maybeSingle: async () => refused,
+      then: (resolve, reject) => Promise.resolve(refused).then(resolve, reject),
+    };
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) =>
+      table === 'organization_schemas' ? failingQuery : realFrom(table)
+    );
+    mocks.parse.mockImplementation((_file, options) => {
+      options.complete({ data: [COACH_ROW], meta: { fields: Object.keys(COACH_ROW) } });
+    });
+    const invoke = vi.spyOn(mockSupabase.functions, 'invoke');
+
+    const wrapper = ({ children }) => <ImportProvider>{children}</ImportProvider>;
+    const { result } = renderHook(() => useImport(), { wrapper });
+    await act(async () => {
+      await result.current.startImport(new File(['x'], 'coaches.csv'), 'coaches');
+    });
+
+    expect(result.current.importStatus).toBe('error');
+    expect(mocks.parse).not.toHaveBeenCalled();
+    expect(invoke.mock.calls.filter(([name]) => name === 'import-validation')).toHaveLength(0);
+    const job = getMockData('import_jobs').at(-1);
+    expect(job.status).toBe('failed');
+    expect(JSON.stringify(job)).toContain('schema_lookup');
+    expect(
+      result.current.importLogs.some((entry) =>
+        /Could not read the organization's custom coach fields/.test(entry.message)
+      )
+    ).toBe(true);
+    expect(getMockData('coaches').filter((c) => c.email === 'email1@example.com')).toHaveLength(0);
+  });
+
   it('a player row loses its contact, guardian and payment columns and keeps team placement', async () => {
     const row = {
       'First Name': 'First3',

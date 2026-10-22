@@ -5,9 +5,12 @@
 -- 20260726000300 defined it, each with the `timezone = UTC` pin
 -- 20261021040000 gave it (CREATE OR REPLACE resets a function's SET clauses,
 -- so the pin is re-applied below); SECURITY DEFINER, search_path=public and
--- the grants are as before (CREATE OR REPLACE keeps grants). It drops
--- `minimise_import_people_data()` and `import_declared_attributes(uuid, text,
--- jsonb)`, and unschedules `cleanup-staging-import-rows`.
+-- the grants are as before (CREATE OR REPLACE keeps grants). It puts back
+-- `validate_custom_attributes()` as 20260405120000 defined it, with the
+-- search_path 20260421001209 set (its date check refuses every date again),
+-- and `cleanup-staging-players` with its 20260416000002 command (every row 30
+-- days old, whatever its job's state). It drops `minimise_import_people_data()`
+-- and the five import helpers, and unschedules `cleanup-staging-import-rows`.
 --
 -- **It cannot restore purged data.** The coach phones, the coaches' and their
 -- import snapshots' undeclared `custom_attributes`, the deleted staging rows
@@ -921,9 +924,78 @@ $$;
 ALTER FUNCTION public.finalize_import_job(uuid, jsonb) SET timezone = 'UTC';
 ALTER FUNCTION public.finalize_coach_import_job(uuid, jsonb) SET timezone = 'UTC';
 
+CREATE OR REPLACE FUNCTION public.validate_custom_attributes()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_schema jsonb;
+    v_key text;
+    v_val jsonb;
+    v_expected_type text;
+    v_reserved_keys text[] := public.get_reserved_keys();
+BEGIN
+    -- 1. Load Schema for Org + Entity
+    SELECT schema_definition INTO v_schema
+    FROM public.organization_schemas
+    WHERE organization_id = NEW.organization_id
+      AND entity_type = TG_ARGV[0];
+
+    -- If no schema, allow empty or log skip (depending on policy)
+    IF v_schema IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- 2. Iterate Payload Keys (O(n) where n = number of custom fields)
+    FOR v_key, v_val IN SELECT * FROM jsonb_each(NEW.custom_attributes)
+    LOOP
+        -- A. RESERVED KEYS PROTECTION
+        IF v_key = ANY(v_reserved_keys) THEN
+            RAISE EXCEPTION '403 Forbidden: System Field Collision at key %', v_key;
+        END IF;
+
+        -- B. Primitive Type Enforcement (Optimized)
+        v_expected_type := v_schema->>v_key;
+
+        IF v_expected_type IS NOT NULL THEN
+            CASE v_expected_type
+                WHEN 'string' THEN
+                    IF jsonb_typeof(v_val) != 'string' THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected string, got %', v_key, jsonb_typeof(v_val);
+                    END IF;
+                WHEN 'number' THEN
+                    IF jsonb_typeof(v_val) != 'number' THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected number, got %', v_key, jsonb_typeof(v_val);
+                    END IF;
+                WHEN 'boolean' THEN
+                    IF jsonb_typeof(v_val) != 'boolean' THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected boolean, got %', v_key, jsonb_typeof(v_val);
+                    END IF;
+                WHEN 'date' THEN
+                    -- Basic date string validation
+                    IF jsonb_typeof(v_val) != 'string' OR NOT (v_val::text ~ '^\d{4}-\d{2}-\d{2}') THEN
+                        RAISE EXCEPTION 'Validation Failed: Key % expected date (YYYY-MM-DD), got %', v_key, v_val;
+                    END IF;
+            END CASE;
+        END IF;
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+ALTER FUNCTION public.validate_custom_attributes() SET search_path = public;
+
 DROP FUNCTION IF EXISTS public.minimise_import_people_data();
-DROP FUNCTION IF EXISTS public.import_declared_attributes(uuid, text, jsonb);
+DROP FUNCTION IF EXISTS public.import_allowed_payload(text, jsonb, jsonb);
+DROP FUNCTION IF EXISTS public.import_kept_player_attributes(jsonb, jsonb);
+DROP FUNCTION IF EXISTS public.import_declared_attributes(jsonb, jsonb);
+DROP FUNCTION IF EXISTS public.import_declared_fields(uuid, text);
+DROP FUNCTION IF EXISTS public.import_allowed_keys(text);
 
 SELECT cron.unschedule('cleanup-staging-import-rows');
+SELECT cron.schedule(
+    'cleanup-staging-players',
+    '0 3 * * *',
+    $$ DELETE FROM public.staging_players WHERE created_at < now() - interval '30 days' $$
+);
 
 COMMIT;

@@ -83,6 +83,21 @@ describe('the mock import-validation', () => {
     expect(JSON.stringify(staged)).not.toContain('MOCK-UNLISTED');
   });
 
+  it('refuses an unreadable birth date without quoting it (R0)', async () => {
+    const { data } = await mockSupabase.functions.invoke('import-validation', {
+      body: {
+        import_type: 'players',
+        organization_id: MOCK_ORG_ID,
+        rows: [
+          { 'First Name': 'First1', 'Last Name': 'Last1', 'Date of Birth': 'MOCK-NOT-A-DATE' },
+        ],
+      },
+    });
+    expect(data.validation_errors).toEqual([
+      { row: 1, field: 'date_of_birth', message: 'Invalid date format' },
+    ]);
+  });
+
   it('leaves a field import as given', async () => {
     const row = {
       location: 'Central Park',

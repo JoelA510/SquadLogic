@@ -241,3 +241,76 @@ export function declaredAttributes(schemaDefinition, payload) {
   }
   return out;
 }
+
+/**
+ * The fields the organization declared for the import's entity, read for this
+ * import (not from a context that loads asynchronously and stays empty on an
+ * error): an empty list would silently drop the organization's own columns.
+ * Throws a message an admin can act on when the read fails, as
+ * import-validation refuses rather than guess.
+ * @param {{ supabase: any, organizationId: string, importType: string }} args
+ * @returns {Promise<string[]>}
+ */
+export async function fetchDeclaredImportFields({ supabase, organizationId, importType }) {
+  const entityType = ALLOWLIST_ENTITY_TYPES[importType];
+  if (!entityType) return [];
+  const { data, error } = await supabase
+    .from('organization_schemas')
+    .select('schema_definition')
+    .eq('organization_id', organizationId)
+    .eq('entity_type', entityType)
+    .maybeSingle();
+  if (error) {
+    throw new Error(
+      `Could not read the organization's custom ${entityType} fields, so the import cannot tell which columns to keep (${error.message || 'unknown error'}). Try again.`
+    );
+  }
+  const definition = data?.schema_definition;
+  return definition && typeof definition === 'object' && !Array.isArray(definition)
+    ? Object.keys(definition)
+    : [];
+}
+
+/** The keys the player import writes into custom_attributes itself. */
+export const PLAYER_IMPORT_OWN_ATTRIBUTES = Object.freeze([
+  'play_up',
+  'coaching_answer',
+  'team_name',
+  'team_age',
+  'team_gender',
+]);
+
+/**
+ * A player's custom attributes as the allowlist keeps them: the declared
+ * fields and the import's own keys. The mock client's stand-in for SQL
+ * `import_kept_player_attributes` (migration 20261022010000).
+ * @param {Record<string, string> | null | undefined} schemaDefinition
+ * @param {Record<string, unknown> | null | undefined} attributes
+ * @returns {Record<string, unknown>}
+ */
+export function keptPlayerAttributes(schemaDefinition, attributes) {
+  /** @type {Record<string, unknown>} */
+  const own = {};
+  for (const key of PLAYER_IMPORT_OWN_ATTRIBUTES) {
+    const value = attributes?.[key];
+    if (value !== undefined && value !== null) own[key] = value;
+  }
+  return { ...declaredAttributes(schemaDefinition, attributes), ...own };
+}
+
+/**
+ * The first of `keys` the payload holds with a non-blank value, trimmed; else
+ * null. The JavaScript form of SQL `import_payload_text`.
+ * @param {Record<string, unknown> | null | undefined} payload
+ * @param {string[]} keys
+ * @returns {string | null}
+ */
+export function importPayloadText(payload, keys) {
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return null;
+}

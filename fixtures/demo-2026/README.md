@@ -12,7 +12,8 @@ data is in these files**; keep it that way (AGENTS.md section 2).
 | `players.csv` | 1,259 | One player registration per row, the export's 37 columns verbatim.                                       |
 | `coaches.csv` | 251   | One coach registration per row, the export's 34 columns verbatim (two headers repeat, as in the export). |
 
-The CSVs are the export's two sheets. `tests/demoFixture.test.js` holds everything below.
+The CSVs are the export's two sheets. `tests/demoFixture.test.js` holds the league shape, the
+placeholder shapes and the cross-references below.
 
 ## The league
 
@@ -33,20 +34,23 @@ Divisions follow the export, not every age: U12 takes 11- and 12-year-olds, U14 
 U19 17-19. Age groups use an **August 1 cutoff** (`Age Group` is the natural age: a child born
 2019-08-01 to 2020-07-31 is age group 7). The program and division a family registered for is in
 `Payment Plan` (`2026 U07B Junior Registration`: program Junior, division U7 boys); `Team Name`,
-`Team Age` and `Team Gender` are where the player is placed, which is older for a player playing up.
-Programs span divisions: Minis is U4, Micro U5-U6, Junior U7-U8, Select U14-U19, and U9, U10 and
-U12 carry no program name. These are the pseudonyms `fixtures/season-2026/` already uses.
+`Team Age` and `Team Gender` are where the player is placed: usually the registered division, older
+for the 50 players playing up, and younger for one, as in the export. Programs span divisions:
+Minis is U4, Micro U5-U6, Junior U7-U8, Select U14-U19, and U9, U10 and U12 carry no program name.
+These are the pseudonyms `fixtures/season-2026/` already uses; its schedule books the Minis program
+as 30-minute slots (`game_formats.csv` calls the format "Minis (U5 intro)"), which are these cohort
+sessions, not games.
 
 ## Placeholders
 
-| Who                              | Name                                                       | Notes                                                                        |
-| -------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Player number N                  | `FirstN LastN`                                             | Numbered in file order.                                                      |
-| Their guardians                  | `Parent1FirstN Parent1LastN`, `Parent2FirstN Parent2LastN` | A parent of siblings is named after the first child, everywhere they appear. |
-| A coach who is a guardian        | that guardian's name                                       | Same email and phone as on the player's row.                                 |
-| Any other coach                  | `CoachFirstK CoachLastK`                                   |                                                                              |
-| Another adult on a coach's row   | `AdultFirstK AdultLastK`                                   |                                                                              |
-| Someone named but not registered | `UnregisteredFirstK UnregisteredLastK`                     | One name per person, wherever they are named.                                |
+| Who                              | Name                                                       | Notes                                                                                                                       |
+| -------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Player number N                  | `FirstN LastN`                                             | Numbered in file order.                                                                                                     |
+| Their guardians                  | `Parent1FirstN Parent1LastN`, `Parent2FirstN Parent2LastN` | A parent of siblings is named after the first child, everywhere they appear; a child's two guardians are always two people. |
+| A coach who is a guardian        | that guardian's name                                       | Contacts are the ones the coach registered with, usually the same as on the child's row.                                    |
+| Any other coach                  | `CoachFirstK CoachLastK`                                   |                                                                                                                             |
+| Another adult on a coach's row   | `AdultFirstK AdultLastK`                                   |                                                                                                                             |
+| Someone named but not registered | `UnregisteredFirstK UnregisteredLastK`                     | One name per person, wherever they are named.                                                                               |
 
 Emails are `emailK@example.com` and phones `555-100-KKKK`, numbered by first appearance; one real
 address shared by a family stays one placeholder. Registration and team ids are new.
@@ -58,10 +62,10 @@ match that player's row.
 
 ## What it keeps from the real season
 
-- **Buddy requests.** 231 mutual pairs (every pair in one division shares a team; 12 pairs straddle
-  divisions because one child plays up), 130 one-way requests, and 107 that name someone not
-  registered.
-- **Coaches.** One to three per team, each on their own child's team; 24 have no team, as some
+- **Buddy requests.** 231 mutual pairs: the 219 within one division each share a team; 12 straddle
+  divisions (different age groups or genders, or one child plays up) and cannot. 131 one-way
+  requests, and 101 that name someone not registered.
+- **Coaches.** One to three per team, each on their own child's team; 23 have no team, as some
   did in the export. Three were added for teams that had none, as a parent of a player on it.
 - **Coach registrations filed under a child's profile.** Eight rows in the export carry a child's
   name and birthdate with the coaching parent in Guardian 1; they are kept, named as the player (or
@@ -86,5 +90,5 @@ _Executed_ through the real header path (`tests/demoFixture.test.js`):
   `Photo Consent` with it. The registered program and division live only in that column, so a
   GotSport import loses them.
 - **A coach export fails the coach import's header check**: it requires one full-name column, and
-  the export has `First Name` and `Last Name`. The test records this as a known failure that flips
-  when the import is fixed.
+  the export has `First Name` and `Last Name`. The test pins exactly that gap, so it fails when the
+  import is fixed and its expectation becomes empty.

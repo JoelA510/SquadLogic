@@ -2,20 +2,21 @@
 
 # Release Prep Closure
 
-**Last refreshed:** 2026-10-22, for release **1.1.0**.
+**Last refreshed:** 2026-10-22, for release **1.2.0**.
 **Status:** release candidate. The code side is closed; the operator checks below remain the
-owner's before the `1.1.0` tag.
+owner's before the `v1.2.0` tag.
 
 This page records the evidence behind the release and what it does not cover. It claims only what
 was checked on the date above; each item says how.
 
 ## Verified Evidence (2026-10-22)
 
-- **Release contents:** `CHANGELOG.md` section `[1.1.0] - 2026-10-22`, which folds in everything
-  merged since 2026-10-20: idempotent evaluation-run saves (#624), the team-count recommendation
-  (#626), Phase A (privacy and access), the `admin_delete_team` and UTC-idiom fixes, and the plans
-  for phases B to E. `package.json` is already `1.1.0`. No tag exists on the
-  remote yet (*executed*: `git ls-remote --tags origin` lists none).
+- **Release contents:** `CHANGELOG.md` section `[1.2.0] - 2026-10-22`: everything merged after
+  the 1.1.0 cut (`4459faf`, #622): idempotent evaluation-run saves (#624), the team-count
+  recommendation (#626), Phase A (privacy and access), the `admin_delete_team` and UTC-idiom
+  fixes, and the plans for phases B to E. `package.json` and the lockfile's root entry move to
+  `1.2.0` (`npm version`); the `[1.1.0]` section is unchanged. No tag exists on the remote yet
+  (*executed*: `git ls-remote --tags origin` lists none); a draft `v1.2.0` release exists.
 - **Migrations, repo against production** (*executed*): 143 SQL migrations under
   `supabase/migrations/` on `main`, and 143 versions in production's
   `supabase_migrations.schema_migrations`, from `20240405180000` to `20261021040000`. CI is the only
@@ -62,7 +63,7 @@ was checked on the date above; each item says how.
   the schedule is disabled, `raw-imports` and `exports` keep every object
   ([storage-retention.md](./storage-retention.md)). See the operator checks.
 - **Phases B to E:** planned (`docs/changes/2026-10-22-phase-*.md`), not built; each waits for the
-  owner's approval. They are not part of 1.1.0.
+  owner's approval. They are not part of 1.2.0.
 
 ## Operator Checks Before Tagging
 
@@ -75,7 +76,9 @@ was checked on the date above; each item says how.
 - Configure the `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` Actions secrets for the
   retention workflow and confirm one green run (manual dispatch with `dry_run: true` first), or
   disable its schedule deliberately ([storage-retention.md](./storage-retention.md)).
-- Tag the release commit `v1.1.0` (or the repository's tag form) and publish the `[1.1.0]` notes.
+- Tag `4459faf` (#622, the 1.1.0 cut) as `v1.1.0`, so that release has its own tag.
+- Publish the draft `v1.2.0` release with its target set to the merge commit of this release PR
+  (publishing creates the tag there), using the `[1.2.0]` notes.
 
 ## Rollback
 

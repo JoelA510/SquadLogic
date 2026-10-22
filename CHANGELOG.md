@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-10-22
+## [1.2.0] - 2026-10-22
 
 ### Added
 
@@ -16,8 +16,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Contact card** (Phase A2c). The account page has a phone, an email and a sharing choice. A saved card replaces the imported details wherever the app shows the person's contact details; "Don't share" shows none. Written only by `set_my_contact_card()`.
 - **Coach directory** on the coach home: every current coach's contact details.
 - **Two league settings**, on by default: Teammate Contacts (guardians see each teammate's primary guardian contact) and Coach Directory. The server-side reads check them.
-- **A team-count recommendation with roster-limit warnings** (#626). For a program's player count, the teaming settings panel shows the range of team counts that keeps every team within its minimum and maximum roster, a recommended count with a one-click "Use N", and warnings for too many or too few players per team. It judges the count generation will actually build: the generator's team-count logic is now `resolveTeamCount`, shared by the advice, the page's estimate and generation, unchanged in behaviour. Advisory only.
 - **Coach accounts are linked to their coach records.** `link_my_coach_record()` (migration `20261020040000`; Phase A2b of `docs/changes/2026-10-20-phase-a-privacy.md`) links a signed-in user to the coach row whose email matches their verified sign-in email, in an organization they belong to; idempotent, refuses a row linked to another account, audited as `coach.linked`. The app calls it once per signed-in user, so the coach-only pages (practice preferences, lighting overrides) find the coach's record.
+- **A team-count recommendation with roster-limit warnings** (#626). For a program's player count, the teaming settings panel shows the range of team counts that keeps every team within its minimum and maximum roster, a recommended count with a one-click "Use N", and warnings for too many or too few players per team. It judges the count generation will actually build: the generator's team-count logic is now `resolveTeamCount`, shared by the advice, the page's estimate and generation, unchanged in behaviour. Advisory only.
+
+### Changed
+
+- **Staff are admins** (owner decision 2026-10-20; Phase A2a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020030000`: `is_org_admin()` admits `staff`; the last-admin guards in `admin_remove_member` and `admin_change_member_role` count staff; the nine policies that test a role by name admit staff beside `admin` (revert and smoke in `docs/sql/`). The Edge Functions' `verifyOrgAdmin`, the frontend's permissions (`ADMIN_ROLES`), the navigation, the dashboard, the import panel, the settings audit log and the mock client follow. `tenant_admin` keeps exactly the access it had (RLS Q5, open).
+
+### Fixed
+
+- **A retried evaluation-run save no longer writes the run twice** (#624). Migration `20261020010000`: `persist_evaluation_run` takes an idempotency key and inserts the run once per organization and key; a replay returns the first run's id and writes no findings or metrics. The Edge Functions key each save and retry it once, with the same key, on a transport failure or a gateway 502, 503 or 504, logging the retry. With no key the behaviour is as before. Revert and smoke in `docs/sql/`.
+- **Deleting a team keeps the record of what went with it** (`docs/changes/2026-10-20-admin-delete-team.md`). Migration `20261021030000`:
+  - The team's practice exceptions are withdrawn, audited and archived onto their run, and each of its practice series is audited as cancelled, as cancelling a single series already did. Before, they vanished with the team, unaudited.
+  - Every game RSVP to the team's games is removed, including the opposing team's, which were left pointing at games that no longer existed.
+  - Players assigned to the team only through `players.team_id` lose that id.
+  - `team.deleted` records what each table lost.
+  - An RSVP sent while a team is being deleted waits for the delete and is then refused.
+
+  Revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/admin_delete_team_exceptions.sql`. The mock client mirrors every cascade.
+
+- **Timestamps no longer depend on the caller's time zone** (`docs/changes/2026-10-20-utc-now-idiom.md`). `timezone('utc', now())` is a time without a zone, and a caller that set its session zone (PostgREST's `Prefer: timezone=`) stored every such timestamp shifted by up to 14 hours. Migration `20261021040000`:
+  - pins the 42 functions that use it to UTC;
+  - turns the 79 column defaults into `now()`;
+  - makes the stale-import cutoff's default `now() - 5 minutes`.
+
+  No caller sets a zone today, so nothing stored so far is wrong. A Vitest guard refuses the idiom in later migrations; revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/utc_now_idiom.sql`.
+
+### Removed
+
+- **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.
+
+### Documentation
+
+- **Plans for phases B to E** (`docs/changes/2026-10-22-phase-*.md`, #635): teaming (buddy requests, eligibility, team-size warnings), field permits, home/away balance and seasons with programs. Each awaits the owner's approval before it is built; the roadmap's order table points at them.
+- `docs/operations/release-prep.md` refreshed for 1.2.0: production migrations reconciled against the repository (143 each), the security advisors re-read, the stalled storage-retention workflow recorded, and the operator checks before tagging.
+
+### Security
+
+- **People data is read only by the people the access table admits** (Phase A3b of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261021020000` narrows the SELECT policies: a member who is not an admin or staff reads players and roster rows only for their own children, coach rows and assignments only for their own coach record, and their own guardian links, each only while still a member; before, every member of an organization read all of them. `staging_players` and `staging_import_rows`, which hold raw import payloads, are admin-only. `reconcile_prod_rls_drift()` names the new coaches policy, so running it cannot restore the old one, drops that one if drift brings it back, and refuses any other read on `coaches`; the migration itself refuses to commit if any other read policy is left on these tables. Revert and smoke in `docs/sql/`; pgTAP `rls_policy_matrix.sql` (rewritten cells) and `restricted_reads.sql`.
+- **A team's calendar feed link is no longer readable by every member.** The token moves from `teams` to `team_calendar_tokens` (every existing token and expiry copied, so subscribed calendars keep working), readable by admins, the team's current coaches and its guardians. `rotate_calendar_token` admits admins and the current coach (it admitted any member); guardians see the link without Regenerate.
+- **Scores are entered by admins, or by a team's current coach for that team's games.** `update_game_score` admitted any coach for any game. Score entry on the Scores page and the standings follows; the Scores page asks the server for a coach's own games, so a busy league no longer pushes them out of its latest 200, and says so when the coach's teams cannot be loaded.
+- **Coaches no longer see the league's Teams & Rosters page** (`VIEW_ALL_TEAMS`): a coach sees their own team.
+
+- **A profile's role and organization are no longer self-editable.** Migration `20261020040000` grants UPDATE on `profiles` for `first_name`, `last_name`, `full_name` and `avatar_url` only; before, a signed-in user could change their own `role` and `organization_id` through the table. `anon` loses UPDATE on `profiles`.
+- **Sensitive registration columns are dropped on the server too.** `import-validation` strips medical, condition, special-needs, emergency, financial and identity-document columns from player and coach imports before it validates, stages or returns a row (`supabase/functions/_shared/sensitive-headers.ts`); before, only the browser did, so a direct call stored them in `staging_players`. The rule now also covers "Conditions", "Special Needs" and snake_case headers such as `medical_info`, in both copies, held equal by `tests/sensitiveHeaderParity.test.js`.
+
+## [1.1.0] - 2026-10-20
+
+### Added
 
 - **Field heat-stress (WBGT) forecast** (`/schedule/heat`, admin-only, behind the new `heat_forecast` org feature): per venue, surface and kickoff window from the current game run (or per hour with no games), the forecast WBGT from the NOAA NWS gridpoint forecast, its U.S. Soccer Recognize to Recover band, and the regional air temperatures that would push the field into Red and Black; NWS update and retrieval times, a stale-forecast warning, the on-site-readings-govern disclaimer, refused rows kept visible with their reason, and a sources panel rendered from row provenance. The model (`packages/core/src/heat/`) is a port of the Python reference in `scripts/heat/reference/` (Liljegren 2008 WBGT, turf/grass surface model, NREL SPA, Ineichen clear sky) held to it by parity tests; the one substitution, a 0.5-degree Linke turbidity table, and its measured effect are in `docs/architecture/heat-forecast.md`.
 - **Org heat settings**: `organization_heat_settings` (threshold category 1-3, up to 10 governing-body guidance links) written only by the audited `admin_set_org_heat_settings` RPC (migration `20261006000000`, revert and smoke in `docs/sql/`, pgTAP), edited under Settings → General → Heat Safety. No row reads as Category 1, labelled as the default.
@@ -85,8 +131,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Staff are admins** (owner decision 2026-10-20; Phase A2a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020030000`: `is_org_admin()` admits `staff`; the last-admin guards in `admin_remove_member` and `admin_change_member_role` count staff; the nine policies that test a role by name admit staff beside `admin` (revert and smoke in `docs/sql/`). The Edge Functions' `verifyOrgAdmin`, the frontend's permissions (`ADMIN_ROLES`), the navigation, the dashboard, the import panel, the settings audit log and the mock client follow. `tenant_admin` keeps exactly the access it had (RLS Q5, open).
-
 - `FeatureGuard` reads flags through `useFeatures`, so an absent key takes its `FEATURE_DEFAULTS` value as every other reader sees it; it read the raw stored JSONB, so a default-on feature rendered as off there only.
 - The mock Supabase client refuses an RPC it has no arm for (`PGRST202`) instead of returning a silent `{ data: null, error: null }`; `admin_update_registration_medical_status`, `admin_upsert_division_settings`, `create_org_invite` and `redeem_org_invite`, the four that relied on the silent success, have arms mirroring their SQL refusals (`frontend/src/lib/mockAdminWrites.js`).
 - SideNav honours a nav item's `feature` gate (`useFeatures().isEnabled`) as well as its `permission`.
@@ -125,23 +169,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **M6 polish** (#588): a real build script, the core package entry, env reads, the bundle shape (Replay lazy), `allowScripts`, LF line endings and the README release line. The mock seed uses UUID organization and season ids (#587).
 
 ### Fixed
-
-- **A retried evaluation-run save no longer writes the run twice** (#624). Migration `20261020010000`: `persist_evaluation_run` takes an idempotency key and inserts the run once per organization and key; a replay returns the first run's id and writes no findings or metrics. The Edge Functions key each save and retry it once, with the same key, on a transport failure or a gateway 502, 503 or 504, logging the retry. With no key the behaviour is as before. Revert and smoke in `docs/sql/`.
-- **Deleting a team keeps the record of what went with it** (`docs/changes/2026-10-20-admin-delete-team.md`). Migration `20261021030000`:
-  - The team's practice exceptions are withdrawn, audited and archived onto their run, and each of its practice series is audited as cancelled, as cancelling a single series already did. Before, they vanished with the team, unaudited.
-  - Every game RSVP to the team's games is removed, including the opposing team's, which were left pointing at games that no longer existed.
-  - Players assigned to the team only through `players.team_id` lose that id.
-  - `team.deleted` records what each table lost.
-  - An RSVP sent while a team is being deleted waits for the delete and is then refused.
-
-  Revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/admin_delete_team_exceptions.sql`. The mock client mirrors every cascade.
-
-- **Timestamps no longer depend on the caller's time zone** (`docs/changes/2026-10-20-utc-now-idiom.md`). `timezone('utc', now())` is a time without a zone, and a caller that set its session zone (PostgREST's `Prefer: timezone=`) stored every such timestamp shifted by up to 14 hours. Migration `20261021040000`:
-  - pins the 42 functions that use it to UTC;
-  - turns the 79 column defaults into `now()`;
-  - makes the stale-import cutoff's default `now() - 5 minutes`.
-
-  No caller sets a zone today, so nothing stored so far is wrong. A Vitest guard refuses the idiom in later migrations; revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/utc_now_idiom.sql`.
 
 - A real club's name, its abbreviation and its real venue names, carried since before the heat feature by the field-availability fixture pack, its pgTAP and Vitest suites, a smoke script, the field-availability CSV template example and a few doc and comment lines, are replaced by synthetic names (`Venue A` .. `Venue J`, "the pilot club") in the working tree; history is unchanged. `tests/realNameDenylist.test.js` keeps them out: it hashes every word and two- and three-word run of every file in the heat coordinate guard's universe (now shared as `tests/helpers/repoScanFiles.js`) against a SHA-256 denylist, so the guard never names what it blocks. It is a regression check, not a privacy control: the names stay in history and the unsalted digests of short words are recoverable by dictionary attack.
 - `WorkflowPage`'s organization panel never rendered: it sat behind `FeatureGuard` on `FEATURE_FLAGS.MULTI_TENANCY`, a key the registry never defined. The guard is gone, and `tests/featureFlagReferences.test.js` fails on any `FEATURE_FLAGS.<KEY>` the registry lacks.
@@ -199,8 +226,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.
-
 - Removed the direct-insert practice writer `persistPracticeAssignments`, and added a source guard against any direct write to `practice_assignments` (#481). Also removed the orphaned `PracticePersistencePanel` and `GamePersistencePanel` (#482).
 - Migration `20261001000000` drops `coaches.preferred_practice_days` and `preferred_practice_window`; it refuses if any coach still holds a value. The Edge `unavailableSlotIds` preference path is retired; approved `coach_practice_preferences` replace both (#477).
 - Removed dead client-side persistence modules from `@squadlogic/core` (`evaluationPersistence`, the team/game/practice `*PersistenceEdgeHandler` factories, and `teamPersistenceEdgeConfig`) — evaluation persistence goes through the `persist_evaluation_run` RPC and the deployed Deno Edge Functions carry their own self-contained handlers; dropped their orphaned tests and the unused `getSignedUrl`, `DEFAULT_AGE_CUTOFF_MODE`, and `SCHEDULING` exports.
@@ -213,8 +238,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- **Plans for phases B to E** (`docs/changes/2026-10-22-phase-*.md`, #635): teaming (buddy requests, eligibility, team-size warnings), field permits, home/away balance and seasons with programs. Each awaits the owner's approval before it is built; the roadmap's order table points at them.
-- `docs/operations/release-prep.md` refreshed for 1.1.0: production migrations reconciled against the repository (143 each), the security advisors re-read, and the operator checks before tagging.
 - `docs/architecture/heat-forecast.md` (new); `data-modeling.md` now carries the venue coordinates (`latitude`/`longitude`, `coordinates_set_at/by`, `20260930000000`), `effective_to` on `locations`/`fields`/`field_subunits`, and `organization_heat_settings`; RPC inventory, RLS catalogue, routes table and ROADMAP open items updated.
 - Added the Phase 8 plans of record: `PHASE_8_PLAN.md` (#358); `PHASE_8_6_PR3B_PLAN.md` and `PHASE_8_9_PLAN.md` (#451); `PHASE_8_9_D14_PLAN.md` (#493); `PHASE_8_6_PR11_ENACT_PLAN.md` (#502); `PLAN_60_62_GATE_GAPS.md` (#513); and `PHASE_8_6_PR12_READERS_PLAN.md` (#516).
 - Added `docs/PHASE_8_PROGRESS.md`, the per-task Phase 8 progress log, opened in #360 and updated after each merge. Also corrected and extended `BUILD_PLAN_STATUS.md` and `MODEL_GAPS.md` (#394, #401, #415), and recorded the 2026-09-29 operator rulings plus the Deno job in CLAUDE.md §11 (#491). Added `docs/operations/migration-ledger-normalisation.md`, the production ledger re-key executed on 2026-09-28 (#457), and `docs/testing/test-timeouts.md`, the measured per-test timeout rule (#476).
@@ -227,14 +250,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The production-readiness audit and its remediation plan (#544), closed out with a final scorecard (#601); one `AGENTS.md` with loadable workflow skills (#557, #586); the documentation drift corrected (B4, #605); progress notes for 8.6 3b, #60b and the grid override prompt (#529, #535, #537, #543, #554).
 
 ### Security
-
-- **People data is read only by the people the access table admits** (Phase A3b of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261021020000` narrows the SELECT policies: a member who is not an admin or staff reads players and roster rows only for their own children, coach rows and assignments only for their own coach record, and their own guardian links, each only while still a member; before, every member of an organization read all of them. `staging_players` and `staging_import_rows`, which hold raw import payloads, are admin-only. `reconcile_prod_rls_drift()` names the new coaches policy, so running it cannot restore the old one, drops that one if drift brings it back, and refuses any other read on `coaches`; the migration itself refuses to commit if any other read policy is left on these tables. Revert and smoke in `docs/sql/`; pgTAP `rls_policy_matrix.sql` (rewritten cells) and `restricted_reads.sql`.
-- **A team's calendar feed link is no longer readable by every member.** The token moves from `teams` to `team_calendar_tokens` (every existing token and expiry copied, so subscribed calendars keep working), readable by admins, the team's current coaches and its guardians. `rotate_calendar_token` admits admins and the current coach (it admitted any member); guardians see the link without Regenerate.
-- **Scores are entered by admins, or by a team's current coach for that team's games.** `update_game_score` admitted any coach for any game. Score entry on the Scores page and the standings follows; the Scores page asks the server for a coach's own games, so a busy league no longer pushes them out of its latest 200, and says so when the coach's teams cannot be loaded.
-- **Coaches no longer see the league's Teams & Rosters page** (`VIEW_ALL_TEAMS`): a coach sees their own team.
-
-- **A profile's role and organization are no longer self-editable.** Migration `20261020040000` grants UPDATE on `profiles` for `first_name`, `last_name`, `full_name` and `avatar_url` only; before, a signed-in user could change their own `role` and `organization_id` through the table. `anon` loses UPDATE on `profiles`.
-- **Sensitive registration columns are dropped on the server too.** `import-validation` strips medical, condition, special-needs, emergency, financial and identity-document columns from player and coach imports before it validates, stages or returns a row (`supabase/functions/_shared/sensitive-headers.ts`); before, only the browser did, so a direct call stored them in `staging_players`. The rule now also covers "Conditions", "Special Needs" and snake_case headers such as `medical_info`, in both copies, held equal by `tests/sensitiveHeaderParity.test.js`.
 
 - Dependency audit gate (remediation plan M2.1, M2.3): `npm run check:audit` fails on any high or critical advisory not waived in `docs/security/audit-waivers.json` (reason, owner, expiry at most 90 days out; expired and stale waivers fail), run by `.github/workflows/audit.yml` on every PR, on pushes to `main` and weekly. The 18 high advisories in 8 packages open at the audit (`react-router`, `vite`, `postcss`, `brace-expansion`, `browserslist`, `js-yaml`, `nanoid`, `source-map-js`) are fixed by the in-range refresh carried over from #332 (credited); no waiver was needed. The `esbuild` override (`^0.25.0`, March 2026) is removed: it forced `0.25.x` under a Vite 7.3 that declares `^0.27.0 || ^0.28.0` (#331's esbuild change, without its Vite 8 major). Install guards in `.npmrc` (`min-release-age=3`, no git or URL dependencies), npm pinned in `packageManager`, `@types/node` back on Node 24's major, and `.github/dependabot.yml` (npm and Actions, weekly, grouped, 3-day cooldown). GitHub Actions move to their Node 24 majors (`checkout`, `setup-node` and `upload-artifact` v7, `supabase/setup-cli` v2). Policy: `docs/security/dependency-policy.md`, which replaces `dependabot-waivers.md`.
 - CSP `connect-src` adds `https://api.weather.gov` (exact host) for the heat forecast, with the security review in `docs/security/csp.md`; verified live in Chromium under the production policy (refused before, allowed after). `tests/cspPolicy.test.js` holds `vercel.json` and the document to the same `connect-src` set.

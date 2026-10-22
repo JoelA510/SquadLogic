@@ -1,6 +1,6 @@
 # SquadLogic Documentation
 
-> **Status**: v1.1.0 released (2026-10-20): the Lightning-class enterprise redesign, the heat forecast and the production-readiness remediation; see [`../CHANGELOG.md`](../CHANGELOG.md).
+> **Status**: v1.2.0 released (2026-10-22): Phase A privacy and access, the team-delete and timezone fixes, and the team-count recommendation; v1.1.0 (2026-10-20) brought the Lightning-class enterprise redesign, the heat forecast and the production-readiness remediation. See [`../CHANGELOG.md`](../CHANGELOG.md).
 > **Documentation standard**: Active docs live in categorized subdirectories and describe the _current_ system. Historical records (completed plans, point-in-time audits, progress logs) are retired to git history; their durable knowledge is consolidated in [`LESSONS_LEARNED.md`](LESSONS_LEARNED.md).
 
 ## Reading Path for New Contributors

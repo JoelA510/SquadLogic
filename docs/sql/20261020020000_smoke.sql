@@ -88,7 +88,7 @@ BEGIN
     RAISE NOTICE 'the UPDATE branch updated the player and stored no medical key';
 
     -- (c) Posture.
-    IF NOT (SELECT p.prosecdef AND p.proconfig = ARRAY['search_path=public']
+    IF NOT (SELECT p.prosecdef AND COALESCE(p.proconfig, '{}') <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (COALESCE(p.proconfig, '{}'))
                    AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
                    AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
               FROM pg_proc p

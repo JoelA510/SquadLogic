@@ -1,8 +1,53 @@
 # `timezone('utc', now())` stores a time shifted by the caller's session timezone
 
-Status: **plan, for owner approval** (AGENTS.md rule 14: persistence). Requested by the owner
-2026-10-20. Source: B2 (DS-5) found it while building the registration throttle; lesson 37 in
+Status: **built** in `20261021040000_utc_now_idiom.sql` (option 1, approved by the owner
+2026-10-21). Requested by the owner 2026-10-20. Source: B2 (DS-5) found it while building the registration throttle; lesson 37 in
 `docs/LESSONS_LEARNED.md` and the remediation plan's "Discovered during execution" record it.
+
+## As built (2026-10-21)
+
+- **Scope, re-read at build time** (_executed_): a migration-built database and production match:
+  42 functions use the idiom as a timestamp and 79 column defaults use it (the "82" above was an
+  earlier count). `team_local_today` also matched the pattern, but its one use is the deliberate
+  UTC calendar date, `(now() AT TIME ZONE 'UTC')::date`, so it is not pinned. The guard and the
+  catalogue checks exempt that `::date` form. `20261021030000` (the team delete, merged first)
+  rewrote `upsert_team_event_rsvp` with `now()`, so 41 of the 42 still use the idiom; the RSVP
+  writer keeps its pin because it casts a game's start to a date.
+- **`fail_stale_import_jobs`** is redefined from production's `pg_get_functiondef` text, with only
+  its argument default changed, and the revert restores that text byte for byte. `CREATE OR REPLACE` resets a function's `SET` clauses, so the
+  redefinition comes before the pins in the migration.
+- **What pinning changes inside the 42**, by expression (none of it changes behaviour for a
+  session at UTC, which is every caller today):
+
+  | Expression                                              | Functions                                                                                                                            | Pinned behaviour                                                                                                                      |
+  | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+  | `current_date`                                          | `set_team_coaches` ("not in the future"), `persist_team_schedule`                                                                    | the UTC date                                                                                                                          |
+  | timestamptz cast to `date`                              | `upsert_team_event_rsvp` (a game's date)                                                                                             | the date in UTC                                                                                                                       |
+  | text parsed to `timestamptz`                            | `persist_game_schedule`, `persist_practice_schedule`, `persist_team_schedule` (run times, kickoff, end), `rollback_coach_import_job` | a string without an offset reads as UTC; the client sends ISO strings with `Z`, and the rollback restores text written with an offset |
+  | text cast to `date` or `daterange`, `to_char` of a date | `apply_player_patch`, `persist_practice_schedule`, `rollback_field_import_job`, `upsert_team_event_rsvp`                             | unaffected by the zone                                                                                                                |
+
+  Moving `set_team_coaches`' check to the season's zone is a body rewrite for its own plan.
+
+- **Callees inherit the pin; siblings do not.** A `SET` clause holds for the whole call, so a
+  function or trigger a pinned function reaches (for example `field_is_live_on`, and
+  `trigger_set_timestamp` on the rows it writes) also runs at UTC. Functions outside the 42 keep
+  the caller's zone, and four read `current_date`: `admin_assign_team_coach`,
+  `team_coach_assignment_drift` (both `20260923000000`), `caller_coaches_practice_slot`
+  (`20261003000000`) and `field_is_live_on` when called directly (`20260906000000`). Those use the
+  idiom nowhere, so they are out of this change's scope. They read the UTC date today because no
+  client sets a session zone. Whether each should use the season's zone is part of the same body
+  rewrite as `set_team_coaches`.
+- **Posture checks.** Five older smokes asserted a function's configuration was exactly
+  `{search_path=public}`; they now accept `search_path=public` plus the pin and nothing else, and
+  a function with no configuration at all fails them.
+- **Pattern breadth.** The guard and the catalogue checks match the idiom over every clock
+  function (`now()`, `clock_timestamp()`, `statement_timestamp()`, `transaction_timestamp()`,
+  `current_timestamp`) and the zone written as `'utc'` or `'etc/utc'`, in any case.
+- **Tests.** `supabase/tests/utc_now_idiom.sql` (12): a default, `trigger_set_timestamp`,
+  `set_team_coaches`' `ended_at` and a `persist_practice_schedule` run under UTC+14, the stale-job
+  cutoff without its argument under UTC-12 and UTC+14, and the three catalogue checks. Run against
+  the reverted schema, 9 of the 12 fail. `tests/utcNowIdiom.test.js` guards later migrations; the
+  migration's smoke repeats the catalogue checks on every harness run.
 
 ## What is wrong
 
@@ -17,11 +62,11 @@ hours into the past, or 12 into the future.
 **Evidence, executed on local PostgreSQL 16 (2026-10-20).** In a session at
 `Pacific/Kiritimati` (UTC+14):
 
-| Case | Stored offset |
-| --- | --- |
-| A column default `timezone('utc', now())` | 14 hours early |
+| Case                                                    | Stored offset  |
+| ------------------------------------------------------- | -------------- |
+| A column default `timezone('utc', now())`               | 14 hours early |
 | A plpgsql function that writes `timezone('utc', now())` | 14 hours early |
-| The same function declared `SET timezone = 'UTC'` | correct (0) |
+| The same function declared `SET timezone = 'UTC'`       | correct (0)    |
 
 **Scope, executed (read-only, production catalogue, 2026-10-20):**
 
@@ -36,7 +81,7 @@ hours into the past, or 12 into the future.
   - the import pipeline;
   - the retire and unretire RPCs.
 - **One comparison, in an argument default:** `fail_stale_import_jobs(p_stale_before timestamptz
-  DEFAULT timezone('utc', now()) - interval '5 minutes')` (`20260503100000`). A caller at UTC-12
+DEFAULT timezone('utc', now()) - interval '5 minutes')` (`20260503100000`). A caller at UTC-12
   would move the cutoff 12 hours later and fail their own organization's running imports.
   `ImportContext.jsx:455` calls it without the argument. **Pinning the function does not fix
   this.** PostgreSQL inserts an omitted argument's default into the caller's query, where it is
@@ -80,10 +125,10 @@ No real users exist yet, so no stored data needs correcting.
 
 **Recommendation: option 1**, plus a guard so the idiom does not come back:
 
-- **CI guard:** a Vitest test (`tests/utcNowIdiom.test.js`) fails on any migration *after* this
+- **CI guard:** a Vitest test (`tests/utcNowIdiom.test.js`) fails on any migration _after_ this
   one that contains the idiom without `::date`. It matches on a normalized pattern, not one
   literal: case-insensitive, with optional whitespace and casts. That covers `timezone('utc',
-  now())`, `timezone('UTC'::text, now())` and `now() AT TIME ZONE 'utc'`. A catalogue check in the
+now())`, `timezone('UTC'::text, now())` and `now() AT TIME ZONE 'utc'`. A catalogue check in the
   migration harness fails if any public function with the idiom in its body lacks `timezone=UTC`
   in its `proconfig`, or any column default (`pg_get_expr`) or function argument default
   (`pg_get_function_arguments`) contains it. The catalogue deparses the literal as
@@ -113,6 +158,7 @@ No real users exist yet, so no stored data needs correcting.
   - one default.
 
   Plus the catalogue assertion that no function body with the idiom lacks the pin.
+
 - **Plants**, shown failing before merge:
   - a function left unpinned fails the catalogue assertion;
   - a column default restored to the idiom fails it;

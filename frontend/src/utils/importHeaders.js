@@ -24,6 +24,16 @@ export const REQUIRED_HEADERS = {
 };
 
 /**
+ * A required column the import can build from others when the file lacks it: a GotSport coach
+ * export has First Name and Last Name but no full name, and import-validation composes it
+ * (`supabase/functions/_shared/import-rows.ts`).
+ * @type {Record<string, string[]>}
+ */
+export const COMPOSABLE_HEADERS = {
+  full_name: ['first_name', 'last_name'],
+};
+
+/**
  * Resolve one raw header to its canonical name: prefer the matcher's mapping,
  * else fall back to a lowercased/trimmed copy of the raw header.
  * @param {Record<string, string>} mappings
@@ -49,7 +59,11 @@ export function normalizeImportHeader(mappings, header) {
 export function findMissingRequiredHeaders(fields, type, mappings) {
   const required = REQUIRED_HEADERS[type] || [];
   const normalized = (fields || []).map((h) => normalizeImportHeader(mappings, h));
-  return required.filter((req) => !normalized.includes(req));
+  return required.filter((req) => {
+    if (normalized.includes(req)) return false;
+    const parts = COMPOSABLE_HEADERS[req];
+    return !(parts && parts.every((part) => normalized.includes(part)));
+  });
 }
 
 /**

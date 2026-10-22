@@ -183,7 +183,10 @@ describe('ImportPanel', () => {
     expect(playersButton).toHaveClass('focus-visible:ring-2');
     expectTooltipFor(playersButton, 'Requires first name, last name, and date of birth columns.');
     expect(coachesButton).toHaveAttribute('aria-pressed', 'false');
-    expectTooltipFor(coachesButton, 'Requires full name and email columns.');
+    expectTooltipFor(
+      coachesButton,
+      'Requires full name (or first and last name) and email columns.'
+    );
     expectTooltipFor(
       fieldAvailabilityButton,
       'Requires season_label, location, name, available_from, and available_until columns.'

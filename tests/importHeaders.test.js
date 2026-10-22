@@ -154,4 +154,14 @@ describe('importHeaders', () => {
     expect(REQUIRED_HEADERS.players).toEqual(['first_name', 'last_name', 'date_of_birth']);
     expect(REQUIRED_HEADERS.coaches).toContain('email');
   });
+
+  it('accepts First Name and Last Name for a coach full name (D1)', () => {
+    expect(resolve(['First Name', 'Last Name', 'Email'], 'coaches').missing).toEqual([]);
+    expect(resolve(['Full Name', 'Email'], 'coaches').missing).toEqual([]);
+  });
+
+  it('still requires a coach full name when only one half is present', () => {
+    expect(resolve(['First Name', 'Email'], 'coaches').missing).toEqual(['full_name']);
+    expect(resolve(['Last Name', 'Email'], 'coaches').missing).toEqual(['full_name']);
+  });
 });

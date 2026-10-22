@@ -25,6 +25,7 @@ import {
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
+import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -603,12 +604,10 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
       ? stripSensitiveColumns(body.rows[i] as Record<string, unknown>)
       : (body.rows[i] as Record<string, unknown>);
 
-    // Normalize headers via alias map
-    const normalizedRow: Record<string, string> = {};
-    for (const [key, value] of Object.entries(rawRow)) {
-      const normalizedKey = normalizeHeader(key);
-      normalizedRow[normalizedKey] = sanitizeString(value);
-    }
+    // Normalize headers via alias map; a blank never replaces a value two columns share, and a
+    // coach row with first and last names but no full name gets one (_shared/import-rows.ts)
+    let normalizedRow = normalizeImportRow(rawRow, normalizeHeader, sanitizeString);
+    if (body.import_type === 'coaches') normalizedRow = composeFullName(normalizedRow);
 
     // Validate
     const rowErrors = validateRow(normalizedRow, body.import_type, i);

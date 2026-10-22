@@ -142,9 +142,10 @@ export const SENSITIVE_PATTERNS = [
 
 /**
  * Headers that would match a SENSITIVE_PATTERN but are explicitly kept.
- * "Payment Status" is a PAID/UNPAID boolean compliance signal (no amounts,
- * plans, or instruments) consumed by the `paid` roster flag; everything else
- * financial — Payment Plan, amounts, balances, card data — stays stripped.
+ * "Payment Status" is a PAID/UNPAID flag (no amounts, plans, or instruments);
+ * everything else financial — Payment Plan, amounts, balances, card data —
+ * stays stripped. Nothing stores it since `players.paid` was dropped
+ * (20261022020000): the import allowlist drops it after this filter.
  * @type {RegExp[]}
  */
 export const ALLOWED_HEADERS = [/^payment\s*status$/];

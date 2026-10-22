@@ -22,7 +22,7 @@ Given('the admin views the reporting dashboard', async ({ page }) => {
   // Pin to the mock seed's org so the next page load resolves to the org with data in initialMockData
   await pinToMockOrg(page);
 
-  // Seed data the EnterpriseDashboard needs: view_org_metrics, players, view_compliance_stats
+  // Seed data the EnterpriseDashboard needs: view_org_metrics, players
   await waitForMockClient(page);
   await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -50,18 +50,6 @@ Given('the admin views the reporting dashboard', async ({ page }) => {
       }
     }
 
-    db.view_compliance_stats = db.view_compliance_stats || [];
-    if (
-      !db.view_compliance_stats.find((c: Record<string, unknown>) => c.organization_id === orgId)
-    ) {
-      db.view_compliance_stats.push({
-        organization_id: orgId,
-        form_title: 'Fall Registration',
-        total_registrations: 45,
-        medical_cleared: 38,
-      });
-    }
-
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
   }, MOCK_ORG_ID);
 
@@ -75,18 +63,27 @@ Given('the admin views the reporting dashboard', async ({ page }) => {
 });
 
 Then('I should see the {string} metric', async ({ page }, metricName: string) => {
-  if (metricName === 'Registrations') {
-    // The Recharts chart renders only when view_compliance_stats has data.
-    const chart = page.locator('.recharts-responsive-container').first();
-    await expect(chart).toBeVisible({ timeout: 15000 });
-  } else {
-    // EnterpriseDashboard renders KPI cards with text labels.
-    // "Total Teams" in the feature maps to "Active Teams" in the UI.
-    const displayName = metricName === 'Total Teams' ? 'Active Teams' : metricName;
-    const card = page.getByText(displayName, { exact: false }).first();
-    await expect(card).toBeVisible({ timeout: 15000 });
-  }
+  // EnterpriseDashboard renders KPI cards with text labels.
+  // "Total Teams" in the feature maps to "Active Teams" in the UI.
+  const displayName = metricName === 'Total Teams' ? 'Active Teams' : metricName;
+  const card = page.getByText(displayName, { exact: false }).first();
+  await expect(card).toBeVisible({ timeout: 15000 });
 });
+
+// Paperwork compliance is not tracked (docs/changes/2026-10-22-admin-focus.md,
+// R1), so the readiness radar has no Compliance axis. Read off the chart's
+// accessible data table, which lists one row per axis.
+Then(
+  'the readiness chart shows {string} and no {string} axis',
+  async ({ page }, present: string, absent: string) => {
+    await expect(page.locator('.recharts-responsive-container').first()).toBeVisible({
+      timeout: 15000,
+    });
+    const table = page.getByRole('table', { name: /Organization Readiness/ });
+    await expect(table.getByRole('cell', { name: present, exact: true })).toHaveCount(1);
+    await expect(table.getByRole('cell', { name: absent, exact: true })).toHaveCount(0);
+  }
+);
 
 // ─── CSV Export ─────────────────────────────────────────────────────
 

@@ -28,9 +28,6 @@ const GameSchedulingPage = lazy(() => import('./pages/GameSchedulingPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
 const AccountSettingsPage = lazy(() => import('./pages/AccountSettingsPage.jsx'));
 const TeamRecordPage = lazy(() => import('./pages/TeamRecordPage.jsx'));
-const RegistrationFlow = lazy(() => import('./pages/RegistrationFlow.jsx'));
-const AdminComplianceDashboard = lazy(() => import('./pages/AdminComplianceDashboard.jsx'));
-const RegistrationForms = lazy(() => import('./pages/RegistrationForms.jsx'));
 const EnterpriseDashboard = lazy(() => import('./pages/EnterpriseDashboard.jsx'));
 const LeagueStandings = lazy(() => import('./pages/LeagueStandings.jsx'));
 const SeasonSetupPage = lazy(() => import('./pages/SeasonSetupPage.jsx'));
@@ -151,7 +148,6 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
-          <Route path="/register/:formId" element={<RegistrationFlow />} />
           <Route
             path="/import"
             element={
@@ -261,22 +257,6 @@ function AppContent() {
             element={
               <ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_ORGANIZATION}>
                 <FieldManagementPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/compliance"
-            element={
-              <ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_ORGANIZATION}>
-                <AdminComplianceDashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/forms"
-            element={
-              <ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_ORGANIZATION}>
-                <RegistrationForms />
               </ProtectedRoute>
             }
           />

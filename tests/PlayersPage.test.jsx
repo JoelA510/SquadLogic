@@ -25,9 +25,6 @@ vi.mock('../frontend/src/hooks/usePlayersData.js', () => ({
         years_played: 2,
         rating: 3,
         jersey_number: 7,
-        paid: true,
-        waiver_received: false,
-        medical_form_received: false,
         willing_to_coach: false,
         buddy_request: 'Jamie Jones',
       },
@@ -41,9 +38,6 @@ vi.mock('../frontend/src/hooks/usePlayersData.js', () => ({
         years_played: 0,
         rating: null,
         jersey_number: null,
-        paid: false,
-        waiver_received: false,
-        medical_form_received: false,
         willing_to_coach: true,
         buddy_request: null,
       },
@@ -131,17 +125,30 @@ describe('PlayersPage', () => {
     );
   });
 
-  it('runs bulk compliance actions on the selection', async () => {
+  it('runs the bulk waitlist action on the selection', async () => {
     renderPage();
     const checkboxes = screen.getAllByRole('checkbox', { name: 'Select row' });
     fireEvent.click(checkboxes[0]);
     fireEvent.click(checkboxes[1]);
-    fireEvent.click(screen.getByRole('button', { name: /Mark paid/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Waitlist$/ }));
     await vi.waitFor(() =>
       expect(mocks.bulkUpdatePlayers).toHaveBeenCalledWith(expect.arrayContaining(['p1', 'p2']), {
-        paid: true,
+        status: 'waitlist',
       })
     );
+  });
+
+  // Paperwork and payment are tracked on the league's registration platform
+  // (docs/changes/2026-10-22-admin-focus.md, R1): no column, no bulk action.
+  it('offers no paid, waiver or medical column or bulk action', () => {
+    renderPage();
+    const checkboxes = screen.getAllByRole('checkbox', { name: 'Select row' });
+    fireEvent.click(checkboxes[0]);
+    for (const header of ['Paid', 'Waiver', 'Medical']) {
+      expect(screen.queryByRole('columnheader', { name: header })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: /Mark paid/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Waiver received/ })).not.toBeInTheDocument();
   });
 
   it('adds a player from the header action', async () => {

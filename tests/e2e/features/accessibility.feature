@@ -73,9 +73,6 @@ Feature: Every top-level route passes an automated accessibility scan
       | /schedule/practice-lighting   | Practice lighting        | Set lighting override                   |
       | /schedule/heat                | Heat forecast            | turned off for this organization        |
       | /fields                       | Field Management         | Field 1                                 |
-      | /admin/compliance             | Compliance Dashboard     | Jamie Jones                             |
-      | /admin/forms                  | Registration Forms       | Spring 2026 Registration                |
-      | /register/f1                  | Spring 2026 Registration | Who are you registering?                |
       | /admin/audit-logs             | Audit Explorer           | Total Events                            |
       | /admin/analytics              | Analytical Insights      | No traceable evaluation records         |
       | /admin/reports                | Enterprise Dashboard     | Organization Readiness                  |

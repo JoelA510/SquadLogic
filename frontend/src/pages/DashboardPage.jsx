@@ -7,7 +7,6 @@ import {
   BookUser,
   Calendar,
   CheckCircle2,
-  ClipboardCheck,
   Flag,
   History,
   Home,
@@ -138,13 +137,6 @@ function AdminHome() {
   const firstName = user?.profile?.first_name || user?.profile?.full_name?.split(' ')[0] || 'there';
 
   const activePlayers = players.filter((p) => (p.status || 'active') === 'active');
-  const compliancePct = activePlayers.length
-    ? Math.round(
-        (activePlayers.filter((p) => p.paid && p.waiver_received).length / activePlayers.length) *
-          100
-      )
-    : 100;
-  const missingWaivers = activePlayers.filter((p) => !p.waiver_received).length;
   const unassigned = activePlayers.filter((p) => !p.team_id).length;
   const waitlisted = players.filter((p) => p.status === 'waitlist').length;
 
@@ -178,13 +170,6 @@ function AdminHome() {
   }, [divisions, teams, players, genderModel]);
 
   const attention = [
-    missingWaivers > 0 && {
-      icon: ClipboardCheck,
-      color: 'var(--warning)',
-      text: `${missingWaivers} active players missing waivers`,
-      action: 'Review',
-      route: '/admin/compliance',
-    },
     unassigned > 0 && {
       icon: User,
       color: 'var(--accent-teal)',
@@ -252,13 +237,6 @@ function AdminHome() {
         />
         <KPI icon={Calendar} tone="accent-teal" label="Practice slots" value={practices.length} />
         <KPI icon={Flag} tone="accent-amber" label="Games scheduled" value={games.length} />
-        <KPI
-          icon={ClipboardCheck}
-          tone="accent-green"
-          label="Compliance"
-          value={`${compliancePct}%`}
-          sub={missingWaivers ? `${missingWaivers} waivers due` : 'All clear'}
-        />
       </div>
 
       <div

@@ -74,7 +74,7 @@ const rsvpOpen = (event) => !event.timeTbd;
  * Team record — the old Team Portal absorbed into the Lightning-class
  * record layout: hero (name, division, roster size, calendar subscribe)
  * + tabs Schedule (events, RSVPs, team chat), Roster, Staff, Balance.
- * All portal capabilities (calendar feed, RSVP, messages, medical status)
+ * All portal capabilities (calendar feed, RSVP, messages)
  * are reused, not forked.
  */
 export default function TeamRecordPage() {
@@ -466,8 +466,6 @@ export default function TeamRecordPage() {
           <div className="glass-panel p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {roster.map((player) => {
-                const isMedicalCleared = player.medical_cleared === true;
-                const canViewMedicalClearance = player.medical_clearance_visible === true;
                 const playerName = `${player.first_name} ${player.last_name}`;
 
                 return (
@@ -494,17 +492,6 @@ export default function TeamRecordPage() {
                         <GuardianContacts contacts={player.guardian_contacts} />
                       </div>
                     </div>
-                    {canViewMedicalClearance && (
-                      <div
-                        className={`text-xs font-bold px-2 py-1 rounded-full ${
-                          isMedicalCleared
-                            ? 'bg-status-success-bg text-status-success'
-                            : 'bg-status-warning-bg text-status-warning-text'
-                        }`}
-                      >
-                        Medical Clearance: {isMedicalCleared ? 'Yes' : 'Pending'}
-                      </div>
-                    )}
                   </div>
                 );
               })}

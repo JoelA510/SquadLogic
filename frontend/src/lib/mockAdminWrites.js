@@ -1,5 +1,5 @@
 /**
- * Mock arms for the four RPCs the mock client used to let fall through to its
+ * Mock arms for the three RPCs the mock client used to let fall through to its
  * catch-all `{ data: null, error: null }` -- a silent success for a write that
  * never happened. With these arms in place the catch-all refuses instead
  * ({@link unmockedRpcError}), so a new unmocked RPC fails loudly rather than
@@ -7,12 +7,6 @@
  *
  * Each mirrors its SQL definition, refusals included (LESSONS_LEARNED #13):
  *
- * - `admin_update_registration_medical_status`
- *   (`20260504000000_admin_compliance_medical_status_rpc.sql`): 23502 missing
- *   args; 22023 non-object metadata; 42501 no uid, not an org admin, or a
- *   registration not in the org (or without its form, the SQL's JOIN);
- *   returns `{registration_id, organization_id, medical_cleared,
- *   previous_status, changed}`.
  * - `admin_upsert_division_settings`
  *   (`20260504020000_admin_upsert_division_settings_rpc.sql`): 23502 missing
  *   org/season/name; 42501 season not the org's, no uid, not an org admin, or a
@@ -33,7 +27,6 @@
  */
 
 export const ADMIN_WRITE_RPCS = Object.freeze([
-  'admin_update_registration_medical_status',
   'admin_upsert_division_settings',
   'create_org_invite',
   'redeem_org_invite',
@@ -94,51 +87,6 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
   const now = ctx.now ?? new Date();
   const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
   const uid = ctx.currentUserId;
-
-  if (name === 'admin_update_registration_medical_status') {
-    if (!p.p_organization_id) return fail('23502', 'p_organization_id is required');
-    if (!p.p_registration_id) return fail('23502', 'p_registration_id is required');
-    if (typeof p.p_medical_cleared !== 'boolean')
-      return fail('23502', 'p_medical_cleared is required');
-    const metadata = p.p_metadata ?? {};
-    if (typeof metadata !== 'object' || Array.isArray(metadata) || metadata === null) {
-      return fail('22023', 'p_metadata must be a JSON object');
-    }
-    if (!uid) return fail('42501', 'authenticated user is required');
-    if (!ctx.isOrgAdmin(p.p_organization_id)) {
-      return fail(
-        '42501',
-        `Access denied: caller is not an admin of organization ${p.p_organization_id}`
-      );
-    }
-    const reg = (db.registrations || []).find(
-      (r) => same(r.id, p.p_registration_id) && same(r.organization_id, p.p_organization_id)
-    );
-    const form =
-      reg &&
-      (db.registration_forms || []).find(
-        (f) => same(f.id, reg.form_id) && same(f.organization_id, reg.organization_id)
-      );
-    if (!reg || !form) {
-      return fail('42501', `Registration not found in organization ${p.p_organization_id}`);
-    }
-    const previous = reg.medical_cleared ?? null;
-    const changed = previous !== p.p_medical_cleared;
-    if (changed) {
-      reg.medical_cleared = p.p_medical_cleared;
-      reg.updated_at = now.toISOString();
-    }
-    return {
-      data: {
-        registration_id: p.p_registration_id,
-        organization_id: p.p_organization_id,
-        medical_cleared: p.p_medical_cleared,
-        previous_status: previous,
-        changed,
-      },
-      error: null,
-    };
-  }
 
   if (name === 'admin_upsert_division_settings') {
     const orgId = p.p_organization_id;

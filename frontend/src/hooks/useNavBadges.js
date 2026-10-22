@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { REFRESH_TOPICS, subscribeRefresh } from '../lib/refreshBus.js';
 
-const EMPTY = { players: null, coaches: null, teams: null, complianceOpen: null };
+const EMPTY = { players: null, coaches: null, teams: null };
 
 /**
  * Lightweight per-org counts for the side-nav badges. Selects ids only and
@@ -47,7 +47,7 @@ export function useNavBadges() {
         countRows('teams'),
       ]);
       if (!cancelled) {
-        setState({ orgId, badges: { players, coaches, teams, complianceOpen: null } });
+        setState({ orgId, badges: { players, coaches, teams } });
       }
     })();
 

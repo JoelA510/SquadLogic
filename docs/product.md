@@ -17,7 +17,7 @@ administrators spend their season on the league rather than on spreadsheets.
 | League administrator (admin or staff) | Import registrations, form teams, schedule games and practices, publish, manage fields and permits                                     | Know SQL or CSV formats, or have time; they are volunteers                                  |
 | Coach                                 | See their team, its roster and contacts (as the access table allows), schedules and permits (view only), and enter their team's scores | Be at a desk: they use a phone at the field                                                 |
 | Guardian                              | See their child's team, schedule and RSVP                                                                                              | Have an account before they are invited, or read anything but their own child's information |
-| Prospective league (demo visitor)     | Try the product on a ready-made placeholder league for an hour, without an account                                                     | Want to give an email address, or know how to self-host                                     |
+| Prospective league (demo visitor)     | Try the product on a ready-made placeholder league for 30 minutes, without an account                                                  | Want to give an email address, or know how to self-host                                     |
 
 Players are minors and are **not** users: they never sign in. The public is not a user either (no
 public club pages).
@@ -52,7 +52,7 @@ public club pages).
 | Division    | An age group and gender (for example U12 girls) that teams form within; each is in one program.                    |
 | Age group   | A player's natural age with the league's cutoff (August 1 in the example league).                                  |
 | Cohort      | A practice-only team in a division that plays no games (the U4 cohorts).                                           |
-| Demo league | A private, hour-long copy of the placeholder league in `fixtures/demo-2026`.                                       |
+| Demo league | A private, 30-minute copy of the placeholder league in `fixtures/demo-2026`.                                       |
 
 ## History
 

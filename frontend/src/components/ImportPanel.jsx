@@ -229,7 +229,8 @@ export default function ImportPanel({ onImport }) {
       const rowErrors = [];
       const errorFields = [];
 
-      // As import-validation normalizes it (utils/importRows.js)
+      // The row rules import-validation applies (utils/importRows.js); the preview does not
+      // apply its HTML and control-character stripping.
       const normalized = normalizeImportRow(row, (h) => normalizeImportHeader(mappings, h));
       const newRow = importType === 'coaches' ? composeFullName(normalized) : normalized;
 

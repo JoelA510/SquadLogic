@@ -160,6 +160,13 @@ describe('importHeaders', () => {
     expect(resolve(['Full Name', 'Email'], 'coaches').missing).toEqual([]);
   });
 
+  it('composes only from parts import-validation will recognize, not learned mappings', () => {
+    const learned = { 'First Name': 'first_name', Surname: 'last_name', Email: 'email' };
+    expect(
+      findMissingRequiredHeaders(['First Name', 'Surname', 'Email'], 'coaches', learned)
+    ).toEqual(['full_name']);
+  });
+
   it('still requires a coach full name when only one half is present', () => {
     expect(resolve(['First Name', 'Email'], 'coaches').missing).toEqual(['full_name']);
     expect(resolve(['Last Name', 'Email'], 'coaches').missing).toEqual(['full_name']);

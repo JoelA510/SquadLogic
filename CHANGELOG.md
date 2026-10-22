@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A GotSport coach export imports as it is** (D1 of `docs/changes/2026-10-22-demo-mode.md`). The coach import accepted only a full-name column; it now composes the name from `First Name` and `Last Name`, in `import-validation` and in the browser preview. And of two columns that mean the same field (`Email/UserID` and `Contact Email`), a blank one no longer erases the other: 62 of the demo league's 251 coaches lost their email that way. Where both are filled the later one is still kept. One rule in `supabase/functions/_shared/import-rows.ts` and its browser twin `frontend/src/utils/importRows.js`, held equal by `tests/importRowsParity.test.js`.
+- **A GotSport coach export imports as it is** (D1 of `docs/changes/2026-10-22-demo-mode.md`). The coach import accepted only a full-name column; it now composes the name from `First Name` and `Last Name`, in `import-validation` and in the browser preview. And of two columns that mean the same field (`Email/UserID` and `Contact Email`), a blank one no longer erases the other: 62 of the demo league's 251 coaches lost their email that way. Where both are filled the later one is still kept. The blank rule holds for every import type (a fields file's blank `Name` no longer erases its `Field`). One rule in `supabase/functions/_shared/import-rows.ts` and its browser twin `frontend/src/utils/importRows.js`, held equal by `tests/importRowsParity.test.js`.
 
 ## [1.2.0] - 2026-10-22
 

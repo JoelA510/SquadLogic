@@ -85,8 +85,8 @@ REFERENCES programs (id, season_settings_id)`, so a division cannot sit in anoth
   of the program's organization (`is_org_member`), as `divisions` is; no INSERT, UPDATE or DELETE
   policy, so the four program RPCs below (definer, `is_org_admin`) are the only writers;
   `organization_id` is `ON DELETE CASCADE`, as `divisions`' is (`20260331000000:284`), so a demo
-  purge removes them; `anon` gets no grant. pgTAP: an Org B member reads none of Org A's programs, every direct write is refused, and
-  `definer_function_grants.sql` covers the new RPCs.
+  purge removes them; `anon` gets no grant. pgTAP: an Org B member reads none of Org A's
+  programs, every direct write is refused, and `definer_function_grants.sql` covers the new RPCs.
 - **A form's division is in the form's organization and season, by the schema.** E2 adds UNIQUE
   `(id, season_settings_id)` on `divisions` and a composite FK `registration_forms (division_id,
 season_id) REFERENCES divisions (id, season_settings_id)`, and drops the
@@ -198,33 +198,41 @@ registration_closes_on IS NULL)`), so a division with no program is governed by 
   status alone. The default cannot be renamed, deleted or merged away. Decision 8.
 - **Four writers**, each SECURITY DEFINER, `is_org_admin`, refusing a `completed` season, under
   the season lock rollover takes (Concurrency, below) so a rollover never copies a half-moved set,
-  each with a frontend Zod schema and one audit row:
+  each with a frontend Zod schema and one audit row. Each takes the season it checks from the
+  rows it changes (an existing program's, the division's), never from the caller alone:
+  `admin_upsert_program` with an `id` refuses one whose season is not `season_id`, so a
+  completed season's program cannot be edited by naming an active season.
 
-  | RPC                                                              | Does                                                                                                                                                      | Audit                                                         |
-  | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-  | `admin_upsert_program(season_id, id, name, opens_on, closes_on)` | create (id NULL) or rename and re-window; name unique per season (23505)                                                                                  | `program.upserted`                                            |
-  | `admin_set_division_program(division_id, program_id)`            | assign or move; `program_id` NULL removes (to the default); another season's program raises 23503                                                         | `division.program_changed` (from, to)                         |
-  | `admin_delete_program(program_id)`                               | moves its divisions to the default, then deletes it, in one transaction                                                                                   | `program.deleted` (name, window, moved division ids)          |
-  | `admin_merge_programs(source_id, target_id)`                     | moves every source division to the target, deletes the source; the target keeps its name and window; same season; source is not the target or the default | `program.merged` (source name and window, moved division ids) |
+  | RPC                                                              | Does                                                                                                                                                      | Audit                                                                |
+  | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+  | `admin_upsert_program(season_id, id, name, opens_on, closes_on)` | create (id NULL) or rename and re-window; name unique per season (23505); the default refuses a rename                                                    | `program.upserted` (created or updated; old and new name and window) |
+  | `admin_set_division_program(division_id, program_id)`            | assign or move; `program_id` NULL removes (to the default); another season's program raises 23503                                                         | `division.program_changed` (from, to)                                |
+  | `admin_delete_program(program_id)`                               | moves its divisions to the default, then deletes it, in one transaction                                                                                   | `program.deleted` (name, window, moved division ids)                 |
+  | `admin_merge_programs(source_id, target_id)`                     | moves every source division to the target, deletes the source; the target keeps its name and window; same season; source is not the target or the default | `program.merged` (source name and window, moved division ids)        |
 
   The four actions are registered in `audit_actions` by the same migration.
 
 - **What a move changes.** Only the window: forms, teams, players and schedules key on the
   division. A division moved into a program whose window is closed stops taking submissions at
-  once (`registration_form_availability` reads the current program), so the confirmation names
-  the open forms whose state changes, and a delete or merge names the window it drops. Phase B's
-  per-program aggregates follow on their next read.
+  once (`registration_form_availability` reads the current program). Every confirmation (move,
+  remove, delete, merge) lists the forms that open and the forms that close, computed with the
+  same availability function before and after: deleting a closed program reopens its divisions'
+  forms (the default has no window), and merging an open source into a closed target closes
+  them. Phase B's per-program aggregates follow on their next read.
 - **Rollover** copies every program (the default included) and each division's assignment through
   `copied_from_program_id`.
 - **Demo organizations** may use all four: programs hold no personal data.
 - _Tests:_ pgTAP per RPC: a non-admin, another organization's program, and a completed season are
-  refused; deleting or merging away the default, and merging a program into itself, are refused;
-  setting a window on the default violates the CHECK; a delete leaves its divisions in the default
-  and one audit row naming them; a merge leaves the source gone, every division in the target, one
-  audit row; a division moved into a program closed yesterday makes its open form unavailable
-  (planted: availability reading the program the division was in when the form opened). Mock twin
-  in `tests/programs.test.js`; Vitest for the Programs section: the confirmation lists the forms a
-  move closes.
+  refused; deleting, renaming or merging away the default, and merging a program into itself, are
+  refused; `admin_upsert_program` with a completed season's program `id` and an active `season_id`
+  is refused (planted: validating only the supplied season); each upsert's audit row carries the old
+  and new name and window; setting a window on the default violates the CHECK; a delete leaves its
+  divisions in the default and one audit row naming them; a merge leaves the source gone, every
+  division in the target, one audit row; a division moved into a program closed yesterday makes its
+  open form unavailable (planted: availability reading the program the division was in when the form
+  opened). Mock twin in `tests/programs.test.js`; Vitest for the Programs section: the confirmation
+  lists the forms that open and close for a move, a delete of a closed program (opens) and a merge
+  of an open source into a closed target (closes).
 
 ## PR split (nothing can create a draft until every reader ignores drafts)
 

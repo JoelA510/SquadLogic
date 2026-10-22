@@ -25,6 +25,11 @@ import {
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
+import {
+  ALLOWLIST_ENTITY_TYPES,
+  isAllowlistedImportType,
+  keepAllowedColumns,
+} from '../_shared/import-allowlist.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -598,10 +603,37 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // The browser strips them too, but this function is callable directly.
   const stripsSensitive = SENSITIVE_IMPORT_TYPES.includes(body.import_type);
 
+  // People imports then keep only the allowlisted columns: the keys the
+  // finalizer reads, team placement for players, and the fields the
+  // organization declared for the entity (`_shared/import-allowlist.ts`). A
+  // failed schema read fails the request: guessing "no declared fields" would
+  // drop the organization's own columns without saying so.
+  const allowlisted = isAllowlistedImportType(body.import_type);
+  let declaredFields: string[] = [];
+  if (allowlisted) {
+    const { data: schemaRow, error: schemaError } = await serviceClient
+      .from('organization_schemas')
+      .select('schema_definition')
+      .eq('organization_id', body.organization_id)
+      .eq('entity_type', ALLOWLIST_ENTITY_TYPES[body.import_type])
+      .maybeSingle();
+    if (schemaError) {
+      await logFailure(logCtx, 'Organization schema lookup failed', schemaError);
+      return jsonResponse({ status: 'error', message: 'Organization schema lookup failed' }, 500);
+    }
+    const definition = schemaRow?.schema_definition;
+    if (definition && typeof definition === 'object' && !Array.isArray(definition)) {
+      declaredFields = Object.keys(definition);
+    }
+  }
+
   for (let i = 0; i < body.rows.length; i++) {
-    const rawRow = stripsSensitive
+    const strippedRow = stripsSensitive
       ? stripSensitiveColumns(body.rows[i] as Record<string, unknown>)
       : (body.rows[i] as Record<string, unknown>);
+    const rawRow = allowlisted
+      ? keepAllowedColumns(body.import_type, strippedRow, normalizeHeader, declaredFields)
+      : strippedRow;
 
     // Normalize headers via alias map
     const normalizedRow: Record<string, string> = {};

@@ -6,6 +6,10 @@
 -- external_registration_id) carries neither column at all. Before the fix,
 -- the second finalize call would silently reset guardian_contacts to []
 -- and willing_to_coach to false. After the fix, both are preserved.
+--
+-- Since 20261022010000 (the import allowlist) an import stores no guardian
+-- contact at all: the first import leaves guardian_contacts at [], and the
+-- re-import must leave a contact an admin entered by hand untouched.
 
 BEGIN;
 
@@ -56,8 +60,8 @@ SELECT is(
         WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
           AND external_registration_id = 'REIMPORT-EXT-100'
     ),
-    1,
-    'first import: guardian_contacts is populated from the CSV'
+    0,
+    'first import: the CSV''s guardian columns are not stored (guardian_contacts stays [])'
 );
 
 SELECT is(
@@ -70,6 +74,12 @@ SELECT is(
     true,
     'first import: willing_to_coach is set true from the CSV'
 );
+
+-- An admin records a guardian contact by hand between the two imports.
+UPDATE public.players
+SET guardian_contacts = '[{"name": "Pat Guardian"}]'::jsonb
+WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
+  AND external_registration_id = 'REIMPORT-EXT-100';
 
 -- ── Second import: same player, narrower payload (no guardian or ──
 -- coaching-interest columns at all -- simulates a corrected export from a
@@ -112,7 +122,7 @@ SELECT is(
           AND external_registration_id = 'REIMPORT-EXT-100'
     ),
     1,
-    'narrower re-import: guardian_contacts is PRESERVED, not wiped to []'
+    'narrower re-import: the admin-entered guardian_contacts is PRESERVED, not wiped to []'
 );
 
 SELECT is(

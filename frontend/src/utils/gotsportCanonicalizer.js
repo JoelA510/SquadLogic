@@ -1,17 +1,18 @@
 /**
  * GotSport registration import — client-side privacy filter.
  *
- * SquadLogic only needs the data required for teaming and scheduling (Name,
- * Email, Role/Team plus a few teaming signals: age, gender, division, skill,
- * buddy, guardian contacts). Per the project's data-minimization rules we strip
- * sensitive registration columns — medical, insurance, financial / payment,
- * identity documents, waivers / signatures, and non-teaming demographics — on
- * the client BEFORE upload, so they never leave the browser.
+ * SquadLogic only needs the data required for teaming and scheduling. Per the
+ * project's data-minimization rules we strip sensitive registration columns —
+ * medical, insurance, financial / payment, identity documents, waivers /
+ * signatures, and non-teaming demographics — on the client BEFORE upload, so
+ * they never leave the browser. The import allowlist
+ * (`importAllowlist.js`) then keeps only the columns SquadLogic uses; this
+ * filter stays as the first, pattern-based pass.
  *
- * Everything else passes through with its ORIGINAL header name intact, so the
- * downstream recognition pipeline (column mapping, edge validation, finalize
- * RPC) behaves exactly as it did before this filter existed. Pure module — safe
- * to unit test in isolation.
+ * Everything this filter keeps passes through with its ORIGINAL header name
+ * intact, so the downstream recognition pipeline (column mapping, edge
+ * validation, finalize RPC) is unchanged by it. Pure module — safe to unit
+ * test in isolation.
  */
 
 function clean(value) {

@@ -25,6 +25,12 @@ import {
   describeHeaderParse,
 } from '../utils/importHeaders.js';
 import {
+  ALLOWLIST_ENTITY_TYPES,
+  canonicalImportKey,
+  filterImportRows,
+  isAllowedImportKey,
+} from '../utils/importAllowlist.js';
+import {
   buildCoachLeadPayload,
   getExternalRegistrationId,
   hasCoachLeadIntent,
@@ -636,12 +642,23 @@ export function ImportProvider({ children }) {
             // waivers, non-teaming demographics) BEFORE upload so they never
             // leave the browser. Kept columns retain their original headers, so
             // downstream header recognition is unchanged.
+            // Then keep only the allowlisted columns: what the finalizer
+            // reads, team placement for players, and the fields the
+            // organization declared (utils/importAllowlist.js). The Edge
+            // Function and the finalizers apply the same rule again.
             const isPrivacyFiltered = type === 'players' || type === 'coaches';
+            const declaredFields = isPrivacyFiltered
+              ? Object.keys(organizationSchemas[ALLOWLIST_ENTITY_TYPES[type]] || {})
+              : [];
             const data = isPrivacyFiltered
-              ? canonicalizeForUpload(type, results.data)
+              ? filterImportRows(type, canonicalizeForUpload(type, results.data), declaredFields)
               : results.data;
             if (isPrivacyFiltered && Array.isArray(meta.fields)) {
-              meta.fields = meta.fields.filter((h) => !isSensitiveHeader(h));
+              meta.fields = meta.fields.filter(
+                (h) =>
+                  !isSensitiveHeader(h) &&
+                  isAllowedImportKey(type, canonicalImportKey(h), declaredFields)
+              );
             }
 
             // Guard an unreadable header row (empty file, wrong delimiter, or

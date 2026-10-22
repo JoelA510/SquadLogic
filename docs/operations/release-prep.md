@@ -70,9 +70,8 @@ was checked on the date above; each item says how.
 
 - Confirm the production deployment for the release commit (the merge of this release PR) is
   `READY` in Vercel.
-- Confirm `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Vercel Production, and that
-  `VITE_USE_MOCK_SUPABASE` is unset or `false` there.
-- Done 2026-10-22 (*owner-confirmed*): `VITE_SENTRY_DSN` set in Vercel Production; the live
+- Done 2026-10-22 (*owner-confirmed*): Vercel Production sets `VITE_SENTRY_DSN`,
+  `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and not `VITE_USE_MOCK_SUPABASE`; the live
   `main` ruleset matches `.github/rulesets/main.json`. Done (*executed*): the retention secrets
   and a green dry run (run 183).
 - Tag `4459faf` (#622, the 1.1.0 cut) as `v1.1.0`, so that release has its own tag.

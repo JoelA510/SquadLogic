@@ -85,16 +85,16 @@ against the source: no source email, phone, id or full name anywhere in it, ever
 placeholder, every carried column taken only from the source's low-cardinality answers. It
 caught a planted real email, a real name, a missing player and an out-of-window birthdate.
 
-## Import gaps it exposes
+## Import gaps it exposed
 
 _Executed_ through the real header path (`tests/demoFixture.test.js`):
 
 - **`Payment Plan` is dropped** by the import's sensitive-column filter (it matches `payment`), and
   `Photo Consent` with it. The registered program and division live only in that column, so a
-  GotSport import loses them.
-- **One of two email columns is lost**: `Email/UserID` and `Contact Email` both resolve to `email`,
-  and import-validation keeps the last one even when it is blank, so 62 coach rows with a login
-  email arrive with none. Players are unaffected (their `Contact Email` is the filled one).
-- **A coach export fails the coach import's header check**: it requires one full-name column, and
-  the export has `First Name` and `Last Name`. The test pins exactly that gap, so it fails when the
-  import is fixed and its expectation becomes empty.
+  GotSport import loses them. Open until Phase E reads it.
+- **Fixed (D1): one of two email columns was lost.** `Email/UserID` and `Contact Email` both
+  resolve to `email`, and the import kept the last one even when it was blank, so 62 coach rows
+  with a login email arrived with none. A blank now never replaces a value; where both are filled
+  the later column, `Contact Email`, is kept.
+- **Fixed (D1): a coach export failed the coach import's header check**, which required one
+  full-name column where the export has `First Name` and `Last Name`. The import now composes it.

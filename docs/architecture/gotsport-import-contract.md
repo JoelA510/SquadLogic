@@ -44,6 +44,12 @@ insurance, payments, financial aid, and full guardian demographics.
 > **Duplicate headers:** the coach export repeats `Playing Up` and
 > `Preferred Co-Coach` once per coached player. A PapaParse `transformHeader`
 > disambiguates them positionally (`__2`) so values never collide.
+>
+> **Two email columns, one `email`:** a blank one never replaces the other, and
+> where both are filled the later column (`Contact Email`) is kept. The full
+> name is composed from `First Name` and `Last Name` when the file has no
+> full-name column. Both rules live in `_shared/import-rows.ts`
+> (`import-validation`) and its browser twin `frontend/src/utils/importRows.js`.
 
 ## Dropped on import (never stored)
 

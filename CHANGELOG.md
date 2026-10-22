@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A demo league's registrations** (`fixtures/demo-2026/`): 1,259 player and 251 coach registrations in a GotSport export's own columns, every person a placeholder, shaped as 128 teams (eight per division to U12, two from U14, and four U4 practice cohorts). Made from a real 2026 rec export outside the repository; the seed for demo mode and a realistic import for tests. `tests/demoFixture.test.js` holds its shape, its placeholders and its cross-references, and records three import gaps it exposes: `Payment Plan` (which carries the registered program and division) is dropped as a payment column, the coach import requires a full-name column a GotSport export does not have, and of the two email columns the later one wins even when blank (62 coaches lose theirs). Registration times and adult birthdates are synthetic.
 
+### Fixed
+
+- **A GotSport coach export imports as it is** (D1 of `docs/changes/2026-10-22-demo-mode.md`). The coach import accepted only a full-name column; it now composes the name from `First Name` and `Last Name`, in `import-validation` and in the browser preview. And of two columns that mean the same field (`Email/UserID` and `Contact Email`), a blank one no longer erases the other: 62 of the demo league's 251 coaches lost their email that way. Where both are filled the later one is still kept. The blank rule holds for every import type (a fields file's blank `Name` no longer erases its `Field`). One rule in `supabase/functions/_shared/import-rows.ts` and its browser twin `frontend/src/utils/importRows.js`, held equal by `tests/importRowsParity.test.js`.
+
 ## [1.2.0] - 2026-10-22
 
 ### Added

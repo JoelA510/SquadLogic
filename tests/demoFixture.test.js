@@ -21,7 +21,9 @@ import {
   findMissingRequiredHeaders,
   normalizeImportHeader,
 } from '../frontend/src/utils/importHeaders.js';
+import { composeFullName, normalizeImportRow } from '../frontend/src/utils/importRows.js';
 import { matchHeaders } from '../frontend/src/utils/telemetryUtils.js';
+import * as edgeRows from '../supabase/functions/_shared/import-rows.ts';
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'demo-2026');
 
@@ -275,39 +277,72 @@ describe('demo fixture: the real import path', () => {
     expect(required(players, 'players')).toEqual([]);
   });
 
-  // Known gap (README, "Import gaps"): `Email/UserID` and `Contact Email` both resolve to `email`,
-  // and import-validation keeps the last column written for a key, blank or not
-  // (supabase/functions/import-validation/index.ts, "Normalize headers via alias map"). Rows are
-  // resolved here with the import's own header matching, in header order, last one winning.
-  const emailAfterImport = ({ fields, rows }) => {
+  // `Email/UserID` and `Contact Email` both resolve to `email`. Rows go through the import's own
+  // header matching and row normalization (browser and Edge copies), so a blank Contact Email no
+  // longer erases a login email (fixtures/demo-2026/README.md, "Import gaps", fixed by D1).
+  const emailAfterImport = ({ fields, rows }, normalize) => {
     const kept = fields.filter((h) => !isSensitiveHeader(h));
     const { mappings } = matchHeaders(kept, [], {});
-    expect(kept.filter((h) => normalizeImportHeader(mappings, h) === 'email').length).toBe(2);
+    const resolve = (h) => normalizeImportHeader(mappings, h);
+    expect(kept.filter((h) => resolve(h) === 'email').length).toBe(2);
     return rows.map((r) => {
-      const out = {};
-      for (const h of kept) out[normalizeImportHeader(mappings, h)] = r[h] ?? '';
-      return out.email;
+      const row = Object.fromEntries(kept.map((h) => [h, r[h] ?? '']));
+      return normalize(row, resolve).email;
     });
   };
 
-  it('loses the email of exactly the coach rows whose later Contact Email is blank', () => {
-    const lost = emailAfterImport(coaches).filter((e) => !filled(e)).length;
-    const withLogin = C.filter(
-      (r) => filled(r['Email/UserID']) && !filled(r['Contact Email'])
-    ).length;
-    expect(lost).toBe(withLogin);
-    expect(lost).toBe(62);
+  for (const [name, normalize] of [
+    ['browser', normalizeImportRow],
+    ['edge', edgeRows.normalizeImportRow],
+  ]) {
+    it(`keeps every coach row's email when either column has one (${name})`, () => {
+      const emails = emailAfterImport(coaches, normalize);
+      const withEither = C.filter(
+        (r) => filled(r['Email/UserID']) || filled(r['Contact Email'])
+      ).length;
+      expect(emails.filter(filled).length).toBe(withEither);
+      // The 62 rows the last-column rule used to empty: login email only.
+      const loginOnly = C.map((r, i) => [r, i]).filter(
+        ([r]) => filled(r['Email/UserID']) && !filled(r['Contact Email'])
+      );
+      expect(loginOnly.length).toBe(62);
+      for (const [r, i] of loginOnly) expect(emails[i]).toBe(r['Email/UserID']);
+    });
+
+    it(`keeps the Contact Email where the two columns differ (${name})`, () => {
+      const emails = emailAfterImport(players, normalize);
+      const both = P.map((r, i) => [r, i]).filter(
+        ([r]) =>
+          filled(r['Email/UserID']) &&
+          filled(r['Contact Email']) &&
+          r['Email/UserID'] !== r['Contact Email']
+      );
+      expect(both.length).toBe(46);
+      for (const [r, i] of both) expect(emails[i]).toBe(r['Contact Email']);
+    });
+  }
+
+  // A GotSport coach export has First Name and Last Name and no full-name column; the import
+  // composes it (D1), so the header check passes.
+  it('passes the coach import header check', () => {
+    expect(required(coaches, 'coaches')).toEqual([]);
   });
 
-  it('keeps every player email (the later Contact Email is the filled one)', () => {
-    const lost = emailAfterImport(players).filter((e) => !filled(e)).length;
-    expect(lost).toBe(P.filter((r) => !filled(r['Contact Email'])).length);
-  });
-
-  // Known gap (fixtures/demo-2026/README.md, "Import gaps"): the coach import requires one
-  // full-name column, and a GotSport coach export has only First Name and Last Name. Pinned to
-  // exactly that gap: when the import accepts the pair this fails, and the expectation becomes [].
-  it('misses only the full-name column in the coach import header check', () => {
-    expect(required(coaches, 'coaches')).toEqual(['full_name']);
-  });
+  /** @type {Array<[string, { normalizeImportRow: typeof normalizeImportRow, composeFullName: typeof composeFullName }]>} */
+  const copies = [
+    ['browser', { normalizeImportRow, composeFullName }],
+    ['edge', edgeRows],
+  ];
+  for (const [name, rows] of copies) {
+    it(`gives every coach row a full name from First Name and Last Name (${name})`, () => {
+      const kept = coaches.fields.filter((h) => !isSensitiveHeader(h));
+      const { mappings } = matchHeaders(kept, [], {});
+      const resolve = (h) => normalizeImportHeader(mappings, h);
+      expect(kept.map(resolve)).not.toContain('full_name');
+      for (const r of C) {
+        const row = rows.composeFullName(rows.normalizeImportRow(r, resolve));
+        expect(row.full_name).toBe(`${r['First Name']} ${r['Last Name']}`);
+      }
+    });
+  }
 });

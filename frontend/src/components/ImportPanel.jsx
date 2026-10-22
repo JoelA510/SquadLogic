@@ -22,13 +22,12 @@ import ProgressBar from './ui/ProgressBar.jsx';
 import Tooltip from './ui/Tooltip.jsx';
 import ColumnMapper, { applyMapping, serializeCanonicalCsv } from './ColumnMapper.jsx';
 import { logger } from '../lib/logger.js';
-
-const REQUIRED_HEADERS = {
-  players: ['first_name', 'last_name', 'date_of_birth'],
-  coaches: ['full_name', 'email'],
-  fields: ['location', 'name', 'type', 'start', 'end'],
-  field_availability: ['season_label', 'location', 'name', 'available_from', 'available_until'],
-};
+import {
+  REQUIRED_HEADERS,
+  findMissingRequiredHeaders,
+  normalizeImportHeader,
+} from '../utils/importHeaders.js';
+import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 
 /** @typedef {'players' | 'coaches' | 'fields' | 'field_availability'} ImportType */
 /** @type {readonly ImportType[]} */
@@ -36,7 +35,7 @@ const IMPORT_TYPES = Object.freeze(['players', 'coaches', 'fields', 'field_avail
 const COMPLETED_IMPORT_STATUSES = new Set(['completed', 'completed_with_warnings']);
 const IMPORT_TYPE_TOOLTIPS = {
   players: 'Requires first name, last name, and date of birth columns.',
-  coaches: 'Requires full name and email columns.',
+  coaches: 'Requires full name (or first and last name) and email columns.',
   fields: 'Requires location, name, type, start, and end columns.',
   field_availability:
     'Requires season_label, location, name, available_from, and available_until columns.',
@@ -222,19 +221,18 @@ export default function ImportPanel({ onImport }) {
    */
   const buildPreview = ({ data, headers, smartMetadata }) => {
     const { mappings } = smartMetadata;
-    const normalizeHeader = (h) => mappings[h] || h.toLowerCase().trim();
 
     const validationErrors = [];
     const requiredForType = REQUIRED_HEADERS[importType] || [];
 
     data.forEach((row, index) => {
-      const newRow = {};
       const rowErrors = [];
       const errorFields = [];
 
-      Object.keys(row).forEach((key) => {
-        newRow[normalizeHeader(key)] = row[key];
-      });
+      // The row rules import-validation applies (utils/importRows.js); the preview does not
+      // apply its HTML and control-character stripping.
+      const normalized = normalizeImportRow(row, (h) => normalizeImportHeader(mappings, h));
+      const newRow = importType === 'coaches' ? composeFullName(normalized) : normalized;
 
       requiredForType.forEach((field) => {
         if (!newRow[field]) {
@@ -291,12 +289,7 @@ export default function ImportPanel({ onImport }) {
           });
         }
 
-        const normalizeHeader = (h) => mappings[h] || h.toLowerCase().trim();
-        const requiredForType = REQUIRED_HEADERS[importType] || [];
-        const normalizedFileHeaders = headers.map(normalizeHeader);
-        const missingHeaders = requiredForType.filter(
-          (req) => !normalizedFileHeaders.includes(req)
-        );
+        const missingHeaders = findMissingRequiredHeaders(headers, importType, mappings);
 
         if (missingHeaders.length > 0) {
           // Instead of hard-erroring, hand off to the ColumnMapper so the

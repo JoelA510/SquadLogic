@@ -17,7 +17,10 @@ import {
   isSensitiveHeader,
   makeDedupeHeaderTransformer,
 } from '../frontend/src/utils/gotsportCanonicalizer.js';
-import { findMissingRequiredHeaders } from '../frontend/src/utils/importHeaders.js';
+import {
+  findMissingRequiredHeaders,
+  normalizeImportHeader,
+} from '../frontend/src/utils/importHeaders.js';
 import { matchHeaders } from '../frontend/src/utils/telemetryUtils.js';
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'demo-2026');
@@ -193,6 +196,31 @@ describe('demo fixture: dates and cross-references', () => {
     }
   });
 
+  it('gives adult coaches synthetic birthdates and every row a synthetic registration time', () => {
+    for (const r of C) {
+      expect(r['Date of Birth'].slice(0, 4)).toBe(r['Birth Year']);
+      const name = `${r['First Name']} ${r['Last Name']}`;
+      // a row filed under a child's profile carries that child's birthdate (README)
+      if (byName.has(name)) expect(r['Date of Birth']).toBe(byName.get(name)['Date of Birth']);
+      else if (!UNREGISTERED.test(name)) {
+        expect(Number(r['Birth Year'])).toBeGreaterThanOrEqual(1970);
+        expect(Number(r['Birth Year'])).toBeLessThanOrEqual(1996);
+      }
+    }
+    const stamp = (v) => {
+      const m = /^(\d\d)\/(\d\d)\/2026 (\d\d):(\d\d)$/.exec(v);
+      expect(m).not.toBeNull();
+      return Date.UTC(2026, Number(m[1]) - 1, Number(m[2]), Number(m[3]), Number(m[4]));
+    };
+    for (const r of [...P, ...C]) {
+      const created = stamp(r.Created);
+      const submitted = stamp(r['Submitted At']);
+      expect(created).toBeGreaterThanOrEqual(Date.UTC(2026, 2, 1));
+      expect(submitted).toBeGreaterThan(created);
+      expect(submitted - created).toBeLessThan(4 * 60 * 60 * 1000);
+    }
+  });
+
   it('names only players in the demo in buddy requests, never the requester', () => {
     for (const r of P) {
       for (const part of parts(r[BUDDY])) {
@@ -245,6 +273,35 @@ describe('demo fixture: the real import path', () => {
 
   it('passes the player import header check', () => {
     expect(required(players, 'players')).toEqual([]);
+  });
+
+  // Known gap (README, "Import gaps"): `Email/UserID` and `Contact Email` both resolve to `email`,
+  // and import-validation keeps the last column written for a key, blank or not
+  // (supabase/functions/import-validation/index.ts, "Normalize headers via alias map"). Rows are
+  // resolved here with the import's own header matching, in header order, last one winning.
+  const emailAfterImport = ({ fields, rows }) => {
+    const kept = fields.filter((h) => !isSensitiveHeader(h));
+    const { mappings } = matchHeaders(kept, [], {});
+    expect(kept.filter((h) => normalizeImportHeader(mappings, h) === 'email').length).toBe(2);
+    return rows.map((r) => {
+      const out = {};
+      for (const h of kept) out[normalizeImportHeader(mappings, h)] = r[h] ?? '';
+      return out.email;
+    });
+  };
+
+  it('loses the email of exactly the coach rows whose later Contact Email is blank', () => {
+    const lost = emailAfterImport(coaches).filter((e) => !filled(e)).length;
+    const withLogin = C.filter(
+      (r) => filled(r['Email/UserID']) && !filled(r['Contact Email'])
+    ).length;
+    expect(lost).toBe(withLogin);
+    expect(lost).toBe(62);
+  });
+
+  it('keeps every player email (the later Contact Email is the filled one)', () => {
+    const lost = emailAfterImport(players).filter((e) => !filled(e)).length;
+    expect(lost).toBe(P.filter((r) => !filled(r['Contact Email'])).length);
   });
 
   // Known gap (fixtures/demo-2026/README.md, "Import gaps"): the coach import requires one

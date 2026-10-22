@@ -54,6 +54,8 @@ sessions, not games.
 
 Emails are `emailK@example.com` and phones `555-100-KKKK`, numbered by first appearance; one real
 address shared by a family stays one placeholder. Registration and team ids are new.
+Registration times (`Created`, `Submitted At`) are synthetic, spread over March to August 2026, and
+adult coaches' birthdates are synthetic (1970-1996): neither is derived from the source.
 
 Free-text answers (buddy requests, a coach's player, preferred co-coach) were rebuilt from the
 people they name, so no original text survives: a name becomes that person's placeholder, and an
@@ -76,8 +78,9 @@ match that player's row.
 From one real 2026 rec export, outside the repository; the source and the generator stay with the
 owner (the generator names the source club in order to replace it). Real players were dropped where
 a division had more than it needed (unplaced and unreferenced first) and synthetic ones added where
-it had fewer, from that division's own answers. Birthdates moved 1 to 30 days at random, inside
-the player's August-1 window, so no one changes age group. A verifier then checked the output
+it had fewer, from that division's own answers. Players' birthdates moved 1 to 30 days at random,
+inside the player's August-1 window, so no one changes age group; adults' birthdates and every
+registration time were replaced outright. A verifier then checked the output
 against the source: no source email, phone, id or full name anywhere in it, every name column a
 placeholder, every carried column taken only from the source's low-cardinality answers. It
 caught a planted real email, a real name, a missing player and an out-of-window birthdate.
@@ -89,6 +92,9 @@ _Executed_ through the real header path (`tests/demoFixture.test.js`):
 - **`Payment Plan` is dropped** by the import's sensitive-column filter (it matches `payment`), and
   `Photo Consent` with it. The registered program and division live only in that column, so a
   GotSport import loses them.
+- **One of two email columns is lost**: `Email/UserID` and `Contact Email` both resolve to `email`,
+  and import-validation keeps the last one even when it is blank, so 62 coach rows with a login
+  email arrive with none. Players are unaffected (their `Contact Email` is the filled one).
 - **A coach export fails the coach import's header check**: it requires one full-name column, and
   the export has `First Name` and `Last Name`. The test pins exactly that gap, so it fails when the
   import is fixed and its expectation becomes empty.

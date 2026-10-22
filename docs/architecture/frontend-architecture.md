@@ -24,13 +24,10 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/schedule/practice`    | `PracticeSchedulingPage`   | Practice slot assignment with lock/unlock toggles               |
 | `/schedule/game`        | `GameSchedulingPage`       | Interactive game schedule grid with drag-and-drop               |
 | `/settings`             | `SettingsPage`             | League config, theme branding, season management                |
-| `/admin/compliance`     | `AdminComplianceDashboard` | Waiver and medical-clearance tracking (admin)                   |
-| `/admin/forms`          | `RegistrationForms`        | Registration form management (admin)                            |
 | `/admin/audit-logs`     | `AuditLogPage`             | Audit Explorer (global-settings permission)                     |
 | `/admin/analytics`      | `AnalyticalDashboard`      | Analytical Insights: fairness trend, conflict frequency (admin) |
 | `/admin/reports`        | `EnterpriseDashboard`      | Org readiness and distribution analytics (admin)                |
 | `/standings`            | `LeagueStandings`          | Score entry, standings tables, tie-breaker logic                |
-| `/register/:formId`     | `RegistrationFlow`         | Registration form flow (signed-in, inside the dashboard layout) |
 | `/team/:teamId`         | `TeamRecordPage`           | Team record (tabs: schedule+RSVP+chat, roster, staff, balance)  |
 | `/players`              | `PlayersPage`              | Virtualized editable players grid (audited RPC mutations)       |
 | `/players/:playerId`    | `PlayerRecordPage`         | Player record with inline editing                               |

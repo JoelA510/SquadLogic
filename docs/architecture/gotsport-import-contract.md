@@ -65,10 +65,14 @@ key fails until the key is allowlisted on purpose.
 | `team name`, `team age`, `team gender`                                                                                                                     | `custom_attributes.team_name` / `team_age` / `team_gender` | Phase B (teams formed outside SquadLogic) |
 | a declared player field                                                                                                                                    | `custom_attributes.<declared name>`, typed as declared     | The organization's own use                |
 
-A player import no longer writes `contact_info` (new rows get `{}`),
-`guardian_contacts` (new rows get `[]`) or `paid` (new rows get `false`); an
-existing player's values are left as they are until those columns are dropped
-(R1, R4).
+A player import no longer writes `contact_info` (new rows get `{}`) or
+`guardian_contacts` (new rows get `[]`); an existing player's values are left as
+they are until those columns are dropped (R4). `players.paid` and the paperwork
+flags `waiver_received` and `medical_form_received` were dropped in R1
+(`20261022020000`): payments and paperwork are tracked on the league's
+registration platform, and the waitlist status stays the teaming gate. The
+sensitive-column filter still lets a "Payment Status" header through (it was the
+`paid` flag's source); the allowlist then drops it, so nothing stores it.
 
 ## Coach import — kept fields
 

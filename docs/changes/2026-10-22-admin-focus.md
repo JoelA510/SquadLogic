@@ -120,6 +120,26 @@ at once (AGENTS.md section 11).
   after finalize), then deleted by the purge and a 30-day retention job for coach staging like the
   player one, not deleted at finalize.
 
+## As built (R1)
+
+- **Two more RPCs than the row names.** `admin_delete_registration_form` and
+  `admin_update_registration_medical_status` wrote the dropped tables, so they went too (seven
+  functions in all). The tables' policies and triggers are dropped by name before the tables.
+- **Replaced, not dropped:** `sanitize_player_patch` and `apply_player_patch` lose the three flags
+  (a patch naming one is refused 22023), and `finalize_import_job` is copied from R0's body
+  without `paid`.
+- **The Reports page** loses its Compliance axis and the Network Readiness tile, which displayed
+  that axis's value.
+- **The `medical_forms` flag** leaves the settings catalogue and its default; its key stays in
+  `FEATURE_FLAGS` so a stored value still parses (skill `squadlogic-feature-guardians`).
+- **Kept:** the sensitive-column filter's "Payment Status" exception (the import allowlist drops
+  the column after it, so nothing stores it); the retired actions' `audit_actions` rows; every
+  GotSport "registration" name.
+- **Harness:** older smokes at head stop exercising dropped objects (the throttle smoke now checks
+  they stay gone), so the six M28 throttle plants are retired; the M30 plant is re-aimed at this
+  migration's `finalize_import_job`; the revert check compares a catalogue fingerprint of every
+  dropped or replaced object with a build at `20261022010000`.
+
 ## Docs updated across the PRs
 
 AGENTS.md section 2 (data rules), `docs/agents-reference.md`, `README.md`,

@@ -16,6 +16,42 @@ const pinToMockOrg = async (page: Page) => {
   }, MOCK_ORG_ID);
 };
 
+// ─── Background ─────────────────────────────────────────────────────
+
+// Moved here from the registration steps, which went with the in-app
+// registration flow (docs/changes/2026-10-22-admin-focus.md, R1): the
+// organization and its active season, seeded on every page load, as before,
+// without the registration form and registration that file also seeded.
+Given('there is an active season {string}', async ({ page }, seasonName: string) => {
+  await page.addInitScript(
+    ({ mockOrgId, name }) => {
+      type MockTable = Array<Record<string, unknown>>;
+      type MockDb = Record<string, MockTable>;
+      const db = ((window as { __MOCK_DB__?: MockDb }).__MOCK_DB__ || {}) as MockDb;
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      db.organizations = db.organizations || [];
+      if (!db.organizations.find((o: Record<string, unknown>) => o.id === orgId)) {
+        db.organizations.push({ id: orgId, name: 'Test Org', is_onboarded: true });
+      }
+      db.season_settings = db.season_settings || [];
+      if (!db.season_settings.find((s: Record<string, unknown>) => s.name === name)) {
+        db.season_settings.push({
+          id: 'season-fall-26',
+          organization_id: orgId,
+          name,
+          status: 'active',
+          timezone: 'America/Los_Angeles',
+          created_at: new Date().toISOString(),
+        });
+      }
+      (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      localStorage.setItem('squadlogic_active_org', orgId);
+    },
+    { mockOrgId: MOCK_ORG_ID, name: seasonName }
+  );
+});
+
 // ─── Admin Dashboard Steps ──────────────────────────────────────────
 
 Given('the admin views the reporting dashboard', async ({ page }) => {

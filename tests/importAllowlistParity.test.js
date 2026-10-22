@@ -129,6 +129,68 @@ describe('the import allowlist, browser and Edge copies', () => {
     }
   });
 
+  it('keeps a declared field whose header is also a global alias, in both copies', () => {
+    const normalize = browser.canonicalImportKey;
+    // `Skill` is an alias of `skill_tier`, which coaches do not keep.
+    expect(normalize('Skill')).toBe('skill_tier');
+    for (const copy of [browser, edge]) {
+      expect(copy.isAllowedImportHeader('coaches', 'Skill', normalize, ['skill'])).toBe(true);
+      expect(copy.isAllowedImportHeader('coaches', 'Skill', normalize, [])).toBe(false);
+      expect(copy.isAllowedImportHeader('players', 'Skill', normalize, [])).toBe(true);
+      expect(
+        copy.keepAllowedColumns('coaches', { 'Full Name': 'First1 Last1', Skill: 'A' }, normalize, [
+          'skill',
+        ])
+      ).toEqual({ 'Full Name': 'First1 Last1', Skill: 'A' });
+    }
+  });
+
+  it('carries the declared field under its identity, and the system field keeps its reading', () => {
+    const normalize = browser.canonicalImportKey;
+    for (const copy of [browser, edge]) {
+      // Players: skill_tier is a system field; the declared `skill` gets a copy.
+      expect(
+        copy.withDeclaredColumns(
+          'players',
+          { first_name: 'First1', skill_tier: 'advanced' },
+          { 'First Name': 'First1', Skill: 'advanced' },
+          normalize,
+          ['skill']
+        )
+      ).toEqual({ first_name: 'First1', skill_tier: 'advanced', skill: 'advanced' });
+      // Coaches: skill_tier is not theirs, so only the declared copy stays.
+      expect(
+        copy.withDeclaredColumns(
+          'coaches',
+          { full_name: 'First1 Last1', skill_tier: 'A' },
+          { 'Full Name': 'First1 Last1', Skill: 'A' },
+          normalize,
+          ['skill']
+        )
+      ).toEqual({ full_name: 'First1 Last1', skill: 'A' });
+      // Nothing declared: as before, and an unlisted key is dropped.
+      expect(
+        copy.withDeclaredColumns(
+          'coaches',
+          { full_name: 'First1 Last1', skill_tier: 'A' },
+          { 'Full Name': 'First1 Last1', Skill: 'A' },
+          normalize,
+          []
+        )
+      ).toEqual({ full_name: 'First1 Last1' });
+      // The copy never replaces a non-blank value already under its key.
+      expect(
+        copy.withDeclaredColumns(
+          'players',
+          { first_name: 'First1', skill: 'kept' },
+          { Skill: 'other' },
+          normalize,
+          ['skill']
+        )
+      ).toEqual({ first_name: 'First1', skill: 'kept' });
+    }
+  });
+
   it('leaves the other import types as given in both copies', () => {
     const row = { location: 'Field Park', 'Guardian 1 Email Address': 'kept@example.com' };
     const lower = (h) => h.toLowerCase().trim();
@@ -508,5 +570,23 @@ describe('import-validation row errors quote no person value', () => {
       quotingMessages("message: `Invalid date format: ${row['date_of_birth']}`,")
     ).toHaveLength(1);
     expect(quotingMessages('message: `Invalid email format: ${row.email}`,')).toHaveLength(1);
+  });
+});
+
+describe('import-validation applies the declared-field rule on every people row', () => {
+  const src = readFileSync(
+    path.join(REPO, 'supabase/functions/import-validation/index.ts'),
+    'utf8'
+  );
+
+  it('filters with keepAllowedColumns and carries declared fields with withDeclaredColumns', () => {
+    const keep = src.indexOf('keepAllowedColumns(body.import_type');
+    const compose = src.indexOf('composeFullName(normalizedRow');
+    const declared = src.indexOf('withDeclaredColumns(\n');
+    expect(keep).toBeGreaterThan(-1);
+    expect(compose).toBeGreaterThan(keep);
+    // After the full name is composed, before the row is validated or staged.
+    expect(declared).toBeGreaterThan(compose);
+    expect(declared).toBeLessThan(src.indexOf('validateRow(normalizedRow'));
   });
 });

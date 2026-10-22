@@ -138,6 +138,22 @@ export function isAllowedImportKey(importType, canonicalKey, declaredFields = []
 }
 
 /**
+ * True when an import column is kept: its canonical key is allowed, or its
+ * own identity is a declared field (a header that is also a global alias,
+ * `Skill` -> `skill_tier`, still reaches a declared `skill`).
+ * @param {string} importType
+ * @param {string} header
+ * @param {(header: string) => string} normalizeHeader
+ * @param {Iterable<string>} [declaredFields]
+ */
+export function isAllowedImportHeader(importType, header, normalizeHeader, declaredFields = []) {
+  const declared = [...declaredFields];
+  if (isAllowedImportKey(importType, normalizeHeader(header), declared)) return true;
+  const identity = declaredFieldKey(header);
+  return identity !== '' && declared.some((field) => declaredFieldKey(field) === identity);
+}
+
+/**
  * The row with only its allowed columns, keyed and valued as given.
  * @param {string} importType
  * @param {Record<string, unknown>} row
@@ -151,9 +167,48 @@ export function keepAllowedColumns(importType, row, normalizeHeader, declaredFie
   /** @type {Record<string, unknown>} */
   const kept = {};
   for (const [key, value] of Object.entries(row ?? {})) {
-    if (isAllowedImportKey(importType, normalizeHeader(key), declared)) kept[key] = value;
+    if (isAllowedImportHeader(importType, key, normalizeHeader, declared)) kept[key] = value;
   }
   return kept;
+}
+
+/**
+ * The normalized row with each declared field the import carries under its
+ * declared identity, and with no key that is neither allowed nor declared.
+ * When a header is both a declared field and an alias of a system field, the
+ * system field keeps its own reading and the declared field gets a copy; the
+ * copy never replaces a non-blank value. The Edge copy's comment says more.
+ * @param {string} importType
+ * @param {Record<string, string>} normalizedRow
+ * @param {Record<string, unknown>} rawRow
+ * @param {(header: string) => string} normalizeHeader
+ * @param {Iterable<string>} [declaredFields]
+ * @param {(value: unknown) => string} [clean]
+ * @returns {Record<string, string>}
+ */
+export function withDeclaredColumns(
+  importType,
+  normalizedRow,
+  rawRow,
+  normalizeHeader,
+  declaredFields = [],
+  clean = (v) => (v == null ? '' : String(v))
+) {
+  if (!isAllowlistedImportType(importType)) return normalizedRow;
+  const declared = new Set([...declaredFields].map(declaredFieldKey));
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const [key, value] of Object.entries(normalizedRow)) {
+    if (isAllowedImportKey(importType, key, declared)) out[key] = value;
+  }
+  for (const [header, value] of Object.entries(rawRow ?? {})) {
+    const identity = declaredFieldKey(header);
+    if (!declared.has(identity) || identity === normalizeHeader(header)) continue;
+    const cleaned = clean(value);
+    if (cleaned.trim() === '') continue;
+    if (out[identity] === undefined || String(out[identity]).trim() === '') out[identity] = cleaned;
+  }
+  return out;
 }
 
 /**

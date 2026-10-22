@@ -48,6 +48,22 @@ holds the two code copies equal and holds each list equal to the keys the latest
 SQL readers of the staged payload read, so a finalizer that starts reading a new
 key fails until the key is allowlisted on purpose.
 
+**A declared field whose header is also a global alias.** The alias map turns
+some headers into system keys (`Skill` becomes `skill_tier`). A column is kept
+when its own identity is a declared field too, and then both readings are
+made: the system field reads the canonical key as it always did (a player's
+`skill_tier`), and the declared field gets a copy under its identity
+(`skill`), which the finalizers store in `custom_attributes`. The copy never
+replaces a non-blank value already under that key, so it cannot displace
+another column's reading; the canonical key stays only when the import type
+keeps it (`skill_tier` stays for players and goes for coaches). With nothing
+declared, the header is judged by its canonical key alone, as before.
+
+**A declared date** is stored as `YYYY-MM-DD` and must be a real calendar
+date written exactly so: the custom-attributes trigger refuses
+`2025-02-03junk` and `2025-02-30`, and the import drops such a value rather
+than storing it.
+
 ## Player import — kept fields
 
 | Canonical key(s)                                                                                                                                           | Stored as                                                  | Used for                                  |
@@ -131,8 +147,9 @@ can be restored:
   reduced to the allowlist (their `raw_payload`, which nothing reads, keeps only
   columns whose lower-cased header is itself an allowlisted key or a declared
   field);
-- personal values in `audit_log.metadata` (emails, and a player event's names,
-  birth date, contact and guardian values) replaced with `[redacted]`, and a
+- personal values in `audit_log.metadata` replaced with `[redacted]`: every
+  key whose name contains `email` (a boolean such as `has_email` aside), and a
+  player event's names, birth date, contact and guardian values; and a
   value an "Invalid date format" or "Invalid email format" row error quoted
   removed from `import_jobs.error_summary`. `import-validation` no longer
   quotes the value.

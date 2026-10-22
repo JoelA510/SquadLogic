@@ -30,8 +30,9 @@
 --         reduced to the allowlisted keys and the declared fields.
 --   * `validate_custom_attributes()` (the custom-attributes trigger), copied
 --     from 20260405120000 with its 20260421001209 search_path: a declared
---     `date` is checked on the string's text, not its JSON text, whose
---     quotes made every date fail `^\d{4}-\d{2}-\d{2}`. Nothing else changes.
+--     `date` must be a real calendar date written exactly `YYYY-MM-DD`. It
+--     was checked on its JSON text, whose quotes made every date fail an
+--     unanchored `^\d{4}-\d{2}-\d{2}`. Nothing else changes.
 --   * `finalize_import_job(uuid, jsonb)`, copied from its latest body
 --     (20261020020000), no longer reads any email, phone, guardian, parent or
 --     payment key: it writes `contact_info = '{}'` and `guardian_contacts =
@@ -71,9 +72,10 @@
 --         allowlist. `raw_payload`, which nothing reads, keeps only entries
 --         whose lower-cased key is itself allowlisted or declared;
 --       - personal values in `audit_log.metadata` replaced with
---         '[redacted]': the email keys on every row, and the name, birth
---         date, contact, guardian and note keys inside a player event's
---         `patch`, `fields`, `old` and `new`. No row is deleted;
+--         '[redacted]': every key naming an email (and `phone`) on every row,
+--         and the name, birth date, contact, guardian, note and email keys
+--         inside a player event's `patch`, `fields`, `old` and `new`. No row
+--         is deleted;
 --       - the value in an "Invalid date format: ..." or "Invalid email
 --         format: ..." row error in `import_jobs.error_summary` removed
 --         (import-validation no longer puts it there).
@@ -279,6 +281,7 @@ DECLARE
     v_val jsonb;
     v_expected_type text;
     v_reserved_keys text[] := public.get_reserved_keys();
+    v_date_ok boolean;
 BEGIN
     -- 1. Load Schema for Org + Entity
     SELECT schema_definition INTO v_schema
@@ -317,10 +320,27 @@ BEGIN
                         RAISE EXCEPTION 'Validation Failed: Key % expected boolean, got %', v_key, jsonb_typeof(v_val);
                     END IF;
                 WHEN 'date' THEN
-                    -- Basic date string validation. `#>> '{}'` is the string
-                    -- itself; `v_val::text` was its JSON text, quotes included,
-                    -- so no date ever matched (20261022010000).
-                    IF jsonb_typeof(v_val) != 'string' OR NOT ((v_val #>> '{}') ~ '^\d{4}-\d{2}-\d{2}') THEN
+                    -- A real calendar date written YYYY-MM-DD and nothing else
+                    -- (20261022010000). `#>> '{}'` is the string itself;
+                    -- `v_val::text` was its JSON text, quotes included, so no
+                    -- date ever matched, and the pattern was unanchored, so
+                    -- '2025-02-03junk' would have. The round trip through
+                    -- `::date` is what enforces a real date written exactly so
+                    -- ('2025-02-30' does not cast; anything the cast would
+                    -- reinterpret does not come back equal). The anchored
+                    -- pattern only keeps every other string away from the
+                    -- cast, so the two datetime errors caught below are the
+                    -- only ones it can raise.
+                    v_date_ok := jsonb_typeof(v_val) = 'string'
+                        AND (v_val #>> '{}') ~ '^\d{4}-\d{2}-\d{2}$';
+                    IF v_date_ok THEN
+                        BEGIN
+                            v_date_ok := to_char((v_val #>> '{}')::date, 'YYYY-MM-DD') = (v_val #>> '{}');
+                        EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN
+                            v_date_ok := false;
+                        END;
+                    END IF;
+                    IF NOT v_date_ok THEN
                         RAISE EXCEPTION 'Validation Failed: Key % expected date (YYYY-MM-DD), got %', v_key, v_val;
                     END IF;
             END CASE;
@@ -1174,18 +1194,22 @@ SET search_path = public
 AS $$
 DECLARE
     -- Inside a player event's patch, fields, old or new: names, birth date,
-    -- contact, guardian and free-text note values.
+    -- contact, guardian and free-text note values (and, as everywhere, any
+    -- key naming an email).
     v_player_keys text[] := ARRAY[
         'first_name', 'last_name', 'preferred_name', 'nickname', 'full_name', 'name',
         'date_of_birth', 'dob', 'birth_year', 'notes',
         'contact_info', 'guardian_contacts', 'emergency_contacts', 'medical_info',
-        'email', 'alternate_email', 'phone', 'address'
+        'phone', 'address'
     ];
-    -- At the top level of any event's metadata: an email or phone.
-    v_top_keys text[] := ARRAY[
-        'coach_email', 'matched_email', 'email', 'contact_email', 'guardian_email',
-        'parent_email', 'invited_email', 'phone'
-    ];
+    -- At the top level of any event's metadata: every key whose name contains
+    -- `email` (not a list: the writers found by grep, 2026-10-22, are
+    -- coach.linked's `matched_email` and `coach_email` (20261020040000),
+    -- guardian.linked's `matched_email` (20261021010000) and
+    -- settings.timezone_updated's `admin_email` (20260917000000), and a
+    -- future writer is caught by the name), unless its value is a boolean
+    -- such as `has_email`; and `phone`.
+    v_email_key text := 'email';
     v_finished text[] := ARRAY['completed', 'completed_with_warnings', 'failed'];
     v_coaches integer := 0;
     v_players integer := 0;
@@ -1344,7 +1368,9 @@ BEGIN
                 SELECT COALESCE(jsonb_object_agg(
                     e.key,
                     CASE
-                        WHEN e.key = ANY (v_top_keys) AND jsonb_typeof(e.value) <> 'null'
+                        WHEN ((strpos(lower(e.key), v_email_key) > 0
+                               AND jsonb_typeof(e.value) NOT IN ('null', 'boolean'))
+                              OR (e.key = 'phone' AND jsonb_typeof(e.value) <> 'null'))
                             THEN to_jsonb('[redacted]'::text)
                         WHEN (a.resource_type = 'players' OR a.action LIKE 'player.%')
                              AND e.key IN ('patch', 'fields', 'old', 'new')
@@ -1352,8 +1378,10 @@ BEGIN
                             THEN (
                                 SELECT COALESCE(jsonb_object_agg(
                                     n.key,
-                                    CASE WHEN n.key = ANY (v_player_keys)
-                                              AND jsonb_typeof(n.value) <> 'null'
+                                    CASE WHEN (n.key = ANY (v_player_keys)
+                                               AND jsonb_typeof(n.value) <> 'null')
+                                              OR (strpos(lower(n.key), v_email_key) > 0
+                                               AND jsonb_typeof(n.value) NOT IN ('null', 'boolean'))
                                          THEN to_jsonb('[redacted]'::text)
                                          ELSE n.value END
                                 ), '{}'::jsonb)

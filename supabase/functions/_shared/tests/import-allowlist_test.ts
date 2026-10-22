@@ -7,7 +7,13 @@
  */
 
 import { assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
-import { isAllowedImportKey, keepAllowedColumns, declaredFieldKey } from '../import-allowlist.ts';
+import {
+  isAllowedImportHeader,
+  isAllowedImportKey,
+  keepAllowedColumns,
+  declaredFieldKey,
+  withDeclaredColumns,
+} from '../import-allowlist.ts';
 
 const lower = (h: string) => h.toLowerCase().trim();
 
@@ -61,3 +67,28 @@ Deno.test('field imports pass through as given', () => {
   const row = { location: 'Field Park', 'guardian 1 email address': 'kept' };
   assertEquals(keepAllowedColumns('fields', row, lower), row);
 });
+
+Deno.test(
+  'a declared field whose header is also an alias is kept and carried under its identity',
+  () => {
+    const alias = (h: string) => (lower(h) === 'skill' ? 'skill_tier' : lower(h));
+    assertEquals(isAllowedImportHeader('coaches', 'Skill', alias, ['skill']), true);
+    assertEquals(isAllowedImportHeader('coaches', 'Skill', alias, []), false);
+    assertEquals(
+      withDeclaredColumns(
+        'coaches',
+        { full_name: 'First1 Last1', skill_tier: 'A' },
+        { 'Full Name': 'First1 Last1', Skill: 'A' },
+        alias,
+        ['skill']
+      ),
+      { full_name: 'First1 Last1', skill: 'A' }
+    );
+    assertEquals(
+      withDeclaredColumns('players', { skill_tier: 'advanced' }, { Skill: 'advanced' }, alias, [
+        'skill',
+      ]),
+      { skill_tier: 'advanced', skill: 'advanced' }
+    );
+  }
+);

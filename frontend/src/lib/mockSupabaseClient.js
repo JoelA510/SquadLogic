@@ -16,6 +16,7 @@ import {
   filterImportRows,
   importPayloadText,
   keptPlayerAttributes,
+  withDeclaredColumns,
 } from '../utils/importAllowlist.js';
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
@@ -7808,8 +7809,16 @@ export const mockSupabase = {
           declaredFields
         ).forEach((rawRow, index) => {
           const normalized = normalizeImportRow(rawRow, normalizeHeader, sanitize);
-          const row =
-            body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized;
+          // As the Edge Function does: a declared field whose header is also
+          // a global alias is carried under its own identity too.
+          const row = withDeclaredColumns(
+            body.import_type,
+            body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized,
+            rawRow,
+            normalizeHeader,
+            declaredFields,
+            sanitize
+          );
 
           required.forEach((field) => {
             if (!row[field]) {

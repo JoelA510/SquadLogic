@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-22
+
 ### Added
 
 - **Server-side reads for people's data** (owner decisions 2026-10-20; Phase A3a of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261021010000` adds `get_team_roster`, `get_team_staff`, `get_coach_directory` and `get_my_coached_team_ids`, which apply the plan's access table: admins and staff, a team's current coach (judged in the season's timezone) and its guardians each see what the table gives them, and everyone else is refused. The team page's roster and staff tab, the coach home and the RSVP list read through them; the Balance tab is admin-only. Revert and smoke in `docs/sql/`, pgTAP in `supabase/tests/server_side_reads.sql`.
@@ -15,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Coach directory** on the coach home: every current coach's contact details.
 - **Two league settings**, on by default: Teammate Contacts (guardians see each teammate's primary guardian contact) and Coach Directory. The server-side reads check them.
 - **Coach accounts are linked to their coach records.** `link_my_coach_record()` (migration `20261020040000`; Phase A2b of `docs/changes/2026-10-20-phase-a-privacy.md`) links a signed-in user to the coach row whose email matches their verified sign-in email, in an organization they belong to; idempotent, refuses a row linked to another account, audited as `coach.linked`. The app calls it once per signed-in user, so the coach-only pages (practice preferences, lighting overrides) find the coach's record.
+- **A team-count recommendation with roster-limit warnings** (#626). For a program's player count, the teaming settings panel shows the range of team counts that keeps every team within its minimum and maximum roster, a recommended count with a one-click "Use N", and warnings for too many or too few players per team. It judges the count generation will actually build: the generator's team-count logic is now `resolveTeamCount`, shared by the advice, the page's estimate and generation, unchanged in behaviour. Advisory only.
 
 ### Changed
 
@@ -22,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A retried evaluation-run save no longer writes the run twice** (#624). Migration `20261020010000`: `persist_evaluation_run` takes an idempotency key and inserts the run once per organization and key; a replay returns the first run's id and writes no findings or metrics. The Edge Functions key each save and retry it once, with the same key, on a transport failure or a gateway 502, 503 or 504, logging the retry. With no key the behaviour is as before. Revert and smoke in `docs/sql/`.
 - **Deleting a team keeps the record of what went with it** (`docs/changes/2026-10-20-admin-delete-team.md`). Migration `20261021030000`:
   - The team's practice exceptions are withdrawn, audited and archived onto their run, and each of its practice series is audited as cancelled, as cancelling a single series already did. Before, they vanished with the team, unaudited.
   - Every game RSVP to the team's games is removed, including the opposing team's, which were left pointing at games that no longer existed.
@@ -41,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Medical and emergency data** (owner decision 2026-10-20; Phase A1 of `docs/changes/2026-10-20-phase-a-privacy.md`). Migration `20261020020000` drops `players.medical_info` and `players.emergency_contacts` and replaces `finalize_import_job` without its medical lines (revert and smoke in `docs/sql/`). The import column mapper loses its "Medical Info" target. The paperwork booleans (`medical_form_received`, `waiver_received`, `medical_cleared`) stay.
+
+### Documentation
+
+- **Plans for phases B to E** (`docs/changes/2026-10-22-phase-*.md`, #635): teaming (buddy requests, eligibility, team-size warnings), field permits, home/away balance and seasons with programs. Each awaits the owner's approval before it is built; the roadmap's order table points at them.
+- `docs/operations/release-prep.md` refreshed for 1.2.0: production migrations reconciled against the repository (143 each), the security advisors re-read, the stalled storage-retention workflow recorded, and the operator checks before tagging.
 
 ### Security
 

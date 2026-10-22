@@ -2,119 +2,85 @@
 
 # Release Prep Closure
 
-**Last refreshed:** 2026-06-11
-**Status:** Code-completable release-prep hardening is current through the Lightning-class redesign merge (PR #322); not a final release sign-off.
+**Last refreshed:** 2026-10-22, for release **1.2.0**.
+**Status:** release candidate. The code side is closed; the operator checks below not marked
+done remain the owner's before the `v1.2.0` tag.
 
-> **2026-06-11 update:** the Lightning-class redesign merged with five new
-> migrations (`20260611000000`–`20260611000400`: player roster fields, audited
-> admin mutation RPCs, expanded GotSport mapping, audit-action whitelist,
-> `team_players` sync trigger). Before final sign-off, apply the batch to
-> production and re-run the Supabase advisors; the open operator items
-> (Sentry DSN, leaked-password protection, branch protection) are tracked in
-> [`docs/expansion/03_ROADMAP.md`](../expansion/03_ROADMAP.md) §Open Items.
+This page records the evidence behind the release and what it does not cover. It claims only what
+was checked on the date above; each item says how.
 
-This page closes the current release-prep documentation drift. It does not
-replace the final review-pass sign-off, and it does not claim production
-security, database, or observability settings that were not directly verified.
+## Verified Evidence (2026-10-22)
 
-## Verified Evidence
+- **Release contents:** `CHANGELOG.md` section `[1.2.0] - 2026-10-22`: everything merged after
+  the 1.1.0 cut (`4459faf`, #622): idempotent evaluation-run saves (#624), the team-count
+  recommendation (#626), Phase A (privacy and access), the `admin_delete_team` and UTC-idiom
+  fixes, and the plans for phases B to E. `package.json` and the lockfile's root entry move to
+  `1.2.0` (`npm version`); the `[1.1.0]` section is unchanged. No tag exists on the remote yet
+  (*executed*: `git ls-remote --tags origin` lists none); a draft `v1.2.0` release exists.
+- **Migrations, repo against production** (*executed*): 143 SQL migrations under
+  `supabase/migrations/` on `main`, and 143 versions in production's
+  `supabase_migrations.schema_migrations`, from `20240405180000` to `20261021040000`. CI is the only
+  writer (AGENTS.md section 11); the last deploy job (`main` CI run 1507, commit `6a22d29`) pushed
+  `20261021040000` and found nothing pending.
+- **Database tests:** 63 pgTAP files under `supabase/tests/`, run by the required `Run pgTAP
+  against local Supabase` check on every pull request; the migration harness (smokes, reverts,
+  planted defects) runs on every pull request touching SQL.
+- **Production deployment** (*executed*, Vercel API): `dpl_6zRCz24Tga9nxjTd9gDJjcAAQ3AM` is `READY`,
+  target `production`, for `main` commit `6a22d29` (#633). Confirm again for the release commit
+  (operator check below).
+- **Production security advisors** (*executed*, Supabase advisors, 2026-10-22): no ERROR. WARN:
+  - `authenticated_security_definer_function_executable` (98): the RPC layer. Every state write is
+    a SECURITY DEFINER RPC that checks the caller itself (AGENTS.md: RPC enforcement), and
+    `supabase/tests/definer_function_grants.sql` holds the grants. Accepted by design.
+  - `anon_security_definer_function_executable` (1): `submit_registration`, the public
+    registration form, excluded on purpose from the anon revoke
+    (`20260603120000_revoke_anon_execute_on_definer_functions.sql`). Accepted.
+  - `function_search_path_mutable` (1): `public.min(uuid)` is an aggregate, which cannot carry
+    `SET search_path`; its state function `min_uuid` pins it
+    (`20260612000000_min_uuid_aggregate.sql`). A false positive.
+  - `auth_leaked_password_protection` (1): needs the Pro plan; accepted with compensating controls
+    in [leaked-password-protection.md](./leaked-password-protection.md).
 
-- **Current repo head:** local `main` and `origin/main` are at
-  `7c5793bde74d0734ce8f0d14eca419e49e8bcb55`, the squash merge for PR #268
-  (`chore(supabase): untrack cli temp state`).
-- **Recent merged production-readiness PRs:** #257 registration-form writes, #258
-  invite revoke, #259 schema-builder saves, #260 facility mutations, #261 team
-  portal communication writes, #262 import job lifecycle writes, #263 release
-  evidence refresh, #264 Edge Function budget guidance, #265 legacy evaluation
-  RPC overload removal, #266 legacy `current_user_role()` removal, #267 release
-  evidence refresh, and #268 Supabase CLI temp-state untracking.
-- **Frontend direct-write scan:** `rg -U` found no routed Supabase
-  `insert`/`update`/`upsert`/`delete` calls under `frontend/src` outside the mock
-  client. The only generic mutation matches in app code were local cache
-  `Map.delete()` operations in `frontend/src/lib/cache.js`.
-- **Vercel project:** `secureyourtech/squadlogic`
-  (`prj_tdCn9qLkRFB9LFAVmp2AKJCkcDJ9`) exists, reports framework `vite`, and
-  reports Node `24.x`. Project domains reported by the connector are
-  `squadlogic.vercel.app`, `squadlogic.secureyour.tech`,
-  `squadlogic-secureyourtech.vercel.app`, and
-  `squadlogic-git-main-secureyourtech.vercel.app`.
-- **Latest Vercel deployment visible in connector:** deployment
-  `dpl_9ceG8vFfde3TZ2XCLrNv8swHK3pW` is `READY` for `main` commit
-  `7c5793bde74d0734ce8f0d14eca419e49e8bcb55` (PR #268); its target is
-  `production`.
-- **GitHub `main` branch protection:** GitHub API returned `404 Branch not
-  protected` for `repos/JoelA510/SquadLogic/branches/main/protection` during
-  this refresh after PR #268 merged.
-- **Repo migration inventory:** 74 SQL migration files are present locally; the
-  latest file is
-  `supabase/migrations/20260504100000_drop_current_user_role_helper.sql`.
-- **Repo pgTAP inventory:** 31 SQL test files are present under
-  `supabase/tests/`, covering RLS plus targeted RPC contracts added during the
-  production-readiness PR queue.
-- **CI and DB harness:** PR #209 restored hosted CI/E2E; PR #211 restored local
-  and hosted pgTAP for DB-affecting PRs. PR #262 hosted checks reported
-  `Build & Test`, pgTAP, CodeQL, GitGuardian, and Vercel as passing. PR #266
-  hosted checks reported `Build & Test`, pgTAP, CodeQL, GitGuardian, and Vercel
-  as passing before merge. PR #268 hosted `Build & Test`, CodeQL, and
-  GitGuardian passed before merge; Vercel's PR status failed because the project
-  hit the free daily deployment quota, but the connector later reported the
-  `main` production deployment above as `READY`.
-- **Production Supabase security advisors:** `supabase db advisors --linked
-  --type security --level warn --fail-on error` returned zero ERROR-level
-  issues but 68 WARN findings: 5 `function_search_path_mutable`, 31
-  `anon_security_definer_function_executable`, 31
-  `authenticated_security_definer_function_executable`, and 1
-  `auth_leaked_password_protection` (see
-  [leaked-password-protection.md](./leaked-password-protection.md)). This is
-  verified as **not clean** and must be remediated or formally accepted before
-  final release sign-off.
-- **Release checks available today:** `npm ci`, `npm run typecheck`,
-  `npm run lint`, `npm run test`, `npm run test:coverage`,
-  `npm run frontend:build`, `npm run check:bundle`,
-  `npm run check:advisors`, `npm run test:e2e -- --workers=1`, and
-  `npm run test:db`.
+  The June refresh recorded 68 WARN findings in other categories (5 mutable search paths, 31
+  anon-executable definer functions); those are closed.
+- **Node parity:** `.nvmrc` 24, `engines.node` `^24.15.0`, CI reads `.nvmrc`, Vercel builds on
+  `24.x` (remediation plan item M1.4).
+- **Release checks:** `npm ci`, `npm run typecheck`, `npm run lint`, `npm run check:unused`,
+  `npm run test:coverage`, `npm run frontend:build`, `npm run check:bundle`,
+  `npm run check:advisors`, `npm run test:e2e -- --workers=1`, and the pgTAP suite; each ran green
+  in CI on the pull requests that make up the release.
 
 ## Explicit Deferrals
 
-- **Final Lighthouse score:** no repo-native Lighthouse command exists. Use
-  browser/manual Lighthouse during Task 9 or Task 10, then record the exact
-  URL, mode, device profile, and score. Do not claim Lighthouse closure before
-  that evidence exists.
-- **Performance budget tightening:** current bundle budgets remain the active
-  gate. Chart-vendor splitting, asset optimization, and tighter earned budgets
-  are deferred to the performance polish task.
-- **Vercel/CI Node parity:** resolved 2026-10 (remediation plan item M1.4):
-  `.nvmrc` pins `24`, `engines.node` is `^24.15.0`, CI reads `.nvmrc`, and
-  Vercel builds on `24.x`. At this check Vercel reported Node `24.x` while CI
-  ran Node 20 and `package.json` declared `>=20`.
-- **Production Supabase migration reconciliation:** exact linked migration
-  listing requires `SUPABASE_DB_PASSWORD` in this environment after
-  `supabase/.temp/` became local-only. Operators must run
-  `supabase migration list --linked` with the production DB password and
-  reconcile local-vs-remote history before final release sign-off.
-- **Sentry:** the SDK is wired, but `VITE_SENTRY_DSN` production/preview values
-  and the synthetic event smoke remain operator-owned until verified with
-  [`sentry-smoke.md`](./sentry-smoke.md).
+- **Lighthouse:** no repo-native command. Run it manually against production and record the URL,
+  mode, device profile and score before claiming it.
+- **Sentry:** the SDK is wired and its release tag pinned (`tests/sentryConfig.test.js`).
+  `VITE_SENTRY_DSN` is set in Vercel Production (*owner-confirmed* 2026-10-22; the Vercel API
+  refused to list environment variables to us, 403). That an event reaches Sentry was not
+  checked: [sentry-smoke.md](./sentry-smoke.md).
+- **Storage retention:** the scheduled `Cleanup storage buckets (retention)` workflow failed its
+  runs from 2026-10-20 to 2026-10-22 for lack of its two Actions secrets. The owner set them on
+  2026-10-22, and a manual dry run (run 183) passed both jobs (*executed*). Both buckets held no
+  objects (*executed*, `storage.objects`), so that run proved the secrets are present and the list
+  call is accepted, not a deletion ([storage-retention.md](./storage-retention.md)).
+- **Phases B to E:** planned (`docs/changes/2026-10-22-phase-*.md`), not built; each waits for the
+  owner's approval. They are not part of 1.2.0.
 
-## Operator Checks Before Final Sign-Off
+## Operator Checks Before Tagging
 
-- Configure `main` branch protection and required checks, or document an
-  intentional exception. Connector/API evidence during this refresh showed
-  `main` was not protected.
-- Confirm the production-target Vercel deployment for the intended release
-  commit remains `READY` after the final release candidate is chosen.
-- Confirm Vercel production/preview environment variables, especially
-  `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_USE_MOCK_SUPABASE`, and
-  `VITE_SENTRY_DSN`.
-- Configure or intentionally disable the raw-import cleanup workflow secrets:
-  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-- Resolve or formally accept the 68 production Supabase security advisor WARN
-  findings recorded above.
-- Confirm production Supabase migration count and reconcile local-vs-remote
-  history with `supabase migration list --linked`.
-- Run the full final validation suite listed in the release-readiness plan.
+- Confirm the production deployment for the release commit (the merge of this release PR) is
+  `READY` in Vercel.
+- Done 2026-10-22 (*owner-confirmed*): Vercel Production sets `VITE_SENTRY_DSN`,
+  `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, and not `VITE_USE_MOCK_SUPABASE`; the live
+  `main` ruleset matches `.github/rulesets/main.json`. Done (*executed*): the retention secrets
+  and a green dry run (run 183).
+- Tag `4459faf` (#622, the 1.1.0 cut) as `v1.1.0`, so that release has its own tag.
+- Publish the draft `v1.2.0` release with its target set to the merge commit of this release PR
+  (publishing creates the tag there), using the `[1.2.0]` notes.
 
 ## Rollback
 
-This document is docs-only. Roll back by reverting the PR that changed it. No
-runtime, schema, or data rollback is required.
+This page and the changelog are docs only: revert the PR that changed them. Migrations from
+`20260530000000` on have a revert under `docs/sql/`, except four recorded as deferred gaps in the
+remediation plan: `20260602010000`, `20260603190000`, `20260612000000` and `20260612000001`.
+Earlier migrations predate the revert rule. Tagging runs none of them.

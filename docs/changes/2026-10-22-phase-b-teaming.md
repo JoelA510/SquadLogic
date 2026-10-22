@@ -1,11 +1,18 @@
 # Phase B: teaming
 
-Status: **proposed 2026-10-22, for owner approval** (AGENTS.md rule 14: B2 changes the generator,
-B1 the domain model of buddy requests). It applies the owner's decisions of 2026-10-20
-(`2026-10-20-core-roadmap.md`) to the teaming core: buddy requests, research item 3 (eligibility),
-and team counts per program. No migration: everything new is computed, and the run's `results`
-JSON is stored opaque (`team-persistence/index.ts:53`, `runMetadata: z.record(z.unknown())`).
-Five PRs, in this order; B2 is the only solver touch. Each is reviewed once before it opens.
+Status: **proposed 2026-10-22, for owner approval** (AGENTS.md rule 14: B2 and B6 change the
+generator, B1 the domain model of buddy requests). B6 records the owner's team priorities of
+2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
+teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
+migration: everything new is computed, and the run's `results` JSON is stored opaque
+(`team-persistence/index.ts:53`, `runMetadata: z.record(z.unknown())`). Six PRs, in this order; B2
+and B6 touch the solver. Each is reviewed once before it opens.
+
+**Superseded in part (owner, 2026-10-22, `2026-10-22-admin-focus.md`):** the paperwork flags
+(payment, waiver, medical form) and the Compliance page are removed in R1, so every "missing
+paperwork" flag, `tests/paperworkGaps.test.js` and the compliance rule below are dropped from B2
+and B3; the waitlist stays the gate an admin uses. Birthdates give way to a stored natural age in
+R5, which `unknown` placement reads instead.
 
 Every claim below is _statically reviewed_ against `main` at `6a22d29` unless marked _executed_.
 Line numbers are current; research item 3's (`:776`, `:806-835`) have moved.
@@ -195,6 +202,52 @@ over its limits shows a warning status in the overview; rows operable by keyboar
 way and pair only mutual requests. `tests/balanceAndCoed.test.js` gains two-same-name and one-way
 cases (fail today).
 
+## B6. Team priorities and coaching leads (owner, 2026-10-22; medium; **solver**)
+
+The owner set the order a team in a division is filled by:
+
+1. **Coaches' children with their buddies.** Each coach's child (or children) anchors that coach's
+   team, with the child's buddy as the league's buddy rule allows (below).
+2. **An even number of coaching leads per team, where possible.** A coaching lead is a player whose
+   registration says a parent volunteers to coach (`players.willing_to_coach`). Leads are spread so
+   no two teams differ by more than one, except where a buddy unit holds more than one lead
+   ("where buddying allows").
+3. **Experience and skill balance** (years played, skill tier or rating), with compensation: a team
+   with fewer leads receives more of the experienced or skilled players, to make up for the
+   missing parent coaches.
+
+**What a lead is, and is not.** Only the flag: a lead's contact details stay on the registration
+platform and are not stored (`docs/changes/2026-10-22-admin-focus.md`, R0). Admins see a "Lead"
+mark on the player while teaming. The coach-lead capture that copied a volunteering guardian's name
+and email into a coach row is retired in R0; the signal is kept.
+
+**League settings** (organization feature flags, audited, through the
+`squadlogic-feature-guardians` registry):
+
+- `teaming_spread_coaching_leads`: on by default. With it off, priority 2 and the compensation in
+  3 are skipped. An import with no volunteer column has no leads, so the default changes nothing
+  for it.
+- `buddy_rule`: `mutual` by default (a pair is formed only when both players name each other, one
+  buddy per player), or `one_way_best_effort`, the rule the owner gave earlier the same day: a
+  one-way request is ignored when the requested player is not registered or requested someone
+  else, is matched when the requested player listed no buddy, and every one-way request is listed
+  for the admin (name variants).
+
+**Change:** one rule in `packages/core` used by both the generator (`teamGeneration.js` with
+`assignmentUnits.js`) and TeamBuilder's auto-balance (`balanceSignals.js:69-140`, which already
+deals units holding a volunteer first, one per team where possible). Units are dealt in priority
+order; a lead unit goes to a team with the fewest leads; skill is dealt to the team with the lowest
+`skill total + c × leads`, where `c` is the division's mean unit skill (one lead counts as one
+average player). `c` is a named constant, tuned against `fixtures/demo-2026/` (the season fixture
+holds no player roster) before the PR opens.
+
+**Tests:** core unit: three teams and four leads give 2/1/1, never 3/1/0; two leads who are mutual
+buddies stay together even when that is uneven; with compensation, the team with fewer leads has
+the higher mean experience (planted: `c = 0` fails it); with the setting off, leads are ignored;
+`buddy_rule = mutual` ignores a one-way request and `one_way_best_effort` honours it when the
+requested player listed no buddy. The full season fixture suite runs (AGENTS.md, scheduling
+engine conventions), and the demo league is teamed end to end.
+
 ## Must stay unchanged (regression tests)
 
 - The fresh-path invariants, `tests/teamGeneration.characterization.test.js` (section 4 of the
@@ -219,10 +272,8 @@ cases (fail today).
 
 ## Decisions for you
 
-1. **One-way requests** (blocking for B1): best effort, or ignored? _Recommended: best effort._ A
-   mutual pair is guaranteed; a one-way request is honoured when it fits and listed when it is not.
-   This is what the generator's evaluator already does once a request arrives, and one family cannot
-   force another's child onto a team.
+1. **One-way requests:** _answered (owner, 2026-10-22)_: a league setting, `buddy_rule` (B6),
+   default mutual only with one buddy per player; `one_way_best_effort` is the league's choice.
 2. **Name matching:** exact after normalising, ambiguity settled only by reciprocity, near misses
    listed, never linked? _Recommended: yes_, as identity resolution does (incident 6, the fixture
    README): a wrong pair is worse than a listed miss, and the admin fixes the request text.

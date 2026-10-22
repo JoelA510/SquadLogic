@@ -61,8 +61,8 @@ players or guardians. That is fixed first (R0).
 
 ## PRs
 
-Each PR: migration, `docs/sql/<v>_revert.sql` and `_smoke.sql`, pgTAP, the mock twin, Vitest and
-E2E where the UI changes, `supabase/catalog-snapshot.json` regenerated, docs in the same PR. A revert
+Each PR: migration, `docs/sql/<v>_revert.sql` and `_smoke.sql`, pgTAP, the mock twin, Vitest and E2E
+where the UI changes, `supabase/catalog-snapshot.json` regenerated, docs in the same PR. A revert
 restores structure, never deleted personal data (stated in each revert's header).
 
 | PR                                                | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Tests (each proven against a planted defect)                                                                                                                                                                                                                                                                                                              |
@@ -122,8 +122,8 @@ at once (AGENTS.md section 11).
 ## Docs updated across the PRs
 
 AGENTS.md section 2 (data rules), `docs/agents-reference.md`, `README.md`,
-`docs/security/rls-policies.md`, `docs/architecture/gotsport-import-contract.md` (its "dropped"
-list is false today for guardian addresses, phones and the coach's birth date),
+`docs/security/rls-policies.md`, `docs/architecture/gotsport-import-contract.md` (its "dropped" list
+is false today for guardian addresses, phones and the coach's birth date),
 `docs/architecture/data-modeling.md`, `docs/architecture/frontend-architecture.md`,
-`docs/architecture/persistence-rpc-layer.md`, `docs/operations/ENVIRONMENT.md` (`TEST_PARENT_EMAIL`),
-the Phase A decisions and the core roadmap.
+`docs/architecture/persistence-rpc-layer.md`, `docs/operations/ENVIRONMENT.md`
+(`TEST_PARENT_EMAIL`), the Phase A decisions and the core roadmap.

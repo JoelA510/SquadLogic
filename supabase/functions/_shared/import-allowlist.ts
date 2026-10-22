@@ -149,9 +149,28 @@ export function isAllowedImportKey(
 }
 
 /**
+ * True when an import column is kept: its canonical key (`normalizeHeader`)
+ * is allowed, or its own identity (lower case, whitespace as `_`) is a
+ * declared field. The second arm matters when the header is also a global
+ * alias: `Skill` canonicalizes to `skill_tier`, and an organization that
+ * declared `skill` still gets the column.
+ */
+export function isAllowedImportHeader(
+  importType: string,
+  header: string,
+  normalizeHeader: (header: string) => string,
+  declaredFields: Iterable<string> = []
+): boolean {
+  const declared = [...declaredFields];
+  if (isAllowedImportKey(importType, normalizeHeader(header), declared)) return true;
+  const identity = declaredFieldKey(header);
+  return identity !== '' && declared.some((field) => declaredFieldKey(field) === identity);
+}
+
+/**
  * The row with only its allowed columns, keyed and valued as given. Each
- * header is judged by its canonical key, `normalizeHeader(header)`, so the
- * caller passes the same header normalization it stages with.
+ * header is judged by `isAllowedImportHeader`, so the caller passes the same
+ * header normalization it stages with.
  */
 export function keepAllowedColumns(
   importType: string,
@@ -163,7 +182,44 @@ export function keepAllowedColumns(
   const declared = [...declaredFields];
   const kept: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
-    if (isAllowedImportKey(importType, normalizeHeader(key), declared)) kept[key] = value;
+    if (isAllowedImportHeader(importType, key, normalizeHeader, declared)) kept[key] = value;
   }
   return kept;
+}
+
+/**
+ * The normalized row with each declared field the import carries under its
+ * declared identity, and with no key that is neither allowed nor declared.
+ *
+ * **When a header is both a declared field and an alias of a system field**
+ * (`Skill` with `skill` declared: the alias gives `skill_tier`), the system
+ * field keeps its own reading -- the canonical key, as it always had -- and
+ * the declared field gets a copy under its identity (`skill`), which the
+ * finalizers store in `custom_attributes`. The copy never replaces a non-blank
+ * value already under that key, so it cannot displace another column's
+ * reading. The canonical key itself stays only when it is allowed or declared
+ * (`skill_tier` stays for players, and goes for coaches).
+ */
+export function withDeclaredColumns(
+  importType: string,
+  normalizedRow: Record<string, string>,
+  rawRow: Record<string, unknown>,
+  normalizeHeader: (header: string) => string,
+  declaredFields: Iterable<string> = [],
+  clean: (value: unknown) => string = (v) => (v == null ? '' : String(v))
+): Record<string, string> {
+  if (!isAllowlistedImportType(importType)) return normalizedRow;
+  const declared = new Set([...declaredFields].map(declaredFieldKey));
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(normalizedRow)) {
+    if (isAllowedImportKey(importType, key, declared)) out[key] = value;
+  }
+  for (const [header, value] of Object.entries(rawRow ?? {})) {
+    const identity = declaredFieldKey(header);
+    if (!declared.has(identity) || identity === normalizeHeader(header)) continue;
+    const cleaned = clean(value);
+    if (cleaned.trim() === '') continue;
+    if (out[identity] === undefined || String(out[identity]).trim() === '') out[identity] = cleaned;
+  }
+  return out;
 }

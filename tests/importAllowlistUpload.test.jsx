@@ -188,4 +188,76 @@ describe('a people import keeps only allowlisted columns', () => {
       })
     ).not.toContain('NOPE-');
   });
+
+  it('keeps a declared field whose header is also a global alias, and the system field keeps its reading', async () => {
+    for (const [entity, definition] of [
+      ['coach', { skill: 'string' }],
+      ['player', { skill: 'string' }],
+    ]) {
+      const { error } = await mockSupabase.rpc('admin_upsert_organization_schema', {
+        p_organization_id: MOCK_ORG_ID,
+        p_entity_type: entity,
+        p_schema_definition: definition,
+      });
+      expect(error).toBeNull();
+    }
+    const wrapper = ({ children }) => <ImportProvider>{children}</ImportProvider>;
+    const { result } = renderHook(() => useImport(), { wrapper });
+
+    const coachRow = { 'Full Name': 'First5 Last5', Email: 'email5@example.com', Skill: 'A' };
+    mocks.parse.mockImplementation((_file, options) => {
+      options.complete({ data: [coachRow], meta: { fields: Object.keys(coachRow) } });
+    });
+    await act(async () => {
+      await result.current.startImport(new File(['x'], 'coaches.csv'), 'coaches');
+    });
+    await waitFor(() => {
+      expect(getMockData('coaches').find((c) => c.email === 'email5@example.com')).toBeTruthy();
+    });
+    expect(
+      getMockData('coaches').find((c) => c.email === 'email5@example.com').custom_attributes
+    ).toEqual({ skill: 'A' });
+
+    const playerRow = {
+      'First Name': 'First6',
+      'Last Name': 'Last6',
+      'Date of Birth': '2016-06-06',
+      'Registration ID': 'REG-6',
+      Skill: 'advanced',
+    };
+    mocks.parse.mockImplementation((_file, options) => {
+      options.complete({ data: [playerRow], meta: { fields: Object.keys(playerRow) } });
+    });
+    await act(async () => {
+      await result.current.startImport(new File(['x'], 'players.csv'), 'players');
+    });
+    await waitFor(() => {
+      expect(
+        getMockData('players').find((p) => p.external_registration_id === 'REG-6')
+      ).toBeTruthy();
+    });
+    const player = getMockData('players').find((p) => p.external_registration_id === 'REG-6');
+    expect(player.skill_tier).toBe('advanced');
+    expect(player.custom_attributes).toEqual({ skill: 'advanced' });
+  });
+
+  it('refuses a people file wider than the column limit, judged before the allowlist drops columns', async () => {
+    const row = { 'Full Name': 'First7 Last7', Email: 'email7@example.com' };
+    for (let i = 1; i <= 1200; i += 1) row[`Extra ${i}`] = 'x';
+    mocks.parse.mockImplementation((_file, options) => {
+      options.complete({ data: [row], meta: { fields: Object.keys(row) } });
+    });
+    const invoke = vi.spyOn(mockSupabase.functions, 'invoke');
+    const wrapper = ({ children }) => <ImportProvider>{children}</ImportProvider>;
+    const { result } = renderHook(() => useImport(), { wrapper });
+    await act(async () => {
+      await result.current.startImport(new File(['x'], 'coaches.csv'), 'coaches');
+    });
+
+    expect(result.current.importStatus).toBe('error');
+    expect(invoke.mock.calls.filter(([name]) => name === 'import-validation')).toHaveLength(0);
+    const job = getMockData('import_jobs').at(-1);
+    expect(job.status).toBe('failed');
+    expect(JSON.stringify(job)).toContain('parse_limit');
+  });
 });

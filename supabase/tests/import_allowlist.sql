@@ -20,7 +20,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(21);
+SELECT plan(25);
 
 -- Every public column that can hold text, and which of them contain any
 -- needle. Tables in p_skip are not searched.
@@ -95,7 +95,7 @@ VALUES
     ('a1111111-1111-1111-1111-111111111111', 'coach',
      '{"shirt_size": "string", "years_coached": "number", "cert_date": "date"}'::jsonb),
     ('a1111111-1111-1111-1111-111111111111', 'player',
-     '{"shirt_size": "string", "joined_on": "date"}'::jsonb)
+     '{"shirt_size": "string", "joined_on": "date", "skill": "string"}'::jsonb)
 ON CONFLICT (organization_id, entity_type) DO UPDATE SET schema_definition = EXCLUDED.schema_definition;
 
 INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by)
@@ -146,6 +146,9 @@ FROM (SELECT jsonb_build_object(
     'payment_status', 'R0-PAID-MARKER', 'payment status', 'R0-PAID-MARKER',
     'team name', 'R0 Team', 'team age', 'U10', 'team gender', 'Girls',
     'play_up', 'yes', 'shirt size', 'YS', 'joined on', '2024-01-02',
+    -- `Skill` is an alias of skill_tier and a declared field here: the import
+    -- stages the system key and, for the declared field, a copy under `skill`.
+    'skill_tier', 'advanced', 'skill', 'advanced',
     'undeclared column', 'R0Undeclared') AS p) s;
 
 -- The same player again, for the re-import below.
@@ -187,10 +190,18 @@ SELECT is(
                                'contact_info', contact_info,
                                'guardian_contacts', guardian_contacts, 'paid', paid)
        FROM public.players WHERE external_registration_id = 'R0-EXT-1'),
-    '{"custom_attributes": {"shirt_size": "YS", "joined_on": "2024-01-02", "team_name": "R0 Team",
-                            "team_age": "U10", "team_gender": "Girls", "play_up": "yes"},
+    '{"custom_attributes": {"shirt_size": "YS", "joined_on": "2024-01-02", "skill": "advanced",
+                            "team_name": "R0 Team", "team_age": "U10", "team_gender": "Girls",
+                            "play_up": "yes"},
       "contact_info": {}, "guardian_contacts": [], "paid": false}'::jsonb,
     'the player keeps its declared field, team placement and play-up, and no contact, guardian or payment'
+);
+
+SELECT is(
+    (SELECT skill_tier || '/' || (custom_attributes ->> 'skill')
+       FROM public.players WHERE external_registration_id = 'R0-EXT-1'),
+    'advanced/advanced',
+    'a declared field that is also an alias is stored for the organization, and the system field keeps its reading'
 );
 
 SELECT is(
@@ -210,8 +221,8 @@ SELECT public.finalize_import_job('a1111111-0000-4000-8000-0000000000b2');
 RESET role;
 SELECT is(
     (SELECT custom_attributes FROM public.players WHERE external_registration_id = 'R0-EXT-1'),
-    '{"shirt_size": "YS", "joined_on": "2024-01-02", "team_name": "R0 Team", "team_age": "U10",
-      "team_gender": "Girls", "play_up": "yes"}'::jsonb,
+    '{"shirt_size": "YS", "joined_on": "2024-01-02", "skill": "advanced", "team_name": "R0 Team",
+      "team_age": "U10", "team_gender": "Girls", "play_up": "yes"}'::jsonb,
     'a re-import drops an undeclared key the player held and keeps the declared and the import''s own'
 );
 
@@ -227,6 +238,20 @@ SELECT throws_ok(
     'P0001',
     NULL,
     'the trigger refuses a declared date that is not one'
+);
+SELECT throws_ok(
+    $$ UPDATE public.players SET custom_attributes = custom_attributes || '{"joined_on": "2025-02-03junk"}'::jsonb
+        WHERE external_registration_id = 'R0-EXT-1' $$,
+    'P0001',
+    NULL,
+    'the trigger refuses a date followed by anything else'
+);
+SELECT throws_ok(
+    $$ UPDATE public.players SET custom_attributes = custom_attributes || '{"joined_on": "2025-02-30"}'::jsonb
+        WHERE external_registration_id = 'R0-EXT-1' $$,
+    'P0001',
+    NULL,
+    'the trigger refuses a date that is not on the calendar'
 );
 
 -- A coach as production holds them today: a phone, and the export's columns
@@ -280,6 +305,14 @@ VALUES ('b2222222-0000-4000-8000-0000000000d1', 'b2222222-2222-2222-2222-2222222
         '[{"name": "R0GuardianName", "email": "r0-guardian-one@example.test"}]'::jsonb,
         '{"play_up": "yes", "guardian 1 address": "191 R0 Placeholder Way"}'::jsonb);
 
+-- A season timezone change made while acting for another user records the
+-- admin's email (20260917000000); a contact-card change records only whether
+-- there was one.
+INSERT INTO public.audit_log (user_id, organization_id, action, resource_type, metadata)
+VALUES ('22222222-2222-2222-2222-222222222222', 'b2222222-2222-2222-2222-222222222222',
+        'settings.updated', 'r0_timezone',
+        '{"timezone": "UTC", "admin_email": "r0-guardian-two@example.test", "has_email": true}'::jsonb);
+
 UPDATE public.import_jobs SET status = 'completed'
  WHERE id IN ('a1111111-0000-4000-8000-0000000000c1', 'a1111111-0000-4000-8000-0000000000b1');
 
@@ -332,6 +365,12 @@ SELECT is(
       WHERE import_job_id = 'b2222222-0000-4000-8000-0000000000cb'),
     1,
     'the purge keeps a finished field job''s staged rows (they are not people, and refused rows wait for replay)'
+);
+
+SELECT is(
+    (SELECT metadata FROM public.audit_log WHERE resource_type = 'r0_timezone'),
+    '{"timezone": "UTC", "admin_email": "[redacted]", "has_email": true}'::jsonb,
+    'the purge redacts every metadata key naming an email, admin_email included, and keeps a boolean'
 );
 
 SELECT is(

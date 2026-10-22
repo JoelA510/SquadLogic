@@ -4224,8 +4224,18 @@ plant "M37 the purge leaves an unfinished job's guardian columns" "$M37" \
   "smoke 20261022010000"
 
 plant "M37 the date check still reads the JSON text" "$M37" \
-  "OR NOT ((v_val #>> '{}') ~ '^\\d{4}-\\d{2}-\\d{2}') THEN" \
-  "OR NOT (v_val::text ~ '^\\d{4}-\\d{2}-\\d{2}') THEN" \
+  "                        AND (v_val #>> '{}') ~ '^\\d{4}-\\d{2}-\\d{2}\$';" \
+  "                        AND v_val::text ~ '^\\d{4}-\\d{2}-\\d{2}\$';" \
+  "smoke 20261022010000"
+
+plant "M37 the date check accepts a date not on the calendar" "$M37" \
+  "                            v_date_ok := to_char((v_val #>> '{}')::date, 'YYYY-MM-DD') = (v_val #>> '{}');" \
+  "                            v_date_ok := true;" \
+  "smoke 20261022010000"
+
+plant "M37 the audit purge redacts only the listed email keys" "$M37" \
+  "                        WHEN ((strpos(lower(e.key), v_email_key) > 0" \
+  "                        WHEN ((e.key IN ('matched_email', 'coach_email')" \
   "smoke 20261022010000"
 
 plant "R37 the revert leaves import_declared_attributes" "$R37" \

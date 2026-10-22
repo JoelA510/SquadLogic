@@ -226,7 +226,10 @@ BEGIN
     INSERT INTO public.audit_log (user_id, organization_id, action, resource_type, resource_id, metadata)
     VALUES (v_admin, v_org, 'settings.updated', 'coaches', v_coach.id,
             jsonb_build_object('matched_email', 'guardian-one@example.test',
-                               'coach_email', 'guardian-two@example.test', 'user_id', v_admin));
+                               'coach_email', 'guardian-two@example.test', 'user_id', v_admin)),
+           (v_admin, v_org, 'settings.updated', 'season_settings', NULL,
+            jsonb_build_object('timezone', 'UTC', 'admin_email', 'guardian-one@example.test',
+                               'has_email', true));
     SELECT count(*) INTO v_n FROM public.audit_log WHERE organization_id = v_org;
 
     v_result := public.minimise_import_people_data();
@@ -273,7 +276,10 @@ BEGIN
     IF EXISTS (SELECT 1 FROM unnest(v_secrets) s WHERE strpos(v_text, s) > 0)
        OR (SELECT count(*) FROM public.audit_log WHERE organization_id = v_org) <> v_n
        OR (SELECT metadata FROM public.audit_log WHERE id = v_audit_id)
-          IS DISTINCT FROM '{"patch": {"first_name": "[redacted]", "date_of_birth": "[redacted]", "division_id": null}}'::jsonb THEN
+          IS DISTINCT FROM '{"patch": {"first_name": "[redacted]", "date_of_birth": "[redacted]", "division_id": null}}'::jsonb
+       OR (SELECT metadata FROM public.audit_log
+            WHERE organization_id = v_org AND resource_type = 'season_settings')
+          IS DISTINCT FROM '{"timezone": "UTC", "admin_email": "[redacted]", "has_email": true}'::jsonb THEN
         RAISE EXCEPTION 'the purge left a personal value in audit_log, deleted a row, or redacted the wrong key: %', v_text;
     END IF;
     IF (SELECT error_summary FROM public.import_jobs WHERE id = v_failed_job) IS DISTINCT FROM
@@ -283,17 +289,21 @@ BEGIN
     END IF;
     RAISE NOTICE 'purge: coach and player reduced, snapshots scrubbed, finished jobs'' people rows deleted, a field job''s and a ready job''s kept (the ready one reduced), audit values redacted with no row deleted, a row error''s value removed';
 
-    -- (f) The custom-attributes trigger still refuses a declared date that is not one.
-    BEGIN
-        UPDATE public.players SET custom_attributes = custom_attributes || '{"joined_on": "soon"}'::jsonb
-         WHERE id = v_player.id;
-        RAISE EXCEPTION 'the trigger accepted a declared date that is not one';
-    EXCEPTION WHEN raise_exception THEN
-        IF SQLERRM NOT LIKE 'Validation Failed: Key joined_on expected date%' THEN
-            RAISE;
-        END IF;
-    END;
-    RAISE NOTICE 'trigger: a declared YYYY-MM-DD date passes and a non-date is refused';
+    -- (f) The custom-attributes trigger refuses a declared date that is not a
+    --     calendar date written exactly YYYY-MM-DD.
+    FOREACH v_text IN ARRAY ARRAY['soon', '2025-02-03junk', '2025-02-30'] LOOP
+        BEGIN
+            UPDATE public.players
+               SET custom_attributes = custom_attributes || jsonb_build_object('joined_on', v_text)
+             WHERE id = v_player.id;
+            RAISE EXCEPTION 'the trigger accepted % as a declared date', v_text;
+        EXCEPTION WHEN raise_exception THEN
+            IF SQLERRM NOT LIKE 'Validation Failed: Key joined_on expected date%' THEN
+                RAISE;
+            END IF;
+        END;
+    END LOOP;
+    RAISE NOTICE 'trigger: a declared YYYY-MM-DD date passes; "soon", "2025-02-03junk" and "2025-02-30" are refused';
 
     -- (g) Posture.
     IF (SELECT count(*) FROM pg_proc p

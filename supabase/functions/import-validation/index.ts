@@ -29,6 +29,7 @@ import {
   ALLOWLIST_ENTITY_TYPES,
   isAllowlistedImportType,
   keepAllowedColumns,
+  withDeclaredColumns,
 } from '../_shared/import-allowlist.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
 
@@ -643,6 +644,19 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     let normalizedRow = normalizeImportRow(rawRow, normalizeHeader, sanitizeString);
     if (body.import_type === 'coaches') {
       normalizedRow = composeFullName(normalizedRow, sanitizeString);
+    }
+    // A declared field whose header is also a global alias (`Skill` ->
+    // `skill_tier`) is carried under its own identity too, for
+    // custom_attributes; the system field keeps its reading.
+    if (allowlisted) {
+      normalizedRow = withDeclaredColumns(
+        body.import_type,
+        normalizedRow,
+        rawRow,
+        normalizeHeader,
+        declaredFields,
+        sanitizeString
+      );
     }
 
     // Validate

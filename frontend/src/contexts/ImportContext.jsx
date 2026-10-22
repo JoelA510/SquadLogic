@@ -28,7 +28,7 @@ import {
   canonicalImportKey,
   fetchDeclaredImportFields,
   filterImportRows,
-  isAllowedImportKey,
+  isAllowedImportHeader,
   isAllowlistedImportType,
 } from '../utils/importAllowlist.js';
 import { isAdminRole } from '../constants/permissions.js';
@@ -529,6 +529,10 @@ export function ImportProvider({ children }) {
           transformHeader: makeDedupeHeaderTransformer(),
           complete: async (results) => {
             const { meta } = results;
+            // The column limit is judged on what the file holds, before the
+            // filters below shrink meta.fields: a very wide people CSV must
+            // not pass the guard because most of its columns are dropped.
+            const detectedColumnCount = Array.isArray(meta.fields) ? meta.fields.length : 0;
             // For player/coach imports, strip sensitive registration columns
             // (medical, insurance, financial/payment, identity documents,
             // waivers, non-teaming demographics) BEFORE upload so they never
@@ -546,7 +550,7 @@ export function ImportProvider({ children }) {
               meta.fields = meta.fields.filter(
                 (h) =>
                   !isSensitiveHeader(h) &&
-                  isAllowedImportKey(type, canonicalImportKey(h), declaredFields)
+                  isAllowedImportHeader(type, h, canonicalImportKey, declaredFields)
               );
             }
 
@@ -572,7 +576,7 @@ export function ImportProvider({ children }) {
             }
 
             // Check hard limits for DoS mitigation
-            if (meta.fields.length > MAX_COLS) {
+            if (detectedColumnCount > MAX_COLS) {
               await failImportJob({
                 supabase,
                 importJobId: job.id,

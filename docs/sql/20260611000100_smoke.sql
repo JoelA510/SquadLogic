@@ -1,7 +1,8 @@
 -- Smoke checks for 20260611000100_player_admin_mutation_rpcs.sql
 
 -- 1. All five public RPCs exist as SECURITY DEFINER with pinned search_path,
---    and anon cannot execute any of them.
+--    and anon cannot execute any of them (four since 20261022020000 dropped
+--    coach_update_player_compliance).
 select p.proname,
        p.prosecdef as security_definer,
        array_to_string(p.proconfig, ',') as config,
@@ -18,7 +19,8 @@ order by p.proname;
 -- 2. Patch sanitizer rejects unknown fields (expect ERROR).
 -- select public.sanitize_player_patch('{"hacker_field": true}'::jsonb);
 
--- 3. Patch sanitizer normalizes a representative patch.
+-- 3. Patch sanitizer normalizes a representative patch. (`paid` left it in
+--    20261022020000, which dropped the column; a patch naming it is refused.)
 select public.sanitize_player_patch(
-  '{"rating": 4, "paid": true, "status": "waitlist", "jersey_number": 12}'::jsonb
+  '{"rating": 4, "status": "waitlist", "jersey_number": 12}'::jsonb
 ) as sanitized;

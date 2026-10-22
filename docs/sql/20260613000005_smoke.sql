@@ -10,7 +10,8 @@ SELECT proname, pg_get_function_identity_arguments(pg_proc.oid) AS args
 FROM pg_proc
 JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
 WHERE nspname = 'public' AND proname = 'admin_create_registration_form';
--- Expected: 1 row, args include "p_waiver_text text"
+-- Expected: 1 row, args include "p_waiver_text text" (0 rows since
+-- 20261022020000 dropped the in-app registration RPCs)
 
 -- Members read path exists and is SECURITY DEFINER
 SELECT proname, prosecdef
@@ -35,4 +36,4 @@ JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
 WHERE nspname = 'public'
   AND proname = 'admin_update_registration_form'
   AND prosrc LIKE '%Season settings do not belong%';
--- Expected: 1 row
+-- Expected: 1 row (0 since 20261022020000)

@@ -1,8 +1,9 @@
 # Core roadmap after the owner's decisions (2026-10-20)
 
-Status: **order for owner approval**; each phase that touches persistence, the domain model or the
-solver gets its own short plan before it is built (AGENTS.md rule 14). Phase A's plan is
-`2026-10-20-phase-a-privacy.md`.
+Status: **order approved 2026-10-20**; each phase that touches persistence, the domain model or the
+solver gets its own short plan before it is built (AGENTS.md rule 14). Phase A is built
+(`2026-10-20-phase-a-privacy.md`); the plans for B to E are written (2026-10-22) and await
+approval.
 
 ## The product's core, in the owner's words
 
@@ -56,10 +57,10 @@ On the five research defects (`2026-10-20-research-defects.md`):
 | Phase | What | Why this position | Plan |
 | --- | --- | --- | --- |
 | **A** | Privacy and access: drop medical data, the access rules above with their two league settings, self-editable contact details, coach account linking, the profile column guard, score authorization, calendar token | Must precede real users; the cheapest it will ever be | `phase-a-privacy.md` (this PR) |
-| **B** | Teaming: buddy requests reach the generator; eligibility flags and unplaced players (item 3); recommended team counts per program and visible too-few/too-many warnings | The core flow; buddies are silently broken today | Written after A is approved |
-| **C** | Fields: permit records per field or venue (issuer, dates, scope, file), visible to admins and coaches, with an expiry warning | Core; nothing exists yet | Written after B |
-| **D** | Scheduling: home/away balance (item 4); the `admin_delete_team` and UTC-idiom plans already merged | Correctness fixes in the core flow | The two plans await your approval; item 4's after C |
-| **E** | Seasons and programs: rollover (item 5), a program attribute on divisions, per-program registration windows, one active season | Needed before next registration (default May 1) | Written after D |
+| **B** | Teaming: buddy requests reach the generator; eligibility flags and unplaced players (item 3); recommended team counts per program and visible too-few/too-many warnings | The core flow; buddies are silently broken today | `2026-10-22-phase-b-teaming.md` |
+| **C** | Fields: permit records per field or venue (issuer, dates, scope, file), visible to admins and coaches, with an expiry warning | Core; nothing exists yet | `2026-10-22-phase-c-permits.md` |
+| **D** | Scheduling: home/away balance (item 4); the `admin_delete_team` and UTC-idiom plans already merged | Correctness fixes in the core flow | `admin_delete_team` and the UTC idiom are built (#632, #633); item 4: `2026-10-22-phase-d-home-away.md` |
+| **E** | Seasons and programs: rollover (item 5), a program attribute on divisions, per-program registration windows, one active season | Needed before next registration (default May 1) | `2026-10-22-phase-e-seasons.md` |
 
 **UI-only work** in the core needs no plan and can go first: showing the team-size warnings the
 generator already computes. It runs alongside A.

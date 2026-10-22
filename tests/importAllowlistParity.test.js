@@ -82,7 +82,6 @@ describe('the import allowlist, browser and Edge copies', () => {
   const DROPPED_COACH = [
     'phone',
     'contact_phone',
-    'first_name',
     'guardian 1 address',
     'guardian 1 mobile phone number',
     'guardian 1 email address',
@@ -93,7 +92,15 @@ describe('the import allowlist, browser and Edge copies', () => {
     'playing up',
     'preferred co-coach',
   ];
-  const KEPT_COACH = ['full_name', 'email', 'status', 'can_coach_multiple_teams', 'certifications'];
+  const KEPT_COACH = [
+    'full_name',
+    'first_name',
+    'last_name',
+    'email',
+    'status',
+    'can_coach_multiple_teams',
+    'certifications',
+  ];
 
   it.each(DROPPED_PLAYER)('both copies drop the player key %j', (key) => {
     expect(browser.isAllowedImportKey('players', key)).toBe(false);
@@ -351,8 +358,12 @@ describe('the allowlist equals what the latest SQL reads', () => {
     for (const key of TEAM_PLACEMENT) expect(census.read.players.has(key)).toBe(true);
   });
 
-  it('the coach finalizer reads exactly the coach allowlist', () => {
-    expect([...census.read.coaches].sort()).toEqual([...browser.COACH_IMPORT_KEYS].sort());
+  it('the coach finalizer reads exactly the coach allowlist, less the name parts composed before it', () => {
+    const parts = new Set(browser.COACH_NAME_PARTS);
+    expect([...census.read.coaches].sort()).toEqual(
+      browser.COACH_IMPORT_KEYS.filter((key) => !parts.has(key)).sort()
+    );
+    expect([...edge.COACH_NAME_PARTS]).toEqual([...browser.COACH_NAME_PARTS]);
   });
 
   it('neither people finalizer stores the payload minus a denylist; both use the declared fields', () => {
@@ -378,7 +389,10 @@ describe('the allowlist equals what the latest SQL reads', () => {
     const { read } = sqlCensus(planted);
     expect(read.players.has('guardian_1_email')).toBe(true);
     expect([...read.players].sort()).not.toEqual([...browser.PLAYER_IMPORT_KEYS].sort());
-    expect([...read.coaches].sort()).not.toEqual([...browser.COACH_IMPORT_KEYS].sort());
+    const parts = new Set(browser.COACH_NAME_PARTS);
+    expect([...read.coaches].sort()).not.toEqual(
+      browser.COACH_IMPORT_KEYS.filter((key) => !parts.has(key)).sort()
+    );
   });
 
   it('POSITIVE CONTROL: a new reader of the staged payload is unclassified until named', () => {

@@ -1,6 +1,7 @@
 # Admin focus: removals, data minimisation, coach view and exports
 
-Status: **draft for owner approval** (AGENTS.md rule 14: persistence, the domain model and roles).
+Status: **approved by the owner 2026-10-22**, with the recommended decisions and the additions under
+"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles).
 It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
 about main (`c15c3b2`) is _statically reviewed_ unless marked _executed_; the inventories behind it
 cite file and line for each item and are summarised here, not repeated.
@@ -90,22 +91,33 @@ at once (AGENTS.md section 11).
   every permit in the organization.
 - **Phase E:** already revised (no registration).
 
-## Decisions
+## Decisions (owner, 2026-10-22: all as recommended, plus the additions)
 
-1. `players.paid`: _recommended_ drop with the compliance flags (payments are a non-goal; the
-   import fills it from the export today).
-2. Coach phone: _recommended_ not stored (contacts live on the registration platform; the email
-   stays because coaches sign in with it).
-3. Birthdates: _recommended_ never stored server-side; a stored natural age replaces them. The
-   owner's "dropped after teaming" is met at import, since teaming reads the file in the browser.
-   The alternative, store and clear after a roster is published, needs a trigger on publish and
-   re-imports restore the date (`finalize_import_job:428`).
-4. Coach practice preferences: _recommended_ kept (the owner named them as a scheduling input).
-   Coach score entry and standings: _recommended_ admin-only. Lighting requests from coaches:
-   _recommended_ admin-only.
-5. Team chat: _recommended_ removed with RSVP (with no families signed in, it has no audience).
-6. XLSX library: chosen at R7 against the dependency policy (a release older than `.npmrc`'s
-   wait, no high advisory); CSV and ICS need none.
+1. `players.paid` is dropped (R1). **Waitlist status stays** as the gate: a player is imported
+   waitlisted or active within their division, and an admin moves a player off the waitlist to make
+   them eligible for teaming.
+2. Coach phone is not stored (R0); the email stays because coaches sign in with it.
+3. Birthdates are never stored server-side; a stored natural age replaces them (R5).
+4. Coach practice preferences stay. **Lighting is admin-only, with no coach requests.** **Score
+   entry and standings are admin functions, each enabled by the league in its settings** (a
+   feature flag, off by default; R6).
+5. Team chat is removed with RSVP (R2).
+6. The XLSX library is chosen at R7 against the dependency policy.
+
+## As built (R0)
+
+- **Coach allowlist.** The coach finalizer reads only full name, email, status, the multi-team flag
+  and certifications, so the coach import keeps those plus first and last name (D1 composes the
+  full name from them). The plan's draft list also named registration id, requested division,
+  years coached and the child's columns: nothing reads them, so they are dropped. Keeping a coach
+  with their child (`coach_team_requests`) has no writer today; when Phase B builds one, it adds
+  the child's name and birth date to the allowlist to resolve the player and stores only the link.
+- **Coach leads are retired.** A lead was a volunteering guardian's name and email; with guardian
+  contacts gone the step could only warn. The player's `willing_to_coach` flag still records the
+  offer; the leads RPC and table go in R4.
+- **Staging retention.** Staged rows are kept until their job finishes (buddy pairing reads them
+  after finalize), then deleted by the purge and a 30-day retention job for coach staging like the
+  player one, not deleted at finalize.
 
 ## Docs updated across the PRs
 

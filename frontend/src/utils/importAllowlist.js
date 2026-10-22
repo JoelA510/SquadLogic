@@ -67,7 +67,13 @@ export const PLAYER_IMPORT_KEYS = Object.freeze([
   'team gender',
 ]);
 
-/** Keys `finalize_coach_import_job` reads, less the phone. */
+/**
+ * The columns a coach's full name is composed from when the export has none
+ * (`import-rows`, D1): read before the finalizer, so kept although it never reads them.
+ */
+export const COACH_NAME_PARTS = Object.freeze(['first_name', 'last_name']);
+
+/** Keys `finalize_coach_import_job` reads, less the phone, and the name parts. */
 export const COACH_IMPORT_KEYS = Object.freeze([
   'full_name',
   'email',
@@ -78,6 +84,7 @@ export const COACH_IMPORT_KEYS = Object.freeze([
   'multi_team',
   'certifications',
   'certification',
+  ...COACH_NAME_PARTS,
 ]);
 
 /** The import types the allowlist applies to, and the schema entity each declares fields for. */

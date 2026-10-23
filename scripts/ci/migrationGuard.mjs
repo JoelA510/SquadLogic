@@ -14,16 +14,21 @@
  *   - the dry-run's pending set differs from `migration list`'s local-only set;
  *   - (a) a pending version is <= the highest version already applied;
  *   - (b) more than `maxPending` migrations are pending;
- *   - the dry-run would push seed data.
+ *   - the dry-run would push seed data;
+ *   - a version listed in supabase/unapplied-migration-edits.json is already
+ *     applied: the CLI never re-runs it, so the listed edit cannot be what
+ *     production holds. Delete the entry once its migration has deployed.
  *
  * `--verify` mode runs after the push: nothing may be pending or remote-only.
  *
  * Usage:
  *   node scripts/ci/migrationGuard.mjs --list list.json --dry-run dry.json [--max 5]
+ *     [--unapplied-edits <file>]   (default supabase/unapplied-migration-edits.json)
  *   node scripts/ci/migrationGuard.mjs --verify --list list.json
  */
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { readAllowedEdits } from './migrationVersions.mjs';
 
 export const DEFAULT_MAX_PENDING = 5;
 
@@ -152,7 +157,7 @@ function checkLedger(list) {
  * guard's actionable message must not depend on the dry-run having succeeded.
  * `dryRunExit` is the dry-run's exit status; non-zero is a failure even when
  * its output looks well formed.
- * @param {{ listText: string, dryRunText: string, dryRunExit?: number | string, maxPending?: number }} args
+ * @param {{ listText: string, dryRunText: string, dryRunExit?: number | string, maxPending?: number, allowedEdits?: { version: string }[] }} args
  * @returns {{ pending: string[], highestApplied: string }}
  */
 export function evaluate({
@@ -160,9 +165,21 @@ export function evaluate({
   dryRunText,
   dryRunExit = 0,
   maxPending = DEFAULT_MAX_PENDING,
+  allowedEdits = [],
 }) {
   const list = parseMigrationList(listText);
   checkLedger(list);
+  const editedButApplied = allowedEdits
+    .map((e) => e.version)
+    .filter((v) => list.applied.includes(v));
+  if (editedButApplied.length > 0) {
+    throw new GuardError(
+      `supabase/unapplied-migration-edits.json lists ${editedButApplied.join(', ')}, already ` +
+        'applied in production. The CLI never re-runs an applied migration, so an edit to it ' +
+        'would never run. If it deployed in an earlier run, delete the entry; otherwise revert ' +
+        'the edit and add a new migration.'
+    );
+  }
 
   const fromList = [...list.pending].sort(cmp);
   const highestApplied = [...list.applied].sort(cmp).at(-1);
@@ -242,6 +259,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       dryRunText: readFileSync(dryPath, 'utf8'),
       dryRunExit: arg(argv, '--dry-run-exit') ?? 0,
       maxPending,
+      allowedEdits: readAllowedEdits(arg(argv, '--unapplied-edits')),
     });
     summary(
       pending.length === 0

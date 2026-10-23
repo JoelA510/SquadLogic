@@ -237,6 +237,15 @@ directory). On pull requests it also checks that every **added** migration has a
 version greater than the latest on the base branch, and that no existing
 migration was renamed, edited or removed. It needs no secrets.
 
+**Editing a migration that never deployed.** A migration whose deploy failed and
+rolled back is still pending in production, so an edit to it does run. List it
+in `supabase/unapplied-migration-edits.json` with its version, the git blob of
+the edited file and the reason, after reading production's ledger. The static
+check then accepts that exact content and no other. The deploy guard
+(`migrationGuard.mjs`) refuses to run while a listed version is already
+applied, so delete the entry in the PR after its migration deploys. First use:
+`20261022020000`, 2026-10-23.
+
 ### Supabase CLI version
 
 Every `supabase/setup-cli` step installs the CLI with

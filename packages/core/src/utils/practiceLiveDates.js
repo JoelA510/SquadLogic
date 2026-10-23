@@ -15,7 +15,7 @@
  *   validity, inclusive). Its live dates are `firstDate + 7k` up to `lastDate`.
  *   No weekday label is parsed here.
  * - An assignment's range is read by `practiceRangeBounds`, the reader the
- *   portal, the feed and the RSVP check already use, never by a third parser.
+ *   portal and the feed already use, never by a third parser.
  *   An open upper bound (`[2026-11-02,)`) reads to the slot's validity end
  *   (plan Q3), through `practiceRangeLowerBound`. Anything else that does not
  *   bound is `unreadable`. An absent range (`undefined`/`null`) is live on
@@ -24,8 +24,8 @@
  * - `YYYY-MM-DD` day numbers only: no `Date` is constructed (GAP-30).
  *
  * - Saved practice exceptions (the M4.7 follow-up, plan Q1) go through
- *   `applyPracticeExceptions`, the helper the portal, the feed and the RSVP
- *   check already use: {@link applyExceptionsToLiveRows} turns a dated run's
+ *   `applyPracticeExceptions`, the helper the portal and the feed already
+ *   use: {@link applyExceptionsToLiveRows} turns a dated run's
  *   rows plus their exceptions into each row's dated **pieces** (the dates it
  *   is held on, per slot) and its TIME TBD dates, and the engines compare
  *   pieces instead of spans for the rows it touched.

@@ -1,29 +1,32 @@
--- pgTAP: admin_delete_team takes its practice exceptions, its opponents' game
--- RSVPs and its players' team ids with it, on the record (migration
--- 20261021030000; plan docs/changes/2026-10-20-admin-delete-team.md).
+-- pgTAP: admin_delete_team takes its practice exceptions and its players' team
+-- ids with it, on the record (migration 20261021030000; plan
+-- docs/changes/2026-10-20-admin-delete-team.md), and since 20261022030000
+-- (plan docs/changes/2026-10-22-admin-focus.md, R2) does so without RSVPs or
+-- team chat: both tables are dropped, and the delete neither touches nor
+-- counts them.
 --
 -- Built from the migrations, the old body deleted a team whose series carried
 -- exceptions without the v3 RESTRICT guard firing (the team_id cascade removes
 -- them first), so this file pins what the new body adds: the withdrawal, the
--- archive, the audit rows, the opposing RSVP, the unassigned players and a
--- counter for every table the cascade empties. Run against the old body it
--- fails on all of those.
+-- archive, the audit rows, the unassigned players and a counter for every
+-- table the cascade empties -- enumerated from the catalogue, so the cascade
+-- set is whatever the head build has (seven tables since R2). Run against the
+-- 20261021030000 body at head it fails: that body reads the dropped tables.
 --
 -- Fixture (Org A): team T (deleted) and opponent O. T has two series, the
 -- first with a live relocation and a withdrawn TIME TBD row, both on run R;
 -- a game G against O with a game assignment; a rostered player P1 and a player
--- P2 assigned only through players.team_id; its own practice RSVP, a message,
--- an ended coach assignment and its calendar token. O's player RSVPs to G (to
--- be removed), to an O-only game G2, and to a "practice" whose reference_id is
--- G's id (both to survive). T2 carries a series cancelled through the sibling
--- RPC, for the parity checks. All ids and names are synthetic.
+-- P2 assigned only through players.team_id; an ended coach assignment and its
+-- calendar token. O has an O-only game G2 (to survive). T2 carries a series
+-- cancelled through the sibling RPC, for the parity checks. All ids and names
+-- are synthetic.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(25);
+SELECT plan(24);
 
 INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
     ('d8000000-0000-4000-8000-0000000000b1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'Del T'),
@@ -71,17 +74,6 @@ INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES
     ('d8000000-0000-4000-8000-0000000000b1', 'd8000000-0000-4000-8000-00000000aa01', 'a1111111-1111-1111-1111-111111111111'),
     ('d8000000-0000-4000-8000-0000000000b2', 'd8000000-0000-4000-8000-00000000aa03', 'a1111111-1111-1111-1111-111111111111');
 UPDATE public.players SET team_id = 'd8000000-0000-4000-8000-0000000000b1' WHERE id = 'd8000000-0000-4000-8000-00000000aa01';
-INSERT INTO public.event_rsvps (id, organization_id, team_id, player_id, reference_id, event_type, occurrence_date, status) VALUES
-    ('d8000000-0000-4000-8000-0000000000d1', 'a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b1',
-     'd8000000-0000-4000-8000-00000000aa01', 'd8000000-0000-4000-8000-00000000000a', 'practice', '2026-09-01', 'attending'),
-    ('d8000000-0000-4000-8000-0000000000d2', 'a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b2',
-     'd8000000-0000-4000-8000-00000000aa03', 'd8000000-0000-4000-8000-0000000000c1', 'game', '2026-09-05', 'attending'),
-    ('d8000000-0000-4000-8000-0000000000d3', 'a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b2',
-     'd8000000-0000-4000-8000-00000000aa03', 'd8000000-0000-4000-8000-0000000000c1', 'practice', '2026-09-06', 'maybe'),
-    ('d8000000-0000-4000-8000-0000000000d4', 'a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b2',
-     'd8000000-0000-4000-8000-00000000aa03', 'd8000000-0000-4000-8000-0000000000c2', 'game', '2026-09-07', 'declined');
-INSERT INTO public.team_messages (organization_id, team_id, author_id, content)
-VALUES ('a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b1', '11111111-1111-1111-1111-111111111111', 'Del message');
 INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status)
 VALUES ('d8000000-0000-4000-8000-0000000000c9', 'a1111111-1111-1111-1111-111111111111', NULL, 'Del Coach', 'del-coach@test.local', 'active');
 INSERT INTO public.team_coach_assignments
@@ -93,9 +85,8 @@ SELECT ok(
     (SELECT count(*) FROM public.practice_exceptions WHERE team_id = 'd8000000-0000-4000-8000-0000000000b1' AND withdrawn_at IS NULL) = 1
     AND (SELECT count(*) FROM public.practice_exceptions WHERE team_id = 'd8000000-0000-4000-8000-0000000000b1' AND withdrawn_at IS NOT NULL) = 1
     AND (SELECT count(*) FROM public.team_calendar_tokens WHERE team_id = 'd8000000-0000-4000-8000-0000000000b1') = 1
-    AND (SELECT count(*) FROM public.team_messages WHERE team_id = 'd8000000-0000-4000-8000-0000000000b1') = 1
     AND (SELECT count(*) FROM public.team_coach_assignments WHERE team_id = 'd8000000-0000-4000-8000-0000000000b1') = 1,
-    'the fixture: one live and one withdrawn exception on T, its token, a message and an ended coach assignment');
+    'the fixture: one live and one withdrawn exception on T, its token and an ended coach assignment');
 
 -- ---- the control: a non-admin is refused and nothing changes ---------------
 SET LOCAL role = 'authenticated';
@@ -174,12 +165,7 @@ SELECT is((SELECT array_agg(e.value->>'id' ORDER BY e.value->>'id')
           ARRAY['d8000000-0000-4000-8000-0000000000e1', 'd8000000-0000-4000-8000-0000000000e2', 'd8000000-0000-4000-8000-0000000000e3'],
           'run R''s archive holds both of T''s exceptions beside the sibling''s');
 
--- RSVPs: the opponent's game RSVP to G goes; the rest stay.
-SELECT ok(NOT EXISTS (SELECT 1 FROM public.event_rsvps WHERE id IN ('d8000000-0000-4000-8000-0000000000d1', 'd8000000-0000-4000-8000-0000000000d2')),
-          'T''s own RSVP and the opponent''s RSVP to the deleted game are gone');
-SELECT is((SELECT array_agg(id::text ORDER BY id) FROM public.event_rsvps WHERE id IN ('d8000000-0000-4000-8000-0000000000d3', 'd8000000-0000-4000-8000-0000000000d4')),
-          ARRAY['d8000000-0000-4000-8000-0000000000d3', 'd8000000-0000-4000-8000-0000000000d4'],
-          'a practice RSVP whose reference_id equals the game''s id, and an RSVP to another game, survive');
+-- Games: T's goes with the cascade, O's other game stays.
 SELECT ok(EXISTS (SELECT 1 FROM public.games WHERE id = 'd8000000-0000-4000-8000-0000000000c2')
           AND NOT EXISTS (SELECT 1 FROM public.games WHERE id = 'd8000000-0000-4000-8000-0000000000c1'),
           'T''s game is gone, the other game stays');
@@ -196,14 +182,18 @@ SELECT is((SELECT jsonb_build_object(
               'games_deleted', metadata->'games_deleted',
               'game_assignments_deleted', metadata->'game_assignments_deleted',
               'team_players_deleted', metadata->'team_players_deleted',
-              'event_rsvps_deleted', metadata->'event_rsvps_deleted',
-              'team_messages_deleted', metadata->'team_messages_deleted',
               'team_coach_assignments_deleted', metadata->'team_coach_assignments_deleted',
               'team_calendar_tokens_deleted', metadata->'team_calendar_tokens_deleted') FROM del_audit),
           '{"practice_exceptions_deleted": 2, "practice_assignments_deleted": 2, "games_deleted": 1,
-            "game_assignments_deleted": 1, "team_players_deleted": 1, "event_rsvps_deleted": 2,
-            "team_messages_deleted": 1, "team_coach_assignments_deleted": 1, "team_calendar_tokens_deleted": 1}'::jsonb,
+            "game_assignments_deleted": 1, "team_players_deleted": 1,
+            "team_coach_assignments_deleted": 1, "team_calendar_tokens_deleted": 1}'::jsonb,
           'team.deleted counts what each table lost');
+-- R2: no counter names a table that no longer exists (the catalogue walk below
+-- only asks that every cascading table HAS one).
+SELECT is(
+    (SELECT array_agg(k ORDER BY k) FROM del_audit, jsonb_object_keys(metadata) k
+      WHERE k LIKE '%\_deleted' AND to_regclass('public.' || regexp_replace(k, '_deleted$', '')) IS NULL),
+    NULL, 'team.deleted has no counter for a table that does not exist (no RSVP or chat counter)');
 SELECT is((SELECT metadata->'game_ids' FROM del_audit), '["d8000000-0000-4000-8000-0000000000c1"]'::jsonb,
           'team.deleted names the deleted game');
 SELECT is((SELECT metadata->'player_ids_unassigned' FROM del_audit),
@@ -225,8 +215,8 @@ SELECT is(
           FROM del_audit, jsonb_object_keys(metadata) k
          WHERE k LIKE '%\_deleted') s),
     NULL, 'every table that cascades from teams has a *_deleted counter');
-SELECT ok((SELECT count(*) FROM pg_constraint c
-            WHERE c.contype = 'f' AND c.confrelid = 'public.teams'::regclass AND c.confdeltype = 'c') >= 9,
+SELECT ok((SELECT count(DISTINCT c.conrelid) FROM pg_constraint c
+            WHERE c.contype = 'f' AND c.confrelid = 'public.teams'::regclass AND c.confdeltype = 'c') >= 7,
           'the catalogue walk found the cascading tables (it examined something)');
 
 SELECT * FROM finish();

@@ -6,8 +6,8 @@
  * ({@link practiceOccurrenceDates}, unchanged). A live exception then changes
  * the dates inside its own window: `time_tbd` turns them into dated TIME TBD
  * entries, `relocated` moves them to another slot. Every reader that turns
- * stored rows into dated practices (the portal, the feed, the RSVP check) is
- * meant to go through this one function -- PR 12b, 12c and 12d adopt it. **This
+ * stored rows into dated practices (the portal, the feed, and until R2 the RSVP
+ * check) is meant to go through this one function -- PR 12b, 12c and 12d adopt it. **This
  * PR adopts it nowhere**, so on its own it changes nothing a family sees.
  *
  * ## The rules (plan §3, operator answers §10)

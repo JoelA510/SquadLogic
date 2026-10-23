@@ -1,6 +1,6 @@
 Feature: Pillar 2 - Coach Daily Loop
   As a volunteer coach
-  I want to easily manage my team's roster, schedule, and communications
+  I want to easily manage my team's roster and schedule
   So that I can focus on coaching rather than administration
 
   Background:
@@ -19,8 +19,10 @@ Feature: Pillar 2 - Coach Daily Loop
     Then I should see all my team events in my external calendar application
     And the feed should only contain data for my authorized team (no data leakage)
 
-  Scenario: Communicating with Parents
-    Given I need to announce a practice cancellation
-    When I use the Team Communication tool
-    Then a notification should be sent to all parents of players on my roster
-    And I should be able to see a history of all sent messages
+  # R2 (docs/changes/2026-10-22-admin-focus.md): availability marking (RSVP)
+  # and team chat are removed; the team page shows the schedule without them.
+  Scenario: The team page shows the schedule without RSVP or team chat
+    Given my team has a practice series on Tuesdays
+    When I view my Team Portal
+    Then I should see the Tuesday practices on the team schedule
+    And I should see no RSVP controls and no team chat

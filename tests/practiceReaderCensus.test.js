@@ -94,12 +94,9 @@ const REGISTRY = {
   },
 
   // --- SQL: the latest definition of each function or view (plan §1.1 G6).
-  // R6, adopted in 12d (20261005000000): the RSVP validator reads the live
-  // exceptions on the assignment and mirrors the helper's rules in SQL.
-  'sql:upsert_team_event_rsvp': {
-    class: 'applies',
-    why: 'R6: the RSVP validator accepts a date only as the applied practice calendar shows it',
-  },
+  // R6, the RSVP validator `upsert_team_event_rsvp`, was dropped with RSVPs
+  // (20261022030000; plan docs/changes/2026-10-22-admin-focus.md, R2), so it
+  // is no reader: the scan honours the DROP, and an entry here would be stale.
   'sql:field_bookings': {
     class: 'series-only',
     why: "X13: a booking is judged per row by its last day; relocated targets are 11d's gap (D5)",
@@ -273,9 +270,12 @@ describe('practice-reader census (W16)', () => {
     expect(JS.scanned).toBeGreaterThan(300);
     expect(SQL.files).toBeGreaterThan(50);
     expect(SQL.definitions).toBeGreaterThan(100);
-    // The two readers the plan found only through SQL (R6) and the feed (R4).
-    expect(SUBJECTS).toContain('sql:upsert_team_event_rsvp');
+    // A reader only SQL shows (admin_delete_team closes a deleted team's
+    // series), and the feed (R4). R6, the RSVP validator, was dropped by
+    // 20261022030000 and must not be found.
+    expect(SUBJECTS).toContain('sql:admin_delete_team');
     expect(SUBJECTS).toContain('supabase/functions/_shared/calendar/teamFeed.ts');
+    expect(SUBJECTS).not.toContain('sql:upsert_team_event_rsvp');
   });
 
   it('every reader of practice_assignments is classified', () => {

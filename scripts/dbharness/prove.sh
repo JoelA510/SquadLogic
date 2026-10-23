@@ -4225,7 +4225,7 @@ plant "R38 the revert restores a drifted apply_player_patch body" "$R38" \
   "revert 20261022020000"
 
 # R2: no RSVP, no team chat. The smoke RAISEs on each; the revert claim on a
-# policy left out, a grant left out and a body that drifted.
+# policy left out, a trigger left out and a body that drifted.
 plant "M39 create_team_message is left behind" "$M39" \
   "DROP FUNCTION public.create_team_message(uuid, text);
 " \
@@ -4254,8 +4254,11 @@ plant "R39 the revert leaves the chat read policy out" "$R39" \
   "" \
   "revert 20261022030000"
 
-plant "R39 the revert leaves upsert_team_event_rsvp closed to authenticated" "$R39" \
-  "GRANT ALL ON FUNCTION public.upsert_team_event_rsvp(p_team_id uuid, p_player_id uuid, p_reference_id uuid, p_event_type text, p_occurrence_date date, p_status text) TO authenticated;
+# Not the function grants: since 20260614000000 the default privileges grant
+# authenticated EXECUTE on any new function, so a GRANT left out of the revert
+# changes nothing the fingerprint can see (measured 2026-10-23).
+plant "R39 the revert leaves the RSVP trigger out" "$R39" \
+  "CREATE TRIGGER event_rsvps_set_timestamp BEFORE UPDATE ON public.event_rsvps FOR EACH ROW EXECUTE FUNCTION public.trigger_set_timestamp();
 " \
   "" \
   "revert 20261022030000"
@@ -4402,7 +4405,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"]="R34 the revert leaves players restricted|R34 the revert leaves the token table|R34 the revert restores a drifted rotate body"
   ["(checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"]="R35 the revert leaves the new admin_delete_team|R35 the revert leaves the locking RSVP writer"
   ["(checked) the UTC revert unpins every function, restores the 79 column defaults, and restores fail_stale_import_jobs byte for byte"]="R36 the revert leaves the functions pinned|R36 the revert leaves the column defaults on now()"
-  ["(checked) the RSVP and chat revert restores both tables with their keys, index, trigger, policies and grants, the two dropped functions, and the two replaced functions' previous bodies, each with its grants, comment and posture as before"]="R39 the revert leaves the chat read policy out|R39 the revert leaves upsert_team_event_rsvp closed to authenticated|R39 the revert restores a drifted admin_delete_team body"
+  ["(checked) the RSVP and chat revert restores both tables with their keys, index, trigger, policies and grants, the two dropped functions, and the two replaced functions' previous bodies, each with its grants, comment and posture as before"]="R39 the revert leaves the chat read policy out|R39 the revert leaves the RSVP trigger out|R39 the revert restores a drifted admin_delete_team body"
   ["(checked) the registration revert restores the seven functions, both tables, the view and the three players columns, and the three replaced functions' previous bodies, each with its grants, policies, triggers and posture as before"]="R38 the revert leaves submit_registration closed to anon|R38 the revert leaves a registrations policy out|R38 the revert restores a drifted apply_player_patch body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"

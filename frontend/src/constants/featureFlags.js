@@ -62,6 +62,30 @@ export const FEATURE_FLAGS = {
 export const GENDER_MODEL_KEY = 'gender_model';
 export const GENDER_MODELS = ['split', 'coed'];
 
+/**
+ * String-valued org setting: the league's buddy rule (Phase B1). `mutual` pairs two players
+ * only when each names the other, one buddy per player; `one_way_best_effort` also scores a
+ * one-way request best effort when the named player listed no buddy. The same values as
+ * `BUDDY_RULES` in `packages/core/src/buddyLinking.js` (`tests/buddyRuleSetting.test.jsx`).
+ */
+export const BUDDY_RULE_KEY = 'buddy_rule';
+/** Each rule as the settings page offers it and the Teams page's buddy list names it. */
+export const BUDDY_RULE_CHOICES = Object.freeze([
+  {
+    value: 'mutual',
+    label: 'Mutual requests only',
+    description:
+      'Two players are kept together only when each names the other. One-way requests are listed for review.',
+  },
+  {
+    value: 'one_way_best_effort',
+    label: 'One-way requests, best effort',
+    description:
+      'A one-way request is also placed together where the roster allows, when the named player listed no buddy.',
+  },
+]);
+export const BUDDY_RULE_OPTIONS = BUDDY_RULE_CHOICES.map((choice) => choice.value);
+
 // For development convenience, a list of all known flag names
 export const ALL_FLAGS = Object.values(FEATURE_FLAGS);
 
@@ -78,6 +102,7 @@ export const FEATURE_DEFAULTS = {
   [FEATURE_FLAGS.GUARDIAN_CONTACT_SHARING]: true,
   [FEATURE_FLAGS.COACH_DIRECTORY]: true,
   [GENDER_MODEL_KEY]: 'split',
+  [BUDDY_RULE_KEY]: 'mutual',
 };
 
 /**
@@ -149,8 +174,9 @@ export const FEATURE_CATALOG = [
 
 /**
  * Zod schema for validating the feature_flags JSONB object from Supabase.
- * Known boolean flags must be booleans; `gender_model` must be a known
- * model string. Unknown keys are ignored (selective ignore).
+ * Known boolean flags must be booleans; `gender_model` and `buddy_rule` must
+ * each be one of their known strings, exactly (anything else is refused, not
+ * coerced). Unknown keys are ignored (selective ignore).
  */
 export const FeatureFlagSchema = z
   .record(z.string(), z.union([z.boolean(), z.string()]))
@@ -163,6 +189,14 @@ export const FeatureFlagSchema = z
           validated[key] = value;
         } else if (IS_DEV_SERVER) {
           console.warn(`[FeatureFlag] Ignoring invalid gender_model value: "${value}"`);
+        }
+        return;
+      }
+      if (key === BUDDY_RULE_KEY) {
+        if (typeof value === 'string' && BUDDY_RULE_OPTIONS.includes(value)) {
+          validated[key] = value;
+        } else if (IS_DEV_SERVER) {
+          console.warn(`[FeatureFlag] Ignoring invalid buddy_rule value: "${value}"`);
         }
         return;
       }

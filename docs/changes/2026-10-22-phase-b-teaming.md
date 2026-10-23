@@ -1,7 +1,8 @@
 # Phase B: teaming
 
-Status: **proposed 2026-10-22, for owner approval** (AGENTS.md rule 14: B2 and B6 change the
-generator, B1 the domain model of buddy requests). B6 records the owner's team priorities of
+Status: **approved by the owner 2026-10-22, with every recommendation** (AGENTS.md rule 14: B2
+and B6 change the generator, B1 the domain model of buddy requests). B1 is built (see "As built
+(B1)"). B6 records the owner's team priorities of
 2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
 teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
 migration: everything new is computed, and the run's `results` JSON is stored opaque
@@ -286,6 +287,16 @@ engine conventions), and the demo league is teamed end to end.
   Watch: the buddy list's counts on the first real import. Reruns are safe: preserved players stay.
 - **Blocked players lower the team count.** Advice counts the registered; generation, the eligible.
   The outcome warnings and "Not placed" make the gap visible.
+- **Review of PR #647 (Codex).** A namesake tie is settled only by a reverse request that names
+  the requester and nobody else in its division. Any request text with a digit that matches no
+  registration id is `not-found`. The page reads names and the request from the durable player
+  rows (the Player Record page's edits), for the program and the whole roster, in chunks of 200
+  ids. `BuddyEvaluator` also steers a player toward a placed requester who named them, so an
+  honoured one-way request is scored whichever of the two is placed first (still best effort,
+  never a unit; the evaluator change ran against the season fixture and the regression suites).
+  Buddy codes are grouped across the whole roster, so a code shared with another division is
+  `cross-division-buddy`; only two program players in one division are linked. The list takes
+  its pairs from the prepared players too, so a review-mode rerun keeps preserved pairs.
 - **Header variants.** If the import rows carry a header form B1 does not read, requests stay lost
   silently. B1's page test uses the real canonical headers, and an import with a buddy column whose
   every request is unresolved shows that in the list.
@@ -295,15 +306,48 @@ engine conventions), and the demo league is teamed end to end.
 
 1. **One-way requests:** _answered (owner, 2026-10-22)_: a league setting, `buddy_rule` (B6),
    default mutual only with one buddy per player; `one_way_best_effort` is the league's choice.
-2. **Name matching:** exact after normalising, ambiguity settled only by reciprocity, near misses
-   listed, never linked? _Recommended: yes_, as identity resolution does (incident 6, the fixture
-   README): a wrong pair is worse than a listed miss, and the admin fixes the request text.
-3. **A rostered player who becomes ineligible** stays and is listed; the sync is not blocked?
-   _Recommended: yes._ The roster was reviewed; the admin moves them by hand if they agree.
-4. **Saved overrides that were never chosen:** keep them, or reset to Auto? _Recommended: keep_, with
-   the recommendation and "Use N" beside them. A saved estimate cannot be told from a choice.
-5. **TeamBuilder (B5):** adopt the resolver and mutual-only pairing? _Recommended: yes_, so the two
-   pages cannot disagree about who is a buddy (AGENTS.md: adopt the sibling's contract).
+2. **Name matching:** _answered (owner, 2026-10-22): yes._ Exact after normalising, ambiguity
+   settled only by reciprocity, near misses listed, never linked, as identity resolution does
+   (incident 6, the fixture README): a wrong pair is worse than a listed miss, and the admin fixes
+   the request text.
+3. **A rostered player who becomes ineligible:** _answered (owner, 2026-10-22): yes._ They stay
+   and are listed; the sync is not blocked. The roster was reviewed; the admin moves them by hand
+   if they agree.
+4. **Saved overrides that were never chosen:** _answered (owner, 2026-10-22): keep them_, with the
+   recommendation and "Use N" beside them. A saved estimate cannot be told from a choice.
+5. **TeamBuilder (B5):** _answered (owner, 2026-10-22): yes._ TeamBuilder adopts the resolver and
+   the league's buddy rule, so the two pages cannot disagree about who is a buddy (AGENTS.md:
+   adopt the sibling's contract).
+
+## As built (B1)
+
+- **A one-way registration id is a one-way request.** `normalizeBuddyLinks` used to set a
+  `buddyId` from any `buddy_request` that matched an external registration id, reciprocated or
+  not. In the pipeline the resolver now consumes the request text first, so an id follows the same
+  buddy rule as a name: under `mutual` a one-way id request is listed, not linked. Called directly,
+  `normalizeBuddyLinks` keeps its old rule. On the page no id request reached the pipeline before
+  B1, so nothing a league saw changes.
+- **Registration ids match with case ignored**, as `materialize_import_buddy_pairs` does
+  (`lower()` on both sides), not exactly as `normalizeBuddyLinks` does.
+- **`self`** is a request matching only the requester. The requester's own name beside a
+  namesake is `ambiguous` (it may mean the namesake) unless the namesake names the requester back.
+  A request of one name only (no surname) is `unparsed`; text with a digit that matches no
+  registration id is `not-found`. Names compare in Latin letters only (`normaliseNamePart`, the
+  identity module's contract), so a name in another script is `unparsed`.
+- **The rule's audit row** is `settings.flags_updated`, the action the settings page writes for a
+  toggle, beside `update_org_feature_flags`' own `feature_flags.updated`: a new action would need
+  a migration (`audit_actions`), and B1 has none.
+- **Only a mutual pair sanctions a play-up** (route B). An honoured one-way request's `buddyId`
+  is set after play-up eligibility, so it is scored best effort and sanctions nothing: the two
+  may not land together. A requester whom a buddy code pairs keeps the code pair, and the one-way
+  request is listed as not honoured (one buddy per player).
+- **The list** is in the review view below the persistence panel, and reads
+  `results.buddyRequestsByDivision` of the staged or the synced run; whether a pair is together is
+  read from the run's current `team_players`, so a manual roster edit shows. It also lists
+  buddy-code problems and `buddy-coach-conflict` pairs.
+- **Header variants.** The page reads the keys `materialize_import_buddy_pairs` reads, and any
+  header the import's alias map stages under one of them (`canonicalImportKey`). Every one is on
+  the import allowlist (`PLAYER_IMPORT_KEYS`).
 
 ## Not in Phase B
 

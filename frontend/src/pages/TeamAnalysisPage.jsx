@@ -13,6 +13,7 @@ import TeamingConfiguration from '../components/teaming/TeamingConfiguration.jsx
 import RosterManager from '../components/teaming/RosterManager.jsx';
 import TeamPersistencePanel from '../components/TeamPersistencePanel.jsx';
 import DataValidationPanel from '../components/teaming/DataValidationPanel.jsx';
+import BuddyRequestsList from '../components/teaming/BuddyRequestsList.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
@@ -21,9 +22,13 @@ import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { DEFAULT_ROSTER_LIMITS } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
+import { summarizeBuddyRequests } from '@squadlogic/core/buddyLinking.js';
 import { mapSchedulerRunToSummary } from '@squadlogic/core/utils/teamSummaryMapper.js';
 import { formatChangeNote } from '@squadlogic/core/teamDiagnostics.js';
 import { PERMISSIONS } from '../constants/permissions.js';
+import { FEATURE_FLAGS } from '../constants/featureFlags.js';
+import { useFeatures } from '../hooks/useFeatures.js';
+import { canonicalImportKey } from '../utils/importAllowlist.js';
 import { getPersistenceEndpoint, triggerTeamPersistence } from '../utils/teamPersistenceClient.js';
 import {
   buildExistingSnapshotForRerun,
@@ -235,7 +240,140 @@ function normalizeSkillRating(value) {
   return undefined;
 }
 
-function toGeneratorPlayer(row, sourceIndex, division) {
+// The keys `materialize_import_buddy_pairs` reads (migration 20260503080000), in its order. A
+// row's header counts when the import would stage it under one of them (`canonicalImportKey`,
+// the alias map the import maps headers with), so "Buddy Request" and "Friend" are read too.
+const BUDDY_REQUEST_KEYS = [
+  'buddy_request',
+  'buddy_id',
+  'buddy_external_registration_id',
+  'buddy_registration_id',
+  'friend_request',
+];
+const BUDDY_CODE_KEYS = ['mutual_buddy_code', 'buddy_code', 'friend_code'];
+
+function readImportField(row, canonicalKeys) {
+  const nonBlank = (value) => value !== undefined && value !== null && String(value).trim() !== '';
+  for (const key of canonicalKeys) {
+    if (nonBlank(row?.[key])) return String(row[key]).trim();
+  }
+  for (const [header, value] of Object.entries(row || {})) {
+    if (canonicalKeys.includes(canonicalImportKey(header)) && nonBlank(value)) {
+      return String(value).trim();
+    }
+  }
+  return null;
+}
+
+/** The buddy fields a generator player carries (Phase B1); none when buddy requests are off. */
+function buddyFieldsOf(row) {
+  const buddyRequest = readImportField(row, BUDDY_REQUEST_KEYS);
+  const mutualBuddyCode = readImportField(row, BUDDY_CODE_KEYS);
+  const externalId = getPlayerExternalCandidate(row);
+  return {
+    ...(buddyRequest ? { buddy_request: buddyRequest } : {}),
+    ...(mutualBuddyCode ? { mutual_buddy_code: mutualBuddyCode } : {}),
+    ...(externalId ? { external_registration_id: String(externalId) } : {}),
+  };
+}
+
+// What a durable player row holds of a person's identity and buddy request. The Player
+// Record page edits names and the request on `players`, so these win over the import rows,
+// which keep what the file said.
+const DURABLE_PLAYER_FIELDS =
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code';
+const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
+const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
+const LOOKUP_CHUNK = 200;
+const LOOKUP_CONCURRENCY = 8;
+
+/**
+ * The import row with the durable player's identity and buddy request over it. Every header
+ * the import reads as a name or a request is replaced, so a request the admin cleared on the
+ * record is cleared here too. The code stays the import's unless the player row holds one.
+ */
+function withDurableIdentity(row, durable) {
+  if (!durable) return row;
+  const next = {};
+  for (const [header, value] of Object.entries(row || {})) {
+    const key = canonicalImportKey(header);
+    if (BUDDY_REQUEST_KEYS.includes(key) || IDENTITY_KEYS.includes(key)) continue;
+    if (IDENTITY_CAMEL_KEYS.includes(header)) continue;
+    next[header] = value;
+  }
+  // A name the player row lacks (a mock row, a partial select) keeps the import's.
+  next.first_name =
+    durable.first_name ?? firstNonEmpty(row, ['first_name', 'First Name', 'firstName']) ?? '';
+  next.last_name =
+    durable.last_name ?? firstNonEmpty(row, ['last_name', 'Last Name', 'lastName']) ?? '';
+  if (durable.preferred_name) next.preferred_name = durable.preferred_name;
+  if (durable.buddy_request) next.buddy_request = durable.buddy_request;
+  if (durable.mutual_buddy_code) next.mutual_buddy_code = durable.mutual_buddy_code;
+  return next;
+}
+
+/**
+ * Durable players by id and by external registration id, in chunks (a long `in` list is a
+ * long URL), at most eight requests at a time. A refused read throws.
+ * @param {string} organizationId
+ * @param {{ ids?: string[], externalIds?: string[], divisionId?: string | null }} keys
+ *   `divisionId` narrows the external-id lookup to one division.
+ */
+async function fetchDurablePlayers(
+  organizationId,
+  { ids = [], externalIds = [], divisionId = null }
+) {
+  const queries = [];
+  for (let start = 0; start < ids.length; start += LOOKUP_CHUNK) {
+    const chunk = ids.slice(start, start + LOOKUP_CHUNK);
+    queries.push(() =>
+      supabase
+        .from('players')
+        .select(DURABLE_PLAYER_FIELDS)
+        .eq('organization_id', organizationId)
+        .in('id', chunk)
+    );
+  }
+  for (let start = 0; start < externalIds.length; start += LOOKUP_CHUNK) {
+    const chunk = externalIds.slice(start, start + LOOKUP_CHUNK);
+    queries.push(() => {
+      const query = supabase
+        .from('players')
+        .select(DURABLE_PLAYER_FIELDS)
+        .eq('organization_id', organizationId);
+      return (divisionId ? query.eq('division_id', divisionId) : query).in(
+        'external_registration_id',
+        chunk
+      );
+    });
+  }
+  const players = [];
+  for (let start = 0; start < queries.length; start += LOOKUP_CONCURRENCY) {
+    const results = await Promise.all(
+      queries.slice(start, start + LOOKUP_CONCURRENCY).map((run) => run())
+    );
+    for (const { data, error } of results) {
+      if (error) throw error;
+      players.push(...(data || []));
+    }
+  }
+  return players;
+}
+
+/** A roster entry buddy requests are matched against: identity only. */
+function toBuddyRosterEntry(row, id, division) {
+  return {
+    id: String(id),
+    division: String(division),
+    firstName: firstNonEmpty(row, ['first_name', 'First Name', 'firstName']) || '',
+    lastName: firstNonEmpty(row, ['last_name', 'Last Name', 'lastName']) || '',
+    preferredName:
+      firstNonEmpty(row, ['preferred_name', 'Preferred Name', 'preferredName', 'nickname']) || '',
+    ...buddyFieldsOf(row),
+  };
+}
+
+function toGeneratorPlayer(row, sourceIndex, division, { buddyRequests = false } = {}) {
   const id = String(
     firstNonEmpty(row, [
       'id',
@@ -271,6 +409,7 @@ function toGeneratorPlayer(row, sourceIndex, division) {
     ...(playUpRequested ? { play_up_requested: true } : {}),
     ...(skillRating !== undefined ? { skillRating } : {}),
     ...(coachId || willingToCoach ? { coachId: String(coachId || `coach-${id}`) } : {}),
+    ...(buddyRequests ? buddyFieldsOf(row) : {}),
   };
 }
 
@@ -348,6 +487,8 @@ export default function TeamAnalysisPage() {
   const { importedData } = useImport();
   const { currentOrganization, currentSeasonSetting, permissions = [] } = useOrganization();
   const { session, user: authUser } = useAuth();
+  const { isEnabled, buddyRule } = useFeatures();
+  const buddyRequestsEnabled = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
@@ -668,30 +809,15 @@ export default function TeamAnalysisPage() {
   const resolveGeneratorPlayers = useCallback(
     async (rowsForProgram, selectedProgramKey, selectedDivisionId) => {
       const { ids, externalIds } = collectPlayerLookupKeys(rowsForProgram);
-      const durablePlayers = [];
       const selectedDivisionKey = String(selectedDivisionId || '');
-      const lookupResults = await Promise.all([
-        ids.length > 0
-          ? supabase
-              .from('players')
-              .select('id, external_registration_id, division_id')
-              .eq('organization_id', currentOrganization.id)
-              .in('id', ids)
-          : Promise.resolve({ data: [], error: null }),
-        externalIds.length > 0
-          ? supabase
-              .from('players')
-              .select('id, external_registration_id, division_id')
-              .eq('organization_id', currentOrganization.id)
-              .eq('division_id', selectedDivisionId)
-              .in('external_registration_id', externalIds)
-          : Promise.resolve({ data: [], error: null }),
+      const [byIdRows, byExternalRows] = await Promise.all([
+        fetchDurablePlayers(currentOrganization.id, { ids }),
+        fetchDurablePlayers(currentOrganization.id, {
+          externalIds,
+          divisionId: selectedDivisionId,
+        }),
       ]);
-
-      lookupResults.forEach(({ data, error }) => {
-        if (error) throw error;
-        durablePlayers.push(...(data || []));
-      });
+      const durablePlayers = [...byIdRows, ...byExternalRows];
 
       const byId = new Map(durablePlayers.map((player) => [String(player.id), player]));
       const byExternalId = new Map(
@@ -700,6 +826,7 @@ export default function TeamAnalysisPage() {
           .map((player) => [String(player.external_registration_id), player])
       );
       const missingRows = [];
+      const generationRows = [];
 
       const generatorPlayers = rowsForProgram.map(({ row, sourceIndex }) => {
         const idCandidate = getPlayerIdCandidate(row);
@@ -720,14 +847,17 @@ export default function TeamAnalysisPage() {
 
         const rowForGeneration = durablePlayer
           ? {
-              ...row,
+              ...withDurableIdentity(row, durablePlayer),
               id: durablePlayer.id,
               player_id: durablePlayer.id,
               division_id: durablePlayer.division_id || row.division_id,
             }
           : row;
+        generationRows.push(rowForGeneration);
 
-        return toGeneratorPlayer(rowForGeneration, sourceIndex, selectedProgramKey);
+        return toGeneratorPlayer(rowForGeneration, sourceIndex, selectedProgramKey, {
+          buddyRequests: buddyRequestsEnabled,
+        });
       });
 
       if (missingRows.length > 0) {
@@ -737,9 +867,9 @@ export default function TeamAnalysisPage() {
         );
       }
 
-      return generatorPlayers;
+      return { generatorPlayers, generationRows };
     },
-    [currentOrganization?.id]
+    [buddyRequestsEnabled, currentOrganization?.id]
   );
 
   const handleGenerateTeams = useCallback(async () => {
@@ -768,17 +898,61 @@ export default function TeamAnalysisPage() {
         throw new Error(`No imported players found for ${selectedProgram.name}.`);
       }
 
-      const generatorPlayers = await resolveGeneratorPlayers(
+      const { generatorPlayers, generationRows } = await resolveGeneratorPlayers(
         rowsForProgram,
         selectedProgramKey,
         savedDivision.id
       );
+
+      // Every imported player, so a buddy request naming someone outside this program is told
+      // apart from one naming nobody. The program's own rows carry their generator ids; every
+      // row carries its durable player's names and request (the record's edits), where found.
+      const programIndexBySource = new Map(
+        rowsForProgram.map((entry, programIndex) => [entry.sourceIndex, programIndex])
+      );
+      let buddyRoster;
+      if (buddyRequestsEnabled) {
+        const otherRows = importedPlayerRows.filter(
+          (_, sourceIndex) => !programIndexBySource.has(sourceIndex)
+        );
+        const otherKeys = collectPlayerLookupKeys(otherRows.map((row) => ({ row })));
+        const otherDurable = await fetchDurablePlayers(currentOrganization.id, otherKeys);
+        const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
+        const otherByExternalId = new Map(
+          otherDurable
+            .filter((player) => player.external_registration_id)
+            .map((player) => [String(player.external_registration_id), player])
+        );
+        buddyRoster = importedPlayerRows.map((row, sourceIndex) => {
+          const programIndex = programIndexBySource.get(sourceIndex);
+          if (programIndex !== undefined) {
+            return toBuddyRosterEntry(
+              generationRows[programIndex],
+              generatorPlayers[programIndex].id,
+              selectedProgramKey
+            );
+          }
+          const division = resolveDivisionId(row);
+          const idCandidate = getPlayerIdCandidate(row);
+          const externalCandidate = getPlayerExternalCandidate(row);
+          const durable =
+            (isUuid(idCandidate) && otherById.get(idCandidate)) ||
+            (externalCandidate && otherByExternalId.get(externalCandidate)) ||
+            null;
+          return toBuddyRosterEntry(
+            withDurableIdentity(row, durable),
+            durable?.id ?? toGeneratorPlayer(row, sourceIndex, division).id,
+            division
+          );
+        });
+      }
 
       // Coach-anchored teaming + play-up/play-down eligibility. Imported coaches
       // (via coach_team_requests) drive which players anchor a coach's team, and
       // a coach-child or qualifying buddy sanctions a play-up. Guarded so the
       // page falls back to the raw roster if coach links are unavailable.
       let preparedPlayers = generatorPlayers;
+      let preparedDiagnostics = null;
       try {
         const { data: coachLinks } = await supabase
           .from('coach_team_requests')
@@ -797,6 +971,8 @@ export default function TeamAnalysisPage() {
         }
         const prepared = prepareTeamingInput({
           players: generatorPlayers,
+          roster: buddyRoster,
+          buddyRule,
           coaches: [...coachesById.values()],
           divisions: [
             {
@@ -815,6 +991,7 @@ export default function TeamAnalysisPage() {
           remapBlocked: false,
         });
         preparedPlayers = prepared.players;
+        preparedDiagnostics = prepared.diagnostics;
       } catch (pipelineErr) {
         console.warn('Teaming pipeline (coach links / play-up) skipped:', pipelineErr?.message);
       }
@@ -838,13 +1015,32 @@ export default function TeamAnalysisPage() {
         divisionKey: selectedProgramKey,
       });
       const generationMode = existingSnapshot ? 'review' : 'draft';
-      const result = generateTeams({
+      const generated = generateTeams({
         players: preparedPlayers,
         divisionConfigs: { [selectedProgramKey]: divisionConfig },
         seed: config.seed,
         existingSnapshot,
         generationMode,
       });
+      // The "Buddy requests" list, kept in the run's results so it survives a reload.
+      const result =
+        buddyRequestsEnabled && preparedDiagnostics
+          ? {
+              ...generated,
+              buddyRequestsByDivision: {
+                [selectedProgramKey]: summarizeBuddyRequests({
+                  players: preparedPlayers,
+                  requests: preparedDiagnostics.buddyRequests,
+                  linkDiagnostics: preparedDiagnostics.buddyLinking,
+                  buddyDiagnostics: generated.buddyDiagnosticsByDivision?.[selectedProgramKey],
+                  teams: generated.teamsByDivision?.[selectedProgramKey],
+                  overflow: generated.overflowByDivision?.[selectedProgramKey],
+                  roster: buddyRoster,
+                  buddyRule,
+                }),
+              },
+            }
+          : generated;
       const generatedTeams = result.teamsByDivision?.[selectedProgramKey] ?? [];
       if (generatedTeams.length === 0) {
         throw new Error(
@@ -905,6 +1101,8 @@ export default function TeamAnalysisPage() {
       setIsGenerating(false);
     }
   }, [
+    buddyRequestsEnabled,
+    buddyRule,
     configs,
     canManageTeams,
     currentOrganization?.id,
@@ -1389,6 +1587,7 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
+          <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (
             <section
               className="bg-bg-surface border border-border-subtle rounded-xl p-6"

@@ -116,8 +116,8 @@ R37="$REPO/docs/sql/20261022010000_revert.sql"
 # and the revert.
 M38="$REPO/supabase/migrations/20261022020000_remove_registration_and_compliance.sql"
 R38="$REPO/docs/sql/20261022020000_revert.sql"
-# The two reporting views production lacked, restored, and the revert (a no-op
-# restatement on a fresh build).
+# The two reporting views production lacked, restored (the standings view with
+# a `division` column appended), and the revert.
 M39="$REPO/supabase/migrations/20261023010000_restore_reporting_views.sql"
 R39="$REPO/docs/sql/20261023010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
@@ -4291,6 +4291,14 @@ WITH (security_invoker = true)
 AS" \
   "CREATE OR REPLACE VIEW public.view_league_standings
 AS" \
+  "smoke 20261023010000"
+
+plant "M39 the standings view loses its division column" "$M39" \
+  "COALESCE(SUM(gr.draw), 0) AS points,
+    d.name AS division
+" \
+  "COALESCE(SUM(gr.draw), 0) AS points
+" \
   "smoke 20261023010000"
 
 plant "R39 the revert drops both views" "$R39" \

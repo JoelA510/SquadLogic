@@ -4,9 +4,10 @@
 --   * `view_org_metrics` and `view_league_standings` exist, as views, with
 --     `security_invoker = true` (without it a view reads its tables as its
 --     owner, past RLS);
---   * their columns, in order, are the definitive schema's, which the Reports
---     page (`EnterpriseDashboard.jsx`) and the Standings page
---     (`LeagueStandings.jsx`) read with `select('*')`;
+--   * their columns, in order, are the definitive schema's, plus
+--     `view_league_standings.division` last, which the Reports page
+--     (`EnterpriseDashboard.jsx`) and the Standings page (`LeagueStandings.jsx`,
+--     which orders and groups by `division`) read with `select('*')`;
 --   * authenticated and service_role can SELECT from both.
 -- That RLS still scopes their rows (a member of one organization sees only
 -- its own) is supabase/tests/reporting_views_present.sql's, under a real
@@ -50,10 +51,10 @@ BEGIN
     IF v_org IS DISTINCT FROM 'organization_id,organization_name,total_players,total_teams,total_users' THEN
         RAISE EXCEPTION 'view_org_metrics columns are %', v_org;
     END IF;
-    IF v_standings IS DISTINCT FROM 'team_id,organization_id,team_name,division_id,games_played,wins,losses,draws,goals_for,goals_against,goal_differential,points' THEN
+    IF v_standings IS DISTINCT FROM 'team_id,organization_id,team_name,division_id,games_played,wins,losses,draws,goals_for,goals_against,goal_differential,points,division' THEN
         RAISE EXCEPTION 'view_league_standings columns are %', v_standings;
     END IF;
-    RAISE NOTICE 'columns: view_org_metrics 5 and view_league_standings 12, in the definitive schema''s order';
+    RAISE NOTICE 'columns: view_org_metrics 5 and view_league_standings 13, in the definitive schema''s order with division last';
 END;
 $$;
 

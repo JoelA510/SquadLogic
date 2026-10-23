@@ -12,14 +12,21 @@
 --   * `view_org_metrics`, the Reports page (frontend/src/pages/EnterpriseDashboard.jsx):
 --     its read fails, so Active Teams stays 0;
 --   * `view_league_standings`, the Standings page (frontend/src/pages/LeagueStandings.jsx):
---     its reads fail.
+--     its reads fail. The page also orders and groups by a `division` column
+--     (a division name) that no definition of the view has ever had.
 -- `view_compliance_stats` went in 20261022020000 (R1); `view_facility_usage`
 -- is read by nothing and is left as it is.
 --
--- **The change.** Both views, CREATE OR REPLACE, exactly as their latest
--- definitions (20260331000000_definitive_schema.sql): the same SELECT, the
--- same columns in the same order, `security_invoker = true`, so a reader sees
--- only the rows RLS gives it on the tables beneath. Then their grants, as a
+-- **The change.** Both views, CREATE OR REPLACE, from their latest
+-- definitions (20260331000000_definitive_schema.sql), `security_invoker =
+-- true`, so a reader sees only the rows RLS gives it on the tables beneath:
+--   * `view_org_metrics` exactly as defined there;
+--   * `view_league_standings` as defined there plus one LAST column,
+--     `division` (the team's division name, from a LEFT JOIN on `divisions`,
+--     NULL for a team whose division the reader cannot see), which the
+--     Standings page reads. Appended last, so CREATE OR REPLACE stays valid
+--     over the existing view on a fresh build.
+-- Then their grants, as a
 -- fresh build has them (read off a harness build at 20261022020000, not from
 -- the migrations' text): the migrations grant SELECT to authenticated, and
 -- Supabase's default privileges for objects `postgres` creates in `public`
@@ -28,20 +35,14 @@
 -- default privileges differ. Neither view is updatable (aggregates), and with
 -- security_invoker anon reads no rows of either (the pgTAP suite checks it).
 --
--- **Known gap, not fixed here.** LeagueStandings.jsx orders by, and groups on,
--- a `division` column that no definition of `view_league_standings` has ever
--- had (it has `division_id`), so once the view exists that page's read is
--- expected to fail on the missing column instead (statically reviewed; not
--- run against PostgREST). Changing the view's shape or the page is a
--- follow-up; this migration restores the definition as it is.
+-- On a fresh build this restates `view_org_metrics` and the ACL unchanged and
+-- adds `division` to `view_league_standings`. In production it creates both.
 --
--- On a fresh build this is a no-op: the definitions and the ACL are what the
--- build already has (the harness compares a fingerprint of both). In
--- production it creates the two views.
---
--- Reversible: docs/sql/20261023010000_revert.sql restates the views as they
--- stood at 20261022020000 (production lacked them before this migration; see
--- its header). Smoke checks: docs/sql/20261023010000_smoke.sql.
+-- Reversible: docs/sql/20261023010000_revert.sql returns both views to how
+-- they stood at 20261022020000, dropping and recreating
+-- `view_league_standings` to remove the column (production lacked both views
+-- before this migration; see its header).
+-- Smoke checks: docs/sql/20261023010000_smoke.sql.
 -- pgTAP: supabase/tests/reporting_views_present.sql.
 
 BEGIN;
@@ -99,10 +100,12 @@ SELECT
     COALESCE(SUM(gr.goals_for), 0) AS goals_for,
     COALESCE(SUM(gr.goals_against), 0) AS goals_against,
     COALESCE(SUM(gr.goals_for), 0) - COALESCE(SUM(gr.goals_against), 0) AS goal_differential,
-    (COALESCE(SUM(gr.win), 0) * 3) + COALESCE(SUM(gr.draw), 0) AS points
+    (COALESCE(SUM(gr.win), 0) * 3) + COALESCE(SUM(gr.draw), 0) AS points,
+    d.name AS division
 FROM public.teams t
+LEFT JOIN public.divisions d ON d.id = t.division_id
 LEFT JOIN game_results gr ON gr.team_id = t.id
-GROUP BY t.id, t.organization_id, t.name, t.division_id;
+GROUP BY t.id, t.organization_id, t.name, t.division_id, d.name;
 
 GRANT ALL ON public.view_org_metrics, public.view_league_standings
     TO anon, authenticated, service_role;

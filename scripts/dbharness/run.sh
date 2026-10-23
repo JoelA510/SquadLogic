@@ -2618,9 +2618,10 @@ NEEDLES
       fi
     fi
     if [ "$id" = "20261023010000" ]; then
-      # The revert is a no-op restatement: a fresh build had both views before
-      # the migration (production did not; see the revert's header). So the
-      # fingerprint of both views after it -- owner, sorted ACL, options,
+      # A fresh build had both views before the migration (production did
+      # not; see the revert's header), and the revert drops the standings
+      # view's appended `division` by recreating it. So the fingerprint of
+      # both views after it -- owner, sorted ACL, options,
       # definition, and each column's position, name and type -- must equal the
       # one read 2026-10-23 off a build at 20261022020000 with the same query.
       # The row count is part of the verdict, so a view the revert drops or

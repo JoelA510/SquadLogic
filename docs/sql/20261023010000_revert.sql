@@ -7,11 +7,13 @@
 --
 -- This revert returns a database to the state the migration set leaves at
 -- 20261022020000, which is the fresh build's: both views present, as the
--- definitive schema defines them, with that build's grants. So it is a no-op
--- restatement, on purpose. It does NOT drop the views: that would leave a
--- fresh build without two views its own history creates, and the Reports and
--- Standings pages reading nothing. Production's literal earlier state (no
--- views) is the drift this migration repairs, not a state to return to.
+-- definitive schema defines them, with that build's grants. `view_org_metrics`
+-- is restated unchanged. `view_league_standings` is dropped and recreated
+-- without the `division` column the migration appended (CREATE OR REPLACE
+-- cannot drop a column), then both views' grants are restated. It does NOT
+-- leave the views dropped: that would leave a fresh build without two views
+-- its own history creates. Production's literal earlier state (no views) is
+-- the drift this migration repairs, not a state to return to.
 --
 -- Verified: the harness compares a fingerprint of both views (owner, ACL,
 -- options, definition and columns) after this revert with the one read off a
@@ -29,6 +31,8 @@ SELECT
     (SELECT COUNT(t.id) FROM public.teams t WHERE t.organization_id = o.id) AS total_teams,
     (SELECT COUNT(om.profile_id) FROM public.organization_members om WHERE om.organization_id = o.id) AS total_users
 FROM public.organizations o;
+
+DROP VIEW public.view_league_standings;
 
 CREATE OR REPLACE VIEW public.view_league_standings
 WITH (security_invoker = true)

@@ -241,10 +241,15 @@ migration was renamed, edited or removed. It needs no secrets.
 rolled back is still pending in production, so an edit to it does run. List it
 in `supabase/unapplied-migration-edits.json` with its version, the git blob of
 the edited file and the reason, after reading production's ledger. The static
-check then accepts that exact content and no other. The deploy guard
-(`migrationGuard.mjs`) refuses to run while a listed version is already
-applied, so delete the entry in the PR after its migration deploys. First use:
-`20261022020000`, 2026-10-23.
+check then accepts that exact content and no other. Each entry also records
+the original file's blob (`base_blob`) and a `marker`, text the edit added. The
+list is permanent: an entry is never removed or changed. Before and after each
+push, the deploy guard (`migrationGuard.mjs`) reads production's ledger
+(`supabase_migrations.schema_migrations.statements`, the SQL the CLI recorded
+running) through the Management API's read-only query endpoint, and refuses to
+deploy if a listed, applied version ran without its marker: that would mean
+production ran the original file, not the edit. First use: `20261022020000`,
+2026-10-23.
 
 ### Supabase CLI version
 

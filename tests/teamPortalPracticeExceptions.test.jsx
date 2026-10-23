@@ -29,7 +29,7 @@ import {
 import { PRACTICE_TBD_CAUSES } from '@squadlogic/core/utils/practiceOccurrences.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
-const mocks = vi.hoisted(() => ({ client: null }));
+const mocks = vi.hoisted(() => ({ client: null, tables: [], channels: [] }));
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ teamId: 'team-1' }),
@@ -46,10 +46,14 @@ vi.mock('../frontend/src/hooks/usePermission.js', () => ({
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: (table) => mocks.client.from(table),
+    from: (table) => {
+      mocks.tables.push(table);
+      return mocks.client.from(table);
+    },
     rpc: (name, params) => mocks.client.rpc(name, params),
     auth: { getUser: () => mocks.client.getUser() },
-    channel: () => {
+    channel: (name) => {
+      mocks.channels.push(name);
       const channel = { on: () => channel, subscribe: () => channel };
       return channel;
     },
@@ -223,7 +227,7 @@ const shiftWindows = (exceptions, days) =>
 
 // --- The fake client: honours eq, is and range; `fail` makes a table err. ---
 
-function fakeClient(db, { fail = [], user = 'parent-1', rosterError = null } = {}) {
+function fakeClient(db, { fail = [], gone = [], user = 'parent-1', rosterError = null } = {}) {
   const from = (table) => {
     const filters = [];
     let single = false;
@@ -237,6 +241,13 @@ function fakeClient(db, { fail = [], user = 'parent-1', rosterError = null } = {
       range: (lo, hi) => ((span = [lo, hi]), q),
       single: () => ((single = true), q),
       then: (resolve, reject) => {
+        if (gone.includes(table)) {
+          const error = {
+            code: 'PGRST205',
+            message: 'Could not find the table in the schema cache',
+          };
+          return Promise.resolve({ data: null, error }).then(resolve, reject);
+        }
         if (fail.includes(table)) {
           return Promise.resolve({ data: null, error: { message: `${table} unreadable` } }).then(
             resolve,
@@ -291,9 +302,7 @@ function dbOf(exceptions = EXCEPTIONS) {
     games: [],
     practice_assignments: ROWS,
     practice_exceptions: exceptions,
-    event_rsvps: [],
     profile_players: [{ profile_id: 'parent-1', player_id: 'player-1' }],
-    team_messages: [],
   };
 }
 
@@ -324,6 +333,8 @@ const byKind = (kind) => EXPECTED.filter((e) => e.kind === kind);
 
 beforeEach(() => {
   mocks.client = null;
+  mocks.tables = [];
+  mocks.channels = [];
 });
 
 describe('the seed exercises every case (meta)', () => {
@@ -434,31 +445,6 @@ describe('team portal: saved practice exceptions are applied (W12, W4 portal)', 
     }
   });
 
-  it('RSVP is hidden on TIME TBD dates, and shown on the series and moved practices', async () => {
-    await renderPortal();
-    // Meta: the parent does RSVP somewhere, so an absence below is not vacuous.
-    for (const e of byKind('series')) {
-      const cards = screen.getAllByText(longDate(e.date)).map(panelOf);
-      expect(
-        cards.some((c) => within(c).queryAllByTitle('Going').length === 1),
-        e.date
-      ).toBe(true);
-    }
-    for (const e of byKind('tbd')) {
-      const card = cardWith(`Time TBD on ${longDate(e.date)}: ${PRACTICE_TBD_CAUSES[e.code]}`);
-      expect(within(card).queryAllByTitle('Going'), e.date).toHaveLength(0);
-      expect(within(card).getByText('RSVP opens once a time is set')).toBeInTheDocument();
-    }
-    // 12d (plan R6, Q4): a moved practice takes an RSVP on its new date. The
-    // loop must see one, or the assertion inside it is vacuous.
-    expect(byKind('moved').length).toBeGreaterThan(0);
-    for (const e of byKind('moved')) {
-      const card = cardWith(longDate(e.date));
-      expect(within(card).getByText('Practice (moved)')).toBeInTheDocument();
-      expect(within(card).queryAllByTitle('Going'), e.date).toHaveLength(1);
-    }
-  });
-
   it('a coach sees the same schedule as a parent', async () => {
     const details = () =>
       screen
@@ -468,9 +454,46 @@ describe('team portal: saved practice exceptions are applied (W12, W4 portal)', 
     const parent = details();
     cleanup();
     await renderPortal({ user: 'coach-1' });
-    expect(screen.queryAllByTitle('Going')).toHaveLength(0);
     expect(details()).toEqual(parent);
     expect(parent.length).toBe(EXPECTED.length);
+  });
+});
+
+// R2 (20261022030000; plan docs/changes/2026-10-22-admin-focus.md): the RSVP
+// and chat tables are gone. The fake client refuses both as PostgREST refuses
+// a table it does not have, so a read of either would put the page into its
+// error state; the page must render the schedule for a coach without them.
+describe('team portal: no RSVP and no team chat (R2)', () => {
+  const GONE = { code: 'PGRST205', message: 'Could not find the table in the schema cache' };
+
+  it('renders the schedule for a coach with the RSVP and chat tables gone', async () => {
+    await renderPortal({ user: 'coach-1', gone: ['event_rsvps', 'team_messages'] });
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+    const headings = screen.getAllByRole('heading', { level: 3 });
+    // Meta: the schedule is there, so the absences below are not vacuous.
+    expect(headings.length).toBe(EXPECTED.length);
+    expect(screen.queryByRole('heading', { name: /Team Chat/i })).toBeNull();
+    expect(screen.queryByPlaceholderText(/Type a message/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Send team message/i })).toBeNull();
+    for (const label of ['Going', 'Not Going', 'Maybe']) {
+      expect(screen.queryAllByTitle(label), label).toHaveLength(0);
+    }
+    expect(screen.queryByText(/RSVP/)).toBeNull();
+  });
+
+  it('reads neither table and subscribes to no realtime channel', async () => {
+    await renderPortal({ user: 'coach-1', gone: ['event_rsvps', 'team_messages'] });
+    // Meta: the recorder sees the page's real reads.
+    expect(mocks.tables).toContain('practice_exceptions');
+    expect(mocks.tables).not.toContain('event_rsvps');
+    expect(mocks.tables).not.toContain('team_messages');
+    expect(mocks.channels).toEqual([]);
+  });
+
+  it('the fake client refuses a gone table (control: a read of it would show)', async () => {
+    mocks.client = fakeClient(dbOf(), { gone: ['event_rsvps'] });
+    const { error } = await mocks.client.from('event_rsvps').select('*').eq('team_id', 'team-1');
+    expect(error).toEqual(GONE);
   });
 });
 

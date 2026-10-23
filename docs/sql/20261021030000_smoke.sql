@@ -4,16 +4,19 @@
 -- `auth.uid()` stub:
 --   * an admin deletes a team whose series carries a live and a withdrawn
 --     exception: the live one is withdrawn and audited, both are archived onto
---     their run, each series is audited practice.cancelled, the opponent's RSVP
---     to the deleted game is removed and a practice RSVP sharing that id is
---     kept, every player on the team loses the team id, and team.deleted
---     records the counts;
+--     their run, each series is audited practice.cancelled, every player on
+--     the team loses the team id, and team.deleted records the counts;
 --   * a coach is refused 42501 and nothing changes;
 --   * while that delete is open, a second session's exception insert for the
---     team waits on it (55P03 at a 1s lock timeout), and so does an opposing
---     guardian's RSVP to the team's game (upsert_team_event_rsvp now takes
---     FOR KEY SHARE on the game); the same session writes an untouched team's
---     exception and RSVPs to an untouched game at once.
+--     team waits on it (55P03 at a 1s lock timeout); the same session writes an
+--     untouched team's exception at once.
+--
+-- **Since 20261022030000 (plan docs/changes/2026-10-22-admin-focus.md, R2)**
+-- the head build this runs on has no RSVPs: `event_rsvps` and
+-- `upsert_team_event_rsvp` are dropped, and `admin_delete_team` no longer
+-- removes or counts RSVPs. The checks of
+-- the opponent's game RSVP and the two RSVP races went with them;
+-- docs/sql/20261022030000_smoke.sql checks the delete without them.
 --
 -- The race needs a second session, so this smoke uses `dblink` (contrib, in
 -- the harness's PostgreSQL image) and drops it at the end. Its fixture is
@@ -73,9 +76,6 @@ BEGIN
     INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'DT', 'Three') RETURNING id INTO v_p3;
     INSERT INTO public.players (organization_id, division_id, first_name, last_name) VALUES (v_org, v_d, 'DT', 'Four') RETURNING id INTO v_p4;
     INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_t, v_p1, v_org), (v_o, v_p3, v_org), (v_o, v_p4, v_org);
-    INSERT INTO public.event_rsvps (organization_id, team_id, player_id, reference_id, event_type, occurrence_date, status) VALUES
-        (v_org, v_o, v_p3, v_g, 'game', '2026-11-07', 'attending'),
-        (v_org, v_o, v_p3, v_g, 'practice', '2026-09-08', 'maybe');
     INSERT INTO dt_ids (name, id) VALUES
         ('admin', v_admin), ('coach', v_coach), ('org', v_org), ('season', v_s), ('t', v_t), ('o', v_o), ('x', v_x),
         ('thu', v_thu), ('run', v_run), ('pa', v_pa), ('pa2', v_pa2), ('pao', v_pao), ('g', v_g), ('g2', v_g2),
@@ -135,12 +135,6 @@ BEGIN
     END IF;
     RAISE NOTICE 'each of the team''s 2 series is audited practice.cancelled with its before row';
 
-    IF EXISTS (SELECT 1 FROM public.event_rsvps WHERE reference_id = v_g AND event_type = 'game')
-       OR NOT EXISTS (SELECT 1 FROM public.event_rsvps WHERE reference_id = v_g AND event_type = 'practice') THEN
-        RAISE EXCEPTION 'the opponent''s RSVP to the deleted game stayed, or the practice RSVP sharing its id went';
-    END IF;
-    RAISE NOTICE 'the opponent''s game RSVP is removed; a practice RSVP with the same reference id stays';
-
     IF EXISTS (SELECT 1 FROM public.players
                 WHERE id IN (SELECT id FROM dt_ids WHERE name IN ('p1', 'p2')) AND team_id IS NOT NULL) THEN
         RAISE EXCEPTION 'a player kept the deleted team''s id';
@@ -152,12 +146,14 @@ BEGIN
     IF v_meta->>'practice_exceptions_deleted' IS DISTINCT FROM '2'
        OR v_meta->>'practice_assignments_deleted' IS DISTINCT FROM '2'
        OR v_meta->>'games_deleted' IS DISTINCT FROM '1'
-       OR v_meta->>'event_rsvps_deleted' IS DISTINCT FROM '1'
        OR v_meta->>'team_players_deleted' IS DISTINCT FROM '1'
        OR jsonb_array_length(v_meta->'player_ids_unassigned') IS DISTINCT FROM 2 THEN
         RAISE EXCEPTION 'team.deleted did not record what the delete took: %', v_meta;
     END IF;
     RAISE NOTICE 'team.deleted records the counts, the game and the unassigned players';
+    IF EXISTS (SELECT 1 FROM public.games WHERE id = v_g) THEN
+        RAISE EXCEPTION 'the deleted team''s game survived the delete';
+    END IF;
 END;
 $$;
 ROLLBACK;
@@ -175,14 +171,9 @@ DECLARE
     v_o uuid := (SELECT id FROM dt_ids WHERE name = 'o');
     v_pa uuid := (SELECT id FROM dt_ids WHERE name = 'pa');
     v_pao uuid := (SELECT id FROM dt_ids WHERE name = 'pao');
-    v_g uuid := (SELECT id FROM dt_ids WHERE name = 'g');
-    v_g2 uuid := (SELECT id FROM dt_ids WHERE name = 'g2');
-    v_p3 uuid := (SELECT id FROM dt_ids WHERE name = 'p3');
-    v_p4 uuid := (SELECT id FROM dt_ids WHERE name = 'p4');
-    v_p1 uuid := (SELECT id FROM dt_ids WHERE name = 'p1');
     v_conn text := 'dt_racer';
     v_state text; v_msg text;
-    v_exc_wait text; v_exc_control text; v_rsvp_wait text; v_rsvp_control text; v_own_wait text;
+    v_exc_wait text; v_exc_control text;
 BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM public.admin_delete_team(v_t);
@@ -220,59 +211,12 @@ BEGIN
     END;
     PERFORM dblink_exec(v_conn, 'ROLLBACK');
 
-    -- An opposing RSVP to the deleted team's game, from a player with no RSVP
-    -- to it yet: p3's existing row is deleted (and so locked) by the delete,
-    -- which would make p3's upsert wait on that row and hide a missing game lock.
-    BEGIN
-        PERFORM dblink_exec(v_conn, 'BEGIN');
-        PERFORM * FROM dblink(v_conn, format(
-            'SELECT public.upsert_team_event_rsvp(%L, %L, %L, ''game'', %L, ''declined'')::text',
-            v_o, v_p4, v_g, '2026-11-07')) AS t(result text);
-        v_rsvp_wait := 'committed';
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
-        v_rsvp_wait := v_state || ' ' || v_msg;
-    END;
-    PERFORM dblink_exec(v_conn, 'ROLLBACK');
-    -- The deleted team's own player's RSVP to its game: it reads the team
-    -- FOR KEY SHARE first, so it waits on the team, in the delete's lock order.
-    BEGIN
-        PERFORM dblink_exec(v_conn, 'BEGIN');
-        PERFORM * FROM dblink(v_conn, format(
-            'SELECT public.upsert_team_event_rsvp(%L, %L, %L, ''game'', %L, ''attending'')::text',
-            v_t, v_p1, v_g, '2026-11-07')) AS t(result text);
-        v_own_wait := 'committed';
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
-        v_own_wait := v_state || ' ' || v_msg;
-    END;
-    PERFORM dblink_exec(v_conn, 'ROLLBACK');
-    -- The control: an RSVP to a game the delete does not touch.
-    BEGIN
-        PERFORM dblink_exec(v_conn, 'BEGIN');
-        PERFORM * FROM dblink(v_conn, format(
-            'SELECT public.upsert_team_event_rsvp(%L, %L, %L, ''game'', %L, ''attending'')::text',
-            v_o, v_p3, v_g2, '2026-11-14')) AS t(result text);
-        v_rsvp_control := 'committed';
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
-        v_rsvp_control := v_state || ' ' || v_msg;
-    END;
-    PERFORM dblink_exec(v_conn, 'ROLLBACK');
     PERFORM dblink_disconnect(v_conn);
 
     IF v_exc_wait NOT LIKE '55P03%' OR v_exc_control <> 'committed' THEN
         RAISE EXCEPTION 'exception race: the deleted team''s insert gave "%", the control gave "%"', v_exc_wait, v_exc_control;
     END IF;
     RAISE NOTICE 'exception race: while the delete was open, a second session''s exception insert for the team timed out 55P03; an untouched team''s insert was written at once';
-    IF v_rsvp_wait NOT LIKE '55P03%' OR v_rsvp_control <> 'committed' THEN
-        RAISE EXCEPTION 'RSVP race: the RSVP to the deleted game gave "%", the control gave "%"', v_rsvp_wait, v_rsvp_control;
-    END IF;
-    RAISE NOTICE 'RSVP race: while the delete was open, an opposing RSVP to the team''s game timed out 55P03 on the game lock; an RSVP to an untouched game was written at once';
-    IF v_own_wait NOT LIKE '55P03%' THEN
-        RAISE EXCEPTION 'own-team RSVP race: the deleted team''s own RSVP gave "%"', v_own_wait;
-    END IF;
-    RAISE NOTICE 'own-team RSVP race: the deleted team''s own RSVP to its game waited on the team and timed out 55P03';
 END;
 $$;
 ROLLBACK;

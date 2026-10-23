@@ -32,6 +32,8 @@ order by tablename, indexname;
 -- Expected: 15 rows. If fewer, the migration didn't apply to every table; check
 -- for a prior migration that dropped one of the target tables (e.g., a table
 -- rename that broke the IF NOT EXISTS CREATE INDEX).
+-- Since 20261022030000 (R2) dropped event_rsvps, idx_event_rsvps_org_team went
+-- with it: on a database past that migration, expect 14.
 
 -- Query-plan spot check (optional; requires sample data):
 --

@@ -95,11 +95,6 @@ beforeEach(() => {
     ],
     events: [],
     practiceChangesUnread: false,
-    rsvps: [],
-    messages: [],
-    myPlayers: [],
-    updateRsvp: vi.fn(),
-    sendMessage: vi.fn(),
   };
 });
 

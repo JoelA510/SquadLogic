@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
-const { Given, When, Then } = createBdd();
+const { Given, Then } = createBdd();
 
 /**
  * 8.6 3b PR 12c: the team portal applies saved practice exceptions.
@@ -16,7 +16,6 @@ const { Given, When, Then } = createBdd();
  */
 const SEED = {
   mondaySeries: '[2026-11-02,2026-12-01)',
-  unchangedDate: '2026-11-16',
   movedDate: '2026-11-12',
   movedWindow: '[2026-11-09,2026-11-16)',
   tbdDate: '2026-11-23',
@@ -143,43 +142,6 @@ Then(
 Then('I should see the TIME TBD date with its reason', async ({ page }) => {
   const text = `Time TBD on ${await longDate(page, SEED.tbdDate)}: ${SEED.tbdWording}`;
   await expect(page.getByText(text, { exact: true })).toBeVisible({ timeout: 15000 });
-});
-
-Then('RSVP should be hidden on the TIME TBD date', async ({ page }) => {
-  const card = cardWith(page, `Time TBD on ${await longDate(page, SEED.tbdDate)}`);
-  await expect(card).toHaveCount(1, { timeout: 15000 });
-  await expect(card.getByText('RSVP opens once a time is set')).toBeVisible();
-  await expect(card.getByTitle('Going', { exact: true })).toHaveCount(0);
-});
-
-/*
- * 8.6 3b PR 12d: the moved practice takes an RSVP keyed on (assignment id,
- * new date). The mock RPC mirrors 20261005000000, so the button only turns
- * pressed if that rule ACCEPTED the new date; before 12d it refused it and the
- * button stayed unpressed. DOM assertions only.
- */
-When('I mark my child as going to the moved practice', async ({ page }) => {
-  const card = cardWith(page, await longDate(page, SEED.movedDate));
-  await expect(card).toHaveCount(1, { timeout: 15000 });
-  await expect(card.getByRole('heading', { name: 'Practice (moved)' })).toBeVisible();
-  const going = card.getByTitle('Going', { exact: true });
-  await expect(going).toHaveCount(1);
-  await expect(going).toHaveAttribute('aria-pressed', 'false');
-  await going.click();
-});
-
-Then('the moved practice should show my child as going', async ({ page }) => {
-  const card = cardWith(page, await longDate(page, SEED.movedDate));
-  await expect(card.getByTitle('Going', { exact: true })).toHaveAttribute('aria-pressed', 'true', {
-    timeout: 15000,
-  });
-});
-
-Then('RSVP should be open on an unchanged practice of the same series', async ({ page }) => {
-  // The absence above is not vacuous: the same parent RSVPs the series.
-  const card = cardWith(page, await longDate(page, SEED.unchangedDate));
-  await expect(card).toHaveCount(1, { timeout: 15000 });
-  await expect(card.getByTitle('Going', { exact: true })).toHaveCount(1);
 });
 
 /*

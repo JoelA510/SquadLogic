@@ -120,6 +120,46 @@ at once (AGENTS.md section 11).
   after finalize), then deleted by the purge and a 30-day retention job for coach staging like the
   player one, not deleted at finalize.
 
+## As built (R2)
+
+- **Migration `20261022030000`.** `admin_delete_team` is replaced first, from its latest body
+  (`20261021030000`) with the RSVP delete and the `event_rsvps_deleted` and `team_messages_deleted`
+  counters removed. It also no longer locks the team's games `FOR UPDATE`: that lock existed only
+  so an RSVP to one of them could not commit after the delete. Then `upsert_team_event_rsvp`,
+  `create_team_message`, the two read policies, the `event_rsvps_set_timestamp` trigger and both
+  tables are dropped by exact name, with no CASCADE. The `team.rsvp_updated` and
+  `team.message_created` audit actions stay registered for old audit rows.
+- **Not in the plan, forced by the drop.** `reconcile_prod_rls_drift()` named the chat table's read
+  policy in its spec, so after the drop it would have failed. It is replaced from its latest body
+  (`20261021020000`) without that table, and its smoke now counts 19 policies and 10 broad tables.
+  `team_messages` also leaves the `supabase_realtime` publication where it is a member. The revert
+  puts it back where that publication exists, as `20251217000000` did. A comment in
+  `persist_team_schedule` still names both tables. It is left alone, because changing it would mean
+  replacing that function.
+- **The team page.** `useTeamPortal` reads neither table, opens no realtime channel, and drops
+  `myPlayers` (the caller's own children, used only for RSVP). `get_team_roster` still returns
+  `is_my_child`, which R3 takes out with the guardian arms. `TeamRecordPage` shows the schedule at
+  full width, with no RSVP column and no chat panel. The unused `rsvp_event` permission is
+  removed. No feature flag, nav entry, notification, Edge Function or calendar code named either
+  table.
+- **Tests.**
+  - pgTAP: `admin_delete_team_exceptions.sql` reads the new cascade set (seven tables) off the
+    catalogue, and fails if `team.deleted` has a counter for a table that does not exist.
+  - pgTAP: `rsvp_and_team_chat_removed.sql` checks that the objects are gone. As the team's
+    current coach, it also checks that every read the team page makes still returns its row.
+  - Vitest: `teamPortalPracticeExceptions.test.jsx` renders the page for a coach with both tables
+    refused (`PGRST205`), and checks that neither table is read and no channel is opened.
+  - E2E: Pillar 2's "Communicating with Parents" becomes a coach scenario: the schedule shows,
+    with no RSVP or chat.
+  - Removed: `team_communication.feature`, the RSVP checks in `team_portal_practice_changes.feature`,
+    the RSVP case table and its three arms, and the mock RPC tests.
+  - `practiceReaderCensus` drops the RSVP reader.
+- **Harness.** The smokes of `20261005000000` and `20261021030000` now run at head without RSVPs:
+  the RSVP cases and races are reduced to checking that the objects stay gone. The four M21 plants
+  and three M35 RSVP plants are retired. The M14, M34-reconcile and M35-delete plants are re-aimed
+  at `$M39`, the live definitions, and new M39 and R39 plants are added. The revert is checked by
+  a catalogue fingerprint.
+
 ## Docs updated across the PRs
 
 AGENTS.md section 2 (data rules), `docs/agents-reference.md`, `README.md`,

@@ -12,7 +12,7 @@ SquadLogic uses Supabase Auth with five logical roles stored in the `organizatio
 | Role     | Description                                                                              |
 | -------- | ---------------------------------------------------------------------------------------- |
 | `admin`  | Full access to all organization data. Can manage users, import data, and run schedulers. |
-| `coach`  | View team data they are assigned to. Can update RSVP and participate in team chat.       |
+| `coach`  | View team data they are assigned to.                                                     |
 | `player` | Limited access to own team data and schedule views.                                      |
 | `parent` | View child's team schedule and public calendar feeds.                                    |
 | `staff`  | An admin: `is_org_admin()` admits staff since `20261020030000`.                          |
@@ -150,7 +150,7 @@ Every data table has a direct `organization_id` column (either native or backfil
 | **Teams & Rosters** | `teams`, `team_players`                                                                                   | Direct `organization_id`                            |
 | **Facilities**      | `locations`, `fields`, `field_subunits`                                                                   | Direct `organization_id`                            |
 | **Scheduling**      | `practice_slots`, `game_slots`, `practice_assignments`, `games`                                           | Direct `organization_id`                            |
-| **Communication**   | `event_rsvps`, `team_messages`, `profile_players`                                                         | Direct `organization_id`                            |
+| **Communication**   | `profile_players` (`event_rsvps` and `team_messages` dropped by `20261022030000`)                         | Direct `organization_id`                            |
 | **Evaluation**      | `scheduler_runs`, `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, `evaluation_run_events` | Direct `organization_id`                            |
 | **Exports & Logs**  | `export_jobs`, `email_log`, `audit_log`                                                                   | Direct `organization_id`                            |
 | **Registration**    | `registration_forms`, `registrations`                                                                     | Direct `organization_id` via `organization_members` |
@@ -205,7 +205,7 @@ The RLS system evolved through multiple migrations, consolidated during a 4-phas
 | ---------------- | ---------------- | ------------------------------------------------------------------ |
 | Original         | `20251208000000` | Admin-only role check policies (no org scope)                      |
 | Auth             | `20251214000004` | Core auth schema, profiles, organization_members                   |
-| Communication    | `20251217000000` | Team messages, RSVP tables with partial org scope                  |
+| Communication    | `20251217000000` | Team messages, RSVP tables with partial org scope (dropped, R2)    |
 | RLS Remediation  | `20260309000000` | `coach_team_map` security_invoker fix                              |
 | Unified RLS      | `20260310000002` | `organization_id` denormalization, `is_org_member()` on all tables |
 | Registration Fix | `20260310000003` | Fixed policies referencing non-existent `organization_roles` table |

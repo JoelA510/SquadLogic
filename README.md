@@ -36,7 +36,7 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 - **Role-Based Access Control (RBAC)**: Comprehensive permission enforcement across all UI flows and RLS policies.
 - **Multi-Tenant Enforcement**: Strict organization partitioning ensuring data isolation.
 - **Facility Management**: Full CRUD UI for venues, fields, blackout dates, and availability profiles.
-- **Communication**: RSVP tracking, trigger-based notifications (rainouts, schedule changes), and team messages.
+- **Notifications**: trigger-based notifications (rainouts, schedule changes). Availability marking (RSVP) and team chat were removed on 2026-10-22: families are reached through the league's registration platform.
 - **Calendar Sync**: Public ICS feeds for parents and coaches.
 - **Registration & Compliance**: Custom form builder, waiver/payment/medical tracking (boolean toggles — no document storage), and a compliance dashboard.
 - **Reporting**: Game score entry, standings calculations, and tie-breaker logic.
@@ -46,7 +46,7 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 - **Design system**: Cobalt light + dark themes driven by CSS tokens (`data-theme` on `<html>`, persisted preference), self-hosted Public Sans, and a shared UI primitive library.
 - **App chrome**: Top bar with org/season switchers, global search (`/` shortcut), and role preview; nested collapsible navigation with role-scoped views for coaches and parents.
 - **Players workspace**: Excel-grade editable, virtualized data grid (click-to-edit, keyboard navigation, multi-select bulk actions, instant search) smooth at 1,400+ rows.
-- **Record pages**: Tabbed player records (overview, guardians, schedule, compliance) and team records absorbing the team portal (roster, schedule, staff, messages, RSVP).
+- **Record pages**: Tabbed player records (overview, guardians, schedule, compliance) and team records absorbing the team portal (roster, schedule, staff).
 - **Team Builder**: Drag-and-drop roster balancing with a serpentine signal balancer (rating or years-played), buddy links, and coach-parent spreading — every move audited.
 - **Org feature configuration**: Per-organization toggles (player rating, years played, buddy requests, coaching interest, medical forms, waitlist) and a division **gender model** — gendered (U8B/U8G) or co-ed display with real merge/split transitions.
 - **Season Setup**: Resumable checklist that derives progress from live data — leave and return without losing your place.

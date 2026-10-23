@@ -31,7 +31,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/admin/reports`        | `EnterpriseDashboard`      | Org readiness and distribution analytics (admin)                |
 | `/standings`            | `LeagueStandings`          | Score entry, standings tables, tie-breaker logic                |
 | `/register/:formId`     | `RegistrationFlow`         | Registration form flow (signed-in, inside the dashboard layout) |
-| `/team/:teamId`         | `TeamRecordPage`           | Team record (tabs: schedule+RSVP+chat, roster, staff, balance)  |
+| `/team/:teamId`         | `TeamRecordPage`           | Team record (tabs: schedule, roster, staff, balance)            |
 | `/players`              | `PlayersPage`              | Virtualized editable players grid (audited RPC mutations)       |
 | `/players/:playerId`    | `PlayerRecordPage`         | Player record with inline editing                               |
 | `/teams/builder`        | `TeamBuilderPage`          | Drag-and-drop balance board (`balanceSignals`)                  |
@@ -82,7 +82,7 @@ State is managed entirely through **React Context** — no external state librar
 | `useConflicts`           | Real-time conflict detection across scheduling data              |
 | `useSchedulerRun`        | Generic scheduler run execution and status tracking              |
 | `usePermission`          | RBAC permission checks against current user role                 |
-| `useTeamPortal`          | Team portal data — roster, schedule, RSVP, chat                  |
+| `useTeamPortal`          | Team portal data — roster and schedule (no RSVP or chat, R2)     |
 
 ## Component Organization
 

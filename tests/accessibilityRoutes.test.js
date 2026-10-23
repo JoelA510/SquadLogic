@@ -100,12 +100,7 @@ describe('accessibility scan coverage', () => {
   });
 
   it('scans each record page on a seeded record, and matches a record path to its route', () => {
-    for (const route of [
-      '/players/:playerId',
-      '/team/:teamId',
-      '/register/:formId',
-      '/invite/:code',
-    ]) {
+    for (const route of ['/players/:playerId', '/team/:teamId', '/invite/:code']) {
       expect(declared).toContain(route);
       expect(unscannedRoutes([route], scanned)).toEqual([]);
     }

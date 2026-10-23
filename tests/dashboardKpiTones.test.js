@@ -27,7 +27,8 @@ describe('DashboardPage KPI tones', () => {
 
   it('gives every tile a tone, and no tile a hex colour', () => {
     expect(tonesIn(page)).toHaveLength((page.match(/<KPI\b/g) ?? []).length);
-    expect(tonesIn(page).length).toBeGreaterThanOrEqual(5);
+    // Four admin tiles since R1 removed the Compliance tile (2026-10-22).
+    expect(tonesIn(page).length).toBeGreaterThanOrEqual(4);
     expect(page).not.toMatch(/<KPI\b[^>]*?\bcolor="#/s);
   });
 

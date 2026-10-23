@@ -7,12 +7,11 @@ Feature: Pillar 2 - Coach Daily Loop
     Given I am logged into SquadLogic as a "coach"
     And I have been assigned to the "U12 Tigers"
 
-  Scenario: Viewing Team Roster and Compliance
+  Scenario: Viewing Team Roster
     Given my team has 12 players assigned
     When I view my Team Portal
     Then I should see a list of all players and their contact information
-    And I should see a dashboard indicating which players have completed their medical waivers
-    And I should be flagged if any player is currently non-compliant
+    And the roster shows no medical clearance status
 
   Scenario: Accessing Integrated Calendar
     Given my team has practices on Tuesdays and games on Saturdays

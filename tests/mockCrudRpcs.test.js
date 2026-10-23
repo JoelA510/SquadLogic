@@ -13,94 +13,88 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// admin_update_registration_form
+// The in-app registration flow and Compliance are gone (plan
+// docs/changes/2026-10-22-admin-focus.md, R1; migration 20261022020000): the
+// mock answers their RPCs as PostgREST answers a function it does not know,
+// and holds none of their tables.
 // ---------------------------------------------------------------------------
-describe('mock admin_update_registration_form rpc', () => {
-  it('patches allowed fields and creates audit entry', async () => {
-    const form = getMockData('registration_forms')[0];
-    expect(form).toBeTruthy();
+describe('mock: the removed registration and compliance RPCs', () => {
+  const REMOVED = [
+    'submit_registration',
+    'admin_create_registration_form',
+    'admin_update_registration_form',
+    'admin_delete_registration_form',
+    'admin_update_registration_medical_status',
+    'get_team_portal_medical_status',
+    'coach_update_player_compliance',
+  ];
 
-    const { data, error } = await supabase.rpc('admin_update_registration_form', {
-      p_form_id: form.id,
-      p_patch: { title: 'Updated Title', status: 'closed' },
-    });
-    expect(error).toBeNull();
-    expect(data?.id).toBe(form.id);
-
-    const updated = getMockData('registration_forms').find((f) => f.id === form.id);
-    expect(updated.title).toBe('Updated Title');
-    expect(updated.status).toBe('closed');
-
-    const audit = getMockData('audit_log').find(
-      (row) => row.action === 'registration.form_updated'
-    );
-    expect(audit).toBeTruthy();
+  it('refuses each one as an unknown function (PGRST202)', async () => {
+    for (const name of REMOVED) {
+      const { data, error } = await supabase.rpc(name, {});
+      expect(data, name).toBeNull();
+      expect(error?.code, name).toBe('PGRST202');
+    }
   });
 
-  it('rejects disallowed patch keys', async () => {
-    const form = getMockData('registration_forms')[0];
-    const { data, error } = await supabase.rpc('admin_update_registration_form', {
-      p_form_id: form.id,
-      p_patch: { organization_id: 'evil' },
-    });
-    expect(data).toBeNull();
-    expect(error?.message).toMatch(/disallowed/i);
+  it('seeds no registration form, registration or compliance view, and no paperwork flag', () => {
+    expect(getMockData('registration_forms')).toEqual([]);
+    expect(getMockData('registrations')).toEqual([]);
+    expect(getMockData('view_compliance_stats')).toEqual([]);
+    const players = getMockData('players');
+    expect(players.length).toBeGreaterThan(0);
+    for (const player of players) {
+      expect(player).not.toHaveProperty('paid');
+      expect(player).not.toHaveProperty('waiver_received');
+      expect(player).not.toHaveProperty('medical_form_received');
+    }
   });
 
-  it('returns error for unknown form id', async () => {
-    const { data, error } = await supabase.rpc('admin_update_registration_form', {
-      p_form_id: '00000000-0000-0000-0000-000000000000',
-      p_patch: { title: 'x' },
-    });
-    expect(data).toBeNull();
-    expect(error?.message).toMatch(/not found/i);
+  it('refuses a player patch naming a paperwork flag, as sanitize_player_patch does', async () => {
+    const player = getMockData('players')[0];
+    for (const key of ['paid', 'waiver_received', 'medical_form_received']) {
+      const { data, error } = await supabase.rpc('admin_update_player', {
+        p_player_id: player.id,
+        p_patch: { [key]: true },
+      });
+      expect(data, key).toBeNull();
+      expect(error?.message, key).toBe(`field ${key} is not editable`);
+    }
   });
 
-  it('denies non-admin callers', async () => {
-    setSession('mock-coach-id');
-    const form = getMockData('registration_forms')[0];
-    const { data, error } = await supabase.rpc('admin_update_registration_form', {
-      p_form_id: form.id,
-      p_patch: { title: 'hacked' },
+  it('refuses a paperwork flag on bulk update and create too: both pass sanitize_player_patch', async () => {
+    const player = getMockData('players')[0];
+    const before = getMockData('players').length;
+    for (const key of ['paid', 'waiver_received', 'medical_form_received']) {
+      const bulk = await supabase.rpc('admin_bulk_update_players', {
+        p_player_ids: [player.id],
+        p_patch: { [key]: true },
+      });
+      expect(bulk.data, key).toBeNull();
+      expect(bulk.error?.message, key).toBe(`field ${key} is not editable`);
+
+      const created = await supabase.rpc('admin_create_player', {
+        p_organization_id: MOCK_ORG_ID,
+        p_fields: { status: 'pending', [key]: true },
+      });
+      expect(created.data, key).toBeNull();
+      expect(created.error?.message, key).toBe(`field ${key} is not editable`);
+    }
+    const stored = getMockData('players').find((row) => String(row.id) === String(player.id));
+    expect(stored).not.toHaveProperty('waiver_received');
+    expect(getMockData('players')).toHaveLength(before);
+
+    // An allowed patch still goes through on both arms.
+    const ok = await supabase.rpc('admin_bulk_update_players', {
+      p_player_ids: [player.id],
+      p_patch: { status: 'waitlist' },
     });
-    expect(data).toBeNull();
-    expect(error?.message).toMatch(/access denied/i);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// admin_delete_registration_form
-// ---------------------------------------------------------------------------
-describe('mock admin_delete_registration_form rpc', () => {
-  it('deletes the form and creates audit entry', async () => {
-    const form = getMockData('registration_forms')[0];
-    expect(form).toBeTruthy();
-
-    const { error } = await supabase.rpc('admin_delete_registration_form', {
-      p_form_id: form.id,
+    expect(ok).toMatchObject({ data: 1, error: null });
+    const made = await supabase.rpc('admin_create_player', {
+      p_organization_id: MOCK_ORG_ID,
+      p_fields: { status: 'pending' },
     });
-    expect(error).toBeNull();
-
-    const remaining = getMockData('registration_forms').find((f) => f.id === form.id);
-    expect(remaining).toBeUndefined();
-
-    const audit = getMockData('audit_log').find(
-      (row) => row.action === 'registration.form_deleted'
-    );
-    expect(audit).toBeTruthy();
-  });
-
-  it('denies non-admin callers', async () => {
-    setSession('mock-coach-id');
-    const form = getMockData('registration_forms')[0];
-    const { data, error } = await supabase.rpc('admin_delete_registration_form', {
-      p_form_id: form.id,
-    });
-    expect(data).toBeNull();
-    expect(error?.message).toMatch(/access denied/i);
-    // Form should still exist
-    const stillThere = getMockData('registration_forms').find((f) => f.id === form.id);
-    expect(stillThere).toBeTruthy();
+    expect(made.error).toBeNull();
   });
 });
 

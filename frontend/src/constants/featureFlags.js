@@ -4,7 +4,6 @@ import {
   Clock,
   Contact,
   History,
-  ShieldCheck,
   Star,
   ThermometerSun,
   UserRoundCheck,
@@ -42,6 +41,10 @@ export const FEATURE_FLAGS = {
   PLAYER_RATING: 'player_rating',
   BUDDY_REQUESTS: 'buddy_requests',
   COACHING_INTEREST: 'coaching_interest',
+  // Retired with the Compliance page (plan docs/changes/2026-10-22-admin-focus.md,
+  // R1): nothing reads it and the settings page no longer offers it. The key
+  // stays so an organization that stored it still parses (skill
+  // squadlogic-feature-guardians, "Retiring").
   MEDICAL_FORMS: 'medical_forms',
   WAITLIST: 'waitlist',
 
@@ -71,7 +74,6 @@ export const FEATURE_DEFAULTS = {
   [FEATURE_FLAGS.PLAYER_RATING]: false,
   [FEATURE_FLAGS.BUDDY_REQUESTS]: true,
   [FEATURE_FLAGS.COACHING_INTEREST]: true,
-  [FEATURE_FLAGS.MEDICAL_FORMS]: true,
   [FEATURE_FLAGS.WAITLIST]: true,
   [FEATURE_FLAGS.GUARDIAN_CONTACT_SHARING]: true,
   [FEATURE_FLAGS.COACH_DIRECTORY]: true,
@@ -112,13 +114,6 @@ export const FEATURE_CATALOG = [
     description: 'Capture parents willing to coach, pulled from registration.',
     icon: UserRoundCheck,
     column: true,
-  },
-  {
-    key: FEATURE_FLAGS.MEDICAL_FORMS,
-    label: 'Medical Forms',
-    description: 'Track medical / consent form receipt in the compliance dashboard.',
-    icon: ShieldCheck,
-    column: false,
   },
   {
     key: FEATURE_FLAGS.WAITLIST,

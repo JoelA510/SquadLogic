@@ -66,22 +66,23 @@ CREATE POLICY "players_delete_admin" ON public.players
 
 `is_org_admin()` admits the roles `admin`, `tenant_admin` and `staff` (staff since
 `20261020030000`: staff are admins). A policy that reads the caller itself wraps `auth.uid()` in
-`(select ...)`. `registration_forms` and `season_settings` test the role inline,
+`(select ...)`. `season_settings` tests the role inline,
 `om.role IN ('admin', 'staff')`, narrower than `is_org_admin()` by `tenant_admin` (remediation plan,
-RLS Q5, open), as do the `audit_log` and `organization_schema_history` SELECT policies.
-`supabase/tests/staff_is_admin.sql` fails on any policy or function that names `'admin'` as a role
-without `'staff'`. `registration_forms` (INSERT shown; UPDATE carries the same expression in
+RLS Q5, open), as do the `audit_log` and `organization_schema_history` SELECT policies
+(`registration_forms` did too, until `20261022020000` dropped it with the in-app registration
+flow). `supabase/tests/staff_is_admin.sql` fails on any policy or function that names `'admin'` as
+a role without `'staff'`. `season_settings` (INSERT shown; UPDATE carries the same expression in
 `USING` and `WITH CHECK`, DELETE in `USING`):
 
 ```sql
-CREATE POLICY "registration_forms_admin_insert" ON public.registration_forms
+CREATE POLICY "Season Settings: admins insert" ON public.season_settings
   FOR INSERT TO authenticated
   WITH CHECK (
     is_org_member(organization_id) AND
     EXISTS (
       SELECT 1 FROM public.organization_members om
       WHERE om.profile_id = (select auth.uid())
-        AND om.organization_id = registration_forms.organization_id
+        AND om.organization_id = season_settings.organization_id
         AND om.role IN ('admin', 'staff')
     )
   );
@@ -119,8 +120,9 @@ that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_s
 
 "Current coach" is a `team_coach_assignments` row of the caller's linked coach (`coaches.user_id`,
 set by `link_my_coach_record()`) whose inclusive window holds today in the team's season timezone
-(`team_local_today()`, UTC when unset). "Guardian" is a `profile_players` link, written by in-app
-registration or by `link_my_guardian_records()` from a matching verified email; the link keeps
+(`team_local_today()`, UTC when unset). "Guardian" is a `profile_players` link, written by
+`link_my_guardian_records()` from a matching verified email (and by in-app registration until
+`20261022020000` removed it); the link keeps
 the imported address it matched (`profile_players.matched_email`). A refused call
 raises 42501, the same for a team that does not exist. A user's contact card
 (`profiles.contact_phone`, `contact_email`, `share_contact`, written only by
@@ -153,7 +155,6 @@ Every data table has a direct `organization_id` column (either native or backfil
 | **Communication**   | `profile_players` (`event_rsvps` and `team_messages` dropped by `20261022030000`)                         | Direct `organization_id`                            |
 | **Evaluation**      | `scheduler_runs`, `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, `evaluation_run_events` | Direct `organization_id`                            |
 | **Exports & Logs**  | `export_jobs`, `email_log`, `audit_log`                                                                   | Direct `organization_id`                            |
-| **Registration**    | `registration_forms`, `registrations`                                                                     | Direct `organization_id` via `organization_members` |
 | **Staging**         | `staging_players`, `player_buddies`                                                                       | Direct `organization_id`                            |
 | **Heat forecast**   | `organization_heat_settings`                                                                              | Direct `organization_id` (PK); members SELECT, no write policy -- `admin_set_org_heat_settings` only |
 

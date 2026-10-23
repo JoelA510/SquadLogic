@@ -17,7 +17,7 @@
   - `mutual_buddy_code` (text) – only honored when a matching code exists
   - `skill_tier` (enum: `novice`, `developing`, `advanced`) – optional balancing input
   - `coach_volunteer` (legacy registration volunteer flag), `willing_to_coach` (canonical import-normalized flag), and `notes`
-  - Roster/compliance fields (migration `20260611000000`): `rating` (smallint 1–5, backfilled from `skill_tier`), `years_played`, `jersey_number`, `paid`, `waiver_received`, `medical_form_received` (booleans — no documents stored), and `status` extended with `'waitlist'`
+  - Roster fields (migration `20260611000000`): `rating` (smallint 1–5, backfilled from `skill_tier`), `years_played`, `jersey_number`, and `status` extended with `'waitlist'` (the teaming gate). The paperwork and payment booleans it also added (`paid`, `waiver_received`, `medical_form_received`) were dropped by `20261022020000`: leagues track paperwork and payment on their registration platform.
   - `team_id` (UUID, denormalized roster pointer — see Team Players below)
 - **Indexes & constraints**:
   - Unique constraint on (`division_id`, `external_registration_id`); both columns are nullable so manually created players (audited admin RPCs) don't require an import identity.

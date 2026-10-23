@@ -188,12 +188,14 @@ SELECT is(
 SELECT is(
     (SELECT jsonb_build_object('custom_attributes', custom_attributes,
                                'contact_info', contact_info,
-                               'guardian_contacts', guardian_contacts, 'paid', paid)
+                               'guardian_contacts', guardian_contacts)
        FROM public.players WHERE external_registration_id = 'R0-EXT-1'),
+    -- No `paid` since 20261022020000 dropped the column; the payment value is
+    -- in the catalogue scan's needles below.
     '{"custom_attributes": {"shirt_size": "YS", "joined_on": "2024-01-02", "skill": "advanced",
                             "team_name": "R0 Team", "team_age": "U10", "team_gender": "Girls",
                             "play_up": "yes"},
-      "contact_info": {}, "guardian_contacts": [], "paid": false}'::jsonb,
+      "contact_info": {}, "guardian_contacts": []}'::jsonb,
     'the player keeps its declared field, team placement and play-up, and no contact, guardian or payment'
 );
 

@@ -36,6 +36,7 @@ test('isSensitiveHeader flags sensitive columns', () => {
     'Insurance Provider',
     'Policy Number',
     'Payment Plan',
+    'Payment Status',
     'Amount Paid',
     'Outstanding Balance',
     'Financial Aid',
@@ -92,8 +93,6 @@ test('isSensitiveHeader keeps teaming-relevant columns (no false positives)', ()
     'Team',
     'Club',
     'Waitlist',
-    // Allowlisted: PAID/UNPAID boolean compliance signal (no amounts).
-    'Payment Status',
   ]) {
     assert.equal(isSensitiveHeader(h), false, `expected kept: ${h}`);
   }
@@ -128,9 +127,8 @@ test('stripSensitiveColumns drops sensitive keys, preserves the rest verbatim', 
       'First Name': 'Alex',
       'Last Name': 'Smith',
       'Date of Birth': '2015-01-01',
-      // Payment Status is an allowlisted PAID/UNPAID compliance boolean — no
-      // amounts or instruments — consumed by the players.paid roster flag.
-      'Payment Status': 'PAID',
+      // Payment Status went with players.paid (20261022020000): every payment
+      // column is stripped now.
     },
   ]);
 });

@@ -12,9 +12,10 @@
 --     contact_info held, drops a declared date that does not parse instead of
 --     failing, and keeps the stored one;
 --   * a player import stores no contact, guardian or payment value, writes
---     '{}' and '[]' for contact_info and guardian_contacts and false for paid,
---     and keeps team placement, play-up and the declared fields; a re-import
---     drops an undeclared key the player already held;
+--     '{}' and '[]' for contact_info and guardian_contacts (and false for
+--     paid until 20261022020000 dropped it), and keeps team placement,
+--     play-up and the declared fields; a re-import drops an undeclared key
+--     the player already held;
 --   * `minimise_import_people_data()`: a planted coach reduced to its declared
 --     attributes with no phone, its import snapshot scrubbed; a planted
 --     player's contacts, guardians and undeclared keys cleared; the staged
@@ -161,14 +162,15 @@ BEGIN
     IF EXISTS (SELECT 1 FROM unnest(v_secrets) s WHERE strpos(v_text, s) > 0) THEN
         RAISE EXCEPTION 'the player import stored a contact, guardian, payment or undeclared value: %', v_text;
     END IF;
+    -- `paid` is not checked since 20261022020000 dropped the column; the
+    -- payment value is still in v_secrets above.
     IF v_player.contact_info IS DISTINCT FROM '{}'::jsonb
        OR v_player.guardian_contacts IS DISTINCT FROM '[]'::jsonb
-       OR v_player.paid IS DISTINCT FROM false
        OR v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
             'shirt_size', 'YM', 'joined_on', '2024-01-02', 'team_name', 'Smoke Team',
             'team_age', 'U10', 'team_gender', 'Girls', 'play_up', 'yes') THEN
-        RAISE EXCEPTION 'the player import wrote the wrong contact, guardian, paid or attributes: % % % %',
-            v_player.contact_info, v_player.guardian_contacts, v_player.paid, v_player.custom_attributes;
+        RAISE EXCEPTION 'the player import wrote the wrong contact, guardian or attributes: % % %',
+            v_player.contact_info, v_player.guardian_contacts, v_player.custom_attributes;
     END IF;
     RAISE NOTICE 'player INSERT: no contact, guardian, payment or undeclared value stored; team placement, play-up and the declared fields kept';
 

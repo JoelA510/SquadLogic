@@ -39,6 +39,9 @@ const SENSITIVE = [
   // A sample of the older categories
   'Insurance Provider',
   'Payment Plan',
+  // Kept for players.paid until it was dropped (20261022020000)
+  'Payment Status',
+  'payment_status',
   'Birth Certificate',
   'Waiver Signed',
   '﻿Medical Conditions',
@@ -57,8 +60,6 @@ const KEPT = [
   'guardian_1_email',
   'Buddy Request',
   'Skill Level',
-  'Payment Status',
-  'payment_status',
   'Years Played',
   "Can you coach for this player's team?",
   'Phone',
@@ -101,7 +102,6 @@ describe('the sensitive-header rule, browser and Edge copies', () => {
     const expected = {
       'First Name': 'Avery',
       'Guardian 1 Email': 'parent@example.test',
-      'Payment Status': 'PAID',
     };
     expect(edge.stripSensitiveColumns(row)).toEqual(expected);
     expect(browser.stripSensitiveColumns([row])).toEqual([expected]);

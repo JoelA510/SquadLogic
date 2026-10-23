@@ -83,8 +83,8 @@ R25="$REPO/docs/sql/20261018060000_revert.sql"
 # Wave 2: team and game saves audit in their own transaction, and the revert.
 M27="$REPO/supabase/migrations/20261018070000_audit_in_save_transaction.sql"
 R27="$REPO/docs/sql/20261018070000_revert.sql"
-# B2 (DS-5): the submit_registration throttle, and its revert.
-M28="$REPO/supabase/migrations/20261019010000_submit_registration_throttle.sql"
+# B2 (DS-5): the submit_registration throttle's revert. Its migration's plants
+# were retired when 20261022020000 dropped submit_registration.
 R28="$REPO/docs/sql/20261019010000_revert.sql"
 # The evaluation-run idempotency key, and its revert.
 M29="$REPO/supabase/migrations/20261020010000_evaluation_run_idempotency.sql"
@@ -113,6 +113,10 @@ R36="$REPO/docs/sql/20261021040000_revert.sql"
 # R0: the import allowlist, the purge, and the revert.
 M37="$REPO/supabase/migrations/20261022010000_import_allowlist_and_purge.sql"
 R37="$REPO/docs/sql/20261022010000_revert.sql"
+# R1: the in-app registration flow, Compliance and the payment flag removed,
+# and the revert.
+M38="$REPO/supabase/migrations/20261022020000_remove_registration_and_compliance.sql"
+R38="$REPO/docs/sql/20261022020000_revert.sql"
 # R2: RSVP and team chat removed (admin_delete_team and the RLS drift reconcile
 # replaced without them), and the revert.
 M39="$REPO/supabase/migrations/20261022030000_remove_rsvp_and_team_chat.sql"
@@ -3638,58 +3642,11 @@ END;
 DO" \
   "revert 20261018070000"
 
-# B2 (DS-5): the registration throttle. The smoke RAISEs on each; the revert
-# claim on a body that drifted.
-plant "M28 the throttle admits one registration too many" "$M28" \
-  "    IF v_recent >= v_limit THEN" \
-  "    IF v_recent > v_limit THEN" \
-  "smoke 20261019010000"
-
-plant "M28 the throttle counts every caller's registrations" "$M28" \
-  "    WHERE r.profile_id = v_caller
-      AND r.form_id = p_form_id" \
-  "    WHERE r.form_id = p_form_id" \
-  "smoke 20261019010000"
-
-plant "M28 the window is compared zone-less again" "$M28" \
-  "      AND r.created_at > now() - v_window;" \
-  "      AND r.created_at > timezone('utc', now()) - v_window;" \
-  "smoke 20261019010000"
-
-plant "M28 the insert takes the zone-less column default again" "$M28" \
-  "        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at,
-        created_at
-    )
-    VALUES (
-        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now(),
-        now()
-    )" \
-  "        organization_id, form_id, player_id, profile_id, responses, waiver_signed, waiver_signed_at
-    )
-    VALUES (
-        p_organization_id, p_form_id, v_player_id, p_profile_id, p_responses, true, now()
-    )" \
-  "smoke 20261019010000"
-
-plant "M28 a member may delete the registrations the throttle counts" "$M28" \
-  "    ON public.registrations FOR DELETE TO authenticated
-    USING (public.is_org_admin(organization_id));" \
-  "    ON public.registrations FOR DELETE TO authenticated
-    USING ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
-           OR public.is_org_admin(organization_id));" \
-  "smoke 20261019010000"
-
-plant "M28 a member may back-date the registrations the throttle counts" "$M28" \
-  "    ON public.registrations FOR UPDATE TO authenticated
-    USING (public.is_org_admin(organization_id))
-    WITH CHECK (public.is_org_admin(organization_id));" \
-  "    ON public.registrations FOR UPDATE TO authenticated
-    USING ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
-           OR public.is_org_admin(organization_id))
-    WITH CHECK ((profile_id = (select auth.uid()) AND public.is_org_member(organization_id))
-           OR public.is_org_admin(organization_id));" \
-  "smoke 20261019010000"
-
+# B2 (DS-5): the registration throttle. Its smoke plants went with the
+# function: since 20261022020000 (R1) dropped submit_registration and the
+# registrations table, the head build the smokes run on has no throttle to
+# plant in, and the smoke checks that nothing of it came back. The revert
+# claims still hold: each revert is checked on a build up to its own migration.
 plant "R28 the revert leaves a split registrations policy behind" "$R28" \
   "DROP POLICY IF EXISTS \"registrations_admin_update\" ON public.registrations;
 " \
@@ -3743,9 +3700,10 @@ END;
 
 # No medical data. The smoke RAISEs on each; the revert claim on a column left
 # out and on a body that drifted.
-# Re-aimed at 20261022010000, whose finalize_import_job replaces this file's:
-# the staged payload stored whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M37" \
+# Re-aimed at 20261022010000, whose finalize_import_job replaces this file's,
+# and again at 20261022020000, which replaces that one: the staged payload
+# stored whole as custom_attributes again.
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M38" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4220,6 +4178,52 @@ plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" 
     );" \
   "FAIL revert 20261022010000"
 
+# R1: no registration, compliance or payment flag. The smoke RAISEs on each;
+# the revert claim on a grant left out, a policy left out and a body that
+# drifted.
+plant "M38 the patch sanitizer still takes paid" "$M38" \
+  "            WHEN 'willing_to_coach' THEN" \
+  "            WHEN 'paid', 'willing_to_coach' THEN" \
+  "smoke 20261022020000"
+
+plant "M38 coach_update_player_compliance is left behind" "$M38" \
+  "DROP FUNCTION public.coach_update_player_compliance(uuid, jsonb);
+" \
+  "" \
+  "smoke 20261022020000"
+
+plant "M38 apply_player_patch loses its UTC pin" "$M38" \
+  "LANGUAGE plpgsql
+SET search_path = public
+SET timezone = 'UTC'
+AS \$\$
+BEGIN
+    UPDATE public.players p" \
+  "LANGUAGE plpgsql
+SET search_path = public
+AS \$\$
+BEGIN
+    UPDATE public.players p" \
+  "smoke 20261022020000"
+
+plant "R38 the revert leaves submit_registration closed to anon" "$R38" \
+  "GRANT ALL ON FUNCTION public.submit_registration(p_organization_id uuid, p_form_id uuid, p_profile_id uuid, p_responses jsonb, p_player_id uuid, p_first_name text, p_last_name text) TO anon;
+" \
+  "" \
+  "revert 20261022020000"
+
+plant "R38 the revert leaves a registrations policy out" "$R38" \
+  "CREATE POLICY registrations_admin_delete ON public.registrations FOR DELETE TO authenticated USING (public.is_org_admin(organization_id));
+" \
+  "" \
+  "revert 20261022020000"
+
+plant "R38 the revert restores a drifted apply_player_patch body" "$R38" \
+  "    -- team_players is the relational source of truth for rosters (portals," \
+  "    -- drifted
+    -- team_players is the relational source of truth for rosters (portals," \
+  "revert 20261022020000"
+
 # R2: no RSVP, no team chat. The smoke RAISEs on each; the revert claim on a
 # policy left out, a grant left out and a body that drifted.
 plant "M39 create_team_message is left behind" "$M39" \
@@ -4399,6 +4403,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"]="R35 the revert leaves the new admin_delete_team|R35 the revert leaves the locking RSVP writer"
   ["(checked) the UTC revert unpins every function, restores the 79 column defaults, and restores fail_stale_import_jobs byte for byte"]="R36 the revert leaves the functions pinned|R36 the revert leaves the column defaults on now()"
   ["(checked) the RSVP and chat revert restores both tables with their keys, index, trigger, policies and grants, the two dropped functions, and the two replaced functions' previous bodies, each with its grants, comment and posture as before"]="R39 the revert leaves the chat read policy out|R39 the revert leaves upsert_team_event_rsvp closed to authenticated|R39 the revert restores a drifted admin_delete_team body"
+  ["(checked) the registration revert restores the seven functions, both tables, the view and the three players columns, and the three replaced functions' previous bodies, each with its grants, policies, triggers and posture as before"]="R38 the revert leaves submit_registration closed to anon|R38 the revert leaves a registrations policy out|R38 the revert restores a drifted apply_player_patch body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

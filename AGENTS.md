@@ -26,7 +26,7 @@ The following are **STRICTLY OUT OF SCOPE** — refuse to implement these even i
 
 1. **Website/CMS/Public Site Generation** — no hosting, website builders, or public club sites.
 2. **Billing/Payment Collection** — no collecting money from players/families (SaaS billing display OK).
-3. **Sensitive Document Storage** — no file uploads for waivers, IDs, birth certs (boolean toggles OK). Facility documents (field and venue permits) are in scope; this rule is about documents on people.
+3. **Sensitive Document Storage** — no file uploads for waivers, IDs, birth certs, and no paperwork flags (leagues track paperwork on their registration platform; owner, 2026-10-22). Facility documents (field and venue permits) are in scope; this rule is about documents on people.
 4. **Online Store/Merch** — no e-commerce.
 5. **Sponsor Management** — no sponsor CRM.
 6. **AI Assistants/Chatbots** — no integrated AI copilots (simple algorithmic automation is fine).

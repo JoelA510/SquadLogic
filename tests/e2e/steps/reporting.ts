@@ -16,13 +16,49 @@ const pinToMockOrg = async (page: Page) => {
   }, MOCK_ORG_ID);
 };
 
+// ─── Background ─────────────────────────────────────────────────────
+
+// Moved here from the registration steps, which went with the in-app
+// registration flow (docs/changes/2026-10-22-admin-focus.md, R1): the
+// organization and its active season, seeded on every page load, as before,
+// without the registration form and registration that file also seeded.
+Given('there is an active season {string}', async ({ page }, seasonName: string) => {
+  await page.addInitScript(
+    ({ mockOrgId, name }) => {
+      type MockTable = Array<Record<string, unknown>>;
+      type MockDb = Record<string, MockTable>;
+      const db = ((window as { __MOCK_DB__?: MockDb }).__MOCK_DB__ || {}) as MockDb;
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      db.organizations = db.organizations || [];
+      if (!db.organizations.find((o: Record<string, unknown>) => o.id === orgId)) {
+        db.organizations.push({ id: orgId, name: 'Test Org', is_onboarded: true });
+      }
+      db.season_settings = db.season_settings || [];
+      if (!db.season_settings.find((s: Record<string, unknown>) => s.name === name)) {
+        db.season_settings.push({
+          id: 'season-fall-26',
+          organization_id: orgId,
+          name,
+          status: 'active',
+          timezone: 'America/Los_Angeles',
+          created_at: new Date().toISOString(),
+        });
+      }
+      (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      localStorage.setItem('squadlogic_active_org', orgId);
+    },
+    { mockOrgId: MOCK_ORG_ID, name: seasonName }
+  );
+});
+
 // ─── Admin Dashboard Steps ──────────────────────────────────────────
 
 Given('the admin views the reporting dashboard', async ({ page }) => {
   // Pin to the mock seed's org so the next page load resolves to the org with data in initialMockData
   await pinToMockOrg(page);
 
-  // Seed data the EnterpriseDashboard needs: view_org_metrics, players, view_compliance_stats
+  // Seed data the EnterpriseDashboard needs: view_org_metrics, players
   await waitForMockClient(page);
   await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -50,18 +86,6 @@ Given('the admin views the reporting dashboard', async ({ page }) => {
       }
     }
 
-    db.view_compliance_stats = db.view_compliance_stats || [];
-    if (
-      !db.view_compliance_stats.find((c: Record<string, unknown>) => c.organization_id === orgId)
-    ) {
-      db.view_compliance_stats.push({
-        organization_id: orgId,
-        form_title: 'Fall Registration',
-        total_registrations: 45,
-        medical_cleared: 38,
-      });
-    }
-
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
   }, MOCK_ORG_ID);
 
@@ -75,18 +99,27 @@ Given('the admin views the reporting dashboard', async ({ page }) => {
 });
 
 Then('I should see the {string} metric', async ({ page }, metricName: string) => {
-  if (metricName === 'Registrations') {
-    // The Recharts chart renders only when view_compliance_stats has data.
-    const chart = page.locator('.recharts-responsive-container').first();
-    await expect(chart).toBeVisible({ timeout: 15000 });
-  } else {
-    // EnterpriseDashboard renders KPI cards with text labels.
-    // "Total Teams" in the feature maps to "Active Teams" in the UI.
-    const displayName = metricName === 'Total Teams' ? 'Active Teams' : metricName;
-    const card = page.getByText(displayName, { exact: false }).first();
-    await expect(card).toBeVisible({ timeout: 15000 });
-  }
+  // EnterpriseDashboard renders KPI cards with text labels.
+  // "Total Teams" in the feature maps to "Active Teams" in the UI.
+  const displayName = metricName === 'Total Teams' ? 'Active Teams' : metricName;
+  const card = page.getByText(displayName, { exact: false }).first();
+  await expect(card).toBeVisible({ timeout: 15000 });
 });
+
+// Paperwork compliance is not tracked (docs/changes/2026-10-22-admin-focus.md,
+// R1), so the readiness radar has no Compliance axis. Read off the chart's
+// accessible data table, which lists one row per axis.
+Then(
+  'the readiness chart shows {string} and no {string} axis',
+  async ({ page }, present: string, absent: string) => {
+    await expect(page.locator('.recharts-responsive-container').first()).toBeVisible({
+      timeout: 15000,
+    });
+    const table = page.getByRole('table', { name: /Organization Readiness/ });
+    await expect(table.getByRole('cell', { name: present, exact: true })).toHaveCount(1);
+    await expect(table.getByRole('cell', { name: absent, exact: true })).toHaveCount(0);
+  }
+);
 
 // ─── CSV Export ─────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 -- Revert for 20261022030000_remove_rsvp_and_team_chat.sql
 --
 -- Restores, empty, every object the migration dropped, as it stood after
--- 20261022010000: the `event_rsvps` and `team_messages` tables with their
+-- 20261022020000: the `event_rsvps` and `team_messages` tables with their
 -- keys, CHECKs, index, foreign keys, `set_timestamp` trigger, row security,
 -- read policies and grants; `upsert_team_event_rsvp` (SECURITY DEFINER,
 -- search_path=public, pinned to UTC as 20261021040000 left it) and
@@ -9,7 +9,7 @@
 -- replaced functions' previous bodies and comments: `admin_delete_team` from
 -- 20261021030000 and `reconcile_prod_rls_drift` from 20261021020000.
 --
--- The DDL is pg_dump's (16.15) of a harness build at 20261022010000, so each
+-- The DDL is pg_dump's (16.15) of a harness build at 20261022020000, so each
 -- function body is that migration's text byte for byte; only the OWNER lines
 -- are left out (the objects are created by the role that runs this).
 --
@@ -28,7 +28,7 @@
 -- Verified: the harness compares a fingerprint of every restored object
 -- (signature, posture, grants, comment and body md5 of the four functions;
 -- columns, constraints, index, trigger, grants and policies of the two tables)
--- with the one read off a build at 20261022010000.
+-- with the one read off a build at 20261022020000.
 
 BEGIN;
 

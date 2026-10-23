@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Calendar, Check, ChevronRight, Clock, Flag, Shield, Star } from 'lucide-react';
+import { Calendar, ChevronRight, Clock, Flag, Shield, Star } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
 import Badge from '../components/ui/Badge.jsx';
 import Button from '../components/ui/Button.jsx';
 import Avatar from '../components/ui/Avatar.jsx';
-import Toggle from '../components/ui/Toggle.jsx';
 import InlineField from '../components/ui/InlineField.jsx';
 import { useToast } from '../components/ui/ToastHost.jsx';
 import { supabase } from '../lib/supabaseClient.js';
@@ -30,8 +29,8 @@ function Stars({ n = 0 }) {
 }
 
 /**
- * Player record — hero + tabs (Overview / Guardians / Team & Schedule /
- * Compliance). Inline edits persist through admin_update_player.
+ * Player record — hero + tabs (Overview / Guardians / Team & Schedule).
+ * Inline edits persist through admin_update_player.
  */
 export default function PlayerRecordPage() {
   const { playerId } = useParams();
@@ -178,17 +177,10 @@ export default function PlayerRecordPage() {
     .concat(isEnabled(FEATURE_FLAGS.WAITLIST) ? ['waitlist'] : [])
     .map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) }));
 
-  const complianceItems = [
-    ['Registration fee', 'paid'],
-    ['Liability waiver', 'waiver_received'],
-    ...(isEnabled(FEATURE_FLAGS.MEDICAL_FORMS) ? [['Medical form', 'medical_form_received']] : []),
-  ];
-
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'guardians', label: 'Guardians' },
     { id: 'schedule', label: 'Team & Schedule' },
-    { id: 'compliance', label: 'Compliance' },
   ];
 
   return (
@@ -512,51 +504,6 @@ export default function PlayerRecordPage() {
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        )}
-
-        {tab === 'compliance' && (
-          <div className="card">
-            <div className="card-body flush">
-              {complianceItems.map(([label, key], index) => (
-                <div
-                  key={key}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '15px 18px',
-                    borderBottom:
-                      index < complianceItems.length - 1 ? '1px solid var(--border-soft)' : 'none',
-                  }}
-                >
-                  <span
-                    className="kpi-ico"
-                    style={{
-                      width: 30,
-                      height: 30,
-                      background: player[key] ? 'var(--success-weak)' : 'var(--warning-weak)',
-                      color: player[key] ? 'var(--success-text)' : 'var(--warning-text)',
-                    }}
-                  >
-                    {player[key] ? (
-                      <Check size={16} aria-hidden="true" />
-                    ) : (
-                      <Clock size={16} aria-hidden="true" />
-                    )}
-                  </span>
-                  <span style={{ flex: 1, fontWeight: 600 }}>{label}</span>
-                  <span className="muted" style={{ fontSize: 12.5 }}>
-                    {player[key] ? 'Received' : 'Outstanding'}
-                  </span>
-                  <Toggle
-                    checked={!!player[key]}
-                    onChange={(v) => save({ [key]: v })}
-                    label={label}
-                  />
-                </div>
-              ))}
             </div>
           </div>
         )}

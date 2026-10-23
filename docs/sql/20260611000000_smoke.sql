@@ -1,6 +1,7 @@
 -- Smoke checks for 20260611000000_player_roster_fields.sql
 
--- 1. New columns exist with expected types.
+-- 1. New columns exist with expected types (since 20261022020000 dropped
+--    paid, waiver_received and medical_form_received, expect the other three).
 select column_name, data_type, is_nullable, column_default
 from information_schema.columns
 where table_schema = 'public' and table_name = 'players'

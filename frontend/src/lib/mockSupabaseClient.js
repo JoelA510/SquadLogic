@@ -38,6 +38,31 @@ const mockId = (prefix = '') =>
  */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCHEMA_ENTITIES = new Set(['player', 'coach', 'team']);
+
+// The keys `sanitize_player_patch` accepts (20261022020000). admin_update_player,
+// admin_bulk_update_players and admin_create_player all pass through it, so all
+// three arms refuse any other key, as the SQL does with 22023.
+const PLAYER_PATCH_FIELDS = new Set([
+  'first_name',
+  'last_name',
+  'preferred_name',
+  'gender',
+  'grade',
+  'notes',
+  'buddy_request',
+  'status',
+  'rating',
+  'years_played',
+  'jersey_number',
+  'willing_to_coach',
+  'division_id',
+  'team_id',
+  'date_of_birth',
+  'guardian_contacts',
+]);
+/** The first key `sanitize_player_patch` would refuse, or undefined. */
+const rejectedPlayerPatchField = (patch) =>
+  Object.keys(patch || {}).find((key) => !PLAYER_PATCH_FIELDS.has(key));
 const SCHEMA_VALUE_TYPES = new Set(['string', 'number', 'boolean', 'date']);
 const stableSchemaKey = (schema) =>
   JSON.stringify(
@@ -224,9 +249,6 @@ const initialMockData = {
       years_played: 2,
       rating: 3,
       jersey_number: 7,
-      paid: true,
-      waiver_received: true,
-      medical_form_received: false,
       willing_to_coach: false,
       buddy_request: 'Jamie Jones',
       guardian_contacts: [{ name: 'Dana Smith', email: 'dana.smith@example.com' }],
@@ -243,9 +265,6 @@ const initialMockData = {
       years_played: 0,
       rating: null,
       jersey_number: null,
-      paid: false,
-      waiver_received: false,
-      medical_form_received: false,
       willing_to_coach: true,
       guardian_contacts: [],
     },
@@ -433,31 +452,6 @@ const initialMockData = {
       score_away: null,
     },
   ],
-  player_registrations: [
-    {
-      id: 'player-1',
-      organization_id: MOCK_ORG_ID,
-      season_id: MOCK_SEASON_ID,
-      first_name: 'Alex',
-      last_name: 'Smith',
-      status: 'Reviewing',
-      gender: 'B',
-      birth_year: 2015,
-    },
-    {
-      id: 'player-2',
-      organization_id: MOCK_ORG_ID,
-      season_id: MOCK_SEASON_ID,
-      first_name: 'Sam',
-      last_name: 'Jones',
-      status: 'Approved',
-      gender: 'G',
-      birth_year: 2016,
-    },
-  ],
-  registration_forms: [
-    { id: 'f1', title: 'Spring 2026 Registration', status: 'active', organization_id: MOCK_ORG_ID },
-  ],
   scheduler_runs: [
     {
       id: 'run-practice-1',
@@ -515,18 +509,6 @@ const initialMockData = {
       },
       started_at: new Date(Date.now() - 3600000).toISOString(),
       completed_at: new Date().toISOString(),
-    },
-  ],
-  registrations: [
-    {
-      id: 'reg-1',
-      organization_id: MOCK_ORG_ID,
-      form_id: 'f1',
-      player_id: 'player-1',
-      profile_id: 'mock-admin-id',
-      medical_cleared: false,
-      waiver_signed: true,
-      created_at: new Date().toISOString(),
     },
   ],
   team_summaries: [
@@ -616,14 +598,6 @@ const initialMockData = {
   view_org_metrics: [
     { organization_id: MOCK_ORG_ID, total_players: 150, total_teams: 12, total_users: 25 },
   ],
-  view_compliance_stats: [
-    {
-      organization_id: MOCK_ORG_ID,
-      form_title: 'Spring 2026 Registration',
-      total_registrations: 45,
-      medical_cleared: 38,
-    },
-  ],
 };
 
 // ── Realtime & Auth Event Plumbing ──────────────────────────────────────────
@@ -692,8 +666,6 @@ const mergeSource = (db, source) => {
           if (key === 'team_calendar_tokens') return String(r.team_id) === String(record.team_id);
           if (key === 'view_org_metrics')
             return String(r.organization_id) === String(record.organization_id);
-          if (key === 'view_compliance_stats')
-            return String(r.form_title) === String(record.form_title);
           if (key === 'view_league_standings') return String(r.team_id) === String(record.team_id);
           return false;
         });
@@ -1677,22 +1649,6 @@ const createMockQuery = (table, data = null) => {
             organizations: orgs.find((o) => String(o.id) === String(item.organization_id)) || null,
           }));
         }
-        if (table === 'registrations') {
-          if (queryContent.includes('players')) {
-            const players = getMockData('players');
-            results = results.map((item) => {
-              const p = players.find((player) => String(player.id) === String(item.player_id));
-              return { ...item, players: p || null };
-            });
-          }
-          if (queryContent.includes('profiles')) {
-            const profiles = getMockData('profiles');
-            results = results.map((item) => {
-              const p = profiles.find((profile) => String(profile.id) === String(item.profile_id));
-              return { ...item, profiles: p || null };
-            });
-          }
-        }
         if (table === 'organization_members') {
           if (queryContent.includes('organizations')) {
             const orgs = getMockData('organizations');
@@ -2671,90 +2627,6 @@ export const mockSupabase = {
       });
       saveDB(db);
       return { data: orgId, error: null };
-    }
-
-    if (name === 'submit_registration') {
-      const {
-        p_organization_id,
-        p_form_id,
-        p_profile_id,
-        p_responses,
-        p_player_id,
-        p_first_name,
-        p_last_name,
-      } = params;
-
-      // The real RPC's throttle (20261019010000, DS-5): a caller's eleventh
-      // registration to one form inside 60 seconds is refused PT429, before any
-      // row is written. The limit and window are the migration's own;
-      // tests/submitRegistrationThrottle.test.js ties the two together.
-      const recent = (db.registrations || []).filter(
-        (r) =>
-          r.profile_id === p_profile_id &&
-          r.form_id === p_form_id &&
-          Date.now() - Date.parse(r.created_at) < 60 * 1000
-      ).length;
-      if (recent >= 10) {
-        return {
-          data: null,
-          error: {
-            code: 'PT429',
-            message: 'Too many registrations submitted for this form. Wait a minute and try again.',
-            hint: 'At most 10 registrations per form per 00:01:00.',
-          },
-        };
-      }
-
-      let playerId = p_player_id;
-      if (!playerId && p_first_name && p_last_name) {
-        playerId = mockId();
-        db.players.push({
-          id: playerId,
-          first_name: p_first_name,
-          last_name: p_last_name,
-          organization_id: p_organization_id,
-        });
-        db.profile_players.push({
-          profile_id: p_profile_id,
-          player_id: playerId,
-        });
-      }
-
-      const registration = {
-        id: mockId(),
-        organization_id: p_organization_id,
-        form_id: p_form_id,
-        player_id: playerId,
-        profile_id: p_profile_id,
-        responses: p_responses,
-        waiver_signed: true,
-        medical_cleared: false,
-        created_at: new Date().toISOString(),
-      };
-
-      db.registrations = db.registrations || [];
-      db.registrations.push(registration);
-      saveDB(db);
-
-      return { data: registration.id, error: null };
-    }
-
-    if (name === 'admin_create_registration_form') {
-      const created = {
-        id: mockId(),
-        organization_id: params.p_organization_id,
-        title: params.p_title,
-        description: params.p_description ?? null,
-        season_id: params.p_season_id ?? null,
-        fields: params.p_fields ?? [],
-        status: params.p_status || 'open',
-        waiver_text: params.p_waiver_text ?? null,
-        created_at: new Date().toISOString(),
-      };
-      db.registration_forms.unshift(created);
-      saveDB(db);
-
-      return { data: created, error: null };
     }
 
     if (name === 'get_organization_members') {
@@ -4626,31 +4498,6 @@ export const mockSupabase = {
       return { data: result, error: null };
     }
 
-    if (name === 'get_team_portal_medical_status') {
-      const teamId = params?.p_team_id;
-      const team = (db.teams || []).find((item) => String(item.id) === String(teamId));
-      const rosterPlayerIds = (db.team_players || [])
-        .filter((row) => String(row.team_id) === String(teamId))
-        .map((row) => String(row.player_id));
-      const registrations = db.registrations || [];
-
-      return {
-        data: rosterPlayerIds.map((playerId) => {
-          const registration = registrations.find(
-            (row) =>
-              String(row.organization_id) === String(team?.organization_id) &&
-              String(row.player_id) === String(playerId)
-          );
-
-          return {
-            player_id: playerId,
-            medical_cleared: registration?.medical_cleared === true,
-          };
-        }),
-        error: null,
-      };
-    }
-
     if (name === 'rotate_calendar_token') {
       // As 20261021020000: an admin or staff member, or the team's current
       // coach; an unknown team and a refused caller answer alike.
@@ -4930,37 +4777,13 @@ export const mockSupabase = {
       return { data: { ...division }, error: null };
     }
 
-    if (name === 'admin_update_player' || name === 'coach_update_player_compliance') {
+    if (name === 'admin_update_player') {
       const { p_player_id, p_patch } = params || {};
       const player = (db.players || []).find((item) => String(item.id) === String(p_player_id));
       if (!player) {
         return { data: null, error: { message: `player ${p_player_id} not found` } };
       }
-      const allowed =
-        name === 'coach_update_player_compliance'
-          ? ['paid', 'waiver_received', 'medical_form_received']
-          : [
-              'first_name',
-              'last_name',
-              'preferred_name',
-              'gender',
-              'grade',
-              'notes',
-              'buddy_request',
-              'status',
-              'rating',
-              'years_played',
-              'jersey_number',
-              'paid',
-              'waiver_received',
-              'medical_form_received',
-              'willing_to_coach',
-              'division_id',
-              'team_id',
-              'date_of_birth',
-              'guardian_contacts',
-            ];
-      const rejected = Object.keys(p_patch || {}).find((key) => !allowed.includes(key));
+      const rejected = rejectedPlayerPatchField(p_patch);
       if (rejected) {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
@@ -5018,7 +4841,7 @@ export const mockSupabase = {
       db.audit_log.push({
         id: mockId(),
         organization_id: player.organization_id,
-        action: name === 'admin_update_player' ? 'player.updated' : 'player.compliance_updated',
+        action: 'player.updated',
         metadata: { patch: p_patch, player_id: p_player_id },
         created_at: new Date().toISOString(),
       });
@@ -5028,6 +4851,10 @@ export const mockSupabase = {
 
     if (name === 'admin_bulk_update_players') {
       const { p_player_ids, p_patch } = params || {};
+      const rejected = rejectedPlayerPatchField(p_patch);
+      if (rejected) {
+        return { data: null, error: { message: `field ${rejected} is not editable` } };
+      }
       const ids = (p_player_ids || []).map(String);
       let count = 0;
       (db.players || []).forEach((player) => {
@@ -5050,6 +4877,10 @@ export const mockSupabase = {
 
     if (name === 'admin_create_player') {
       const { p_organization_id, p_fields } = params || {};
+      const rejected = rejectedPlayerPatchField(p_fields);
+      if (rejected) {
+        return { data: null, error: { message: `field ${rejected} is not editable` } };
+      }
       const now = new Date().toISOString();
       const player = {
         id: mockId(),
@@ -5057,9 +4888,6 @@ export const mockSupabase = {
         first_name: p_fields?.first_name || 'New',
         last_name: p_fields?.last_name || 'Player',
         status: p_fields?.status || 'pending',
-        paid: false,
-        waiver_received: false,
-        medical_form_received: false,
         created_at: now,
         updated_at: now,
         ...p_fields,
@@ -5280,7 +5108,6 @@ export const mockSupabase = {
           db.players.push({
             id: mockId(),
             created_at: now,
-            paid: false,
             contact_info: {},
             guardian_contacts: [],
             ...basePlayer,
@@ -7190,99 +7017,6 @@ export const mockSupabase = {
             String(run.season_id) === String(seasonId))
       );
       return { data: selectLatestTeamRunsPerDivision(runs), error: null };
-    }
-
-    if (name === 'admin_update_registration_form') {
-      const { p_form_id, p_patch } = params || {};
-      const session =
-        typeof window !== 'undefined'
-          ? JSON.parse(sessionStorage.getItem('__MOCK_SESSION__') || 'null')
-          : null;
-      const form = (db.registration_forms || []).find((f) => String(f.id) === String(p_form_id));
-      if (!form) return { data: null, error: { message: 'Form not found' } };
-      const member = (db.organization_members || []).find(
-        (item) =>
-          String(item.organization_id) === String(form.organization_id) &&
-          String(item.profile_id) === String(session?.user?.id)
-      );
-      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
-        return { data: null, error: { message: 'Access denied: admin role required' } };
-      }
-      const allowed = ['title', 'description', 'status', 'waiver_text', 'fields', 'season_id'];
-      for (const key of Object.keys(p_patch || {})) {
-        if (!allowed.includes(key)) {
-          return { data: null, error: { message: `Disallowed patch key: ${key}` } };
-        }
-      }
-      // Match the real RPC's status whitelist so invalid values fail in mock
-      // mode too instead of only in production.
-      if ('status' in (p_patch || {}) && !['draft', 'open', 'closed'].includes(p_patch.status)) {
-        return { data: null, error: { message: `invalid status: ${p_patch.status}` } };
-      }
-      Object.assign(form, p_patch, { updated_at: new Date().toISOString() });
-      db.audit_log = db.audit_log || [];
-      db.audit_log.push({
-        id: mockId(),
-        organization_id: form.organization_id,
-        user_id: session?.user?.id,
-        action: 'registration.form_updated',
-        resource_type: 'registration_form',
-        resource_id: p_form_id,
-        metadata: { patch: p_patch },
-        created_at: new Date().toISOString(),
-      });
-      saveDB(db);
-      return { data: { id: form.id }, error: null };
-    }
-
-    if (name === 'admin_delete_registration_form') {
-      const { p_form_id } = params || {};
-      const session =
-        typeof window !== 'undefined'
-          ? JSON.parse(sessionStorage.getItem('__MOCK_SESSION__') || 'null')
-          : null;
-      const form = (db.registration_forms || []).find((f) => String(f.id) === String(p_form_id));
-      if (!form) return { data: null, error: { message: 'Form not found' } };
-      const member = (db.organization_members || []).find(
-        (item) =>
-          String(item.organization_id) === String(form.organization_id) &&
-          String(item.profile_id) === String(session?.user?.id)
-      );
-      if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
-        return { data: null, error: { message: 'Access denied: admin role required' } };
-      }
-      const subCount = (db.registrations || []).filter(
-        (r) => String(r.form_id) === String(p_form_id)
-      ).length;
-      // The form was tombstoned and its submissions were not, so a SEEDED
-      // registration came back attached to a form that no longer exists.
-      markMockDeleted(
-        db,
-        'registrations',
-        (db.registrations || [])
-          .filter((r) => String(r.form_id) === String(p_form_id))
-          .map((r) => tombstoneKey('registrations', r))
-      );
-      db.registrations = (db.registrations || []).filter(
-        (r) => String(r.form_id) !== String(p_form_id)
-      );
-      db.registration_forms = (db.registration_forms || []).filter(
-        (f) => String(f.id) !== String(p_form_id)
-      );
-      markMockDeleted(db, 'registration_forms', [tombstoneKey('registration_forms', form)]);
-      db.audit_log = db.audit_log || [];
-      db.audit_log.push({
-        id: mockId(),
-        organization_id: form.organization_id,
-        user_id: session?.user?.id,
-        action: 'registration.form_deleted',
-        resource_type: 'registration_form',
-        resource_id: p_form_id,
-        metadata: { submission_count: subCount },
-        created_at: new Date().toISOString(),
-      });
-      saveDB(db);
-      return { data: { deleted_submissions: subCount }, error: null };
     }
 
     if (name === 'admin_remove_member') {

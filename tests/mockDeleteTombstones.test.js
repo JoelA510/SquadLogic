@@ -226,9 +226,10 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
     // Pinned exactly, on LIVE-3's precedent: adding a delete path or folding
     // two into a helper must be a deliberate edit to this number, not a
     // silent drift past a >= with a margin of one.
-    expect(sites).toHaveLength(24);
+    // 22 since R1 removed the registration form delete and its two sites.
+    expect(sites).toHaveLength(22);
     const tables = new Set(sites.map((site) => site.table));
-    for (const table of ['field_subunits', 'team_players', 'registrations', 'teams']) {
+    for (const table of ['field_subunits', 'team_players', 'practice_assignments', 'teams']) {
       expect(tables).toContain(table);
     }
   });
@@ -309,7 +310,8 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
 
   it('builds every tombstone key through tombstoneKey, never by hand', () => {
     const calls = scanTombstoneCalls(SOURCE);
-    expect(calls.length, 'the call scanner matched nothing').toBeGreaterThanOrEqual(24);
+    // 22 since R1 removed the registration form delete's two calls.
+    expect(calls.length, 'the call scanner matched nothing').toBeGreaterThanOrEqual(22);
     const handBuilt = calls
       .filter((call) => !/tombstoneKey\(/.test(call.text))
       .map((call) => `${call.line}: ${call.text.trim().slice(0, 80)}`);
@@ -355,7 +357,7 @@ const SANCTIONED_WRITES = {
 };
 
 const KNOWN_E2E_DEBT = {
-  'tests/e2e/steps/async_and_optimistic_ui.ts': 4,
+  'tests/e2e/steps/async_and_optimistic_ui.ts': 3,
   'tests/e2e/steps/auth_setup.ts': 1,
   'tests/e2e/steps/auto_scheduler.ts': 1,
   'tests/e2e/steps/coach_and_calendar.ts': 4,
@@ -363,8 +365,8 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/network_resilience.ts': 2,
   'tests/e2e/steps/onboarding.ts': 2,
   'tests/e2e/steps/rbac_and_fields.ts': 3,
-  'tests/e2e/steps/registration_compliance.ts': 2,
-  'tests/e2e/steps/reporting.ts': 1,
+  // Two of these came from registration_compliance.ts with its active-season step (R1).
+  'tests/e2e/steps/reporting.ts': 3,
   'tests/e2e/steps/scheduling_and_overrides.ts': 4,
   'tests/e2e/steps/team_and_roster.ts': 7,
   'tests/e2e/steps/team_communication.ts': 2,
@@ -375,8 +377,9 @@ describe('mock db writes :: nothing new may go past saveDB', () => {
   it('finds the writes, and would fail if it found none', () => {
     const writes = scanDirectDbWrites();
     // A floor for a scanner that broke, not a count: the exact inventory is
-    // pinned below. Lowered from 60 when M4.6 removed nine Pillar 1 writes (56 left),
-    // and to 45 when R2 removed the RSVP practice seeder (49 left).
+    // pinned below. Lowered from 60 when M4.6 removed nine Pillar 1 writes (56
+    // left), and from 50 when R1 removed the registration and compliance steps
+    // (47 left); R2 removed the RSVP practice seeder (46 left).
     expect(writes.length).toBeGreaterThanOrEqual(45);
     expect(new Set(writes.map((write) => write.file))).toContain(
       'frontend/src/lib/mockSupabaseClient.js'
@@ -459,17 +462,6 @@ describe('mock hard deletes :: a seeded row stays deleted across getDB', () => {
     expect(getMockData('practice_assignments').filter((r) => r.team_id === SEEDED_TEAM)).toEqual(
       []
     );
-  });
-
-  it('keeps a deleted form s seeded submissions gone', async () => {
-    const before = getMockData('registrations').filter((r) => r.form_id === 'f1');
-    expect(before.length, 'form f1 has no seeded submissions to resurrect').toBeGreaterThan(0);
-
-    const { error } = await supabase.rpc('admin_delete_registration_form', { p_form_id: 'f1' });
-    expect(error).toBeNull();
-
-    expect(getMockData('registration_forms').find((f) => f.id === 'f1')).toBeUndefined();
-    expect(getMockData('registrations').filter((r) => r.form_id === 'f1')).toEqual([]);
   });
 
   it('keeps a row deleted through the generic .delete().eq() gone', async () => {

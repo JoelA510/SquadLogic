@@ -815,18 +815,6 @@ const PLANTS = [
       );`,
   },
   {
-    label: 'a deleted form s submissions are not tombstoned',
-    suite: 'tests/mockDeleteTombstones.test.js',
-    find: `      markMockDeleted(
-        db,
-        'registrations',
-        (db.registrations || [])
-          .filter((r) => String(r.form_id) === String(p_form_id))
-          .map((r) => tombstoneKey('registrations', r))
-      );`,
-    replace: '      void p_form_id;',
-  },
-  {
     label: 'the generic .delete().eq() does not tombstone',
     suite: 'tests/mockDeleteTombstones.test.js',
     find: `              const doomed = db[table].filter((item) => String(item[col]) === String(val));`,
@@ -925,13 +913,15 @@ const PLANTS = [
     // untombstoned delete is the one-time audit it replaced.
     label: 'a new untombstoned delete is added beside a tombstoned one',
     suite: 'tests/mockDeleteTombstones.test.js',
-    find: `      db.registrations = (db.registrations || []).filter(
-        (r) => String(r.form_id) !== String(p_form_id)
-      );`,
-    replace: `      db.divisions = (db.divisions || []).filter((d) => String(d.id) !== 'nope');
-      db.registrations = (db.registrations || []).filter(
-        (r) => String(r.form_id) !== String(p_form_id)
-      );`,
+    // Aimed at the player move's roster drop since the registration form
+    // delete it sat beside went with the in-app registration flow (R1).
+    find: `        db.team_players = (db.team_players || []).filter(
+          (row) => String(row.player_id) !== String(p_player_id)
+        );`,
+    replace: `        db.divisions = (db.divisions || []).filter((d) => String(d.id) !== 'nope');
+        db.team_players = (db.team_players || []).filter(
+          (row) => String(row.player_id) !== String(p_player_id)
+        );`,
   },
 ];
 

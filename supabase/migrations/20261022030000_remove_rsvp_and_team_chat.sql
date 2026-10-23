@@ -41,7 +41,7 @@
 --   * Kept: the `audit_actions` rows `team.rsvp_updated` and
 --     `team.message_created`, which old `audit_log` rows reference. No other
 --     function, view or policy names a dropped table (catalogue scan of every
---     public function's prosrc on a build at 20261022010000: the two dropped
+--     public function's prosrc on a build at 20261022020000: the two dropped
 --     functions, the two replaced ones, and a comment in
 --     `persist_team_schedule`, which is left as it is).
 --

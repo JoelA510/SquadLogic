@@ -17,7 +17,7 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
-import { Download, Users, ShieldCheck, Activity, Lock } from 'lucide-react';
+import { Download, Users, ShieldCheck, Lock } from 'lucide-react';
 import { logger } from '../lib/logger.js';
 import { CHART_BAR_CURSOR, CHART_SERIES } from '../constants/chartTheme.js';
 
@@ -60,8 +60,6 @@ export default function EnterpriseDashboard() {
     teams: 0,
     users: 0,
     coaches: 0,
-    compliance_cleared: 0,
-    compliance_total: 0,
   });
   const [loading, setLoading] = useState(true);
   const [exporting, _setExporting] = useState(false);
@@ -75,24 +73,14 @@ export default function EnterpriseDashboard() {
       try {
         // Independent reads, sent together rather than one after another.
         const orgId = currentOrganization.id;
-        const [{ data: pData }, { data: orgData }, { data: compData }] = await Promise.all([
+        const [{ data: pData }, { data: orgData }] = await Promise.all([
           supabase
             .from('players')
             .select('id, custom_attributes, team_id, division')
             .eq('organization_id', orgId),
           supabase.from('view_org_metrics').select('*').eq('organization_id', orgId).single(),
-          supabase.from('view_compliance_stats').select('*').eq('organization_id', orgId),
         ]);
         if (pData) setPlayers(pData);
-
-        let cCleared = 0;
-        let cTotal = 0;
-        if (compData) {
-          compData.forEach((c) => {
-            cCleared += c.medical_cleared || 0;
-            cTotal += c.total_registrations || 0;
-          });
-        }
 
         // Coach info mock from users count (stub)
         if (orgData) {
@@ -100,8 +88,6 @@ export default function EnterpriseDashboard() {
             teams: orgData.total_teams,
             users: orgData.total_users,
             coaches: Math.floor(orgData.total_users * 0.4), // Stub calculation for coaches
-            compliance_cleared: cCleared,
-            compliance_total: cTotal,
           });
         }
       } catch (err) {
@@ -115,24 +101,18 @@ export default function EnterpriseDashboard() {
 
   const { aggregates, isLowSample, maskedFields } = useEnterpriseMetrics(players, orgSchema);
 
-  // Radar Metrics Calculation
+  // Radar Metrics Calculation. There is no Compliance axis: paperwork
+  // compliance is not tracked (owner, 2026-10-22).
   const radarData = useMemo(() => {
-    // 1. Compliance
-    const complianceScore =
-      metrics.compliance_total > 0
-        ? (metrics.compliance_cleared / metrics.compliance_total) * 100
-        : 85;
-
-    // 2. Staffing (Coaches to Teams ratio)
+    // 1. Staffing (Coaches to Teams ratio)
     const staffingScore =
       metrics.teams > 0 ? Math.min(100, (metrics.coaches / metrics.teams) * 100) : 90;
 
-    // 3. Balance & Skill Variability (Stub calculations returning realistic percentages)
+    // 2. Balance & Skill Variability (Stub calculations returning realistic percentages)
     const balanceScore = 88;
     const skillVariabilityScore = 92;
 
     return [
-      { subject: 'Compliance', A: Math.round(complianceScore), fullMark: 100 },
       { subject: 'Staffing', A: Math.round(staffingScore), fullMark: 100 },
       { subject: 'Balance', A: balanceScore, fullMark: 100 },
       { subject: 'Skill Variability', A: skillVariabilityScore, fullMark: 100 },
@@ -203,7 +183,7 @@ export default function EnterpriseDashboard() {
       )}
 
       {/* Primary KPI Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-bg-surface border border-border-subtle bg-bg-glass rounded-2xl p-6 shadow-md relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-brand-glow rounded-full blur-[60px] opacity-30 transition-transform group-hover:scale-150" />
           <div className="flex flex-col relative z-10">
@@ -223,17 +203,6 @@ export default function EnterpriseDashboard() {
             </span>
             <span className="text-4xl font-black tracking-tight text-text-primary">
               {metrics.teams}
-            </span>
-          </div>
-        </div>
-        <div className="bg-bg-surface border border-border-subtle bg-bg-glass rounded-2xl p-6 shadow-md relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-brand-glow rounded-full blur-[60px] opacity-30 transition-transform group-hover:scale-150" />
-          <div className="flex flex-col relative z-10">
-            <span className="text-text-muted text-sm font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
-              <Activity size={16} /> Network Readiness
-            </span>
-            <span className="text-4xl font-black tracking-tight text-text-primary">
-              {radarData[0].A}%
             </span>
           </div>
         </div>
@@ -258,7 +227,7 @@ export default function EnterpriseDashboard() {
                 data={radarData}
                 outerRadius="70%"
                 role="img"
-                aria-label="Radar chart showing organization readiness across Compliance, Staffing, Balance, and Skill Variability."
+                aria-label="Radar chart showing organization readiness across Staffing, Balance, and Skill Variability."
               >
                 <PolarGrid stroke="var(--color-border-subtle)" />
                 <PolarAngleAxis

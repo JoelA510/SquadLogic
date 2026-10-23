@@ -22,8 +22,6 @@ Given('I have been assigned to the {string}', async ({ page }, teamName: string)
       db.players = [];
       db.team_players = [];
       db.profile_players = [];
-      db.registration_forms = db.registration_forms || [];
-      db.registrations = [];
       db.coaches = db.coaches || [];
       db.season_settings = db.season_settings || [];
       db.divisions = db.divisions || [];
@@ -118,30 +116,13 @@ Given('my team has {int} players assigned', async ({ page }, count: number) => {
       const team = db.teams?.find((item: Record<string, unknown>) => item.id === teamId) || {
         id: teamId,
       };
-      const division = db.divisions?.find(
-        (item: Record<string, unknown>) => item.id === team.division_id
-      );
       const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-      const seasonId = division?.season_settings_id || 'team-portal-season-1';
-      const formId = 'registration-form-1';
 
       db.team_players = db.team_players || [];
       db.players = db.players || [];
       db.profile_players = db.profile_players || [];
-      db.registration_forms = db.registration_forms || [];
-      db.registrations = db.registrations || [];
-      if (!db.registration_forms.find((form: Record<string, unknown>) => form.id === formId)) {
-        db.registration_forms.push({
-          id: formId,
-          organization_id: orgId,
-          title: 'Team Portal Registration',
-          season_id: seasonId,
-          status: 'open',
-        });
-      }
       for (let i = 0; i < num; i++) {
         const pid = `p-${i}`;
-        const medicalCleared = i % 2 === 0;
         db.team_players.push({
           id: `tp-${i}`,
           organization_id: orgId,
@@ -154,15 +135,6 @@ Given('my team has {int} players assigned', async ({ page }, count: number) => {
           division_id: team.division_id,
           first_name: `Player ${i}`,
           last_name: 'Test',
-        });
-        db.registrations.push({
-          id: `reg-${i}`,
-          organization_id: orgId,
-          form_id: formId,
-          player_id: pid,
-          profile_id: 'mock-parent-id',
-          medical_cleared: medicalCleared,
-          updated_at: new Date(Date.now() + i).toISOString(),
         });
       }
       (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
@@ -187,17 +159,11 @@ Then('I should see a list of all players and their contact information', async (
   await expect(page.getByText(/Player 0/i).first()).toBeVisible();
 });
 
-Then(
-  'I should see a dashboard indicating which players have completed their medical waivers',
-  async ({ page }) => {
-    await expect(page.getByText(/Medical Clearance/i).first()).toBeVisible();
-  }
-);
-
-Then('I should be flagged if any player is currently non-compliant', async ({ page }) => {
-  // The UI renders "Medical Clearance: Pending" with a warning badge
-  await expect(page.getByText(/Pending/i).first()).toBeVisible();
-  await expect(page.locator('.bg-status-warning-bg').first()).toBeVisible();
+// Paperwork is tracked on the league's registration platform, not here
+// (docs/changes/2026-10-22-admin-focus.md, R1): the roster has no clearance badge.
+Then('the roster shows no medical clearance status', async ({ page }) => {
+  await expect(page.getByText(/Player 0/i).first()).toBeVisible();
+  await expect(page.getByText(/Medical Clearance/i)).toHaveCount(0);
 });
 
 Given('my team has practices on Tuesdays and games on Saturdays', async ({ page: _page }) => {

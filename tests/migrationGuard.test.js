@@ -5,11 +5,17 @@
  * output, captured against a local production-shaped ledger on 2026-09-28 --
  * see docs/operations/migration-ledger-normalisation.md.
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_MAX_PENDING,
   GuardError,
   evaluate,
+  fetchLedger,
+  main,
+  parseLedgerRows,
   parseMax,
   verifyApplied,
 } from '../scripts/ci/migrationGuard.mjs';
@@ -233,5 +239,142 @@ describe('migration guard: limit parsing and post-push verification', () => {
       /still pending after the push: 20260927000000/
     );
     expect(() => verifyApplied('not json')).toThrow(GuardError);
+  });
+});
+
+// supabase/unapplied-migration-edits.json: an edit to a migration that had never
+// applied (20261022020000's first deploy failed and rolled back, 2026-10-23).
+// The guard proves from production's ledger that the edited file is what ran.
+describe('migration guard: listed edits are proven by the ledger', () => {
+  const MARKER = 'DROP VIEW IF EXISTS public.v';
+  const edit = (version) => ({
+    version,
+    blob: 'a'.repeat(40),
+    base_blob: 'b'.repeat(40),
+    marker: MARKER,
+    reason: 'test',
+  });
+  const ran = (version, statements) => new Map([[version, statements.join('\n')]]);
+
+  it('passes a listed version still pending, without reading the ledger', () => {
+    const result = evaluate({
+      listText: listJson({ pending: ['20260927000000'] }),
+      dryRunText: dryJson(['20260927000000']),
+      allowedEdits: [edit('20260927000000')],
+    });
+    expect(result.pending).toEqual(['20260927000000']);
+  });
+
+  it('passes a listed version applied with the edit: its marker is in the ledger', () => {
+    expect(() =>
+      evaluate({
+        listText: listJson(),
+        dryRunText: dryJson([]),
+        allowedEdits: [edit('20260924000000')],
+        ledger: ran('20260924000000', ['BEGIN', `${MARKER}_stats`, 'COMMIT']),
+      })
+    ).not.toThrow();
+  });
+
+  it('refuses a listed version applied without the edit (the laundering case)', () => {
+    expect(() =>
+      evaluate({
+        listText: listJson(),
+        dryRunText: dryJson([]),
+        allowedEdits: [edit('20260924000000')],
+        ledger: ran('20260924000000', ['DROP VIEW public.v_stats']),
+      })
+    ).toThrow(/ran it without the edit/);
+  });
+
+  it('refuses a listed version applied whose ledger was not read', () => {
+    expect(() =>
+      evaluate({
+        listText: listJson(),
+        dryRunText: dryJson([]),
+        allowedEdits: [edit('20260924000000')],
+      })
+    ).toThrow(/ledger statements for it were not read/);
+  });
+
+  it('checks again after the push (--verify)', () => {
+    expect(() =>
+      verifyApplied(listJson(), {
+        allowedEdits: [edit('20260924000000')],
+        ledger: ran('20260924000000', ['something else']),
+      })
+    ).toThrow(/ran it without the edit/);
+  });
+
+  it('reads the ledger through the read-only query endpoint, with the token', async () => {
+    const calls = [];
+    const fakeFetch = async (url, init) => {
+      calls.push({ url, init });
+      return { ok: true, json: async () => [{ version: '20260924000000', statements: [MARKER] }] };
+    };
+    const ledger = await fetchLedger(
+      ['20260924000000'],
+      { SUPABASE_PROJECT_ID: 'ref123', SUPABASE_ACCESS_TOKEN: 'tok' },
+      fakeFetch
+    );
+    expect(ledger.get('20260924000000')).toContain(MARKER);
+    expect(calls[0].url).toBe(
+      'https://api.supabase.com/v1/projects/ref123/database/query/read-only'
+    );
+    expect(calls[0].init.headers.Authorization).toBe('Bearer tok');
+    expect(JSON.parse(calls[0].init.body).query).toMatch(
+      /from supabase_migrations\.schema_migrations where version in \('20260924000000'\)/
+    );
+  });
+
+  it('fails loudly when the ledger cannot be read', async () => {
+    const denied = async () => ({ ok: false, status: 403, json: async () => ({}) });
+    await expect(
+      fetchLedger(
+        ['20260924000000'],
+        { SUPABASE_PROJECT_ID: 'r', SUPABASE_ACCESS_TOKEN: 't' },
+        denied
+      )
+    ).rejects.toThrow(/answered 403/);
+    await expect(fetchLedger(['20260924000000'], {}, denied)).rejects.toThrow(/are needed/);
+    expect(() => parseLedgerRows({ rows: [] })).toThrow(/not an array/);
+    expect(() => parseLedgerRows([{ version: '20260924000000', statements: null }])).toThrow(
+      /no recorded statements/
+    );
+  });
+
+  it('the entry point reads the list and the ledger: main() refuses an unproven edit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-'));
+    const path = (name) => join(dir, name);
+    writeFileSync(path('list.json'), listJson());
+    writeFileSync(path('dry.json'), dryJson([]));
+    writeFileSync(path('edits.json'), JSON.stringify({ edits: [edit('20260924000000')] }));
+    const args = (ledger) => {
+      writeFileSync(path('ledger.json'), JSON.stringify(ledger));
+      return [
+        '--list',
+        path('list.json'),
+        '--dry-run',
+        path('dry.json'),
+        '--unapplied-edits',
+        path('edits.json'),
+        '--ledger',
+        path('ledger.json'),
+      ];
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(await main(args([{ version: '20260924000000', statements: ['other'] }]), {})).toBe(1);
+      expect(error.mock.calls.flat().join(' ')).toMatch(/ran it without the edit/);
+      expect(await main(args([{ version: '20260924000000', statements: [MARKER] }]), {})).toBe(0);
+      // Without --ledger, main() fetches it, and with no credentials that fails loudly.
+      const noLedger = args([]).slice(0, 6);
+      expect(await main(noLedger, {})).toBe(1);
+      expect(await main([...noLedger, '--verify'], {})).toBe(1);
+    } finally {
+      error.mockRestore();
+      log.mockRestore();
+    }
   });
 });

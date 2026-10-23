@@ -14,16 +14,25 @@
  *   - the dry-run's pending set differs from `migration list`'s local-only set;
  *   - (a) a pending version is <= the highest version already applied;
  *   - (b) more than `maxPending` migrations are pending;
- *   - the dry-run would push seed data.
+ *   - the dry-run would push seed data;
+ *   - a version listed in supabase/unapplied-migration-edits.json is applied
+ *     but production's ledger (supabase_migrations.schema_migrations, the SQL
+ *     the CLI recorded running) lacks the entry's marker: production ran a
+ *     different version of the file than the repository holds. Checked before
+ *     and after the push; the ledger is read through the Management API's
+ *     read-only query endpoint, or from --ledger <file> (tests).
  *
  * `--verify` mode runs after the push: nothing may be pending or remote-only.
  *
  * Usage:
  *   node scripts/ci/migrationGuard.mjs --list list.json --dry-run dry.json [--max 5]
+ *     [--unapplied-edits <file>]   (default supabase/unapplied-migration-edits.json)
  *   node scripts/ci/migrationGuard.mjs --verify --list list.json
+ *   (either mode also takes --ledger <file>: `[{ version, statements }]`)
  */
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { readAllowedEdits } from './migrationVersions.mjs';
 
 export const DEFAULT_MAX_PENDING = 5;
 
@@ -31,6 +40,12 @@ const VERSION = /^[0-9]+$/;
 const DRY_RUN_FILE = /^([0-9]+)_.*\.sql$/;
 
 export class GuardError extends Error {}
+
+/**
+ * The slice of `fetch` the ledger read uses (tests pass a stand-in).
+ * @typedef {(url: string, init: { method: string, headers: Record<string, string>, body: string }) =>
+ *   Promise<{ ok: boolean, status?: number, json: () => Promise<unknown> }>} FetchLike
+ */
 
 /** The CLI prints `{"_tag":"Error",...}` on failure; surface its message. */
 function parseJson(text, what) {
@@ -152,7 +167,7 @@ function checkLedger(list) {
  * guard's actionable message must not depend on the dry-run having succeeded.
  * `dryRunExit` is the dry-run's exit status; non-zero is a failure even when
  * its output looks well formed.
- * @param {{ listText: string, dryRunText: string, dryRunExit?: number | string, maxPending?: number }} args
+ * @param {{ listText: string, dryRunText: string, dryRunExit?: number | string, maxPending?: number, allowedEdits?: { version: string, marker: string }[], ledger?: Map<string, string> }} args
  * @returns {{ pending: string[], highestApplied: string }}
  */
 export function evaluate({
@@ -160,9 +175,12 @@ export function evaluate({
   dryRunText,
   dryRunExit = 0,
   maxPending = DEFAULT_MAX_PENDING,
+  allowedEdits = [],
+  ledger = new Map(),
 }) {
   const list = parseMigrationList(listText);
   checkLedger(list);
+  checkListedEdits(list.applied, allowedEdits, ledger);
 
   const fromList = [...list.pending].sort(cmp);
   const highestApplied = [...list.applied].sort(cmp).at(-1);
@@ -205,14 +223,113 @@ export function evaluate({
   return { pending: fromDry, highestApplied };
 }
 
-/** The post-push check: nothing pending, nothing remote-only, something applied. */
-export function verifyApplied(listText) {
+/**
+ * The listed versions already applied: the ones `checkListedEdits` needs the
+ * ledger for.
+ */
+export function listedApplied(applied, allowedEdits) {
+  return allowedEdits.map((e) => e.version).filter((v) => applied.includes(v));
+}
+
+/**
+ * Every listed version that is applied ran the edited file: its marker is in
+ * the statements production's ledger recorded for it. A listed version still
+ * pending is fine, since the push about to run applies the edited file.
+ * @param {string[]} applied
+ * @param {{ version: string, marker: string }[]} allowedEdits
+ * @param {Map<string, string>} ledger version -> the recorded statements as text
+ */
+export function checkListedEdits(applied, allowedEdits, ledger) {
+  for (const edit of allowedEdits) {
+    if (!applied.includes(edit.version)) continue;
+    const ran = ledger.get(edit.version);
+    if (ran === undefined) {
+      throw new GuardError(
+        `${edit.version} is listed in supabase/unapplied-migration-edits.json and applied, ` +
+          "but production's ledger statements for it were not read; cannot prove which " +
+          'version of the file ran'
+      );
+    }
+    if (!ran.includes(edit.marker)) {
+      throw new GuardError(
+        `${edit.version} is listed in supabase/unapplied-migration-edits.json, but production ` +
+          'ran it without the edit (its ledger statements lack the marker). The CLI never ' +
+          're-runs an applied migration: revert the edit in the file and add a new migration.'
+      );
+    }
+  }
+}
+
+/** The post-push check: nothing pending, nothing remote-only, listed edits ran. */
+export function verifyApplied(listText, { allowedEdits = [], ledger = new Map() } = {}) {
   const list = parseMigrationList(listText);
   checkLedger(list);
   if (list.pending.length > 0) {
     throw new GuardError(`still pending after the push: ${list.pending.join(', ')}`);
   }
+  checkListedEdits(list.applied, allowedEdits, ledger);
   return { applied: list.applied.length };
+}
+
+/**
+ * Parse ledger rows `[{ version, statements }]`, the query endpoint's shape,
+ * into version -> statements text. `statements` is a text[] as a JSON array,
+ * or its text form.
+ */
+export function parseLedgerRows(rows) {
+  if (!Array.isArray(rows)) {
+    throw new GuardError('ledger query: the response is not an array of rows');
+  }
+  const ledger = new Map();
+  for (const row of rows) {
+    const version = typeof row?.version === 'string' ? row.version : null;
+    if (!version || !VERSION.test(version)) {
+      throw new GuardError(`ledger query: row without a version: ${JSON.stringify(row)}`);
+    }
+    const statements = row.statements;
+    if (statements === null || statements === undefined) {
+      throw new GuardError(`ledger query: ${version} has no recorded statements`);
+    }
+    ledger.set(version, Array.isArray(statements) ? statements.join('\n') : String(statements));
+  }
+  return ledger;
+}
+
+/**
+ * Read the ledger statements of `versions` from production, through the
+ * Management API's read-only SQL endpoint. Versions are digits only (checked
+ * here), so they are safe to quote into the query.
+ * @param {string[]} versions
+ * @param {Record<string, string | undefined>} env
+ * @param {FetchLike} [fetchImpl]
+ */
+export async function fetchLedger(versions, env, fetchImpl = fetch) {
+  const ref = env.SUPABASE_PROJECT_ID;
+  const token = env.SUPABASE_ACCESS_TOKEN;
+  if (!ref || !token) {
+    throw new GuardError(
+      'SUPABASE_PROJECT_ID and SUPABASE_ACCESS_TOKEN are needed to read the ledger of ' +
+        versions.join(', ')
+    );
+  }
+  if (!versions.every((v) => VERSION.test(v))) {
+    throw new GuardError(`ledger query: not a migration version: ${versions.join(', ')}`);
+  }
+  const query =
+    'select version, statements from supabase_migrations.schema_migrations ' +
+    `where version in (${versions.map((v) => `'${v}'`).join(', ')})`;
+  const res = await fetchImpl(
+    `https://api.supabase.com/v1/projects/${ref}/database/query/read-only`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    }
+  );
+  if (!res.ok) {
+    throw new GuardError(`ledger query: the Management API answered ${res.status}`);
+  }
+  return parseLedgerRows(await res.json());
 }
 
 function arg(argv, name) {
@@ -220,7 +337,8 @@ function arg(argv, name) {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-export function main(argv = process.argv.slice(2), env = process.env) {
+/** @param {FetchLike} [fetchImpl] */
+export async function main(argv = process.argv.slice(2), env = process.env, fetchImpl = fetch) {
   const summary = (line) => {
     console.log(line);
     if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`);
@@ -229,8 +347,14 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     const listPath = arg(argv, '--list');
     if (!listPath) throw new GuardError('--list <file> is required');
     const listText = readFileSync(listPath, 'utf8');
+    const allowedEdits = readAllowedEdits(arg(argv, '--unapplied-edits'));
+    const needed = listedApplied(parseMigrationList(listText).applied, allowedEdits);
+    const ledgerPath = arg(argv, '--ledger');
+    let ledger = new Map();
+    if (ledgerPath) ledger = parseLedgerRows(JSON.parse(readFileSync(ledgerPath, 'utf8')));
+    else if (needed.length > 0) ledger = await fetchLedger(needed, env, fetchImpl);
     if (argv.includes('--verify')) {
-      const { applied } = verifyApplied(listText);
+      const { applied } = verifyApplied(listText, { allowedEdits, ledger });
       summary(`Migrations verified: ${applied} applied, none pending.`);
       return 0;
     }
@@ -242,6 +366,8 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       dryRunText: readFileSync(dryPath, 'utf8'),
       dryRunExit: arg(argv, '--dry-run-exit') ?? 0,
       maxPending,
+      allowedEdits,
+      ledger,
     });
     summary(
       pending.length === 0
@@ -261,5 +387,5 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  process.exit(main());
+  main().then((code) => process.exit(code));
 }

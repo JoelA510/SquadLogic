@@ -20,7 +20,8 @@
 --       admin_update_registration_medical_status(uuid, uuid, boolean, jsonb),
 --       get_team_portal_medical_status(uuid),
 --       coach_update_player_compliance(uuid, jsonb).
---   * `view_compliance_stats` (a view over the two tables) dropped.
+--   * `view_compliance_stats` (a view over the two tables) dropped where it
+--     exists (production never had it; see the statement below).
 --   * `registrations` and `registration_forms` dropped, after their eight
 --     policies and two `set_timestamp` triggers (named here rather than left
 --     to the table drop, so the catalogue change reads in one place).
@@ -92,7 +93,12 @@ DROP FUNCTION public.coach_update_player_compliance(uuid, jsonb);
 -- 2. The view, then the tables' policies, triggers and the tables.
 -- ---------------------------------------------------------------------------
 
-DROP VIEW public.view_compliance_stats;
+-- IF EXISTS: production never had this view. A fresh build creates it
+-- (20251220000000, 20260331000000), but production's catalogue holds only
+-- `field_closures` and `import_efficiency_metrics` of the migrations' views
+-- (read 2026-10-23, after this migration's first deploy failed here with
+-- 42P01 and rolled back); docs/operations/schema-drift-2026-10.md.
+DROP VIEW IF EXISTS public.view_compliance_stats;
 
 DROP POLICY registrations_select_own_or_admin ON public.registrations;
 DROP POLICY registrations_admin_insert ON public.registrations;

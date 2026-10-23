@@ -7,13 +7,16 @@
  * nothing would have said so until the ledger did, in production. This file
  * absorbed #454's `migrationVersionUnique.test.js`, which duplicated the rule.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   baseEntries,
   checkAgainstBase,
+  checkEditsList,
   checkNames,
   listHead,
+  readAllowedEdits,
   versionOf,
 } from '../scripts/ci/migrationVersions.mjs';
 
@@ -96,6 +99,78 @@ describe('migration versions: the head against the base', () => {
     const errors = checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'y')]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/was edited/);
+  });
+
+  it('passes an edit listed as unapplied, to exactly the listed blob, and no other', () => {
+    const allowed = [{ version: '20260924000000', blob: 'y', reason: 'never applied' }];
+    expect(checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'y')], allowed)).toEqual([]);
+    const other = checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'z')], allowed);
+    expect(other).toHaveLength(1);
+    expect(other[0]).toMatch(/was edited/);
+    const unlisted = checkAgainstBase(
+      [...base, e('20260925000000_c.sql')],
+      [...base.slice(0, 1), e('20260924000000_b.sql', 'y'), e('20260925000000_c.sql', 'q')],
+      allowed
+    );
+    expect(unlisted).toHaveLength(1);
+    expect(unlisted[0]).toMatch(/20260925000000_c\.sql.*was edited/);
+  });
+
+  it('reads the committed list: every entry is well formed and matches its file', () => {
+    for (const a of readAllowedEdits()) {
+      const file = listHead().find((f) => versionOf(f) === a.version);
+      expect(file, a.version).toBeTruthy();
+      expect(baseEntries('HEAD').find((x) => x.file === file)?.blob, a.version).toBe(a.blob);
+      const text = (blob) => execFileSync('git', ['cat-file', '-p', blob], { encoding: 'utf8' });
+      expect(text(a.blob), a.version).toContain(a.marker);
+      expect(text(a.base_blob), a.version).not.toContain(a.marker);
+    }
+  });
+
+  it('keeps the edits list permanent, and each marker new in its edit', () => {
+    const files = {
+      a: 'DROP VIEW IF EXISTS x;',
+      b: 'DROP VIEW x;',
+      c: 'DROP VIEW IF EXISTS y;',
+      d: 'unrelated',
+    };
+    const git = {
+      content: (blob) => files[blob[0]],
+      baseBlobOf: () => 'b'.repeat(40),
+      pastBlobsOf: () => new Set(['b'.repeat(40), 'a'.repeat(40)]),
+    };
+    const entry = (over = {}) => ({
+      version: '20260924000000',
+      blob: 'a'.repeat(40),
+      base_blob: 'b'.repeat(40),
+      marker: 'IF EXISTS',
+      reason: 'never applied',
+      ...over,
+    });
+    expect(checkEditsList([entry()], [entry()], git)).toEqual([]);
+    expect(checkEditsList([], [entry()], git)).toEqual([]);
+    expect(checkEditsList([entry()], [], git)).toEqual([
+      'supabase/unapplied-migration-edits.json: entry 20260924000000 was removed; entries are permanent',
+    ]);
+    expect(checkEditsList([entry()], [entry({ marker: 'DROP' })], git).join(' ')).toMatch(
+      /changed its "marker".*already in the original file/
+    );
+    expect(checkEditsList([], [entry({ marker: 'absent' })], git)).toEqual([
+      "supabase/unapplied-migration-edits.json: entry 20260924000000's marker is not in its edited file",
+    ]);
+    // A new entry's base_blob must be the base branch's blob of that migration, not any
+    // object lacking the marker (Codex on #646).
+    expect(checkEditsList([], [entry({ base_blob: 'c'.repeat(40), marker: 'x;' })], git)).toEqual([
+      "supabase/unapplied-migration-edits.json: entry 20260924000000's base_blob is not the base branch's blob of that migration",
+    ]);
+    // A legacy base entry (version and blob only) may gain the fields, naming a blob the
+    // file really had, and not its own edited blob.
+    const legacy = { version: '20260924000000', blob: 'a'.repeat(40), reason: 'old' };
+    expect(checkEditsList([legacy], [entry()], git)).toEqual([]);
+    expect(checkEditsList([legacy], [entry({ base_blob: 'd'.repeat(40) })], git)).toEqual([
+      "supabase/unapplied-migration-edits.json: entry 20260924000000's base_blob is not an earlier blob of that migration",
+    ]);
+    expect(checkEditsList([legacy], [entry({ base_blob: 'a'.repeat(40) })], git)).toHaveLength(1);
   });
 
   it('fails a removed migration', () => {

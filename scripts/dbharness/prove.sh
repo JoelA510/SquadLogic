@@ -116,6 +116,10 @@ R37="$REPO/docs/sql/20261022010000_revert.sql"
 # and the revert.
 M38="$REPO/supabase/migrations/20261022020000_remove_registration_and_compliance.sql"
 R38="$REPO/docs/sql/20261022020000_revert.sql"
+# The two reporting views production lacked, restored, and the revert (a no-op
+# restatement on a fresh build).
+M39="$REPO/supabase/migrations/20261023010000_restore_reporting_views.sql"
+R39="$REPO/docs/sql/20261023010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4269,6 +4273,43 @@ plant "R38 the revert restores a drifted apply_player_patch body" "$R38" \
     -- team_players is the relational source of truth for rosters (portals," \
   "revert 20261022020000"
 
+# The reporting views restored. The smoke RAISEs on a view that is gone or
+# reads past RLS; the revert claim on a revert that drops a view (production's
+# literal earlier state) or restates one without security_invoker.
+plant "M39 view_org_metrics is dropped again" "$M39" \
+  "
+COMMIT;" \
+  "
+DROP VIEW public.view_org_metrics;
+
+COMMIT;" \
+  "smoke 20261023010000"
+
+plant "M39 view_league_standings loses security_invoker" "$M39" \
+  "CREATE OR REPLACE VIEW public.view_league_standings
+WITH (security_invoker = true)
+AS" \
+  "CREATE OR REPLACE VIEW public.view_league_standings
+AS" \
+  "smoke 20261023010000"
+
+plant "R39 the revert drops both views" "$R39" \
+  "
+COMMIT;" \
+  "
+DROP VIEW public.view_org_metrics, public.view_league_standings;
+
+COMMIT;" \
+  "revert 20261023010000"
+
+plant "R39 the revert restates view_org_metrics without security_invoker" "$R39" \
+  "CREATE OR REPLACE VIEW public.view_org_metrics
+WITH (security_invoker = true)
+AS" \
+  "CREATE OR REPLACE VIEW public.view_org_metrics
+AS" \
+  "revert 20261023010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4408,6 +4449,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"]="R35 the revert leaves the new admin_delete_team|R35 the revert leaves the locking RSVP writer"
   ["(checked) the UTC revert unpins every function, restores the 79 column defaults, and restores fail_stale_import_jobs byte for byte"]="R36 the revert leaves the functions pinned|R36 the revert leaves the column defaults on now()"
   ["(checked) the registration revert restores the seven functions, both tables, the view and the three players columns, and the three replaced functions' previous bodies, each with its grants, policies, triggers and posture as before"]="R38 the revert leaves submit_registration closed to anon|R38 the revert leaves a registrations policy out|R38 the revert restores a drifted apply_player_patch body"
+  ["(checked) the reporting views revert leaves view_org_metrics and view_league_standings as a build at 20261022020000 has them: definition, columns, security_invoker and grants"]="R39 the revert drops both views|R39 the revert restates view_org_metrics without security_invoker"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

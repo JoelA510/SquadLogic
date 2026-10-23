@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261023010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2615,6 +2615,34 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the registration revert did not restore every dropped or replaced object as it was at 20261022010000"
         dump 10 $SCRATCH/harness_registration; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261023010000" ]; then
+      # The revert is a no-op restatement: a fresh build had both views before
+      # the migration (production did not; see the revert's header). So the
+      # fingerprint of both views after it -- owner, sorted ACL, options,
+      # definition, and each column's position, name and type -- must equal the
+      # one read 2026-10-23 off a build at 20261022020000 with the same query.
+      # The row count is part of the verdict, so a view the revert drops or
+      # never finds cannot hash its way to a pass.
+      if psql_cmd "SELECT 'VIEWS-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*)
+                    = '6bb6e91fec22743f635174925b94cea1:19' THEN 'restored' ELSE 'wrong' END FROM (
+      SELECT 'c|' || c.relname || '|' || c.relkind::text || '|' || pg_get_userbyid(c.relowner) || '|'
+             || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(c.relacl) e), '') || '|'
+             || coalesce(array_to_string(c.reloptions, ','), '') || '|' || pg_get_viewdef(c.oid) AS x
+        FROM pg_class c
+       WHERE c.relnamespace = 'public'::regnamespace AND c.relname IN ('view_org_metrics', 'view_league_standings')
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attnum || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod)
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+       WHERE c.relnamespace = 'public'::regnamespace AND c.relname IN ('view_org_metrics', 'view_league_standings')
+         AND a.attnum > 0 AND NOT a.attisdropped
+             ) s;" \
+         >$SCRATCH/harness_views 2>&1 && grep -q 'VIEWS-VERDICT:restored' $SCRATCH/harness_views; then
+        echo "  | (checked) the reporting views revert leaves view_org_metrics and view_league_standings as a build at 20261022020000 has them: definition, columns, security_invoker and grants"
+      else
+        echo "FAIL revert ${id}: the reporting views revert did not leave both views as they were at 20261022020000"
+        dump 10 $SCRATCH/harness_views; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

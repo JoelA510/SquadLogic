@@ -190,89 +190,87 @@ export default function TeamRecordPage() {
 
       <div style={{ padding: '20px 0 40px' }}>
         {tab === 'schedule' && (
-          <div>
-            <div className="space-y-6">
-              <h2 className="text-2xl font-display font-bold flex items-center gap-2">
-                <Calendar className="text-color-primary" />
-                Team Schedule
-              </h2>
+          <div className="space-y-6">
+            <h2 className="text-2xl font-display font-bold flex items-center gap-2">
+              <Calendar className="text-color-primary" />
+              Team Schedule
+            </h2>
 
-              {practiceChangesUnread && (
-                // Q5: the practices below are the bare series; say so, never silently.
-                <div
-                  role="alert"
-                  data-testid="practice-changes-unread"
-                  className="bg-status-warning-bg text-text-primary border border-status-warning rounded-xl p-4 text-sm"
-                >
-                  {PRACTICE_CHANGES_UNREAD_TEXT}
+            {practiceChangesUnread && (
+              // Q5: the practices below are the bare series; say so, never silently.
+              <div
+                role="alert"
+                data-testid="practice-changes-unread"
+                className="bg-status-warning-bg text-text-primary border border-status-warning rounded-xl p-4 text-sm"
+              >
+                {PRACTICE_CHANGES_UNREAD_TEXT}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {events.length === 0 ? (
+                <div className="glass-panel p-8 text-center text-text-muted">
+                  No upcoming events scheduled.
                 </div>
-              )}
+              ) : (
+                events.map((event, idx) => (
+                  <div
+                    key={`${event.type}-${event.id}-${event.date}-${event.reasonCode ?? ''}-${event.exceptionId ?? ''}`}
+                    className="glass-panel p-5 animate-slideUp"
+                    style={{ animationDelay: `${idx * 0.05}s` }}
+                  >
+                    <div className="flex flex-col md:flex-row justify-between gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              event.type === 'game'
+                                ? 'bg-status-success-bg text-status-success'
+                                : 'bg-brand-glow text-color-primary'
+                            }`}
+                          >
+                            {event.type}
+                          </span>
+                          <h3 className="font-bold text-lg">{event.description}</h3>
+                        </div>
 
-              <div className="space-y-4">
-                {events.length === 0 ? (
-                  <div className="glass-panel p-8 text-center text-text-muted">
-                    No upcoming events scheduled.
-                  </div>
-                ) : (
-                  events.map((event, idx) => (
-                    <div
-                      key={`${event.type}-${event.id}-${event.date}-${event.reasonCode ?? ''}-${event.exceptionId ?? ''}`}
-                      className="glass-panel p-5 animate-slideUp"
-                      style={{ animationDelay: `${idx * 0.05}s` }}
-                    >
-                      <div className="flex flex-col md:flex-row justify-between gap-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                event.type === 'game'
-                                  ? 'bg-status-success-bg text-status-success'
-                                  : 'bg-brand-glow text-color-primary'
-                              }`}
-                            >
-                              {event.type}
-                            </span>
-                            <h3 className="font-bold text-lg">{event.description}</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-y-1 gap-x-4 text-sm text-text-secondary">
+                          <div className="flex items-center gap-1.5">
+                            <Calendar size={14} />
+                            {event.timeTbd
+                              ? event.date
+                                ? `Time TBD on ${longDate(event.date)}: ${event.reason}`
+                                : `Date and time TBD: ${event.reason}`
+                              : longDate(event.date)}
                           </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-y-1 gap-x-4 text-sm text-text-secondary">
-                            <div className="flex items-center gap-1.5">
-                              <Calendar size={14} />
-                              {event.timeTbd
-                                ? event.date
-                                  ? `Time TBD on ${longDate(event.date)}: ${event.reason}`
-                                  : `Date and time TBD: ${event.reason}`
-                                : longDate(event.date)}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <Clock size={14} />
-                              {event.timeTbd
-                                ? 'TIME TBD'
-                                : `${event.startTime?.substring(0, 5)} - ${event.endTime?.substring(0, 5)}`}
-                            </div>
-                            <div className="flex items-center gap-1.5 md:col-span-2">
-                              <MapPin size={14} />
-                              {event.location ?? 'Location TBD'}
-                            </div>
-                            {event.timingNotes?.map((note) => (
-                              // The feed's placed-event note: an ambiguous fall-back hour.
-                              <p key={note} className="md:col-span-2 text-text-secondary">
-                                Note: {note}.
-                              </p>
-                            ))}
-                            {event.kind === 'relocated' && (
-                              // Q3: one line naming what the move replaces.
-                              <p className="md:col-span-2 text-text-secondary">
-                                {movedFromLine(event.movedFrom)}
-                              </p>
-                            )}
+                          <div className="flex items-center gap-1.5">
+                            <Clock size={14} />
+                            {event.timeTbd
+                              ? 'TIME TBD'
+                              : `${event.startTime?.substring(0, 5)} - ${event.endTime?.substring(0, 5)}`}
                           </div>
+                          <div className="flex items-center gap-1.5 md:col-span-2">
+                            <MapPin size={14} />
+                            {event.location ?? 'Location TBD'}
+                          </div>
+                          {event.timingNotes?.map((note) => (
+                            // The feed's placed-event note: an ambiguous fall-back hour.
+                            <p key={note} className="md:col-span-2 text-text-secondary">
+                              Note: {note}.
+                            </p>
+                          ))}
+                          {event.kind === 'relocated' && (
+                            // Q3: one line naming what the move replaces.
+                            <p className="md:col-span-2 text-text-secondary">
+                              {movedFromLine(event.movedFrom)}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}

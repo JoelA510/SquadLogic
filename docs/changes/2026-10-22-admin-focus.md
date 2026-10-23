@@ -148,21 +148,22 @@ at once (AGENTS.md section 11).
 
 - **Migration `20261022030000`.** `admin_delete_team` is replaced first, from its latest body
   (`20261021030000`) with the RSVP delete and the `event_rsvps_deleted` and `team_messages_deleted`
-  counters removed. It also no longer locks the team's games `FOR UPDATE`: that lock existed only
-  so an RSVP to one of them could not commit after the delete. Then `upsert_team_event_rsvp`,
+  counters removed. It still locks the team's games `FOR UPDATE`, which keeps the game ids and
+  count it records equal to the rows the cascade removes. Then `upsert_team_event_rsvp`,
   `create_team_message`, the two read policies, the `event_rsvps_set_timestamp` trigger and both
   tables are dropped by exact name, with no CASCADE. The `team.rsvp_updated` and
   `team.message_created` audit actions stay registered for old audit rows.
 - **Not in the plan, forced by the drop.** `reconcile_prod_rls_drift()` named the chat table's read
   policy in its spec, so after the drop it would have failed. It is replaced from its latest body
   (`20261021020000`) without that table, and its smoke now counts 19 policies and 10 broad tables.
-  `team_messages` also leaves the `supabase_realtime` publication where it is a member. The revert
+  Its comment is restated with the new spec. `team_messages` also leaves the `supabase_realtime`
+  publication where it is a member. The revert
   puts it back where that publication exists, as `20251217000000` did. A comment in
   `persist_team_schedule` still names both tables. It is left alone, because changing it would mean
   replacing that function.
 - **The team page.** `useTeamPortal` reads neither table, opens no realtime channel, and drops
   `myPlayers` (the caller's own children, used only for RSVP). `get_team_roster` still returns
-  `is_my_child`, which R3 takes out with the guardian arms. `TeamRecordPage` shows the schedule at
+  `is_my_child`, which nothing reads any more; R3 takes it out with the guardian arms. `TeamRecordPage` shows the schedule at
   full width, with no RSVP column and no chat panel. The unused `rsvp_event` permission is
   removed. No feature flag, nav entry, notification, Edge Function or calendar code named either
   table.

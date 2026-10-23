@@ -369,7 +369,7 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/reporting.ts': 3,
   'tests/e2e/steps/scheduling_and_overrides.ts': 4,
   'tests/e2e/steps/team_and_roster.ts': 7,
-  'tests/e2e/steps/team_communication.ts': 2,
+  'tests/e2e/steps/team_communication.ts': 1,
   'tests/e2e/steps/visual_rbac_enforcement.ts': 1,
 };
 
@@ -379,7 +379,7 @@ describe('mock db writes :: nothing new may go past saveDB', () => {
     // A floor for a scanner that broke, not a count: the exact inventory is
     // pinned below. Lowered from 60 when M4.6 removed nine Pillar 1 writes (56
     // left), and from 50 when R1 removed the registration and compliance steps
-    // (47 left); R2 removed the RSVP practice seeder (46 left).
+    // (47 left); R2 removed the RSVP practice seeder and the twin seeder (45 left).
     expect(writes.length).toBeGreaterThanOrEqual(45);
     expect(new Set(writes.map((write) => write.file))).toContain(
       'frontend/src/lib/mockSupabaseClient.js'

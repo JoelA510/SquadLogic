@@ -77,47 +77,6 @@ Given(
 );
 
 Given(
-  'my child {string} is also on the {string} team',
-  async ({ page }, childName: string, teamName: string) => {
-    await waitForMockClient(page);
-    await page.evaluate(
-      ({ child, team, mockOrgId }) => {
-        const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-        const teamId = team.toLowerCase().replace(/\s+/g, '-');
-        const playerId = `player-${child.toLowerCase()}`;
-
-        db.players = db.players || [];
-        // CRITICAL FIX: Remove existing player to prevent duplicate keys
-        db.players = db.players.filter((p: Record<string, unknown>) => p.id !== playerId);
-        db.players.push({
-          id: playerId,
-          first_name: child,
-          last_name: 'Test',
-          organization_id: orgId,
-        });
-
-        db.team_players = db.team_players || [];
-        db.team_players = db.team_players.filter(
-          (tp: Record<string, unknown>) => tp.player_id !== playerId
-        );
-        db.team_players.push({ team_id: teamId, player_id: playerId });
-
-        db.profile_players = db.profile_players || [];
-        db.profile_players = db.profile_players.filter(
-          (pp: Record<string, unknown>) => pp.player_id !== playerId
-        );
-        db.profile_players.push({ profile_id: 'mock-parent-id', player_id: playerId });
-
-        localStorage.setItem('test_target_team_id', teamId);
-        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-      },
-      { child: childName, team: teamName, mockOrgId: MOCK_ORG_ID }
-    );
-  }
-);
-
-Given(
   'I am on the {string} page for the {string}',
   async ({ page }, pageName: string, teamName: string) => {
     const teamId =

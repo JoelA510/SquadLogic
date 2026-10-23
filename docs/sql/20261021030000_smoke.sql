@@ -14,7 +14,7 @@
 -- **Since 20261022030000 (plan docs/changes/2026-10-22-admin-focus.md, R2)**
 -- the head build this runs on has no RSVPs: `event_rsvps` and
 -- `upsert_team_event_rsvp` are dropped, and `admin_delete_team` no longer
--- removes or counts RSVPs or locks the team's games for them. The checks of
+-- removes or counts RSVPs. The checks of
 -- the opponent's game RSVP and the two RSVP races went with them;
 -- docs/sql/20261022030000_smoke.sql checks the delete without them.
 --

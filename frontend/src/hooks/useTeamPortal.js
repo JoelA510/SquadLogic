@@ -110,6 +110,10 @@ export function useTeamPortal(teamId) {
         setRosterUnavailable(null);
       }
 
+      // Declared, not read: the rows still carry `is_my_child` (the guardian
+      // arm of get_team_roster). Its one reader, the RSVP list, went with RSVP
+      // (R2); the field goes with the guardian arms in R3
+      // (docs/changes/2026-10-22-admin-focus.md).
       // Deduplicate roster by player ID to prevent React key collisions
       const uniqueRoster = [];
       const seenIds = new Set();

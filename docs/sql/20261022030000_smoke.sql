@@ -9,7 +9,8 @@
 --     `team_messages` is in no publication;
 --   * the audit history stays readable: `team.rsvp_updated` and
 --     `team.message_created` keep their `audit_actions` rows;
---   * `admin_delete_team` works without them: an admin deletes a team with a
+--   * `admin_delete_team` works without them (and still locks the team's games,
+--     so what it records is what the cascade removes): an admin deletes a team with a
 --     game, a series carrying a live exception and a rostered player; the
 --     team, its game and its series are gone, the exception is withdrawn on
 --     the record, and `team.deleted` carries no RSVP or chat counter but one
@@ -30,7 +31,9 @@
 BEGIN;
 
 -- The names the scan looks for, as whole words, in code (`--` comments
--- stripped): the two tables and the two functions.
+-- stripped): the two tables and the two functions. Declared blind spot: the
+-- strip is textual, so a `--` inside a string literal hides the rest of its
+-- line from the scan.
 CREATE FUNCTION pg_temp.r2_names_dropped(src text) RETURNS boolean
 LANGUAGE sql IMMUTABLE AS $f$
     SELECT regexp_replace(src, '--[^\n]*', '', 'g')
@@ -74,7 +77,7 @@ BEGIN
            AND p.proname IN ('upsert_team_event_rsvp', 'create_team_message')
         UNION ALL
         SELECT 'publication ' || pubname FROM pg_publication_tables
-         WHERE tablename IN ('event_rsvps', 'team_messages')
+         WHERE schemaname = 'public' AND tablename IN ('event_rsvps', 'team_messages')
     ) s;
     IF v_left IS NOT NULL THEN
         RAISE EXCEPTION 'objects 20261022030000 dropped are back: %', v_left;

@@ -4,7 +4,8 @@
 --
 --   * the two functions and the two tables are absent, no public function
 --     names them in code (its `--` comments aside: persist_team_schedule
---     narrates both in one), and the retired actions keep their
+--     narrates both in one; the strip is textual, so a `--` inside a string
+--     literal would hide the rest of its line), and the retired actions keep their
 --     `audit_actions` rows (old `audit_log` rows reference them);
 --   * the reads the team page makes (useTeamPortal and TeamRecordPage), as the
 --     team's current coach: the team, its game, its practice series and its

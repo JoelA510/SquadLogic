@@ -13,10 +13,10 @@
 --   * `admin_delete_team(uuid)` is replaced first, from its latest body
 --     (20261021030000) with only the RSVP and chat lines removed: it no longer
 --     deletes the opposing team's game RSVPs, no longer counts
---     `event_rsvps_deleted` or `team_messages_deleted` on `team.deleted`, and
---     no longer locks the team's games FOR UPDATE (that lock existed only so an
---     RSVP to one of them could not commit after the delete; the cascade still
---     takes the rows). Everything else is that body byte for byte: the
+--     `event_rsvps_deleted` or `team_messages_deleted` on `team.deleted`.
+--     It still locks the team's games FOR UPDATE: besides holding off an RSVP,
+--     the lock keeps the game ids and count it records equal to the rows the
+--     cascade removes. Everything else is that body byte for byte: the
 --     practice exceptions withdrawn, audited and archived, each series
 --     cancelled on the record, `players.team_id` cleared, a counter for every
 --     table the cascade empties. SECURITY DEFINER, search_path=public, as
@@ -177,12 +177,16 @@ BEGIN
         );
     END LOOP;
 
-    -- 3. The team's games, which the cascade deletes. (20261022030000: with
-    --    RSVPs dropped, nothing outside the cascade refers to a game.)
+    -- 3. The team's games, held until commit, so the game ids and count
+    --    team.deleted records are the rows the cascade removes (a concurrent
+    --    write cannot move a game off the team in between). 20261022030000:
+    --    their RSVPs are gone with the table.
     SELECT COALESCE(array_agg(g.id ORDER BY g.id), ARRAY[]::uuid[])
       INTO v_game_ids
-      FROM public.games g
-     WHERE g.home_team_id = p_team_id OR g.away_team_id = p_team_id;
+      FROM (SELECT id FROM public.games
+             WHERE home_team_id = p_team_id OR away_team_id = p_team_id
+             ORDER BY id
+               FOR UPDATE) g;
 
     -- 4. Players assigned through players.team_id (no foreign key), then the team.
     SELECT COALESCE(array_agg(p.id ORDER BY p.id), ARRAY[]::uuid[])
@@ -472,6 +476,9 @@ BEGIN
 END;
 $fn$;
 
+COMMENT ON FUNCTION public.reconcile_prod_rls_drift() IS
+    'Idempotent: creates the repo''s member/admin policies on the tables of migration 20260928000000 where missing (aborting on a same-named mismatch), drops "Enforce Org Membership: ALL" and "org_member_access" on practice_slots/field_subunits/scheduler_runs, then refuses any non-allowlisted non-admin write policy in public. Spec as of 20261022030000: scheduler_runs admin write split by command and the legacy import_jobs SELECT gone (20261018030000), coaches read by admins and the coach themselves (20261021020000), the team chat table dropped (20261022030000). Owner-only.';
+
 -- ---------------------------------------------------------------------------
 -- 3. The two functions, before the tables whose row types they name.
 -- ---------------------------------------------------------------------------
@@ -485,9 +492,13 @@ DROP FUNCTION public.create_team_message(uuid, text);
 
 DO $$
 BEGIN
+    -- A FOR ALL TABLES publication lists every table and cannot drop one; the
+    -- table drop below takes it out of such a publication by itself.
     IF EXISTS (
-        SELECT 1 FROM pg_publication_tables
-         WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'team_messages'
+        SELECT 1 FROM pg_publication_tables pt
+          JOIN pg_publication p ON p.pubname = pt.pubname
+         WHERE pt.pubname = 'supabase_realtime' AND NOT p.puballtables
+           AND pt.schemaname = 'public' AND pt.tablename = 'team_messages'
     ) THEN
         ALTER PUBLICATION supabase_realtime DROP TABLE public.team_messages;
         RAISE NOTICE 'team_messages removed from the supabase_realtime publication';

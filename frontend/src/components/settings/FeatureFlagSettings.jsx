@@ -9,6 +9,7 @@ import {
   FEATURE_CATALOG,
   FEATURE_DEFAULTS,
   GENDER_MODEL_KEY,
+  BUDDY_RULE_KEY,
 } from '../../constants/featureFlags.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import Toggle from '../ui/Toggle.jsx';
@@ -48,6 +49,22 @@ const FORMAT_OPTIONS = [
   { value: 'coed', title: 'Co-ed (combined)', examples: ['U8', 'U10', 'U12', 'U14'] },
 ];
 
+/** The league's buddy rule (`buddy_rule`), one value per option of `BUDDY_RULE_OPTIONS`. */
+const BUDDY_RULE_CHOICES = [
+  {
+    value: 'mutual',
+    label: 'Mutual requests only',
+    description:
+      'Two players are kept together only when each names the other. One-way requests are listed for review.',
+  },
+  {
+    value: 'one_way_best_effort',
+    label: 'One-way requests, best effort',
+    description:
+      'A one-way request is also placed together where the roster allows, when the named player listed no buddy.',
+  },
+];
+
 /**
  * Feature configuration panel ("FeatureControls" in the design prototype):
  * division format (split/co-ed) cards, the optional-features catalog, and
@@ -65,7 +82,7 @@ export default function FeatureFlagSettings({
   onSplitRegenerate = null,
 }) {
   const { updateFeatureFlags, loading, currentOrganization, featureFlags = {} } = useOrganization();
-  const { features, genderModel } = useFeatures();
+  const { features, genderModel, buddyRule } = useFeatures();
   const { user, isImpersonating } = useAuth();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
@@ -137,6 +154,14 @@ export default function FeatureFlagSettings({
   const handleToggle = (key, next) => {
     persist({ [key]: next }, 'settings.flags_updated');
   };
+
+  const chooseBuddyRule = (value) => {
+    if (value === buddyRule || saving) return;
+    persist({ [BUDDY_RULE_KEY]: value }, 'settings.flags_updated');
+  };
+
+  const buddyRuleChoice =
+    BUDDY_RULE_CHOICES.find((choice) => choice.value === buddyRule) ?? BUDDY_RULE_CHOICES[0];
 
   const chooseFormat = (value) => {
     if (value === genderModel || saving) return;
@@ -273,6 +298,33 @@ export default function FeatureFlagSettings({
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label className="section-title" htmlFor="buddy-rule-select" style={{ display: 'block' }}>
+          Buddy rule
+        </label>
+        <div className="card">
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <select
+              id="buddy-rule-select"
+              value={buddyRuleChoice.value}
+              onChange={(event) => chooseBuddyRule(event.target.value)}
+              disabled={saving}
+              aria-describedby="buddy-rule-description"
+              className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
+            >
+              {BUDDY_RULE_CHOICES.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            <div className="muted" style={{ fontSize: 12.5 }} id="buddy-rule-description">
+              {buddyRuleChoice.description}
+            </div>
           </div>
         </div>
       </div>

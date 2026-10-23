@@ -3,11 +3,6 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useEnterpriseMetrics } from '../contexts/AnalyticsContext.jsx';
 import {
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
   BarChart,
   Bar,
   XAxis,
@@ -59,7 +54,6 @@ export default function EnterpriseDashboard() {
   const [metrics, setMetrics] = useState({
     teams: 0,
     users: 0,
-    coaches: 0,
   });
   const [loading, setLoading] = useState(true);
   const [exporting, _setExporting] = useState(false);
@@ -82,12 +76,10 @@ export default function EnterpriseDashboard() {
         ]);
         if (pData) setPlayers(pData);
 
-        // Coach info mock from users count (stub)
         if (orgData) {
           setMetrics({
             teams: orgData.total_teams,
             users: orgData.total_users,
-            coaches: Math.floor(orgData.total_users * 0.4), // Stub calculation for coaches
           });
         }
       } catch (err) {
@@ -100,24 +92,6 @@ export default function EnterpriseDashboard() {
   }, [currentOrganization?.id]);
 
   const { aggregates, isLowSample, maskedFields } = useEnterpriseMetrics(players, orgSchema);
-
-  // Radar Metrics Calculation. There is no Compliance axis: paperwork
-  // compliance is not tracked (owner, 2026-10-22).
-  const radarData = useMemo(() => {
-    // 1. Staffing (Coaches to Teams ratio)
-    const staffingScore =
-      metrics.teams > 0 ? Math.min(100, (metrics.coaches / metrics.teams) * 100) : 90;
-
-    // 2. Balance & Skill Variability (Stub calculations returning realistic percentages)
-    const balanceScore = 88;
-    const skillVariabilityScore = 92;
-
-    return [
-      { subject: 'Staffing', A: Math.round(staffingScore), fullMark: 100 },
-      { subject: 'Balance', A: balanceScore, fullMark: 100 },
-      { subject: 'Skill Variability', A: skillVariabilityScore, fullMark: 100 },
-    ];
-  }, [metrics]);
 
   // Governance: Stabilize attribute options to prevent dropdown flicker
   const attributeOptions = useMemo(
@@ -209,53 +183,7 @@ export default function EnterpriseDashboard() {
       </div>
 
       {/* Visualizations Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Radar Chart */}
-        <div className="bg-bg-surface border border-border-subtle bg-bg-glass rounded-2xl p-6 shadow-md">
-          <h3 className="text-lg font-bold text-text-primary mb-6">Organization Readiness</h3>
-          <div className="h-80 w-full relative">
-            <AccessibleDataTable
-              title="Organization Readiness"
-              data={radarData}
-              columns={[
-                { key: 'subject', label: 'Metric' },
-                { key: 'A', label: 'Score (%)' },
-              ]}
-            />
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart
-                data={radarData}
-                outerRadius="70%"
-                role="img"
-                aria-label="Radar chart showing organization readiness across Staffing, Balance, and Skill Variability."
-              >
-                <PolarGrid stroke="var(--color-border-subtle)" />
-                <PolarAngleAxis
-                  dataKey="subject"
-                  tick={{ fill: 'var(--color-text-secondary)', fontSize: 13 }}
-                />
-                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                <Radar
-                  name="Organization"
-                  dataKey="A"
-                  stroke="var(--color-primary)"
-                  fill="var(--color-primary)"
-                  fillOpacity={0.4}
-                  animationDuration={800}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'var(--color-bg-surface)',
-                    borderColor: 'var(--color-border-subtle)',
-                    borderRadius: '12px',
-                  }}
-                  itemStyle={{ color: 'var(--color-text-primary)' }}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 gap-6">
         {/* Dynamic Attribute Chart */}
         <div className="bg-bg-surface border border-border-subtle bg-bg-glass rounded-2xl p-6 shadow-md flex flex-col relative">
           <div className="flex items-center justify-between mb-6">

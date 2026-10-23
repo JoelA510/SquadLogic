@@ -9,11 +9,18 @@
 -- 20261022020000, which is the fresh build's: both views present, as the
 -- definitive schema defines them, with that build's grants. `view_org_metrics`
 -- is restated unchanged. `view_league_standings` is dropped and recreated
--- without the `division` column the migration appended (CREATE OR REPLACE
--- cannot drop a column), then both views' grants are restated. It does NOT
--- leave the views dropped: that would leave a fresh build without two views
--- its own history creates. Production's literal earlier state (no views) is
--- the drift this migration repairs, not a state to return to.
+-- without the `division` and `season_settings_id` columns the migration
+-- appended (CREATE OR REPLACE cannot drop a column), then both views' grants
+-- are restated. It does NOT leave the views dropped: that would leave a fresh
+-- build without two views its own history creates.
+--
+-- **Production.** Run there, this leaves both views in place (without the two
+-- appended columns), not production's literal earlier state. That state, no
+-- views, is the drift this migration repairs: the Reports page's Active Teams
+-- read 0 and the Standings page failed in it. Should the views themselves
+-- ever need to go from production, drop them by hand instead of running this
+-- file:
+--   DROP VIEW public.view_league_standings, public.view_org_metrics;
 --
 -- Verified: the harness compares a fingerprint of both views (owner, ACL,
 -- options, definition and columns) after this revert with the one read off a

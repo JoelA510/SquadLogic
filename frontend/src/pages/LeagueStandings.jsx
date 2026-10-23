@@ -18,9 +18,25 @@ const parseScoreInput = (score) => {
 const getRpcScore = (data, key, fallback) =>
   data && Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback;
 
+// Divisions belong to a season, so the view holds an organization's teams from
+// every season: rank only the selected season's. With no season selected there
+// is nothing to rank.
+const fetchStandings = (organizationId, seasonId) =>
+  seasonId
+    ? supabase
+        .from('view_league_standings')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('season_settings_id', seasonId)
+        .order('division', { ascending: true })
+        .order('points', { ascending: false })
+        .order('goal_differential', { ascending: false })
+    : Promise.resolve({ data: [], error: null });
+
 export default function LeagueStandings() {
   const { user, isImpersonating } = useAuth();
-  const { currentOrganization, orgMember } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, orgMember } = useOrganization();
+  const seasonId = currentSeasonSetting?.id ?? null;
 
   const [standings, setStandings] = useState([]);
   const [games, setGames] = useState([]);
@@ -41,13 +57,10 @@ export default function LeagueStandings() {
       setError(null);
       try {
         // Load Standings View
-        const { data: standingsData, error: standingsErr } = await supabase
-          .from('view_league_standings')
-          .select('*')
-          .eq('organization_id', currentOrganization.id)
-          .order('division', { ascending: true })
-          .order('points', { ascending: false })
-          .order('goal_differential', { ascending: false });
+        const { data: standingsData, error: standingsErr } = await fetchStandings(
+          currentOrganization.id,
+          seasonId
+        );
 
         if (standingsErr) throw standingsErr;
         setStandings(standingsData || []);
@@ -80,7 +93,7 @@ export default function LeagueStandings() {
       }
     }
     loadData();
-  }, [currentOrganization?.id]);
+  }, [currentOrganization?.id, seasonId]);
 
   const handleScoreUpdate = async (gameId, homeScore, awayScore) => {
     if (!currentOrganization?.id) return;
@@ -118,13 +131,7 @@ export default function LeagueStandings() {
       );
 
       // Refresh Standings View since data changed
-      const { data: standingsData } = await supabase
-        .from('view_league_standings')
-        .select('*')
-        .eq('organization_id', currentOrganization.id)
-        .order('division', { ascending: true })
-        .order('points', { ascending: false })
-        .order('goal_differential', { ascending: false });
+      const { data: standingsData } = await fetchStandings(currentOrganization.id, seasonId);
 
       if (standingsData) setStandings(standingsData);
     } catch (err) {

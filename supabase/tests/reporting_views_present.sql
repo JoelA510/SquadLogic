@@ -6,19 +6,21 @@
 --     `view_league_standings` (the Standings page, LeagueStandings.jsx) exist
 --     as views with `security_invoker = true`;
 --   * their columns, in order, are the definitive schema's, plus
---     `view_league_standings.division` last: both pages read them with
---     `select('*')`, and the Standings page orders and groups by `division`;
+--     `view_league_standings.division` and `season_settings_id` last: both
+--     pages read them with `select('*')`, and the Standings page orders and
+--     groups by `division` and filters on `season_settings_id`;
 --   * authenticated can SELECT from both;
 --   * as Org A's admin: exactly one metrics row, Org A's, with its team and
 --     member counts (the Reports page's Active Teams), only Org A's team in
---     the standings, carrying its division's name; as anon: no rows from either.
+--     the standings, carrying its division's name and season; as anon: no rows
+--     from either.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(16);
+SELECT plan(17);
 
 -- ── 1. Shape and posture ───────────────────────────────────────────────────
 SELECT has_view('public', 'view_org_metrics', 'view_org_metrics exists');
@@ -40,8 +42,9 @@ SELECT is(
     (SELECT array_agg(attname::text ORDER BY attnum) FROM pg_attribute
       WHERE attrelid = to_regclass('public.view_league_standings') AND attnum > 0 AND NOT attisdropped),
     ARRAY['team_id', 'organization_id', 'team_name', 'division_id', 'games_played', 'wins', 'losses',
-          'draws', 'goals_for', 'goals_against', 'goal_differential', 'points', 'division'],
-    'view_league_standings columns, in order, are the definitive schema''s with division last');
+          'draws', 'goals_for', 'goals_against', 'goal_differential', 'points', 'division',
+          'season_settings_id'],
+    'view_league_standings columns, in order, are the definitive schema''s with division and season_settings_id last');
 
 SELECT ok(to_regclass('public.view_org_metrics') IS NOT NULL
           AND has_table_privilege('authenticated', 'public.view_org_metrics', 'SELECT'),
@@ -75,6 +78,12 @@ SELECT is((SELECT division FROM public.view_league_standings
             WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
     'Org A U10',
     'its division is the name of the team''s division, which the Standings page groups by');
+SELECT ok(coalesce((SELECT s.season_settings_id IS NOT NULL AND s.season_settings_id = d.season_settings_id
+                      FROM public.view_league_standings s
+                      JOIN public.teams t ON t.id = s.team_id
+                      JOIN public.divisions d ON d.id = t.division_id
+                     WHERE s.team_id = 'aaaaaaaa-0000-0000-0000-000000000001'), false),
+    'its season_settings_id is its division''s season, which the Standings page filters on');
 
 -- ── 3. anon reads nothing ──────────────────────────────────────────────────
 SET LOCAL role = 'anon';

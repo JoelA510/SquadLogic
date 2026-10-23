@@ -21,11 +21,14 @@
 -- definitions (20260331000000_definitive_schema.sql), `security_invoker =
 -- true`, so a reader sees only the rows RLS gives it on the tables beneath:
 --   * `view_org_metrics` exactly as defined there;
---   * `view_league_standings` as defined there plus one LAST column,
---     `division` (the team's division name, from a LEFT JOIN on `divisions`,
---     NULL for a team whose division the reader cannot see), which the
---     Standings page reads. Appended last, so CREATE OR REPLACE stays valid
---     over the existing view on a fresh build.
+--   * `view_league_standings` as defined there plus two LAST columns, from a
+--     LEFT JOIN on `divisions` (NULL for a team whose division the reader
+--     cannot see): `division`, the team's division name, which the Standings
+--     page orders and groups by; and `season_settings_id`, the division's
+--     season, which the page filters on (divisions belong to a season, so an
+--     organization's teams from earlier seasons stay in the view). Appended
+--     last, so CREATE OR REPLACE stays valid over the existing view on a fresh
+--     build.
 -- Then their grants, as a
 -- fresh build has them (read off a harness build at 20261022020000, not from
 -- the migrations' text): the migrations grant SELECT to authenticated, and
@@ -36,7 +39,8 @@
 -- security_invoker anon reads no rows of either (the pgTAP suite checks it).
 --
 -- On a fresh build this restates `view_org_metrics` and the ACL unchanged and
--- adds `division` to `view_league_standings`. In production it creates both.
+-- adds `division` and `season_settings_id` to `view_league_standings`. In
+-- production it creates both.
 --
 -- Reversible: docs/sql/20261023010000_revert.sql returns both views to how
 -- they stood at 20261022020000, dropping and recreating
@@ -101,11 +105,12 @@ SELECT
     COALESCE(SUM(gr.goals_against), 0) AS goals_against,
     COALESCE(SUM(gr.goals_for), 0) - COALESCE(SUM(gr.goals_against), 0) AS goal_differential,
     (COALESCE(SUM(gr.win), 0) * 3) + COALESCE(SUM(gr.draw), 0) AS points,
-    d.name AS division
+    d.name AS division,
+    d.season_settings_id
 FROM public.teams t
 LEFT JOIN public.divisions d ON d.id = t.division_id
 LEFT JOIN game_results gr ON gr.team_id = t.id
-GROUP BY t.id, t.organization_id, t.name, t.division_id, d.name;
+GROUP BY t.id, t.organization_id, t.name, t.division_id, d.name, d.season_settings_id;
 
 GRANT ALL ON public.view_org_metrics, public.view_league_standings
     TO anon, authenticated, service_role;

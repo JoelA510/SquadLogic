@@ -4294,9 +4294,17 @@ AS" \
 
 plant "M40 the standings view loses its division column" "$M40" \
   "COALESCE(SUM(gr.draw), 0) AS points,
-    d.name AS division
+    d.name AS division,
 " \
-  "COALESCE(SUM(gr.draw), 0) AS points
+  "COALESCE(SUM(gr.draw), 0) AS points,
+" \
+  "smoke 20261023010000"
+
+plant "M40 the standings view loses its season column" "$M40" \
+  "    d.name AS division,
+    d.season_settings_id
+" \
+  "    d.name AS division
 " \
   "smoke 20261023010000"
 

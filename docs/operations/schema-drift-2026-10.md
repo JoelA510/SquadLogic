@@ -390,8 +390,10 @@ migration (AGENTS.md rule 14).
 **Restored, 2026-10-23.** Migration `20261023010000_restore_reporting_views.sql`
 (owner approval 2026-10-23) recreates `view_org_metrics` exactly as
 `20260331000000_definitive_schema.sql` defines it, and `view_league_standings`
-as defined there plus one last column, `division` (the team's division name),
-which the Standings page orders and groups by and no earlier definition had.
+as defined there plus two last columns: `division` (the team's division name),
+which the Standings page orders and groups by and no earlier definition had,
+and `season_settings_id` (the division's season), which the page now filters
+on, so it ranks the selected season's teams rather than every season's.
 Both are `security_invoker`, with the grants a fresh build has (`anon`,
 `authenticated` and `service_role`, read off a harness build). In production it
 creates both views, so the Reports page's Active Teams and the Standings page

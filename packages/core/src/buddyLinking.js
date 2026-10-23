@@ -93,10 +93,16 @@ export function listsABuddy(player) {
  * Canonicalize buddy fields across a player list. Returns NEW player objects (inputs are
  * not mutated) with canonical `buddyId` set where a valid link exists, plus diagnostics.
  *
+ * `roster` (optional) is every imported player: buddy codes are grouped across it, so a code
+ * shared with a player outside `players` is reported for what it is (another division, or
+ * not in this program) rather than as entered by one player. Only two players of `players`
+ * in one division are ever linked, and a group with no player of `players` is not reported.
+ *
  * @param {any[]} players
+ * @param {{ roster?: any[] }} [options]
  * @returns {{ players: any[], diagnostics: BuddyLinkDiagnostic[] }}
  */
-export function normalizeBuddyLinks(players) {
+export function normalizeBuddyLinks(players, { roster } = {}) {
   const list = Array.isArray(players) ? players : [];
   /** @type {BuddyLinkDiagnostic[]} */
   const diagnostics = [];
@@ -121,7 +127,11 @@ export function normalizeBuddyLinks(players) {
   // Codes group case-insensitively, mirroring the import materialization.
   /** @type {Map<string, { code: string, members: any[] }>} */
   const codeGroups = new Map();
-  for (const player of list) {
+  const outsiders = (Array.isArray(roster) ? roster : []).filter((entry) => {
+    const id = coerceId(entry?.id);
+    return id !== undefined && !byId.has(id);
+  });
+  for (const player of [...list, ...outsiders]) {
     const code = getBuddyCode(player);
     if (!code) continue;
     const key = code.toLowerCase();
@@ -132,6 +142,7 @@ export function normalizeBuddyLinks(players) {
   /** @type {Map<string, string>} codeBuddyByPlayerId */
   const codeBuddyByPlayerId = new Map();
   for (const { code, members: group } of codeGroups.values()) {
+    if (!group.some((player) => byId.get(coerceId(player.id)) === player)) continue;
     const ids = group.map((player) => coerceId(player.id)).filter(Boolean);
     if (group.length === 1) {
       diagnostics.push({
@@ -163,6 +174,15 @@ export function normalizeBuddyLinks(players) {
     }
     const aId = coerceId(a.id);
     const bId = coerceId(b.id);
+    if (aId && bId && aId !== bId && (!byId.has(aId) || !byId.has(bId))) {
+      diagnostics.push({
+        code: 'buddy-code-unmatched',
+        severity: 'warning',
+        message: `buddy code "${code}" pairs a player who is not in this program`,
+        playerIds: ids,
+      });
+      continue;
+    }
     if (aId && bId && aId !== bId) {
       codeBuddyByPlayerId.set(aId, bId);
       codeBuddyByPlayerId.set(bId, aId);
@@ -419,9 +439,9 @@ function rosterNameKeys(player) {
  *   punctuation) and matched on first + last, preferred + last, or "Last, First";
  * - exactly one match in the requester's division of the program resolves it; two
  *   or more is ambiguous unless exactly one candidate's own request names the
- *   requester back (reciprocity is the evidence);
+ *   requester back, and names nobody else (reciprocity is the evidence);
  * - a match only outside the requester's division is `cross-division`; none is
- *   `not-found` (so is text with a digit in it that matches no registration id);
+ *   `not-found` (so is any text with a digit in it that matches no registration id);
  *   text naming more than one person, or only one name, is `unparsed`; a request
  *   matching the requester alone is `self`, and the requester's own name beside a
  *   namesake is `ambiguous` unless the namesake names the requester back.
@@ -516,11 +536,15 @@ export function resolveBuddyRequests({ players, roster } = /** @type {any} */ ({
       });
       continue;
     }
+    // Text with a digit in it is a registration id nobody has, never a name to read: names
+    // are compared without their digits, so "Bea Two 12345" would otherwise match Bea Two.
+    if (/\d/.test(text)) {
+      firstPass.set(id, { text, via: null, unparsed: false, matches: [], lastParts: [] });
+      continue;
+    }
     const parsed = parseNameRequest(text);
     if (!parsed) {
-      // Text with a digit in it is a registration id nobody has, not a name to read.
-      const looksLikeId = /\d/.test(text) && !MULTI_PERSON.test(text);
-      firstPass.set(id, { text, via: null, unparsed: !looksLikeId, matches: [], lastParts: [] });
+      firstPass.set(id, { text, via: null, unparsed: true, matches: [], lastParts: [] });
       continue;
     }
     const matches = [];
@@ -532,11 +556,20 @@ export function resolveBuddyRequests({ players, roster } = /** @type {any} */ ({
     firstPass.set(id, { text, via: 'name', unparsed: false, matches, lastParts: parsed.lastParts });
   }
 
-  /** Whether `candidateId`'s own request (or explicit buddy) names `requesterId`. */
+  /**
+   * Whether `candidateId`'s own request (or explicit buddy) names `requesterId` and nobody
+   * else in the candidate's division of the program. A reverse request that is itself a tie
+   * (it names the requester among namesakes) is no evidence of which player was meant.
+   */
   const namesBack = (candidateId, requesterId) => {
     const explicit = getCanonicalBuddyId(programById.get(candidateId));
     if (explicit !== undefined) return explicit === requesterId;
-    return firstPass.get(candidateId)?.matches.includes(requesterId) ?? false;
+    const division = entryById.get(candidateId)?.division;
+    const named = (firstPass.get(candidateId)?.matches ?? []).filter((match) => {
+      const entry = entryById.get(match);
+      return match !== candidateId && entry?.inProgram && entry.division === division;
+    });
+    return named.length === 1 && named[0] === requesterId;
   };
 
   /** @type {BuddyRequestResolution[]} */
@@ -666,9 +699,11 @@ const UNLINKED_DIAGNOSTIC_CODES = new Set([
  * @param {any[]} [params.requests] - `prepareTeamingInput(...).diagnostics.buddyRequests`
  * @param {any[]} [params.linkDiagnostics] - `prepareTeamingInput(...).diagnostics.buddyLinking`
  * @param {{ mutualPairs?: Array<{ playerIds: string[] }> }} [params.buddyDiagnostics] - the
- *   generator's `buddyDiagnosticsByDivision[division]`
+ *   generator's `buddyDiagnosticsByDivision[division]`; its pairs are merged with the mutual
+ *   pairs the prepared players hold, since a rerun reports late players' pairs only
  * @param {any[]} [params.teams] - the generator's `teamsByDivision[division]`
  * @param {any[]} [params.overflow] - the generator's `overflowByDivision[division]`
+ * @param {any[]} [params.roster] - every imported player, to name a candidate outside the program
  * @param {string} [params.buddyRule]
  */
 export function summarizeBuddyRequests({
@@ -678,10 +713,13 @@ export function summarizeBuddyRequests({
   buddyDiagnostics = {},
   teams = [],
   overflow = [],
+  roster = [],
   buddyRule = BUDDY_RULES.MUTUAL,
 } = {}) {
   /** @type {Map<string, string>} */
   const nameById = new Map();
+  /** @type {Map<string, string>} */
+  const divisionById = new Map();
   const noteName = (id, name) => {
     const key = coerceId(id);
     if (key && name && !nameById.has(key)) nameById.set(key, String(name));
@@ -703,7 +741,13 @@ export function summarizeBuddyRequests({
       if (!placement.has(String(player.id))) placement.set(String(player.id), null);
     }
   }
-  for (const player of players ?? []) noteName(player?.id, rosterDisplayName(player));
+  for (const player of [...(players ?? []), ...(roster ?? [])]) {
+    noteName(player?.id, rosterDisplayName(player));
+    const id = coerceId(player?.id);
+    if (id && !divisionById.has(id) && player?.division != null) {
+      divisionById.set(id, String(player.division));
+    }
+  }
   for (const request of requests ?? []) {
     noteName(request.playerId, request.playerName);
     noteName(request.targetId, request.targetName);
@@ -712,7 +756,22 @@ export function summarizeBuddyRequests({
   const teamOf = (id) => (placement.has(String(id)) ? placement.get(String(id)) : null);
   const requestOf = new Map((requests ?? []).map((request) => [request.playerId, request]));
 
-  const paired = (buddyDiagnostics?.mutualPairs ?? []).map(({ playerIds }) => {
+  // Every mutual pair of the run: the generator's (which, on an incremental rerun, names only
+  // late players) and each pair the prepared players hold, preserved ones included.
+  const pairKeys = new Map();
+  const addPair = (x, y) => {
+    const ids = [String(x), String(y)].sort();
+    pairKeys.set(ids.join('\u0000'), ids);
+  };
+  for (const { playerIds } of buddyDiagnostics?.mutualPairs ?? []) addPair(...playerIds);
+  const preparedById = new Map((players ?? []).map((player) => [String(player?.id), player]));
+  for (const player of players ?? []) {
+    const buddyId = getCanonicalBuddyId(player);
+    const partner = buddyId === undefined ? undefined : preparedById.get(buddyId);
+    if (partner && getCanonicalBuddyId(partner) === String(player.id)) addPair(player.id, buddyId);
+  }
+
+  const paired = [...pairKeys.values()].map((playerIds) => {
     const [a, b] = playerIds.map(String);
     const teamId = teamOf(a);
     const together = teamId !== null && teamId === teamOf(b);
@@ -767,12 +826,18 @@ export function summarizeBuddyRequests({
     if (!UNLINKED_DIAGNOSTIC_CODES.has(diagnostic?.code)) continue;
     const ids = (diagnostic.playerIds ?? []).map(String);
     for (const id of ids) {
+      // Listed for this program's players only; another program's player is a candidate.
+      if (preparedById.size > 0 && !preparedById.has(id)) continue;
       addUnresolved(
         id,
         diagnostic.code,
         ids
           .filter((other) => other !== id)
-          .map((other) => ({ playerId: other, name: nameOf(other), division: '' }))
+          .map((other) => ({
+            playerId: other,
+            name: nameOf(other),
+            division: divisionById.get(other) ?? '',
+          }))
       );
     }
   }

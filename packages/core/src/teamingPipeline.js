@@ -179,7 +179,7 @@ export function prepareTeamingInput({
   // Requests (registration ids and names) resolve first; the rule decides which link.
   const { requests } = resolveBuddyRequests({ players, roster });
   const ruled = applyBuddyRule({ players, requests, buddyRule });
-  const buddies = normalizeBuddyLinks(ruled.players);
+  const buddies = normalizeBuddyLinks(ruled.players, { roster });
 
   const linked = linkCoachesToPlayers({ players: buddies.players, coaches });
   const unclashed = breakCoachConflictPairs(linked.players);

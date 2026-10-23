@@ -11,6 +11,7 @@ import {
   summarizeBuddyRequests,
 } from '../packages/core/src/buddyLinking.js';
 import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
+import { generateTeams } from '../packages/core/src/teamGeneration.js';
 import { loadCoachRoster, loadSeason2026 } from '../packages/core/src/fixtures/index.js';
 
 test('getCanonicalBuddyId reads buddyId then buddy_id', () => {
@@ -381,6 +382,42 @@ describe('resolveBuddyRequests', () => {
     expect(a.candidates.map((c) => c.playerId)).toEqual(['b']);
   });
 
+  it('settles a tie only on a reverse request that names the requester alone (PR #647, Codex 1)', () => {
+    // Two Ada Ones and two Sam Lees. Ada (a1) asks for "Sam Lee" and Sam (s1) for "Ada One":
+    // each reverse request names two players, the requester among them, so neither is
+    // evidence of which one was meant. Both stay ambiguous; nobody is paired.
+    const { requests } = resolveBuddyRequests({
+      players: [
+        kid('a1', 'Ada', 'One', { buddy_request: 'Sam Lee' }),
+        kid('a2', 'Ada', 'One'),
+        kid('s1', 'Sam', 'Lee', { buddy_request: 'Ada One' }),
+        kid('s2', 'Sam', 'Lee'),
+      ],
+    });
+    expect(resolutionOf(requests, 'a1')).toMatchObject({
+      status: BUDDY_REQUEST_STATUS.AMBIGUOUS,
+      targetId: null,
+    });
+    expect(resolutionOf(requests, 's1')).toMatchObject({
+      status: BUDDY_REQUEST_STATUS.AMBIGUOUS,
+      targetId: null,
+    });
+  });
+
+  it('calls name text carrying a digit not-found, never a name match (PR #647, Codex 2)', () => {
+    const { requests } = resolveBuddyRequests({
+      players: [
+        kid('a', 'Ada', 'One', { buddy_request: 'Bea Two 12345' }),
+        kid('b', 'Bea', 'Two', { buddy_request: 'Ada One 67890' }),
+      ],
+    });
+    expect(resolutionOf(requests, 'a')).toMatchObject({
+      status: BUDDY_REQUEST_STATUS.NOT_FOUND,
+      targetId: null,
+    });
+    expect(resolutionOf(requests, 'b').status).toBe(BUDDY_REQUEST_STATUS.NOT_FOUND);
+  });
+
   it('calls a request naming the requester self', () => {
     const { requests } = resolveBuddyRequests({
       players: [kid('a', 'Ada', 'One', { buddy_request: 'Ada One' }), kid('b', 'Bea', 'Two')],
@@ -498,7 +535,116 @@ describe('a name request reaches prepareTeamingInput', () => {
   });
 });
 
+describe('buddy codes are judged against the whole roster (PR #647, Codex 6)', () => {
+  it('reports a code shared with a player in another division as cross-division, and links nobody', () => {
+    const players = [
+      kid('a', 'Ada', 'One', { mutual_buddy_code: 'PAIR-7' }),
+      kid('b', 'Bea', 'Two'),
+    ];
+    const roster = [
+      ...players,
+      { ...kid('z', 'Zed', 'Nine', { mutual_buddy_code: 'pair-7' }), division: 'U12' },
+    ];
+    const { players: out, diagnostics } = prepareTeamingInput({
+      players,
+      roster,
+      seasonYear: 2026,
+    });
+    expect(out.every((p) => p.buddyId === undefined)).toBe(true);
+    const codes = diagnostics.buddyLinking.map((d) => d.code);
+    expect(codes).toContain('cross-division-buddy');
+    expect(codes).not.toContain('buddy-code-unmatched');
+    expect(
+      diagnostics.buddyLinking.find((d) => d.code === 'cross-division-buddy').playerIds.sort()
+    ).toEqual(['a', 'z']);
+    // The list names the player in the other division, with that division.
+    const summary = summarizeBuddyRequests({
+      players: out,
+      requests: diagnostics.buddyRequests,
+      linkDiagnostics: diagnostics.buddyLinking,
+      roster,
+    });
+    expect(summary.unresolved.map((u) => u.playerId)).toEqual(['a']);
+    expect(summary.unresolved.find((u) => u.playerId === 'a')).toMatchObject({
+      reason: 'cross-division-buddy',
+      candidates: [{ playerId: 'z', name: 'Zed Nine', division: 'U12' }],
+    });
+  });
+
+  it('still links a code pair inside the program, and says nothing of other programs', () => {
+    const players = [
+      kid('a', 'Ada', 'One', { mutual_buddy_code: 'P1' }),
+      kid('b', 'Bea', 'Two', { mutual_buddy_code: 'p1' }),
+    ];
+    const roster = [
+      ...players,
+      { ...kid('y', 'Yan', 'Ten', { mutual_buddy_code: 'LONE' }), division: 'U12' },
+    ];
+    const { players: out, diagnostics } = prepareTeamingInput({
+      players,
+      roster,
+      seasonYear: 2026,
+    });
+    expect(out.map((p) => p.buddyId)).toEqual(['b', 'a']);
+    expect(diagnostics.buddyLinking).toEqual([]);
+  });
+});
+
 describe('summarizeBuddyRequests', () => {
+  it('keeps preserved pairs on a review-mode rerun (PR #647, Codex 5)', () => {
+    const fillers = Array.from({ length: 14 }, (_, i) => kid(`x${i}`, `Kid${i}`, `Filler${i}`));
+    const players = [
+      kid('a', 'Ada', 'One', { buddy_request: 'Bea Two' }),
+      kid('b', 'Bea', 'Two', { buddy_request: 'Ada One' }),
+      ...fillers,
+    ];
+    const divisionConfigs = {
+      U10: { id: 'U10', slotsPerWeek: 0, teamsCount: 2, maxRosterSize: 12 },
+    };
+    const first = generateTeams({
+      players: prepareTeamingInput({ players, seasonYear: 2026 }).players,
+      divisionConfigs,
+      random: () => 0.3,
+    });
+    const existingSnapshot = {
+      status: 'review',
+      teamsByDivision: {
+        U10: first.teamsByDivision.U10.map((team) => ({
+          id: team.id,
+          division: 'U10',
+          coachId: team.coachId,
+          players: team.players.map((p) => ({ id: p.id })),
+        })),
+      },
+    };
+    // A late registrant arrives; the pair is preserved where it was.
+    const prepared = prepareTeamingInput({
+      players: [...players, kid('z', 'Zed', 'Nine')],
+      seasonYear: 2026,
+    });
+    const rerun = generateTeams({
+      players: prepared.players,
+      divisionConfigs,
+      random: () => 0.3,
+      existingSnapshot,
+      generationMode: 'review',
+    });
+    // Meta-assertion: the generator's own diagnostics name late players only, so the pair
+    // is absent there; the list must not depend on them.
+    expect(rerun.buddyDiagnosticsByDivision.U10.mutualPairs).toEqual([]);
+    const summary = summarizeBuddyRequests({
+      players: prepared.players,
+      requests: prepared.diagnostics.buddyRequests,
+      linkDiagnostics: prepared.diagnostics.buddyLinking,
+      buddyDiagnostics: rerun.buddyDiagnosticsByDivision.U10,
+      teams: rerun.teamsByDivision.U10,
+      overflow: rerun.overflowByDivision.U10,
+    });
+    expect(summary.paired).toEqual([
+      expect.objectContaining({ playerIds: ['a', 'b'], together: true }),
+    ]);
+  });
+
   it('lists pairs with their team, one-way requests, and unresolved requests with candidates', () => {
     const prepared = prepareTeamingInput({
       players: [

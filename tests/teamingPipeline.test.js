@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import { PLACEMENT } from '../packages/core/src/playUp.js';
 import { generateTeams } from '../packages/core/src/teamGeneration.js';
+import { BuddyEvaluator } from '../packages/core/src/evaluators/index.js';
 
 const SEASON = 2026;
 const MODE = 'birth_year';
@@ -204,4 +205,60 @@ test('two coaching families as buddies give buddy-coach-conflict and no throw', 
     result.teamsByDivision.U10B.find((t) => t.players.some((p) => p.id === id));
   assert.equal(teamOf('a').coachId, 'coachA');
   assert.equal(teamOf('b').coachId, 'coachB');
+});
+
+test('an honoured one-way request steers placement whichever of the two is placed first (PR #647, Codex 4)', () => {
+  // Units are placed strongest first, ties in input order, so listing the requester first
+  // places them first. Requester and named player share the top rating, so both are placed
+  // before any team fills: what keeps them together is the score, not capacity. One-way stays
+  // best effort: never a unit.
+  const fillers = Array.from({ length: 16 }, (_, i) =>
+    named(`x${i}`, `Kid${i}`, `Filler${i}`, { skillRating: (i % 4) + 1 })
+  );
+  const divisionConfigs = {
+    U10B: { id: 'U10B', slotsPerWeek: 0, teamsCount: 3, maxRosterSize: 10 },
+  };
+  for (const [first, second] of [
+    ['requester', 'target'],
+    ['target', 'requester'],
+  ]) {
+    const people = {
+      requester: named('r', 'Ada', 'One', { buddy_request: 'Bea Two', skillRating: 5 }),
+      target: named('t', 'Bea', 'Two', { skillRating: 5 }),
+    };
+    for (let s = 0; s < 20; s += 1) {
+      const { players: out } = prepareTeamingInput({
+        players: [people[first], people[second], ...fillers],
+        divisions,
+        seasonYear: SEASON,
+        cutoffMode: MODE,
+        buddyRule: 'one_way_best_effort',
+      });
+      const result = generateTeams({ players: out, divisionConfigs, seed: `one-way-${s}` });
+      const teamOf = (id) =>
+        result.teamsByDivision.U10B.find((t) => t.players.some((p) => p.id === id))?.id;
+      assert.ok(teamOf('r'), 'the requester is placed');
+      assert.equal(teamOf('r'), teamOf('t'), `seed one-way-${s}, ${first} listed first`);
+      assert.deepEqual(result.buddyDiagnosticsByDivision.U10B.mutualPairs, []);
+    }
+  }
+});
+
+test('BuddyEvaluator scores the named player toward a placed requester, and has no data otherwise', () => {
+  const evaluator = new BuddyEvaluator();
+  const requester = { id: 'r', buddyId: 't' };
+  const target = { id: 't' };
+  const teamA = { id: 'A', players: [requester] };
+  const teamB = { id: 'B', players: [{ id: 'x' }] };
+  const allTeams = [teamA, teamB];
+  assert.equal(evaluator.evaluate({ player: target, team: teamA, allTeams }), 100);
+  assert.equal(evaluator.evaluate({ player: target, team: teamB, allTeams }), 0);
+  // Nobody named this player, and they named nobody: no data, a perfect fit everywhere.
+  const loner = { id: 'l' };
+  assert.equal(evaluator.evaluate({ player: loner, team: teamA, allTeams }), 100);
+  assert.equal(evaluator.evaluate({ player: loner, team: teamB, allTeams }), 100);
+  // The requester's own scoring is unchanged: toward the named player once placed.
+  const placed = [{ id: 'A', players: [target] }, teamB];
+  assert.equal(evaluator.evaluate({ player: requester, team: placed[0], allTeams: placed }), 100);
+  assert.equal(evaluator.evaluate({ player: requester, team: teamB, allTeams: placed }), 0);
 });

@@ -942,6 +942,7 @@ export default function TeamAnalysisPage() {
                   buddyDiagnostics: generated.buddyDiagnosticsByDivision?.[selectedProgramKey],
                   teams: generated.teamsByDivision?.[selectedProgramKey],
                   overflow: generated.overflowByDivision?.[selectedProgramKey],
+                  roster: buddyRoster,
                   buddyRule,
                 }),
               },

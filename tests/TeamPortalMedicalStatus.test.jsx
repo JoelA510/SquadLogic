@@ -69,11 +69,6 @@ describe('TeamRecordPage medical clearance', () => {
         },
       ],
       events: [],
-      rsvps: [],
-      messages: [],
-      myPlayers: [],
-      updateRsvp: vi.fn(),
-      sendMessage: vi.fn(),
     };
   });
 

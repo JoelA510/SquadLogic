@@ -698,7 +698,7 @@ function CoachDashboard() {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 15 }}>{team.name}</div>
                     <div className="muted" style={{ fontSize: 12.5 }}>
-                      Your team — open it for the roster, schedule, RSVPs, and chat.
+                      Your team — open it for the roster and schedule.
                     </div>
                   </div>
                   <Link to={`/team/${team.id}`} aria-label={`Open ${team.name}`}>

@@ -1,21 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import PropTypes from 'prop-types';
 import { PRACTICE_CHANGES_UNREAD_TEXT, useTeamPortal } from '../hooks/useTeamPortal.js';
-import {
-  Calendar,
-  MessageSquare,
-  Send,
-  Check,
-  X,
-  Minus,
-  MapPin,
-  Clock,
-  RefreshCw,
-  Shield,
-  Target,
-  UserRoundCheck,
-} from 'lucide-react';
+import { Calendar, MapPin, Clock, RefreshCw, Shield, Target, UserRoundCheck } from 'lucide-react';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import Button from '../components/ui/Button.jsx';
 import Modal from '../components/ui/Modal.jsx';
@@ -61,43 +48,22 @@ function movedFromLine(movedFrom) {
 }
 
 /**
- * Whether an event takes an RSVP here. Never on a TIME TBD date (Q3): the RSVP
- * RPC (`upsert_team_event_rsvp`, 8.6 3b PR 12d, plan R6) refuses one with
- * 22023. A moved practice does take one, keyed on (assignment id, **new**
- * date) -- `event.id` is the assignment id and `event.date` the relocated
- * date -- which is exactly the pair the RPC accepts; it refuses the original
- * date the move removed (Q4).
- */
-const rsvpOpen = (event) => !event.timeTbd;
-
-/**
  * Team record — the old Team Portal absorbed into the Lightning-class
  * record layout: hero (name, division, roster size, calendar subscribe)
- * + tabs Schedule (events, RSVPs, team chat), Roster, Staff, Balance.
- * All portal capabilities (calendar feed, RSVP, messages, medical status)
- * are reused, not forked.
+ * + tabs Schedule, Roster, Staff, Balance. The portal's capabilities
+ * (calendar feed, medical status) are reused, not forked. Availability
+ * marking (RSVP) and team chat were removed (20261022030000; plan
+ * docs/changes/2026-10-22-admin-focus.md, R2): families reach the league
+ * through its registration platform, not here.
  */
 export default function TeamRecordPage() {
   const { teamId } = useParams();
-  const {
-    loading,
-    error,
-    team,
-    roster,
-    rosterUnavailable,
-    events,
-    practiceChangesUnread,
-    rsvps,
-    messages,
-    myPlayers,
-    updateRsvp,
-    sendMessage,
-  } = useTeamPortal(teamId);
+  const { loading, error, team, roster, rosterUnavailable, events, practiceChangesUnread } =
+    useTeamPortal(teamId);
   const { can, PERMISSIONS } = usePermission();
   const { isEnabled, genderModel } = useFeatures();
 
   const [tab, setTab] = useState('schedule');
-  const [chatInput, setChatInput] = useState('');
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
   // Who may regenerate the calendar link: an admin or the team's current
   // coach (rotate_calendar_token, 20261021020000). Asked only once the dialog
@@ -105,11 +71,6 @@ export default function TeamRecordPage() {
   const { coachesTeam } = useScorableGames({ enabled: calendarModalOpen });
   const [staff, setStaff] = useState(/** @type {any[] | null} */ (null));
   const [staffError, setStaffError] = useState(false);
-  const chatEndRef = useRef(null);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   // Staff tab: every current coach, through the server-side read
   // (20261021010000), which admits admins, the team's current coaches and its
@@ -145,14 +106,6 @@ export default function TeamRecordPage() {
 
   if (loading) return <LoadingScreen />;
   if (error) return <div className="p-8 text-status-error glass-panel">Error: {error}</div>;
-
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    const message = chatInput.trim();
-    if (!message) return;
-    sendMessage(message);
-    setChatInput('');
-  };
 
   const isAdminish = can(PERMISSIONS.MANAGE_ALL_TEAMS);
   const divisionLabel = team?.division?.name
@@ -238,8 +191,8 @@ export default function TeamRecordPage() {
 
       <div style={{ padding: '20px 0 40px' }}>
         {tab === 'schedule' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-6">
+          <div>
+            <div className="space-y-6">
               <h2 className="text-2xl font-display font-bold flex items-center gap-2">
                 <Calendar className="text-color-primary" />
                 Team Schedule
@@ -316,147 +269,10 @@ export default function TeamRecordPage() {
                             )}
                           </div>
                         </div>
-
-                        <div className="flex flex-col gap-3 min-w-[200px]">
-                          {myPlayers.length > 0 && rsvpOpen(event) ? (
-                            <div className="space-y-3">
-                              <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
-                                Your RSVPs
-                              </p>
-                              {myPlayers.map((player) => {
-                                const rsvp = rsvps.find(
-                                  (r) =>
-                                    r.player_id === player.id &&
-                                    r.reference_id === event.id &&
-                                    r.occurrence_date === event.date
-                                );
-
-                                return (
-                                  <div
-                                    key={player.id}
-                                    className="flex flex-col gap-1.5 p-2 rounded bg-bg-surface/30 border border-border-subtle"
-                                  >
-                                    <span className="text-xs font-semibold text-text-primary px-1">
-                                      {player.first_name} {player.last_name}
-                                    </span>
-                                    <div className="flex gap-2">
-                                      <RsvpButton
-                                        active={rsvp?.status === 'attending'}
-                                        type="attending"
-                                        onClick={() =>
-                                          updateRsvp(
-                                            player.id,
-                                            event.id,
-                                            event.type,
-                                            event.date,
-                                            'attending'
-                                          )
-                                        }
-                                      />
-                                      <RsvpButton
-                                        active={rsvp?.status === 'declined'}
-                                        type="declined"
-                                        onClick={() =>
-                                          updateRsvp(
-                                            player.id,
-                                            event.id,
-                                            event.type,
-                                            event.date,
-                                            'declined'
-                                          )
-                                        }
-                                      />
-                                      <RsvpButton
-                                        active={rsvp?.status === 'maybe'}
-                                        type="maybe"
-                                        onClick={() =>
-                                          updateRsvp(
-                                            player.id,
-                                            event.id,
-                                            event.type,
-                                            event.date,
-                                            'maybe'
-                                          )
-                                        }
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="h-full flex items-center justify-end">
-                              <span className="text-xs text-text-muted">
-                                {event.timeTbd
-                                  ? event.date
-                                    ? 'RSVP opens once a time is set'
-                                    : 'RSVP opens once a date is set'
-                                  : 'Viewing as Guest/Coach'}
-                              </span>
-                            </div>
-                          )}
-                        </div>
                       </div>
                     </div>
                   ))
                 )}
-              </div>
-            </div>
-
-            <div className="lg:col-span-1 flex flex-col h-[700px]">
-              <h2 className="text-2xl font-display font-bold flex items-center gap-2 mb-6">
-                <MessageSquare className="text-color-primary" />
-                Team Chat
-              </h2>
-
-              <div className="glass-panel p-0 flex flex-col flex-grow overflow-hidden">
-                <div className="flex-grow overflow-y-auto p-4 space-y-4">
-                  {messages.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-text-muted text-sm italic">
-                      No messages yet. Say hello!
-                    </div>
-                  ) : (
-                    messages.map((msg) => (
-                      <div key={msg.id} className="flex flex-col gap-1">
-                        <div className="flex justify-between items-baseline">
-                          <span className="text-xs font-bold text-color-primary">
-                            {msg.author?.full_name}
-                          </span>
-                          <span className="text-[10px] text-text-muted">
-                            {new Date(msg.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        </div>
-                        <div className="bg-bg-surface p-3 rounded-lg rounded-tl-none border border-border-subtle text-sm">
-                          {msg.content}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
-
-                <form
-                  onSubmit={handleSendMessage}
-                  className="p-4 bg-bg-surface/50 border-t border-border-subtle flex gap-2"
-                >
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Type a message..."
-                    className="glass-input flex-grow text-sm"
-                  />
-                  <button
-                    type="submit"
-                    aria-label="Send team message"
-                    className="relative z-20 glass-button p-2 flex items-center justify-center"
-                  >
-                    <Send size={18} />
-                  </button>
-                </form>
               </div>
             </div>
           </div>
@@ -806,50 +622,6 @@ CalendarModal.propTypes = {
   }),
   canRotate: PropTypes.bool,
   onClose: PropTypes.func.isRequired,
-};
-
-function RsvpButton({ active, type, onClick }) {
-  const configs = {
-    attending: {
-      icon: Check,
-      color: 'text-status-success',
-      bg: 'bg-status-success-bg',
-      label: 'Going',
-    },
-    declined: { icon: X, color: 'text-status-error', bg: 'bg-status-error-bg', label: 'Not Going' },
-    maybe: {
-      icon: Minus,
-      color: 'text-status-warning-text',
-      bg: 'bg-status-warning-bg',
-      label: 'Maybe',
-    },
-  };
-
-  const config = configs[type];
-  const Icon = config.icon;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`relative z-20 flex-1 flex flex-col items-center gap-1 p-2 rounded transition-all duration-200 ${
-        active
-          ? `${config.bg} ${config.color} border-current scale-105`
-          : 'bg-bg-surface/20 text-text-muted border-transparent grayscale hover:grayscale-0 hover:bg-bg-surface/40'
-      } border`}
-      title={config.label}
-    >
-      <Icon size={16} aria-hidden="true" />
-      <span className="text-[9px] font-bold uppercase">{config.label}</span>
-    </button>
-  );
-}
-
-RsvpButton.propTypes = {
-  active: PropTypes.bool.isRequired,
-  type: PropTypes.oneOf(['attending', 'declined', 'maybe']).isRequired,
-  onClick: PropTypes.func.isRequired,
 };
 
 /**

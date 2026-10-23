@@ -28,11 +28,11 @@ const ALTER_ENUM = /alter\s+type\s+(?:public\.)?day_of_week\b/i;
 
 /** Source roots whose inline weekday literals must follow a core order. */
 const SCAN_ROOTS = ['frontend/src', 'packages/core/src'];
-/** The inline copies the census found; the scan must find at least these. */
-const KNOWN_INLINE = [
-  'frontend/src/lib/mockSupabaseClient.js',
-  'frontend/src/pages/FieldManagementPage.jsx',
-];
+/**
+ * The inline copies the census found; the scan must find at least these. The
+ * mock's copy went with its RSVP arm (20261022030000, R2).
+ */
+const KNOWN_INLINE = ['frontend/src/pages/FieldManagementPage.jsx'];
 const DAY_CODES = new Set(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
 /**
  * An array literal of five or more short lowercase strings. Kept when at least

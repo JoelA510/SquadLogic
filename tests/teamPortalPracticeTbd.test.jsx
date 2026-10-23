@@ -91,11 +91,6 @@ beforeEach(() => {
     team: { name: 'Tigers', division: { name: 'U10', season: {} } },
     roster: [],
     events: expandPractices(ROWS, [], 'America/Los_Angeles'),
-    rsvps: [],
-    messages: [],
-    myPlayers: [],
-    updateRsvp: vi.fn(),
-    sendMessage: vi.fn(),
   };
 });
 

@@ -28,10 +28,6 @@ import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
-import {
-  practiceRangeBounds,
-  practiceRangeLowerBound,
-} from '@squadlogic/core/utils/practiceOccurrences.js';
 import { ADMIN_ROLES } from '../constants/permissions.js';
 
 const mockId = (prefix = '') =>
@@ -353,30 +349,6 @@ const initialMockData = {
       tbd_reason: 'contended',
       cause_kind: 'blackout',
       withdrawn_at: '2025-02-20T00:00:00.000Z',
-    },
-  ],
-  event_rsvps: [
-    {
-      id: 'rsvp-1',
-      organization_id: MOCK_ORG_ID,
-      team_id: '00000000-0000-0000-0000-000000000001',
-      player_id: 'player-1',
-      reference_id: 'pa-1',
-      event_type: 'practice',
-      occurrence_date: '2025-01-07',
-      status: 'attending',
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'rsvp-2',
-      organization_id: MOCK_ORG_ID,
-      team_id: '00000000-0000-0000-0000-000000000001',
-      player_id: 'player-2',
-      reference_id: 'pa-1',
-      event_type: 'practice',
-      occurrence_date: '2025-01-07',
-      status: 'pending',
-      updated_at: new Date().toISOString(),
     },
   ],
   locations: [{ id: 'loc-1', organization_id: MOCK_ORG_ID, name: 'Central Park' }],
@@ -1358,99 +1330,6 @@ const mockPruneEmptyScenarios = (db, orgId, scenarioIds, destroy) => {
   return doomed.length;
 };
 
-const RSVP_DAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-
-/**
- * The practice-exception half of `upsert_team_event_rsvp`, as 20261005000000
- * reads it (8.6 3b PR 12d, plan R7 mirroring R6). Windows are read by core
- * `practiceRangeBounds` / `practiceRangeLowerBound`, the 12a helper's own
- * readers, so the mock has no range parser of its own for them.
- *
- * Over the LIVE exceptions on the team's assignment (`withdrawn_at == null`,
- * whatever organisation or team they name):
- * - a window whose lower bound does not read refuses every date of the row;
- * - two or more covering the date refuse it (the helper's CONFLICT);
- * - one covering it: `time_tbd` and an open upper bound refuse; a bounded
- *   `relocated` accepts only the relocated slot's weekday inside the window
- *   and the row's own bounded range (Q9), on a row whose slot exists, for an
- *   exception naming the organisation and the team;
- * - none covering it: `series`, and the caller's unchanged series check rules.
- *
- * A reference that is not the team's own assignment is `series` too, so the
- * caller's 42501 answers it exactly as before.
- *
- * @param {Record<string, any>} db
- * @param {{ orgId: any, teamId: any, referenceId: any, date: string }} input
- * @returns {{ verdict: 'series' | 'accept' } | { verdict: 'refuse', message: string }}
- */
-export const mockRsvpPracticeException = (db, { orgId, teamId, referenceId, date }) => {
-  const row = (db.practice_assignments || []).find(
-    (a) =>
-      String(a.id) === String(referenceId) &&
-      String(a.team_id) === String(teamId) &&
-      String(a.organization_id ?? orgId) === String(orgId)
-  );
-  if (!row) return { verdict: 'series' };
-  const live = (db.practice_exceptions || []).filter(
-    (e) => String(e.assignment_id) === String(row.id) && e.withdrawn_at == null
-  );
-  const read = live.map((e) => ({
-    e,
-    whole: practiceRangeBounds(e.window),
-    lower: practiceRangeLowerBound(e.window),
-  }));
-  if (read.some((w) => w.lower === null)) {
-    return {
-      verdict: 'refuse',
-      message: `Practice ${referenceId} has a saved change whose dates cannot be read, so no date of it takes an RSVP`,
-    };
-  }
-  const covering = read.filter(
-    (w) => date >= w.lower.first && (w.whole === null || date <= w.whole.last)
-  );
-  if (covering.length === 0) return { verdict: 'series' };
-  if (covering.length > 1) {
-    return {
-      verdict: 'refuse',
-      message: `Practice ${referenceId} on ${date} is covered by ${covering.length} saved changes at once, so it takes no RSVP`,
-    };
-  }
-  const [{ e, whole }] = covering;
-  if (e.kind === 'time_tbd') {
-    return {
-      verdict: 'refuse',
-      message: `Practice ${referenceId} on ${date} falls inside a TIME TBD change (no confirmed time), so it takes no RSVP yet`,
-    };
-  }
-  if (e.kind !== 'relocated' || whole === null) {
-    return {
-      verdict: 'refuse',
-      message: `Practice ${referenceId} on ${date} is under a saved change with no end date, so it takes no RSVP`,
-    };
-  }
-  const slotOf = (id) =>
-    (db.practice_slots || []).find((slot) => id != null && String(slot.id) === String(id));
-  // The row's own slot as `slotDayForAssignment` finds it: embedded, or by id.
-  const rowSlot = row.slot || slotOf(row.practice_slot_id || row.slot_id);
-  const movedTo = slotOf(e.practice_slot_id);
-  const rowRange = practiceRangeBounds(row.effective_date_range);
-  const weekday = RSVP_DAY_CODES[new Date(`${date}T00:00:00Z`).getUTCDay()];
-  const moved =
-    rowSlot !== undefined &&
-    movedTo !== undefined &&
-    String(e.organization_id) === String(orgId) &&
-    String(e.team_id) === String(teamId) &&
-    rowRange !== null &&
-    date >= rowRange.first &&
-    date <= rowRange.last &&
-    String(movedTo.day_of_week ?? '').toLowerCase() === weekday;
-  if (moved) return { verdict: 'accept' };
-  return {
-    verdict: 'refuse',
-    message: `Practice ${referenceId} on ${date} was moved by a saved change; RSVP to the moved practice's date instead`,
-  };
-};
-
 const saveDB = (db) => {
   liftMockTombstonesForPresentRows(db);
   if (typeof window !== 'undefined') {
@@ -1862,13 +1741,6 @@ const createMockQuery = (table, data = null) => {
               : null;
             return { ...item, division: division ? { ...division, season: season || null } : null };
           });
-        }
-        if (table === 'teams' && queryContent.includes('event_rsvps')) {
-          const rsvps = getMockData('event_rsvps');
-          results = results.map((item) => ({
-            ...item,
-            event_rsvps: rsvps.filter((r) => String(r.team_id) === String(item.id)) || [],
-          }));
         }
         if (
           table === 'games' &&
@@ -2298,17 +2170,7 @@ export const mockSupabase = {
         const eventsToFire = [];
 
         newRecords.forEach((rec) => {
-          let idx = -1;
-          if (table === 'event_rsvps') {
-            idx = existing.findIndex(
-              (item) =>
-                String(item.player_id) === String(rec.player_id) &&
-                String(item.reference_id) === String(rec.reference_id) &&
-                String(item.occurrence_date) === String(rec.occurrence_date)
-            );
-          } else {
-            idx = existing.findIndex((item) => String(item.id) === String(rec.id));
-          }
+          const idx = existing.findIndex((item) => String(item.id) === String(rec.id));
 
           const oldRecord = idx >= 0 ? { ...existing[idx] } : null;
           if (idx >= 0) {
@@ -3033,233 +2895,6 @@ export const mockSupabase = {
       saveDB(db);
 
       return { data: { ...row, changed }, error: null };
-    }
-
-    if (MOCK_CAPABLE_BUILD && ['upsert_team_event_rsvp', 'create_team_message'].includes(name)) {
-      const p = params || {};
-      const session =
-        typeof window !== 'undefined'
-          ? JSON.parse(sessionStorage.getItem('__MOCK_SESSION__') || 'null')
-          : null;
-      const userId = session?.user?.id;
-      const team = (db.teams || []).find((item) => String(item.id) === String(p.p_team_id));
-      const orgId = team?.organization_id;
-      const member = (db.organization_members || []).find(
-        (item) =>
-          String(item.organization_id) === String(orgId) &&
-          String(item.profile_id) === String(userId)
-      );
-      const isAdmin = ADMIN_ROLES.includes(String(member?.role || ''));
-      const isParentOnTeam = () =>
-        (db.profile_players || []).some(
-          (profilePlayer) =>
-            String(profilePlayer.profile_id) === String(userId) &&
-            (db.team_players || []).some(
-              (teamPlayer) =>
-                String(teamPlayer.team_id) === String(p.p_team_id) &&
-                String(teamPlayer.player_id) === String(profilePlayer.player_id)
-            )
-        );
-      const isAssignedCoach = () =>
-        (db.coaches || []).some(
-          (coach) =>
-            String(coach.organization_id) === String(orgId) &&
-            [coach.user_id, coach.profile_id].map(String).includes(String(userId)) &&
-            (String(coach.id) === String(team?.coach_id) ||
-              (team?.assistant_coach_ids || []).map(String).includes(String(coach.id)))
-        );
-      const audit = (action, resourceType, resourceId, metadata) => {
-        db.audit_log = db.audit_log || [];
-        db.audit_log.push({
-          id: mockId(),
-          organization_id: orgId,
-          user_id: userId,
-          action,
-          resource_type: resourceType,
-          resource_id: resourceId,
-          metadata,
-          created_at: new Date().toISOString(),
-        });
-      };
-
-      if (!userId || !team || !member) {
-        return { data: null, error: { message: 'Team is outside the caller organization' } };
-      }
-
-      if (name === 'upsert_team_event_rsvp') {
-        if (!['game', 'practice'].includes(p.p_event_type)) {
-          return { data: null, error: { message: 'event_type must be game or practice' } };
-        }
-        if (!['attending', 'declined', 'maybe'].includes(p.p_status)) {
-          return { data: null, error: { message: 'status must be attending, declined, or maybe' } };
-        }
-
-        const playerOnTeam = (db.players || []).some(
-          (player) =>
-            String(player.id) === String(p.p_player_id) &&
-            String(player.organization_id) === String(orgId) &&
-            (db.team_players || []).some(
-              (teamPlayer) =>
-                String(teamPlayer.team_id) === String(p.p_team_id) &&
-                String(teamPlayer.player_id) === String(p.p_player_id)
-            )
-        );
-        if (!playerOnTeam) {
-          return { data: null, error: { message: 'Player is outside the requested team' } };
-        }
-
-        const canManagePlayer =
-          isAdmin ||
-          (db.profile_players || []).some(
-            (profilePlayer) =>
-              String(profilePlayer.profile_id) === String(userId) &&
-              String(profilePlayer.player_id) === String(p.p_player_id)
-          );
-        if (!canManagePlayer) {
-          return { data: null, error: { message: 'Caller cannot manage RSVP for this player' } };
-        }
-
-        const normalizeDate = (value) => String(value || '').slice(0, 10);
-        const rangeContainsDate = (range, date) => {
-          const [start, end] = String(range || '')
-            .replace(/[()[\]]/g, '')
-            .split(',');
-          return Boolean(start && end && date >= start && date < end);
-        };
-        const dayCodeForDate = (date) => {
-          const day = new Date(`${date}T00:00:00Z`).getUTCDay();
-          return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][day];
-        };
-        const slotDayForAssignment = (assignment) => {
-          const slot =
-            assignment.slot ||
-            (db.practice_slots || []).find(
-              (practiceSlot) =>
-                String(practiceSlot.id) ===
-                String(assignment.practice_slot_id || assignment.slot_id)
-            );
-          return String(assignment.day_of_week || slot?.day_of_week || '').toLowerCase();
-        };
-
-        const referenceAllowed =
-          p.p_event_type === 'game'
-            ? (db.games || []).some((game) => {
-                const gameSlot = (db.game_slots || []).find(
-                  (slot) => String(slot.id) === String(game.game_slot_id)
-                );
-                const gameDate = normalizeDate(
-                  gameSlot?.slot_date || gameSlot?.start || game.start_time
-                );
-                return (
-                  String(game.id) === String(p.p_reference_id) &&
-                  String(game.organization_id) === String(orgId) &&
-                  [game.home_team_id, game.away_team_id]
-                    .map(String)
-                    .includes(String(p.p_team_id)) &&
-                  gameDate === normalizeDate(p.p_occurrence_date)
-                );
-              })
-            : (db.practice_assignments || []).some(
-                (assignment) =>
-                  String(assignment.id) === String(p.p_reference_id) &&
-                  String(assignment.team_id) === String(p.p_team_id) &&
-                  rangeContainsDate(assignment.effective_date_range, p.p_occurrence_date) &&
-                  slotDayForAssignment(assignment) === dayCodeForDate(p.p_occurrence_date)
-              );
-        // 8.6 3b PR 12d (plan R7): the saved practice exceptions, as
-        // 20261005000000 reads them. The series check above is unchanged.
-        const byException =
-          p.p_event_type === 'practice'
-            ? mockRsvpPracticeException(db, {
-                orgId,
-                teamId: p.p_team_id,
-                referenceId: p.p_reference_id,
-                date: normalizeDate(p.p_occurrence_date),
-              })
-            : null;
-        if (byException?.verdict === 'refuse') {
-          return { data: null, error: { code: '22023', message: byException.message } };
-        }
-        if (byException?.verdict !== 'accept' && !referenceAllowed) {
-          return {
-            data: null,
-            error: { message: 'Event reference is outside the requested team' },
-          };
-        }
-
-        db.event_rsvps = db.event_rsvps || [];
-        const existingIndex = db.event_rsvps.findIndex(
-          (rsvp) =>
-            String(rsvp.player_id) === String(p.p_player_id) &&
-            String(rsvp.reference_id) === String(p.p_reference_id) &&
-            String(rsvp.occurrence_date) === String(p.p_occurrence_date)
-        );
-        const previous = existingIndex >= 0 ? { ...db.event_rsvps[existingIndex] } : null;
-        const rsvp = {
-          ...(previous || {}),
-          id: previous?.id || mockId(),
-          organization_id: orgId,
-          team_id: p.p_team_id,
-          player_id: p.p_player_id,
-          reference_id: p.p_reference_id,
-          event_type: p.p_event_type,
-          occurrence_date: p.p_occurrence_date,
-          status: p.p_status,
-          updated_at: new Date().toISOString(),
-        };
-        const changed = !previous || previous.status !== rsvp.status;
-        if (existingIndex >= 0) {
-          db.event_rsvps[existingIndex] = rsvp;
-        } else {
-          db.event_rsvps.push(rsvp);
-        }
-        if (changed) {
-          audit('team.rsvp_updated', 'event_rsvp', rsvp.id, {
-            team_id: p.p_team_id,
-            player_id: p.p_player_id,
-            reference_id: p.p_reference_id,
-            event_type: p.p_event_type,
-            occurrence_date: p.p_occurrence_date,
-            previous_status: previous?.status || null,
-            status: rsvp.status,
-          });
-        }
-        saveDB(db);
-        triggerRealtimeEvent('event_rsvps', previous ? 'UPDATE' : 'INSERT', {
-          new: rsvp,
-          old: previous,
-        });
-        return { data: { rsvp, changed }, error: null };
-      }
-
-      const content = String(p.p_content || '').trim();
-      if (!content) {
-        return { data: null, error: { message: 'Message content is required' } };
-      }
-      if (content.length > 4000) {
-        return { data: null, error: { message: 'Message content exceeds 4000 characters' } };
-      }
-      if (!isAdmin && !isAssignedCoach() && !isParentOnTeam()) {
-        return { data: null, error: { message: 'Caller cannot post messages for this team' } };
-      }
-
-      const message = {
-        id: mockId(),
-        organization_id: orgId,
-        team_id: p.p_team_id,
-        author_id: userId,
-        content,
-        created_at: new Date().toISOString(),
-      };
-      db.team_messages = db.team_messages || [];
-      db.team_messages.push(message);
-      audit('team.message_created', 'team_message', message.id, {
-        team_id: p.p_team_id,
-        content_length: content.length,
-      });
-      saveDB(db);
-      triggerRealtimeEvent('team_messages', 'INSERT', { new: message, old: null });
-      return { data: { message }, error: null };
     }
 
     if (MOCK_CAPABLE_BUILD && name === 'admin_publish_schedule_baseline') {
@@ -7907,12 +7542,12 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
-      // As 20261021030000: the team's practice exceptions are withdrawn,
-      // audited and archived, each series is audited as cancelled, every game
-      // RSVP to its games goes (whichever team it belongs to), players lose the
-      // team id, and team.deleted records what each table lost. Every row the
-      // database's cascade removes is removed and tombstoned here too, so the
-      // mock never shows a deleted team's dependants.
+      // As 20261022030000 (20261021030000 without RSVPs or team chat): the
+      // team's practice exceptions are withdrawn, audited and archived, each
+      // series is audited as cancelled, players lose the team id, and
+      // team.deleted records what each table lost. Every row the database's
+      // cascade removes is removed and tombstoned here too, so the mock never
+      // shows a deleted team's dependants.
       const sameTeam = (value) => String(value) === String(p_team_id);
       const now = new Date().toISOString();
       const userId = session?.user?.id ?? null;
@@ -7985,15 +7620,6 @@ export const mockSupabase = {
         'games',
         (g) => sameTeam(g.home_team_id) || sameTeam(g.away_team_id)
       );
-      const gameIds = new Set(games.map((g) => String(g.id)));
-      const rsvps = cascadeDoomed(
-        'event_rsvps',
-        (r) =>
-          sameTeam(r.team_id) ||
-          (r.event_type === 'game' &&
-            String(r.organization_id ?? team.organization_id) === String(team.organization_id) &&
-            gameIds.has(String(r.reference_id)))
-      );
       const playerIds = (db.players || [])
         .filter((player) => sameTeam(player.team_id))
         .map((player) => player.id)
@@ -8010,8 +7636,6 @@ export const mockSupabase = {
           (a) => sameTeam(a.home_team_id) || sameTeam(a.away_team_id)
         ).length,
         team_players_deleted: cascadeDoomed('team_players', (tp) => sameTeam(tp.team_id)).length,
-        event_rsvps_deleted: rsvps.length,
-        team_messages_deleted: cascadeDoomed('team_messages', (m) => sameTeam(m.team_id)).length,
         team_coach_assignments_deleted: cascadeDoomed('team_coach_assignments', (a) =>
           sameTeam(a.team_id)
         ).length,

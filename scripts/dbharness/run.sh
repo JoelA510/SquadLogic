@@ -899,20 +899,12 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     fi
     # **8.6 3b PR 12d: RSVP follows the applied practice calendar (plan W14,
     # W15, Q4).** One claim per plant in prove.sh. The smoke RAISEs on each;
-    # these fail if its evidence stops. (The fixture meta-assertion and the
-    # posture check RAISE in the same smoke and print as NOTICEs above; they
-    # carry no plant, so they are not claims.)
+    # these fail if its evidence stops. (The fixture meta-assertion RAISEs in
+    # the same smoke and prints as a NOTICE above; it carries no plant, so it
+    # is not a claim.) Since 20261022030000 (R2) dropped the RSVP function and
+    # table, the head build has no RSVP to make: the smoke checks that both stay
+    # gone, and the two RSVP claims went with their plants.
     if [ "$id" = "20261005000000" ]; then
-      if grep -qF "rsvp cases: 16 of 16 as expected -- 6 accepted (series outside every window, relocated dates, a withdrawn window), 8 refused 22023 (TIME TBD, original and off dates in a relocated window, open and unreadable windows, the Q9 clip), 2 refused 42501 by the unchanged series rule" $SCRATCH/harness_smoke; then
-        echo "  | (checked) an RSVP follows the applied practice calendar: a moved practice's new date is accepted, its original date, a TIME TBD date and an open or unreadable window are refused 22023, and dates outside every window are judged as before"
-      else
-        echo "FAIL smoke ${id}: it passed without proving the RSVP rule follows the applied practice calendar"; STATUS=1
-      fi
-      if grep -qF "stored rsvps: 2 of 2 stored on dates now TIME TBD or moved are unchanged, and the organisation holds exactly 2 + 6 rows" $SCRATCH/harness_smoke; then
-        echo "  | (checked) an RSVP stored on a date that became TIME TBD or moved is neither deleted nor rewritten"
-      else
-        echo "FAIL smoke ${id}: it passed without proving stored RSVPs are untouched"; STATUS=1
-      fi
       if grep -qF "exception reads: the parent read 7 of 7 seeded rows, the same set as the admin; a non-member read 0" $SCRATCH/harness_smoke; then
         echo "  | (checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"
       else
@@ -1001,7 +993,7 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
     # assertion; these fail if the evidence lines ever stop printing.
     if [ "$id" = "20260928000000" ]; then
-      if grep -q 'reconciled over the production drift: broad ALL policy gone from all 11 tables' $SCRATCH/harness_smoke &&
+      if grep -q 'reconciled over the production drift: broad ALL policy gone from all 10 tables' $SCRATCH/harness_smoke &&
          grep -q 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows' $SCRATCH/harness_smoke; then
         echo "  | (checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"
       else
@@ -1311,7 +1303,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022030000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2552,6 +2544,64 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the allowlist revert did not restore both finalizers' or the trigger's previous bodies and posture, left a new function or the new retention job, or did not restore the staging_players job"
         dump 10 $SCRATCH/harness_allowlist; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261022030000" ]; then
+      # Structure only (the dropped rows cannot come back). One fingerprint of
+      # every object the migration dropped or replaced, read off the catalogue:
+      # the four functions (signature, security, volatility, SET clauses,
+      # result, arguments, sorted grants, md5 of the body, comment), the two
+      # tables (kind, row security, sorted grants, options, comment), their
+      # columns, constraints, index, trigger and policies. Publication
+      # membership is left out: the revert re-adds team_messages to
+      # supabase_realtime as 20251217000000 did, which on this build (where the
+      # publication was created later) it never was. The expected md5 was read
+      # 2026-10-23 off a build at 20261022010000 with the same query; a lookup
+      # that finds nothing hashes differently, so an empty read cannot pass.
+      if psql_cmd "SELECT 'RSVPCHAT-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) = 'dc822ef619573c1261be1e26372474be'
+               THEN 'restored' ELSE 'wrong' END FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('upsert_team_event_rsvp', 'create_team_message', 'admin_delete_team', 'reconcile_prod_rls_drift')
+      UNION ALL
+      SELECT 'c|' || c.relname || '|' || c.relkind::text || '|' || c.relrowsecurity || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(c.relacl) e), '') || '|'
+             || coalesce(array_to_string(c.reloptions, ','), '') || '|' || coalesce(obj_description(c.oid, 'pg_class'), '')
+        FROM pg_class c
+       WHERE c.relnamespace = 'public'::regnamespace
+         AND c.relname IN ('event_rsvps', 'team_messages')
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '') || '|' || a.attnum
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+         AND c.relname IN ('event_rsvps', 'team_messages')
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint WHERE conrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace
+                                               AND relname IN ('event_rsvps', 'team_messages'))
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace
+                                          AND relname IN ('event_rsvps', 'team_messages'))
+      UNION ALL
+      SELECT 't|' || pg_get_triggerdef(t.oid) FROM pg_trigger t
+       WHERE NOT t.tgisinternal AND t.tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace
+                                                   AND relname IN ('event_rsvps', 'team_messages'))
+      UNION ALL
+      SELECT 'p|' || tablename || '|' || policyname || '|' || permissive || '|' || cmd || '|' || roles::text || '|'
+             || coalesce(qual, '') || '|' || coalesce(with_check, '')
+        FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('event_rsvps', 'team_messages')
+             ) s;" \
+         >$SCRATCH/harness_rsvpchat 2>&1 && grep -q 'RSVPCHAT-VERDICT:restored' $SCRATCH/harness_rsvpchat; then
+        echo "  | (checked) the RSVP and chat revert restores both tables with their keys, index, trigger, policies and grants, the two dropped functions, and the two replaced functions' previous bodies, each with its grants, comment and posture as before"
+      else
+        echo "FAIL revert ${id}: the RSVP and chat revert did not restore every dropped or replaced object as it was at 20261022010000"
+        dump 10 $SCRATCH/harness_rsvpchat; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

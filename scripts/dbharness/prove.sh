@@ -69,7 +69,8 @@ M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blac
 R23="$REPO/docs/sql/20261007000000_revert.sql"
 # The RLS advisor rewrite: it replaces reconcile_prod_rls_drift() whole (the
 # spec's scheduler_runs admin write split by command, the legacy import_jobs
-# SELECT gone), so the M14 plants are aimed here.
+# SELECT gone). 20261021020000 and then 20261022030000 ($M39) replace it again,
+# so the M14 plants are aimed at the latter.
 M24="$REPO/supabase/migrations/20261018030000_rls_advisor_rewrite.sql"
 # Wave 2: create_import_job stops auditing the file name, and its revert.
 M26="$REPO/supabase/migrations/20261018050000_create_import_job_no_file_name.sql"
@@ -112,6 +113,10 @@ R36="$REPO/docs/sql/20261021040000_revert.sql"
 # R0: the import allowlist, the purge, and the revert.
 M37="$REPO/supabase/migrations/20261022010000_import_allowlist_and_purge.sql"
 R37="$REPO/docs/sql/20261022010000_revert.sql"
+# R2: RSVP and team chat removed (admin_delete_team and the RLS drift reconcile
+# replaced without them), and the revert.
+M39="$REPO/supabase/migrations/20261022030000_remove_rsvp_and_team_chat.sql"
+R39="$REPO/docs/sql/20261022030000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -2866,14 +2871,15 @@ plant "R13 the preference warning stops counting coaches distinctly" "$R13" \
 # policy already does -- so neither plant can be seen by the migration build.
 # Only the smoke's replay of production's drift reaches them, and that is the
 # point: a reconcile that skipped either step would pass everywhere but
-# production. The function's live body is 20261018030000's copy ($M24), which
-# replaces 20260928000000's; the plants are aimed there.
-plant "M14 the reconcile skips dropping the broad policy" "$M34" \
+# production. The function's live body is 20261022030000's copy ($M39), which
+# replaces 20261021020000's, 20261018030000's and 20260928000000's; the plants
+# are aimed there.
+plant "M14 the reconcile skips dropping the broad policy" "$M39" \
   "        EXECUTE format('DROP POLICY %I ON %I.%I', v_pol.policyname, v_pol.schemaname, v_pol.tablename);" \
   "        NULL; -- plant: the broad policy is left standing" \
   "FAIL smoke 20260928000000"
 
-plant "M14 the reconcile skips creating the missing read policies" "$M34" \
+plant "M14 the reconcile skips creating the missing read policies" "$M39" \
   "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
   "            IF v_spec.tbl = 'scheduler_runs' THEN EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl; END IF; -- plant: only the repo chain's own creates survive, so the no-op check passes and the drift replay's restore check is what must fail" \
   "FAIL smoke 20260928000000"
@@ -2881,7 +2887,7 @@ plant "M14 the reconcile skips creating the missing read policies" "$M34" \
 # The end-state check was a hand-picked table list once; this puts it back.
 # The smoke's probe table -- member-writable, on no list -- must then pass
 # the reconcile, and the smoke says so.
-plant "M14 the end-state check goes back to a hand-picked table list" "$M34" \
+plant "M14 the end-state check goes back to a hand-picked table list" "$M39" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT'" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT' AND p.tablename = ANY (ARRAY['coaches', 'teams'])" \
   "FAIL smoke 20260928000000"
@@ -2891,7 +2897,7 @@ plant "M14 the end-state check goes back to a hand-picked table list" "$M34" \
 # build's scheduler_runs admin policies come from that migration's own split,
 # not from this spec, so the smoke's no-op check is what sees it: the spec no
 # longer matches the policy of the same name, and the reconcile refuses.
-plant "M14 the scheduler_runs admin write also admits members" "$M34" \
+plant "M14 the scheduler_runs admin write also admits members" "$M39" \
   "scheduler_runs_insert_admin', 'INSERT', 'authenticated',
              NULL, 'public.is_org_admin(organization_id)'" \
   "scheduler_runs_insert_admin', 'INSERT', 'authenticated',
@@ -2902,8 +2908,8 @@ plant "M14 the scheduler_runs admin write also admits members" "$M34" \
 # SECURITY INVOKER persist_practice_schedule unable to write it for admins.
 # Since 20261018030000 the head build's admin policies come from that
 # migration's own split, so a spec without them is seen by the smoke's no-op
-# check (it verifies 18 policies, not 20), not by the writer.
-plant "M14 scheduler_runs gets no admin write policy" "$M34" \
+# check (it verifies 17 policies, not 19), not by the writer.
+plant "M14 scheduler_runs gets no admin write policy" "$M39" \
   "('scheduler_runs', 'scheduler_runs_insert_admin', 'INSERT', 'authenticated',
              NULL, 'public.is_org_admin(organization_id)'),
             ('scheduler_runs', 'scheduler_runs_update_admin', 'UPDATE', 'authenticated',
@@ -3359,47 +3365,10 @@ plant "R20 the revert does not drop the enact wrapper" "$R20" \
   "FAIL revert 20261004000000"
 
 # **8.6 3b PR 12d: RSVP follows the applied practice calendar (plan W14, W15,
-# Q4).** One plant per claim the smoke's evidence prints, and one for the
-# revert. 20261021030000 redefines upsert_team_event_rsvp with this body
-# verbatim (plus a game lock), so the M21 anchors are planted in that file, the
-# live definition.
-# W14's plan plant: the old body, the series weekday alone.
-plant "M21 the RSVP rule keeps the series-only check" "$M35" \
-  "        IF v_assignment_found THEN" \
-  "        IF false THEN" \
-  "FAIL smoke 20261005000000"
-
-# W14: a TIME TBD date falls through to the series rule and is accepted.
-plant "M21 the RSVP rule accepts a TIME TBD date" "$M35" \
-  "                   count(*) FILTER (WHERE p_occurrence_date <@ pe.\"window\")" \
-  "                   count(*) FILTER (WHERE p_occurrence_date <@ pe.\"window\" AND pe.kind <> 'time_tbd')" \
-  "FAIL smoke 20261005000000"
-
-# Q7: an open relocated window read as "until the row ends".
-plant "M21 the RSVP rule accepts a moved practice under an open window" "$M35" \
-  "                IF v_cover.kind IS DISTINCT FROM 'relocated'
-                   OR upper_inf(v_cover.\"window\")
-                   OR upper(v_cover.\"window\") = 'infinity'::date THEN" \
-  "                IF v_cover.kind IS DISTINCT FROM 'relocated' THEN" \
-  "FAIL smoke 20261005000000"
-
-# Q4: a write that tidies stored RSVPs the calendar no longer shows.
-plant "M21 the RSVP write deletes stored RSVPs inside a live window" "$M35" \
-  "    SELECT *
-      INTO v_existing
-      FROM public.event_rsvps" \
-  "    DELETE FROM public.event_rsvps er
-     WHERE er.reference_id = p_reference_id
-       AND er.occurrence_date <> p_occurrence_date
-       AND EXISTS (SELECT 1 FROM public.practice_exceptions pe
-                    WHERE pe.assignment_id = er.reference_id AND pe.withdrawn_at IS NULL
-                      AND er.occurrence_date <@ pe.\"window\");
-
-    SELECT *
-      INTO v_existing
-      FROM public.event_rsvps" \
-  "FAIL smoke 20261005000000"
-
+# Q4).** The four M21 plants of the RSVP rule went with the function: since
+# 20261022030000 (R2) dropped upsert_team_event_rsvp and event_rsvps, the head
+# build the smokes run on has no RSVP to plant in, and the smoke checks that
+# neither came back. W15's plant and the revert claim still hold.
 # W15's plan plant: the select policy tightened to admins, so a parent reads
 # no exception (and the portal would show the series as if nothing changed).
 plant "M15 the practice_exceptions select policy admits admins only" "$M15" \
@@ -3995,14 +3964,14 @@ plant "M34 a removed guardian still reads their own links" "$M34" \
   "        profile_id = (SELECT auth.uid())" \
   "smoke 20261021020000"
 
-plant "M34 the reconcile leaves a re-added member-wide coaches read" "$M34" \
+plant "M34 the reconcile leaves a re-added member-wide coaches read" "$M39" \
   "           AND policyname = 'Coaches: members access'
     LOOP" \
   "           AND policyname = 'Coaches: members access' AND false
     LOOP" \
   "smoke 20261021020000"
 
-plant "M34 the reconcile accepts a second coaches read" "$M34" \
+plant "M34 the reconcile accepts a second coaches read" "$M39" \
   "           AND policyname <> 'coaches_select_admin_or_self'" \
   "           AND false" \
   "smoke 20261021020000"
@@ -4049,7 +4018,7 @@ plant "M34 any coach scores any game" "$M34" \
   "       AND v_member_role <> 'coach' THEN" \
   "smoke 20261021020000"
 
-plant "M34 the reconcile spec keeps the member-wide coaches read" "$M34" \
+plant "M34 the reconcile spec keeps the member-wide coaches read" "$M39" \
   "            ('coaches', 'coaches_select_admin_or_self', 'SELECT', 'authenticated',
              'public.is_org_admin(organization_id) OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))', NULL)," \
   "            ('coaches', 'Coaches: members access', 'SELECT', 'authenticated',
@@ -4077,20 +4046,24 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
   "revert 20261021020000"
 
 # **admin_delete_team takes its exceptions, RSVPs and players' team ids with it
-# (20261021030000).** One plant per claim the smoke prints.
-plant "M35 the delete withdraws nothing" "$M35" \
+# (20261021030000).** One plant per claim the smoke prints. 20261022030000
+# (R2) replaces admin_delete_team without RSVPs, so the plants on the delete are
+# aimed at that copy ($M39), the live definition; the three RSVP plants (the
+# opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
+# game lock) went with the RSVP function and table.
+plant "M35 the delete withdraws nothing" "$M39" \
   "           AND pe.withdrawn_at IS NULL
         RETURNING pe.*" \
   "           AND false
         RETURNING pe.*" \
   "smoke 20261021030000"
 
-plant "M35 the delete archives nothing onto the run" "$M35" \
+plant "M35 the delete archives nothing onto the run" "$M39" \
   "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "smoke 20261021030000"
 
-plant "M35 the delete audits no series" "$M35" \
+plant "M35 the delete audits no series" "$M39" \
   "            'practice.cancelled',
             'practice_assignments',
             v_pa.id," \
@@ -4099,41 +4072,23 @@ plant "M35 the delete audits no series" "$M35" \
             v_pa.id," \
   "smoke 20261021030000"
 
-plant "M35 the delete leaves the opponent's game RSVP" "$M35" \
-  "    DELETE FROM public.event_rsvps
-     WHERE event_type = 'game'" \
-  "    DELETE FROM public.event_rsvps
-     WHERE false AND event_type = 'game'" \
-  "smoke 20261021030000"
-
-plant "M35 the delete takes a practice RSVP sharing a game id" "$M35" \
-  "     WHERE event_type = 'game'
-       AND organization_id = v_team.organization_id" \
-  "     WHERE organization_id = v_team.organization_id" \
-  "smoke 20261021030000"
-
-plant "M35 the delete leaves players.team_id" "$M35" \
+plant "M35 the delete leaves players.team_id" "$M39" \
   "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
   "    PERFORM 1;" \
   "smoke 20261021030000"
 
-plant "M35 team.deleted records no counts" "$M35" \
+plant "M35 team.deleted records no counts" "$M39" \
   "            || v_counts
 " \
   "            || '{}'::jsonb
 " \
   "smoke 20261021030000"
 
-plant "M35 the delete lets a coach through" "$M35" \
+plant "M35 the delete lets a coach through" "$M39" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
         -- Production's own text" \
   "    IF false THEN
         -- Production's own text" \
-  "smoke 20261021030000"
-
-plant "M35 the RSVP writer takes no game lock" "$M35" \
-  "        PERFORM 1 FROM public.games g WHERE g.id = p_reference_id FOR KEY SHARE;" \
-  "        PERFORM 1;" \
   "smoke 20261021030000"
 
 plant "R35 the revert leaves the new admin_delete_team" "$R35" \
@@ -4265,6 +4220,48 @@ plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" 
     );" \
   "FAIL revert 20261022010000"
 
+# R2: no RSVP, no team chat. The smoke RAISEs on each; the revert claim on a
+# policy left out, a grant left out and a body that drifted.
+plant "M39 create_team_message is left behind" "$M39" \
+  "DROP FUNCTION public.create_team_message(uuid, text);
+" \
+  "" \
+  "smoke 20261022030000"
+
+plant "M39 admin_delete_team still counts the RSVP table" "$M39" \
+  "        'team_players_deleted',
+            (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id)," \
+  "        'team_players_deleted',
+            (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id),
+        'event_rsvps_deleted',
+            (SELECT count(*) FROM public.event_rsvps WHERE team_id = p_team_id)," \
+  "smoke 20261022030000"
+
+plant "M39 the reconcile spec keeps the chat read policy" "$M39" \
+  "            -- REMOVED (20261022030000): the team chat table and its read
+            -- policy are dropped (R2); creating it here would fail." \
+  "            ('team_messages', 'Team Messages: members access', 'SELECT', 'authenticated',
+             'public.is_org_member(organization_id)', NULL)," \
+  "smoke 20261022030000"
+
+plant "R39 the revert leaves the chat read policy out" "$R39" \
+  "CREATE POLICY \"Team Messages: members access\" ON public.team_messages FOR SELECT TO authenticated USING (public.is_org_member(organization_id));
+" \
+  "" \
+  "revert 20261022030000"
+
+plant "R39 the revert leaves upsert_team_event_rsvp closed to authenticated" "$R39" \
+  "GRANT ALL ON FUNCTION public.upsert_team_event_rsvp(p_team_id uuid, p_player_id uuid, p_reference_id uuid, p_event_type text, p_occurrence_date date, p_status text) TO authenticated;
+" \
+  "" \
+  "revert 20261022030000"
+
+plant "R39 the revert restores a drifted admin_delete_team body" "$R39" \
+  "    -- 3. The team's games, held until commit, and every game RSVP to them." \
+  "    -- drifted
+    -- 3. The team's games, held until commit, and every game RSVP to them." \
+  "revert 20261022030000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4375,8 +4372,6 @@ declare -A CLAIM_PROVER=(
   ["(checked) an enact leaves one practice.recommendation_enacted row on its series with the plan section 5 keys, the stored retirement date and the writer's result fingerprint"]="M20 the enact audit leaves result_fingerprint unfilled"
   ["(checked) a repeated enact key is idempotent: the second call returns idempotent: true and writes nothing"]="M20 the enact wrapper drops the idempotency lookup"
   ["(checked) the enact revert drops enact_practice_recommendation and leaves the 20261002000000 writer in place"]="R20 the revert does not drop the enact wrapper"
-  ["(checked) an RSVP follows the applied practice calendar: a moved practice's new date is accepted, its original date, a TIME TBD date and an open or unreadable window are refused 22023, and dates outside every window are judged as before"]="M21 the RSVP rule keeps the series-only check|M21 the RSVP rule accepts a TIME TBD date|M21 the RSVP rule accepts a moved practice under an open window"
-  ["(checked) an RSVP stored on a date that became TIME TBD or moved is neither deleted nor rewritten"]="M21 the RSVP write deletes stored RSVPs inside a live window"
   ["(checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"]="M15 the practice_exceptions select policy admits admins only"
   ["(checked) the RSVP revert restores the 20260504070000 upsert_team_event_rsvp body byte for byte, SECURITY DEFINER with search_path=public"]="R21 the revert leaves the 12d body in place"
   ["(checked) only an admin of the organisation sets its heat settings: a coach and another organisation's admin are refused"]="M22 the heat settings RPC stops checking the caller is an org admin"
@@ -4403,6 +4398,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"]="R34 the revert leaves players restricted|R34 the revert leaves the token table|R34 the revert restores a drifted rotate body"
   ["(checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"]="R35 the revert leaves the new admin_delete_team|R35 the revert leaves the locking RSVP writer"
   ["(checked) the UTC revert unpins every function, restores the 79 column defaults, and restores fail_stale_import_jobs byte for byte"]="R36 the revert leaves the functions pinned|R36 the revert leaves the column defaults on now()"
+  ["(checked) the RSVP and chat revert restores both tables with their keys, index, trigger, policies and grants, the two dropped functions, and the two replaced functions' previous bodies, each with its grants, comment and posture as before"]="R39 the revert leaves the chat read policy out|R39 the revert leaves upsert_team_event_rsvp closed to authenticated|R39 the revert restores a drifted admin_delete_team body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

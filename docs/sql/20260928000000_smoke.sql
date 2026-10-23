@@ -12,18 +12,23 @@
 -- read policies to restore (was 9); and it checks that the function drops
 -- both replaced policies if they are ever put back. What it checks is
 -- otherwise unchanged.
+--
+-- **Updated again by 20261022030000_remove_rsvp_and_team_chat.sql** (plan
+-- docs/changes/2026-10-22-admin-focus.md, R2), which dropped `team_messages`
+-- and took it out of the reconcile's spec: 19 policies (was 20), twelve tables
+-- (was 13), ten broad ALL policies in the drift replay (was eleven).
 -- Everything happens inside one transaction that is ROLLED BACK, so the
 -- production drift it recreates never reaches a later smoke or stage.
 --
 -- 1. On the repo chain the reconcile is idempotent: re-running it creates
---    nothing, drops nothing, and finds every one of its 20 policies already
+--    nothing, drops nothing, and finds every one of its 19 policies already
 --    present AND identical (deparsed clause by clause against a probe built
 --    from the spec). The migration's own apply already removed
 --    "org_member_access" from practice_slots, field_subunits and
 --    scheduler_runs, and gave scheduler_runs its member-read/admin-write
 --    split.
 -- 2. Production's drift is recreated: "Enforce Org Membership: ALL" on the
---    eleven tables, and the repo read policies production lacks removed --
+--    ten tables, and the repo read policies production lacks removed --
 --    the six tables' member SELECT and (the worst case the drift report
 --    allows) both facility member SELECTs.
 -- 3. Positive control: under that drift a non-admin member CAN insert into
@@ -32,7 +37,7 @@
 -- 4. The reconcile runs -- the function the migration ran, not a copy -- and
 --    the catalogue and a non-admin member's session are checked: the broad
 --    policy gone everywhere, every dropped read policy back, no member-gated
---    write policy on any of the 13 tables, member inserts into teams, fields
+--    write policy on any of the 12 tables, member inserts into teams, fields
 --    and practice_slots refused by RLS, updates and deletes reaching no row,
 --    and reads of teams and practice_slots limited to the member's own org.
 -- 5. Catalogue-wide, SEMANTICALLY: every non-SELECT policy in `public` is
@@ -52,10 +57,10 @@ DECLARE
     -- The subject sets are STATED here, not read back from the function or
     -- the catalogue a broken reconcile would leave behind.
     c_tables text[] := ARRAY['coaches','teams','locations','fields','divisions','game_assignments',
-                             'import_jobs','imports','team_messages','organization_schemas',
+                             'import_jobs','imports','organization_schemas',
                              'schedule_evaluations','practice_slots','field_subunits'];
     c_broad_tables text[] := ARRAY['coaches','teams','locations','fields','divisions','game_assignments',
-                                   'import_jobs','imports','team_messages','organization_schemas',
+                                   'import_jobs','imports','organization_schemas',
                                    'schedule_evaluations'];
     c_prod_missing text[][] := ARRAY[
         ['coaches', 'coaches_select_admin_or_self'],  -- since 20261021020000
@@ -90,15 +95,15 @@ DECLARE
 BEGIN
     -- ---- 0. the tables this is about all exist ------------------------------
     SELECT count(*) INTO v_n FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 13 THEN
-        RAISE EXCEPTION 'expected the 13 tables of 20260928000000, found %', v_n;
+    IF v_n <> 12 THEN
+        RAISE EXCEPTION 'expected the 12 tables of 20260928000000 left after 20261022030000, found %', v_n;
     END IF;
 
     -- ---- 1. no-op on the repo chain -----------------------------------------
     v_res := public.reconcile_prod_rls_drift();
     IF jsonb_array_length(v_res->'created') <> 0 OR jsonb_array_length(v_res->'dropped') <> 0
-       OR jsonb_array_length(v_res->'verified') <> 20 THEN
-        RAISE EXCEPTION 'on the repo chain the reconcile must create 0, drop 0 and verify 20 identical policies; got %', v_res;
+       OR jsonb_array_length(v_res->'verified') <> 19 THEN
+        RAISE EXCEPTION 'on the repo chain the reconcile must create 0, drop 0 and verify 19 identical policies; got %', v_res;
     END IF;
     SELECT count(*) INTO v_n FROM pg_policies
      WHERE schemaname = 'public' AND tablename IN ('practice_slots', 'field_subunits', 'scheduler_runs')
@@ -106,7 +111,7 @@ BEGIN
     IF v_n <> 0 THEN
         RAISE EXCEPTION 'org_member_access survived the migration on % table(s)', v_n;
     END IF;
-    RAISE NOTICE 'repo chain: the reconcile is a no-op (created 0, dropped 0, verified 20 identical to their definitions)';
+    RAISE NOTICE 'repo chain: the reconcile is a no-op (created 0, dropped 0, verified 19 identical to their definitions)';
 
     -- A same-named policy with different semantics must abort, not verify.
     -- (The block's exception rolls the swap back.)
@@ -250,8 +255,8 @@ BEGIN
         END IF;
     END LOOP;
     SELECT count(*) INTO v_n FROM pg_policies WHERE policyname = 'Enforce Org Membership: ALL';
-    IF v_n <> 11 OR v_m <> 8 THEN
-        RAISE EXCEPTION 'the drift replay did not take: % broad policies (want 11), % of 8 read policies were there to drop', v_n, v_m;
+    IF v_n <> 10 OR v_m <> 8 THEN
+        RAISE EXCEPTION 'the drift replay did not take: % broad policies (want 10), % of 8 read policies were there to drop', v_n, v_m;
     END IF;
 
     -- ---- 3. positive control: under the drift a member CAN write ------------
@@ -275,13 +280,13 @@ BEGIN
             RAISE EXCEPTION 'control: under the production drift a member could not insert into % -- the refusals below would prove nothing', t;
         END IF;
     END LOOP;
-    RAISE NOTICE 'production drift replayed: 11 broad ALL policies, 8 read policies removed; a non-admin member could insert into teams and fields';
+    RAISE NOTICE 'production drift replayed: 10 broad ALL policies, 8 read policies removed; a non-admin member could insert into teams and fields';
 
     -- ---- 4. the reconcile, the function the migration ran -------------------
     v_res := public.reconcile_prod_rls_drift();
-    IF jsonb_array_length(v_res->'created') <> 8 OR jsonb_array_length(v_res->'dropped') <> 11
-       OR jsonb_array_length(v_res->'verified') <> 12 THEN
-        RAISE EXCEPTION 'over the production drift the reconcile must create 8, drop 11 and verify 12; got %', v_res;
+    IF jsonb_array_length(v_res->'created') <> 8 OR jsonb_array_length(v_res->'dropped') <> 10
+       OR jsonb_array_length(v_res->'verified') <> 11 THEN
+        RAISE EXCEPTION 'over the production drift the reconcile must create 8, drop 10 and verify 11; got %', v_res;
     END IF;
 
     SELECT count(*) INTO v_n FROM pg_policies WHERE policyname = 'Enforce Org Membership: ALL';
@@ -442,7 +447,7 @@ BEGIN
     END IF;
     RAISE NOTICE 'scheduler_runs: a member reads 1 own-org run and 0 of org B, and cannot insert or update; an admin session inserts and updates';
 
-    RAISE NOTICE 'reconciled over the production drift: broad ALL policy gone from all 11 tables, 8 read policies restored, no unallowlisted member write policy in public';
+    RAISE NOTICE 'reconciled over the production drift: broad ALL policy gone from all 10 tables, 8 read policies restored, no unallowlisted member write policy in public';
     RAISE NOTICE 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows';
     RAISE NOTICE 'non-admin member after reconcile: reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B''s';
 END;

@@ -75,7 +75,7 @@ Feature: Every top-level route passes an automated accessibility scan
       | /fields                       | Field Management         | Field 1                                 |
       | /admin/audit-logs             | Audit Explorer           | Total Events                            |
       | /admin/analytics              | Analytical Insights      | No traceable evaluation records         |
-      | /admin/reports                | Enterprise Dashboard     | Organization Readiness                  |
+      | /admin/reports                | Enterprise Dashboard     | Fluid Attributes Distribution           |
       | /schedule/practice            | Practice Scheduling      | Tigers                                  |
       | /schedule/game                | Game Scheduling          | No Game Schedule Yet                    |
       | /settings                     | Settings                 | League Name                             |

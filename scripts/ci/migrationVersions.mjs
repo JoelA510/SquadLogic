@@ -137,12 +137,18 @@ export function readAllowedEdits(path = UNAPPLIED_EDITS_FILE) {
 }
 
 /**
- * Check 4. `content(blob)` returns a blob's text. Entries are append-only and
- * immutable, and each marker is new in the edit: present in `blob`, absent
- * from `base_blob`.
+ * Check 4. Entries are append-only and immutable, and each marker is new in
+ * the edit: present in `blob`, absent from `base_blob`. `base_blob` must be
+ * the migration's real original. A new entry's is the base tree's blob of that
+ * version. A legacy base entry gaining the field names a blob the file had in
+ * its history.
+ * @param {{ content: (blob: string) => string, baseBlobOf: (version: string) => string | undefined,
+ *   pastBlobsOf: (version: string) => Set<string> }} git
  * @returns {string[]} errors
  */
-export function checkEditsList(baseEdits, headEdits, content) {
+export function checkEditsList(baseEdits, headEdits, git) {
+  const { content, baseBlobOf, pastBlobsOf } = git;
+  const onBase = new Map(baseEdits.map((e) => [e.version, e]));
   const errors = [];
   const head = new Map(headEdits.map((e) => [e.version, e]));
   for (const b of baseEdits) {
@@ -158,6 +164,24 @@ export function checkEditsList(baseEdits, headEdits, content) {
     }
   }
   for (const h of headEdits) {
+    const was = onBase.get(h.version);
+    if (!was) {
+      if (h.base_blob !== baseBlobOf(h.version)) {
+        errors.push(
+          `${UNAPPLIED_EDITS_FILE}: entry ${h.version}'s base_blob is not the base branch's ` +
+            'blob of that migration'
+        );
+        continue;
+      }
+    } else if (was.base_blob === undefined) {
+      if (h.base_blob === h.blob || !pastBlobsOf(h.version).has(h.base_blob)) {
+        errors.push(
+          `${UNAPPLIED_EDITS_FILE}: entry ${h.version}'s base_blob is not an earlier blob of ` +
+            'that migration'
+        );
+        continue;
+      }
+    }
     if (!content(h.blob).includes(h.marker)) {
       errors.push(`${UNAPPLIED_EDITS_FILE}: entry ${h.version}'s marker is not in its edited file`);
     }
@@ -181,6 +205,25 @@ export function allowedEditsAt(ref, path = UNAPPLIED_EDITS_FILE) {
 
 const blobContent = (blob) =>
   execFileSync('git', ['cat-file', '-p', blob], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+
+/** Every blob a migration file had, across the history reachable from HEAD. */
+function pastBlobsOfFile(file) {
+  const path = `${MIGRATIONS_DIR}/${file}`;
+  const commits = execFileSync(
+    'git',
+    ['log', '--format=%H', '--diff-filter=AM', 'HEAD', '--', path],
+    {
+      encoding: 'utf8',
+    }
+  )
+    .split('\n')
+    .filter(Boolean);
+  return new Set(
+    commits.map((c) =>
+      execFileSync('git', ['rev-parse', `${c}:${path}`], { encoding: 'utf8' }).trim()
+    )
+  );
+}
 
 export function listHead(dir = MIGRATIONS_DIR) {
   return readdirSync(dir).sort();
@@ -207,7 +250,17 @@ export function main(argv = process.argv.slice(2)) {
   if (baseRef) {
     const edits = readAllowedEdits();
     errors.push(...checkAgainstBase(baseEntries(baseRef), baseEntries('HEAD'), edits));
-    errors.push(...checkEditsList(allowedEditsAt(baseRef), edits, blobContent));
+    const baseFiles = new Map(baseEntries(baseRef).map((e) => [versionOf(e.file), e]));
+    errors.push(
+      ...checkEditsList(allowedEditsAt(baseRef), edits, {
+        content: blobContent,
+        baseBlobOf: (version) => baseFiles.get(version)?.blob,
+        pastBlobsOf: (version) => {
+          const file = baseFiles.get(version)?.file;
+          return file ? pastBlobsOfFile(file) : new Set();
+        },
+      })
+    );
   }
   for (const e of errors) console.error(`::error title=Migration versions::${e}`);
   if (errors.length > 0) return 1;

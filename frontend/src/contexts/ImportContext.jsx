@@ -25,15 +25,16 @@ import {
   describeHeaderParse,
 } from '../utils/importHeaders.js';
 import {
-  buildCoachLeadPayload,
-  getExternalRegistrationId,
-  hasCoachLeadIntent,
-} from '../utils/coachLeads.js';
+  canonicalImportKey,
+  fetchDeclaredImportFields,
+  filterImportRows,
+  isAllowedImportHeader,
+  isAllowlistedImportType,
+} from '../utils/importAllowlist.js';
 import { isAdminRole } from '../constants/permissions.js';
 
 const MAX_ROWS = 10000;
 const MAX_COLS = 1200;
-const PLAYER_LOOKUP_CHUNK_SIZE = 500;
 const canDeferImport = (type) =>
   type === 'coaches' || type === 'fields' || type === 'field_availability';
 
@@ -141,134 +142,6 @@ const maskDataInternal = (importPayload, entitySchema) => {
     return masked ? { ...row, custom_attributes: newAttrs } : row;
   });
   return { ...importPayload, data: maskedRows };
-};
-
-const chunkValues = (values, chunkSize) => {
-  const chunks = [];
-  for (let index = 0; index < values.length; index += chunkSize) {
-    chunks.push(values.slice(index, index + chunkSize));
-  }
-  return chunks;
-};
-
-const persistCoachLeadSummary = async ({ importJobId, summary, statusOverride = null, addLog }) => {
-  const { error } = await supabase.rpc('set_import_job_coach_lead_summary', {
-    p_import_job_id: importJobId,
-    p_summary: summary,
-    p_status: statusOverride,
-  });
-
-  if (error) {
-    addLog(`Warning: Could not persist coach lead summary: ${error.message}`);
-  }
-};
-
-const fetchCoachLeadPlayers = async ({ organizationId, candidateRows }) => {
-  const externalIds = Array.from(
-    new Set(candidateRows.map(getExternalRegistrationId).filter(Boolean))
-  );
-  const players = [];
-
-  for (const externalIdChunk of chunkValues(externalIds, PLAYER_LOOKUP_CHUNK_SIZE)) {
-    const { data: matchedPlayers, error } = await supabase
-      .from('players')
-      .select('id, external_registration_id, division_id')
-      .eq('organization_id', organizationId)
-      .in('external_registration_id', externalIdChunk);
-
-    if (error) {
-      throw new Error(error.message || 'Could not resolve imported players');
-    }
-    players.push(...(matchedPlayers || []));
-  }
-
-  return players;
-};
-
-const captureCoachLeadsForImport = async ({
-  importJobId,
-  organizationId,
-  normalizedData,
-  addLog,
-}) => {
-  const candidateRows = normalizedData.filter(hasCoachLeadIntent);
-  if (candidateRows.length === 0) return null;
-
-  try {
-    const { data: divisions, error: divisionsError } = await supabase
-      .from('divisions')
-      .select('id, name')
-      .eq('organization_id', organizationId);
-
-    if (divisionsError) {
-      throw new Error(divisionsError.message || 'Could not resolve divisions');
-    }
-
-    const players = await fetchCoachLeadPlayers({ organizationId, candidateRows });
-    const coachLeadPayload = buildCoachLeadPayload(normalizedData, {
-      organizationId,
-      divisions: divisions || [],
-      players,
-    });
-
-    if (coachLeadPayload.length === 0) {
-      const summary = {
-        status: 'skipped',
-        candidate_rows: candidateRows.length,
-        leads_submitted: 0,
-        message:
-          'Coach volunteer rows were present, but no guardian or parent name and email could be resolved.',
-      };
-      addLog(
-        `Warning: ${candidateRows.length} coach volunteer row(s) could not create leads because adult contact fields were missing.`
-      );
-      await persistCoachLeadSummary({
-        importJobId,
-        summary,
-        statusOverride: 'completed_with_warnings',
-        addLog,
-      });
-      return summary;
-    }
-
-    const { data: coachLeadResult, error: coachLeadError } = await supabase.rpc(
-      'upsert_coach_leads',
-      { p_leads: coachLeadPayload }
-    );
-
-    if (coachLeadError) {
-      throw new Error(coachLeadError.message || 'Coach lead capture failed');
-    }
-
-    const summary = {
-      status: 'completed',
-      candidate_rows: candidateRows.length,
-      leads_submitted: coachLeadPayload.length,
-      leads_created: coachLeadResult?.leads_created ?? 0,
-      programs_linked: coachLeadResult?.programs_linked ?? 0,
-      skipped_existing: coachLeadResult?.skipped_existing ?? 0,
-    };
-    addLog(
-      `Coach leads captured: ${summary.leads_created} new, ${summary.programs_linked} program links.`
-    );
-    await persistCoachLeadSummary({ importJobId, summary, addLog });
-    return summary;
-  } catch (err) {
-    const summary = {
-      status: 'failed',
-      candidate_rows: candidateRows.length,
-      leads_submitted: 0,
-      message: err.message,
-    };
-    addLog(`Coach leads were NOT saved (players still imported): ${err.message}`);
-    await persistCoachLeadSummary({
-      importJobId,
-      summary,
-      statusOverride: 'completed_with_warnings',
-      addLog,
-    });
-    return summary;
-  }
 };
 
 const materializeBuddyPairsForImport = async ({ importJobId, addLog }) => {
@@ -622,6 +495,31 @@ export function ImportProvider({ children }) {
         setActiveJobId(job.id);
         setActiveJob(job);
 
+        // The organization's declared fields, read for this import: the
+        // allowlist keeps their columns, and a failed read fails the import
+        // rather than dropping them silently (import-validation refuses too).
+        let declaredFields = [];
+        if (isAllowlistedImportType(type)) {
+          try {
+            declaredFields = await fetchDeclaredImportFields({
+              supabase,
+              organizationId: currentOrganization.id,
+              importType: type,
+            });
+          } catch (err) {
+            await failImportJob({
+              supabase,
+              importJobId: job.id,
+              stage: 'schema_lookup',
+              message: err.message,
+            });
+            setImportStatus('error');
+            setIsImporting(false);
+            addLog(`Import failed: ${err.message}`);
+            return;
+          }
+        }
+
         addLog('Parsing CSV data...');
         Papa.parse(file, {
           header: true,
@@ -631,17 +529,29 @@ export function ImportProvider({ children }) {
           transformHeader: makeDedupeHeaderTransformer(),
           complete: async (results) => {
             const { meta } = results;
+            // The column limit is judged on what the file holds, before the
+            // filters below shrink meta.fields: a very wide people CSV must
+            // not pass the guard because most of its columns are dropped.
+            const detectedColumnCount = Array.isArray(meta.fields) ? meta.fields.length : 0;
             // For player/coach imports, strip sensitive registration columns
             // (medical, insurance, financial/payment, identity documents,
             // waivers, non-teaming demographics) BEFORE upload so they never
             // leave the browser. Kept columns retain their original headers, so
             // downstream header recognition is unchanged.
+            // Then keep only the allowlisted columns: what the finalizer
+            // reads, team placement for players, and the fields the
+            // organization declared (utils/importAllowlist.js). The Edge
+            // Function and the finalizers apply the same rule again.
             const isPrivacyFiltered = type === 'players' || type === 'coaches';
             const data = isPrivacyFiltered
-              ? canonicalizeForUpload(type, results.data)
+              ? filterImportRows(type, canonicalizeForUpload(type, results.data), declaredFields)
               : results.data;
             if (isPrivacyFiltered && Array.isArray(meta.fields)) {
-              meta.fields = meta.fields.filter((h) => !isSensitiveHeader(h));
+              meta.fields = meta.fields.filter(
+                (h) =>
+                  !isSensitiveHeader(h) &&
+                  isAllowedImportHeader(type, h, canonicalImportKey, declaredFields)
+              );
             }
 
             // Guard an unreadable header row (empty file, wrong delimiter, or
@@ -666,7 +576,7 @@ export function ImportProvider({ children }) {
             }
 
             // Check hard limits for DoS mitigation
-            if (meta.fields.length > MAX_COLS) {
+            if (detectedColumnCount > MAX_COLS) {
               await failImportJob({
                 supabase,
                 importJobId: job.id,
@@ -924,21 +834,9 @@ export function ImportProvider({ children }) {
                   }
                 }
 
-                const coachLeadSummary = await captureCoachLeadsForImport({
-                  importJobId: job.id,
-                  organizationId: currentOrganization.id,
-                  normalizedData,
-                  addLog,
-                });
-                if (coachLeadSummary) {
-                  persistenceResult = {
-                    ...(persistenceResult || {}),
-                    coach_leads: coachLeadSummary,
-                  };
-                  if (coachLeadSummary.status !== 'completed') {
-                    effectiveStatus = 'completed_with_warnings';
-                  }
-                }
+                // No coach leads: a lead was a volunteering guardian's name and email,
+                // which the import no longer keeps (docs/changes/2026-10-22-admin-focus.md,
+                // R0). The player's willing_to_coach flag still records the offer.
 
                 // Surface genuine sub-step failures distinctly from benign partial
                 // warnings. Players are already persisted, so we keep the import
@@ -947,8 +845,6 @@ export function ImportProvider({ children }) {
                 const incompleteSecondarySteps = [];
                 if (buddyPairSummary?.status === 'failed')
                   incompleteSecondarySteps.push('buddy pairs');
-                if (coachLeadSummary?.status === 'failed')
-                  incompleteSecondarySteps.push('coach leads');
                 if (incompleteSecondarySteps.length > 0) {
                   effectiveStatus = 'completed_with_warnings';
                   persistenceResult = {

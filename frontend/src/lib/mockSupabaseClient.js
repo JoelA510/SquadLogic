@@ -10,6 +10,14 @@ import { logger } from './logger.js';
 import { MOCK_CAPABLE_BUILD } from '../env.js';
 import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
 import { canonicalizeForUpload } from '../utils/gotsportCanonicalizer.js';
+import {
+  ALLOWLIST_ENTITY_TYPES,
+  declaredAttributes,
+  filterImportRows,
+  importPayloadText,
+  keptPlayerAttributes,
+  withDeclaredColumns,
+} from '../utils/importAllowlist.js';
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
@@ -5564,34 +5572,39 @@ export const mockSupabase = {
           'willing',
         ].includes(String(payload.willing_to_coach || '').toLowerCase());
         const yearsText = String(payload.years_played ?? '');
-        const guardians = [];
-        const g1Name = [payload.guardian_1_first_name, payload.guardian_1_last_name]
-          .filter(Boolean)
-          .join(' ');
-        if (g1Name || payload.guardian_1_email) {
-          guardians.push({
-            name: g1Name || undefined,
-            email: payload.guardian_1_email || undefined,
-            alternate_email: payload.guardian_1_alternate_email || undefined,
-          });
-        }
-        const g2Name = [payload.guardian_2_first_name, payload.guardian_2_last_name]
-          .filter(Boolean)
-          .join(' ');
-        if (g2Name || payload.guardian_2_email) {
-          guardians.push({
-            name: g2Name || undefined,
-            email: payload.guardian_2_email || undefined,
-            alternate_email: payload.guardian_2_alternate_email || undefined,
-          });
-        }
-        if (guardians.length === 0 && (payload.guardian_name || payload.guardian_email)) {
-          guardians.push({
-            name: payload.guardian_name || undefined,
-            email: payload.guardian_email || undefined,
-            phone: payload.guardian_phone || undefined,
-          });
-        }
+        // As the SQL (20261022010000): no contact, guardian or payment value
+        // is read; custom_attributes is the declared fields, team placement,
+        // play-up and the coaching answer.
+        const playerSchema = (db.organization_schemas || []).find(
+          (item) =>
+            String(item.organization_id) === String(job.organization_id) &&
+            item.entity_type === 'player'
+        );
+        // The SQL reads each with import_payload_text: the first key present
+        // with a non-blank value, trimmed.
+        const teamPlacement = Object.fromEntries(
+          [
+            ['team_name', importPayloadText(payload, ['team name'])],
+            ['team_age', importPayloadText(payload, ['team age'])],
+            ['team_gender', importPayloadText(payload, ['team gender'])],
+          ].filter(([, value]) => value !== null)
+        );
+        const playUp = importPayloadText(payload, [
+          'play_up',
+          'play up',
+          'are you coaching so this player can play up a division?',
+        ]);
+        const coachingAnswer = importPayloadText(payload, [
+          'willing_to_coach',
+          'coach_volunteer',
+          "can you coach for this player's team?",
+        ])?.toLowerCase();
+        const customAttributes = {
+          ...declaredAttributes(playerSchema?.schema_definition, payload),
+          ...teamPlacement,
+          ...(playUp !== null ? { play_up: playUp } : {}),
+          ...(coachingAnswer ? { coaching_answer: coachingAnswer } : {}),
+        };
         const basePlayer = {
           organization_id: job.organization_id,
           division_id: division?.id || payload.division_id || existing?.division_id || null,
@@ -5611,24 +5624,15 @@ export const mockSupabase = {
             ? String(payload.skill_tier).toLowerCase()
             : null,
           years_played: /^[0-9]{1,2}$/.test(yearsText) ? Number(yearsText) : null,
-          // No Payment Status column -> keep the existing paid flag
-          ...(payload.payment_status != null && String(payload.payment_status) !== ''
-            ? {
-                paid:
-                  truthy(payload.payment_status) ||
-                  String(payload.payment_status).toLowerCase() === 'paid',
-              }
-            : existing
-              ? {}
-              : { paid: false }),
           status: waitlistEnabled && truthy(payload.waitlist) ? 'waitlist' : 'active',
           coach_volunteer: willingToCoach,
           willing_to_coach: willingToCoach,
           buddy_request: payload.buddy_request || null,
           mutual_buddy_code: payload.mutual_buddy_code || payload.buddy_code || null,
-          guardian_contacts: guardians,
+          // An existing player's undeclared keys go too (as the SQL).
           custom_attributes: {
-            ...(payload.play_up ? { play_up: payload.play_up } : {}),
+            ...keptPlayerAttributes(playerSchema?.schema_definition, existing?.custom_attributes),
+            ...customAttributes,
           },
           import_source: 'gotsport',
           last_imported_at: now,
@@ -5641,6 +5645,9 @@ export const mockSupabase = {
           db.players.push({
             id: mockId(),
             created_at: now,
+            paid: false,
+            contact_info: {},
+            guardian_contacts: [],
             ...basePlayer,
           });
           insertedPlayers += 1;
@@ -5911,8 +5918,17 @@ export const mockSupabase = {
       let invalidRows = 0;
       let crossOrgConflictRows = 0;
 
+      // As the SQL (20261022010000): no phone is stored, contact_info carries
+      // the sign-in email, and custom_attributes is the declared fields only.
+      const coachSchema = (db.organization_schemas || []).find(
+        (item) =>
+          String(item.organization_id) === String(job.organization_id) &&
+          item.entity_type === 'coach'
+      );
+
       stagedRows.forEach((row) => {
         const payload = row.normalized_payload || {};
+        const customAttributes = declaredAttributes(coachSchema?.schema_definition, payload);
         const email = String(payload.email || '')
           .trim()
           .toLowerCase();
@@ -5956,19 +5972,19 @@ export const mockSupabase = {
               : ['true', 'yes', '1', 'y'].includes(
                   String(payload.can_coach_multiple_teams || '').toLowerCase()
                 );
+          const { phone: _droppedPhone, ...existingContact } = existing.contact_info || {};
           Object.assign(existing, {
             full_name: fullName,
             email,
-            phone: payload.phone || payload.contact_phone || null,
             status,
             can_coach_multiple_teams: canCoachMultipleTeams,
-            contact_info: {
-              email,
-              phone: payload.phone || payload.contact_phone || null,
-            },
+            contact_info: { ...existingContact, email },
             import_source: 'coach_csv',
             last_imported_at: now,
-            custom_attributes: payload,
+            custom_attributes: {
+              ...declaredAttributes(coachSchema?.schema_definition, existing.custom_attributes),
+              ...customAttributes,
+            },
             updated_at: now,
           });
           db.import_application_records.push({
@@ -5992,18 +6008,15 @@ export const mockSupabase = {
             organization_id: job.organization_id,
             full_name: fullName,
             email,
-            phone: payload.phone || payload.contact_phone || null,
+            phone: null,
             status,
             can_coach_multiple_teams: ['true', 'yes', '1', 'y'].includes(
               String(payload.can_coach_multiple_teams || '').toLowerCase()
             ),
-            contact_info: {
-              email,
-              phone: payload.phone || payload.contact_phone || null,
-            },
+            contact_info: { email },
             import_source: 'coach_csv',
             last_imported_at: now,
-            custom_attributes: payload,
+            custom_attributes: customAttributes,
             created_at: now,
             updated_at: now,
           };
@@ -8044,7 +8057,12 @@ export const mockSupabase = {
             'available_until',
           ],
         };
-        const normalizeHeader = (header) => aliases[String(header).toLowerCase().trim()] || header;
+        // As the Edge Function does: the alias, else the header lower-cased
+        // and trimmed (the allowlist and the finalizers read that key).
+        const normalizeHeader = (header) => {
+          const lower = String(header).toLowerCase().trim();
+          return aliases[lower] || lower;
+        };
         const sanitize = (value) =>
           value === null || value === undefined
             ? ''
@@ -8056,12 +8074,32 @@ export const mockSupabase = {
         const validationErrors = [];
         const required = requiredFields[body.import_type] || [];
 
-        // As the Edge Function does: people imports drop sensitive columns
-        // before anything is validated or staged.
-        canonicalizeForUpload(body.import_type, body.rows || []).forEach((rawRow, index) => {
+        // As the Edge Function does: people imports drop sensitive columns,
+        // then keep only the allowlisted ones (the finalizer's keys, team
+        // placement, the organization's declared fields), before anything is
+        // validated or staged.
+        const schemaRow = (getDB().organization_schemas || []).find(
+          (item) =>
+            String(item.organization_id) === String(body.organization_id) &&
+            item.entity_type === ALLOWLIST_ENTITY_TYPES[body.import_type]
+        );
+        const declaredFields = Object.keys(schemaRow?.schema_definition || {});
+        filterImportRows(
+          body.import_type,
+          canonicalizeForUpload(body.import_type, body.rows || []),
+          declaredFields
+        ).forEach((rawRow, index) => {
           const normalized = normalizeImportRow(rawRow, normalizeHeader, sanitize);
-          const row =
-            body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized;
+          // As the Edge Function does: a declared field whose header is also
+          // a global alias is carried under its own identity too.
+          const row = withDeclaredColumns(
+            body.import_type,
+            body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized,
+            rawRow,
+            normalizeHeader,
+            declaredFields,
+            sanitize
+          );
 
           required.forEach((field) => {
             if (!row[field]) {
@@ -8079,7 +8117,7 @@ export const mockSupabase = {
               validationErrors.push({
                 row: index + 1,
                 field: 'date_of_birth',
-                message: `Invalid date format: ${row.date_of_birth}`,
+                message: 'Invalid date format',
               });
             }
           }

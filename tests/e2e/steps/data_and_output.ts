@@ -203,7 +203,10 @@ async function expectCoachListed(page: Page, listed: boolean) {
   if (listed) {
     await expect(row).toHaveCount(1);
     await expect(row).toContainText('CSV Coach');
-    await expect(row).toContainText('555-1212');
+    await expect(row).toContainText('csvcoach@example.com');
+    // The uploaded CSV carries a phone column; no coach phone is stored (R0,
+    // owner decision 2026-10-22), so the row the page showed it in before has none.
+    await expect(row).not.toContainText('555-1212');
   } else {
     await expect(row).toHaveCount(0);
   }

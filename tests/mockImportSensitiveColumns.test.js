@@ -51,6 +51,53 @@ describe('the mock import-validation', () => {
     expect(JSON.stringify(staged)).not.toContain('MOCK-SENSITIVE');
   });
 
+  it('stages and returns a coach row with only its allowlisted columns (R0)', async () => {
+    const jobId = 'mock-job-allowlist';
+    const { data, error } = await mockSupabase.functions.invoke('import-validation', {
+      body: {
+        import_type: 'coaches',
+        organization_id: MOCK_ORG_ID,
+        rows: [
+          {
+            'Full Name': 'First1 Last1',
+            Email: 'email1@example.com',
+            Phone: 'MOCK-UNLISTED',
+            'Guardian 1 Address': 'MOCK-UNLISTED',
+            "What is your player's birth date?": 'MOCK-UNLISTED',
+          },
+        ],
+        import_job_id: jobId,
+        row_offset: 0,
+      },
+    });
+    expect(error).toBeNull();
+    expect(data.validated_data).toEqual([
+      { full_name: 'First1 Last1', email: 'email1@example.com' },
+    ]);
+    const staged = getMockData('staging_import_rows').filter((row) => row.import_job_id === jobId);
+    expect(staged).toHaveLength(1);
+    expect(staged[0].raw_payload).toEqual({
+      'Full Name': 'First1 Last1',
+      Email: 'email1@example.com',
+    });
+    expect(JSON.stringify(staged)).not.toContain('MOCK-UNLISTED');
+  });
+
+  it('refuses an unreadable birth date without quoting it (R0)', async () => {
+    const { data } = await mockSupabase.functions.invoke('import-validation', {
+      body: {
+        import_type: 'players',
+        organization_id: MOCK_ORG_ID,
+        rows: [
+          { 'First Name': 'First1', 'Last Name': 'Last1', 'Date of Birth': 'MOCK-NOT-A-DATE' },
+        ],
+      },
+    });
+    expect(data.validation_errors).toEqual([
+      { row: 1, field: 'date_of_birth', message: 'Invalid date format' },
+    ]);
+  });
+
   it('leaves a field import as given', async () => {
     const row = {
       location: 'Central Park',

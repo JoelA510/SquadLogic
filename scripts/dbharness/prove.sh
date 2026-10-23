@@ -109,6 +109,9 @@ R35="$REPO/docs/sql/20261021030000_revert.sql"
 # The UTC now idiom: functions pinned, defaults now(), and the revert.
 M36="$REPO/supabase/migrations/20261021040000_utc_now_idiom.sql"
 R36="$REPO/docs/sql/20261021040000_revert.sql"
+# R0: the import allowlist, the purge, and the revert.
+M37="$REPO/supabase/migrations/20261022010000_import_allowlist_and_purge.sql"
+R37="$REPO/docs/sql/20261022010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3771,9 +3774,12 @@ END;
 
 # No medical data. The smoke RAISEs on each; the revert claim on a column left
 # out and on a body that drifted.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M30" \
-  "                - 'medical_info' - 'medical' - 'email' - 'contact_email'" \
-  "                - 'email' - 'contact_email'" \
+# Re-aimed at 20261022010000, whose finalize_import_job replaces this file's:
+# the staged payload stored whole as custom_attributes again.
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M37" \
+  "            public.import_declared_attributes(v_declared, sp.normalized_payload)
+                AS custom_attributes" \
+  "            sp.normalized_payload AS custom_attributes" \
   "smoke 20261020020000"
 
 plant "M30 emergency_contacts is left behind" "$M30" \
@@ -4171,6 +4177,94 @@ plant "R36 the revert leaves the column defaults on now()" "$R36" \
   "-- organizations.created_at left on now()" \
   "FAIL revert 20261021040000"
 
+# R0: the import allowlist. The smoke RAISEs on each; the revert claim on a
+# body that drifted and on a new function left behind.
+plant "M37 the coach finalizer stores the payload minus a denylist again" "$M37" \
+  "        v_custom_attributes := public.import_declared_attributes(v_declared, v_row.normalized_payload);" \
+  "        v_custom_attributes := v_row.normalized_payload - 'full_name' - 'email';" \
+  "smoke 20261022010000"
+
+plant "M37 the coach finalizer keeps a phone in contact_info" "$M37" \
+  "                contact_info = (COALESCE(v_existing.contact_info, '{}'::jsonb) - 'phone') || v_contact_info," \
+  "                contact_info = COALESCE(v_existing.contact_info, '{}'::jsonb) || v_contact_info," \
+  "smoke 20261022010000"
+
+plant "M37 the purge keeps a completed job's staged rows" "$M37" \
+  "    DELETE FROM public.staging_import_rows sr
+    USING public.import_jobs j
+    WHERE j.id = sr.import_job_id
+      AND sr.import_type = 'coaches'
+      AND j.status = ANY (v_finished);" \
+  "    DELETE FROM public.staging_import_rows sr
+    USING public.import_jobs j
+    WHERE j.id = sr.import_job_id
+      AND sr.import_type = 'coaches'
+      AND j.status = 'failed';" \
+  "smoke 20261022010000"
+
+plant "M37 the purge stops redacting a player patch" "$M37" \
+  "                        WHEN (a.resource_type = 'players' OR a.action LIKE 'player.%')" \
+  "                        WHEN (a.resource_type = 'nobody')" \
+  "smoke 20261022010000"
+
+plant "M37 the purge deletes a finished job's field rows too" "$M37" \
+  "      AND sr.import_type = 'coaches'
+      AND j.status = ANY (v_finished);" \
+  "      AND j.status = ANY (v_finished);" \
+  "smoke 20261022010000"
+
+plant "M37 the coach retention ignores the job's state" "$M37" \
+  "WHERE j.id = s.import_job_id AND s.import_type = 'coaches' AND j.status IN ('completed', 'completed_with_warnings', 'failed') AND s.created_at" \
+  "WHERE j.id = s.import_job_id AND s.import_type = 'coaches' AND s.created_at" \
+  "smoke 20261022010000"
+
+plant "M37 the purge leaves an unfinished job's guardian columns" "$M37" \
+  "        raw_payload = public.import_allowed_payload('coaches', d.coach, sr.raw_payload)," \
+  "        raw_payload = sr.raw_payload," \
+  "smoke 20261022010000"
+
+plant "M37 the date check still reads the JSON text" "$M37" \
+  "                        AND (v_val #>> '{}') ~ '^\\d{4}-\\d{2}-\\d{2}\$';" \
+  "                        AND v_val::text ~ '^\\d{4}-\\d{2}-\\d{2}\$';" \
+  "smoke 20261022010000"
+
+plant "M37 the date check accepts a date not on the calendar" "$M37" \
+  "                            v_date_ok := to_char((v_val #>> '{}')::date, 'YYYY-MM-DD') = (v_val #>> '{}');" \
+  "                            v_date_ok := true;" \
+  "smoke 20261022010000"
+
+plant "M37 the audit purge redacts only the listed email keys" "$M37" \
+  "                        WHEN ((strpos(lower(e.key), v_email_key) > 0" \
+  "                        WHEN ((e.key IN ('matched_email', 'coach_email')" \
+  "smoke 20261022010000"
+
+plant "R37 the revert leaves import_declared_attributes" "$R37" \
+  "DROP FUNCTION IF EXISTS public.import_declared_attributes(jsonb, jsonb);" \
+  "-- import_declared_attributes left in place" \
+  "FAIL revert 20261022010000"
+
+plant "R37 the revert leaves the coach finalizer unpinned" "$R37" \
+  "ALTER FUNCTION public.finalize_coach_import_job(uuid, jsonb) SET timezone = 'UTC';" \
+  "-- finalize_coach_import_job left unpinned" \
+  "FAIL revert 20261022010000"
+
+plant "R37 the revert leaves the fixed date check" "$R37" \
+  "                    IF jsonb_typeof(v_val) != 'string' OR NOT (v_val::text ~ '^\\d{4}-\\d{2}-\\d{2}') THEN" \
+  "                    IF jsonb_typeof(v_val) != 'string' OR NOT ((v_val #>> '{}') ~ '^\\d{4}-\\d{2}-\\d{2}') THEN" \
+  "FAIL revert 20261022010000"
+
+plant "R37 the revert leaves the staging_players job filtered" "$R37" \
+  "    \$\$ DELETE FROM public.staging_players WHERE created_at < now() - interval '30 days' \$\$" \
+  "    \$\$ DELETE FROM public.staging_players WHERE created_at < now() - interval '31 days' \$\$" \
+  "FAIL revert 20261022010000"
+
+plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" \
+  "        'total_applied_rows', v_total_applied_count
+    );" \
+  "        'total_applied_rows', v_total_applied_count -- drifted
+    );" \
+  "FAIL revert 20261022010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4309,6 +4403,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restriction revert restores the seven member-wide read policies, the calendar token columns on teams, and the three function bodies byte for byte"]="R34 the revert leaves players restricted|R34 the revert leaves the token table|R34 the revert restores a drifted rotate body"
   ["(checked) the team-delete revert restores admin_delete_team and upsert_team_event_rsvp byte for byte"]="R35 the revert leaves the new admin_delete_team|R35 the revert leaves the locking RSVP writer"
   ["(checked) the UTC revert unpins every function, restores the 79 column defaults, and restores fail_stale_import_jobs byte for byte"]="R36 the revert leaves the functions pinned|R36 the revert leaves the column defaults on now()"
+  ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"

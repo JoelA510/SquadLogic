@@ -22,6 +22,7 @@ import {
   normalizeImportHeader,
 } from '../frontend/src/utils/importHeaders.js';
 import { composeFullName, normalizeImportRow } from '../frontend/src/utils/importRows.js';
+import { canonicalImportKey, filterImportRows } from '../frontend/src/utils/importAllowlist.js';
 import { matchHeaders } from '../frontend/src/utils/telemetryUtils.js';
 import * as edgeRows from '../supabase/functions/_shared/import-rows.ts';
 
@@ -264,6 +265,33 @@ describe('demo fixture: dates and cross-references', () => {
       }
     }
     expect(linked).toBeGreaterThan(200);
+  });
+});
+
+describe('demo fixture: through the import allowlist (R0) and the row rules (D1)', () => {
+  const kept = (rows, type) => filterImportRows(type, rows, []);
+
+  it('keeps every coach row a full name and an email, and nothing else from a guardian', () => {
+    const rows = kept(C, 'coaches');
+    for (const [i, row] of rows.entries()) {
+      const out = composeFullName(normalizeImportRow(row, canonicalImportKey));
+      expect(out.full_name).toBe(`${C[i]['First Name']} ${C[i]['Last Name']}`);
+      if (filled(C[i]['Email/UserID']) || filled(C[i]['Contact Email']))
+        expect(filled(out.email)).toBe(true);
+      for (const key of Object.keys(row))
+        expect(key.toLowerCase()).not.toMatch(/guardian|phone|address/);
+    }
+  });
+
+  it('keeps every player the fields teaming reads, and no guardian or contact column', () => {
+    const rows = kept(P, 'players');
+    for (const row of rows) {
+      const out = normalizeImportRow(row, canonicalImportKey);
+      expect(filled(out.first_name) && filled(out.last_name)).toBe(true);
+      for (const key of Object.keys(out))
+        expect(key).not.toMatch(/guardian|phone|email|address|payment/);
+    }
+    expect(rows.some((row) => 'Team Name' in row)).toBe(true);
   });
 });
 

@@ -1311,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2509,6 +2509,49 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the UTC revert left a pin, a column default or fail_stale_import_jobs different from before"
         dump 10 $SCRATCH/harness_utc; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261022010000" ]; then
+      # Structure only (the purge cannot be undone): both finalizers back to
+      # the bodies before the allowlist -- 20261020020000's finalize_import_job
+      # and 20260726000300's finalize_coach_import_job, md5 of prosrc computed
+      # from those files 2026-10-22 -- still pinned to UTC; the custom-attributes
+      # trigger function back to 20260405120000's body (md5 computed from that
+      # file, trailing spaces aside: the revert carries none, for git diff
+      # --check) with its search_path; the six new functions and the new retention
+      # job gone, and cleanup-staging-players back on its 20260416000002 command. `missing` fires when a lookup
+      # finds no function, so a broken query cannot read as restored.
+      if psql_cmd "SELECT 'ALLOWLIST-VERDICT:' || CASE
+               WHEN to_regprocedure('public.finalize_import_job(uuid, jsonb)') IS NULL
+                 OR to_regprocedure('public.finalize_coach_import_job(uuid, jsonb)') IS NULL THEN 'missing'
+               WHEN to_regprocedure('public.import_declared_attributes(jsonb, jsonb)') IS NOT NULL
+                 OR to_regprocedure('public.import_declared_fields(uuid, text)') IS NOT NULL
+                 OR to_regprocedure('public.import_kept_player_attributes(jsonb, jsonb)') IS NOT NULL
+                 OR to_regprocedure('public.import_allowed_payload(text, jsonb, jsonb)') IS NOT NULL
+                 OR to_regprocedure('public.import_allowed_keys(text)') IS NOT NULL
+                 OR to_regprocedure('public.minimise_import_people_data()') IS NOT NULL THEN 'new-functions-left'
+               WHEN EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-import-rows') THEN 'cron-left'
+               WHEN NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-players'
+                                   AND btrim(command) = 'DELETE FROM public.staging_players WHERE created_at < now() - interval ''30 days''')
+                 THEN 'players-cron'
+               WHEN (SELECT md5(regexp_replace(p.prosrc, '[ \t]+\n', E'\n', 'g')) <> '130088e86b2bfe2d701f156adfd9d4c0' OR p.prosecdef
+                            OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public']
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.validate_custom_attributes()'::regprocedure) THEN 'trigger'
+               WHEN (SELECT count(*) FROM pg_proc p
+                      WHERE p.prosecdef
+                        AND p.proconfig = ARRAY['search_path=public', 'TimeZone=UTC']
+                        AND ((p.oid = 'public.finalize_import_job(uuid, jsonb)'::regprocedure
+                              AND md5(p.prosrc) = 'cdd20848e435a09c75730247519a4b69')
+                          OR (p.oid = 'public.finalize_coach_import_job(uuid, jsonb)'::regprocedure
+                              AND md5(p.prosrc) = '0535034115867366d8faf327e3ebece3'))) = 2
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_allowlist 2>&1 && grep -q 'ALLOWLIST-VERDICT:restored' $SCRATCH/harness_allowlist; then
+        echo "  | (checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"
+      else
+        echo "FAIL revert ${id}: the allowlist revert did not restore both finalizers' or the trigger's previous bodies and posture, left a new function or the new retention job, or did not restore the staging_players job"
+        dump 10 $SCRATCH/harness_allowlist; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

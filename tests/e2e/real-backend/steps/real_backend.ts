@@ -127,27 +127,29 @@ Then(
   }
 );
 
-Then(
-  'players from across the export still list the guardian the full export gave them',
-  async ({ page }) => {
-    // Three players, from both ends and the middle of the export, each opened
-    // from the Players grid as an administrator would.
-    const all = registrations();
-    for (const player of [all[0], all[11], all[all.length - 1]]) {
-      await page.goto('/players');
-      await page.getByRole('textbox', { name: 'Search table' }).fill(player.lastName);
-      const row = page.getByRole('row').filter({ hasText: player.lastName });
-      await expect(row).toHaveCount(1, { timeout: 30_000 });
-      await row.getByRole('button', { name: 'Row actions' }).click();
-      await page.getByRole('menuitem', { name: 'Open record' }).click();
-
-      await page.getByRole('tab', { name: 'Guardians' }).click();
-      await expect(page.getByText('No guardians on file.')).toHaveCount(0);
-      await expect(page.getByText(player.guardianEmail)).toBeVisible();
-      await expect(page.getByText(player.guardianName)).toBeVisible();
-    }
+Then('no player row stores a guardian the full export named', async ({ page }) => {
+  // Every column of every player row, read as the administrator: a stored
+  // guardian is found by its name or email wherever it landed (a column,
+  // contact_info, guardian_contacts, custom attributes).
+  const { token, anonKey } = await adminSession(page);
+  const response = await page.request.get(
+    `${stackUrl()}/rest/v1/players?select=*&organization_id=eq.${SEEDED_ADMIN.organizationId}`,
+    { headers: { apikey: anonKey, Authorization: `Bearer ${token}` }, timeout: BACKEND_TIMEOUT }
+  );
+  const rows = (await response.json()) as unknown[];
+  expect(response.status(), JSON.stringify(rows).slice(0, 2000)).toBe(200);
+  // Not vacuous: both imports wrote these players.
+  expect(rows.length, 'player rows read').toBeGreaterThanOrEqual(registrations().length);
+  const text = JSON.stringify(rows).toLowerCase();
+  for (const player of registrations()) {
+    expect(text, `stored guardian email of ${player.lastName}`).not.toContain(
+      player.guardianEmail.toLowerCase()
+    );
+    expect(text, `stored guardian name of ${player.lastName}`).not.toContain(
+      player.guardianName.toLowerCase()
+    );
   }
-);
+});
 
 Then('the app sent import-validation no sensitive column', async ({ page }) => {
   // The browser's own filter, apart from the Edge Function's: what left the

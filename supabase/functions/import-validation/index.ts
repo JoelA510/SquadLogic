@@ -25,6 +25,12 @@ import {
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
+import {
+  ALLOWLIST_ENTITY_TYPES,
+  isAllowlistedImportType,
+  keepAllowedColumns,
+  withDeclaredColumns,
+} from '../_shared/import-allowlist.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
 
 // --- Constants ---
@@ -313,7 +319,9 @@ function validateRow(
       errors.push({
         row: rowIndex + 1,
         field: 'date_of_birth',
-        message: `Invalid date format: ${row['date_of_birth']}`,
+        // The row and field say where; the value stays out of the message,
+        // which is stored in import_jobs.error_summary (R0).
+        message: 'Invalid date format',
       });
     }
   }
@@ -324,7 +332,7 @@ function validateRow(
       errors.push({
         row: rowIndex + 1,
         field: 'email',
-        message: `Invalid email format: ${row['email']}`,
+        message: 'Invalid email format',
       });
     }
   }
@@ -599,16 +607,56 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // The browser strips them too, but this function is callable directly.
   const stripsSensitive = SENSITIVE_IMPORT_TYPES.includes(body.import_type);
 
+  // People imports then keep only the allowlisted columns: the keys the
+  // finalizer reads, team placement for players, and the fields the
+  // organization declared for the entity (`_shared/import-allowlist.ts`). A
+  // failed schema read fails the request: guessing "no declared fields" would
+  // drop the organization's own columns without saying so.
+  const allowlisted = isAllowlistedImportType(body.import_type);
+  let declaredFields: string[] = [];
+  if (allowlisted) {
+    const { data: schemaRow, error: schemaError } = await serviceClient
+      .from('organization_schemas')
+      .select('schema_definition')
+      .eq('organization_id', body.organization_id)
+      .eq('entity_type', ALLOWLIST_ENTITY_TYPES[body.import_type])
+      .maybeSingle();
+    if (schemaError) {
+      await logFailure(logCtx, 'Organization schema lookup failed', schemaError);
+      return jsonResponse({ status: 'error', message: 'Organization schema lookup failed' }, 500);
+    }
+    const definition = schemaRow?.schema_definition;
+    if (definition && typeof definition === 'object' && !Array.isArray(definition)) {
+      declaredFields = Object.keys(definition);
+    }
+  }
+
   for (let i = 0; i < body.rows.length; i++) {
-    const rawRow = stripsSensitive
+    const strippedRow = stripsSensitive
       ? stripSensitiveColumns(body.rows[i] as Record<string, unknown>)
       : (body.rows[i] as Record<string, unknown>);
+    const rawRow = allowlisted
+      ? keepAllowedColumns(body.import_type, strippedRow, normalizeHeader, declaredFields)
+      : strippedRow;
 
     // Normalize headers via alias map; a blank never replaces a value two columns share, and a
     // coach row with first and last names but no full name gets one (_shared/import-rows.ts)
     let normalizedRow = normalizeImportRow(rawRow, normalizeHeader, sanitizeString);
     if (body.import_type === 'coaches') {
       normalizedRow = composeFullName(normalizedRow, sanitizeString);
+    }
+    // A declared field whose header is also a global alias (`Skill` ->
+    // `skill_tier`) is carried under its own identity too, for
+    // custom_attributes; the system field keeps its reading.
+    if (allowlisted) {
+      normalizedRow = withDeclaredColumns(
+        body.import_type,
+        normalizedRow,
+        rawRow,
+        normalizeHeader,
+        declaredFields,
+        sanitizeString
+      );
     }
 
     // Validate

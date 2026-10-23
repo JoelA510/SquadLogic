@@ -122,11 +122,23 @@ function seedImport() {
     // U12 (age group 11): another program.
     row(99, 'Zed', 'Nine', { age_group: '11' }),
   ];
+  // The players the import promoted, as `finalize_import_job` stores them.
   state.durablePlayers = state.rows.map((r, i) => ({
     id: `5d1c2b3a-4e5f-4a6b-8c7d-${String(900000000000 + i)}`,
     external_registration_id: r.external_registration_id,
     division_id: IDS.division,
+    first_name: r.first_name,
+    last_name: r.last_name,
+    preferred_name: null,
+    buddy_request: r.buddy_request ?? r['Buddy Request'] ?? null,
+    mutual_buddy_code: null,
   }));
+}
+
+/** Edit a durable player as the Player Record page does (`players`, not the import rows). */
+function editDurable(registrationId, patch) {
+  const index = state.rows.findIndex((r) => r.external_registration_id === registrationId);
+  state.durablePlayers[index] = { ...state.durablePlayers[index], ...patch };
 }
 
 async function generate() {
@@ -187,6 +199,30 @@ describe('TeamAnalysisPage :: buddy requests reach the generator', () => {
     expect(teamA).toBeTruthy();
     expect(teamA).toBe(teamB);
     expect(results.buddyDiagnosticsByDivision.U10.mutualPairs).toHaveLength(1);
+  });
+
+  it('reads names and requests from the player records, not the stale import rows (PR #647, Codex 3)', async () => {
+    state.storedFlags = {};
+    // The file said "Bea Twoo" and "Zed Nien"; an admin corrected Ada's request, Cy's request
+    // and Zed's name on their records. Bea's request was cleared on her record.
+    state.rows[0] = row(1, 'Ada', 'One', { buddy_request: 'Bea Twoo' });
+    state.rows[2] = row(3, 'Cy', 'Three', { buddy_request: 'Zed Nine' });
+    state.rows[state.rows.length - 1] = row(99, 'Zed', 'Nien', { age_group: '11' });
+    editDurable('REG-1', { buddy_request: 'Bea Two' });
+    editDurable('REG-2', { buddy_request: null });
+    editDurable('REG-99', { last_name: 'Nine' });
+    await generate();
+
+    const list = screen.getByRole('region', { name: 'Buddy requests' });
+    // Ada's corrected request finds Bea; Bea's cleared request makes it one-way.
+    expect(list).toHaveTextContent('U10: 0 paired, 1 one-way, 1 unresolved.');
+    expect(within(list).getByRole('region', { name: 'One-way' })).toHaveTextContent(
+      'Ada One asked for Bea Two.'
+    );
+    // Zed's corrected name, in the other program, is the candidate.
+    expect(within(list).getByRole('region', { name: 'Unresolved' })).toHaveTextContent(
+      'Possible matches: Zed Nine (U12).'
+    );
   });
 
   it('with the buddy_requests flag off, emits no buddy field: no pair and no list', async () => {

@@ -287,6 +287,16 @@ engine conventions), and the demo league is teamed end to end.
   Watch: the buddy list's counts on the first real import. Reruns are safe: preserved players stay.
 - **Blocked players lower the team count.** Advice counts the registered; generation, the eligible.
   The outcome warnings and "Not placed" make the gap visible.
+- **Review of PR #647 (Codex).** A namesake tie is settled only by a reverse request that names
+  the requester and nobody else in its division. Any request text with a digit that matches no
+  registration id is `not-found`. The page reads names and the request from the durable player
+  rows (the Player Record page's edits), for the program and the whole roster, in chunks of 200
+  ids. `BuddyEvaluator` also steers a player toward a placed requester who named them, so an
+  honoured one-way request is scored whichever of the two is placed first (still best effort,
+  never a unit; the evaluator change ran against the season fixture and the regression suites).
+  Buddy codes are grouped across the whole roster, so a code shared with another division is
+  `cross-division-buddy`; only two program players in one division are linked. The list takes
+  its pairs from the prepared players too, so a review-mode rerun keeps preserved pairs.
 - **Header variants.** If the import rows carry a header form B1 does not read, requests stay lost
   silently. B1's page test uses the real canonical headers, and an import with a buddy column whose
   every request is unresolved shows that in the list.

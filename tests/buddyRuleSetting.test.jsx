@@ -153,7 +153,14 @@ describe('buddy_rule through OrganizationContext and the settings page', () => {
     renderWithProvider(<FeatureFlagSettings />);
     const select = await screen.findByRole('combobox', { name: 'Buddy rule' });
     await waitFor(() => expect(select).toHaveValue('one_way_best_effort'));
-    expect(screen.getByText(/also placed together where the roster allows/)).toBeInTheDocument();
+    const description = screen.getByText(/also placed together where the roster allows/);
+    expect(description).toBeInTheDocument();
+    // Styled through the design system's classes, with no inline style (AGENTS.md §6; PR #647,
+    // Codex 7): the label, the card around the select, the select and its description.
+    const label = document.querySelector('label[for="buddy-rule-select"]');
+    for (const element of [label, select, select.parentElement, description]) {
+      expect(element).not.toHaveAttribute('style');
+    }
 
     await act(async () => {
       fireEvent.change(select, { target: { value: 'mutual' } });

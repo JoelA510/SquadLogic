@@ -288,11 +288,11 @@ export default function FeatureFlagSettings({
       </div>
 
       <div>
-        <label className="section-title" htmlFor="buddy-rule-select" style={{ display: 'block' }}>
+        <label className="section-title block" htmlFor="buddy-rule-select">
           Buddy rule
         </label>
         <div className="card">
-          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="card-body flex flex-col gap-2">
             <select
               id="buddy-rule-select"
               value={buddyRuleChoice.value}
@@ -307,7 +307,7 @@ export default function FeatureFlagSettings({
                 </option>
               ))}
             </select>
-            <div className="muted" style={{ fontSize: 12.5 }} id="buddy-rule-description">
+            <div className="muted text-xs" id="buddy-rule-description">
               {buddyRuleChoice.description}
             </div>
           </div>

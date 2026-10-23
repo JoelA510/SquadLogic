@@ -277,6 +277,89 @@ function buddyFieldsOf(row) {
   };
 }
 
+// What a durable player row holds of a person's identity and buddy request. The Player
+// Record page edits names and the request on `players`, so these win over the import rows,
+// which keep what the file said.
+const DURABLE_PLAYER_FIELDS =
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code';
+const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
+const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
+const LOOKUP_CHUNK = 200;
+const LOOKUP_CONCURRENCY = 8;
+
+/**
+ * The import row with the durable player's identity and buddy request over it. Every header
+ * the import reads as a name or a request is replaced, so a request the admin cleared on the
+ * record is cleared here too. The code stays the import's unless the player row holds one.
+ */
+function withDurableIdentity(row, durable) {
+  if (!durable) return row;
+  const next = {};
+  for (const [header, value] of Object.entries(row || {})) {
+    const key = canonicalImportKey(header);
+    if (BUDDY_REQUEST_KEYS.includes(key) || IDENTITY_KEYS.includes(key)) continue;
+    if (IDENTITY_CAMEL_KEYS.includes(header)) continue;
+    next[header] = value;
+  }
+  // A name the player row lacks (a mock row, a partial select) keeps the import's.
+  next.first_name =
+    durable.first_name ?? firstNonEmpty(row, ['first_name', 'First Name', 'firstName']) ?? '';
+  next.last_name =
+    durable.last_name ?? firstNonEmpty(row, ['last_name', 'Last Name', 'lastName']) ?? '';
+  if (durable.preferred_name) next.preferred_name = durable.preferred_name;
+  if (durable.buddy_request) next.buddy_request = durable.buddy_request;
+  if (durable.mutual_buddy_code) next.mutual_buddy_code = durable.mutual_buddy_code;
+  return next;
+}
+
+/**
+ * Durable players by id and by external registration id, in chunks (a long `in` list is a
+ * long URL), at most eight requests at a time. A refused read throws.
+ * @param {string} organizationId
+ * @param {{ ids?: string[], externalIds?: string[], divisionId?: string | null }} keys
+ *   `divisionId` narrows the external-id lookup to one division.
+ */
+async function fetchDurablePlayers(
+  organizationId,
+  { ids = [], externalIds = [], divisionId = null }
+) {
+  const queries = [];
+  for (let start = 0; start < ids.length; start += LOOKUP_CHUNK) {
+    const chunk = ids.slice(start, start + LOOKUP_CHUNK);
+    queries.push(() =>
+      supabase
+        .from('players')
+        .select(DURABLE_PLAYER_FIELDS)
+        .eq('organization_id', organizationId)
+        .in('id', chunk)
+    );
+  }
+  for (let start = 0; start < externalIds.length; start += LOOKUP_CHUNK) {
+    const chunk = externalIds.slice(start, start + LOOKUP_CHUNK);
+    queries.push(() => {
+      const query = supabase
+        .from('players')
+        .select(DURABLE_PLAYER_FIELDS)
+        .eq('organization_id', organizationId);
+      return (divisionId ? query.eq('division_id', divisionId) : query).in(
+        'external_registration_id',
+        chunk
+      );
+    });
+  }
+  const players = [];
+  for (let start = 0; start < queries.length; start += LOOKUP_CONCURRENCY) {
+    const results = await Promise.all(
+      queries.slice(start, start + LOOKUP_CONCURRENCY).map((run) => run())
+    );
+    for (const { data, error } of results) {
+      if (error) throw error;
+      players.push(...(data || []));
+    }
+  }
+  return players;
+}
+
 /** A roster entry buddy requests are matched against: identity only. */
 function toBuddyRosterEntry(row, id, division) {
   return {
@@ -726,30 +809,15 @@ export default function TeamAnalysisPage() {
   const resolveGeneratorPlayers = useCallback(
     async (rowsForProgram, selectedProgramKey, selectedDivisionId) => {
       const { ids, externalIds } = collectPlayerLookupKeys(rowsForProgram);
-      const durablePlayers = [];
       const selectedDivisionKey = String(selectedDivisionId || '');
-      const lookupResults = await Promise.all([
-        ids.length > 0
-          ? supabase
-              .from('players')
-              .select('id, external_registration_id, division_id')
-              .eq('organization_id', currentOrganization.id)
-              .in('id', ids)
-          : Promise.resolve({ data: [], error: null }),
-        externalIds.length > 0
-          ? supabase
-              .from('players')
-              .select('id, external_registration_id, division_id')
-              .eq('organization_id', currentOrganization.id)
-              .eq('division_id', selectedDivisionId)
-              .in('external_registration_id', externalIds)
-          : Promise.resolve({ data: [], error: null }),
+      const [byIdRows, byExternalRows] = await Promise.all([
+        fetchDurablePlayers(currentOrganization.id, { ids }),
+        fetchDurablePlayers(currentOrganization.id, {
+          externalIds,
+          divisionId: selectedDivisionId,
+        }),
       ]);
-
-      lookupResults.forEach(({ data, error }) => {
-        if (error) throw error;
-        durablePlayers.push(...(data || []));
-      });
+      const durablePlayers = [...byIdRows, ...byExternalRows];
 
       const byId = new Map(durablePlayers.map((player) => [String(player.id), player]));
       const byExternalId = new Map(
@@ -758,6 +826,7 @@ export default function TeamAnalysisPage() {
           .map((player) => [String(player.external_registration_id), player])
       );
       const missingRows = [];
+      const generationRows = [];
 
       const generatorPlayers = rowsForProgram.map(({ row, sourceIndex }) => {
         const idCandidate = getPlayerIdCandidate(row);
@@ -778,12 +847,13 @@ export default function TeamAnalysisPage() {
 
         const rowForGeneration = durablePlayer
           ? {
-              ...row,
+              ...withDurableIdentity(row, durablePlayer),
               id: durablePlayer.id,
               player_id: durablePlayer.id,
               division_id: durablePlayer.division_id || row.division_id,
             }
           : row;
+        generationRows.push(rowForGeneration);
 
         return toGeneratorPlayer(rowForGeneration, sourceIndex, selectedProgramKey, {
           buddyRequests: buddyRequestsEnabled,
@@ -797,7 +867,7 @@ export default function TeamAnalysisPage() {
         );
       }
 
-      return generatorPlayers;
+      return { generatorPlayers, generationRows };
     },
     [buddyRequestsEnabled, currentOrganization?.id]
   );
@@ -828,31 +898,54 @@ export default function TeamAnalysisPage() {
         throw new Error(`No imported players found for ${selectedProgram.name}.`);
       }
 
-      const generatorPlayers = await resolveGeneratorPlayers(
+      const { generatorPlayers, generationRows } = await resolveGeneratorPlayers(
         rowsForProgram,
         selectedProgramKey,
         savedDivision.id
       );
 
       // Every imported player, so a buddy request naming someone outside this program is told
-      // apart from one naming nobody. The program's own rows carry their generator ids.
+      // apart from one naming nobody. The program's own rows carry their generator ids; every
+      // row carries its durable player's names and request (the record's edits), where found.
       const programIndexBySource = new Map(
         rowsForProgram.map((entry, programIndex) => [entry.sourceIndex, programIndex])
       );
-      const buddyRoster = buddyRequestsEnabled
-        ? importedPlayerRows.map((row, sourceIndex) => {
-            const programIndex = programIndexBySource.get(sourceIndex);
-            if (programIndex !== undefined) {
-              return toBuddyRosterEntry(row, generatorPlayers[programIndex].id, selectedProgramKey);
-            }
-            const division = resolveDivisionId(row);
+      let buddyRoster;
+      if (buddyRequestsEnabled) {
+        const otherRows = importedPlayerRows.filter(
+          (_, sourceIndex) => !programIndexBySource.has(sourceIndex)
+        );
+        const otherKeys = collectPlayerLookupKeys(otherRows.map((row) => ({ row })));
+        const otherDurable = await fetchDurablePlayers(currentOrganization.id, otherKeys);
+        const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
+        const otherByExternalId = new Map(
+          otherDurable
+            .filter((player) => player.external_registration_id)
+            .map((player) => [String(player.external_registration_id), player])
+        );
+        buddyRoster = importedPlayerRows.map((row, sourceIndex) => {
+          const programIndex = programIndexBySource.get(sourceIndex);
+          if (programIndex !== undefined) {
             return toBuddyRosterEntry(
-              row,
-              toGeneratorPlayer(row, sourceIndex, division).id,
-              division
+              generationRows[programIndex],
+              generatorPlayers[programIndex].id,
+              selectedProgramKey
             );
-          })
-        : undefined;
+          }
+          const division = resolveDivisionId(row);
+          const idCandidate = getPlayerIdCandidate(row);
+          const externalCandidate = getPlayerExternalCandidate(row);
+          const durable =
+            (isUuid(idCandidate) && otherById.get(idCandidate)) ||
+            (externalCandidate && otherByExternalId.get(externalCandidate)) ||
+            null;
+          return toBuddyRosterEntry(
+            withDurableIdentity(row, durable),
+            durable?.id ?? toGeneratorPlayer(row, sourceIndex, division).id,
+            division
+          );
+        });
+      }
 
       // Coach-anchored teaming + play-up/play-down eligibility. Imported coaches
       // (via coach_team_requests) drive which players anchor a coach's team, and

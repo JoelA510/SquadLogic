@@ -363,3 +363,26 @@ operator query covers the one thing it cannot see.
 and the trigger decisions later?**
 _Recommendation:_ one. Each piece is small, they share a revert and a smoke, and
 the snapshot check in Q4 only goes green once all of them are in.
+
+## 7. Addendum, 2026-10-23: views drift too (_executed_, read-only)
+
+Migration `20261022020000` (R1) failed its first production deploy at
+`DROP VIEW public.view_compliance_stats` with 42P01 and rolled back as one
+transaction. Production's `public` schema has two views, `field_closures` and
+`import_efficiency_metrics`. A fresh build also has four more, from
+`20251220000000_reporting_views.sql` and `20260331000000_definitive_schema.sql`:
+
+| View                    | Read by                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `view_compliance_stats` | nothing since R1 (the migration now drops it only if it exists)                                                             |
+| `view_org_metrics`      | the Reports page (`EnterpriseDashboard.jsx`): its read fails in production, so Active Teams stays 0 (_statically reviewed_) |
+| `view_league_standings` | the Standings page (`LeagueStandings.jsx`): its reads fail in production                                                    |
+| `view_facility_usage`   | nothing in `frontend/src`, `supabase/functions` or `packages`                                                               |
+
+`supabase/catalog-snapshot.json` covers functions, policies and triggers, not
+views, so the drift check in section 5 could not see this. Every other object
+`20261022020000` drops (seven functions, eight policies, two triggers, two
+tables, three columns) is present in production, with no foreign key into the
+two tables and nothing depending on the three columns. Recreating the two
+read views, and adding views to the snapshot, is a follow-up that needs a
+migration (AGENTS.md rule 14).

@@ -313,22 +313,14 @@ When('I hover my mouse over the {string} chart', async ({ page }, _chartName: st
   }, MOCK_ORG_ID);
 
   await page.goto('/admin/reports');
-  // Wait for the Recharts canvas/SVG to mount (RadarChart always renders)
-  const chart = page.locator('.recharts-wrapper').first();
-  await expect(chart).toBeVisible({ timeout: 15000 });
+  // The seeded custom attributes render the attribute bar chart, the page's
+  // only chart since the readiness radar was removed.
+  const barRect = page.locator('.recharts-bar-rectangle').first();
+  await expect(barRect).toBeVisible({ timeout: 15000 });
 
   // Wait for animation to settle before hovering
   await page.waitForTimeout(2000);
-
-  // Try the bar chart first, fall back to radar chart sectors
-  const barRect = page.locator('.recharts-bar-rectangle').first();
-  const radarDot = page.locator('.recharts-polar-grid').first();
-  if ((await barRect.count()) > 0) {
-    await barRect.hover({ force: true });
-  } else {
-    // Hover over the radar chart area to trigger its tooltip
-    await radarDot.hover({ force: true });
-  }
+  await barRect.hover({ force: true });
 });
 
 Then('a dark-themed tooltip should appear showing exact counts', async ({ page }) => {
@@ -336,14 +328,7 @@ Then('a dark-themed tooltip should appear showing exact counts', async ({ page }
   // Try multiple approaches to trigger the tooltip.
   const tooltip = page.locator('.recharts-tooltip-wrapper').first();
 
-  // Attempt 1: Hover over radar polygon (most reliable for RadarChart)
-  const radarPolygon = page.locator('.recharts-radar .recharts-polygon').first();
-  if ((await radarPolygon.count()) > 0) {
-    await radarPolygon.hover({ force: true });
-    await page.waitForTimeout(300);
-  }
-
-  // Attempt 2: Hover over each recharts-wrapper center area
+  // Hover over each recharts-wrapper center area
   if (!(await tooltip.isVisible().catch(() => false))) {
     const wrappers = page.locator('.recharts-wrapper');
     const count = await wrappers.count();

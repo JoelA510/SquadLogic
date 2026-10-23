@@ -1,10 +1,12 @@
 {
-  "$comment": "Migrations that may differ from the base branch because they were never applied in production. scripts/ci/migrationVersions.mjs accepts an edit only for a version listed here whose file has exactly this git blob; scripts/ci/migrationGuard.mjs refuses to deploy while a listed version is already applied, so delete an entry once its migration has deployed. Read production's ledger (supabase migration list) before adding one.",
+  "$comment": "Edits to migrations made while they had never applied in production (a deploy that failed and rolled back). Permanent: entries are never removed or changed. scripts/ci/migrationVersions.mjs accepts an edit only for a listed version whose file has exactly `blob`, and requires `marker` to be text the edit added (in `blob`, not in `base_blob`). scripts/ci/migrationGuard.mjs requires, for every listed version production has applied, that `marker` is among the statements production's ledger recorded, so the edited file is what ran. Read production's ledger before adding an entry.",
   "edits": [
     {
       "version": "20261022020000",
       "blob": "dbb09155af08149a3b7839e69c17f79e410c0f84",
-      "reason": "First deploy failed at DROP VIEW public.view_compliance_stats (42P01) and rolled back: production never had the view (docs/operations/schema-drift-2026-10.md, section 7). Not applied in production on 2026-10-23."
+      "reason": "First deploy failed at DROP VIEW public.view_compliance_stats (42P01) and rolled back: production never had the view (docs/operations/schema-drift-2026-10.md, section 7). Not applied in production on 2026-10-23. Applied with the edit by main's deploy of 0e9cda3 (ledger statements read 2026-10-23).",
+      "base_blob": "9c8f2ec04eaa84ddeb6f19808997f86b1872dae1",
+      "marker": "DROP VIEW IF EXISTS public.view_compliance_stats"
     }
   ]
 }

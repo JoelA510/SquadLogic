@@ -1,12 +1,9 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
-import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
-
-// The background's active season, which the app then selects.
-const ACTIVE_SEASON_ID = 'season-fall-26';
 
 /**
  * Ensures localStorage points to the mock seed's organization (MOCK_ORG_ID) so OrganizationContext resolves
@@ -27,7 +24,7 @@ const pinToMockOrg = async (page: Page) => {
 // without the registration form and registration that file also seeded.
 Given('there is an active season {string}', async ({ page }, seasonName: string) => {
   await page.addInitScript(
-    ({ mockOrgId, name, seasonId }) => {
+    ({ mockOrgId, name }) => {
       type MockTable = Array<Record<string, unknown>>;
       type MockDb = Record<string, MockTable>;
       const db = ((window as { __MOCK_DB__?: MockDb }).__MOCK_DB__ || {}) as MockDb;
@@ -39,7 +36,7 @@ Given('there is an active season {string}', async ({ page }, seasonName: string)
       db.season_settings = db.season_settings || [];
       if (!db.season_settings.find((s: Record<string, unknown>) => s.name === name)) {
         db.season_settings.push({
-          id: seasonId,
+          id: 'season-fall-26',
           organization_id: orgId,
           name,
           status: 'active',
@@ -51,7 +48,7 @@ Given('there is an active season {string}', async ({ page }, seasonName: string)
       sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       localStorage.setItem('squadlogic_active_org', orgId);
     },
-    { mockOrgId: MOCK_ORG_ID, name: seasonName, seasonId: ACTIVE_SEASON_ID }
+    { mockOrgId: MOCK_ORG_ID, name: seasonName }
   );
 });
 
@@ -146,33 +143,15 @@ Then(
 
 Given('the coach views the league standings', async ({ page }) => {
   // Pin to the mock seed's org so OrganizationContext resolves (coach is in initialMockData's org_members).
-  // Teams and games are initialMockData's. The page ranks the selected season's
-  // teams only, and the selected season is the background's, so the standings
-  // rows (initialMockData's Team A and Team B) are seeded into that season.
-  await page.addInitScript(
-    ({ mockOrgId, seasonId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const team = (team_id: string, team_name: string, won: boolean) => ({
-        organization_id: mockOrgId,
-        team_id,
-        team_name,
-        division: 'U8 Coed',
-        season_settings_id: seasonId,
-        wins: won ? 1 : 0,
-        losses: won ? 0 : 1,
-        draws: 0,
-        games_played: 1,
-        goals_for: won ? 2 : 1,
-        goals_against: won ? 1 : 2,
-        goal_differential: won ? 1 : -1,
-        points: won ? 3 : 0,
-      });
-      db.view_league_standings = [team('t1', 'Team A', true), team('t2', 'Team B', false)];
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID, seasonId: ACTIVE_SEASON_ID }
-  );
+  // All standings, teams, and games data is in initialMockData — no seeding needed.
   await pinToMockOrg(page);
+  // The page ranks the selected season's teams only. initialMockData's standings
+  // are its own season's, not the background's newer active season (which the
+  // app would otherwise select), so select that season, as the season switcher
+  // would.
+  await page.evaluate((seasonId) => {
+    localStorage.setItem('squadlogic-current-season', seasonId);
+  }, MOCK_SEASON_ID);
   await page.goto('/standings');
   await page.waitForLoadState('networkidle');
 

@@ -7,11 +7,13 @@
  * nothing would have said so until the ledger did, in production. This file
  * absorbed #454's `migrationVersionUnique.test.js`, which duplicated the rule.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   baseEntries,
   checkAgainstBase,
+  checkEditsList,
   checkNames,
   listHead,
   readAllowedEdits,
@@ -119,7 +121,37 @@ describe('migration versions: the head against the base', () => {
       const file = listHead().find((f) => versionOf(f) === a.version);
       expect(file, a.version).toBeTruthy();
       expect(baseEntries('HEAD').find((x) => x.file === file)?.blob, a.version).toBe(a.blob);
+      const text = (blob) => execFileSync('git', ['cat-file', '-p', blob], { encoding: 'utf8' });
+      expect(text(a.blob), a.version).toContain(a.marker);
+      expect(text(a.base_blob), a.version).not.toContain(a.marker);
     }
+  });
+
+  it('keeps the edits list permanent, and each marker new in its edit', () => {
+    const files = { a: 'DROP VIEW IF EXISTS x;', b: 'DROP VIEW x;' };
+    const content = (blob) => files[blob[0]];
+    const entry = (over = {}) => ({
+      version: '20260924000000',
+      blob: 'a'.repeat(40),
+      base_blob: 'b'.repeat(40),
+      marker: 'IF EXISTS',
+      reason: 'never applied',
+      ...over,
+    });
+    expect(checkEditsList([entry()], [entry()], content)).toEqual([]);
+    expect(checkEditsList([], [entry()], content)).toEqual([]);
+    expect(checkEditsList([entry()], [], content)).toEqual([
+      'supabase/unapplied-migration-edits.json: entry 20260924000000 was removed; entries are permanent',
+    ]);
+    expect(checkEditsList([entry()], [entry({ marker: 'DROP' })], content).join(' ')).toMatch(
+      /changed its "marker".*already in the original file/
+    );
+    expect(checkEditsList([], [entry({ marker: 'absent' })], content)).toEqual([
+      "supabase/unapplied-migration-edits.json: entry 20260924000000's marker is not in its edited file",
+    ]);
+    // A legacy base entry (version and blob only) may gain the new fields.
+    const legacy = { version: '20260924000000', blob: 'a'.repeat(40), reason: 'old' };
+    expect(checkEditsList([legacy], [entry()], content)).toEqual([]);
   });
 
   it('fails a removed migration', () => {

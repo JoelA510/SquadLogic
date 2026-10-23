@@ -14,6 +14,11 @@
  *      The one exception: a version listed in
  *      supabase/unapplied-migration-edits.json (never applied in production)
  *      may be edited, to exactly the blob the entry records.
+ *   4. (with --base) That list is append-only: an entry, once on the base,
+ *      stays with the same version, blob, base_blob and marker. Each entry's
+ *      marker is text the edited file has (blob) and the original lacked
+ *      (base_blob); the deploy guard requires it among the statements
+ *      production's ledger recorded, so the edit is proven to have run.
  *
  * Check 3 compares two independent trees, `git ls-tree <base>` and
  * `git ls-tree HEAD` (blob ids from the tree, not the working copy, which is
@@ -100,23 +105,82 @@ export function checkAgainstBase(baseEntries, headEntries, allowedEdits = []) {
 }
 
 /**
- * The edits allowed to never-applied migrations: `[{ version, blob, reason }]`.
- * A missing file allows none; a malformed one is an error, never an empty list.
+ * Parse the list of edits allowed to never-applied migrations:
+ * `[{ version, blob, base_blob, marker, reason }]`. Malformed is an error,
+ * never an empty list.
  */
-export function readAllowedEdits(path = UNAPPLIED_EDITS_FILE) {
-  if (!existsSync(path)) return [];
-  const value = JSON.parse(readFileSync(path, 'utf8'));
-  if (!value || !Array.isArray(value.edits)) throw new Error(`${path}: no "edits" array`);
+export function parseAllowedEdits(text, where = UNAPPLIED_EDITS_FILE, { legacy = false } = {}) {
+  const value = JSON.parse(text);
+  if (!value || !Array.isArray(value.edits)) throw new Error(`${where}: no "edits" array`);
   for (const e of value.edits) {
-    if (!/^[0-9]{14}$/.test(e?.version ?? '') || !/^[0-9a-f]{40}$/.test(e?.blob ?? '')) {
-      throw new Error(`${path}: each edit needs a 14-digit "version" and a 40-hex "blob"`);
+    if (!/^[0-9]{14}$/.test(e?.version ?? '')) {
+      throw new Error(`${where}: each edit needs a 14-digit "version"`);
     }
-    if (typeof e.reason !== 'string' || e.reason.trim() === '') {
-      throw new Error(`${path}: edit ${e.version} needs a "reason"`);
+    // A base list written before markers existed (2026-10-23) has version and blob only.
+    if (legacy && /^[0-9a-f]{40}$/.test(e.blob ?? '') && e.marker === undefined) continue;
+    if (!/^[0-9a-f]{40}$/.test(e.blob ?? '') || !/^[0-9a-f]{40}$/.test(e.base_blob ?? '')) {
+      throw new Error(`${where}: edit ${e.version} needs a 40-hex "blob" and "base_blob"`);
+    }
+    for (const field of ['marker', 'reason']) {
+      if (typeof e[field] !== 'string' || e[field].trim() === '') {
+        throw new Error(`${where}: edit ${e.version} needs a "${field}"`);
+      }
     }
   }
   return value.edits;
 }
+
+/** The committed list; a missing file allows none. */
+export function readAllowedEdits(path = UNAPPLIED_EDITS_FILE) {
+  if (!existsSync(path)) return [];
+  return parseAllowedEdits(readFileSync(path, 'utf8'), path);
+}
+
+/**
+ * Check 4. `content(blob)` returns a blob's text. Entries are append-only and
+ * immutable, and each marker is new in the edit: present in `blob`, absent
+ * from `base_blob`.
+ * @returns {string[]} errors
+ */
+export function checkEditsList(baseEdits, headEdits, content) {
+  const errors = [];
+  const head = new Map(headEdits.map((e) => [e.version, e]));
+  for (const b of baseEdits) {
+    const h = head.get(b.version);
+    if (!h) {
+      errors.push(`${UNAPPLIED_EDITS_FILE}: entry ${b.version} was removed; entries are permanent`);
+      continue;
+    }
+    for (const field of ['blob', 'base_blob', 'marker']) {
+      if (b[field] !== undefined && b[field] !== h[field]) {
+        errors.push(`${UNAPPLIED_EDITS_FILE}: entry ${b.version} changed its "${field}"`);
+      }
+    }
+  }
+  for (const h of headEdits) {
+    if (!content(h.blob).includes(h.marker)) {
+      errors.push(`${UNAPPLIED_EDITS_FILE}: entry ${h.version}'s marker is not in its edited file`);
+    }
+    if (content(h.base_blob).includes(h.marker)) {
+      errors.push(
+        `${UNAPPLIED_EDITS_FILE}: entry ${h.version}'s marker is already in the original file, ` +
+          'so it cannot show which version production ran'
+      );
+    }
+  }
+  return errors;
+}
+
+/** The list as it stands on a git ref; absent there means empty. */
+export function allowedEditsAt(ref, path = UNAPPLIED_EDITS_FILE) {
+  const listed = execFileSync('git', ['ls-tree', ref, '--', path], { encoding: 'utf8' });
+  if (listed.trim() === '') return [];
+  const text = execFileSync('git', ['show', `${ref}:${path}`], { encoding: 'utf8' });
+  return parseAllowedEdits(text, `${ref}:${path}`, { legacy: true });
+}
+
+const blobContent = (blob) =>
+  execFileSync('git', ['cat-file', '-p', blob], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 export function listHead(dir = MIGRATIONS_DIR) {
   return readdirSync(dir).sort();
@@ -141,7 +205,9 @@ export function main(argv = process.argv.slice(2)) {
   const baseRef = i >= 0 ? argv[i + 1] : undefined;
   if (i >= 0 && !baseRef) errors.push('--base needs a git ref');
   if (baseRef) {
-    errors.push(...checkAgainstBase(baseEntries(baseRef), baseEntries('HEAD'), readAllowedEdits()));
+    const edits = readAllowedEdits();
+    errors.push(...checkAgainstBase(baseEntries(baseRef), baseEntries('HEAD'), edits));
+    errors.push(...checkEditsList(allowedEditsAt(baseRef), edits, blobContent));
   }
   for (const e of errors) console.error(`::error title=Migration versions::${e}`);
   if (errors.length > 0) return 1;

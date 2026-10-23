@@ -54,10 +54,13 @@ function getBuddyCode(player) {
   return str === '' ? undefined : str;
 }
 
+/** The fields a player's buddy request text is read from. */
+export const BUDDY_REQUEST_FIELDS = Object.freeze(['buddy_request', 'buddyRequest']);
+
 /** Read a player's external buddy request (an EXTERNAL registration key, not a player id). */
 function getBuddyRequestKey(player) {
   if (!player) return undefined;
-  const raw = player.buddy_request ?? player.buddyRequest;
+  const raw = player[BUDDY_REQUEST_FIELDS[0]] ?? player[BUDDY_REQUEST_FIELDS[1]];
   if (raw === undefined || raw === null) return undefined;
   const str = String(raw).trim();
   return str === '' ? undefined : str;
@@ -70,6 +73,20 @@ function getExternalKey(player) {
   if (raw === undefined || raw === null) return undefined;
   const str = String(raw).trim();
   return str === '' ? undefined : str;
+}
+
+/**
+ * Whether a player listed a buddy of any kind: a request, a code or an explicit reference.
+ * @param {any} player
+ * @returns {boolean}
+ */
+export function listsABuddy(player) {
+  if (!player) return false;
+  return (
+    getCanonicalBuddyId(player) !== undefined ||
+    getBuddyRequestKey(player) !== undefined ||
+    getBuddyCode(player) !== undefined
+  );
 }
 
 /**
@@ -404,8 +421,13 @@ function rosterNameKeys(player) {
  *   or more is ambiguous unless exactly one candidate's own request names the
  *   requester back (reciprocity is the evidence);
  * - a match only outside the requester's division is `cross-division`; none is
- *   `not-found`; text naming more than one person, or only one name, is
- *   `unparsed`; a request naming the requester is `self`.
+ *   `not-found` (so is text with a digit in it that matches no registration id);
+ *   text naming more than one person, or only one name, is `unparsed`; a request
+ *   matching the requester alone is `self`, and the requester's own name beside a
+ *   namesake is `ambiguous` unless the namesake names the requester back.
+ *
+ * Names are compared in Latin letters only (`normaliseNamePart`, the identity
+ * module's contract): a name in another script yields no key and is `unparsed`.
  *
  * @param {{ players: any[], roster?: any[] }} params
  * @returns {{ requests: BuddyRequestResolution[] }}
@@ -496,7 +518,9 @@ export function resolveBuddyRequests({ players, roster } = /** @type {any} */ ({
     }
     const parsed = parseNameRequest(text);
     if (!parsed) {
-      firstPass.set(id, { text, via: null, unparsed: true, matches: [], lastParts: [] });
+      // Text with a digit in it is a registration id nobody has, not a name to read.
+      const looksLikeId = /\d/.test(text) && !MULTI_PERSON.test(text);
+      firstPass.set(id, { text, via: null, unparsed: !looksLikeId, matches: [], lastParts: [] });
       continue;
     }
     const matches = [];
@@ -571,11 +595,9 @@ export function resolveBuddyRequests({ players, roster } = /** @type {any} */ ({
         resolvedTo(reciprocating[0], 'reciprocity');
         continue;
       }
-      if (inDivision.includes(id)) {
-        record({ status: BUDDY_REQUEST_STATUS.SELF, candidates: others.map(candidateOf) });
-        continue;
-      }
-      record({ status: BUDDY_REQUEST_STATUS.AMBIGUOUS, candidates: inDivision.map(candidateOf) });
+      // The requester's own name with a namesake beside it: the request may mean the
+      // namesake, so it is ambiguous (listed with the namesakes), never `self`.
+      record({ status: BUDDY_REQUEST_STATUS.AMBIGUOUS, candidates: others.map(candidateOf) });
       continue;
     }
     if (inDivision.length === 1) {
@@ -699,6 +721,8 @@ export function summarizeBuddyRequests({
       names: [nameOf(a), nameOf(b)],
       teamName: together ? teamNameById.get(teamId) : null,
       together,
+      // A namesake tie settled by reciprocity: worth a second look by the admin.
+      matchedByReciprocity: [a, b].some((id) => requestOf.get(id)?.matchedBy === 'reciprocity'),
     };
   });
 

@@ -1493,11 +1493,7 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
-          <BuddyRequestsList
-            buddyRequestsByDivision={
-              displayPersistenceSnapshot?.runMetadata?.results?.buddyRequestsByDivision
-            }
-          />
+          <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (
             <section
               className="bg-bg-surface border border-border-subtle rounded-xl p-6"

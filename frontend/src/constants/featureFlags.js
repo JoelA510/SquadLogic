@@ -69,7 +69,22 @@ export const GENDER_MODELS = ['split', 'coed'];
  * `BUDDY_RULES` in `packages/core/src/buddyLinking.js` (`tests/buddyRuleSetting.test.jsx`).
  */
 export const BUDDY_RULE_KEY = 'buddy_rule';
-export const BUDDY_RULE_OPTIONS = ['mutual', 'one_way_best_effort'];
+/** Each rule as the settings page offers it and the Teams page's buddy list names it. */
+export const BUDDY_RULE_CHOICES = Object.freeze([
+  {
+    value: 'mutual',
+    label: 'Mutual requests only',
+    description:
+      'Two players are kept together only when each names the other. One-way requests are listed for review.',
+  },
+  {
+    value: 'one_way_best_effort',
+    label: 'One-way requests, best effort',
+    description:
+      'A one-way request is also placed together where the roster allows, when the named player listed no buddy.',
+  },
+]);
+export const BUDDY_RULE_OPTIONS = BUDDY_RULE_CHOICES.map((choice) => choice.value);
 
 // For development convenience, a list of all known flag names
 export const ALL_FLAGS = Object.values(FEATURE_FLAGS);

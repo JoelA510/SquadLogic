@@ -361,6 +361,26 @@ describe('resolveBuddyRequests', () => {
     }
   });
 
+  it('calls a registration id nobody has not-found, never unparsed', () => {
+    const { requests } = resolveBuddyRequests({
+      players: [
+        kid('a', 'Ada', 'One', { buddy_request: '98765' }),
+        kid('b', 'Bea', 'Two', { buddy_request: 'GS-404' }),
+      ],
+    });
+    expect(resolutionOf(requests, 'a').status).toBe(BUDDY_REQUEST_STATUS.NOT_FOUND);
+    expect(resolutionOf(requests, 'b').status).toBe(BUDDY_REQUEST_STATUS.NOT_FOUND);
+  });
+
+  it("calls the requester's own name beside a namesake ambiguous, not self", () => {
+    const { requests } = resolveBuddyRequests({
+      players: [kid('a', 'Sam', 'Lee', { buddy_request: 'Sam Lee' }), kid('b', 'Sam', 'Lee')],
+    });
+    const a = resolutionOf(requests, 'a');
+    expect(a.status).toBe(BUDDY_REQUEST_STATUS.AMBIGUOUS);
+    expect(a.candidates.map((c) => c.playerId)).toEqual(['b']);
+  });
+
   it('calls a request naming the requester self', () => {
     const { requests } = resolveBuddyRequests({
       players: [kid('a', 'Ada', 'One', { buddy_request: 'Ada One' }), kid('b', 'Bea', 'Two')],
@@ -437,6 +457,34 @@ describe('a name request reaches prepareTeamingInput', () => {
     });
   });
 
+  it('keeps numeric ids numeric, so a resolved pair is one unit downstream', () => {
+    const { players } = prepareTeamingInput({
+      players: [
+        { ...kid('a', 'Ada', 'One', { buddy_request: 'Bea Two' }), id: 1 },
+        { ...kid('b', 'Bea', 'Two', { buddy_request: 'Ada One' }), id: 2 },
+      ],
+      seasonYear: 2026,
+    });
+    expect(players.map((p) => p.buddyId)).toEqual([2, 1]);
+  });
+
+  it('keeps a code pair over an honoured one-way request (one buddy per player)', () => {
+    const { players, diagnostics } = prepareTeamingInput({
+      players: [
+        kid('a', 'Ada', 'One', { buddy_request: 'Bea Two', mutual_buddy_code: 'P1' }),
+        kid('b', 'Bea', 'Two'),
+        kid('c', 'Cy', 'Three', { mutual_buddy_code: 'P1' }),
+      ],
+      seasonYear: 2026,
+      buddyRule: 'one_way_best_effort',
+    });
+    expect(players.find((p) => p.id === 'a').buddyId).toBe('c');
+    expect(diagnostics.buddyRequests[0]).toMatchObject({
+      honoured: false,
+      reason: 'requester-has-another-buddy',
+    });
+  });
+
   it('never reads a name as a registration key (no one-way link from normalizeBuddyLinks)', () => {
     const { players } = prepareTeamingInput({
       players: [
@@ -475,7 +523,13 @@ describe('summarizeBuddyRequests', () => {
     });
     expect(summary.rule).toBe('mutual');
     expect(summary.paired).toEqual([
-      { playerIds: ['a', 'b'], names: ['Ada One', 'Bea Two'], teamName: 'Lions', together: true },
+      {
+        playerIds: ['a', 'b'],
+        names: ['Ada One', 'Bea Two'],
+        teamName: 'Lions',
+        together: true,
+        matchedByReciprocity: false,
+      },
     ]);
     expect(summary.oneWay).toEqual([
       expect.objectContaining({

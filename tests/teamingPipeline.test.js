@@ -144,6 +144,25 @@ test("a one-way request for a coach's child sanctions nothing under the mutual r
   assert.equal(out.find((p) => p.id === 'up').placement, PLACEMENT.PLAY_UP_BLOCKED);
 });
 
+test("an honoured one-way request for a coach's child does not sanction a play-up", () => {
+  // Under one_way_best_effort the request is scored best effort, and may not land together,
+  // so it is no sanction: route B needs a pair.
+  const { players: out } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach'),
+      named('up', 'Pia', 'Up', { dob: '2017-05-01', buddy_request: 'Cara Coach' }),
+    ],
+    coaches: [{ id: 'coachA', player_id: 'child' }],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    buddyRule: 'one_way_best_effort',
+  });
+  const up = out.find((p) => p.id === 'up');
+  assert.equal(up.buddyId, 'child', 'the request is honoured best effort');
+  assert.equal(up.placement, PLACEMENT.PLAY_UP_BLOCKED);
+});
+
 test('two coaching families as buddies give buddy-coach-conflict and no throw', () => {
   const players = [
     named('a', 'Ada', 'One', { buddy_request: 'Bea Two' }),

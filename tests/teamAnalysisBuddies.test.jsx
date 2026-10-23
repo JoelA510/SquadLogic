@@ -211,3 +211,103 @@ describe('TeamAnalysisPage :: buddy requests reach the generator', () => {
     }
   });
 });
+
+describe('BuddyRequestsList :: placement follows the run’s current rows', () => {
+  it('says a pair split by a manual roster edit is not placed together', async () => {
+    const { default: BuddyRequestsList } =
+      await import('../frontend/src/components/teaming/BuddyRequestsList.jsx');
+    const summary = {
+      rule: 'mutual',
+      paired: [
+        {
+          playerIds: ['p-a', 'p-b'],
+          names: ['Ada One', 'Bea Two'],
+          teamName: 'Lions',
+          together: true,
+          matchedByReciprocity: false,
+        },
+      ],
+      oneWay: [],
+      unresolved: [],
+    };
+    const teams = [
+      { id: 't-1', name: 'Lions' },
+      { id: 't-2', name: 'Bulls' },
+    ];
+    const { rerender } = render(
+      <BuddyRequestsList
+        results={{
+          buddyRequestsByDivision: { U10: summary },
+          teams,
+          team_players: [
+            { team_id: 't-1', player_id: 'p-a' },
+            { team_id: 't-1', player_id: 'p-b' },
+          ],
+        }}
+      />
+    );
+    const paired = () => screen.getByRole('region', { name: 'Paired' });
+    expect(paired()).toHaveTextContent('Ada One and Bea Two. Placed together on Lions.');
+
+    // The admin moves Bea to the Bulls and saves: the snapshot's rows change, the summary
+    // stored at generation does not.
+    rerender(
+      <BuddyRequestsList
+        results={{
+          buddyRequestsByDivision: { U10: summary },
+          teams,
+          team_players: [
+            { team_id: 't-1', player_id: 'p-a' },
+            { team_id: 't-2', player_id: 'p-b' },
+          ],
+        }}
+      />
+    );
+    expect(paired()).toHaveTextContent('Ada One and Bea Two. Not placed together.');
+  });
+});
+
+describe('BuddyRequestsList :: one-way reasons in words', () => {
+  it('names each reason a one-way request was not honoured, and an honoured one', async () => {
+    const { default: BuddyRequestsList } =
+      await import('../frontend/src/components/teaming/BuddyRequestsList.jsx');
+    const entry = (playerId, reason, honoured = false) => ({
+      playerId,
+      playerName: `Kid ${playerId}`,
+      request: 'Bea Two',
+      targetId: 'b',
+      targetName: 'Bea Two',
+      honoured,
+      reason,
+      teamName: null,
+      together: false,
+    });
+    render(
+      <BuddyRequestsList
+        results={{
+          buddyRequestsByDivision: {
+            U10: {
+              rule: 'one_way_best_effort',
+              paired: [],
+              oneWay: [
+                entry('1', 'buddy-rule-mutual'),
+                entry('2', 'named-player-listed-another-buddy'),
+                entry('3', 'requester-has-another-buddy'),
+                entry('4', null, true),
+              ],
+              unresolved: [],
+            },
+          },
+        }}
+      />
+    );
+    const items = within(screen.getByRole('region', { name: 'One-way' })).getAllByRole('listitem');
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Kid 1 asked for Bea Two. Not honoured: the league pairs mutual requests only.',
+      'Kid 2 asked for Bea Two. Not honoured: Bea Two listed a buddy of their own.',
+      'Kid 3 asked for Bea Two. Not honoured: Kid 3 is already paired by a buddy code.',
+      'Kid 4 asked for Bea Two. Honoured best effort. Not placed together.',
+    ]);
+    expect(screen.getByText(/Rule: One-way requests, best effort\./)).toBeInTheDocument();
+  });
+});

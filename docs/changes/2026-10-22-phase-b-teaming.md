@@ -319,19 +319,22 @@ engine conventions), and the demo league is teamed end to end.
   B1, so nothing a league saw changes.
 - **Registration ids match with case ignored**, as `materialize_import_buddy_pairs` does
   (`lower()` on both sides), not exactly as `normalizeBuddyLinks` does.
-- **`self`** is any request whose matches include the requester, unless reciprocity among the
-  other matches settles it on one player. A request naming only one name (no surname) is
-  `unparsed`.
+- **`self`** is a request matching only the requester. The requester's own name beside a
+  namesake is `ambiguous` (it may mean the namesake) unless the namesake names the requester back.
+  A request of one name only (no surname) is `unparsed`; text with a digit that matches no
+  registration id is `not-found`. Names compare in Latin letters only (`normaliseNamePart`, the
+  identity module's contract), so a name in another script is `unparsed`.
 - **The rule's audit row** is `settings.flags_updated`, the action the settings page writes for a
   toggle, beside `update_org_feature_flags`' own `feature_flags.updated`: a new action would need
   a migration (`audit_actions`), and B1 has none.
-- **A play-up is sanctioned only through an honoured `buddyId`.** Under `mutual`, a one-way request
-  for a coach's child sanctions nothing. Under `one_way_best_effort` an honoured one-way request
-  does sanction it (playUp route B reads `buddyId`), though the two are placed together only best
-  effort; B2 or B6 should decide whether route B needs a mutual pair.
+- **Only a mutual pair sanctions a play-up** (route B). An honoured one-way request's `buddyId`
+  is set after play-up eligibility, so it is scored best effort and sanctions nothing: the two
+  may not land together. A requester whom a buddy code pairs keeps the code pair, and the one-way
+  request is listed as not honoured (one buddy per player).
 - **The list** is in the review view below the persistence panel, and reads
-  `results.buddyRequestsByDivision` of the staged or the synced run. It also lists buddy-code
-  problems and `buddy-coach-conflict` pairs.
+  `results.buddyRequestsByDivision` of the staged or the synced run; whether a pair is together is
+  read from the run's current `team_players`, so a manual roster edit shows. It also lists
+  buddy-code problems and `buddy-coach-conflict` pairs.
 - **Header variants.** The page reads the keys `materialize_import_buddy_pairs` reads, and any
   header the import's alias map stages under one of them (`canonicalImportKey`). Every one is on
   the import allowlist (`PLAYER_IMPORT_KEYS`).

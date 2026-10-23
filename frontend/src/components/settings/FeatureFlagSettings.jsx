@@ -10,6 +10,7 @@ import {
   FEATURE_DEFAULTS,
   GENDER_MODEL_KEY,
   BUDDY_RULE_KEY,
+  BUDDY_RULE_CHOICES,
 } from '../../constants/featureFlags.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import Toggle from '../ui/Toggle.jsx';
@@ -47,22 +48,6 @@ const ADVANCED_FLAGS = [
 const FORMAT_OPTIONS = [
   { value: 'split', title: 'Boys / Girls split', examples: ['U8B', 'U8G', 'U10B', 'U10G'] },
   { value: 'coed', title: 'Co-ed (combined)', examples: ['U8', 'U10', 'U12', 'U14'] },
-];
-
-/** The league's buddy rule (`buddy_rule`), one value per option of `BUDDY_RULE_OPTIONS`. */
-const BUDDY_RULE_CHOICES = [
-  {
-    value: 'mutual',
-    label: 'Mutual requests only',
-    description:
-      'Two players are kept together only when each names the other. One-way requests are listed for review.',
-  },
-  {
-    value: 'one_way_best_effort',
-    label: 'One-way requests, best effort',
-    description:
-      'A one-way request is also placed together where the roster allows, when the named player listed no buddy.',
-  },
 ];
 
 /**

@@ -18,41 +18,37 @@
 import { linkCoachesToPlayers } from './coachLinking.js';
 import { applyPlayUpEligibility } from './playUp.js';
 import {
+  BUDDY_REQUEST_FIELDS,
   BUDDY_REQUEST_STATUS,
   BUDDY_RULES,
   getCanonicalBuddyId,
+  listsABuddy,
   normalizeBuddyLinks,
   resolveBuddyRequests,
 } from './buddyLinking.js';
 
-const BUDDY_REQUEST_FIELDS = ['buddy_request', 'buddyRequest'];
-
-/** Whether a player listed a buddy of any kind (a request, a code or an explicit reference). */
-function listsABuddy(player) {
-  if (!player) return false;
-  if (getCanonicalBuddyId(player) !== undefined) return true;
-  return ['buddy_request', 'buddyRequest', 'mutual_buddy_code', 'mutualBuddyCode'].some(
-    (key) => player[key] !== undefined && player[key] !== null && String(player[key]).trim() !== ''
-  );
-}
-
 /**
  * Turn resolved requests into `buddyId`s under the league's rule, and say what became of
- * each request. A mutual pair (each names the other) always links. A one-way request links
- * (on the requester only, so it is scored best effort and never a unit) only under
- * `one_way_best_effort`, and only when the named player listed no buddy of their own.
+ * each request. A mutual pair (each names the other) always links, here. A one-way request is
+ * honoured only under `one_way_best_effort`, and only when the named player listed no buddy of
+ * their own; its `buddyId` is returned separately (`oneWayBuddyIds`) and set on the requester
+ * after play-up eligibility, so it is scored best effort by `BuddyEvaluator`, never forms a
+ * unit, and never sanctions a play-up (route B needs a pair that is placed together).
  * The request text is consumed here, so `normalizeBuddyLinks` keeps its rules for codes and
- * explicit references and never reads a name as a registration key.
+ * explicit references and never reads a name as a registration key. Each `buddyId` is the
+ * target's own id value (a numeric id stays a number), as the generator compares strictly.
  */
 function applyBuddyRule({ players, requests, buddyRule }) {
   const byId = new Map(players.map((player) => [String(player.id), player]));
+  const rawId = (id) => byId.get(id)?.id ?? id;
   const buddyIdByPlayer = new Map();
+  const oneWayBuddyIds = new Map();
   const outcomes = requests.map((request) => {
     if (request.status !== BUDDY_REQUEST_STATUS.RESOLVED) {
       return { ...request, outcome: request.status, honoured: false };
     }
     if (request.reciprocated) {
-      buddyIdByPlayer.set(request.playerId, request.targetId);
+      buddyIdByPlayer.set(request.playerId, rawId(request.targetId));
       return { ...request, outcome: 'mutual', honoured: true };
     }
     if (buddyRule !== BUDDY_RULES.ONE_WAY_BEST_EFFORT) {
@@ -66,7 +62,7 @@ function applyBuddyRule({ players, requests, buddyRule }) {
         reason: 'named-player-listed-another-buddy',
       };
     }
-    buddyIdByPlayer.set(request.playerId, request.targetId);
+    oneWayBuddyIds.set(request.playerId, rawId(request.targetId));
     return { ...request, outcome: 'one-way', honoured: true };
   });
 
@@ -79,7 +75,7 @@ function applyBuddyRule({ players, requests, buddyRule }) {
     if (buddyIdByPlayer.has(id)) next.buddyId = buddyIdByPlayer.get(id);
     return next;
   });
-  return { players: stripped, outcomes };
+  return { players: stripped, outcomes, oneWayBuddyIds };
 }
 
 /**
@@ -223,15 +219,35 @@ export function prepareTeamingInput({
     remapBlocked,
   });
 
+  // Honoured one-way requests, last: best effort only. A requester a code paired meanwhile
+  // keeps that pair (one buddy per player), and the request is listed as not honoured.
+  const finalBuddyRequests = buddyRequests.map((outcome) =>
+    outcome.outcome === 'one-way' &&
+    outcome.honoured &&
+    getCanonicalBuddyId(playUp.players.find((p) => String(p.id) === outcome.playerId)) !== undefined
+      ? { ...outcome, honoured: false, reason: 'requester-has-another-buddy' }
+      : outcome
+  );
+  const honouredOneWay = new Set(
+    finalBuddyRequests
+      .filter((outcome) => outcome.outcome === 'one-way' && outcome.honoured)
+      .map((outcome) => outcome.playerId)
+  );
+  const outPlayers = playUp.players.map((player) =>
+    honouredOneWay.has(String(player.id))
+      ? { ...player, buddyId: ruled.oneWayBuddyIds.get(String(player.id)) }
+      : player
+  );
+
   return {
-    players: playUp.players,
+    players: outPlayers,
     diagnostics: {
       buddyLinking: [
-        ...requestDiagnostics(buddyRequests),
+        ...requestDiagnostics(finalBuddyRequests),
         ...buddies.diagnostics,
         ...unclashed.diagnostics,
       ],
-      buddyRequests,
+      buddyRequests: finalBuddyRequests,
       coachLinking: linked.diagnostics,
       playUp: playUp.diagnostics,
     },

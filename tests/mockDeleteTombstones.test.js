@@ -369,7 +369,7 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/reporting.ts': 3,
   'tests/e2e/steps/scheduling_and_overrides.ts': 4,
   'tests/e2e/steps/team_and_roster.ts': 7,
-  'tests/e2e/steps/team_communication.ts': 3,
+  'tests/e2e/steps/team_communication.ts': 1,
   'tests/e2e/steps/visual_rbac_enforcement.ts': 1,
 };
 
@@ -379,7 +379,7 @@ describe('mock db writes :: nothing new may go past saveDB', () => {
     // A floor for a scanner that broke, not a count: the exact inventory is
     // pinned below. Lowered from 60 when M4.6 removed nine Pillar 1 writes (56
     // left), and from 50 when R1 removed the registration and compliance steps
-    // (47 left).
+    // (47 left); R2 removed the RSVP practice seeder and the twin seeder (45 left).
     expect(writes.length).toBeGreaterThanOrEqual(45);
     expect(new Set(writes.map((write) => write.file))).toContain(
       'frontend/src/lib/mockSupabaseClient.js'
@@ -760,9 +760,12 @@ const teamCascades = () => {
 describe('mock admin_delete_team :: removes every dependant the cascade removes', () => {
   it('finds the cascading tables in the migrations, and would fail if it found none', () => {
     const tables = new Set(teamCascades().map(({ table }) => table));
-    expect(tables.size, 'the migration scan matched nothing').toBeGreaterThanOrEqual(9);
+    expect(tables.size, 'the migration scan matched nothing').toBeGreaterThanOrEqual(7);
     expect(tables).toContain('team_players');
     expect(tables).toContain('practice_exceptions');
+    // 20261022030000 (R2) dropped both: the scan honours a DROP TABLE.
+    expect(tables).not.toContain('event_rsvps');
+    expect(tables).not.toContain('team_messages');
   });
 
   it('leaves no row pointing at the deleted team, records each table, and keeps them gone', async () => {
@@ -806,24 +809,6 @@ describe('mock admin_delete_team :: removes every dependant the cascade removes'
       const present = store[cascade.table].some((row) => row[cascade.column] === SEEDED_TEAM);
       if (!present) store[cascade.table].push(rowFor(cascade));
     }
-    // The opponent's RSVP to the team's game goes; its practice RSVP that
-    // happens to share the game's id stays.
-    store.event_rsvps.push(
-      {
-        id: 'cascade-opp-game',
-        organization_id: ORG,
-        team_id: OTHER,
-        reference_id: GAME,
-        event_type: 'game',
-      },
-      {
-        id: 'cascade-opp-practice',
-        organization_id: ORG,
-        team_id: OTHER,
-        reference_id: GAME,
-        event_type: 'practice',
-      }
-    );
     window.__saveMockDB__(store);
     for (const { table, column } of cascades) {
       expect(
@@ -839,9 +824,6 @@ describe('mock admin_delete_team :: removes every dependant the cascade removes'
       getMockData(table).some((row) => row[column] === SEEDED_TEAM)
     );
     expect(left).toEqual([]);
-    const rsvpIds = getMockData('event_rsvps').map((row) => row.id);
-    expect(rsvpIds).not.toContain('cascade-opp-game');
-    expect(rsvpIds).toContain('cascade-opp-practice');
 
     const audit = getMockData('audit_log').find(
       (row) => row.action === 'team.deleted' && row.resource_id === SEEDED_TEAM
@@ -850,5 +832,12 @@ describe('mock admin_delete_team :: removes every dependant the cascade removes'
       (table) => !(`${table}_deleted` in (audit?.metadata ?? {}))
     );
     expect(unrecorded).toEqual([]);
+    // And no counter for a table the migrations no longer have (R2 dropped
+    // event_rsvps and team_messages; the database's team.deleted names neither).
+    const tables = new Set(cascades.map(({ table }) => table));
+    const stale = Object.keys(audit?.metadata ?? {}).filter(
+      (key) => key.endsWith('_deleted') && !tables.has(key.replace(/_deleted$/, ''))
+    );
+    expect(stale).toEqual([]);
   });
 });

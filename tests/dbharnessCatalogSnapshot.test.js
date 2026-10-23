@@ -97,7 +97,7 @@ describe('the committed snapshot', () => {
     const snap = JSON.parse(fs.readFileSync(SNAPSHOT, 'utf8'));
     const all = [...snap.functions, ...snap.triggers].join('\n');
     expect(all).toContain('admin_update_field(');
-    expect(all).toContain('CREATE TRIGGER event_rsvps_set_timestamp');
+    expect(all).toContain('CREATE TRIGGER games_set_timestamp');
     for (const gone of [
       'set_updated_at(',
       'handle_field_subunits(',

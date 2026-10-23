@@ -3,19 +3,19 @@
 -- Assertions RAISE; the NOTICEs are evidence of how much each one examined,
 -- and `scripts/dbharness/run.sh` requires each witness NOTICE to print.
 -- `scripts/dbharness/prelude.sql` stubs `auth.uid()` from
--- `request.jwt.claim.sub`, so every RSVP runs the REAL function as a real
--- parent with RLS on, and every read of `practice_exceptions` goes through
+-- `request.jwt.claim.sub`, so every read of `practice_exceptions` goes through
 -- the real select policy.
 --
 -- docs/PHASE_8_6_PR12_READERS_PLAN.md §6:
---   W14  RSVP follows the applied calendar: a relocated date accepted, an
---        original date in a relocated window refused, a TIME TBD date
---        refused, dates outside any window unchanged, a withdrawn exception
---        of no effect; plus the Q7 open and unreadable windows and the Q9
---        clip. The case table is tests/fixtures/rsvpAppliedCalendarCases.json,
---        restated between the case-table markers below, and
---        tests/rsvpAppliedCalendar.test.js pins the two equal.
---   Q4   stored RSVPs on dates that became TIME TBD or moved are untouched.
+--   W14, Q4  RSVP followed the applied calendar, and stored RSVPs were left
+--        alone. **Since 20261022030000 (plan
+--        docs/changes/2026-10-22-admin-focus.md, R2)** dropped
+--        `upsert_team_event_rsvp` and `event_rsvps`, the head build this runs
+--        on has no RSVP to make or keep: both are reduced to checking that the
+--        function and the table stay gone. The case table went with them
+--        (tests/fixtures/rsvpAppliedCalendarCases.json and its Vitest arm);
+--        docs/sql/20261005000000_revert.sql is still checked on a build up to
+--        this migration.
 --   W15  a parent member reads the same practice_exceptions rows as an admin;
 --        a non-member reads none.
 -- Every subject set is enumerated from the rows this file SEEDS, never from
@@ -36,13 +36,7 @@ DECLARE
     v_seeded uuid[] := ARRAY[]::uuid[];
     v_id uuid;
     v_live_relocated int; v_live_tbd int; v_withdrawn int; v_open int; v_unreadable int;
-    v_stored_before text; v_stored_after text;
     r record;
-    v_ref uuid; v_tm uuid; v_pl uuid;
-    v_got text;
-    v_bad text[] := ARRAY[]::text[];
-    v_n int := 0; v_acc int := 0; v_win int := 0; v_ser int := 0;
-    v_rsvps int;
     v_parent_ids uuid[]; v_admin_ids uuid[]; v_outsider_n int;
     i int;
 BEGIN
@@ -128,88 +122,11 @@ BEGIN
       FROM public.practice_exceptions
      WHERE id = ANY (v_seeded);
     IF v_live_relocated < 1 OR v_live_tbd < 1 OR v_withdrawn < 1 OR v_open < 1 OR v_unreadable < 1 THEN
-        RAISE EXCEPTION 'the RSVP fixture does not exercise every window kind: % live relocated, % live time_tbd, % withdrawn, % open, % unreadable',
+        RAISE EXCEPTION 'the exception fixture does not exercise every window kind: % live relocated, % live time_tbd, % withdrawn, % open, % unreadable',
             v_live_relocated, v_live_tbd, v_withdrawn, v_open, v_unreadable;
     END IF;
-    RAISE NOTICE 'rsvp fixture: % exceptions seeded -- % live relocated, % live time_tbd, % withdrawn, % open-upper, % unreadable-lower',
+    RAISE NOTICE 'exception fixture: % exceptions seeded -- % live relocated, % live time_tbd, % withdrawn, % open-upper, % unreadable-lower',
         cardinality(v_seeded), v_live_relocated, v_live_tbd, v_withdrawn, v_open, v_unreadable;
-
-    -- Q4: two RSVPs already stored on dates that are now TIME TBD (A 10-13)
-    -- and moved away (A 09-22). Written as the owner, as a pre-12d RSVP was.
-    INSERT INTO public.event_rsvps (organization_id, team_id, player_id, reference_id, event_type, occurrence_date, status, updated_at)
-      VALUES (v_org, v_team[1], v_player[1], v_a, 'practice', '2026-10-13', 'attending', '2026-09-01T00:00:00Z'),
-             (v_org, v_team[1], v_player[1], v_a, 'practice', '2026-09-22', 'maybe', '2026-09-01T00:00:00Z');
-    SELECT string_agg(id::text || ':' || status || ':' || updated_at::text || ':' || occurrence_date::text, ',' ORDER BY occurrence_date)
-      INTO v_stored_before
-      FROM public.event_rsvps WHERE reference_id = v_a AND occurrence_date IN ('2026-10-13', '2026-09-22');
-
-    -- ---- W14: the case table, as the linked parent -------------------------
-    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-    PERFORM set_config('request.jwt.claim.sub', c_parent::text, true);
-    FOR r IN
-        SELECT * FROM (VALUES
-          -- case-table:begin
-          ('A', '2026-09-08', 'accept'),
-          ('A', '2026-09-09', '42501'),
-          ('A', '2026-09-17', 'accept'),
-          ('A', '2026-09-24', 'accept'),
-          ('A', '2026-09-15', '22023'),
-          ('A', '2026-09-16', '22023'),
-          ('A', '2026-10-06', '22023'),
-          ('A', '2026-11-03', 'accept'),
-          ('A', '2026-11-05', '42501'),
-          ('A', '2026-11-24', '22023'),
-          ('A', '2026-11-26', '22023'),
-          ('B', '2026-09-14', 'accept'),
-          ('B', '2026-09-23', 'accept'),
-          ('B', '2026-10-07', '22023'),
-          ('B', '2026-10-12', '22023'),
-          ('C', '2026-09-16', '22023')
-          -- case-table:end
-        ) AS c(row_key, d, expect)
-    LOOP
-        v_n := v_n + 1;
-        i := CASE r.row_key WHEN 'A' THEN 1 WHEN 'B' THEN 2 ELSE 3 END;
-        v_ref := CASE r.row_key WHEN 'A' THEN v_a WHEN 'B' THEN v_b ELSE v_c END;
-        v_tm := v_team[i]; v_pl := v_player[i];
-        BEGIN
-            SET LOCAL ROLE authenticated;
-            PERFORM public.upsert_team_event_rsvp(v_tm, v_pl, v_ref, 'practice', r.d::date, 'attending');
-            v_got := 'accept';
-            RESET ROLE;
-        EXCEPTION WHEN OTHERS THEN
-            v_got := SQLSTATE;
-        END;
-        RESET ROLE;
-        IF v_got IS DISTINCT FROM r.expect THEN
-            v_bad := v_bad || (r.row_key || ' ' || r.d || ': expected ' || r.expect || ', got ' || v_got);
-        ELSIF r.expect = 'accept' THEN
-            v_acc := v_acc + 1;
-        ELSIF r.expect = '22023' THEN
-            v_win := v_win + 1;
-        ELSE
-            v_ser := v_ser + 1;
-        END IF;
-    END LOOP;
-    IF v_n <> 16 THEN
-        RAISE EXCEPTION 'the RSVP case table ran % case(s), not 16', v_n;
-    END IF;
-    IF cardinality(v_bad) > 0 THEN
-        RAISE EXCEPTION 'RSVP cases wrong, % of %: %', cardinality(v_bad), v_n, array_to_string(v_bad, '; ');
-    END IF;
-    RAISE NOTICE 'rsvp cases: % of 16 as expected -- % accepted (series outside every window, relocated dates, a withdrawn window), % refused 22023 (TIME TBD, original and off dates in a relocated window, open and unreadable windows, the Q9 clip), % refused 42501 by the unchanged series rule',
-        v_acc + v_win + v_ser, v_acc, v_win, v_ser;
-
-    -- ---- Q4: nothing stored was deleted or rewritten -----------------------
-    SELECT string_agg(id::text || ':' || status || ':' || updated_at::text || ':' || occurrence_date::text, ',' ORDER BY occurrence_date)
-      INTO v_stored_after
-      FROM public.event_rsvps WHERE reference_id = v_a AND occurrence_date IN ('2026-10-13', '2026-09-22');
-    SELECT count(*) INTO v_rsvps FROM public.event_rsvps WHERE organization_id = v_org;
-    IF v_stored_after IS DISTINCT FROM v_stored_before OR v_rsvps <> 2 + v_acc THEN
-        RAISE EXCEPTION 'stored RSVPs changed: before %, after %; % row(s) where 2 stored + % accepted were expected',
-            v_stored_before, v_stored_after, v_rsvps, v_acc;
-    END IF;
-    RAISE NOTICE 'stored rsvps: 2 of 2 stored on dates now TIME TBD or moved are unchanged, and the organisation holds exactly 2 + % rows', v_acc;
 
     -- ---- W15: who reads practice_exceptions --------------------------------
     PERFORM set_config('request.jwt.claim.sub', c_parent::text, true);
@@ -240,23 +157,16 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
--- The function's posture is unchanged: SECURITY DEFINER, search_path=public,
--- executable by authenticated and not by PUBLIC.
+-- W14 and Q4 at head: since 20261022030000 there is no RSVP function or table.
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE
-    c_sig constant text := 'public.upsert_team_event_rsvp(uuid, uuid, uuid, text, date, text)';
-    v_p record;
 BEGIN
-    SELECT p.prosecdef, p.proconfig, p.prorettype::regtype::text AS ret,
-           coalesce(p.proacl::text, '') AS acl
-      INTO v_p FROM pg_proc p WHERE p.oid = c_sig::regprocedure;
-    IF NOT v_p.prosecdef OR NOT (COALESCE(v_p.proconfig, '{}') <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (COALESCE(v_p.proconfig, '{}'))) OR v_p.ret <> 'jsonb' THEN
-        RAISE EXCEPTION 'upsert_team_event_rsvp changed posture: definer %, config %, returns %', v_p.prosecdef, v_p.proconfig, v_p.ret;
+    IF to_regprocedure('public.upsert_team_event_rsvp(uuid, uuid, uuid, text, date, text)') IS NOT NULL
+       OR EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                                         AND proname = 'upsert_team_event_rsvp')
+       OR to_regclass('public.event_rsvps') IS NOT NULL THEN
+        RAISE EXCEPTION 'upsert_team_event_rsvp or event_rsvps is back after 20261022030000 dropped them';
     END IF;
-    IF NOT has_function_privilege('authenticated', c_sig, 'EXECUTE') OR v_p.acl LIKE '%{=X/%' OR v_p.acl LIKE '%,=X/%' THEN
-        RAISE EXCEPTION 'upsert_team_event_rsvp grants changed: %', v_p.acl;
-    END IF;
-    RAISE NOTICE 'posture: upsert_team_event_rsvp is SECURITY DEFINER with search_path=public, returns jsonb, executable by authenticated and not by PUBLIC';
+    RAISE NOTICE 'rsvp: upsert_team_event_rsvp and event_rsvps stay dropped (20261022030000)';
 END;
 $$;

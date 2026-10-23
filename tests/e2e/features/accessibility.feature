@@ -63,7 +63,7 @@ Feature: Every top-level route passes an automated accessibility scan
       | /players                      | Players                  | Alex Smith                              |
       | /players/player-1             | Alex Smith               | Jamie Jones                             |
       | /teams/builder                | Team Builder             | Alex Smith                              |
-      | /team/t1                      | Team A                   | Team Chat                               |
+      | /team/t1                      | Team A                   | Team Schedule                           |
       | /scheduling/blackouts         | Blackout Dates           | No closures on file                     |
       | /scores                       | Scores & Results         | Final                                   |
       | /exports                      | Exports                  | Nothing has been published yet          |

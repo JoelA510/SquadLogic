@@ -52,9 +52,12 @@ const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * useTeamPortal
- * Fetches and manages data for the Team Portal.
- * Handles practice expansion (season wall dates and saved practice
- * exceptions, see `expandPractices`) and real-time updates.
+ * Fetches the data for the Team Portal: the team, its roster, and its games and
+ * practices. Handles practice expansion (season wall dates and saved practice
+ * exceptions, see `expandPractices`). Availability marking (RSVP) and team chat
+ * were removed with their tables (20261022030000; plan
+ * docs/changes/2026-10-22-admin-focus.md, R2), so the page reads neither and
+ * subscribes to nothing.
  */
 export function useTeamPortal(teamId) {
   const [loading, setLoading] = useState(true);
@@ -69,9 +72,6 @@ export function useTeamPortal(teamId) {
   const [events, setEvents] = useState([]);
   // Q5: the practices still show, and the page says their changes are unread.
   const [practiceChangesUnread, setPracticeChangesUnread] = useState(false);
-  const [rsvps, setRsvps] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [myPlayers, setMyPlayers] = useState([]);
 
   const fetchData = useCallback(async () => {
     if (!teamId) return;
@@ -94,7 +94,7 @@ export function useTeamPortal(teamId) {
       // a current coach or a guardian on the team; guardian contacts per role
       // and league setting; balance fields to admins only. A caller it does not
       // admit gets 42501: the roster tab says so, and the rest of the page
-      // (schedule, chat) still loads, as it reads tables every member can.
+      // (the schedule) still loads, as it reads tables every member can.
       const { data: rosterRows, error: rosterError } = await supabase.rpc('get_team_roster', {
         p_team_id: teamId,
       });
@@ -110,6 +110,10 @@ export function useTeamPortal(teamId) {
         setRosterUnavailable(null);
       }
 
+      // Declared, not read: the rows still carry `is_my_child` (the guardian
+      // arm of get_team_roster). Its one reader, the RSVP list, went with RSVP
+      // (R2); the field goes with the guardian arms in R3
+      // (docs/changes/2026-10-22-admin-focus.md).
       // Deduplicate roster by player ID to prevent React key collisions
       const uniqueRoster = [];
       const seenIds = new Set();
@@ -230,36 +234,6 @@ export function useTeamPortal(teamId) {
         );
       });
       setEvents(allEvents);
-
-      // 6. Fetch RSVPs
-      const { data: rsvpData, error: rsvpError } = await supabase
-        .from('event_rsvps')
-        .select('*')
-        .eq('team_id', teamId);
-
-      if (rsvpError) throw rsvpError;
-      setRsvps(rsvpData);
-
-      // 7. My Players (for RSVPing): the roster read marks the caller's own
-      // children (their profile_players links).
-      setMyPlayers(uniqueRoster.filter((player) => player.is_my_child === true));
-
-      // 8. Fetch Messages
-      const { data: msgData, error: msgError } = await supabase
-        .from('team_messages')
-        .select(
-          `
-          *,
-          author:profiles (
-            full_name
-          )
-        `
-        )
-        .eq('team_id', teamId)
-        .order('created_at', { ascending: true });
-
-      if (msgError) throw msgError;
-      setMessages(msgData);
     } catch (err) {
       logger.error('Error fetching Team Portal data:', err);
       setError(err.message);
@@ -270,114 +244,7 @@ export function useTeamPortal(teamId) {
 
   useEffect(() => {
     fetchData();
-
-    // Set up Realtime Subscription for Messages
-    const messageChannel = supabase
-      .channel(`team_messages:${teamId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'team_messages',
-          filter: `team_id=eq.${teamId}`,
-        },
-        async (payload) => {
-          // Fetch the author's name to match the state format
-          const { data: authorData } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('id', payload.new.author_id)
-            .single();
-
-          const newMessage = {
-            ...payload.new,
-            author: authorData || { full_name: 'Unknown User' },
-          };
-          setMessages((current) => [...current, newMessage]);
-        }
-      )
-      .subscribe();
-
-    // Set up Realtime Subscription for RSVPs
-    const rsvpChannel = supabase
-      .channel(`event_rsvps:${teamId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'event_rsvps',
-          filter: `team_id=eq.${teamId}`,
-        },
-        (payload) => {
-          setRsvps((currentRsvps) => {
-            if (payload.eventType === 'INSERT') {
-              const exists = currentRsvps.some((r) => r.id === payload.new.id);
-              if (exists) return currentRsvps;
-              return [...currentRsvps, payload.new];
-            } else if (payload.eventType === 'UPDATE') {
-              return currentRsvps.map((r) => (r.id === payload.new.id ? payload.new : r));
-            } else if (payload.eventType === 'DELETE') {
-              return currentRsvps.filter((r) => r.id !== payload.old.id);
-            }
-            return currentRsvps;
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(messageChannel);
-      supabase.removeChannel(rsvpChannel);
-    };
-  }, [teamId, fetchData]);
-
-  const updateRsvp = async (playerId, referenceId, eventType, occurrenceDate, status) => {
-    try {
-      const { data: profileData } = await supabase.auth.getUser();
-      if (!profileData.user) throw new Error('Not authenticated');
-
-      const { error: upsertError } = await supabase.rpc('upsert_team_event_rsvp', {
-        p_team_id: teamId,
-        p_player_id: playerId,
-        p_reference_id: referenceId,
-        p_event_type: eventType,
-        p_occurrence_date: occurrenceDate,
-        p_status: status,
-      });
-
-      if (upsertError) throw upsertError;
-    } catch (err) {
-      logger.error('Error updating RSVP:', err);
-      // You could expose an error state for mutations if needed
-    }
-  };
-
-  const sendMessage = async (content) => {
-    try {
-      const { data: authData } = await supabase.auth.getUser();
-      if (!authData.user) throw new Error('Not authenticated');
-
-      // Optimistic UI Update
-      const optimisticMsg = {
-        id: Date.now(),
-        author: { full_name: authData.user.user_metadata?.full_name || 'You' },
-        content,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, optimisticMsg]);
-
-      const { error: sendError } = await supabase.rpc('create_team_message', {
-        p_team_id: teamId,
-        p_content: content,
-      });
-
-      if (sendError) throw sendError;
-    } catch (err) {
-      logger.error('Error sending message:', err);
-    }
-  };
+  }, [fetchData]);
 
   return {
     loading,
@@ -387,11 +254,6 @@ export function useTeamPortal(teamId) {
     rosterUnavailable,
     events,
     practiceChangesUnread,
-    rsvps,
-    messages,
-    myPlayers,
-    updateRsvp,
-    sendMessage,
     refresh: fetchData,
   };
 }

@@ -25,7 +25,17 @@ This document translates the roadmap's team formation phase into actionable plan
 ## Inputs
 
 - **Players**: Retrieved from the `players` table, joined with `divisions` to determine roster caps and gameplay formats.
-- **Buddy pairs**: Derived from `players.mutual_buddy_code`. Only reciprocal matches are considered valid.
+- **Buddy pairs**: Derived from `players.mutual_buddy_code` and from `players.buddy_request`, which
+  holds a registration id or a name. `resolveBuddyRequests` (`packages/core/src/buddyLinking.js`,
+  Phase B1) matches a request to one player: a registration id exactly (case ignored); a name after
+  normalising (accents, case, punctuation) on first + last, preferred + last, or "Last, First", in
+  the requester's division; two players of one name only by reciprocity. Nothing is fuzzy-linked:
+  a near miss is listed with its same-surname candidates. Only reciprocal requests pair (one buddy
+  per player) under the league's `buddy_rule` setting, `mutual` by default; under
+  `one_way_best_effort` a one-way request, when the named player listed no buddy, is scored best
+  effort through `BuddyEvaluator` and never forms a unit. A pair whose two players each anchor a
+  different head coach is broken (`buddy-coach-conflict`), not thrown. The Teams page lists every
+  request's outcome in the run's `results.buddyRequestsByDivision`.
 - **Coach volunteers**: From the `coaches` table with `player_id` links and `can_coach_multiple_teams` flag.
 - **Configuration**: Season-level overrides from `season_settings` (roster adjustments, division ordering, lock dates), and per-division bounds on `divisions` (`min_roster_size`, `target_team_size`, `team_count_override`, `min_teams`, `max_teams`; migration `20260502001000`), which admins edit on the Team Analysis page through `admin_upsert_division_settings` and which `normalizeDivisionRosterConstraints` in `packages/core/src/teamGeneration.js` reads as `minRosterSize`, `targetTeamSize`, `teamCountOverride`, `minTeams` and `maxTeams`.
 

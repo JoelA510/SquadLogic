@@ -106,20 +106,14 @@ Then('I should see the {string} metric', async ({ page }, metricName: string) =>
   await expect(card).toBeVisible({ timeout: 15000 });
 });
 
-// Paperwork compliance is not tracked (docs/changes/2026-10-22-admin-focus.md,
-// R1), so the readiness radar has no Compliance axis. Read off the chart's
-// accessible data table, which lists one row per axis.
-Then(
-  'the readiness chart shows {string} and no {string} axis',
-  async ({ page }, present: string, absent: string) => {
-    await expect(page.locator('.recharts-responsive-container').first()).toBeVisible({
-      timeout: 15000,
-    });
-    const table = page.getByRole('table', { name: /Organization Readiness/ });
-    await expect(table.getByRole('cell', { name: present, exact: true })).toHaveCount(1);
-    await expect(table.getByRole('cell', { name: absent, exact: true })).toHaveCount(0);
-  }
-);
+// The readiness radar charted no organization data once its Compliance axis
+// went (R1): Staffing was a stub ratio, Balance and Skill Variability
+// constants. It was removed (owner, 2026-10-22); the page still renders.
+Then('the reporting dashboard shows no readiness chart', async ({ page }) => {
+  await expect(page.getByText('Fluid Attributes Distribution')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(/Organization Readiness/)).toHaveCount(0);
+  await expect(page.locator('.recharts-radar, .recharts-polar-grid')).toHaveCount(0);
+});
 
 // ─── CSV Export ─────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ Feature: Admin Reporting Dashboard
     And the admin views the reporting dashboard
     Then I should see the "Total Players" metric
     And I should see the "Total Teams" metric
-    And the readiness chart shows "Staffing" and no "Compliance" axis
+    And the reporting dashboard shows no readiness chart
 
   Scenario: Admin exports rosters to CSV
     Given I am logged into SquadLogic as an "admin"

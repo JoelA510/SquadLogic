@@ -15,7 +15,7 @@
  * observable: a page that awaits its reads one after another has exactly one.
  */
 import React from 'react';
-import { render, screen, waitFor, act, within } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -82,16 +82,16 @@ describe('DS-15: the dashboards send independent reads together', () => {
     expect(await screen.findByText('Enterprise Dashboard')).toBeInTheDocument();
   });
 
-  it('charts readiness without a Compliance axis and never reads view_compliance_stats', async () => {
+  // The readiness radar charted no organization data (Staffing was a stub ratio,
+  // Balance and Skill Variability constants) and was removed (owner, 2026-10-22).
+  it('shows no readiness radar and never reads view_compliance_stats', async () => {
     render(<EnterpriseDashboard />);
     await waitFor(() => expect(mocks.pending).toHaveLength(2));
     await answerAll();
-    const table = await screen.findByRole('table', { name: /Organization Readiness/ });
-    const metrics = within(table)
-      .getAllByRole('row')
-      .slice(1)
-      .map((row) => within(row).getAllByRole('cell')[0].textContent);
-    expect(metrics).toEqual(['Staffing', 'Balance', 'Skill Variability']);
+    expect(await screen.findByText('Fluid Attributes Distribution')).toBeInTheDocument();
+    expect(screen.queryByText(/Organization Readiness/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: /Readiness/ })).not.toBeInTheDocument();
+    expect(document.querySelector('.recharts-radar, .recharts-polar-grid')).toBeNull();
     expect(screen.queryByText(/Network Readiness/)).not.toBeInTheDocument();
     expect(mocks.fromCalls).not.toContain('view_compliance_stats');
   });

@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import { PLACEMENT } from '../packages/core/src/playUp.js';
+import { generateTeams } from '../packages/core/src/teamGeneration.js';
 
 const SEASON = 2026;
 const MODE = 'birth_year';
@@ -64,4 +65,124 @@ test('remapBlocked=false keeps players in their registered division (single-divi
   });
   assert.equal(out[0].division, 'U10B');
   assert.equal(out[0].needsReview, true);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase B1: buddy requests by name reach the generator                        */
+/* -------------------------------------------------------------------------- */
+
+const named = (id, firstName, lastName, extra = {}) => ({
+  id,
+  division: 'U10B',
+  firstName,
+  lastName,
+  dob: '2016-05-01',
+  ...extra,
+});
+
+test('a reciprocal name pair arrives as mutual buddyIds and is one unit in generateTeams', () => {
+  const players = [
+    named('a', 'Ada', 'One', { buddy_request: 'Bea Two' }),
+    named('b', 'Bea', 'Two', { buddy_request: 'One, Ada' }),
+    ...Array.from({ length: 10 }, (_, i) => named(`x${i}`, `Kid${i}`, `Filler${i}`)),
+  ];
+  const { players: out, diagnostics } = prepareTeamingInput({
+    players,
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+  });
+  const byId = new Map(out.map((p) => [p.id, p]));
+  assert.equal(byId.get('a').buddyId, 'b');
+  assert.equal(byId.get('b').buddyId, 'a');
+  assert.ok(!diagnostics.buddyLinking.some((d) => d.code === 'missing-buddy-target'));
+
+  const result = generateTeams({
+    players: out,
+    divisionConfigs: { U10B: { id: 'U10B', slotsPerWeek: 0, teamsCount: 2, maxRosterSize: 8 } },
+    random: () => 0.5,
+  });
+  assert.deepEqual(result.buddyDiagnosticsByDivision.U10B.mutualPairs, [{ playerIds: ['a', 'b'] }]);
+  const teamOf = (id) =>
+    result.teamsByDivision.U10B.find((t) => t.players.some((p) => p.id === id));
+  assert.equal(teamOf('a').id, teamOf('b').id);
+});
+
+test("a coach's child named back by a play-up player sanctions the play-up (route B)", () => {
+  const players = [
+    // the coach's child, age 10, in band in U10B
+    named('child', 'Cara', 'Coach', { buddy_request: 'Pia Up' }),
+    // age 9, registered up into U10B, buddied with the coach's child
+    named('up', 'Pia', 'Up', { dob: '2017-05-01', buddy_request: 'Cara Coach' }),
+  ];
+  const { players: out, diagnostics } = prepareTeamingInput({
+    players,
+    coaches: [{ id: 'coachA', player_id: 'child' }],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+  });
+  const up = out.find((p) => p.id === 'up');
+  assert.equal(up.buddyId, 'child');
+  assert.equal(up.placement, PLACEMENT.PLAY_UP_SANCTIONED);
+  assert.deepEqual(diagnostics.playUp.sanctionedPlayUps, [
+    { id: 'up', division: 'U10B', via: 'buddy', naturalAge: 9 },
+  ]);
+});
+
+test("a one-way request for a coach's child sanctions nothing under the mutual rule", () => {
+  const { players: out } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach'),
+      named('up', 'Pia', 'Up', { dob: '2017-05-01', buddy_request: 'Cara Coach' }),
+    ],
+    coaches: [{ id: 'coachA', player_id: 'child' }],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+  });
+  assert.equal(out.find((p) => p.id === 'up').placement, PLACEMENT.PLAY_UP_BLOCKED);
+});
+
+test('two coaching families as buddies give buddy-coach-conflict and no throw', () => {
+  const players = [
+    named('a', 'Ada', 'One', { buddy_request: 'Bea Two' }),
+    named('b', 'Bea', 'Two', { buddy_request: 'Ada One' }),
+    ...Array.from({ length: 6 }, (_, i) => named(`x${i}`, `Kid${i}`, `Filler${i}`)),
+  ];
+  const prepared = prepareTeamingInput({
+    players,
+    coaches: [
+      { id: 'coachA', player_id: 'a' },
+      { id: 'coachB', player_id: 'b' },
+    ],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+  });
+  const byId = new Map(prepared.players.map((p) => [p.id, p]));
+  // Both keep their coach; neither keeps the buddy.
+  assert.equal(byId.get('a').coachId, 'coachA');
+  assert.equal(byId.get('b').coachId, 'coachB');
+  assert.equal(byId.get('a').buddyId, undefined);
+  assert.equal(byId.get('b').buddyId, undefined);
+  const conflict = prepared.diagnostics.buddyLinking.filter(
+    (d) => d.code === 'buddy-coach-conflict'
+  );
+  assert.equal(conflict.length, 1);
+  assert.deepEqual(conflict[0].playerIds, ['a', 'b']);
+  assert.ok(
+    prepared.diagnostics.buddyRequests.every((r) => r.outcome === 'coach-conflict' && !r.honoured)
+  );
+
+  // The generator no longer aborts the run ("Conflicting coach assignments").
+  const result = generateTeams({
+    players: prepared.players,
+    divisionConfigs: { U10B: { id: 'U10B', slotsPerWeek: 0, teamsCount: 2, maxRosterSize: 8 } },
+    random: () => 0.5,
+  });
+  const teamOf = (id) =>
+    result.teamsByDivision.U10B.find((t) => t.players.some((p) => p.id === id));
+  assert.equal(teamOf('a').coachId, 'coachA');
+  assert.equal(teamOf('b').coachId, 'coachB');
 });

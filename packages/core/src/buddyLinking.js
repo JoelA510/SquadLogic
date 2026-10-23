@@ -24,6 +24,8 @@
  * @property {string[]} playerIds
  */
 
+import { normaliseNamePart } from './people/identity.js';
+
 /** Coerce an id-like value to a trimmed non-empty string, or undefined. */
 function coerceId(value) {
   if (value === undefined || value === null) return undefined;
@@ -261,4 +263,495 @@ export function normalizeBuddyLinks(players) {
   });
 
   return { players: normalized, diagnostics };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Buddy request resolution (Phase B1, docs/changes/2026-10-22-phase-b-teaming.md) */
+/* -------------------------------------------------------------------------- */
+
+/** The league's buddy rule (organization setting `buddy_rule`). */
+export const BUDDY_RULES = Object.freeze({
+  /** A pair is formed only when both players name each other; one buddy per player. */
+  MUTUAL: 'mutual',
+  /** A one-way request is scored best effort when the named player listed no buddy. */
+  ONE_WAY_BEST_EFFORT: 'one_way_best_effort',
+});
+
+/** Why a buddy request did not resolve to one player. */
+export const BUDDY_REQUEST_STATUS = Object.freeze({
+  RESOLVED: 'resolved',
+  AMBIGUOUS: 'ambiguous',
+  CROSS_DIVISION: 'cross-division',
+  NOT_FOUND: 'not-found',
+  UNPARSED: 'unparsed',
+  SELF: 'self',
+});
+
+function readNamePart(player, keys) {
+  for (const key of keys) {
+    const value = player?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+}
+
+function rosterFirst(player) {
+  return readNamePart(player, ['firstName', 'first_name']);
+}
+
+function rosterLast(player) {
+  return readNamePart(player, ['lastName', 'last_name']);
+}
+
+function rosterPreferred(player) {
+  return readNamePart(player, ['preferredName', 'preferred_name', 'nickname']);
+}
+
+function rosterDisplayName(player) {
+  const composed = `${rosterFirst(player)} ${rosterLast(player)}`.trim();
+  if (composed) return composed;
+  const name = readNamePart(player, ['name']);
+  return name || String(player?.id ?? '');
+}
+
+/** Separators that mean a request names more than one person. */
+const MULTI_PERSON = /[&;/+\n]|\band\b/i;
+
+/**
+ * Parse request text into candidate { first, last } name keys (normalised with
+ * `normaliseNamePart`). "Last, First" reads the comma; "First Last" tries every
+ * split, so a two-word first or last name still meets the roster's own split.
+ * @param {string} text
+ * @returns {{ keys: Array<{ first: string, last: string }>, lastParts: string[] } | null}
+ *   null when the text cannot be read as one person's first and last name.
+ */
+function parseNameRequest(text) {
+  if (MULTI_PERSON.test(text)) return null;
+  const commas = text.split(',').length - 1;
+  if (commas > 1) return null;
+  if (commas === 1) {
+    const [lastRaw, firstRaw] = text.split(',');
+    const first = normaliseNamePart(firstRaw);
+    const last = normaliseNamePart(lastRaw);
+    if (!first || !last) return null;
+    return { keys: [{ first, last }], lastParts: [last] };
+  }
+  const tokens = text.split(/\s+/).filter((token) => normaliseNamePart(token) !== '');
+  if (tokens.length < 2) return null;
+  const keys = [];
+  for (let split = 1; split < tokens.length; split += 1) {
+    keys.push({
+      first: normaliseNamePart(tokens.slice(0, split).join('')),
+      last: normaliseNamePart(tokens.slice(split).join('')),
+    });
+  }
+  return { keys, lastParts: [...new Set(keys.map((key) => key.last))] };
+}
+
+/**
+ * The name keys a roster player answers to: first + last and preferred + last.
+ * @returns {string[]}
+ */
+function rosterNameKeys(player) {
+  const last = normaliseNamePart(rosterLast(player));
+  if (!last) return [];
+  const keys = [];
+  const first = normaliseNamePart(rosterFirst(player));
+  if (first) keys.push(`${first}|${last}`);
+  const preferred = normaliseNamePart(rosterPreferred(player));
+  if (preferred && preferred !== first) keys.push(`${preferred}|${last}`);
+  return keys;
+}
+
+/**
+ * @typedef {Object} BuddyRequestCandidate
+ * @property {string} playerId
+ * @property {string} name
+ * @property {string} division
+ *
+ * @typedef {Object} BuddyRequestResolution
+ * @property {string} playerId - the requester
+ * @property {string} playerName
+ * @property {string} division
+ * @property {string} request - the request text as entered (trimmed)
+ * @property {string} status - a BUDDY_REQUEST_STATUS value
+ * @property {'registration-id' | 'name' | 'reciprocity' | null} matchedBy
+ * @property {string | null} targetId - the resolved player, when `status` is resolved
+ * @property {string | null} targetName
+ * @property {boolean} reciprocated - the target's own request (or explicit buddy) names the requester
+ * @property {BuddyRequestCandidate[]} candidates - matches or near misses, for the admin; never linked
+ */
+
+/**
+ * Resolve every program player's buddy request to one player, or say why not.
+ *
+ * Pure. `players` is the program being generated; `roster` is every imported
+ * player (id, division, first, last, preferred name, external registration id),
+ * so "not found" and "in another division" are told apart. The roster defaults
+ * to the program. A player with an explicit `buddyId` is left to
+ * `normalizeBuddyLinks` (an explicit reference wins), and so is one with no
+ * request. Like `people/identity.js` this proposes and never merges: nothing is
+ * fuzzy-linked, and a near miss is reported with its same-surname candidates.
+ *
+ * Per request:
+ * - a value equal to a roster player's external registration id (trimmed, case
+ *   ignored, as the import's pairing does) resolves to that player;
+ * - otherwise it is a name, normalised with `normaliseNamePart` (accents, case,
+ *   punctuation) and matched on first + last, preferred + last, or "Last, First";
+ * - exactly one match in the requester's division of the program resolves it; two
+ *   or more is ambiguous unless exactly one candidate's own request names the
+ *   requester back (reciprocity is the evidence);
+ * - a match only outside the requester's division is `cross-division`; none is
+ *   `not-found`; text naming more than one person, or only one name, is
+ *   `unparsed`; a request naming the requester is `self`.
+ *
+ * @param {{ players: any[], roster?: any[] }} params
+ * @returns {{ requests: BuddyRequestResolution[] }}
+ */
+export function resolveBuddyRequests({ players, roster } = /** @type {any} */ ({})) {
+  const program = Array.isArray(players) ? players : [];
+  const everyone = Array.isArray(roster) && roster.length > 0 ? roster : program;
+
+  /** @type {Map<string, any>} */
+  const programById = new Map();
+  for (const player of program) {
+    const id = coerceId(player?.id);
+    if (id && !programById.has(id)) programById.set(id, player);
+  }
+
+  // The roster entries, with each program player's own entry first (so its
+  // division is the program's), then everyone else once.
+  /** @type {any[]} */
+  const entries = [];
+  const seen = new Set();
+  const addEntry = (player, programPlayer) => {
+    const id = coerceId(player?.id);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    entries.push({
+      id,
+      division: String(programPlayer?.division ?? player?.division ?? ''),
+      inProgram: Boolean(programPlayer),
+      source: { ...player, ...(programPlayer ? { division: programPlayer.division } : {}) },
+    });
+  };
+  for (const player of everyone) addEntry(player, programById.get(coerceId(player?.id) ?? ''));
+  for (const player of program) addEntry(player, player);
+  const entryById = new Map(entries.map((entry) => [entry.id, entry]));
+  // Program players whose roster row lacks a name still answer to the program's own.
+  const nameSource = (entry) => {
+    const own = programById.get(entry.id);
+    return rosterLast(entry.source) || !own ? entry.source : own;
+  };
+
+  /** @type {Map<string, string[]>} */
+  const idsByExternalKey = new Map();
+  /** @type {Map<string, string[]>} */
+  const idsByNameKey = new Map();
+  /** @type {Map<string, string[]>} */
+  const idsByLastName = new Map();
+  const push = (map, key, id) => {
+    if (!map.has(key)) map.set(key, []);
+    if (!map.get(key).includes(id)) map.get(key).push(id);
+  };
+  for (const entry of entries) {
+    const external = getExternalKey(entry.source) ?? getExternalKey(programById.get(entry.id));
+    if (external) push(idsByExternalKey, external.toLowerCase(), entry.id);
+    const source = nameSource(entry);
+    for (const key of rosterNameKeys(source)) push(idsByNameKey, key, entry.id);
+    const last = normaliseNamePart(rosterLast(source));
+    if (last) push(idsByLastName, last, entry.id);
+  }
+
+  const candidateOf = (id) => {
+    const entry = entryById.get(id);
+    return {
+      playerId: id,
+      name: rosterDisplayName(entry ? nameSource(entry) : { id }),
+      division: entry?.division ?? '',
+    };
+  };
+
+  // First pass: every match for each request, before reciprocity.
+  /** @type {Map<string, { text: string, via: 'registration-id' | 'name' | null, unparsed: boolean, matches: string[], lastParts: string[] }>} */
+  const firstPass = new Map();
+  for (const player of program) {
+    const id = coerceId(player?.id);
+    if (!id || firstPass.has(id)) continue;
+    if (getCanonicalBuddyId(player) !== undefined) continue;
+    const text = getBuddyRequestKey(player);
+    if (!text) continue;
+    const byExternal = idsByExternalKey.get(text.toLowerCase());
+    if (byExternal) {
+      firstPass.set(id, {
+        text,
+        via: 'registration-id',
+        unparsed: false,
+        matches: byExternal,
+        lastParts: [],
+      });
+      continue;
+    }
+    const parsed = parseNameRequest(text);
+    if (!parsed) {
+      firstPass.set(id, { text, via: null, unparsed: true, matches: [], lastParts: [] });
+      continue;
+    }
+    const matches = [];
+    for (const key of parsed.keys) {
+      for (const match of idsByNameKey.get(`${key.first}|${key.last}`) ?? []) {
+        if (!matches.includes(match)) matches.push(match);
+      }
+    }
+    firstPass.set(id, { text, via: 'name', unparsed: false, matches, lastParts: parsed.lastParts });
+  }
+
+  /** Whether `candidateId`'s own request (or explicit buddy) names `requesterId`. */
+  const namesBack = (candidateId, requesterId) => {
+    const explicit = getCanonicalBuddyId(programById.get(candidateId));
+    if (explicit !== undefined) return explicit === requesterId;
+    return firstPass.get(candidateId)?.matches.includes(requesterId) ?? false;
+  };
+
+  /** @type {BuddyRequestResolution[]} */
+  const requests = [];
+  for (const player of program) {
+    const id = coerceId(player?.id);
+    const pass = id ? firstPass.get(id) : undefined;
+    if (!id || !pass || requests.some((request) => request.playerId === id)) continue;
+    const division = String(player.division ?? '');
+    const base = {
+      playerId: id,
+      playerName: rosterDisplayName(player),
+      division,
+      request: pass.text,
+    };
+    /** @param {Partial<BuddyRequestResolution>} rest */
+    const record = (rest) =>
+      requests.push({
+        ...base,
+        status: BUDDY_REQUEST_STATUS.NOT_FOUND,
+        matchedBy: null,
+        targetId: null,
+        targetName: null,
+        reciprocated: false,
+        candidates: [],
+        ...rest,
+      });
+
+    if (pass.unparsed) {
+      record({ status: BUDDY_REQUEST_STATUS.UNPARSED });
+      continue;
+    }
+
+    const inDivision = pass.matches.filter((match) => {
+      const entry = entryById.get(match);
+      return entry?.inProgram && entry.division === division;
+    });
+    const others = inDivision.filter((match) => match !== id);
+    const resolvedTo = (targetId, matchedBy) =>
+      record({
+        status: BUDDY_REQUEST_STATUS.RESOLVED,
+        matchedBy,
+        targetId,
+        targetName: candidateOf(targetId).name,
+      });
+
+    if (inDivision.length === 1 && others.length === 1) {
+      resolvedTo(others[0], pass.via);
+      continue;
+    }
+    if (inDivision.length > 1) {
+      // Reciprocity is the only evidence that settles a tie (namesakes, or the
+      // requester's own name among them).
+      const reciprocating = others.filter((match) => namesBack(match, id));
+      if (reciprocating.length === 1) {
+        resolvedTo(reciprocating[0], 'reciprocity');
+        continue;
+      }
+      if (inDivision.includes(id)) {
+        record({ status: BUDDY_REQUEST_STATUS.SELF, candidates: others.map(candidateOf) });
+        continue;
+      }
+      record({ status: BUDDY_REQUEST_STATUS.AMBIGUOUS, candidates: inDivision.map(candidateOf) });
+      continue;
+    }
+    if (inDivision.length === 1) {
+      record({ status: BUDDY_REQUEST_STATUS.SELF });
+      continue;
+    }
+    const elsewhere = pass.matches.filter(
+      (match) => match !== id && entryById.get(match)?.division !== division
+    );
+    if (elsewhere.length > 0) {
+      record({
+        status: BUDDY_REQUEST_STATUS.CROSS_DIVISION,
+        candidates: elsewhere.map(candidateOf),
+      });
+      continue;
+    }
+    // Not found: the near misses an admin can fix the request against (same
+    // surname, in the requester's division), never linked.
+    const nearMisses = [];
+    for (const last of pass.lastParts) {
+      for (const match of idsByLastName.get(last) ?? []) {
+        const entry = entryById.get(match);
+        if (match !== id && entry?.inProgram && entry.division === division) {
+          if (!nearMisses.includes(match)) nearMisses.push(match);
+        }
+      }
+    }
+    record({ status: BUDDY_REQUEST_STATUS.NOT_FOUND, candidates: nearMisses.map(candidateOf) });
+  }
+
+  // A pair is reciprocated only when the target's own final resolution (or explicit
+  // reference) is the requester: a namesake tie the target could not settle is one-way.
+  const finalTarget = new Map(
+    requests
+      .filter((request) => request.status === BUDDY_REQUEST_STATUS.RESOLVED)
+      .map((request) => [request.playerId, request.targetId])
+  );
+  for (const request of requests) {
+    if (request.status !== BUDDY_REQUEST_STATUS.RESOLVED) continue;
+    const explicit = getCanonicalBuddyId(programById.get(request.targetId));
+    request.reciprocated =
+      explicit !== undefined
+        ? explicit === request.playerId
+        : finalTarget.get(request.targetId) === request.playerId;
+  }
+
+  return { requests };
+}
+
+/** `normalizeBuddyLinks` and pipeline diagnostics that leave a player without the buddy asked for. */
+const UNLINKED_DIAGNOSTIC_CODES = new Set([
+  'buddy-coach-conflict',
+  'buddy-code-unmatched',
+  'duplicate-buddy-code',
+  'cross-division-buddy',
+]);
+
+/**
+ * The "Buddy requests" list for one division's run: who was paired, which one-way requests
+ * were honoured and whether they landed together, and every request that linked nobody,
+ * with its reason and candidates. Pure; built from the pipeline's outcomes and diagnostics
+ * and the generator's result, so the page can store it in the run's `results`.
+ *
+ * @param {Object} params
+ * @param {any[]} [params.players] - the prepared players (for names)
+ * @param {any[]} [params.requests] - `prepareTeamingInput(...).diagnostics.buddyRequests`
+ * @param {any[]} [params.linkDiagnostics] - `prepareTeamingInput(...).diagnostics.buddyLinking`
+ * @param {{ mutualPairs?: Array<{ playerIds: string[] }> }} [params.buddyDiagnostics] - the
+ *   generator's `buddyDiagnosticsByDivision[division]`
+ * @param {any[]} [params.teams] - the generator's `teamsByDivision[division]`
+ * @param {any[]} [params.overflow] - the generator's `overflowByDivision[division]`
+ * @param {string} [params.buddyRule]
+ */
+export function summarizeBuddyRequests({
+  players = [],
+  requests = [],
+  linkDiagnostics = [],
+  buddyDiagnostics = {},
+  teams = [],
+  overflow = [],
+  buddyRule = BUDDY_RULES.MUTUAL,
+} = {}) {
+  /** @type {Map<string, string>} */
+  const nameById = new Map();
+  const noteName = (id, name) => {
+    const key = coerceId(id);
+    if (key && name && !nameById.has(key)) nameById.set(key, String(name));
+  };
+  /** @type {Map<string, string | null>} where each player landed: a team id, or null (not placed) */
+  const placement = new Map();
+  /** @type {Map<string, string>} */
+  const teamNameById = new Map();
+  for (const team of teams ?? []) {
+    teamNameById.set(String(team.id), String(team.name ?? team.id));
+    for (const player of team?.players ?? []) {
+      noteName(player?.id, rosterDisplayName(player));
+      placement.set(String(player.id), String(team.id));
+    }
+  }
+  for (const entry of overflow ?? []) {
+    for (const player of entry?.players ?? []) {
+      noteName(player?.id, rosterDisplayName(player));
+      if (!placement.has(String(player.id))) placement.set(String(player.id), null);
+    }
+  }
+  for (const player of players ?? []) noteName(player?.id, rosterDisplayName(player));
+  for (const request of requests ?? []) {
+    noteName(request.playerId, request.playerName);
+    noteName(request.targetId, request.targetName);
+  }
+  const nameOf = (id) => nameById.get(String(id)) ?? String(id);
+  const teamOf = (id) => (placement.has(String(id)) ? placement.get(String(id)) : null);
+  const requestOf = new Map((requests ?? []).map((request) => [request.playerId, request]));
+
+  const paired = (buddyDiagnostics?.mutualPairs ?? []).map(({ playerIds }) => {
+    const [a, b] = playerIds.map(String);
+    const teamId = teamOf(a);
+    const together = teamId !== null && teamId === teamOf(b);
+    return {
+      playerIds: [a, b],
+      names: [nameOf(a), nameOf(b)],
+      teamName: together ? teamNameById.get(teamId) : null,
+      together,
+    };
+  });
+
+  const oneWay = (requests ?? [])
+    .filter((request) => request.outcome === 'one-way')
+    .map((request) => {
+      const teamId = teamOf(request.playerId);
+      const together = teamId !== null && teamId === teamOf(request.targetId);
+      return {
+        playerId: request.playerId,
+        playerName: nameOf(request.playerId),
+        request: request.request,
+        targetId: request.targetId,
+        targetName: nameOf(request.targetId),
+        honoured: Boolean(request.honoured),
+        reason: request.reason ?? null,
+        teamName: together ? teamNameById.get(teamId) : null,
+        together,
+      };
+    });
+
+  /** @type {Array<{ playerId: string, playerName: string, request: string | null, reason: string, candidates: Array<{ playerId: string, name: string, division: string }> }>} */
+  const unresolved = [];
+  const listed = new Set();
+  const addUnresolved = (playerId, reason, candidates) => {
+    const key = `${playerId}::${reason}`;
+    if (listed.has(key)) return;
+    listed.add(key);
+    unresolved.push({
+      playerId: String(playerId),
+      playerName: nameOf(playerId),
+      request: requestOf.get(String(playerId))?.request ?? null,
+      reason,
+      candidates,
+    });
+  };
+  for (const request of requests ?? []) {
+    if (request.status === BUDDY_REQUEST_STATUS.RESOLVED) continue;
+    addUnresolved(request.playerId, request.status, request.candidates ?? []);
+  }
+  for (const diagnostic of linkDiagnostics ?? []) {
+    if (!UNLINKED_DIAGNOSTIC_CODES.has(diagnostic?.code)) continue;
+    const ids = (diagnostic.playerIds ?? []).map(String);
+    for (const id of ids) {
+      addUnresolved(
+        id,
+        diagnostic.code,
+        ids
+          .filter((other) => other !== id)
+          .map((other) => ({ playerId: other, name: nameOf(other), division: '' }))
+      );
+    }
+  }
+
+  return { rule: buddyRule, paired, oneWay, unresolved };
 }

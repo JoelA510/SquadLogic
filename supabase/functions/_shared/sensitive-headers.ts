@@ -90,8 +90,8 @@ export const SENSITIVE_PATTERNS: readonly RegExp[] = [
   /special\s*needs?/,
 ];
 
-/** Headers that would match a pattern but are kept: a PAID/UNPAID flag, no amounts. */
-export const ALLOWED_HEADERS: readonly RegExp[] = [/^payment\s*status$/];
+/** Headers that would match a pattern but are kept. None since `players.paid` was dropped. */
+export const ALLOWED_HEADERS: readonly RegExp[] = [];
 
 /** The import types whose rows lose their sensitive columns (people, not fields). */
 export const SENSITIVE_IMPORT_TYPES: readonly string[] = Object.freeze(['players', 'coaches']);

@@ -842,7 +842,7 @@ function ParentDashboard() {
         {players.length === 0 && (
           <div className="card">
             <div className="card-body muted">
-              No players are linked to your account yet — registration links them automatically.
+              No players are linked to your account yet. Your league administrator can link them.
             </div>
           </div>
         )}

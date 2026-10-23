@@ -132,9 +132,13 @@ at once (AGENTS.md section 11).
   that axis's value.
 - **The `medical_forms` flag** leaves the settings catalogue and its default; its key stays in
   `FEATURE_FLAGS` so a stored value still parses (skill `squadlogic-feature-guardians`).
-- **Kept:** the sensitive-column filter's "Payment Status" exception (the import allowlist drops
-  the column after it, so nothing stores it); the retired actions' `audit_actions` rows; every
-  GotSport "registration" name.
+- **The sensitive-column filter's "Payment Status" exception** goes with `paid`, its only reader:
+  every payment column is stripped before upload (browser and Edge copies).
+- **Kept:** the retired actions' `audit_actions` rows; every GotSport "registration" name.
+- **Left as is, pre-existing:** the Reports page's "Organization Readiness" radar. With the
+  Compliance axis gone, none of its three axes reads organization data (Staffing is a stub ratio,
+  Balance and Skill Variability are constants). Removing it or wiring it to real data is a
+  separate decision.
 - **Harness:** older smokes at head stop exercising dropped objects (the throttle smoke now checks
   they stay gone), so the six M28 throttle plants are retired; the M30 plant is re-aimed at this
   migration's `finalize_import_job`; the revert check compares a catalogue fingerprint of every

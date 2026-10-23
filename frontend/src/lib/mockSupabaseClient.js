@@ -42,6 +42,31 @@ const mockId = (prefix = '') =>
  */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCHEMA_ENTITIES = new Set(['player', 'coach', 'team']);
+
+// The keys `sanitize_player_patch` accepts (20261022020000). admin_update_player,
+// admin_bulk_update_players and admin_create_player all pass through it, so all
+// three arms refuse any other key, as the SQL does with 22023.
+const PLAYER_PATCH_FIELDS = new Set([
+  'first_name',
+  'last_name',
+  'preferred_name',
+  'gender',
+  'grade',
+  'notes',
+  'buddy_request',
+  'status',
+  'rating',
+  'years_played',
+  'jersey_number',
+  'willing_to_coach',
+  'division_id',
+  'team_id',
+  'date_of_birth',
+  'guardian_contacts',
+]);
+/** The first key `sanitize_player_patch` would refuse, or undefined. */
+const rejectedPlayerPatchField = (patch) =>
+  Object.keys(patch || {}).find((key) => !PLAYER_PATCH_FIELDS.has(key));
 const SCHEMA_VALUE_TYPES = new Set(['string', 'number', 'boolean', 'date']);
 const stableSchemaKey = (schema) =>
   JSON.stringify(
@@ -5123,25 +5148,7 @@ export const mockSupabase = {
       if (!player) {
         return { data: null, error: { message: `player ${p_player_id} not found` } };
       }
-      const allowed = [
-        'first_name',
-        'last_name',
-        'preferred_name',
-        'gender',
-        'grade',
-        'notes',
-        'buddy_request',
-        'status',
-        'rating',
-        'years_played',
-        'jersey_number',
-        'willing_to_coach',
-        'division_id',
-        'team_id',
-        'date_of_birth',
-        'guardian_contacts',
-      ];
-      const rejected = Object.keys(p_patch || {}).find((key) => !allowed.includes(key));
+      const rejected = rejectedPlayerPatchField(p_patch);
       if (rejected) {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
@@ -5209,6 +5216,10 @@ export const mockSupabase = {
 
     if (name === 'admin_bulk_update_players') {
       const { p_player_ids, p_patch } = params || {};
+      const rejected = rejectedPlayerPatchField(p_patch);
+      if (rejected) {
+        return { data: null, error: { message: `field ${rejected} is not editable` } };
+      }
       const ids = (p_player_ids || []).map(String);
       let count = 0;
       (db.players || []).forEach((player) => {
@@ -5231,6 +5242,10 @@ export const mockSupabase = {
 
     if (name === 'admin_create_player') {
       const { p_organization_id, p_fields } = params || {};
+      const rejected = rejectedPlayerPatchField(p_fields);
+      if (rejected) {
+        return { data: null, error: { message: `field ${rejected} is not editable` } };
+      }
       const now = new Date().toISOString();
       const player = {
         id: mockId(),

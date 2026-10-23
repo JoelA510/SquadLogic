@@ -61,6 +61,41 @@ describe('mock: the removed registration and compliance RPCs', () => {
       expect(error?.message, key).toBe(`field ${key} is not editable`);
     }
   });
+
+  it('refuses a paperwork flag on bulk update and create too: both pass sanitize_player_patch', async () => {
+    const player = getMockData('players')[0];
+    const before = getMockData('players').length;
+    for (const key of ['paid', 'waiver_received', 'medical_form_received']) {
+      const bulk = await supabase.rpc('admin_bulk_update_players', {
+        p_player_ids: [player.id],
+        p_patch: { [key]: true },
+      });
+      expect(bulk.data, key).toBeNull();
+      expect(bulk.error?.message, key).toBe(`field ${key} is not editable`);
+
+      const created = await supabase.rpc('admin_create_player', {
+        p_organization_id: MOCK_ORG_ID,
+        p_fields: { status: 'pending', [key]: true },
+      });
+      expect(created.data, key).toBeNull();
+      expect(created.error?.message, key).toBe(`field ${key} is not editable`);
+    }
+    const stored = getMockData('players').find((row) => String(row.id) === String(player.id));
+    expect(stored).not.toHaveProperty('waiver_received');
+    expect(getMockData('players')).toHaveLength(before);
+
+    // An allowed patch still goes through on both arms.
+    const ok = await supabase.rpc('admin_bulk_update_players', {
+      p_player_ids: [player.id],
+      p_patch: { status: 'waitlist' },
+    });
+    expect(ok).toMatchObject({ data: 1, error: null });
+    const made = await supabase.rpc('admin_create_player', {
+      p_organization_id: MOCK_ORG_ID,
+      p_fields: { status: 'pending' },
+    });
+    expect(made.error).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

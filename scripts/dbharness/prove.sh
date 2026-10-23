@@ -82,8 +82,8 @@ R25="$REPO/docs/sql/20261018060000_revert.sql"
 # Wave 2: team and game saves audit in their own transaction, and the revert.
 M27="$REPO/supabase/migrations/20261018070000_audit_in_save_transaction.sql"
 R27="$REPO/docs/sql/20261018070000_revert.sql"
-# B2 (DS-5): the submit_registration throttle, and its revert.
-M28="$REPO/supabase/migrations/20261019010000_submit_registration_throttle.sql"
+# B2 (DS-5): the submit_registration throttle's revert. Its migration's plants
+# were retired when 20261022020000 dropped submit_registration.
 R28="$REPO/docs/sql/20261019010000_revert.sql"
 # The evaluation-run idempotency key, and its revert.
 M29="$REPO/supabase/migrations/20261020010000_evaluation_run_idempotency.sql"

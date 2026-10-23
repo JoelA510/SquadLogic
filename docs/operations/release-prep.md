@@ -34,7 +34,9 @@ was checked on the date above; each item says how.
     `supabase/tests/definer_function_grants.sql` holds the grants. Accepted by design.
   - `anon_security_definer_function_executable` (1): `submit_registration`, the public
     registration form, excluded on purpose from the anon revoke
-    (`20260603120000_revoke_anon_execute_on_definer_functions.sql`). Accepted.
+    (`20260603120000_revoke_anon_execute_on_definer_functions.sql`). Accepted then; migration
+    `20261022020000` drops the function, so the next refresh expects 0, and
+    `supabase/tests/definer_function_grants.sql` asserts anon can run no SECURITY DEFINER function.
   - `function_search_path_mutable` (1): `public.min(uuid)` is an aggregate, which cannot carry
     `SET search_path`; its state function `min_uuid` pins it
     (`20260612000000_min_uuid_aggregate.sql`). A false positive.

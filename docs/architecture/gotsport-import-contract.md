@@ -87,8 +87,8 @@ they are until those columns are dropped (R4). `players.paid` and the paperwork
 flags `waiver_received` and `medical_form_received` were dropped in R1
 (`20261022020000`): payments and paperwork are tracked on the league's
 registration platform, and the waitlist status stays the teaming gate. The
-sensitive-column filter still lets a "Payment Status" header through (it was the
-`paid` flag's source); the allowlist then drops it, so nothing stores it.
+sensitive-column filter's "Payment Status" exception (it was the `paid` flag's
+source) went with it, so every payment column is stripped before upload.
 
 ## Coach import — kept fields
 

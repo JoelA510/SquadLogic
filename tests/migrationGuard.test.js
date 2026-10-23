@@ -235,3 +235,28 @@ describe('migration guard: limit parsing and post-push verification', () => {
     expect(() => verifyApplied('not json')).toThrow(GuardError);
   });
 });
+
+// supabase/unapplied-migration-edits.json: an edit to a never-applied migration
+// (20261022020000's first deploy failed and rolled back, 2026-10-23).
+describe('migration guard: listed edits to never-applied migrations', () => {
+  const edit = (version) => ({ version, blob: 'a'.repeat(40), reason: 'test' });
+
+  it('passes a listed version that is still pending, and pushes it', () => {
+    const result = evaluate({
+      listText: listJson({ pending: ['20260927000000'] }),
+      dryRunText: dryJson(['20260927000000']),
+      allowedEdits: [edit('20260927000000')],
+    });
+    expect(result.pending).toEqual(['20260927000000']);
+  });
+
+  it('refuses a listed version already applied: its edit would never run', () => {
+    expect(() =>
+      evaluate({
+        listText: listJson({ pending: ['20260927000000'] }),
+        dryRunText: dryJson(['20260927000000']),
+        allowedEdits: [edit('20260924000000')],
+      })
+    ).toThrow(/lists 20260924000000, already applied/);
+  });
+});

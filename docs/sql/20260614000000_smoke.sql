@@ -1,9 +1,9 @@
 -- Smoke checks for 20260614000000_advisor_hardening_followups.sql
 
 -- 1. The only anon-executable SECURITY DEFINER function in `public` is the
---    intentionally excluded public-registration RPC. Expect a single row:
---    submit_registration.
-select 'anon-executable SECURITY DEFINER functions (expect only submit_registration)' as check,
+--    intentionally excluded public-registration RPC. Since 20261022020000
+--    dropped it (no in-app registration), expect zero rows.
+select 'anon-executable SECURITY DEFINER functions (expect none since 20261022020000)' as check,
        p.proname,
        pg_get_function_identity_arguments(p.oid) as args
 from pg_proc p

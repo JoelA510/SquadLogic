@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, CheckCircle2, Clock, ExternalLink, Trash2, User, UserPlus } from 'lucide-react';
+import { Check, Clock, ExternalLink, Trash2, User, UserPlus } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
 import DataGrid from '../components/grid/DataGrid.jsx';
@@ -118,9 +118,6 @@ export default function PlayersPage() {
         if (rest.length > 0) patch.last_name = rest.join(' ');
         break;
       }
-      case 'paid':
-      case 'waiver_received':
-      case 'medical_form_received':
       case 'willing_to_coach':
         patch = { [key]: value === 'true' || value === true };
         break;
@@ -223,38 +220,6 @@ export default function PlayersPage() {
       min: 0,
       max: 999,
     });
-    cols.push({
-      key: 'paid',
-      label: 'Paid',
-      width: 64,
-      editable: true,
-      type: 'select',
-      options: BOOL_OPTIONS,
-      center: true,
-      render: (row) => boolCell(row.paid),
-    });
-    cols.push({
-      key: 'waiver_received',
-      label: 'Waiver',
-      width: 72,
-      editable: true,
-      type: 'select',
-      options: BOOL_OPTIONS,
-      center: true,
-      render: (row) => boolCell(row.waiver_received),
-    });
-    if (isEnabled(FEATURE_FLAGS.MEDICAL_FORMS)) {
-      cols.push({
-        key: 'medical_form_received',
-        label: 'Medical',
-        width: 76,
-        editable: true,
-        type: 'select',
-        options: BOOL_OPTIONS,
-        center: true,
-        render: (row) => boolCell(row.medical_form_received),
-      });
-    }
     if (isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS)) {
       cols.push({
         key: 'buddy_request',
@@ -383,22 +348,6 @@ export default function PlayersPage() {
         }
         bulkActions={
           <>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={CheckCircle2}
-              onClick={() => bulkPatch({ paid: true }, 'Marked paid')}
-            >
-              Mark paid
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Check}
-              onClick={() => bulkPatch({ waiver_received: true }, 'Waivers recorded')}
-            >
-              Waiver received
-            </Button>
             {waitlistOn && (
               <Button
                 variant="secondary"

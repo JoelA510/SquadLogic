@@ -4,7 +4,9 @@
 -- supabase/migrations/20260603120000_revoke_anon_execute_on_definer_functions.sql:
 --   * anon cannot execute admin RPCs, RLS helpers, or trigger functions;
 --   * authenticated keeps admin RPCs + RLS helpers but loses trigger functions;
---   * anon retains the intentionally-excluded public registration RPC;
+--   * no SECURITY DEFINER function in public is executable by anon: the one
+--     exclusion, the public registration RPC submit_registration, was dropped
+--     with the in-app registration flow (20261022020000);
 --   * the import finalizers stay authenticated-only, and the import allowlist's
 --     helpers and the purge (20261022010000) are executable by no client role.
 -- Grant checks need no fixtures, so this suite seeds nothing.
@@ -47,10 +49,20 @@ SELECT ok(
   'authenticated cannot execute trigger fn handle_new_user'
 );
 
--- Intentional exclusion: the public /register route runs submit_registration as anon.
-SELECT ok(
-  has_function_privilege('anon', 'public.submit_registration(uuid,uuid,uuid,jsonb,uuid,text,text)', 'EXECUTE'),
-  'anon retains submit_registration (public registration route)'
+-- The one exclusion, submit_registration (the public /register route), went
+-- with the in-app registration flow (20261022020000), so anon executes no
+-- SECURITY DEFINER function in public at all.
+SELECT is(
+  ARRAY(
+    SELECT p.oid::regprocedure::text
+      FROM pg_proc p
+     WHERE p.pronamespace = 'public'::regnamespace
+       AND p.prosecdef
+       AND has_function_privilege('anon', p.oid, 'EXECUTE')
+     ORDER BY 1
+  ),
+  ARRAY[]::text[],
+  'anon executes no SECURITY DEFINER function in public (submit_registration is gone)'
 );
 
 -- The import finalizers (replaced by 20261022010000) keep their grants.

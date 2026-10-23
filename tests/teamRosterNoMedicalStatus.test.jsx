@@ -1,3 +1,10 @@
+/**
+ * The team roster shows no medical clearance (plan
+ * docs/changes/2026-10-22-admin-focus.md, R1): the badge read
+ * `get_team_portal_medical_status`, which went with the registrations it read.
+ * A roster row that still carries the old keys renders the player and nothing
+ * about clearance.
+ */
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,7 +40,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   },
 }));
 
-describe('TeamRecordPage medical clearance', () => {
+describe('TeamRecordPage roster without medical clearance', () => {
   beforeEach(() => {
     mocks.portalState = {
       loading: false,
@@ -60,13 +67,6 @@ describe('TeamRecordPage medical clearance', () => {
           medical_cleared: false,
           medical_clearance_visible: true,
         },
-        {
-          id: 'hidden-player',
-          first_name: 'Casey',
-          last_name: 'Chen',
-          medical_cleared: true,
-          medical_clearance_visible: false,
-        },
       ],
       events: [],
       rsvps: [],
@@ -77,17 +77,13 @@ describe('TeamRecordPage medical clearance', () => {
     };
   });
 
-  it('renders medical clearance from registration state instead of hardcoded player ids', () => {
+  it('lists the roster with no medical clearance badge', () => {
     render(<TeamRecordPage />);
 
-    // Roster (with medical status) lives in the Roster tab.
     fireEvent.click(screen.getByRole('tab', { name: /Roster/ }));
 
     expect(screen.getByText('Avery Adams')).toBeInTheDocument();
     expect(screen.getByText('Blair Bennett')).toBeInTheDocument();
-    expect(screen.getByText('Casey Chen')).toBeInTheDocument();
-    expect(screen.getByText('Medical Clearance: Yes')).toHaveClass('text-status-success');
-    expect(screen.getByText('Medical Clearance: Pending')).toHaveClass('text-status-warning-text');
-    expect(screen.getAllByText(/Medical Clearance:/)).toHaveLength(2);
+    expect(screen.queryByText(/Medical Clearance/i)).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 /**
  * The mock client no longer pretends: an RPC with no arm is refused
- * (PGRST202), and the four RPCs that used to fall through to the silent
+ * (PGRST202), and the three RPCs that used to fall through to the silent
  * catch-all have arms mirroring their SQL, refusals included.
  */
 import { describe, it, expect } from 'vitest';
@@ -23,10 +23,6 @@ const makeDb = () => ({
   organization_members: [
     { organization_id: MOCK_ORG_ID, profile_id: 'admin-1', role: 'admin' },
     { organization_id: MOCK_ORG_ID, profile_id: 'coach-1', role: 'coach' },
-  ],
-  registration_forms: [{ id: 'f1', organization_id: MOCK_ORG_ID }],
-  registrations: [
-    { id: 'r1', organization_id: MOCK_ORG_ID, form_id: 'f1', medical_cleared: false },
   ],
   season_settings: [
     { id: 's1', organization_id: MOCK_ORG_ID },
@@ -88,47 +84,6 @@ describe('the mock client refuses an RPC it has no arm for', () => {
     expect([...called].filter((n) => !armed(n))).toEqual([]);
     // The check can fail: a name nobody arms is reported.
     expect(armed('definitely_not_a_function')).toBe(false);
-  });
-});
-
-describe('admin_update_registration_medical_status', () => {
-  it('sets the status and reports the change', () => {
-    const db = makeDb();
-    const res = call(db, 'admin_update_registration_medical_status', {
-      p_organization_id: MOCK_ORG_ID,
-      p_registration_id: 'r1',
-      p_medical_cleared: true,
-    });
-    expect(res.data).toMatchObject({
-      medical_cleared: true,
-      previous_status: false,
-      changed: true,
-    });
-    expect(db.registrations[0].medical_cleared).toBe(true);
-  });
-
-  it('refuses a coach (42501), a missing flag (23502), array metadata (22023) and a foreign registration (42501)', () => {
-    const db = makeDb();
-    const base = {
-      p_organization_id: MOCK_ORG_ID,
-      p_registration_id: 'r1',
-      p_medical_cleared: true,
-    };
-    expect(
-      call(db, 'admin_update_registration_medical_status', base, ctxFor(db, 'coach-1')).error.code
-    ).toBe('42501');
-    expect(
-      call(db, 'admin_update_registration_medical_status', { ...base, p_medical_cleared: null })
-        .error.code
-    ).toBe('23502');
-    expect(
-      call(db, 'admin_update_registration_medical_status', { ...base, p_metadata: [] }).error.code
-    ).toBe('22023');
-    expect(
-      call(db, 'admin_update_registration_medical_status', { ...base, p_registration_id: 'nope' })
-        .error.code
-    ).toBe('42501');
-    expect(db.registrations[0].medical_cleared).toBe(false);
   });
 });
 
@@ -246,9 +201,8 @@ describe('create_org_invite and redeem_org_invite', () => {
     ).toBe('2026-10-09T16:00:00.000Z');
   });
 
-  it('claims exactly the four RPCs', () => {
+  it('claims exactly the three RPCs', () => {
     expect([...ADMIN_WRITE_RPCS].sort()).toEqual([
-      'admin_update_registration_medical_status',
       'admin_upsert_division_settings',
       'create_org_invite',
       'redeem_org_invite',

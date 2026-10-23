@@ -70,9 +70,6 @@ describe('PlayerRecordPage', () => {
           jersey_number: 7,
           years_played: 2,
           rating: null,
-          paid: true,
-          waiver_received: false,
-          medical_form_received: false,
           willing_to_coach: false,
           buddy_request: 'Jamie Jones',
           guardian_contacts: [{ name: 'Dana Smith', email: 'dana@example.com' }],
@@ -105,25 +102,24 @@ describe('PlayerRecordPage', () => {
     );
   });
 
-  it('shows guardians and compliance toggles in their tabs', async () => {
+  it('shows guardians in their tab', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Alex Smith' });
 
     fireEvent.click(screen.getByRole('tab', { name: 'Guardians' }));
     expect(screen.getByText('Primary guardian')).toBeInTheDocument();
     expect(screen.getByText('Dana Smith')).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Compliance' }));
-    expect(screen.getByRole('switch', { name: 'Registration fee' })).toHaveAttribute(
-      'aria-checked',
-      'true'
-    );
-    fireEvent.click(screen.getByRole('switch', { name: 'Liability waiver' }));
-    await waitFor(() =>
-      expect(mocks.rpc).toHaveBeenCalledWith('admin_update_player', {
-        p_player_id: 'p1',
-        p_patch: { waiver_received: true },
-      })
-    );
+  // Paperwork and payment are tracked on the league's registration platform
+  // (docs/changes/2026-10-22-admin-focus.md, R1).
+  it('has no Compliance tab', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Alex Smith' });
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Overview',
+      'Guardians',
+      'Team & Schedule',
+    ]);
   });
 });

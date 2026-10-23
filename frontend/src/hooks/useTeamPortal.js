@@ -120,39 +120,7 @@ export function useTeamPortal(teamId) {
         }
       });
 
-      const medicalClearanceByPlayer = new Map();
-
-      if (uniqueRoster.length > 0) {
-        const { data: medicalStatusData, error: medicalStatusError } = await supabase.rpc(
-          'get_team_portal_medical_status',
-          { p_team_id: teamId }
-        );
-
-        if (medicalStatusError) {
-          logger.warn('Unable to load team portal medical clearance state:', medicalStatusError);
-        } else {
-          (medicalStatusData || []).forEach((statusRow) => {
-            if (!medicalClearanceByPlayer.has(statusRow.player_id)) {
-              medicalClearanceByPlayer.set(statusRow.player_id, {
-                medical_cleared: statusRow.medical_cleared === true,
-                medical_clearance_visible: true,
-              });
-            }
-          });
-        }
-      }
-
-      setRoster(
-        uniqueRoster.map((player) => {
-          const clearance = medicalClearanceByPlayer.get(player.id);
-
-          return {
-            ...player,
-            medical_cleared: clearance?.medical_cleared ?? false,
-            medical_clearance_visible: clearance?.medical_clearance_visible === true,
-          };
-        })
-      );
+      setRoster(uniqueRoster);
 
       // 3. Fetch Games
       const { data: gamesData, error: gamesError } = await supabase

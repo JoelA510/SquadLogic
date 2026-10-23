@@ -141,13 +141,12 @@ export const SENSITIVE_PATTERNS = [
 ];
 
 /**
- * Headers that would match a SENSITIVE_PATTERN but are explicitly kept.
- * "Payment Status" is a PAID/UNPAID boolean compliance signal (no amounts,
- * plans, or instruments) consumed by the `paid` roster flag; everything else
- * financial — Payment Plan, amounts, balances, card data — stays stripped.
+ * Headers that would match a SENSITIVE_PATTERN but are explicitly kept. None
+ * today: "Payment Status" was kept for `players.paid`, and since that column
+ * was dropped (20261022020000) every payment column is stripped.
  * @type {RegExp[]}
  */
-export const ALLOWED_HEADERS = [/^payment\s*status$/];
+export const ALLOWED_HEADERS = [];
 
 /** The import types whose rows lose their sensitive columns (people, not fields). */
 export const SENSITIVE_IMPORT_TYPES = Object.freeze(['players', 'coaches']);

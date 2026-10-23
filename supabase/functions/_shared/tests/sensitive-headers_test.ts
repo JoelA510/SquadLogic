@@ -8,7 +8,7 @@
 import { assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { isSensitiveHeader, stripSensitiveColumns } from '../sensitive-headers.ts';
 
-Deno.test('medical, condition, need and emergency columns are dropped', () => {
+Deno.test('medical, condition, need, emergency and payment columns are dropped', () => {
   for (const header of [
     'Medical Conditions',
     'medical_info',
@@ -20,20 +20,15 @@ Deno.test('medical, condition, need and emergency columns are dropped', () => {
     'Allergies',
     'Emergency Contact Phone',
     'emergency_contacts',
+    'Payment Status',
+    'payment_status',
   ]) {
     assertEquals(isSensitiveHeader(header), true, header);
   }
 });
 
 Deno.test('teaming and contact columns are kept', () => {
-  for (const header of [
-    'First Name',
-    'Date of Birth',
-    'Division',
-    'Guardian 1 Email',
-    'Payment Status',
-    'payment_status',
-  ]) {
+  for (const header of ['First Name', 'Date of Birth', 'Division', 'Guardian 1 Email']) {
     assertEquals(isSensitiveHeader(header), false, header);
   }
 });

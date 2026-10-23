@@ -23,11 +23,9 @@ Given('the season {string} is active', async ({ page }, _seasonName: string) => 
 const routeMap: Record<string, string> = {
   'Dashboard page': '/',
   Dashboard: '/',
-  'Compliance Dashboard': '/admin/compliance',
   'Reporting Dashboard': '/admin/reports',
   'League Standings': '/standings',
   'Team Management page': '/teams',
-  'Registration Forms': '/admin/forms',
   'Practice Scheduling page': '/schedule/practice',
   'Game Scheduling page': '/schedule/game',
 };
@@ -53,7 +51,7 @@ Given('I navigate to the {string}', async ({ page }, destination: string) => {
 });
 
 Given(
-  /I navigate to the (Dashboard page|Dashboard|Compliance Dashboard|Reporting Dashboard|Team Management page|Registration Forms)/,
+  /I navigate to the (Dashboard page|Dashboard|Reporting Dashboard|Team Management page)/,
   async ({ page }, destination: string) => {
     const url = routeMap[destination];
     if (url) {
@@ -70,7 +68,6 @@ Given(
 
 Given('I am on the {string}', async ({ page }, pageName: string) => {
   const routeMap: Record<string, string> = {
-    'Compliance Dashboard': '/admin/compliance',
     'Reporting Dashboard': '/admin/reports',
     'Dashboard page': '/',
     Dashboard: '/',
@@ -104,10 +101,9 @@ Given('I am on the {string} page', async ({ page }, pageName: string) => {
 });
 
 Given(
-  /I am on the (Dashboard page|Dashboard|Compliance Dashboard|Reporting Dashboard)/,
+  /I am on the (Dashboard page|Dashboard|Reporting Dashboard)/,
   async ({ page }, pageName: string) => {
     const routeMap: Record<string, string> = {
-      'Compliance Dashboard': '/admin/compliance',
       'Reporting Dashboard': '/admin/reporting',
       'Dashboard page': '/',
       Dashboard: '/',

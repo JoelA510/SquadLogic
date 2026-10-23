@@ -44,7 +44,7 @@ vi.mock('../frontend/src/hooks/usePermission.js', () => ({
 }));
 
 vi.mock('../frontend/src/hooks/useNavBadges.js', () => ({
-  useNavBadges: () => ({ players: 42, coaches: 7, teams: 6, complianceOpen: null }),
+  useNavBadges: () => ({ players: 42, coaches: 7, teams: 6 }),
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({

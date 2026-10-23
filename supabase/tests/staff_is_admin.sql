@@ -32,8 +32,10 @@ SELECT cmp_ok(
     (SELECT count(*) FROM pg_policies
       WHERE schemaname = 'public'
         AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%''admin''::text%'),
-    '>=', 9::bigint,
-    'at least the nine policies that test a role by name are found'
+    -- Nine when 20261020030000 was written; 20261022020000 dropped the three
+    -- registration_forms admin policies with the table.
+    '>=', 6::bigint,
+    'at least the six policies that test a role by name are found'
 );
 -- Each expression on its own (USING, then WITH CHECK): a USING that admits
 -- staff must not hide a WITH CHECK that does not.

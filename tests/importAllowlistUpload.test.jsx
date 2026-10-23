@@ -178,7 +178,8 @@ describe('a people import keeps only allowlisted columns', () => {
     const player = getMockData('players').find((p) => p.external_registration_id === 'REG-3');
     expect(player.guardian_contacts).toEqual([]);
     expect(player.contact_info).toEqual({});
-    expect(player.paid).toBe(false);
+    // No payment flag since players.paid was dropped (20261022020000).
+    expect(player).not.toHaveProperty('paid');
     expect(player.custom_attributes).toEqual({ team_name: 'Team 3' });
     expect(
       JSON.stringify({

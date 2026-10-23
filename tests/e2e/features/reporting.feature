@@ -1,7 +1,7 @@
 Feature: Admin Reporting Dashboard
   As an organization admin
   I want to view key metrics and export data to CSV
-  So that I can analyze season performance and compliance offline
+  So that I can analyze season performance offline
 
   Background:
     Given I have an organization labeled "Test Org"
@@ -12,7 +12,7 @@ Feature: Admin Reporting Dashboard
     And the admin views the reporting dashboard
     Then I should see the "Total Players" metric
     And I should see the "Total Teams" metric
-    And I should see the "Registrations" metric
+    And the readiness chart shows "Staffing" and no "Compliance" axis
 
   Scenario: Admin exports rosters to CSV
     Given I am logged into SquadLogic as an "admin"

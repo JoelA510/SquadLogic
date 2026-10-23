@@ -16,6 +16,9 @@
 --    And on each of the 19 split tables an INSERT, an UPDATE and a DELETE
 --    admin policy and no FOR ALL one. Counted on the 26 tables, not on
 --    all of `public` (119), so a migration on another table does not move it.
+--    Since 20261022020000 dropped `registration_forms` and `registrations`
+--    (with their 4 + 4 policies), it is 24 tables, 80 policies and 18 split
+--    tables, and both dropped tables are checked to be gone.
 -- 3. A member and an admin of one organization, on `players` (a split
 --    member/admin table): the member reads the organization's row, and its
 --    INSERT is refused by RLS and its UPDATE and DELETE reach no row; the admin
@@ -72,7 +75,7 @@ DECLARE
         'evaluation_runs', 'export_jobs', 'game_slots', 'games', 'import_jobs', 'organization_members',
         'organization_schema_history', 'organizations', 'player_buddies', 'players',
         'practice_assignments', 'practice_exceptions', 'profile_players', 'profiles',
-        'registration_forms', 'registrations', 'scheduler_runs', 'season_settings',
+        'scheduler_runs', 'season_settings',
         'staging_players', 'team_players', 'telemetry_log'
     ];
     -- table, its split-policy name prefix (insert/update/delete follow), suffix
@@ -94,7 +97,6 @@ DECLARE
         ['practice_exceptions', 'Practice exceptions: admins ', ''],
         ['organization_members', 'Org Members: admins ', ''],
         ['organizations', 'Organizations: admins ', ''],
-        ['registration_forms', 'registration_forms_admin_', ''],
         ['season_settings', 'Season Settings: admins ', '']
     ];
     v_member uuid := 'a0a0a0a0-0000-4000-8000-000000001018';
@@ -157,12 +159,15 @@ BEGIN
 
     -- ---- 2. the policies the rewrite leaves ---------------------------------
     SELECT count(*) INTO v_n FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 26 THEN
-        RAISE EXCEPTION 'expected the 26 tables of the advisor findings, found %', v_n;
+    IF v_n <> 24 THEN
+        RAISE EXCEPTION 'expected the 24 tables of the advisor findings still standing, found %', v_n;
+    END IF;
+    IF to_regclass('public.registration_forms') IS NOT NULL OR to_regclass('public.registrations') IS NOT NULL THEN
+        RAISE EXCEPTION 'registration_forms or registrations is back; 20261022020000 dropped both';
     END IF;
     SELECT count(*) INTO v_n FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 88 THEN
-        RAISE EXCEPTION 'the 26 tables carry % policies; the rewrite leaves 85, and 20261019010000 adds 3: 88', v_n;
+    IF v_n <> 80 THEN
+        RAISE EXCEPTION 'the 24 tables carry % policies; the rewrite leaves 85, 20261019010000 adds 3, and 20261022020000 drops 8 with two tables: 80', v_n;
     END IF;
     v_bad := NULL;
     FOR i IN 1 .. array_length(c_split, 1) LOOP
@@ -186,7 +191,7 @@ BEGIN
                 AND policyname = 'Users can view their organization''s import jobs') THEN
         RAISE EXCEPTION 'the legacy import_jobs SELECT survived the rewrite';
     END IF;
-    RAISE NOTICE 'the 26 tables carry 88 policies (85 from the rewrite, 3 from 20261019010000): on each of the 19 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
+    RAISE NOTICE 'the 24 tables carry 80 policies (85 from the rewrite, 3 from 20261019010000, less the 8 of the two tables 20261022020000 dropped): on each of the 18 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
 
     -- ---- seed: one organization, a member, an admin and a tenant_admin ------
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES

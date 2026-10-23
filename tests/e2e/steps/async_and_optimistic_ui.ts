@@ -200,74 +200,6 @@ Then('the panel status should change to {string}', async ({ page }, status: stri
   }
 });
 
-// --- Medical Clearance Optimistic ---
-Given(
-  'I am viewing a registration for {string} with a {string} medical status',
-  async ({ page }, name: string, status: string) => {
-    await page.goto('/');
-    await waitForMockClient(page);
-    await page.evaluate(
-      ({ playerName, mockOrgId }) => {
-        const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-
-        db.registration_forms = [
-          { id: 'f1', title: 'Fall Registration', organization_id: orgId, status: 'active' },
-        ];
-        db.players = [
-          { id: 'p1', first_name: playerName, last_name: 'Test', organization_id: orgId },
-        ];
-        db.profiles = [
-          {
-            id: 'mock-parent-id',
-            first_name: 'Parent',
-            last_name: 'Test',
-            email: 'parent@test.com',
-          },
-        ];
-        db.registrations = [
-          {
-            id: 'reg-1',
-            organization_id: orgId,
-            form_id: 'f1',
-            player_id: 'p1',
-            profile_id: 'mock-parent-id',
-            medical_cleared: false,
-            waiver_signed: true,
-            created_at: new Date().toISOString(),
-          },
-        ];
-        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-      },
-      { playerName: name, mockOrgId: MOCK_ORG_ID }
-    );
-
-    await page.goto('/admin/compliance');
-    await expect(page.getByText(name).first()).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole('button', { name: status }).first()).toBeVisible();
-  }
-);
-
-When('I click the {string} medical clearance button', async ({ page }, status: string) => {
-  await page.getByRole('button', { name: status }).first().click({ force: true });
-});
-
-Then(
-  'the button should instantly change to a blue {string} state',
-  async ({ page }, newState: string) => {
-    const btn = page.getByRole('button', { name: newState }).first();
-    await expect(btn).toBeVisible();
-    await expect(btn).toHaveClass(/bg-blue|bg-brand/);
-  }
-);
-
-Then(
-  'the database should be updated in the background without a page refresh',
-  async ({ page }) => {
-    await expect(page.locator('text=Syncing...').first()).toBeHidden();
-  }
-);
-
 // --- Output Pipeline ---
 Given('I am on the {string} workflow step on Dashboard', async ({ page }, step: string) => {
   // Establish origin first, seed storage, then use the workflow page's
@@ -361,15 +293,6 @@ When('I hover my mouse over the {string} chart', async ({ page }, _chartName: st
   await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-
-    db.view_compliance_stats = [
-      {
-        organization_id: orgId,
-        form_title: 'Fall Registration',
-        total_registrations: 45,
-        medical_cleared: 38,
-      },
-    ];
 
     db.view_org_metrics = [{ organization_id: orgId, total_teams: 6, total_users: 15 }];
 

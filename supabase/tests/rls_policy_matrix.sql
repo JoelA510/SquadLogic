@@ -1,5 +1,5 @@
 -- RLS persona matrix: what each persona can read and write, table by table,
--- on the 26 tables whose policies the Supabase performance advisors flag
+-- on the 24 tables whose policies the Supabase performance advisors flag
 -- (`auth_rls_initplan`, `multiple_permissive_policies`; the waivers in
 -- docs/security/supabase-advisor-waivers.json). docs/PLAN_RLS_ADVISOR_REWRITE.md
 -- section 4.2.
@@ -20,11 +20,13 @@
 --
 -- **Subjects**: the 26 tables, as a literal list taken from the advisor
 -- findings (the plan's section 1), never derived from `pg_policies`, so a
--- dropped policy cannot shrink the set. Each table carries one row in Org A
+-- dropped policy cannot shrink the set. 24 since 20261022020000 dropped
+-- `registration_forms` and `registrations` with the in-app registration flow
+-- (plan docs/changes/2026-10-22-admin-focus.md, R1). Each table carries one row in Org A
 -- and one in Org B (from the fixtures where they have one, seeded below
 -- otherwise).
 --
--- **Probes**, per persona and table (26 x 8 x 5 = 1040 cells):
+-- **Probes**, per persona and table (24 x 8 x 5 = 960 cells):
 --   sel  which of the two subject rows SELECT returns: 'AB', 'A', 'B' or '-';
 --   ins  an INSERT of a new Org A row: 'ok';
 --   upd  how many rows an UPDATE of Org A's subject row reaches, setting one
@@ -49,14 +51,14 @@
 -- after the write and catches only that (and 42501, the refusal it is
 -- measuring), so its subtransaction rolls back and no probe sees another's
 -- effect. Any other error is not caught: it aborts the test. A write reads
--- 'ok' once its statement has returned, foreign keys checked; none of the 26
+-- 'ok' once its statement has returned, foreign keys checked; none of the 24
 -- tables has a deferred constraint or a constraint trigger that would run
 -- only at commit (checked on a31ddde).
 --
--- **Assertions** (32): five meta-assertions (the 26 subject tables exist and
+-- **Assertions** (30): five meta-assertions (the 24 subject tables exist and
 -- each has RLS enabled, every subject row was seeded, every persona ran as the
--- identity it claims on every table, the expected table covers all 208
--- table-persona pairs, the probes produced all 1040 cells); one that no cell
+-- identity it claims on every table, the expected table covers all 192
+-- table-persona pairs, the probes produced all 960 cells); one that no cell
 -- anywhere differs from the literal expected table below; and one
 -- `results_eq` per table, so a failure names its table. Every differing cell
 -- is printed as a diagnostic.
@@ -70,7 +72,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(32);
+SELECT plan(30);
 
 -- ── 1. The three personas the fixtures lack, and a spare user ─────────────
 -- The spare user exists only so the profiles INSERT probe has an auth user
@@ -227,12 +229,6 @@ VALUES
      'b2222222-2222-2222-2222-222222222bbb', 'bbbbbbbb-0000-0000-0000-000000000002',
      'e0000011-0000-0000-0000-00000000002b', '[2026-09-01,2026-09-08)', 'time_tbd', 'declined');
 
--- 18 registration_forms: Org A's is open, Org B's a draft, so both arms of
--- registration_forms_member_access (member, or status 'open') show.
-INSERT INTO public.registration_forms (id, organization_id, title, status) VALUES
-    ('e0000018-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111', 'Org A form', 'open'),
-    ('e0000018-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222', 'Org B form', 'draft');
-
 -- 22 organization_schema_history
 INSERT INTO public.organization_schema_history (id, organization_id, entity_type) VALUES
     ('e0000022-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111', 'player'),
@@ -243,15 +239,6 @@ INSERT INTO public.organization_schema_history (id, organization_id, entity_type
 INSERT INTO public.profile_players (profile_id, player_id, organization_id) VALUES
     ('55555555-5555-5555-5555-555555555555', 'e0000010-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111'),
     ('66666666-6666-6666-6666-666666666666', 'e0000010-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222');
-
--- 25 registrations: Org A's is the parent's own; Org B's is Bob's.
-INSERT INTO public.registrations (id, organization_id, form_id, player_id, profile_id) VALUES
-    ('e0000025-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111',
-     'e0000018-0000-0000-0000-00000000000a', 'e0000010-0000-0000-0000-00000000000a',
-     '55555555-5555-5555-5555-555555555555'),
-    ('e0000025-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222',
-     'e0000018-0000-0000-0000-00000000000b', 'e0000010-0000-0000-0000-00000000000b',
-     '22222222-2222-2222-2222-222222222222');
 
 -- ── 3. The matrix's own tables (temporary, owned by the test role) ────────
 CREATE TEMP TABLE matrix_persona (ord int PRIMARY KEY, persona text UNIQUE, db_role text, uid uuid);
@@ -374,11 +361,6 @@ INSERT INTO matrix_subject VALUES
      'name',
      $$INSERT INTO public.organizations (id, name, slug)
        VALUES ('e0000017-0000-0000-0000-0000000000fa', 'Matrix Probe Org', 'matrix-probe-org')$$),
-    ('registration_forms',
-     $$id = 'e0000018-0000-0000-0000-00000000000a'$$, $$id = 'e0000018-0000-0000-0000-00000000000b'$$,
-     'organization_id',
-     $$INSERT INTO public.registration_forms (id, organization_id, title)
-       VALUES ('e0000018-0000-0000-0000-0000000000fa', 'a1111111-1111-1111-1111-111111111111', 'Probe form')$$),
     ('season_settings',
      $$id = 'a1111111-1111-1111-1111-111111111aaa'$$, $$id = 'b2222222-2222-2222-2222-222222222bbb'$$,
      'organization_id',
@@ -413,13 +395,6 @@ INSERT INTO matrix_subject VALUES
      'full_name',
      $$INSERT INTO public.profiles (id, email, full_name)
        VALUES ('77777777-7777-7777-7777-777777777777', 'spare@test.local', 'Spare User')$$),
-    ('registrations',
-     $$id = 'e0000025-0000-0000-0000-00000000000a'$$, $$id = 'e0000025-0000-0000-0000-00000000000b'$$,
-     'organization_id',
-     $$INSERT INTO public.registrations (id, organization_id, form_id, player_id, profile_id)
-       VALUES ('e0000025-0000-0000-0000-0000000000fa', 'a1111111-1111-1111-1111-111111111111',
-               'e0000018-0000-0000-0000-00000000000a', 'e0000010-0000-0000-0000-00000000002a',
-               '55555555-5555-5555-5555-555555555555')$$),
     ('telemetry_log',
      $$id = 'cafefade-1111-1111-1111-111111111111'$$, $$id = 'cafefade-2222-2222-2222-222222222221'$$,
      'org_id',
@@ -565,7 +540,7 @@ $matrix$;
 -- admin and tenant_admin): every member of Org A reads A's row, A's admin and
 -- tenant_admin write it and cannot move rows to Org C (the WITH CHECK refuses:
 -- 'rls'; so does Bob's, on B's rows), Bob reads B's only, and the outsider
--- and anon read nothing. None of the 26 tables has a policy for `anon`, so anon's writes are
+-- and anon read nothing. None of the 24 tables has a policy for `anon`, so anon's writes are
 -- refused by RLS (or by the grant, where the table grants anon nothing).
 CREATE TEMP TABLE matrix_expected (
     tbl text, persona text, sel text, ins text, upd text, mov text, del text,
@@ -749,24 +724,6 @@ INSERT INTO matrix_expected VALUES
     -- (it never had a policy to use it); before, the policy refused it ('0').
     ('profiles',                    'anon',     '-',  'rls',   'grant', 'n/a',   '0'),
 
-    -- registration_forms: member or status 'open' (Org A's form is open: deliberate, plan Q6); writes need role = 'admin' (not tenant_admin, plan Q5).
-    ('registration_forms',          'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
-    ('registration_forms',          'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('registration_forms',          'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('registration_forms',          'parent_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('registration_forms',          'admin_b',  'AB', 'rls',   '0',   'rls',   '0'),
-    ('registration_forms',          'outsider', 'A',  'rls',   '0',   '0',     '0'),
-    ('registration_forms',          'anon',     '-',  'rls',   '0',   '0',     '0'),
-
-    -- registrations: SELECT (own AND member) or is_org_admin; INSERT/UPDATE/DELETE is_org_admin only (20261019010000: a member writes through submit_registration). Org A's row is the parent's own, and so is the INSERT probe's.
-    ('registrations',               'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
-    ('registrations',               'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
-    ('registrations',               'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('registrations',               'parent_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('registrations',               'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
-    ('registrations',               'outsider', '-',  'rls',   '0',   '0',     '0'),
-    ('registrations',               'anon',     '-',  'rls',   '0',   '0',     '0'),
-
     -- scheduler_runs: member SELECT, admin ALL.
     ('scheduler_runs',              'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('scheduler_runs',              'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
@@ -825,13 +782,13 @@ SELECT is(
     (SELECT count(*) FROM matrix_subject s
        JOIN pg_class c ON c.oid = to_regclass('public.' || quote_ident(s.tbl))
       WHERE c.relkind = 'r' AND c.relrowsecurity),
-    26::bigint,
-    'the 26 subject tables exist, each an ordinary table with RLS enabled'
+    24::bigint,
+    'the 24 subject tables exist, each an ordinary table with RLS enabled'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_seen WHERE a_n = 1 AND b_n = 1),
-    26::bigint,
+    24::bigint,
     'every subject table holds exactly one Org A and one Org B subject row'
 );
 
@@ -840,21 +797,21 @@ SELECT is(
        JOIN matrix_persona p ON p.persona = i.persona
        JOIN matrix_subject s ON s.tbl = i.tbl
       WHERE i.db_role = p.db_role AND i.uid IS NOT DISTINCT FROM p.uid),
-    208::bigint,
-    'every persona ran as the role and user it claims, on every table (26 x 8)'
+    192::bigint,
+    'every persona ran as the role and user it claims, on every table (24 x 8)'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_expected e
        JOIN matrix_subject USING (tbl) JOIN matrix_persona USING (persona)),
-    208::bigint,
-    'the expected table covers every table and persona (26 x 8)'
+    192::bigint,
+    'the expected table covers every table and persona (24 x 8)'
 );
 
 SELECT is(
     (SELECT count(sel) + count(ins) + count(upd) + count(mov) + count(del) FROM matrix_result),
-    1040::bigint,
-    'the probes produced every cell (26 tables x 8 personas x 5 probes)'
+    960::bigint,
+    'the probes produced every cell (24 tables x 8 personas x 5 probes)'
 );
 
 -- Every differing cell, anywhere in the matrix: printed, then counted. This
@@ -909,8 +866,6 @@ SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'practice_assignments'), 
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'practice_exceptions'), pg_temp.matrix_rows('matrix_expected', 'practice_exceptions'), 'persona matrix: practice_exceptions');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'profile_players'), pg_temp.matrix_rows('matrix_expected', 'profile_players'), 'persona matrix: profile_players');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'profiles'), pg_temp.matrix_rows('matrix_expected', 'profiles'), 'persona matrix: profiles');
-SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'registration_forms'), pg_temp.matrix_rows('matrix_expected', 'registration_forms'), 'persona matrix: registration_forms');
-SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'registrations'), pg_temp.matrix_rows('matrix_expected', 'registrations'), 'persona matrix: registrations');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'scheduler_runs'), pg_temp.matrix_rows('matrix_expected', 'scheduler_runs'), 'persona matrix: scheduler_runs');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'season_settings'), pg_temp.matrix_rows('matrix_expected', 'season_settings'), 'persona matrix: season_settings');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'staging_players'), pg_temp.matrix_rows('matrix_expected', 'staging_players'), 'persona matrix: staging_players');

@@ -28,13 +28,6 @@ Feature: Async States and Optimistic UI Updates
     And I click "Sync to Supabase" on the Team Persistence Panel
     Then the Teams page still says the team review was applied, with what was synced
 
-  Scenario: Medical Clearance Optimistic Toggle
-    Given I am on the "Compliance Dashboard"
-    And I am viewing a registration for "Alex" with a "Reviewing" medical status
-    When I click the "Reviewing" medical clearance button
-    Then the button should instantly change to a blue "Cleared" state
-    And the database should be updated in the background without a page refresh
-
   Scenario: Output Generation Async Pipeline
     Given I am on the "Outcome" workflow step on Dashboard
     When I click "Generate CSVs"
@@ -45,5 +38,5 @@ Feature: Async States and Optimistic UI Updates
 
   Scenario: Recharts Tooltip Rendering
     Given I am on the "Reporting Dashboard"
-    When I hover my mouse over the "Compliance Status" chart
+    When I hover my mouse over the "Fluid Attributes Distribution" chart
     Then a dark-themed tooltip should appear showing exact counts

@@ -32,13 +32,12 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 - **Practice & Game Scheduling Engines**: Conflict-aware round-robin generation and field/time slot allocation.
 - **Evaluation Pipeline**: Automated readiness scoring, fairness metrics, and conflict detection.
 - **Supabase Persistence**: Edge Functions and audited SECURITY DEFINER RPCs for all state changes — no direct table writes.
-- **Durable CSV Import**: Staged GotSport ingestion (players, coaches, field slots) with validation, idempotent re-import, apply/rollback, and expanded field mapping (years played, payment status, waitlist, guardians, gendered divisions).
+- **Durable CSV Import**: Staged GotSport ingestion (players, coaches, field slots) with validation, idempotent re-import, apply/rollback, and expanded field mapping (years played, waitlist, gendered divisions).
 - **Role-Based Access Control (RBAC)**: Comprehensive permission enforcement across all UI flows and RLS policies.
 - **Multi-Tenant Enforcement**: Strict organization partitioning ensuring data isolation.
 - **Facility Management**: Full CRUD UI for venues, fields, blackout dates, and availability profiles.
 - **Communication**: RSVP tracking, trigger-based notifications (rainouts, schedule changes), and team messages.
 - **Calendar Sync**: Public ICS feeds for parents and coaches.
-- **Registration & Compliance**: Custom form builder, waiver/payment/medical tracking (boolean toggles — no document storage), and a compliance dashboard.
 - **Reporting**: Game score entry, standings calculations, and tie-breaker logic.
 
 ### Lightning-class redesign
@@ -46,9 +45,9 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 - **Design system**: Cobalt light + dark themes driven by CSS tokens (`data-theme` on `<html>`, persisted preference), self-hosted Public Sans, and a shared UI primitive library.
 - **App chrome**: Top bar with org/season switchers, global search (`/` shortcut), and role preview; nested collapsible navigation with role-scoped views for coaches and parents.
 - **Players workspace**: Excel-grade editable, virtualized data grid (click-to-edit, keyboard navigation, multi-select bulk actions, instant search) smooth at 1,400+ rows.
-- **Record pages**: Tabbed player records (overview, guardians, schedule, compliance) and team records absorbing the team portal (roster, schedule, staff, messages, RSVP).
+- **Record pages**: Tabbed player records (overview, guardians, schedule) and team records absorbing the team portal (roster, schedule, staff, messages, RSVP).
 - **Team Builder**: Drag-and-drop roster balancing with a serpentine signal balancer (rating or years-played), buddy links, and coach-parent spreading — every move audited.
-- **Org feature configuration**: Per-organization toggles (player rating, years played, buddy requests, coaching interest, medical forms, waitlist) and a division **gender model** — gendered (U8B/U8G) or co-ed display with real merge/split transitions.
+- **Org feature configuration**: Per-organization toggles (player rating, years played, buddy requests, coaching interest, waitlist) and a division **gender model** — gendered (U8B/U8G) or co-ed display with real merge/split transitions.
 - **Season Setup**: Resumable checklist that derives progress from live data — leave and return without losing your place.
 - **Role dashboards**: Admin KPI home, coach dashboard, and parent dashboard, each scoped to what that role needs.
 
@@ -74,7 +73,7 @@ The application is structured around the following workflows (see `frontend/src/
 - `/schedule/practice` & `/schedule/game` — **Scheduling**: Practice slot assignment and round-robin game generation.
 - `/scores` & `/standings` — **Results**: Score entry and standings.
 - `/exports` — **Exports**: Output generation (rosters, schedules).
-- `/admin/*` — **Administration**: Members, compliance, forms, reports, analytics, audit logs.
+- `/admin/*` — **Administration**: Members, reports, analytics, audit logs.
 - `/settings` — **Settings**: Organization configuration, feature toggles, invites, and audit log.
 
 ## 🏁 Getting Started

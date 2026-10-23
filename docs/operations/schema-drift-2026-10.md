@@ -386,3 +386,23 @@ tables, three columns) is present in production, with no foreign key into the
 two tables and nothing depending on the three columns. Recreating the two
 read views, and adding views to the snapshot, is a follow-up that needs a
 migration (AGENTS.md rule 14).
+
+**Restored, 2026-10-23.** Migration `20261023010000_restore_reporting_views.sql`
+(owner approval 2026-10-23) recreates `view_org_metrics` exactly as
+`20260331000000_definitive_schema.sql` defines it, and `view_league_standings`
+as defined there plus two last columns: `division` (the team's division name),
+which the Standings page orders and groups by and no earlier definition had,
+and `season_settings_id` (the division's season), which the page now filters
+on, so it ranks the selected season's teams rather than every season's.
+Both are `security_invoker`, with the grants a fresh build has (`anon`,
+`authenticated` and `service_role`, read off a harness build). In production it
+creates both views, so the Reports page's Active Teams and the Standings page
+work. `view_facility_usage` is left absent. Revert and smoke in
+`docs/sql/20261023010000_revert.sql` and `_smoke.sql`, pgTAP in
+`supabase/tests/reporting_views_present.sql`.
+
+`supabase/catalog-snapshot.json` still does not cover views. Adding them
+touches the snapshot query, its Python checker and floors, its test and the
+operator runbook, and a definition digest would need the same care as function
+bodies (`pg_get_viewdef` text can differ between PostgreSQL versions), so it is
+left to its own change.

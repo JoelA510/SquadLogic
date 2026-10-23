@@ -1,7 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
-import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -145,6 +145,13 @@ Given('the coach views the league standings', async ({ page }) => {
   // Pin to the mock seed's org so OrganizationContext resolves (coach is in initialMockData's org_members).
   // All standings, teams, and games data is in initialMockData — no seeding needed.
   await pinToMockOrg(page);
+  // The page ranks the selected season's teams only. initialMockData's standings
+  // are its own season's, not the background's newer active season (which the
+  // app would otherwise select), so select that season, as the season switcher
+  // would.
+  await page.evaluate((seasonId) => {
+    localStorage.setItem('squadlogic-current-season', seasonId);
+  }, MOCK_SEASON_ID);
   await page.goto('/standings');
   await page.waitForLoadState('networkidle');
 

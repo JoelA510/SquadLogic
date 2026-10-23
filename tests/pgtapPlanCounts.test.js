@@ -78,6 +78,7 @@ const ASSERTIONS = [
   'row_eq',
   'isa_ok',
   'has_table',
+  'has_view',
   'has_column',
   'col_is_pk',
 ];

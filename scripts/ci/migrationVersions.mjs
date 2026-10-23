@@ -11,6 +11,9 @@
  *      greater than the latest version on the base, and every base version
  *      must survive unrenamed and unedited. Deploy time is too late for either:
  *      the CLI refuses out-of-order files, and never re-runs an edited one.
+ *      The one exception: a version listed in
+ *      supabase/unapplied-migration-edits.json (never applied in production)
+ *      may be edited, to exactly the blob the entry records.
  *
  * Check 3 compares two independent trees, `git ls-tree <base>` and
  * `git ls-tree HEAD` (blob ids from the tree, not the working copy, which is
@@ -19,10 +22,11 @@
  * Usage: node scripts/ci/migrationVersions.mjs [--base <sha>]
  */
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const MIGRATIONS_DIR = 'supabase/migrations';
+export const UNAPPLIED_EDITS_FILE = 'supabase/unapplied-migration-edits.json';
 const NAME = /^([0-9]{14})_[A-Za-z0-9_]+\.sql$/;
 
 /** @returns {string | null} the version, or null when the name is malformed */
@@ -59,7 +63,7 @@ export function checkNames(files) {
  *     applied migration, so an edit would silently never be applied.
  * @returns {string[]} errors
  */
-export function checkAgainstBase(baseEntries, headEntries) {
+export function checkAgainstBase(baseEntries, headEntries, allowedEdits = []) {
   const byVersion = (entries) =>
     new Map(entries.filter((e) => versionOf(e.file) !== null).map((e) => [versionOf(e.file), e]));
   const base = byVersion(baseEntries);
@@ -81,6 +85,8 @@ export function checkAgainstBase(baseEntries, headEntries) {
     } else if (b.file !== h.file) {
       errors.push(`${b.file} was renamed to ${h.file}; applied migrations keep their name`);
     } else if (b.blob && h.blob && b.blob !== h.blob) {
+      const allowed = allowedEdits.find((a) => a.version === version);
+      if (allowed && allowed.blob === h.blob) continue;
       errors.push(
         `${h.file}: an existing migration was edited, and production will never re-run it. ` +
           'Revert the edit and add a new migration instead'
@@ -91,6 +97,25 @@ export function checkAgainstBase(baseEntries, headEntries) {
     if (!head.has(version)) errors.push(`${b.file} (version ${version}) was removed`);
   }
   return errors;
+}
+
+/**
+ * The edits allowed to never-applied migrations: `[{ version, blob, reason }]`.
+ * A missing file allows none; a malformed one is an error, never an empty list.
+ */
+export function readAllowedEdits(path = UNAPPLIED_EDITS_FILE) {
+  if (!existsSync(path)) return [];
+  const value = JSON.parse(readFileSync(path, 'utf8'));
+  if (!value || !Array.isArray(value.edits)) throw new Error(`${path}: no "edits" array`);
+  for (const e of value.edits) {
+    if (!/^[0-9]{14}$/.test(e?.version ?? '') || !/^[0-9a-f]{40}$/.test(e?.blob ?? '')) {
+      throw new Error(`${path}: each edit needs a 14-digit "version" and a 40-hex "blob"`);
+    }
+    if (typeof e.reason !== 'string' || e.reason.trim() === '') {
+      throw new Error(`${path}: edit ${e.version} needs a "reason"`);
+    }
+  }
+  return value.edits;
 }
 
 export function listHead(dir = MIGRATIONS_DIR) {
@@ -115,7 +140,9 @@ export function main(argv = process.argv.slice(2)) {
   const i = argv.indexOf('--base');
   const baseRef = i >= 0 ? argv[i + 1] : undefined;
   if (i >= 0 && !baseRef) errors.push('--base needs a git ref');
-  if (baseRef) errors.push(...checkAgainstBase(baseEntries(baseRef), baseEntries('HEAD')));
+  if (baseRef) {
+    errors.push(...checkAgainstBase(baseEntries(baseRef), baseEntries('HEAD'), readAllowedEdits()));
+  }
   for (const e of errors) console.error(`::error title=Migration versions::${e}`);
   if (errors.length > 0) return 1;
   console.log(

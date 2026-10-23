@@ -5,11 +5,15 @@
  * output, captured against a local production-shaped ledger on 2026-09-28 --
  * see docs/operations/migration-ledger-normalisation.md.
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_MAX_PENDING,
   GuardError,
   evaluate,
+  main,
   parseMax,
   verifyApplied,
 } from '../scripts/ci/migrationGuard.mjs';
@@ -233,5 +237,55 @@ describe('migration guard: limit parsing and post-push verification', () => {
       /still pending after the push: 20260927000000/
     );
     expect(() => verifyApplied('not json')).toThrow(GuardError);
+  });
+});
+
+// supabase/unapplied-migration-edits.json: an edit to a never-applied migration
+// (20261022020000's first deploy failed and rolled back, 2026-10-23).
+describe('migration guard: listed edits to never-applied migrations', () => {
+  const edit = (version) => ({ version, blob: 'a'.repeat(40), reason: 'test' });
+
+  it('passes a listed version that is still pending, and pushes it', () => {
+    const result = evaluate({
+      listText: listJson({ pending: ['20260927000000'] }),
+      dryRunText: dryJson(['20260927000000']),
+      allowedEdits: [edit('20260927000000')],
+    });
+    expect(result.pending).toEqual(['20260927000000']);
+  });
+
+  it('refuses a listed version already applied: its edit would never run', () => {
+    expect(() =>
+      evaluate({
+        listText: listJson({ pending: ['20260927000000'] }),
+        dryRunText: dryJson(['20260927000000']),
+        allowedEdits: [edit('20260924000000')],
+      })
+    ).toThrow(/lists 20260924000000, already applied/);
+  });
+
+  it('the entry point reads the list: a listed version already applied fails main()', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-'));
+    const listPath = join(dir, 'list.json');
+    const dryPath = join(dir, 'dry.json');
+    const editsPath = join(dir, 'edits.json');
+    writeFileSync(listPath, listJson());
+    writeFileSync(dryPath, dryJson([]));
+    writeFileSync(editsPath, JSON.stringify({ edits: [edit('20260924000000')] }));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(
+        main(['--list', listPath, '--dry-run', dryPath, '--unapplied-edits', editsPath], {})
+      ).toBe(1);
+      expect(error.mock.calls.flat().join(' ')).toMatch(/lists 20260924000000, already applied/);
+      writeFileSync(editsPath, JSON.stringify({ edits: [] }));
+      expect(
+        main(['--list', listPath, '--dry-run', dryPath, '--unapplied-edits', editsPath], {})
+      ).toBe(0);
+    } finally {
+      error.mockRestore();
+      log.mockRestore();
+    }
   });
 });

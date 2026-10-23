@@ -14,6 +14,7 @@ import {
   checkAgainstBase,
   checkNames,
   listHead,
+  readAllowedEdits,
   versionOf,
 } from '../scripts/ci/migrationVersions.mjs';
 
@@ -96,6 +97,29 @@ describe('migration versions: the head against the base', () => {
     const errors = checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'y')]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/was edited/);
+  });
+
+  it('passes an edit listed as unapplied, to exactly the listed blob, and no other', () => {
+    const allowed = [{ version: '20260924000000', blob: 'y', reason: 'never applied' }];
+    expect(checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'y')], allowed)).toEqual([]);
+    const other = checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'z')], allowed);
+    expect(other).toHaveLength(1);
+    expect(other[0]).toMatch(/was edited/);
+    const unlisted = checkAgainstBase(
+      [...base, e('20260925000000_c.sql')],
+      [...base.slice(0, 1), e('20260924000000_b.sql', 'y'), e('20260925000000_c.sql', 'q')],
+      allowed
+    );
+    expect(unlisted).toHaveLength(1);
+    expect(unlisted[0]).toMatch(/20260925000000_c\.sql.*was edited/);
+  });
+
+  it('reads the committed list: every entry is well formed and matches its file', () => {
+    for (const a of readAllowedEdits()) {
+      const file = listHead().find((f) => versionOf(f) === a.version);
+      expect(file, a.version).toBeTruthy();
+      expect(baseEntries('HEAD').find((x) => x.file === file)?.blob, a.version).toBe(a.blob);
+    }
   });
 
   it('fails a removed migration', () => {

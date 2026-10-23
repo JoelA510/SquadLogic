@@ -9,6 +9,8 @@ import {
   FEATURE_CATALOG,
   FEATURE_DEFAULTS,
   GENDER_MODEL_KEY,
+  BUDDY_RULE_KEY,
+  BUDDY_RULE_CHOICES,
 } from '../../constants/featureFlags.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import Toggle from '../ui/Toggle.jsx';
@@ -65,7 +67,7 @@ export default function FeatureFlagSettings({
   onSplitRegenerate = null,
 }) {
   const { updateFeatureFlags, loading, currentOrganization, featureFlags = {} } = useOrganization();
-  const { features, genderModel } = useFeatures();
+  const { features, genderModel, buddyRule } = useFeatures();
   const { user, isImpersonating } = useAuth();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
@@ -137,6 +139,14 @@ export default function FeatureFlagSettings({
   const handleToggle = (key, next) => {
     persist({ [key]: next }, 'settings.flags_updated');
   };
+
+  const chooseBuddyRule = (value) => {
+    if (value === buddyRule || saving) return;
+    persist({ [BUDDY_RULE_KEY]: value }, 'settings.flags_updated');
+  };
+
+  const buddyRuleChoice =
+    BUDDY_RULE_CHOICES.find((choice) => choice.value === buddyRule) ?? BUDDY_RULE_CHOICES[0];
 
   const chooseFormat = (value) => {
     if (value === genderModel || saving) return;
@@ -273,6 +283,33 @@ export default function FeatureFlagSettings({
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label className="section-title block" htmlFor="buddy-rule-select">
+          Buddy rule
+        </label>
+        <div className="card">
+          <div className="card-body flex flex-col gap-2">
+            <select
+              id="buddy-rule-select"
+              value={buddyRuleChoice.value}
+              onChange={(event) => chooseBuddyRule(event.target.value)}
+              disabled={saving}
+              aria-describedby="buddy-rule-description"
+              className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
+            >
+              {BUDDY_RULE_CHOICES.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            <div className="muted text-xs" id="buddy-rule-description">
+              {buddyRuleChoice.description}
+            </div>
           </div>
         </div>
       </div>

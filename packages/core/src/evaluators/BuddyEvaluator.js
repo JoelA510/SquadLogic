@@ -22,24 +22,32 @@ export class BuddyEvaluator extends BaseEvaluator {
   evaluate(context) {
     const { player, team, allTeams } = context;
     const buddyId = player.buddyId;
-    if (!buddyId) return 100; // No buddy, no conflict
+    if (buddyId) {
+      // 1. Is the buddy already on this team?
+      const buddyOnThisTeam = team.players.find((p) => p.id === buddyId);
+      if (buddyOnThisTeam) return 100;
 
-    // 1. Is the buddy already on this team?
-    const buddyOnThisTeam = team.players.find((p) => p.id === buddyId);
-    if (buddyOnThisTeam) return 100;
-
-    // 2. Is the buddy already on a DIFFERENT team?
-    const buddyOnOtherTeam = allTeams.find(
-      (t) => t.id !== team.id && t.players.find((p) => p.id === buddyId)
-    );
-    if (buddyOnOtherTeam) {
-      // If buddy is elsewhere, this assignment is a direct conflict
-      return 0;
+      // 2. Is the buddy already on a DIFFERENT team?
+      const buddyOnOtherTeam = allTeams.find(
+        (t) => t.id !== team.id && t.players.find((p) => p.id === buddyId)
+      );
+      if (buddyOnOtherTeam) {
+        // If buddy is elsewhere, this assignment is a direct conflict
+        return 0;
+      }
+      // 3. Buddy is not yet assigned: judged below, as anyone named by a placed player is.
+      // (Mutual buddy pairs are placed as one unit by buildTeamsForDivision.)
     }
 
-    // 3. Buddy is not yet assigned. High score if team has capacity for 2.
-    // (Actual placement of mutual buddy pairs is currently handled by buildTeamsForDivision).
-    return 100;
+    // 4. A one-way request (Phase B1, `one_way_best_effort`) sets `buddyId` on the requester
+    // only. When the requester was placed first, the player they named is steered to them
+    // here, so the request is honoured whichever of the two is placed first. Best effort
+    // only: it scores, it never forms a unit.
+    if (team.players.some((p) => p.buddyId === player.id)) return 100;
+    const requesterElsewhere = allTeams.some(
+      (t) => t.id !== team.id && t.players.some((p) => p.buddyId === player.id)
+    );
+    return requesterElsewhere ? 0 : 100;
   }
 
   getDiagnostics(context) {

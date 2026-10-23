@@ -23,6 +23,7 @@
  *
  * Usage:
  *   node scripts/ci/migrationGuard.mjs --list list.json --dry-run dry.json [--max 5]
+ *     [--unapplied-edits <file>]   (default supabase/unapplied-migration-edits.json)
  *   node scripts/ci/migrationGuard.mjs --verify --list list.json
  */
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -258,7 +259,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       dryRunText: readFileSync(dryPath, 'utf8'),
       dryRunExit: arg(argv, '--dry-run-exit') ?? 0,
       maxPending,
-      allowedEdits: readAllowedEdits(),
+      allowedEdits: readAllowedEdits(arg(argv, '--unapplied-edits')),
     });
     summary(
       pending.length === 0

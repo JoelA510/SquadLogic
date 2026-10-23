@@ -1,4 +1,5 @@
-## [← Back to Documentation Index](../README.md)
+[← Back to Documentation Index](../README.md)
+---
 
 # CI/CD Operations
 
@@ -522,7 +523,7 @@ other environment.
   `npm run test:e2e` and `ci.yml` see the mock project alone, and the job sees
   this one alone (no mock dev server is started). It serves a
   production build (`vite build` into `.real-backend-dist/`, then `vite
-preview`), the shape that ships. Features and steps
+  preview`), the shape that ships. Features and steps
   are under [`tests/e2e/real-backend/`](../../tests/e2e/real-backend/), outside
   the mock project's globs: a narrower re-import that must keep the guardians
   the first import recorded (migration `20260726000300`), each import leaving its
@@ -670,16 +671,16 @@ merge, not the deploy.
 Project `squadlogic` (team SecureYourTech), read through the Vercel API and the production
 build log on 2026-10-13:
 
-| Setting               | Value                                                                      | Where it is set                                                                                                      |
-| --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Framework             | Vite                                                                       | `vercel.json` `framework`                                                                                            |
-| Build command         | `npm run frontend:build`                                                   | `vercel.json` `buildCommand` (`npm run build`, the Vite preset's default, runs the same script since plan item M6.1) |
-| Output directory      | `dist`                                                                     | `vercel.json` `outputDirectory` (where `vite.config.js` builds: `root` plus `build.outDir`)                          |
-| Install command       | `npm ci`                                                                   | `vercel.json` `installCommand` (#559), so Vercel installs exactly what the lockfile pins, as CI does                 |
-| Node.js               | 24.x                                                                       | `package.json` `engines` ([ENVIRONMENT.md](./ENVIRONMENT.md#node-runtime))                                           |
-| Region                | `iad1`                                                                     | Vercel's default                                                                                                     |
-| Deployment protection | Vercel Authentication on every deployment except custom domains            | Dashboard                                                                                                            |
-| Environment variables | By name in [ENVIRONMENT.md](./ENVIRONMENT.md#what-the-vercel-project-sets) | Dashboard                                                                                                            |
+| Setting | Value | Where it is set |
+| --- | --- | --- |
+| Framework | Vite | `vercel.json` `framework` |
+| Build command | `npm run frontend:build` | `vercel.json` `buildCommand` (`npm run build`, the Vite preset's default, runs the same script since plan item M6.1) |
+| Output directory | `dist` | `vercel.json` `outputDirectory` (where `vite.config.js` builds: `root` plus `build.outDir`) |
+| Install command | `npm ci` | `vercel.json` `installCommand` (#559), so Vercel installs exactly what the lockfile pins, as CI does |
+| Node.js | 24.x | `package.json` `engines` ([ENVIRONMENT.md](./ENVIRONMENT.md#node-runtime)) |
+| Region | `iad1` | Vercel's default |
+| Deployment protection | Vercel Authentication on every deployment except custom domains | Dashboard |
+| Environment variables | By name in [ENVIRONMENT.md](./ENVIRONMENT.md#what-the-vercel-project-sets) | Dashboard |
 
 `vercel.json` overrides the dashboard's build settings, so a project imported from the
 repository builds the same way with only its environment variables set.
@@ -698,12 +699,12 @@ pattern stops matching. Why: see "Free-tier budgets" below.
 The project runs on free plans (GitHub Free with a public repository, Vercel Hobby, Supabase
 Free). The limits that bit, and the levers:
 
-| Budget                                                                                 | What spends it                                                                                                                                                          | Lever                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Hobby: 100 deployments a day (error `api-deployments-free-per-day`, 2026-10-14) | Every push to any branch with automatic deployments on                                                                                                                  | `git.deploymentEnabled` (above); previews on request. On 2026-10-13/14, 100 deployments in 12.8 h: 13 `main`, about 61 agent branches, 14 from a notes branch with no app, 11 Dependabot                                                                                                                                                                                                                                     |
-| GitHub Actions                                                                         | Each push runs every workflow (about 17 min for `Build & Test`); the strict ruleset makes every merge re-run CI on each open pull request once it is brought up to date | Minutes are free on standard runners for a public repository; the cost is wall time. At most two pull requests in flight; push once per pull request after local gates pass                                                                                                                                                                                                                                                  |
-| Dependabot                                                                             | Each pull request and each rebase is a push                                                                                                                             | `.github/dependabot.yml`: monthly, minors and patches grouped, majors grouped as one inventory PR (not merged as such), rebasing off, a small open-PR limit                                                                                                                                                                                                                                                                  |
-| Supabase Free                                                                          | Hosted project resources; Pro-only features                                                                                                                             | CI runs pgTAP and the real-backend E2E against a local `supabase start`, never the hosted project. Leaked-password protection is Pro-only (Supabase docs, 2026-10-14): set a minimum length and required character classes instead. Keep the Supabase GitHub integration's "Deploy to production" and "Automatic branching" off (`deploy-migrations` is the only migration writer; branching also redeploys Vercel previews) |
+| Budget | What spends it | Lever |
+| --- | --- | --- |
+| Vercel Hobby: 100 deployments a day (error `api-deployments-free-per-day`, 2026-10-14) | Every push to any branch with automatic deployments on | `git.deploymentEnabled` (above); previews on request. On 2026-10-13/14, 100 deployments in 12.8 h: 13 `main`, about 61 agent branches, 14 from a notes branch with no app, 11 Dependabot |
+| GitHub Actions | Each push runs every workflow (about 17 min for `Build & Test`); the strict ruleset makes every merge re-run CI on each open pull request once it is brought up to date | Minutes are free on standard runners for a public repository; the cost is wall time. At most two pull requests in flight; push once per pull request after local gates pass |
+| Dependabot | Each pull request and each rebase is a push | `.github/dependabot.yml`: monthly, minors and patches grouped, majors grouped as one inventory PR (not merged as such), rebasing off, a small open-PR limit |
+| Supabase Free | Hosted project resources; Pro-only features | CI runs pgTAP and the real-backend E2E against a local `supabase start`, never the hosted project. Leaked-password protection is Pro-only (Supabase docs, 2026-10-14): set a minimum length and required character classes instead. Keep the Supabase GitHub integration's "Deploy to production" and "Automatic branching" off (`deploy-migrations` is the only migration writer; branching also redeploys Vercel previews) |
 
 ## Rollback
 

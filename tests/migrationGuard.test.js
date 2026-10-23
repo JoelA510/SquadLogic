@@ -5,11 +5,15 @@
  * output, captured against a local production-shaped ledger on 2026-09-28 --
  * see docs/operations/migration-ledger-normalisation.md.
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_MAX_PENDING,
   GuardError,
   evaluate,
+  main,
   parseMax,
   verifyApplied,
 } from '../scripts/ci/migrationGuard.mjs';
@@ -258,5 +262,30 @@ describe('migration guard: listed edits to never-applied migrations', () => {
         allowedEdits: [edit('20260924000000')],
       })
     ).toThrow(/lists 20260924000000, already applied/);
+  });
+
+  it('the entry point reads the list: a listed version already applied fails main()', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-'));
+    const listPath = join(dir, 'list.json');
+    const dryPath = join(dir, 'dry.json');
+    const editsPath = join(dir, 'edits.json');
+    writeFileSync(listPath, listJson());
+    writeFileSync(dryPath, dryJson([]));
+    writeFileSync(editsPath, JSON.stringify({ edits: [edit('20260924000000')] }));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(
+        main(['--list', listPath, '--dry-run', dryPath, '--unapplied-edits', editsPath], {})
+      ).toBe(1);
+      expect(error.mock.calls.flat().join(' ')).toMatch(/lists 20260924000000, already applied/);
+      writeFileSync(editsPath, JSON.stringify({ edits: [] }));
+      expect(
+        main(['--list', listPath, '--dry-run', dryPath, '--unapplied-edits', editsPath], {})
+      ).toBe(0);
+    } finally {
+      error.mockRestore();
+      log.mockRestore();
+    }
   });
 });

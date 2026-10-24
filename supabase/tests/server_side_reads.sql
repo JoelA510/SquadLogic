@@ -10,24 +10,27 @@
 --   Sid    staff                        Cora  current lead coach of A-Team
 --   Finn   A-Team assistant until yesterday
 --   Otto   current lead coach of A2 (another Org A team)
---   Gwen   guardian of Pia (A-Team)     Hal   guardian of Quinn (A2)
---   Mo     parent with no tie to either team
--- Players on A-Team: Pia (Gwen's), Rex (two guardian contacts). On A2: Quinn.
+--   Mo     a coach-role member who coaches no team
+-- Players on A-Team: Pia, Rex (two guardian contacts each). On A2: Quinn.
+--
+-- **Since 20261024010000 (plan docs/changes/2026-10-22-admin-focus.md, R3)**
+-- there is no guardian and no `parent` role: the guardian callers (Gwen, Hal),
+-- the guardian link, the teammate-sharing setting and the guardian contact
+-- card went with them, and a current coach reads names only.
+-- supabase/tests/guardian_view_removed.sql checks the removal.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(36);
+SELECT plan(28);
 
 INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
     ('e1000000-0000-4000-8000-000000000001', 'sid@test.local',  '{"password_length": 12}', now()),
     ('e1000000-0000-4000-8000-000000000002', 'cora@test.local', '{"password_length": 12}', now()),
     ('e1000000-0000-4000-8000-000000000003', 'finn@test.local', '{"password_length": 12}', now()),
     ('e1000000-0000-4000-8000-000000000004', 'otto@test.local', '{"password_length": 12}', now()),
-    ('e1000000-0000-4000-8000-000000000005', 'gwen@test.local', '{"password_length": 12}', now()),
-    ('e1000000-0000-4000-8000-000000000006', 'Hal@Test.local',  '{"password_length": 12}', now()),
     ('e1000000-0000-4000-8000-000000000007', 'mo@test.local',   '{"password_length": 12}', now())
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.profiles (id, email, full_name) VALUES
@@ -35,8 +38,6 @@ INSERT INTO public.profiles (id, email, full_name) VALUES
     ('e1000000-0000-4000-8000-000000000002', 'cora@test.local', 'Cora'),
     ('e1000000-0000-4000-8000-000000000003', 'finn@test.local', 'Finn'),
     ('e1000000-0000-4000-8000-000000000004', 'otto@test.local', 'Otto'),
-    ('e1000000-0000-4000-8000-000000000005', 'gwen@test.local', 'Gwen'),
-    ('e1000000-0000-4000-8000-000000000006', 'hal@test.local', 'Hal'),
     ('e1000000-0000-4000-8000-000000000007', 'mo@test.local', 'Mo')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
@@ -44,9 +45,7 @@ INSERT INTO public.organization_members (organization_id, profile_id, role) VALU
     ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000002', 'coach'),
     ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000003', 'coach'),
     ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000004', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000005', 'parent'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000006', 'parent'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000007', 'parent')
+    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000007', 'coach')
 ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
 INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
@@ -87,8 +86,6 @@ INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES
     ('aaaaaaaa-0000-0000-0000-000000000001', 'e3000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111'),
     ('aaaaaaaa-0000-0000-0000-000000000001', 'e3000000-0000-4000-8000-000000000002', 'a1111111-1111-1111-1111-111111111111'),
     ('aaaaaaaa-0000-0000-0000-0000000000a2', 'e3000000-0000-4000-8000-000000000003', 'a1111111-1111-1111-1111-111111111111');
-INSERT INTO public.profile_players (profile_id, player_id, organization_id) VALUES
-    ('e1000000-0000-4000-8000-000000000005', 'e3000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111');
 
 SET LOCAL role = 'authenticated';
 
@@ -107,38 +104,24 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"
 SELECT is((SELECT array_agg(r.first_name || ':' || coalesce(r.rating::text, '-') || ':'
                             || jsonb_array_length(r.guardian_contacts) ORDER BY r.first_name)
              FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
-          ARRAY['Pia:-:2', 'Rex:-:2'],
-          'the current coach reads names and every guardian contact, and no rating');
+          ARRAY['Pia:-:0', 'Rex:-:0'],
+          'the current coach reads names only: no guardian contact and no rating');
+
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT ok((SELECT r.guardian_contacts -> 0 ? 'alternate_email'
              FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r
             WHERE r.first_name = 'Rex'),
-          'the current coach sees a guardian''s alternate email');
+          'an admin sees a guardian''s alternate email');
 
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
-SELECT is((SELECT array_agg(r.first_name || ':' || r.is_my_child || ':'
-                            || jsonb_array_length(r.guardian_contacts) ORDER BY r.first_name)
-             FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
-          ARRAY['Pia:true:2', 'Rex:false:1'],
-          'a guardian reads their own child''s contacts in full and a teammate''s primary only');
-SELECT is((SELECT r.guardian_contacts -> 0
-             FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r
-            WHERE r.first_name = 'Rex'),
-          '{"name": "Rhea", "email": "rhea@test.local", "phone": "555-0202"}'::jsonb,
-          'a teammate''s primary contact carries name, email and phone, not the alternate email');
-
+-- A stored guardian_contact_sharing (the setting R3 retired) narrows nothing.
 RESET role;
 UPDATE public.organizations SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"guardian_contact_sharing": false}'
  WHERE id = 'a1111111-1111-1111-1111-111111111111';
 SET LOCAL role = 'authenticated';
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
-SELECT is((SELECT array_agg(r.first_name || ':' || jsonb_array_length(r.guardian_contacts) ORDER BY r.first_name)
-             FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
-          ARRAY['Pia:2', 'Rex:0'],
-          'with teammate contacts off, a guardian reads only their own child''s');
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is((SELECT sum(jsonb_array_length(r.guardian_contacts))::int
              FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
-          4, 'the setting does not narrow what the coach reads');
+          4, 'a stored guardian_contact_sharing changes nothing an admin reads');
 RESET role;
 UPDATE public.organizations SET feature_flags = feature_flags - 'guardian_contact_sharing'
  WHERE id = 'a1111111-1111-1111-1111-111111111111';
@@ -151,9 +134,6 @@ SELECT throws_ok($$ SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-000
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
 SELECT throws_ok($$ SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') $$,
                  '42501', NULL, 'the coach of another team is refused the roster');
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000006"}';
-SELECT throws_ok($$ SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') $$,
-                 '42501', NULL, 'a guardian on another team is refused the roster');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000007"}';
 SELECT throws_ok($$ SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') $$,
                  '42501', NULL, 'a member with no tie to the team is refused the roster');
@@ -165,12 +145,12 @@ SELECT throws_ok($$ SELECT * FROM public.get_team_roster('00000000-0000-4000-800
                  '42501', NULL, 'an unknown team is refused like a forbidden one');
 
 -- ── get_team_staff ────────────────────────────────────────────────────────
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
 SELECT is((SELECT array_agg(s.full_name || ':' || s.role || ':' || coalesce(s.phone, '-') || ':'
                             || coalesce(s.status, '-'))
              FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') s),
           ARRAY['Cora:lead:555-0102:-'],
-          'a guardian reads the current coach''s contact details, not the former one, and no status');
+          'the current coach reads the current coach''s contact details, not the former one, and no status');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000007"}';
 SELECT throws_ok($$ SELECT * FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') $$,
                  '42501', NULL, 'a member with no tie to the team is refused the staff');
@@ -184,13 +164,13 @@ SELECT throws_ok($$ SELECT public.set_my_contact_card('call me', NULL, true) $$,
                  '22023', NULL, 'a card phone that is not a phone number is refused');
 SELECT lives_ok($$ SELECT public.set_my_contact_card('+1 555 0999', 'cora.card@test.local', true) $$,
                 'a coach saves a shared card');
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is((SELECT s.phone || ' ' || s.email FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') s),
           '+1 555 0999 cora.card@test.local', 'a shared card replaces the coach''s imported details');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
 SELECT lives_ok($$ SELECT public.set_my_contact_card('+1 555 0999', 'cora.card@test.local', false) $$,
                 'a coach unshares the card');
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is((SELECT coalesce(s.phone, '-') || ' ' || coalesce(s.email, '-')
              FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') s),
           '- -', 'an unshared card shows no phone or email, imported or saved');
@@ -200,9 +180,9 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"
 SELECT is((SELECT array_agg(d.full_name ORDER BY d.full_name)
              FROM public.get_coach_directory('a1111111-1111-1111-1111-111111111111') d),
           ARRAY['Cora', 'Otto'], 'a current coach reads every current coach, and not the former one');
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000007"}';
 SELECT throws_ok($$ SELECT * FROM public.get_coach_directory('a1111111-1111-1111-1111-111111111111') $$,
-                 '42501', NULL, 'a guardian is refused the coach directory');
+                 '42501', NULL, 'a member who coaches no team is refused the coach directory');
 RESET role;
 UPDATE public.organizations SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"coach_directory": false}'
  WHERE id = 'a1111111-1111-1111-1111-111111111111';
@@ -221,26 +201,6 @@ SELECT is((SELECT array_agg(t) FROM public.get_my_coached_team_ids('a1111111-111
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000003"}';
 SELECT is((SELECT count(*)::int FROM public.get_my_coached_team_ids('a1111111-1111-1111-1111-111111111111')),
           0, 'a coach whose assignment ended coaches nothing');
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000006"}';
-SELECT is(public.link_my_guardian_records()->>'status', 'linked',
-          'a guardian whose imported email matches, case ignored, is linked');
-SELECT is((SELECT count(*)::int FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-0000000000a2')),
-          1, 'once linked, the guardian reads their child''s team roster');
-
--- A guardian's card keeps applying after their sign-in email changes: the
--- link recorded the imported address it matched.
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000006"}';
-SELECT lives_ok($$ SELECT public.set_my_contact_card(NULL, NULL, false) $$,
-                'Hal unshares his card');
-RESET role;
-UPDATE auth.users SET email = 'hal.new@test.local' WHERE id = 'e1000000-0000-4000-8000-000000000006';
-SET LOCAL role = 'authenticated';
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
-SELECT is((SELECT r.guardian_contacts -> 0
-             FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-0000000000a2') r),
-          '{"name": "Hal"}'::jsonb,
-          'an unshared card still hides the imported email after the sign-in email changes');
-
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is((SELECT array_agg(t) FROM public.admin_get_coached_team_ids('a1111111-1111-1111-1111-111111111111',
                                                                      'e1000000-0000-4000-8000-000000000004') t),
@@ -259,7 +219,7 @@ SELECT is(public.team_local_today('aaaaaaaa-0000-0000-0000-000000000001'),
           'today is judged in the team''s season timezone');
 
 SELECT ok(NOT has_function_privilege('anon', 'public.get_team_roster(uuid)', 'EXECUTE')
-          AND NOT has_function_privilege('authenticated', 'public.guardian_contacts_view(uuid,jsonb,boolean)', 'EXECUTE')
+          AND NOT has_function_privilege('authenticated', 'public.org_flag(uuid,text,boolean)', 'EXECUTE')
           AND NOT has_function_privilege('authenticated', 'public.team_local_today(uuid)', 'EXECUTE'),
           'anon cannot read a roster, and no client role can call the contact or date helpers');
 

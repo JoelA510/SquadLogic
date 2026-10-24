@@ -50,7 +50,7 @@ BEGIN
         RETURNING id INTO v_org2;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_a, 'coach'), (v_org, v_b, 'coach'), (v_org, v_c, 'coach'), (v_org, v_d, 'coach'),
-        (v_org, v_e, 'parent');
+        (v_org, v_e, 'coach');
     INSERT INTO public.coaches (organization_id, full_name, email) VALUES
         (v_org, 'Coach A', 'link-a@EXAMPLE.test') RETURNING id INTO v_coach_a;
     INSERT INTO public.coaches (organization_id, full_name, email) VALUES

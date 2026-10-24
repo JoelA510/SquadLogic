@@ -7,7 +7,7 @@
 -- writer as a real org admin with RLS on: both are SECURITY INVOKER.
 --
 -- docs/PHASE_8_6_PR11_ENACT_PLAN.md §6, the witnesses assigned to 11b:
---    8  admin-only: a coach, a parent and a caller with no uid (42501)
+--    8  admin-only: a coach, a member who coaches no team and a caller with no uid (42501)
 --   24  the commit gate (SQL arm): the cause field's effective_to NULL, and a
 --       different stored date, each refused 22023 with nothing written
 --    6  never blind: a NULL base_fingerprint (22023)
@@ -36,7 +36,7 @@ DO $$
 DECLARE
     c_admin  constant uuid := 'e1100000-0000-4000-8000-0000000000a1';
     c_coach  constant uuid := 'e1100000-0000-4000-8000-0000000000c1';
-    c_parent constant uuid := 'e1100000-0000-4000-8000-0000000000d1';
+    c_member constant uuid := 'e1100000-0000-4000-8000-0000000000d1';
     c_k0 constant uuid := 'e1100000-0000-4000-8000-00000000e000';
     c_k1 constant uuid := 'e1100000-0000-4000-8000-00000000e001';
     c_k2 constant uuid := 'e1100000-0000-4000-8000-00000000e002';
@@ -66,13 +66,13 @@ BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
       (c_admin, 'e11-admin@example.test', jsonb_build_object('password_length', 16)),
       (c_coach, 'e11-coach@example.test', jsonb_build_object('password_length', 16)),
-      (c_parent, 'e11-parent@example.test', jsonb_build_object('password_length', 16));
+      (c_member, 'e11-member@example.test', jsonb_build_object('password_length', 16));
     INSERT INTO public.profiles (id, email) VALUES
       (c_admin, 'e11-admin@example.test'), (c_coach, 'e11-coach@example.test'),
-      (c_parent, 'e11-parent@example.test') ON CONFLICT DO NOTHING;
+      (c_member, 'e11-member@example.test') ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org E11', 'smoke-org-e11') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-      (v_org, c_admin, 'admin'), (v_org, c_coach, 'coach'), (v_org, c_parent, 'parent');
+      (v_org, c_admin, 'admin'), (v_org, c_coach, 'coach'), (v_org, c_member, 'coach');
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'E11 Park') RETURNING id INTO v_loc;
     -- Field 1 retires from D; field 2, at the same park, stays.
     INSERT INTO public.fields (organization_id, location_id, name, active)
@@ -174,7 +174,7 @@ BEGIN
     -- commit gate's; the wrapper's own message is required, not the writer's.
     UPDATE public.fields SET effective_to = '2026-10-14' WHERE id = v_f1;
     v_n := 0;
-    FOR v_state IN SELECT unnest(ARRAY[c_coach::text, c_parent::text, '']) LOOP
+    FOR v_state IN SELECT unnest(ARRAY[c_coach::text, c_member::text, '']) LOOP
         PERFORM set_config('request.jwt.claim.sub', v_state, true);
         BEGIN
             SET LOCAL ROLE authenticated;
@@ -197,9 +197,9 @@ BEGIN
                || '/' || (SELECT count(*) FROM public.audit_log al WHERE al.organization_id = v_org)::text)
       INTO v_after;
     IF v_n <> 3 OR v_after <> v_digest THEN
-        RAISE EXCEPTION 'expected a coach, a parent and a no-uid caller each refused 42501 by the wrapper, writing nothing; got % of 3 (last: %)', v_n, v_msg;
+        RAISE EXCEPTION 'expected a coach, a member who coaches no team and a no-uid caller each refused 42501 by the wrapper, writing nothing; got % of 3 (last: %)', v_n, v_msg;
     END IF;
-    RAISE NOTICE 'enact access: a coach, a parent and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing';
+    RAISE NOTICE 'enact access: a coach, a member who coaches no team and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing';
 
     -- ---- 24. the commit gate -------------------------------------------------
     v_n := 0;

@@ -82,8 +82,13 @@ SELECT is(
 
 -- The member RPCs: staff pass the admin gate.
 SELECT lives_ok(
+    -- To admin and back (until 20261024010000 this made Charlie a parent, a
+    -- role that no longer exists), so Sam is again the only admin-equivalent
+    -- member once Alice is removed below.
     $$SELECT public.admin_change_member_role('a1111111-1111-1111-1111-111111111111',
-                                              '33333333-3333-3333-3333-333333333333', 'parent')$$,
+                                              '33333333-3333-3333-3333-333333333333', 'admin'),
+             public.admin_change_member_role('a1111111-1111-1111-1111-111111111111',
+                                              '33333333-3333-3333-3333-333333333333', 'coach')$$,
     'a staff member changes another member''s role'
 );
 

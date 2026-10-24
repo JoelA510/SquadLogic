@@ -1,27 +1,31 @@
 -- Smoke checks for 20261021010000_server_side_reads.sql
 --
--- What it proves, with prelude.sql's `auth.uid()` stub:
---   * link_my_guardian_records links a verified member to the players whose
---     imported guardian email or alternate email matches, case-insensitively,
---     audits each link once, and a second call links nothing; an unverified
---     email links nothing;
---   * get_team_roster: the current coach gets every guardian contact; a
---     guardian gets their own child's contacts in full and a teammate's primary
---     contact only, and nothing of it with guardian_contact_sharing off; a
---     member with no tie to the team is refused; rating is admin-only;
---   * a saved contact card replaces the imported email and phone, and an
---     unshared card leaves neither, also after the guardian changes their
---     sign-in email; each save is audited without the values;
---   * get_team_staff admits the guardian and refuses the unrelated member; a
---     coach whose assignment ended yesterday is no longer current;
+-- What it proves, with prelude.sql's `auth.uid()` stub, on the head build:
+--   * get_team_roster: an admin gets every guardian contact and the rating;
+--     the current coach gets names only (since 20261024010000: no contact, no
+--     rating); a member with no tie to the team and a former coach are
+--     refused;
+--   * a saved contact card replaces a coach's imported email and phone in
+--     get_team_staff, and an unshared card leaves neither; each save is
+--     audited without the values;
+--   * get_team_staff admits the current coach and refuses the unrelated
+--     member; a coach whose assignment ended yesterday is no longer current;
 --   * get_coach_directory admits a current coach and refuses them once
 --     coach_directory is off;
 --   * the posture: every reader is SECURITY DEFINER with search_path=public,
---     executable by authenticated and not anon; the four internal helpers
---     (org_flag, guardian_contacts_view, team_local_today,
---     coached_team_ids_of) by neither;
+--     executable by authenticated and not anon; the three internal helpers
+--     (org_flag, team_local_today, coached_team_ids_of) by neither;
 --   * admin_get_coached_team_ids answers an admin's preview of a coach, and
 --     refuses a non-admin.
+--
+-- **Since 20261024010000 (plan docs/changes/2026-10-22-admin-focus.md, R3)**
+-- there is no guardian: `link_my_guardian_records`, `is_team_guardian`,
+-- `guardian_contacts_view`, `profile_players` and the
+-- `guardian_contact_sharing` setting are gone, and `parent` is no role. The
+-- guardian link, guardian roster and teammate-sharing cases went with them;
+-- docs/sql/20261024010000_smoke.sql checks they stay gone, and
+-- docs/sql/20261021010000_revert.sql is still checked on a build up to this
+-- migration. The member with no tie to the team is a coach who coaches none.
 --
 -- Wrapped in BEGIN ... ROLLBACK. Every id is generated; every email is
 -- `@example.test`; there is no PII.
@@ -35,9 +39,7 @@ DECLARE
     v_admin uuid := gen_random_uuid();
     v_coach_u uuid := gen_random_uuid();   -- current lead coach of team A
     v_old_u uuid := gen_random_uuid();     -- coach of team A until yesterday
-    v_g1 uuid := gen_random_uuid();        -- guardian of player 1 (matched by alternate email)
-    v_stranger uuid := gen_random_uuid();  -- member with no tie to team A
-    v_unv uuid := gen_random_uuid();       -- unverified; email matches player 2's guardian
+    v_stranger uuid := gen_random_uuid();  -- member with no tie to team A (coaches no team)
     v_org uuid;
     v_s uuid;
     v_d uuid;
@@ -55,19 +57,16 @@ BEGIN
         (v_admin, 'ssr-admin@example.test', '{"password_length": 16}', now()),
         (v_coach_u, 'ssr-coach@example.test', '{"password_length": 16}', now()),
         (v_old_u, 'ssr-old@example.test', '{"password_length": 16}', now()),
-        (v_g1, 'SSR-G1@Example.test', '{"password_length": 16}', now()),
-        (v_stranger, 'ssr-stranger@example.test', '{"password_length": 16}', now()),
-        (v_unv, 'g2@example.test', '{"password_length": 16}', NULL);
+        (v_stranger, 'ssr-stranger@example.test', '{"password_length": 16}', now());
     INSERT INTO public.profiles (id, email) VALUES
         (v_admin, 'ssr-admin@example.test'), (v_coach_u, 'ssr-coach@example.test'),
-        (v_old_u, 'ssr-old@example.test'), (v_g1, 'ssr-g1@example.test'),
-        (v_stranger, 'ssr-stranger@example.test'), (v_unv, 'g2@example.test')
+        (v_old_u, 'ssr-old@example.test'), (v_stranger, 'ssr-stranger@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org SSR', 'smoke-org-ssr')
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin'), (v_org, v_coach_u, 'coach'), (v_org, v_old_u, 'coach'),
-        (v_org, v_g1, 'parent'), (v_org, v_stranger, 'parent'), (v_org, v_unv, 'parent');
+        (v_org, v_stranger, 'coach');
     INSERT INTO public.season_settings (organization_id, name, timezone)
         VALUES (v_org, 'SSR Fall', 'America/Los_Angeles') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name)
@@ -100,94 +99,52 @@ BEGIN
     INSERT INTO public.team_players (team_id, player_id, organization_id)
         VALUES (v_ta, v_p1, v_org), (v_ta, v_p2, v_org);
 
-    -- Guardian link
-    PERFORM set_config('request.jwt.claim.sub', v_g1::text, true);
-    v_r := public.link_my_guardian_records();
-    IF v_r->>'status' <> 'linked' OR (v_r->>'linked')::int <> 1
-       OR NOT EXISTS (SELECT 1 FROM public.profile_players WHERE profile_id = v_g1 AND player_id = v_p1) THEN
-        RAISE EXCEPTION 'the guardian was not linked to their child by alternate email: %', v_r;
+    -- Roster: admin and coach
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    SELECT count(*) INTO v_n FROM public.get_team_roster(v_ta) r
+     WHERE jsonb_array_length(r.guardian_contacts) = 2 AND r.rating IS NOT NULL
+       AND r.guardian_contacts->0 ? 'alternate_email';
+    IF v_n <> 2 THEN
+        RAISE EXCEPTION 'an admin did not get every guardian contact and the rating: % of 2', v_n;
     END IF;
-    v_r := public.link_my_guardian_records();
-    IF v_r->>'status' <> 'already_linked' OR (v_r->>'linked')::int <> 0 THEN
-        RAISE EXCEPTION 'a second call was not already_linked: %', v_r;
-    END IF;
-    IF (SELECT count(*) FROM public.audit_log WHERE action = 'guardian.linked' AND resource_id = v_p1) <> 1 THEN
-        RAISE EXCEPTION 'the guardian link was not audited exactly once';
-    END IF;
-    PERFORM set_config('request.jwt.claim.sub', v_unv::text, true);
-    v_r := public.link_my_guardian_records();
-    IF v_r->>'status' <> 'email_not_verified'
-       OR EXISTS (SELECT 1 FROM public.profile_players WHERE profile_id = v_unv) THEN
-        RAISE EXCEPTION 'an unverified email linked a guardian: %', v_r;
-    END IF;
-    RAISE NOTICE 'a verified guardian was linked by alternate email, once, audited once; a second call changed nothing; an unverified email linked nothing';
-
-    -- Roster: coach
     PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
     SELECT count(*) INTO v_n FROM public.get_team_roster(v_ta) r
-     WHERE jsonb_array_length(r.guardian_contacts) = 2 AND r.rating IS NULL;
+     WHERE r.guardian_contacts = '[]'::jsonb AND r.rating IS NULL AND r.first_name IS NOT NULL;
     IF v_n <> 2 THEN
-        RAISE EXCEPTION 'the current coach did not get every guardian contact (and no rating): % of 2', v_n;
+        RAISE EXCEPTION 'the current coach did not get names only (no contact, no rating): % of 2', v_n;
     END IF;
+    RAISE NOTICE 'roster: an admin gets every contact and the rating; the current coach gets names only';
 
-    -- Roster: guardian
-    PERFORM set_config('request.jwt.claim.sub', v_g1::text, true);
-    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r WHERE r.player_id = v_p2;
-    IF jsonb_array_length(v_contacts) <> 1 OR v_contacts->0->>'email' <> 'g2@example.test'
-       OR v_contacts->0 ? 'alternate_email' THEN
-        RAISE EXCEPTION 'a guardian did not get exactly a teammate''s primary contact: %', v_contacts;
-    END IF;
-    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r
-     WHERE r.player_id = v_p1 AND r.is_my_child;
-    IF jsonb_array_length(v_contacts) <> 2 THEN
-        RAISE EXCEPTION 'a guardian did not get their own child''s contacts in full: %', v_contacts;
-    END IF;
-    UPDATE public.organizations SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"guardian_contact_sharing": false}'
-     WHERE id = v_org;
-    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r WHERE r.player_id = v_p2;
-    IF v_contacts <> '[]'::jsonb THEN
-        RAISE EXCEPTION 'a teammate''s contact was shared with the league setting off: %', v_contacts;
-    END IF;
-    UPDATE public.organizations SET feature_flags = feature_flags - 'guardian_contact_sharing' WHERE id = v_org;
-    RAISE NOTICE 'roster: coach gets all contacts; guardian gets own child in full, a teammate''s primary only, none with sharing off';
-
-    -- Contact card
-    PERFORM public.set_my_contact_card('+1 555 0199', 'card-g1@example.test', true);
-    PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
-    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r WHERE r.player_id = v_p1;
-    IF v_contacts->0->>'email' <> 'card-g1@example.test' OR v_contacts->0->>'phone' <> '+1 555 0199' THEN
+    -- Contact card, on the coach
+    PERFORM public.set_my_contact_card('+1 555 0199', 'card-coach@example.test', true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    SELECT to_jsonb(s.*) INTO v_contacts FROM public.get_team_staff(v_ta) s WHERE s.coach_id = v_coach;
+    IF v_contacts->>'email' <> 'card-coach@example.test' OR v_contacts->>'phone' <> '+1 555 0199' THEN
         RAISE EXCEPTION 'a shared card did not replace the imported details: %', v_contacts;
     END IF;
-    PERFORM set_config('request.jwt.claim.sub', v_g1::text, true);
-    PERFORM public.set_my_contact_card('+1 555 0199', 'card-g1@example.test', false);
     PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
-    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r WHERE r.player_id = v_p1;
-    IF v_contacts->0 ? 'email' OR v_contacts->0 ? 'phone' OR v_contacts->0->>'name' <> 'Guardian One' THEN
+    PERFORM public.set_my_contact_card('+1 555 0199', 'card-coach@example.test', false);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    SELECT to_jsonb(s.*) INTO v_contacts FROM public.get_team_staff(v_ta) s WHERE s.coach_id = v_coach;
+    IF v_contacts->>'email' IS NOT NULL OR v_contacts->>'phone' IS NOT NULL
+       OR v_contacts->>'full_name' <> 'Coach Current' THEN
         RAISE EXCEPTION 'an unshared card still showed contact details: %', v_contacts;
     END IF;
     IF (SELECT count(*) FROM public.audit_log
-         WHERE action = 'profile.contact_card_updated' AND resource_id = v_g1
+         WHERE action = 'profile.contact_card_updated' AND resource_id = v_coach_u
            AND organization_id = v_org AND metadata ? 'share_contact'
            AND NOT metadata ? 'contact_phone' AND NOT (metadata::text LIKE '%0199%')) <> 2 THEN
         RAISE EXCEPTION 'each card save was not audited once, without the phone number';
     END IF;
-    -- The card keeps applying after the guardian changes their sign-in email:
-    -- the link recorded the imported address it matched.
-    UPDATE auth.users SET email = 'ssr-g1-new@example.test' WHERE id = v_g1;
-    SELECT r.guardian_contacts INTO v_contacts FROM public.get_team_roster(v_ta) r WHERE r.player_id = v_p1;
-    IF v_contacts->0 ? 'email' OR v_contacts->0 ? 'phone' THEN
-        RAISE EXCEPTION 'a sign-in email change brought back the details an unshared card hides: %', v_contacts;
-    END IF;
-    UPDATE auth.users SET email = 'SSR-G1@Example.test' WHERE id = v_g1;
-    RAISE NOTICE 'a shared card replaces the imported email and phone; an unshared card shows neither, also after a sign-in email change; each save audited once, without the values';
+    RAISE NOTICE 'a shared card replaces a coach''s imported email and phone; an unshared card shows neither; each save audited once, without the values';
 
     -- Staff
-    PERFORM set_config('request.jwt.claim.sub', v_g1::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
     SELECT count(*) INTO v_n FROM public.get_team_staff(v_ta);
     IF v_n <> 1 OR (SELECT s.coach_id FROM public.get_team_staff(v_ta) s) <> v_coach THEN
-        RAISE EXCEPTION 'staff: the guardian did not get exactly the current coach (% rows)', v_n;
+        RAISE EXCEPTION 'staff: the current coach did not get exactly the current coach (% rows)', v_n;
     END IF;
-    RAISE NOTICE 'staff: the guardian sees the current coach; the coach whose window ended yesterday is not listed';
+    RAISE NOTICE 'staff: the current coach sees the current coach; the coach whose window ended yesterday is not listed';
 
     -- Refusals
     PERFORM set_config('request.jwt.claim.sub', v_stranger::text, true);
@@ -253,25 +210,22 @@ BEGIN
      WHERE p.oid IN ('public.get_team_roster(uuid)'::regprocedure, 'public.get_team_staff(uuid)'::regprocedure,
                      'public.get_coach_directory(uuid)'::regprocedure,
                      'public.get_my_coached_team_ids(uuid)'::regprocedure,
-                     'public.link_my_guardian_records()'::regprocedure,
                      'public.set_my_contact_card(text,text,boolean)'::regprocedure,
                      'public.is_current_team_coach(uuid)'::regprocedure,
-                     'public.is_team_guardian(uuid)'::regprocedure,
                      'public.admin_get_coached_team_ids(uuid,uuid)'::regprocedure)
        AND p.prosecdef AND p.proconfig = ARRAY['search_path=public']
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
-    IF v_n <> 9 THEN
-        RAISE EXCEPTION 'posture: % of 9 callable functions are definer, pinned, authenticated-only', v_n;
+    IF v_n <> 7 THEN
+        RAISE EXCEPTION 'posture: % of 7 callable functions are definer, pinned, authenticated-only', v_n;
     END IF;
-    IF has_function_privilege('authenticated', 'public.guardian_contacts_view(uuid,jsonb,boolean)', 'EXECUTE')
-       OR has_function_privilege('authenticated', 'public.org_flag(uuid,text,boolean)', 'EXECUTE')
+    IF has_function_privilege('authenticated', 'public.org_flag(uuid,text,boolean)', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.team_local_today(uuid)', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.coached_team_ids_of(uuid,uuid)', 'EXECUTE')
-       OR has_function_privilege('anon', 'public.guardian_contacts_view(uuid,jsonb,boolean)', 'EXECUTE') THEN
+       OR has_function_privilege('anon', 'public.org_flag(uuid,text,boolean)', 'EXECUTE') THEN
         RAISE EXCEPTION 'an internal helper is executable by a client role';
     END IF;
-    RAISE NOTICE 'posture: 9 of 9 callable functions definer, pinned, authenticated-only; the four internal helpers callable by no client role';
+    RAISE NOTICE 'posture: 7 of 7 callable functions definer, pinned, authenticated-only; the three internal helpers callable by no client role';
 END;
 $$;
 

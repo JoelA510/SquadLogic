@@ -18,9 +18,14 @@
 --    all of `public` (119), so a migration on another table does not move it.
 --    Since 20261022020000 dropped `registration_forms` and `registrations`
 --    (with their 4 + 4 policies), it is 24 tables, 80 policies and 18 split
---    tables, and both dropped tables are checked to be gone.
+--    tables, and both dropped tables are checked to be gone. Since
+--    20261024010000 dropped `profile_players` (and its one policy) with the
+--    guardian view, it is 23 tables and 79 policies, and that table is checked
+--    to be gone too.
 -- 3. A member and an admin of one organization, on `players` (a split
---    member/admin table): the member reads the organization's row, and its
+--    admin table): the member reads no row (since 20261021020000 a non-admin
+--    reads a player only through the roster read; until 20261024010000 a
+--    guardian read their own child), and its
 --    INSERT is refused by RLS and its UPDATE and DELETE reach no row; the admin
 --    reads, inserts, updates and deletes. And on `season_settings`, the
 --    narrower one (plan Q5): a tenant_admin reads but writes nothing, while an
@@ -74,7 +79,7 @@ DECLARE
         'audit_log', 'email_log', 'evaluation_findings', 'evaluation_metrics', 'evaluation_run_events',
         'evaluation_runs', 'export_jobs', 'game_slots', 'games', 'import_jobs', 'organization_members',
         'organization_schema_history', 'organizations', 'player_buddies', 'players',
-        'practice_assignments', 'practice_exceptions', 'profile_players', 'profiles',
+        'practice_assignments', 'practice_exceptions', 'profiles',
         'scheduler_runs', 'season_settings',
         'staging_players', 'team_players', 'telemetry_log'
     ];
@@ -159,15 +164,18 @@ BEGIN
 
     -- ---- 2. the policies the rewrite leaves ---------------------------------
     SELECT count(*) INTO v_n FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 24 THEN
-        RAISE EXCEPTION 'expected the 24 tables of the advisor findings still standing, found %', v_n;
+    IF v_n <> 23 THEN
+        RAISE EXCEPTION 'expected the 23 tables of the advisor findings still standing, found %', v_n;
     END IF;
     IF to_regclass('public.registration_forms') IS NOT NULL OR to_regclass('public.registrations') IS NOT NULL THEN
         RAISE EXCEPTION 'registration_forms or registrations is back; 20261022020000 dropped both';
     END IF;
+    IF to_regclass('public.profile_players') IS NOT NULL THEN
+        RAISE EXCEPTION 'profile_players is back; 20261024010000 dropped it';
+    END IF;
     SELECT count(*) INTO v_n FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 80 THEN
-        RAISE EXCEPTION 'the 24 tables carry % policies; the rewrite leaves 85, 20261019010000 adds 3, and 20261022020000 drops 8 with two tables: 80', v_n;
+    IF v_n <> 79 THEN
+        RAISE EXCEPTION 'the 23 tables carry % policies; the rewrite leaves 85, 20261019010000 adds 3, 20261022020000 drops 8 with two tables and 20261024010000 1 with one: 79', v_n;
     END IF;
     v_bad := NULL;
     FOR i IN 1 .. array_length(c_split, 1) LOOP
@@ -191,7 +199,7 @@ BEGIN
                 AND policyname = 'Users can view their organization''s import jobs') THEN
         RAISE EXCEPTION 'the legacy import_jobs SELECT survived the rewrite';
     END IF;
-    RAISE NOTICE 'the 24 tables carry 80 policies (85 from the rewrite, 3 from 20261019010000, less the 8 of the two tables 20261022020000 dropped): on each of the 18 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
+    RAISE NOTICE 'the 23 tables carry 79 policies (85 from the rewrite, 3 from 20261019010000, less the 8 of the two tables 20261022020000 dropped and the 1 of the table 20261024010000 dropped): on each of the 18 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
 
     -- ---- seed: one organization, a member, an admin and a tenant_admin ------
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -208,10 +216,6 @@ BEGIN
         (v_org, v_member, 'coach'), (v_org, v_admin, 'admin'), (v_org, v_tenant, 'tenant_admin');
     INSERT INTO public.players (organization_id, first_name, last_name)
         VALUES (v_org, 'Rewrite', 'Smoke') RETURNING id INTO v_player;
-    -- Since 20261021020000 a member reads a player only as its guardian, so
-    -- the member is linked to it; what this checks is that they cannot write.
-    INSERT INTO public.profile_players (profile_id, player_id, organization_id)
-        VALUES (v_member, v_player, v_org);
     INSERT INTO public.season_settings (organization_id, name)
         VALUES (v_org, 'Rewrite Season') RETURNING id INTO v_season;
 
@@ -223,8 +227,8 @@ BEGIN
     UPDATE public.players SET last_name = 'Renamed' WHERE id = v_player;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     RESET ROLE;
-    IF v_n <> 1 OR v_rows <> 0 THEN
-        RAISE EXCEPTION 'players as a member: read % (want 1), updated % (want 0)', v_n, v_rows;
+    IF v_n <> 0 OR v_rows <> 0 THEN
+        RAISE EXCEPTION 'players as a member: read % (want 0), updated % (want 0)', v_n, v_rows;
     END IF;
     SET LOCAL ROLE authenticated;
     DELETE FROM public.players WHERE id = v_player;
@@ -297,7 +301,7 @@ BEGIN
         RAISE EXCEPTION 'season_settings as an admin: updated % (want 1)', v_rows;
     END IF;
 
-    RAISE NOTICE 'players: a member reads and cannot insert, update or delete; an admin reads, inserts, updates and deletes';
+    RAISE NOTICE 'players: a member reads nothing and cannot insert, update or delete; an admin reads, inserts, updates and deletes';
     RAISE NOTICE 'season_settings: a tenant_admin reads and updates nothing; an admin updates (role = ''admin'', kept)';
 END;
 $smoke$;

@@ -45,7 +45,9 @@ BEGIN
     END IF;
     RAISE NOTICE 'a staff member is an admin of their own organization and of no other';
 
-    PERFORM public.admin_change_member_role(v_org, v_coach, 'parent');
+    -- The coach keeps their role (until 20261024010000 this made them a parent,
+    -- a role that no longer exists): the gate is what is checked.
+    PERFORM public.admin_change_member_role(v_org, v_coach, 'coach');
     BEGIN
         PERFORM public.admin_change_member_role(v_org, v_staff, 'coach');
         RAISE EXCEPTION 'the last admin-equivalent member, a staff member, demoted themself';

@@ -799,8 +799,8 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # RAISE in the same smoke and print as NOTICEs above; they carry no plant,
     # so they are not claims.)
     if [ "$id" = "20261003000000" ]; then
-      if grep -qF "a coach of another slot's team, a lapsed coach, a parent and another organisation's admin were each refused 42501, 4 of 4, and wrote nothing" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a parent and another organisation's admin are refused"
+      if grep -qF "a coach of another slot's team, a lapsed coach, a member who coaches no team and another organisation's admin were each refused 42501, 4 of 4, and wrote nothing" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a member who coaches no team and another organisation's admin are refused"
       else
         echo "FAIL smoke ${id}: it passed without proving a non-coach cannot request a lighting override"; STATUS=1
       fi
@@ -829,7 +829,7 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving every lighting override write is audited"; STATUS=1
       fi
-      if grep -qF "coach A read the 5 rows of slot 1 and none of slot 2; coach B the 2 of slot 2 and none of slot 1; a lapsed coach and a parent 0; the admin 7 of 7; another organisation's admin 0" $SCRATCH/harness_smoke; then
+      if grep -qF "coach A read the 5 rows of slot 1 and none of slot 2; coach B the 2 of slot 2 and none of slot 1; a lapsed coach and a member who coaches no team 0; the admin 7 of 7; another organisation's admin 0" $SCRATCH/harness_smoke; then
         echo "  | (checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"
       else
         echo "FAIL smoke ${id}: it passed without proving the lighting override read policy is admin-or-slot-coach"; STATUS=1
@@ -846,8 +846,8 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # TBD enact and the grant posture RAISE in the same smoke and print as
     # NOTICEs above; they carry no plant, so they are not claims.)
     if [ "$id" = "20261004000000" ]; then
-      if grep -qF "enact access: a coach, a parent and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin with a uid enacts a practice recommendation: a coach, a parent and a no-uid caller are refused by the wrapper itself"
+      if grep -qF "enact access: a coach, a member who coaches no team and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin with a uid enacts a practice recommendation: a coach, a member who coaches no team and a no-uid caller are refused by the wrapper itself"
       else
         echo "FAIL smoke ${id}: it passed without proving a non-admin cannot enact a practice recommendation"; STATUS=1
       fi
@@ -905,10 +905,10 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # table, the head build has no RSVP to make: the smoke checks that both stay
     # gone, and the two RSVP claims went with their plants.
     if [ "$id" = "20261005000000" ]; then
-      if grep -qF "exception reads: the parent read 7 of 7 seeded rows, the same set as the admin; a non-member read 0" $SCRATCH/harness_smoke; then
-        echo "  | (checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"
+      if grep -qF "exception reads: a member who coaches no team read 7 of 7 seeded rows, the same set as the admin; a non-member read 0" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a member who is not an admin reads the same practice_exceptions rows as an admin, and a non-member reads none"
       else
-        echo "FAIL smoke ${id}: it passed without proving parents read practice exceptions as admins do"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a non-admin member reads practice exceptions as admins do"; STATUS=1
       fi
     fi
     # **Heat forecast: org heat settings.** One claim per plant in prove.sh.
@@ -1303,7 +1303,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2694,6 +2694,62 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the reporting views revert did not leave both views as they were at 20261022020000"
         dump 10 $SCRATCH/harness_views; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261024010000" ]; then
+      # Structure only (the dropped guardian links cannot come back). One
+      # fingerprint of every object the migration dropped or replaced, read off
+      # the catalogue: the seven functions (signature, security, volatility, SET
+      # clauses, result, arguments, sorted grants, md5 of the body, comment),
+      # `profile_players` and `team_calendar_tokens` (kind, row security, sorted
+      # grants, options, comment), the link table's columns, constraints and
+      # index, the two role checks, and every policy on `profile_players`,
+      # `players`, `team_players` and `team_calendar_tokens`. The expected md5
+      # and row count were read 2026-10-24 off a build at 20261023010000 with
+      # the same query; the count is part of the verdict, so a lookup that
+      # finds nothing cannot pass.
+      if psql_cmd "SELECT 'GUARDIAN-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*)
+               = 'b8556e5110d761fdd9798644792d79cc:37' THEN 'restored' ELSE 'wrong' END FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('get_team_roster', 'get_team_staff', 'is_team_guardian', 'guardian_contacts_view',
+                           'link_my_guardian_records', 'create_org_invite', 'admin_change_member_role')
+      UNION ALL
+      SELECT 'c|' || c.relname || '|' || c.relkind::text || '|' || c.relrowsecurity || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(c.relacl) e), '') || '|'
+             || coalesce(array_to_string(c.reloptions, ','), '') || '|' || coalesce(obj_description(c.oid, 'pg_class'), '')
+        FROM pg_class c
+       WHERE c.relnamespace = 'public'::regnamespace
+         AND c.relname IN ('profile_players', 'team_calendar_tokens')
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '') || '|' || a.attnum
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+         AND c.relname = 'profile_players'
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint
+       WHERE conrelid = to_regclass('public.profile_players')
+          OR conname IN ('organization_members_role_check', 'organization_invites_role_check')
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid = to_regclass('public.profile_players')
+      UNION ALL
+      SELECT 'p|' || tablename || '|' || policyname || '|' || permissive || '|' || cmd || '|' || roles::text || '|'
+             || coalesce(qual, '') || '|' || coalesce(with_check, '')
+        FROM pg_policies WHERE schemaname = 'public'
+         AND tablename IN ('profile_players', 'players', 'team_players', 'team_calendar_tokens')
+             ) s;" \
+         >$SCRATCH/harness_guardian 2>&1 && grep -q 'GUARDIAN-VERDICT:restored' $SCRATCH/harness_guardian; then
+        echo "  | (checked) the guardian revert restores profile_players with its keys, policy and grants, the three guardian functions, the roster and staff reads' guardian arms, the people and calendar token read policies and the parent and player roles, each with its grants, comment and posture as at 20261023010000"
+      else
+        echo "FAIL revert ${id}: the guardian revert did not restore every dropped or replaced object as it was at 20261023010000"
+        dump 10 $SCRATCH/harness_guardian; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

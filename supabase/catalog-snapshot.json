@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from a fresh build by scripts/dbharness/run.sh (catalog_snapshot.sql). Do not edit by hand: a migration that changes a public function signature, trigger or policy regenerates it with HARNESS_WRITE_CATALOG_SNAPSHOT=1. docs/operations/ci-cd.md, \"Catalogue drift check\".",
+  "$comment": "Generated from a fresh build by scripts/dbharness/run.sh (catalog_snapshot.sql). Do not edit by hand: a migration that changes a public function signature, trigger, policy or view regenerates it with HARNESS_WRITE_CATALOG_SNAPSHOT=1. docs/operations/ci-cd.md, \"Catalogue drift check\".",
   "functions": [
     "admin_assign_team_coach(p_organization_id uuid, p_team_id uuid, p_coach_id uuid, p_effective_on date) returns jsonb",
     "admin_bulk_update_players(p_player_ids uuid[], p_patch jsonb) returns integer",
@@ -292,5 +292,13 @@
     "CREATE TRIGGER tr_validate_coach_attributes BEFORE INSERT OR UPDATE ON public.coaches FOR EACH ROW EXECUTE FUNCTION validate_custom_attributes('coach')",
     "CREATE TRIGGER tr_validate_player_attributes BEFORE INSERT OR UPDATE ON public.players FOR EACH ROW EXECUTE FUNCTION validate_custom_attributes('player')",
     "CREATE TRIGGER tr_validate_team_attributes BEFORE INSERT OR UPDATE ON public.teams FOR EACH ROW EXECUTE FUNCTION validate_custom_attributes('team')"
+  ],
+  "views": [
+    "coach_team_map|v|security_invoker=true|coach_user_id uuid, team_id uuid",
+    "field_closures|v|security_invoker=true|id uuid, organization_id uuid, closes_location_id uuid, closes_field_id uuid, field_location_id uuid, blackout_from date, blackout_until date, start_minutes integer, end_minutes integer, reason text, note text, source_reason_text text, source text",
+    "import_efficiency_metrics|v|security_invoker=true|import_job_id uuid, suggestions_applied bigint, total_suggestions bigint, match_rate double precision",
+    "view_facility_usage|v|security_invoker=true|field_id uuid, organization_id uuid, field_name text, practice_count bigint, game_count bigint, total_events bigint",
+    "view_league_standings|v|security_invoker=true|team_id uuid, organization_id uuid, team_name text, division_id uuid, games_played bigint, wins bigint, losses bigint, draws bigint, goals_for bigint, goals_against bigint, goal_differential bigint, points bigint, division text, season_settings_id uuid",
+    "view_org_metrics|v|security_invoker=true|organization_id uuid, organization_name text, total_players bigint, total_teams bigint, total_users bigint"
   ]
 }

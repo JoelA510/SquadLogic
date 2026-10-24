@@ -3585,6 +3585,16 @@ plant "CS a migration adds a function the snapshot does not list" "$M25" \
 COMMIT;" \
   "catalog snapshot"
 
+# The views section: a migration that adds a view the snapshot does not list.
+# The drift it exists for ran the other way (production lacked two views a
+# fresh build had), which diff() names the same way; tests/dbharnessCatalogSnapshot.test.js
+# pins both directions without a database.
+plant "CS a migration adds a view the snapshot does not list" "$M40" \
+  "COMMIT;" \
+  "CREATE VIEW public.catalog_snapshot_view_plant WITH (security_invoker = true) AS SELECT 1 AS x;
+COMMIT;" \
+  "catalog snapshot"
+
 plant "R25 the revert leaves trigger_manage_field_subunits out" "$R25" \
   "CREATE TRIGGER trigger_manage_field_subunits AFTER INSERT OR UPDATE OF supports_halves ON public.fields
     FOR EACH ROW EXECUTE FUNCTION public.handle_field_subunits();" \

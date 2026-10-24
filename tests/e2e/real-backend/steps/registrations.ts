@@ -5,6 +5,10 @@
  * TLD). Built here rather than kept as CSV files so the twenty-four players are
  * always aged ten in the current year, as the seeded U10 division expects,
  * whenever the suite runs. The year is UTC's, as the seed's `current_date` is.
+ * "Aged ten" holds under either age cutoff only for births from January to
+ * July: under the seeded season's default `school_year_aug_jul` cutoff an
+ * August to December birth makes a player nine, an unsanctioned play-up into
+ * U10, which team generation holds off every team (Phase B2).
  */
 
 /** The administrator tests/e2e/real-backend/seed.sql creates (a local stack only). */
@@ -83,7 +87,7 @@ export interface Registration {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** Twenty-four U10 registrations, born in the year ten years before this one. */
+/** Twenty-four U10 registrations, born January to July of the year ten years before this one. */
 export function registrations(now = new Date()): Registration[] {
   const birthYear = now.getUTCFullYear() - 10;
   return FIRST_NAMES.map((firstName, i) => {
@@ -92,7 +96,7 @@ export function registrations(now = new Date()): Registration[] {
       registrationId: `E2E-REG-${pad(i + 1)}`,
       firstName,
       lastName,
-      dateOfBirth: `${birthYear}-${pad((i % 12) + 1)}-${pad((i % 27) + 1)}`,
+      dateOfBirth: `${birthYear}-${pad((i % 7) + 1)}-${pad((i % 27) + 1)}`,
       gender: i % 2 === 0 ? 'M' : 'F',
       guardianName: `Parent ${lastName}`,
       guardianEmail: `parent.${lastName.toLowerCase()}@example.test`,

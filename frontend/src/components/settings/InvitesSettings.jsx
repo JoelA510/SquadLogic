@@ -245,7 +245,7 @@ export default function InvitesSettings() {
               />
             </div>
             {justCreated.expires_at && (
-              <p className="text-[10px] text-text-muted">
+              <p className="text-[10px] text-text-secondary">
                 Expires {new Date(justCreated.expires_at).toLocaleString()}
               </p>
             )}

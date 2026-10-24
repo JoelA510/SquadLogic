@@ -412,7 +412,7 @@ Given('the team rosters have been generated and finalized', async ({ page }) => 
 
     // Through saveDB, which also replaces the page's in-memory copy: written to
     // sessionStorage alone, the stale copy was merged back over it by the next
-    // read, and an RPC that saved on load (link_my_guardian_records) put the
+    // read, and an RPC that saved on load (then link_my_guardian_records) put the
     // seeded two-team run back in place of this one.
     window.__saveMockDB__(db);
   }, MOCK_ORG_ID);

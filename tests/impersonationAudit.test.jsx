@@ -29,7 +29,7 @@ const ADMIN_ID = '00000000-0000-4000-8000-0000000000a1';
 const ORG = '00000000-0000-4000-8000-00000000000a';
 const session = { access_token: 't', user: { id: ADMIN_ID, email: 'admin@example.test' } };
 const profile = { id: ADMIN_ID, organization_id: ORG, role: 'admin' };
-const target = { id: '00000000-0000-4000-8000-0000000000b2', organization_id: ORG, role: 'parent' };
+const target = { id: '00000000-0000-4000-8000-0000000000b2', organization_id: ORG, role: 'coach' };
 
 /** The last context value the probe saw (an object, so the component does not reassign a module variable). */
 /** @type {{ auth: any }} */

@@ -9,7 +9,7 @@ import { ContactCardSchema, contactCardFormOf } from '../../utils/contactCard.js
 /**
  * The account page's contact card (Phase A2c): a phone, an email and whether to
  * share them. Wherever the app shows this person's contact details (a team's
- * staff, the coach directory, a roster's guardian contacts), a saved card
+ * staff, the coach directory; no guardian since 20261024010000), a saved card
  * replaces what the league imported, and "Don't share" shows neither. Saved
  * through `set_my_contact_card`, the card's only writer.
  *

@@ -34,7 +34,7 @@ NavItem.propTypes = {
 };
 
 /**
- * Nested collapsible navigation (admin) or flat role nav (coach/parent).
+ * Nested collapsible navigation (admin) or the coach's flat nav.
  * Desktop: 256px ↔ 60px collapse, persisted. Mobile (<900px): off-canvas
  * drawer opened from the TopBar hamburger.
  */
@@ -78,9 +78,10 @@ export default function SideNav({
     if (window.innerWidth < 900) onMobileClose?.();
   };
 
-  const isAdminNav =
-    effectiveRole !== 'coach' && effectiveRole !== 'parent' && effectiveRole !== 'player';
-  const flatItems = isAdminNav ? null : ROLE_NAV[effectiveRole] || ROLE_NAV.parent;
+  // Every role but coach gets the admin nav, filtered by permission: a role
+  // with no permissions (a stale `parent` or `player`, both removed in
+  // 20261024010000) sees only the items that need none.
+  const flatItems = effectiveRole === 'coach' ? ROLE_NAV.coach : null;
 
   const visible = (item) =>
     (!item.permission || can(item.permission)) && (!item.feature || isEnabled(item.feature));
@@ -103,7 +104,7 @@ export default function SideNav({
             <>
               {!collapsed && (
                 <div className="nav-group-label" style={{ pointerEvents: 'none' }}>
-                  {effectiveRole === 'coach' ? 'Coach' : 'Family'}
+                  Coach
                 </div>
               )}
               {flatItems.map((item) => (

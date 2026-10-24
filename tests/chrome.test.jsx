@@ -52,7 +52,10 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
     from: () => ({
       select: () => ({
         in: () => Promise.resolve({ data: [], error: null }),
+        // Either filter answers with the seeded profiles, so a filter that
+        // let a parent through would show in the menu.
         eq: () => ({
+          eq: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
           in: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
         }),
       }),
@@ -199,6 +202,20 @@ describe('TopBar', () => {
     );
   });
 
+  // No parent view to preview since 20261024010000 (R3): a profile still
+  // carrying the old role is not offered, even if a read returns one.
+  it('offers no parent preview', async () => {
+    mocks.previewProfiles = [{ id: 'parent-1', role: 'parent', organization_id: MOCK_ORG_ID }];
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    await screen.findByRole('menuitem', { name: 'Sign out' });
+    expect(screen.queryByRole('menuitem', { name: /Preview as/ })).not.toBeInTheDocument();
+  });
+
   it('offers no role preview to a coach', () => {
     mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
     mocks.auth.isAdmin = false;
@@ -314,8 +331,8 @@ describe('SideNav', () => {
   it('scopes navigation to the previewed role while impersonating', () => {
     mocks.auth.isImpersonating = true;
     mocks.auth.user = {
-      email: 'parent@example.com',
-      profile: { full_name: 'Pat Parent', role: 'parent' },
+      email: 'coach@example.com',
+      profile: { full_name: 'Cal Coach', role: 'coach' },
     };
     render(
       <MemoryRouter initialEntries={['/']}>
@@ -323,6 +340,7 @@ describe('SideNav', () => {
       </MemoryRouter>
     );
     expect(screen.getByRole('link', { name: 'My Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'My Team' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Audit Log/ })).not.toBeInTheDocument();
   });
 });

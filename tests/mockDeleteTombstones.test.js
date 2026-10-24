@@ -604,17 +604,18 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
 
   it('makes a keyless row s delete durable without wiping its siblings', async () => {
     // **`String(undefined)` is a key, and it matches every keyless row.**
-    // `profile_players` rows have no `id`, so before this PR the only two
+    // `team_players` rows have no `id` (nor had `profile_players`, the guardian
+    // link table 20261024010000 dropped), so before this PR the only two
     // outcomes available were "tombstone 'undefined' and empty the table" or
     // "record nothing and resurrect the row". It gets the composite identity
     // `mergeSource` already dedupes it by instead, so neither happens.
-    const before = getMockData('profile_players');
-    expect(before.length, 'profile_players is empty, so this proves nothing').toBeGreaterThan(1);
+    const before = getMockData('team_players');
+    expect(before.length, 'team_players is empty, so this proves nothing').toBeGreaterThan(1);
     expect(before.every((row) => row.id === undefined)).toBe(true);
 
-    await supabase.from('profile_players').delete().eq('player_id', 'player-1');
+    await supabase.from('team_players').delete().eq('player_id', 'player-1');
 
-    const after = getMockData('profile_players');
+    const after = getMockData('team_players');
     expect(after.filter((row) => row.player_id === 'player-1')).toHaveLength(0);
     // The sibling survives -- no collateral wipe from an 'undefined' key.
     expect(after.filter((row) => row.player_id === 'player-2')).toHaveLength(1);
@@ -653,11 +654,11 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
     // The other half of the same branch, so the tombstone check cannot be
     // "fixed" by deleting the seeding push outright.
     expect(
-      getMockData('organization_members').filter((m) => m.profile_id === 'mock-parent-id')
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id')
     ).toHaveLength(1);
     await supabase.rpc('admin_remove_member', {
       p_organization_id: ORG,
-      p_profile_id: 'mock-parent-id',
+      p_profile_id: 'mock-coach-id',
     });
 
     await supabase.auth.signInWithPassword({

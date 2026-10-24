@@ -2,7 +2,9 @@
 // generic `.from(table)` reads, and its rotate_calendar_token and
 // update_game_score arms refuse whom the database refuses, so a page that still
 // reads a restricted table directly, or offers an action the server refuses,
-// fails in mock mode and in the E2E suite as it would against Postgres.
+// fails in mock mode and in the E2E suite as it would against Postgres. Since
+// 20261024010000 (R3) there is no guardian: players and team_players are an
+// admin's, and the calendar token an admin's or the team's current coach's.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
@@ -26,33 +28,27 @@ beforeEach(() => {
 });
 
 describe('mock read policies :: the restricted tables', () => {
-  it('shows a guardian their own children and no other player', async () => {
+  it('shows players and roster rows to an admin only, not to the coach of their team', async () => {
     setSession('mock-admin-id');
     await supabase.from('teams').update({ name: 'Tigers' }).eq('id', TIGERS);
     const db = /** @type {any} */ (window.__MOCK_DB__);
-    db.players.push({ id: 'player-other', organization_id: ORG, first_name: 'Other' });
-    db.team_players.push({ team_id: TIGERS, player_id: 'player-other', organization_id: ORG });
+    // A player on the coach's own team (t1), so the coach's empty read below
+    // is the policy's doing, not an empty roster.
+    db.team_players.push({ team_id: 't1', player_id: 'player-1', organization_id: ORG });
     window.__saveMockDB__(db);
-    expect(await read('players'), 'the unrelated player was not seeded').toContain('player-other');
-    setSession('mock-parent-id');
+    expect(
+      await read('team_players', 'team_id'),
+      'nothing is rostered on the coach team'
+    ).toContain('t1');
+    expect(await read('players')).toEqual(
+      getMockData('players')
+        .map((row) => String(row.id))
+        .sort()
+    );
 
-    expect(await read('players')).toEqual(['player-1', 'player-2']);
-    expect(await read('team_players', 'player_id')).toEqual(['player-1', 'player-2']);
-    expect(await read('profile_players', 'player_id')).toEqual(['player-1', 'player-2']);
-  });
-
-  it('shows a removed guardian nothing of their child', async () => {
-    setSession('mock-admin-id');
-    const { error } = await supabase.rpc('admin_remove_member', {
-      p_organization_id: ORG,
-      p_profile_id: 'mock-parent-id',
-    });
-    expect(error).toBeNull();
-    setSession('mock-parent-id');
-
+    setSession('mock-coach-id');
     expect(await read('players')).toEqual([]);
     expect(await read('team_players', 'player_id')).toEqual([]);
-    expect(await read('profile_players', 'player_id')).toEqual([]);
   });
 
   it('shows a coach their own coach row and assignments, and no roster', async () => {
@@ -83,13 +79,16 @@ describe('mock read policies :: the restricted tables', () => {
     expect(await read('team_coach_assignments')).toEqual([]);
   });
 
-  it('shows a team s calendar token to its guardian and admin, not to another team s coach', async () => {
-    setSession('mock-parent-id');
-    expect(await read('team_calendar_tokens', 'team_id')).toEqual([TIGERS]);
+  it('shows a team s calendar token to its current coach and an admin, not to another team s coach', async () => {
     setSession('mock-coach-id');
     expect(await read('team_calendar_tokens', 'team_id')).toEqual([]);
+    await supabase.from('teams').update({ name: 'Tigers' }).eq('id', TIGERS);
+    const db = /** @type {any} */ (window.__MOCK_DB__);
+    db.team_calendar_tokens.push({ team_id: 't1', token: 'mock-calendar-token-t1' });
+    window.__saveMockDB__(db);
+    expect(await read('team_calendar_tokens', 'team_id')).toEqual(['t1']);
     setSession('mock-admin-id');
-    expect(await read('team_calendar_tokens', 'team_id')).toEqual([TIGERS]);
+    expect(await read('team_calendar_tokens', 'team_id')).toEqual([TIGERS, 't1'].sort());
   });
 
   it('shows an admin every row', async () => {
@@ -106,13 +105,9 @@ describe('mock read policies :: the restricted tables', () => {
 
 describe('mock rotate_calendar_token and update_game_score :: who may', () => {
   it('rotates for the team s current coach and an admin only', async () => {
-    setSession('mock-parent-id');
-    const guardian = await supabase.rpc('rotate_calendar_token', { p_team_id: TIGERS });
-    expect(guardian.data).toEqual({ status: 'error', message: 'Access denied' });
-
     setSession('mock-coach-id');
     const otherCoach = await supabase.rpc('rotate_calendar_token', { p_team_id: TIGERS });
-    expect(otherCoach.data?.status).toBe('error');
+    expect(otherCoach.data).toEqual({ status: 'error', message: 'Access denied' });
     const ownCoach = await supabase.rpc('rotate_calendar_token', { p_team_id: 't1' });
     expect(ownCoach.data?.status).toBe('success');
     expect(getMockData('team_calendar_tokens').find((row) => row.team_id === 't1')?.token).toBe(
@@ -136,7 +131,7 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
         p_score_away: 0,
       });
 
-    setSession('mock-parent-id');
+    setSession('mock-outsider-id');
     expect((await score('game-2')).error?.code).toBe('42501');
 
     setSession('mock-coach-id');

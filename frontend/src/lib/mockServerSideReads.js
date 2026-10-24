@@ -1,13 +1,15 @@
 /**
  * Mock arms for the server-side reads of migration
- * `20261021010000_server_side_reads.sql` (Phase A3a): the guardian link, the
- * contact card writer, and the four reads that apply the Phase A access table.
+ * `20261021010000_server_side_reads.sql` (Phase A3a), as
+ * `20261024010000_remove_guardian_view_and_roles.sql` (R3) left them: the
+ * contact card writer and the four reads that apply the access table. There is
+ * no guardian: the guardian link and the guardian arms went in R3.
  *
  * **Refusals included** (LESSONS_LEARNED #13), with the SQL's error codes:
  *   - 42501 a caller with no session; a roster or staff read by anyone but an
- *     org admin or staff member, a current coach of the team, or a guardian on
- *     the team (an unknown team id is refused the same way); a directory read
- *     by anyone but an admin or a current coach while `coach_directory` is on;
+ *     org admin or staff member or a current coach of the team (an unknown
+ *     team id is refused the same way); a directory read by anyone but an
+ *     admin or a current coach while `coach_directory` is on;
  *   - 23502 `p_share` missing; 22023 a phone or email that is not one.
  *
  * "Current coach" is a `team_coach_assignments` row of the caller's linked
@@ -15,8 +17,6 @@
  * season timezone, UTC when unset or unreadable, as `team_local_today`.
  *
  * **Not mirrored** (stated so nobody reads this as the database):
- *   - the mock has no unverified accounts: the session's email is the verified
- *     email the guardian link and the contact card's matching use;
  *   - `record_audit_event`'s own checks (the row is appended directly);
  *   - the table policies: the mock's generic `.from()` still returns every row
  *     of the organization, as the database does until A3b restricts them.
@@ -31,7 +31,6 @@ import { CONTACT_PHONE_PATTERN } from '../utils/contactCard.js';
 import { seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 
 export const SERVER_SIDE_READ_RPCS = Object.freeze([
-  'link_my_guardian_records',
   'set_my_contact_card',
   'get_team_roster',
   'get_team_staff',
@@ -42,10 +41,6 @@ export const SERVER_SIDE_READ_RPCS = Object.freeze([
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-const norm = (value) =>
-  String(value ?? '')
-    .trim()
-    .toLowerCase();
 const denied = (message) => ({ data: null, error: { message, code: '42501' } });
 
 /** Today's date (YYYY-MM-DD) in `zone`, UTC when the zone is unset or unreadable. */
@@ -59,7 +54,7 @@ export function localDateIn(zone, now = new Date()) {
  * The caller-relative access questions every mock arm of the Phase A3 reads
  * and restrictions asks (20261021010000, 20261021020000), answered over `db`
  * as the SQL helpers answer them: is_org_admin, is_org_member,
- * team_local_today, is_current_team_coach and is_team_guardian.
+ * team_local_today and is_current_team_coach.
  *
  * @param {Record<string, any[]>} db
  * @param {string | null} currentUserId
@@ -114,21 +109,8 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
         isOrgMember(row.organization_id) &&
         isLive(row)
     );
-  const myChildIds = new Set(
-    (db.profile_players || [])
-      .filter((link) => String(link.profile_id) === String(currentUserId))
-      .map((link) => String(link.player_id))
-  );
   const rosterOf = (teamId) =>
     (db.team_players || []).filter((row) => String(row.team_id) === String(teamId));
-  const isTeamGuardian = (teamId) => {
-    const team = teamById(teamId);
-    return (
-      !!team &&
-      isOrgMember(team.organization_id) &&
-      rosterOf(teamId).some((row) => myChildIds.has(String(row.player_id)))
-    );
-  };
   const orgFlag = (orgId, key, fallback) => {
     const org = (db.organizations || []).find((o) => String(o.id) === String(orgId));
     const value = org?.feature_flags?.[key];
@@ -144,9 +126,7 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
     coachById,
     myCoachIds,
     isCurrentTeamCoach,
-    myChildIds,
     rosterOf,
-    isTeamGuardian,
     orgFlag,
   };
 }
@@ -155,7 +135,7 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
  * @param {Record<string, any[]>} db
  * @param {string} name
  * @param {Record<string, any> | null | undefined} params
- * @param {{ currentUserId: string | null, sessionEmail?: string | null, now?: Date, newId?: () => string }} ctx
+ * @param {{ currentUserId: string | null, now?: Date, newId?: () => string }} ctx
  */
 export function handleServerSideReadRpc(db, name, params, ctx) {
   if (!SERVER_SIDE_READ_RPCS.includes(name)) return null;
@@ -164,7 +144,6 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
   const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
   const p = params || {};
   if (!currentUserId) return denied(`${name} requires a signed-in caller`);
-  const email = norm(ctx.sessionEmail);
 
   const {
     isOrgAdmin,
@@ -174,9 +153,7 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     coachById,
     myCoachIds,
     isCurrentTeamCoach,
-    myChildIds,
     rosterOf,
-    isTeamGuardian,
     orgFlag,
   } = createAccessHelpers(db, currentUserId, now);
   const profileById = (id) =>
@@ -190,45 +167,19 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
   };
   const stripNulls = (obj) =>
     Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== null && v !== undefined));
-  const guardianContactsView = (player, primaryOnly) => {
-    const contacts = Array.isArray(player.guardian_contacts) ? player.guardian_contacts : [];
-    // Each linked account with the addresses it answers to: the imported
-    // address its link was matched on (kept across a sign-in email change)
-    // and its current email.
-    const linked = (db.profile_players || [])
-      .filter((link) => String(link.player_id) === String(player.id))
-      .map((link) => {
-        const profile = profileById(link.profile_id);
-        return profile
-          ? { profile, addresses: [norm(link.matched_email), norm(profile.email)].filter(Boolean) }
-          : null;
-      })
-      .filter(Boolean);
-    // As the SQL: the primary contact is the FIRST element (`ord = 1`), taken
-    // before anything that is not a contact object is dropped.
-    return contacts
-      .slice(0, primaryOnly ? 1 : undefined)
+  // An admin's view of a player's guardian contacts: every contact object, as
+  // imported (no contact card applies to one since R3).
+  const guardianContactsView = (player) =>
+    (Array.isArray(player.guardian_contacts) ? player.guardian_contacts : [])
       .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
-      .map((c) => {
-        const contactAddresses = [norm(c.email), norm(c.alternate_email)].filter(Boolean);
-        const matches = linked
-          .filter(({ addresses }) => addresses.some((a) => contactAddresses.includes(a)))
-          .map(({ profile }) => profile);
-        const card = matches.find((m) => m.share_contact !== null && m.share_contact !== undefined);
-        if (!card) {
-          return stripNulls({
-            name: c.name,
-            email: c.email,
-            phone: c.phone,
-            alternate_email: primaryOnly ? null : c.alternate_email,
-          });
-        }
-        if (card.share_contact) {
-          return stripNulls({ name: c.name, email: card.contact_email, phone: card.contact_phone });
-        }
-        return stripNulls({ name: c.name });
-      });
-  };
+      .map((c) =>
+        stripNulls({
+          name: c.name,
+          email: c.email,
+          phone: c.phone,
+          alternate_email: c.alternate_email,
+        })
+      );
   const myCoachedTeamIds = (orgId) =>
     isOrgMember(orgId)
       ? [
@@ -244,52 +195,6 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
           ),
         ]
       : [];
-
-  if (name === 'link_my_guardian_records') {
-    if (!email) return { data: { status: 'email_not_verified', linked: 0 }, error: null };
-    db.profile_players = db.profile_players || [];
-    let linked = 0;
-    for (const player of db.players || []) {
-      if (!isOrgMember(player.organization_id)) continue;
-      const contacts = Array.isArray(player.guardian_contacts) ? player.guardian_contacts : [];
-      const matches = contacts.some(
-        (c) => c && (norm(c.email) === email || norm(c.alternate_email) === email)
-      );
-      if (!matches) continue;
-      if (myChildIds.has(String(player.id))) {
-        // A link made at registration records the address it matches now.
-        const existing = db.profile_players.find(
-          (link) =>
-            String(link.profile_id) === String(currentUserId) &&
-            String(link.player_id) === String(player.id)
-        );
-        if (existing && !existing.matched_email) existing.matched_email = email;
-        continue;
-      }
-      db.profile_players.push({
-        profile_id: currentUserId,
-        player_id: player.id,
-        organization_id: player.organization_id,
-        matched_email: email,
-        created_at: now.toISOString(),
-      });
-      myChildIds.add(String(player.id));
-      linked += 1;
-      db.audit_log = db.audit_log || [];
-      db.audit_log.push({
-        id: newId(),
-        organization_id: player.organization_id,
-        user_id: currentUserId,
-        action: 'guardian.linked',
-        resource_type: 'players',
-        resource_id: player.id,
-        metadata: { profile_id: currentUserId, matched_email: email },
-        created_at: now.toISOString(),
-      });
-    }
-    const status = linked > 0 ? 'linked' : myChildIds.size > 0 ? 'already_linked' : 'no_match';
-    return { data: { status, linked }, error: null };
-  }
 
   if (name === 'set_my_contact_card') {
     if (typeof p.p_share !== 'boolean') {
@@ -412,8 +317,7 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
   const team = teamById(p.p_team_id);
   const admin = !!team && isOrgAdmin(team.organization_id);
   const coach = !!team && !admin && isCurrentTeamCoach(team.id);
-  const guardian = !!team && !admin && !coach && isTeamGuardian(team.id);
-  if (!(admin || coach || guardian)) {
+  if (!(admin || coach)) {
     return denied(
       name === 'get_team_roster'
         ? "not permitted to read this team's roster"
@@ -445,23 +349,19 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     return { data: rows, error: null };
   }
 
-  const share = orgFlag(team.organization_id, FEATURE_FLAGS.GUARDIAN_CONTACT_SHARING, true);
+  // A current coach reads names and jersey number; every other column is an
+  // admin's (20261024010000).
   const rows = rosterOf(team.id)
     .map((row) => (db.players || []).find((pl) => String(pl.id) === String(row.player_id)))
     .filter(Boolean)
     .map((player) => {
-      const mine = myChildIds.has(String(player.id));
-      let contacts = [];
-      if (admin || coach || mine) contacts = guardianContactsView(player, false);
-      else if (share) contacts = guardianContactsView(player, true);
       return {
         player_id: player.id,
         first_name: player.first_name ?? null,
         last_name: player.last_name ?? null,
         preferred_name: player.preferred_name ?? null,
         jersey_number: player.jersey_number ?? null,
-        is_my_child: mine,
-        guardian_contacts: contacts,
+        guardian_contacts: admin ? guardianContactsView(player) : [],
         gender: admin ? (player.gender ?? null) : null,
         years_played: admin ? (player.years_played ?? null) : null,
         rating: admin ? (player.rating ?? null) : null,

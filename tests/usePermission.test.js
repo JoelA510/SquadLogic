@@ -37,19 +37,25 @@ describe('usePermission', () => {
     expect(result.current.can(PERMISSIONS.MANAGE_GLOBAL_SETTINGS)).toBe(true);
   });
 
-  it('should deny Player from managing organization', () => {
+  it('should deny a Coach managing the organization', () => {
     /** @type {any} */ (OrgContext.useOrganization).mockReturnValue({
-      orgMember: makeOrganizationMember({ role: ROLES.PLAYER }),
+      orgMember: makeOrganizationMember({ role: ROLES.COACH }),
     });
     const { result } = renderHook(() => usePermission());
     expect(result.current.can(PERMISSIONS.MANAGE_ORGANIZATION)).toBe(false);
+    expect(result.current.can(PERMISSIONS.VIEW_ORGANIZATION)).toBe(true);
   });
 
-  it('should allow Player to view own team', () => {
+  // No parent or player role since 20261024010000 (R3): a membership still
+  // carrying one (a stale cache, a row written before the migration) is granted
+  // nothing, not a family's read-only view.
+  it.each(['parent', 'player'])('grants a stale %s role no permission', (role) => {
     /** @type {any} */ (OrgContext.useOrganization).mockReturnValue({
-      orgMember: makeOrganizationMember({ role: ROLES.PLAYER }),
+      orgMember: makeOrganizationMember({ role }),
     });
     const { result } = renderHook(() => usePermission());
-    expect(result.current.can(PERMISSIONS.VIEW_OWN_TEAM)).toBe(true);
+    for (const permission of Object.values(PERMISSIONS)) {
+      expect(result.current.can(permission), permission).toBe(false);
+    }
   });
 });

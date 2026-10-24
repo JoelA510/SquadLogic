@@ -76,10 +76,13 @@ Then(
 );
 
 /**
- * The mock parent, signed in as a parent of the active org with a child on
- * `team`, then on that team's portal. Every row carries `organization_id`.
+ * The mock coach, signed in as the current lead coach of `team` in the active
+ * org, then on that team's portal. A coach since 20261024010000 (R3), which
+ * removed the guardian view and the parent role this step signed in as. Every
+ * row carries `organization_id`; the assignment's window holds today in any
+ * season timezone.
  */
-When('a parent of a {string} player opens its team portal', async ({ page }, teamName: string) => {
+When('the coach of {string} opens its team portal', async ({ page }, teamName: string) => {
   await waitForMockClient(page);
   const teamId = await page.evaluate((name) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -88,40 +91,52 @@ When('a parent of a {string} player opens its team portal', async ({ page }, tea
       (t: Record<string, unknown>) => t.name === name && t.organization_id === orgId
     );
     if (!team) throw new Error(`no team ${name} in the active organization`);
-    const parentId = 'mock-parent-id';
-    const playerId = `player-${team.id}`;
+    const coachUserId = 'mock-coach-id';
+    const coachId = `coach-repair-${team.id}`;
     const org = (db.organization_members || []).find(
       (m: Record<string, unknown>) => m.organization_id === orgId
     )?.organizations;
     db.organization_members = [
       ...(db.organization_members || []).filter(
-        (m: Record<string, unknown>) => !(m.organization_id === orgId && m.profile_id === parentId)
+        (m: Record<string, unknown>) =>
+          !(m.organization_id === orgId && m.profile_id === coachUserId)
       ),
-      { organization_id: orgId, profile_id: parentId, role: 'parent', organizations: org },
+      { organization_id: orgId, profile_id: coachUserId, role: 'coach', organizations: org },
     ];
-    db.players = [
-      ...(db.players || []).filter((p: Record<string, unknown>) => p.id !== playerId),
-      { id: playerId, first_name: 'Sample', last_name: 'Child', organization_id: orgId },
+    db.coaches = [
+      ...(db.coaches || []).filter((c: Record<string, unknown>) => c.id !== coachId),
+      {
+        id: coachId,
+        organization_id: orgId,
+        user_id: coachUserId,
+        full_name: 'Mock Coach',
+        status: 'active',
+      },
     ];
-    db.team_players = [
-      ...(db.team_players || []).filter((t: Record<string, unknown>) => t.player_id !== playerId),
-      { team_id: team.id, player_id: playerId, organization_id: orgId },
-    ];
-    db.profile_players = [
-      ...(db.profile_players || []).filter(
-        (p: Record<string, unknown>) => p.player_id !== playerId
+    db.team_coach_assignments = [
+      ...(db.team_coach_assignments || []).filter(
+        (a: Record<string, unknown>) => a.coach_id !== coachId
       ),
-      { profile_id: parentId, player_id: playerId },
+      {
+        id: `tca-${coachId}`,
+        organization_id: orgId,
+        team_id: team.id,
+        coach_id: coachId,
+        role: 'lead',
+        effective_from: '2020-01-01',
+        effective_to: null,
+        started_via: 'e2e',
+      },
     ];
     window.__saveMockDB__(db);
     sessionStorage.setItem(
       '__MOCK_SESSION__',
       JSON.stringify({
         user: {
-          id: parentId,
-          email: 'parent@squadlogic.app',
-          user_metadata: { full_name: 'Mock parent' },
-          app_metadata: { role: 'parent' },
+          id: coachUserId,
+          email: 'coach@squadlogic.app',
+          user_metadata: { full_name: 'Mock Coach' },
+          app_metadata: { role: 'coach' },
         },
         access_token: 'mock-token',
       })
@@ -147,7 +162,7 @@ const longDate = (page: Page, date: string) =>
   );
 
 Then(
-  'the parent should see the practice on {string} as {string}',
+  'the coach should see the practice on {string} as {string}',
   async ({ page }, date: string, heading: string) => {
     const card = page.locator('.glass-panel').filter({ hasText: await longDate(page, date) });
     await expect(card).toHaveCount(1, { timeout: 15000 });
@@ -157,7 +172,7 @@ Then(
 );
 
 Then(
-  'the parent should see the practice on {string} as TIME TBD',
+  'the coach should see the practice on {string} as TIME TBD',
   async ({ page }, date: string) => {
     const text = new RegExp(`^Time TBD on ${await longDate(page, date)}: .+`);
     await expect(page.getByText(text)).toBeVisible({ timeout: 15000 });

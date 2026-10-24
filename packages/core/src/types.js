@@ -15,9 +15,10 @@
  * @property {string} id - UUID (matches Auth ID)
  * @property {string} email - User email
  * @property {string} full_name - Display name
- * @property {('admin'|'coach'|'player'|'parent')} role - Primary role in the org
+ * @property {('admin'|'coach'|'staff'|'tenant_admin')} role - Primary role in the org (no
+ *   parent or player since 20261024010000)
  * @property {string} organization_id - UUID of the organization they belong to
- * @property {string} [team_id] - UUID of the team (if player/coach)
+ * @property {string} [team_id] - UUID of the team (if coach)
  * @property {string} created_at - ISO timestamp
  */
 

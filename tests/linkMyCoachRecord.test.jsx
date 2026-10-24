@@ -63,8 +63,9 @@ describe('the mock link_my_coach_record', () => {
 });
 
 describe('OrganizationContext', () => {
-  // The provider links both identities before it loads the organizations:
-  // the coach record (20261020040000) and the guardian's players (20261021010000).
+  // The provider links the coach record (20261020040000) before it loads the
+  // organizations. It no longer calls link_my_guardian_records: the guardian
+  // link went with the guardian view (20261024010000, R3).
   const callsOf = (name) => mocks.rpc.mock.calls.filter(([rpcName]) => rpcName === name).length;
 
   async function setup(rpcImpl) {
@@ -127,8 +128,8 @@ describe('OrganizationContext', () => {
     await waitFor(() => expect(order).toContain('orgs'));
     expect(order.lastIndexOf('link-done')).toBeLessThan(order.indexOf('orgs'));
     expect(callsOf('link_my_coach_record')).toBe(1);
-    expect(callsOf('link_my_guardian_records')).toBe(1);
-    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(callsOf('link_my_guardian_records')).toBe(0);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it('links again when the organizations are refetched (a redeemed invite), and survives a failure', async () => {
@@ -161,24 +162,16 @@ describe('OrganizationContext', () => {
       expect.any(Error)
     );
     expect(callsOf('link_my_coach_record')).toBe(1);
-    expect(callsOf('link_my_guardian_records')).toBe(1);
     act(() => probe.refetch());
     await waitFor(() => expect(callsOf('link_my_coach_record')).toBe(2));
-    await waitFor(() => expect(callsOf('link_my_guardian_records')).toBe(2));
+    expect(callsOf('link_my_guardian_records')).toBe(0);
   });
 
-  it('loads the organizations when the guardian link fails, and logs it', async () => {
-    const { order, errorSpy, OrganizationProvider } = await setup(async () => ({
+  it('loads the organizations having called no guardian link', async () => {
+    const { order, OrganizationProvider } = await setup(async () => ({
       data: { status: 'no_match' },
       error: null,
     }));
-    const base = mocks.rpc.getMockImplementation();
-    mocks.rpc.mockImplementation(async (name) => {
-      if (name === 'link_my_guardian_records') {
-        return { data: null, error: { message: 'boom', code: 'XX000' } };
-      }
-      return base(name);
-    });
     mocks.user = { id: 'user-1' };
     render(
       <OrganizationProvider>
@@ -186,9 +179,6 @@ describe('OrganizationContext', () => {
       </OrganizationProvider>
     );
     await waitFor(() => expect(order).toContain('orgs'));
-    expect(errorSpy).toHaveBeenCalledWith(
-      'Could not link this account to its players',
-      expect.objectContaining({ message: 'boom' })
-    );
+    expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual(['link_my_coach_record']);
   });
 });

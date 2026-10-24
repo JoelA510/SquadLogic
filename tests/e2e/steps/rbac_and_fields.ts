@@ -296,56 +296,10 @@ Then(
   }
 );
 
-const readOnlyRouteState: {
-  teamRedirected: boolean;
-  practiceControlsHidden: boolean;
-  gameControlsHidden: boolean;
-} = {
-  teamRedirected: false,
-  practiceControlsHidden: false,
-  gameControlsHidden: false,
-};
-
-When('I open the guarded team and schedule routes as a read-only user', async ({ page }) => {
-  readOnlyRouteState.teamRedirected = false;
-  readOnlyRouteState.practiceControlsHidden = false;
-  readOnlyRouteState.gameControlsHidden = false;
-
-  await page.goto('/teams');
-  await page.waitForURL((url) => url.pathname === '/', { timeout: 15000 });
-  readOnlyRouteState.teamRedirected = true;
-
-  await page.goto('/schedule/practice');
-  await expect(page.getByRole('heading', { name: /Practice Scheduling/i })).toBeVisible({
-    timeout: 15000,
-  });
-  await expect(
-    page.getByRole('button', { name: /Enter Manual Override|Save Assignments/i })
-  ).toBeHidden();
-  await expect(
-    page.getByRole('button', { name: /Run auto-scheduler optimization/i })
-  ).toBeDisabled();
-  readOnlyRouteState.practiceControlsHidden = true;
-
-  await page.goto('/schedule/game');
-  await expect(page.getByRole('heading', { name: /Game Scheduling/i })).toBeVisible({
-    timeout: 15000,
-  });
-  await expect(page.getByRole('button', { name: /Quick Adjust|Commit Changes/i })).toBeHidden();
-  await expect(
-    page.getByRole('button', { name: /Run auto-scheduler optimization/i })
-  ).toBeDisabled();
-  readOnlyRouteState.gameControlsHidden = true;
-});
-
-Then('Team Management should redirect the read-only user to the Dashboard', async () => {
-  expect(readOnlyRouteState.teamRedirected).toBe(true);
-});
-
-Then('Practice and Game Scheduling should not expose edit or apply controls', async () => {
-  expect(readOnlyRouteState.practiceControlsHidden).toBe(true);
-  expect(readOnlyRouteState.gameControlsHidden).toBe(true);
-});
+// The read-only user's route checks went with the parent persona (R3,
+// 20261024010000): no remaining role is read-only. A coach becomes one when R6
+// takes MANAGE_SCHEDULE from coaches (docs/changes/2026-10-22-admin-focus.md),
+// and that PR brings the scenario back as the coach's.
 
 // ────────────────────────────────────────────────────────────
 // Field Management steps (shared with field_management_efficiency.feature)

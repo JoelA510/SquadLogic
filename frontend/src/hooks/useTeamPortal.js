@@ -89,10 +89,10 @@ export function useTeamPortal(teamId) {
       if (teamError) throw teamError;
       setTeam(teamData);
 
-      // 2. Fetch Roster. Through the server-side read (20261021010000), which
-      // applies the Phase A access table: names and jersey number for an admin,
-      // a current coach or a guardian on the team; guardian contacts per role
-      // and league setting; balance fields to admins only. A caller it does not
+      // 2. Fetch Roster. Through the server-side read (20261021010000, without
+      // the guardian since 20261024010000): names and jersey number for an
+      // admin or a current coach of the team; guardian contacts and balance
+      // fields to admins only. A caller it does not
       // admit gets 42501: the roster tab says so, and the rest of the page
       // (the schedule) still loads, as it reads tables every member can.
       const { data: rosterRows, error: rosterError } = await supabase.rpc('get_team_roster', {
@@ -110,10 +110,6 @@ export function useTeamPortal(teamId) {
         setRosterUnavailable(null);
       }
 
-      // Declared, not read: the rows still carry `is_my_child` (the guardian
-      // arm of get_team_roster). Its one reader, the RSVP list, went with RSVP
-      // (R2); the field goes with the guardian arms in R3
-      // (docs/changes/2026-10-22-admin-focus.md).
       // Deduplicate roster by player ID to prevent React key collisions
       const uniqueRoster = [];
       const seenIds = new Set();

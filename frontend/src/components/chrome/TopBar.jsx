@@ -116,7 +116,8 @@ export default function TopBar({ onToggleNav = undefined }) {
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
-  // Role-preview targets (one coach + one parent profile), fetched for admins.
+  // Role-preview target (one coach profile), fetched for admins. There is no
+  // parent view to preview since 20261024010000 (R3).
   const orgId = currentOrganization?.id;
   useEffect(() => {
     if (!isAdmin || !orgId) return undefined;
@@ -127,14 +128,10 @@ export default function TopBar({ onToggleNav = undefined }) {
           .from('profiles')
           .select('id, email, first_name, last_name, full_name, role, organization_id')
           .eq('organization_id', orgId)
-          .in('role', ['coach', 'parent']);
+          .eq('role', 'coach');
         if (error || cancelled) return;
-        const targets = [];
         const coach = (data || []).find((profile) => profile.role === 'coach');
-        const parent = (data || []).find((profile) => profile.role === 'parent');
-        if (coach) targets.push(coach);
-        if (parent) targets.push(parent);
-        setPreviewTargets(targets);
+        setPreviewTargets(coach ? [coach] : []);
       } catch {
         /* preview is optional — ignore fetch failures */
       }
@@ -181,14 +178,11 @@ export default function TopBar({ onToggleNav = undefined }) {
     ...(isAdmin && previewTargets.length > 0
       ? previewTargets.map((profile) => ({
           id: `preview-${profile.id}`,
-          label: `Preview as ${profile.role === 'coach' ? 'Coach' : 'Parent'}`,
-          icon: profile.role === 'coach' ? UserRoundCheck : User,
+          label: 'Preview as Coach',
+          icon: UserRoundCheck,
           onSelect: () =>
             impersonateUser(profile, { orgRole: orgMember?.role }).catch(() => {
-              toast(
-                `Could not start the preview as ${profile.role === 'coach' ? 'a coach' : 'a parent'}. Try again.`,
-                'warning'
-              );
+              toast('Could not start the preview as a coach. Try again.', 'warning');
             }),
         }))
       : []),

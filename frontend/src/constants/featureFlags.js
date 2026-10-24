@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   BookUser,
   Clock,
-  Contact,
   History,
   Star,
   ThermometerSun,
@@ -51,11 +50,15 @@ export const FEATURE_FLAGS = {
   // Field heat-stress (WBGT) forecast; off unless an admin turns it on.
   HEAT_FORECAST: 'heat_forecast',
 
-  // League privacy settings (Phase A3), on unless an admin turns them off. The
-  // server-side reads check them (migration 20261021010000); the UI only
+  // League privacy setting (Phase A3), on unless an admin turns it off. The
+  // server-side read checks it (migration 20261021010000); the UI only
   // follows.
-  GUARDIAN_CONTACT_SHARING: 'guardian_contact_sharing',
   COACH_DIRECTORY: 'coach_directory',
+  // Retired with the guardian view (plan docs/changes/2026-10-22-admin-focus.md,
+  // R3; migration 20261024010000): nothing reads it and the settings page no
+  // longer offers it. The key stays so an organization that stored it still
+  // parses (skill squadlogic-feature-guardians, "Retiring").
+  GUARDIAN_CONTACT_SHARING: 'guardian_contact_sharing',
 };
 
 /** String-valued org setting stored alongside the boolean flags. */
@@ -99,7 +102,6 @@ export const FEATURE_DEFAULTS = {
   [FEATURE_FLAGS.BUDDY_REQUESTS]: true,
   [FEATURE_FLAGS.COACHING_INTEREST]: true,
   [FEATURE_FLAGS.WAITLIST]: true,
-  [FEATURE_FLAGS.GUARDIAN_CONTACT_SHARING]: true,
   [FEATURE_FLAGS.COACH_DIRECTORY]: true,
   [GENDER_MODEL_KEY]: 'split',
   [BUDDY_RULE_KEY]: 'mutual',
@@ -153,14 +155,6 @@ export const FEATURE_CATALOG = [
     description:
       'Forecast field WBGT per venue and kickoff from the NWS forecast, banded by U.S. Soccer heat guidelines. Decision support; on-site readings govern.',
     icon: ThermometerSun,
-    column: false,
-  },
-  {
-    key: FEATURE_FLAGS.GUARDIAN_CONTACT_SHARING,
-    label: 'Teammate Contacts',
-    description:
-      "Guardians on a team see each teammate's primary guardian contact. Off: they see only their own children's.",
-    icon: Contact,
     column: false,
   },
   {

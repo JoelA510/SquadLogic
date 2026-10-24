@@ -70,7 +70,6 @@ beforeEach(() => {
         player_id: 'p-1',
         first_name: 'Pia',
         last_name: 'Able',
-        is_my_child: true,
         guardian_contacts: [
           { name: 'Gwen Able', email: 'gwen@example.test', phone: '555-0201' },
           { name: 'Gus Able', email: 'gus@example.test' },
@@ -81,7 +80,6 @@ beforeEach(() => {
         player_id: 'p-2',
         first_name: 'Rex',
         last_name: 'Baker',
-        is_my_child: false,
         guardian_contacts: [{ name: 'Rhea Baker', email: 'rhea@example.test' }],
       },
       {
@@ -89,7 +87,6 @@ beforeEach(() => {
         player_id: 'p-3',
         first_name: 'Quinn',
         last_name: 'Cole',
-        is_my_child: false,
         guardian_contacts: [],
       },
     ],

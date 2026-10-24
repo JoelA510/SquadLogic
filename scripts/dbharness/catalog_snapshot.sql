@@ -1,6 +1,6 @@
 -- The catalogue the drift check compares: every `public` function signature,
--- every `public` trigger and a digest of every `public` RLS policy, as one JSON
--- document. READ-ONLY: one SELECT against the system catalogues, nothing else.
+-- every `public` trigger, a digest of every `public` RLS policy and the shape of
+-- every `public` view, as one JSON document. READ-ONLY: one SELECT against the system catalogues, nothing else.
 --
 -- Two readers, one query, so the two cannot drift apart:
 --   * scripts/dbharness/run.sh runs it on the fresh build and compares the
@@ -20,7 +20,18 @@
 --     changes no behaviour. A signature, a trigger and a policy's expression are
 --     what the drift of 2026-10 was made of; body drift is recorded as a gap in
 --     the remediation plan;
---   * internal (constraint) triggers, and anything outside `public`.
+--   * internal (constraint) triggers, and anything outside `public`;
+--   * a view's text and grants. A view is its name, kind, sorted options
+--     (`security_invoker` among them; a boolean spelled on/yes/1 or off/no/0
+--     reads as true or false, since the catalogue keeps the spelling a
+--     migration used: production's import_efficiency_metrics has `=on`) and
+--     typed columns in order: a view's text is re-deparsed by each
+--     PostgreSQL version, so its hash would report drift between the
+--     harness's server and production's that changes no behaviour, and grants follow each database's default privileges, which
+--     the function and policy entries leave out too. Production lacked
+--     `view_org_metrics` and `view_league_standings` for months with nothing
+--     noticing (schema-drift-2026-10.md, section 7): presence and columns are
+--     what that drift was made of.
 --
 -- Names print relative to the session's search_path (pg_get_triggerdef, the
 -- argument types): both the harness and Supabase have `public` on it, and
@@ -71,5 +82,28 @@ SELECT jsonb_build_object(
                           md5(COALESCE(pp.qual, '') || '#' || COALESCE(pp.with_check, ''))) AS pol
               FROM pg_policies pp
              WHERE pp.schemaname = 'public'
-          ) po), '[]'::jsonb)
+          ) po), '[]'::jsonb),
+    'views', COALESCE((
+        SELECT jsonb_agg(v ORDER BY v COLLATE "C")
+          FROM (
+            SELECT format('%s|%s|%s|%s',
+                          c.relname,
+                          c.relkind,
+                          COALESCE((SELECT string_agg(o, ',' ORDER BY o COLLATE "C")
+                                      FROM (SELECT regexp_replace(regexp_replace(lower(r), '=(on|yes|1)$', '=true'),
+                                                                  '=(off|no|0)$', '=false') AS o
+                                              FROM unnest(c.reloptions) r) ro), ''),
+                          (SELECT string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ' ORDER BY a.attnum)
+                             FROM pg_attribute a
+                            WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped)) AS v
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public'
+               AND c.relkind IN ('v', 'm')
+               AND NOT EXISTS (
+                   SELECT 1 FROM pg_depend d
+                    WHERE d.classid = 'pg_catalog.pg_class'::regclass
+                      AND d.objid = c.oid
+                      AND d.deptype = 'e')
+          ) vw), '[]'::jsonb)
 )::text AS catalog

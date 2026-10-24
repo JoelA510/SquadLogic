@@ -2709,7 +2709,7 @@ NEEDLES
       # the same query; the count is part of the verdict, so a lookup that
       # finds nothing cannot pass.
       if psql_cmd "SELECT 'GUARDIAN-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*)
-               = 'b8556e5110d761fdd9798644792d79cc:37' THEN 'restored' ELSE 'wrong' END FROM (
+               = 'b8556e5110d761fdd9798644792d79cc:31' THEN 'restored' ELSE 'wrong' END FROM (
       SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
              || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
              || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)

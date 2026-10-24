@@ -4337,8 +4337,10 @@ plant "M41 the member role check keeps parent" "$M41" \
   "smoke 20261024010000"
 
 plant "M41 create_org_invite accepts a parent" "$M41" \
-  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'staff') THEN" \
-  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'parent', 'staff') THEN" \
+  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'staff') THEN
+    RAISE EXCEPTION 'Invalid role: %'" \
+  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'parent', 'staff') THEN
+    RAISE EXCEPTION 'Invalid role: %'" \
   "smoke 20261024010000"
 
 plant "R41 the revert leaves the guardian link policy out" "$R41" \

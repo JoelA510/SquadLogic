@@ -36,7 +36,10 @@ export const ELIGIBILITY_GOLDEN = 'tests/fixtures/teamGenerationEligibility.gold
 
 const SEASON = 2026;
 
-/** A generator player as the page's pipeline emits it (placeholder names only). */
+/**
+ * A generator player as the page's pipeline emits it (placeholder names only).
+ * @returns {any}
+ */
 function annotated(id, division, extra = {}) {
   return { id, division, firstName: 'Player', lastName: id, name: `Player ${id}`, ...extra };
 }
@@ -187,7 +190,10 @@ function reviewRerunScenario() {
   };
 }
 
-/** The golden's scenarios, by name; the test builds the same ones. */
+/**
+ * The golden's scenarios, by name; the test builds the same ones.
+ * @returns {Record<string, any>}
+ */
 export function eligibilityGoldenScenarios() {
   return {
     freshAnnotated: freshAnnotatedScenario(),

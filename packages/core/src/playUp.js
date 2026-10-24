@@ -32,6 +32,23 @@ export const PLACEMENT = Object.freeze({
   UNKNOWN: 'unknown',
 });
 
+/** The placements that keep a player off every roster; `unknown` flags, never blocks. */
+const BLOCKING_PLACEMENTS = new Set(
+  /** @type {string[]} */ ([PLACEMENT.PLAY_UP_BLOCKED, PLACEMENT.PLAY_DOWN_BLOCKED])
+);
+
+/**
+ * Is a player's placement one the generator must not seat (Phase B2)? Only an unsanctioned
+ * play-up or a play-down, as `applyPlayUpEligibility` annotates them. A player with no natural
+ * age, or no annotation at all, is not blocked (owner decision 3).
+ *
+ * @param {any} player - a generator player (`placement` from `applyPlayUpEligibility`)
+ * @returns {boolean}
+ */
+export function isEligibilityBlocked(player) {
+  return BLOCKING_PLACEMENTS.has(player?.placement);
+}
+
 const TRUTHY = new Set(['true', 'yes', 'y', '1', 't']);
 
 function isTruthy(value) {

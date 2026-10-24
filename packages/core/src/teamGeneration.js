@@ -13,6 +13,7 @@ import { buildAssignmentUnits, calculateUnitSkill } from './assignmentUnits.js';
 import { reconcileTeamDeltas } from './teamDelta.js';
 import { getCanonicalBuddyId } from './buddyLinking.js';
 import { applyCoachContinuity } from './coachContinuity.js';
+import { isEligibilityBlocked } from './playUp.js';
 
 /** @typedef {import('./types.js').Player} Player */
 /** @typedef {import('./types.js').Team} Team */
@@ -40,6 +41,13 @@ import { applyCoachContinuity } from './coachContinuity.js';
  *     `allowHouseholdCoachReplacement` (default false), `allowLateCoachAttachToChildTeam`
  *     (default true), `allowAssistantShellCreation` (default false — assistant-only late units
  *     backfill existing teams or place as general units instead of creating shells).
+ *
+ * Eligibility (Phase B2): a player whose `placement` is `play_up_blocked` or `play_down_blocked`
+ * (`isEligibilityBlocked`, playUp.js) is never seated. They leave the pool before the team count
+ * and coach anchors are computed and are in `overflowByDivision` with reason
+ * `eligibility-blocked`, one entry per player, metadata `{ placement, reviewReason, naturalAge,
+ * coachId }`; a mutual buddy is placed alone (`buddy-not-placed`). A blocked player already on a
+ * preserved roster stays there and is listed in `changeDiagnosticsByDivision[div].eligibilityHolds`.
  * @returns {{
  *   teamsByDivision: Record<string, Array<Team>>,
  *   overflowByDivision: Record<string, Array<{ players: Array<Player>, reason: string, metadata?: Object }>>,
@@ -552,6 +560,16 @@ export function generateTeams({
         capacityViolations,
         minRosterWarnings: teamsBelowMinRoster ?? [],
         structuralWarnings,
+        // A blocked player seated on a final roster: only a preserved one can be (late blocked
+        // players overflow), and they stay (owner decision 3), listed for the admin.
+        eligibilityHolds: teams.flatMap((team) =>
+          team.players.filter(isEligibilityBlocked).map((player) => ({
+            playerId: player.id,
+            teamId: team.id,
+            placement: player.placement,
+            reviewReason: player.reviewReason ?? null,
+          }))
+        ),
       };
     }
   }
@@ -714,6 +732,11 @@ function buildTeamsForDivision({
     });
   }
 
+  // Blocked players leave the pool before anything is counted or anchored: they add no team,
+  // a blocked coach's child anchors none, and each is in overflow with the reason.
+  const blocked = separateEligibilityBlocked(players);
+  players = blocked.eligible;
+
   const coachIds = Array.from(
     new Set(players.filter((player) => player.coachId).map((player) => player.coachId))
   );
@@ -733,7 +756,8 @@ function buildTeamsForDivision({
   const teams = [];
   let teamIndex = 0;
 
-  const overflow = [];
+  /** @type {Array<{ players: Array<Player>, reason: string, metadata?: Object }>} */
+  const overflow = [...blocked.overflow];
 
   const createTeam = (coachId = null) => {
     if (maxTeams && teams.length >= maxTeams) {
@@ -757,6 +781,7 @@ function buildTeamsForDivision({
   }
 
   const { units, buddyDiagnostics } = buildAssignmentUnits(players);
+  relabelBlockedBuddyRequests(buddyDiagnostics, blocked.blockedPlayers);
   const coachUnits = [];
   const generalUnits = [];
 
@@ -900,13 +925,16 @@ function buildTeamsForDivisionIncremental({
 }) {
   const {
     preservedTeams,
-    latePlayers,
+    latePlayers: incomingLatePlayers,
     teamCountPolicy,
     allowOverCapAssignments,
     allowAssistantShellCreation,
   } = incremental;
   const { maxTeams } = rosterConstraints;
   const allowTeamCreation = teamCountPolicy === 'preserve-or-expand';
+  // A blocked late player is never placed; a blocked preserved player stays (eligibilityHolds).
+  const blocked = separateEligibilityBlocked(incomingLatePlayers);
+  const latePlayers = blocked.eligible;
   const effectiveMaxRosterSize = allowOverCapAssignments ? Number.MAX_SAFE_INTEGER : maxRosterSize;
 
   const teams = preservedTeams.map((team, index) => ({
@@ -936,7 +964,8 @@ function buildTeamsForDivisionIncremental({
     }
   }
 
-  const overflow = [];
+  /** @type {Array<{ players: Array<Player>, reason: string, metadata?: Object }>} */
+  const overflow = [...blocked.overflow];
   let teamIndex = teams.length;
 
   const createTeam = (coachId = null) => {
@@ -959,6 +988,7 @@ function buildTeamsForDivisionIncremental({
   };
 
   const { units, buddyDiagnostics } = buildAssignmentUnits(latePlayers);
+  relabelBlockedBuddyRequests(buddyDiagnostics, blocked.blockedPlayers);
   const coachUnits = [];
   const targetedBuddyUnits = [];
   const generalUnits = [];
@@ -1191,13 +1221,59 @@ function buildTeamsForDivisionIncremental({
   const incrementalStats = {
     existingTeamsPreserved: preservedTeams.length,
     newTeamsCreated: teams.length - preservedTeams.length,
-    latePlayersAssigned: latePlayers.length - latePlayersOverflowed,
+    latePlayersAssigned: incomingLatePlayers.length - latePlayersOverflowed,
     latePlayersOverflowed,
     buddyTargetAssignments,
     assistantBackfills,
   };
 
   return { teams, overflow, buddyDiagnostics, incrementalStats };
+}
+
+/**
+ * Split a division's unplaced players into those the generator may seat and those whose
+ * eligibility is blocked (Phase B2), each blocked one an overflow entry of its own, in input
+ * order. With nobody blocked, `eligible` holds the same players in the same order.
+ * @param {Array<Player>} players
+ */
+function separateEligibilityBlocked(players) {
+  const eligible = [];
+  const blockedPlayers = [];
+  for (const player of players) {
+    (isEligibilityBlocked(player) ? blockedPlayers : eligible).push(player);
+  }
+  const overflow = blockedPlayers.map((player) => {
+    const annotated = /** @type {any} */ (player);
+    return {
+      players: [player],
+      reason: TEAM_GENERATION.REASON_EligibilityBlocked,
+      metadata: {
+        placement: annotated.placement,
+        reviewReason: annotated.reviewReason ?? null,
+        naturalAge: Number.isFinite(annotated.naturalAge) ? annotated.naturalAge : null,
+        coachId: player.coachId ?? null,
+      },
+    };
+  });
+  return { eligible, blockedPlayers, overflow };
+}
+
+/**
+ * The unit builder only sees eligible players, so a request naming a blocked player reads as
+ * `missing-player`. Say what it is instead: `buddy-not-placed` for a mutual buddy (placed
+ * alone), and `not-reciprocated`, as before B2, for a one-way request. Matches ids as the unit
+ * builder does (strictly).
+ * @param {{ unmatchedRequests: Array<{ playerId: string, requestedBuddyId: string, reason: string }> }} buddyDiagnostics
+ * @param {Array<Player>} blockedPlayers
+ */
+function relabelBlockedBuddyRequests(buddyDiagnostics, blockedPlayers) {
+  if (blockedPlayers.length === 0) return;
+  const blockedById = new Map(blockedPlayers.map((player) => [player.id, player]));
+  for (const entry of buddyDiagnostics.unmatchedRequests) {
+    const target = blockedById.get(entry.requestedBuddyId);
+    if (entry.reason !== 'missing-player' || !target) continue;
+    entry.reason = target.buddyId === entry.playerId ? 'buddy-not-placed' : 'not-reciprocated';
+  }
 }
 
 /**

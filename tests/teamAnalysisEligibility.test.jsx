@@ -234,5 +234,8 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
     expect(results.overflowByDivision.U10.map((e) => e.reason)).not.toContain(
       'eligibility-blocked'
     );
+    // Conservation, enumerated from the import: the two late players are seated or not placed.
+    const seated = results.team_players.map((tp) => tp.player_id);
+    expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
   });
 });

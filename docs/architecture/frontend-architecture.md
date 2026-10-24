@@ -17,7 +17,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 
 | Route                   | Page Component             | Description                                                     |
 | ----------------------- | -------------------------- | --------------------------------------------------------------- |
-| `/`                     | `DashboardPage`            | Role-scoped Home (admin KPIs/setup card; coach & parent views)  |
+| `/`                     | `DashboardPage`            | Role-scoped Home (admin KPIs/setup card; coach view)            |
 | `/import`               | `ImportPage`               | GotSport CSV data ingestion with validation                     |
 | `/teams`                | `TeamAnalysisPage`         | Roster generation, analysis, drag-and-drop overrides            |
 | `/fields`               | `FieldManagementPage`      | Venue/field/blackout date CRUD with weekly grid                 |

@@ -7,15 +7,19 @@ This document describes the **implemented** Row Level Security (RLS) strategy fo
 
 ## Roles & Auth Model
 
-SquadLogic uses Supabase Auth with five logical roles stored in the `organization_members` table:
+SquadLogic uses Supabase Auth with the organization roles stored in the `organization_members`
+table (`organization_members_role_check`):
 
 | Role     | Description                                                                              |
 | -------- | ---------------------------------------------------------------------------------------- |
 | `admin`  | Full access to all organization data. Can manage users, import data, and run schedulers. |
 | `coach`  | View team data they are assigned to.                                                     |
-| `player` | Limited access to own team data and schedule views.                                      |
-| `parent` | View child's team schedule and public calendar feeds.                                    |
 | `staff`  | An admin: `is_org_admin()` admits staff since `20261020030000`.                          |
+
+`tenant_admin` is also an admin to `is_org_admin()`, and is never invited or assigned. There is no
+`parent` or `player` role since `20261024010000` (the guardian view was removed; plan
+`docs/changes/2026-10-22-admin-focus.md`, R3): both role checks, `create_org_invite` and
+`admin_change_member_role` refuse them.
 
 Roles are defined in `frontend/src/constants/permissions.js` and enforced via:
 
@@ -40,8 +44,8 @@ $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 A table that members read and admins write follows this shape (`players` as it stood from the
 rewrite `20261018030000_rls_advisor_rewrite.sql`, which split the admin `FOR ALL` policy by command,
-until `20261021020000` narrowed its read to admins and the player's guardians; `teams` still has a
-member read):
+until `20261021020000` narrowed its read to admins and the player's guardians, and
+`20261024010000` to admins; `teams` still has a member read):
 
 ```sql
 -- Members read: one SELECT policy, the only one a SELECT evaluates.
@@ -112,7 +116,7 @@ that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_s
 
 | Function                       | Admits                                                         | Returns                                                                                                                                                                                                                                          |
 | ------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `get_team_roster(team)`        | admins, staff; a current coach of the team; a guardian on it   | names, jersey number; guardian contacts in full to admins, staff, the coach and a player's own guardians, a teammate's primary contact to other guardians unless `guardian_contact_sharing` is off; balance fields to admins and staff only |
+| `get_team_roster(team)`        | admins, staff; a current coach of the team                     | names and jersey number; guardian contacts (as imported) and balance fields to admins and staff only (since `20261024010000`: a coach reads names only) |
 | `get_team_staff(team)`         | the same                                                       | every current coach's name, role, phone and email                                                                                                                                                                                              |
 | `get_coach_directory(org)`     | admins, staff; a current coach while `coach_directory` is on   | every current coach's contact details                                                                                                                                                                                                            |
 | `get_my_coached_team_ids(org)` | any member                                                     | the teams the caller currently coaches                                                                                                                                                                                                           |
@@ -120,21 +124,22 @@ that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_s
 
 "Current coach" is a `team_coach_assignments` row of the caller's linked coach (`coaches.user_id`,
 set by `link_my_coach_record()`) whose inclusive window holds today in the team's season timezone
-(`team_local_today()`, UTC when unset). "Guardian" is a `profile_players` link, written by
-`link_my_guardian_records()` from a matching verified email (and by in-app registration until
-`20261022020000` removed it); the link keeps
-the imported address it matched (`profile_players.matched_email`). A refused call
+(`team_local_today()`, UTC when unset). There is no guardian since `20261024010000`, which
+dropped `profile_players`, `link_my_guardian_records()`, `is_team_guardian()` and
+`guardian_contacts_view()` and retired the `guardian_contact_sharing` setting. A refused call
 raises 42501, the same for a team that does not exist. A user's contact card
 (`profiles.contact_phone`, `contact_email`, `share_contact`, written only by
 `set_my_contact_card()`) replaces imported details wherever these functions return them; an
 unshared card returns none.
 
 Since `20261021020000` (A3b) those functions are the only non-admin path. A member who is not an
-admin or staff reads `players` and `team_players` only for their own children (and only while a
-member of the child's organization), `coaches` and `team_coach_assignments` only for their own
-coach record (again only while a member), `profile_players` only their own links (the same), and `staging_players` and
-`staging_import_rows` not at all. A team's calendar feed token lives in `team_calendar_tokens`,
-readable by admins and staff, the team's current coaches and its guardians;
+admin or staff reads `coaches` and `team_coach_assignments` only for their own coach record (only
+while a member), and `staging_players` and `staging_import_rows` not at all. Since
+`20261024010000`, `players` and `team_players` are read by admins and staff only
+(`players_select_admin`, `team_players_select_admin`; until then a guardian read their own
+children): row security chooses rows, not columns, so a coach reads their team's players'
+names through `get_team_roster` instead. A team's calendar feed token lives in
+`team_calendar_tokens`, readable by admins and staff and the team's current coaches;
 `rotate_calendar_token` admits admins, staff and a current coach. `update_game_score` admits admins
 and staff for any game and anyone else only for a game of a team they currently coach. The
 migration refuses to commit if any other `SELECT` or `ALL` policy is left on one of these tables,
@@ -152,7 +157,7 @@ Every data table has a direct `organization_id` column (either native or backfil
 | **Teams & Rosters** | `teams`, `team_players`                                                                                   | Direct `organization_id`                            |
 | **Facilities**      | `locations`, `fields`, `field_subunits`                                                                   | Direct `organization_id`                            |
 | **Scheduling**      | `practice_slots`, `game_slots`, `practice_assignments`, `games`                                           | Direct `organization_id`                            |
-| **Communication**   | `profile_players` (`event_rsvps` and `team_messages` dropped by `20261022030000`)                         | Direct `organization_id`                            |
+| **Communication**   | none (`event_rsvps` and `team_messages` dropped by `20261022030000`, `profile_players` by `20261024010000`) | Direct `organization_id`                            |
 | **Evaluation**      | `scheduler_runs`, `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, `evaluation_run_events` | Direct `organization_id`                            |
 | **Exports & Logs**  | `export_jobs`, `email_log`, `audit_log`                                                                   | Direct `organization_id`                            |
 | **Staging**         | `staging_players`, `player_buddies`                                                                       | Direct `organization_id`                            |

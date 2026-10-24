@@ -452,16 +452,25 @@ gives CI a production credential.
 **In the harness, on every pull request that touches `supabase/`.**
 [`supabase/catalog-snapshot.json`](../../supabase/catalog-snapshot.json) is the
 fresh build's catalogue: every `public` function signature, every `public`
-trigger (`pg_get_triggerdef`) and a digest of every `public` policy, as read by
+trigger (`pg_get_triggerdef`), a digest of every `public` policy, and every
+`public` view's name, kind, options and typed columns, as read by
 [`scripts/dbharness/catalog_snapshot.sql`](../../scripts/dbharness/catalog_snapshot.sql).
 The harness reads the same catalogue off the database it built to head, before
 the smokes run, and prints `FAIL catalog snapshot` with every entry only one
 side has if they differ. A migration that adds, drops or re-signs a function, a
-trigger or a policy therefore updates the snapshot in the same pull request:
+trigger, a policy or a view therefore updates the snapshot in the same pull
+request:
 
 ```bash
 sudo HARNESS_WRITE_CATALOG_SNAPSHOT=1 bash scripts/dbharness/run.sh   # rewrites the file and fails; review, commit, run again
 ```
+
+View text and grants are not compared either: PostgreSQL re-deparses a view's
+text differently from version to version (the harness runs 16, production 17),
+and grants follow each database's default privileges. A boolean option reads
+the same however a migration spelled it (`security_invoker=on` is `=true`).
+Views were added on 2026-10-24, after production was found lacking two that
+every fresh build has (`docs/operations/schema-drift-2026-10.md`, section 7).
 
 Function bodies are not compared (production's early bodies were applied from
 other texts than the repository's: LF where some files have CRLF, and at least
@@ -480,8 +489,8 @@ catalogues and writes nothing):
 python3 scripts/dbharness/catalog_snapshot.py compare-sql supabase/catalog-snapshot.json > /tmp/catalog-compare.sql
 ```
 
-Production matches when the only rows are the three `count` rows (`functions`,
-`policies`, `triggers`). A `search_path` row means the session lacks `public` on
+Production matches when the only rows are the four `count` rows (`functions`,
+`policies`, `triggers`, `views`). A `search_path` row means the session lacks `public` on
 its search path, so names print qualified; run it from a default session. An `only_in_database` row is an object production has
 and the repository does not build; an `only_in_snapshot` row carries a key,
 which `python3 scripts/dbharness/catalog_snapshot.py name supabase/catalog-snapshot.json <key>`
@@ -490,8 +499,13 @@ migration, never by hand. Measured on 2026-10-18, before `20261018030000` and
 `20261018060000` deployed: the 29 objects `20261018060000` drops (17 triggers,
 12 functions) were `only_in_database`, and the policies differed by exactly
 the RLS rewrite (28 old policies `only_in_database`, 65 new ones
-`only_in_snapshot`); nothing else differed. Once both have deployed, expect only
-the three `count` rows (133, 119, 35).
+`only_in_snapshot`); nothing else differed. Measured on 2026-10-24 at
+`20261023010000` (145 functions, 113 policies, 33 triggers, 4 views): every
+function, policy and trigger matches, and two views are `only_in_snapshot`,
+`coach_team_map` and `view_facility_usage`, which every fresh build creates and
+production never had. Nothing in the app reads either (schema-drift-2026-10.md,
+section 7); until a migration settles them, expect those two rows besides the
+four `count` rows.
 
 ## Real-backend E2E (`e2e-real-backend.yml`)
 

@@ -406,3 +406,15 @@ touches the snapshot query, its Python checker and floors, its test and the
 operator runbook, and a definition digest would need the same care as function
 bodies (`pg_get_viewdef` text can differ between PostgreSQL versions), so it is
 left to its own change.
+
+**Views in the snapshot, 2026-10-24.** The snapshot now has a `views` section:
+each `public` view's name, kind, sorted options (a boolean however spelled reads
+as `true` or `false`) and typed columns in order, not its text or grants, for
+the reason above. The operator query against production at `20261023010000`
+(_executed_, read-only) matches on every function, policy and trigger, and
+reports two views `only_in_snapshot`: `view_facility_usage` (above) and
+`coach_team_map`, which this addendum missed. A fresh build has had it since
+`20251208000000_consolidated_schema.sql`; nothing in `frontend/src`,
+`supabase/functions` or `packages` reads it. Whether to drop both from the
+build or create them in production is the owner's call (AGENTS.md rule 14);
+until then the operator check expects those two rows.

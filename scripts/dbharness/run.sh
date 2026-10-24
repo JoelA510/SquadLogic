@@ -276,10 +276,10 @@ STATUS=0
 # and nothing compared the two: 17 triggers and a function overload lived only
 # in production and three orphan functions only here, one of those triggers
 # deleting data (docs/operations/schema-drift-2026-10.md). The snapshot is this
-# build's catalogue -- every `public` function signature, trigger and policy
-# digest, read by scripts/dbharness/catalog_snapshot.sql -- so a migration that
-# changes the catalogue fails here until it updates the snapshot in the same
-# pull request, and the operator query in docs/operations/ci-cd.md
+# build's catalogue -- every `public` function signature, trigger, policy
+# digest and view shape, read by scripts/dbharness/catalog_snapshot.sql -- so a
+# migration that changes the catalogue fails here until it updates the snapshot
+# in the same pull request, and the operator query in docs/operations/ci-cd.md
 # ("Catalogue drift check") compares production with the same file.
 #
 # It runs on the database built to head and BEFORE the smokes: a smoke may
@@ -318,7 +318,7 @@ else
   elif [ "$v_cat_rc" -eq 1 ]; then
     echo "FAIL catalog snapshot: the fresh build's catalogue differs from supabase/catalog-snapshot.json"
     dump 60 $SCRATCH/catalog_diff
-    echo "    A migration that changes a public function signature, trigger or policy updates the snapshot"
+    echo "    A migration that changes a public function signature, trigger, policy or view updates the snapshot"
     echo "    in the same pull request: HARNESS_WRITE_CATALOG_SNAPSHOT=1 sudo bash scripts/dbharness/run.sh"
     STATUS=1
   else

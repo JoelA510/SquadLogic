@@ -318,7 +318,7 @@ else
   elif [ "$v_cat_rc" -eq 1 ]; then
     echo "FAIL catalog snapshot: the fresh build's catalogue differs from supabase/catalog-snapshot.json"
     dump 60 $SCRATCH/catalog_diff
-    echo "    A migration that changes a public function signature, trigger or policy updates the snapshot"
+    echo "    A migration that changes a public function signature, trigger, policy or view updates the snapshot"
     echo "    in the same pull request: HARNESS_WRITE_CATALOG_SNAPSHOT=1 sudo bash scripts/dbharness/run.sh"
     STATUS=1
   else

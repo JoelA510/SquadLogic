@@ -56,12 +56,18 @@ describe('no player blocked: the output is the golden from main, byte for byte',
       ];
       expect(seen.sort()).toEqual(scenario.players.map((player) => player.id).sort());
 
-      // B2's one new key on a rerun: present, and empty when nobody is blocked.
-      for (const changes of Object.values(output.changeDiagnosticsByDivision ?? {})) {
-        if ('eligibilityHolds' in changes) {
+      // B2's one new key on a rerun: present on every incremental division, and empty when
+      // nobody is blocked; absent from a fresh run (no change diagnostics at all).
+      if (scenario.existingSnapshot) {
+        const divisions = Object.keys(output.changeDiagnosticsByDivision);
+        expect(divisions.length).toBeGreaterThan(0);
+        for (const division of divisions) {
+          const changes = output.changeDiagnosticsByDivision[division];
           expect(changes.eligibilityHolds).toEqual([]);
           delete changes.eligibilityHolds;
         }
+      } else {
+        expect(output.changeDiagnosticsByDivision).toBeUndefined();
       }
       expect(JSON.stringify(output)).toBe(JSON.stringify(golden));
     });
@@ -417,5 +423,64 @@ describe('incremental generation: a rostered blocked player stays and is listed'
     expect(result.changeDiagnosticsByDivision.U12.eligibilityHolds).toEqual([]);
     expect(result.changeDiagnosticsByDivision.U12.latePlayersOverflowed).toBe(1);
     expectConserved(result, u12, 'U12');
+  });
+});
+
+describe('review findings (B2)', () => {
+  it('a division where every player is blocked builds no empty teams', () => {
+    const input = ['d1', 'd2', 'd3'].map((id) => kid(id, PLAY_DOWN_DOB));
+    const result = generateTeams({
+      players: prepare(input),
+      divisionConfigs: { U10: { ...config('U10'), teamCountOverride: 3 } },
+      seed: 'b2',
+    });
+    expect(result.teamsByDivision.U10).toEqual([]);
+    expect(eligibilityEntries(result)).toHaveLength(3);
+    expectConserved(result, input);
+  });
+
+  it('a player remapBlocked moved to their natural division is placed there', () => {
+    // A multi-division flow may remap (prepareTeamingInput's remapBlocked: true): the moved
+    // player keeps the placement judged in the division they registered in.
+    const input = [
+      kid('moved', PLAY_DOWN_DOB),
+      ...fillers(3),
+      ...['a', 'b', 'c'].map((id) => ({ id: `u13-${id}`, division: 'U13', dob: PLAY_DOWN_DOB })),
+    ];
+    const players = prepareTeamingInput({
+      players: input,
+      divisions: [...U10, { id: 'U13', name: 'U13', min_age: 13, max_age: 13 }],
+      seasonYear: SEASON,
+      cutoffMode: 'birth_year',
+      remapBlocked: true,
+    }).players;
+    const moved = players.find((p) => p.id === 'moved');
+    expect(moved).toMatchObject({ division: 'U13', registeredDivision: 'U10' });
+    expect(moved.placement).toBe(PLACEMENT.PLAY_DOWN_BLOCKED);
+
+    const result = generateTeams({
+      players,
+      divisionConfigs: { U10: config('U10'), U13: config('U13') },
+      seed: 'b2',
+    });
+    expect(seatedIds(result, 'U13')).toContain('moved');
+    expect(eligibilityEntries(result, 'U13')).toEqual([]);
+  });
+
+  it('a blocked assistant’s child is named in the metadata', () => {
+    const input = [kid('asst-kid', PLAY_UP_DOB, { assistantCoachId: 'asst-z' }), ...fillers(3)];
+    const result = generateTeams({
+      players: prepare(input),
+      divisionConfigs: { U10: config('U10') },
+      seed: 'b2',
+    });
+    expect(eligibilityEntries(result)[0].metadata).toEqual({
+      placement: 'play_up_blocked',
+      reviewReason: 'unsanctioned play-up (no coaching parent or qualifying buddy)',
+      naturalAge: 8,
+      coachId: null,
+      assistantCoachId: 'asst-z',
+    });
+    expect(result.teamsByDivision.U10.flatMap((team) => team.assistantCoachIds)).toEqual([]);
   });
 });

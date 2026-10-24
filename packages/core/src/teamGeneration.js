@@ -736,6 +736,15 @@ function buildTeamsForDivision({
   // a blocked coach's child anchors none, and each is in overflow with the reason.
   const blocked = separateEligibilityBlocked(players);
   players = blocked.eligible;
+  if (players.length === 0 && blocked.blockedPlayers.length > 0) {
+    // Everyone is blocked: no team could seat anyone, so none is built (empty shells would be
+    // persisted as if teamed). Every player is in overflow with the reason.
+    return {
+      teams: [],
+      overflow: blocked.overflow,
+      buddyDiagnostics: { mutualPairs: [], unmatchedRequests: [] },
+    };
+  }
 
   const coachIds = Array.from(
     new Set(players.filter((player) => player.coachId).map((player) => player.coachId))
@@ -1252,6 +1261,8 @@ function separateEligibilityBlocked(players) {
         reviewReason: annotated.reviewReason ?? null,
         naturalAge: Number.isFinite(annotated.naturalAge) ? annotated.naturalAge : null,
         coachId: player.coachId ?? null,
+        // An assistant whose child is blocked is not attached anywhere; say who, when there is one.
+        ...(player.assistantCoachId ? { assistantCoachId: player.assistantCoachId } : {}),
       },
     };
   });

@@ -399,7 +399,8 @@ generation omits the key entirely.
 `insufficient-capacity`, `coach-capacity`, `buddy-target-capacity`, `buddy-target-locked`,
 `eligibility-blocked` (Phase B2, `docs/changes/2026-10-22-phase-b-teaming.md`: one entry per
 player whose `placement` is `play_up_blocked` or `play_down_blocked`, metadata
-`{ placement, reviewReason, naturalAge, coachId }`, in fresh generation and for a late player on
+`{ placement, reviewReason, naturalAge, coachId }` (plus `assistantCoachId` when the player has
+one), in fresh generation and for a late player on
 a rerun; `unknown` is placed, never blocked). A blocked player leaves the pool before the team
 count and coach anchors are built, and a mutual buddy of one is placed alone with the unmatched
 request reason `buddy-not-placed`. With nobody blocked the output is unchanged

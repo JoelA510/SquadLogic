@@ -202,6 +202,24 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
     expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
   });
 
+  it('stages no review when every player is blocked (no empty teams to sync)', async () => {
+    state.rows = state.rows.map((r) => ({ ...r, date_of_birth: PLAY_DOWN }));
+    render(
+      <MemoryRouter>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    const button = await screen.findByRole('button', { name: /Generate Teams/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    // The run stops at the page's own guard (no teams); B3 words the reason.
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText('Team Review Pending')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(REVIEW_KEY)).toBeNull();
+  });
+
   it('on a rerun keeps a rostered blocked player on their saved team and lists the hold', async () => {
     // A saved run of ten on one team, the blocked player among them; 18 and 19 are late.
     const rostered = [1, 2, 10, 11, 12, 13, 14, 15, 16, 17];

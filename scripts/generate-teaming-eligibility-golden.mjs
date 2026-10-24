@@ -20,7 +20,8 @@
  *
  *   node scripts/generate-teaming-eligibility-golden.mjs [--check]
  *
- * `--check` regenerates in memory and exits non-zero when the committed file differs.
+ * `--check` regenerates in memory and exits non-zero when the committed file differs (ignoring an
+ * empty `eligibilityHolds`, as the test does).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -222,6 +223,14 @@ function main() {
   const target = path.join(REPO_ROOT, ELIGIBILITY_GOLDEN);
   if (check) {
     const committed = JSON.parse(readFileSync(target, 'utf8'));
+    // As the test does: B2's `eligibilityHolds`, empty here, is the one key main did not emit.
+    for (const output of Object.values(outputs)) {
+      for (const changes of Object.values(output.changeDiagnosticsByDivision ?? {})) {
+        if (Array.isArray(changes.eligibilityHolds) && changes.eligibilityHolds.length === 0) {
+          delete changes.eligibilityHolds;
+        }
+      }
+    }
     const same = JSON.stringify(committed.scenarios) === JSON.stringify(outputs);
     console.log(same ? 'golden matches' : 'golden DIFFERS');
     process.exitCode = same ? 0 : 1;

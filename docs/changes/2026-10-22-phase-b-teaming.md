@@ -373,7 +373,18 @@ engine conventions), and the demo league is teamed end to end.
   The generator calls it; B3 can.
 - **One overflow entry per blocked player**, never a unit, ahead of the division's other overflow
   entries, in input order. `metadata.naturalAge` is `null` when not a finite number; `coachId` is
-  the player's (`null` when none).
+  the player's (`null` when none). Beyond the plan, `metadata.assistantCoachId` is added when the
+  blocked player carries one, so an assistant left on no team is named (review finding).
+- **A division where every player is blocked builds no teams** (review finding): before, the
+  team count's floor of one (or `teamCountOverride`, `minTeams`) built empty shells that the page
+  would stage and sync as if teamed. Now the division has no teams, every player is in overflow,
+  and the page stops at its existing "No teams could be generated" guard and stages nothing
+  (`tests/teamAnalysisEligibility.test.jsx`); the wording of that message is B3's.
+- **A remapped player is not blocked** (review finding): with `remapBlocked: true` (a
+  multi-division flow; the page passes `false`), `applyPlayUpEligibility` moves a blocked player
+  to their natural division but keeps the placement it judged in the registered one.
+  `isEligibilityBlocked` blocks only while `division` is still `registeredDivision` (or no
+  registered division is recorded), so the moved player is placed where they belong.
 - **Buddy reasons.** The unit builder sees eligible players only, so a request naming a blocked
   player would read `missing-player`. It is relabelled in the generator's
   `buddyDiagnosticsByDivision[div].unmatchedRequests`: `buddy-not-placed` when the blocked player

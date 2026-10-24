@@ -1,0 +1,1328 @@
+{
+  "source": "scripts/generate-teaming-eligibility-golden.mjs (Phase B2)",
+  "generatedAt": "a18734d",
+  "scenarios": {
+    "freshAnnotated": {
+      "teamsByDivision": {
+        "U10": [
+          {
+            "id": "U10-T01",
+            "name": "U10 Team 01",
+            "division": "U10",
+            "coachId": "coach-a",
+            "coachNeeded": false,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 4,
+            "players": [
+              {
+                "id": "u10-c1",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-c1",
+                "name": "Player u10-c1",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-a",
+                "skillRating": 1
+              },
+              {
+                "id": "u10-c2",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-c2",
+                "name": "Player u10-c2",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-a",
+                "skillRating": 2
+              },
+              {
+                "id": "u10-c3",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-c3",
+                "name": "Player u10-c3",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-a",
+                "skillRating": 0
+              },
+              {
+                "id": "u10-c4",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-c4",
+                "name": "Player u10-c4",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-a",
+                "skillRating": 1
+              }
+            ]
+          },
+          {
+            "id": "U10-T02",
+            "name": "U10 Team 02",
+            "division": "U10",
+            "coachId": "coach-b",
+            "coachNeeded": false,
+            "locked": false,
+            "assistantCoachIds": ["asst-a"],
+            "skillTotal": 13,
+            "players": [
+              {
+                "id": "u10-up",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-up",
+                "name": "Player u10-up",
+                "placement": "play_up_sanctioned",
+                "naturalAge": 9,
+                "playUpSanctioned": true,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-b",
+                "isCoachChild": true
+              },
+              {
+                "id": "u10-asst",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-asst",
+                "name": "Player u10-asst",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "assistantCoachId": "asst-a",
+                "skillRating": 2
+              },
+              {
+                "id": "u10-g6",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-g6",
+                "name": "Player u10-g6",
+                "skillRating": 6
+              },
+              {
+                "id": "u10-g5",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-g5",
+                "name": "Player u10-g5",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 5
+              }
+            ]
+          },
+          {
+            "id": "U10-T03",
+            "name": "U10 Team 03",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 11,
+            "players": [
+              {
+                "id": "u10-pa",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-pa",
+                "name": "Player u10-pa",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "buddyId": "u10-pb",
+                "skillRating": 3
+              },
+              {
+                "id": "u10-pb",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-pb",
+                "name": "Player u10-pb",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "buddyId": "u10-pa",
+                "skillRating": 1
+              },
+              {
+                "id": "u10-g4",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-g4",
+                "name": "Player u10-g4",
+                "skillRating": 4
+              },
+              {
+                "id": "u10-g3",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-g3",
+                "name": "Player u10-g3",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 3
+              }
+            ]
+          },
+          {
+            "id": "U10-T04",
+            "name": "U10 Team 04",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 0,
+            "players": [
+              {
+                "id": "u10-miss",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-miss",
+                "name": "Player u10-miss",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "buddyId": "nobody"
+              }
+            ]
+          },
+          {
+            "id": "U10-T05",
+            "name": "U10 Team 05",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 3,
+            "players": [
+              {
+                "id": "u10-g2",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-g2",
+                "name": "Player u10-g2",
+                "skillRating": 2
+              },
+              {
+                "id": "u10-g1",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-g1",
+                "name": "Player u10-g1",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 1
+              },
+              {
+                "id": "u10-ow",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-ow",
+                "name": "Player u10-ow",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "buddyId": "u10-g1"
+              }
+            ]
+          }
+        ],
+        "U12": [
+          {
+            "id": "U12-T01",
+            "name": "U12 Team 01",
+            "division": "U12",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 14,
+            "players": [
+              {
+                "id": "u12-g2",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g2",
+                "name": "Player u12-g2",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 4
+              },
+              {
+                "id": "u12-g7",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g7",
+                "name": "Player u12-g7",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 4
+              },
+              {
+                "id": "u12-g4",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g4",
+                "name": "Player u12-g4",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 3
+              },
+              {
+                "id": "u12-g9",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g9",
+                "name": "Player u12-g9",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 3
+              }
+            ]
+          },
+          {
+            "id": "U12-T02",
+            "name": "U12 Team 02",
+            "division": "U12",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 6,
+            "players": [
+              {
+                "id": "u12-g1",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g1",
+                "name": "Player u12-g1",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 2
+              },
+              {
+                "id": "u12-g6",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g6",
+                "name": "Player u12-g6",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 2
+              },
+              {
+                "id": "u12-g3",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g3",
+                "name": "Player u12-g3",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 1
+              },
+              {
+                "id": "u12-g8",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g8",
+                "name": "Player u12-g8",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 1
+              }
+            ]
+          }
+        ]
+      },
+      "overflowByDivision": {
+        "U10": [
+          {
+            "players": [
+              {
+                "id": "u10-c5",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "u10-c5",
+                "name": "Player u10-c5",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-a",
+                "skillRating": 2
+              }
+            ],
+            "reason": "coach-capacity",
+            "metadata": {
+              "coachId": "coach-a"
+            }
+          }
+        ],
+        "U12": [
+          {
+            "players": [
+              {
+                "id": "u12-g5",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g5",
+                "name": "Player u12-g5",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 0
+              }
+            ],
+            "reason": "insufficient-capacity",
+            "metadata": {
+              "unitSize": 1
+            }
+          },
+          {
+            "players": [
+              {
+                "id": "u12-g10",
+                "division": "U12",
+                "firstName": "Player",
+                "lastName": "u12-g10",
+                "name": "Player u12-g10",
+                "placement": "in_band",
+                "naturalAge": 12,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 0
+              }
+            ],
+            "reason": "insufficient-capacity",
+            "metadata": {
+              "unitSize": 1
+            }
+          }
+        ]
+      },
+      "overflowSummaryByDivision": {
+        "U10": {
+          "totalUnits": 1,
+          "totalPlayers": 1,
+          "byReason": {
+            "coach-capacity": {
+              "units": 1,
+              "players": 1
+            }
+          }
+        },
+        "U12": {
+          "totalUnits": 2,
+          "totalPlayers": 2,
+          "byReason": {
+            "insufficient-capacity": {
+              "units": 2,
+              "players": 2
+            }
+          }
+        }
+      },
+      "buddyDiagnosticsByDivision": {
+        "U10": {
+          "mutualPairs": [
+            {
+              "playerIds": ["u10-pa", "u10-pb"]
+            }
+          ],
+          "unmatchedRequests": [
+            {
+              "playerId": "u10-ow",
+              "requestedBuddyId": "u10-g1",
+              "reason": "not-reciprocated"
+            },
+            {
+              "playerId": "u10-miss",
+              "requestedBuddyId": "nobody",
+              "reason": "missing-player"
+            }
+          ]
+        },
+        "U12": {
+          "mutualPairs": [],
+          "unmatchedRequests": []
+        }
+      },
+      "coachCoverageByDivision": {
+        "U10": {
+          "totalTeams": 5,
+          "volunteerCoaches": 2,
+          "teamsWithCoach": 2,
+          "teamsWithoutCoach": 3,
+          "coverageRate": 0.4,
+          "needsAdditionalCoaches": true,
+          "additionalCoachesNeeded": 3
+        },
+        "U12": {
+          "totalTeams": 2,
+          "volunteerCoaches": 0,
+          "teamsWithCoach": 0,
+          "teamsWithoutCoach": 2,
+          "coverageRate": 0,
+          "needsAdditionalCoaches": true,
+          "additionalCoachesNeeded": 2
+        }
+      },
+      "rosterBalanceByDivision": {
+        "U10": {
+          "teamStats": [
+            {
+              "teamId": "U10-T01",
+              "coachId": "coach-a",
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "U10-T02",
+              "coachId": "coach-b",
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "U10-T03",
+              "coachId": null,
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "U10-T04",
+              "coachId": null,
+              "playerCount": 1,
+              "maxRosterSize": 4,
+              "slotsRemaining": 3,
+              "fillRate": 0.25
+            },
+            {
+              "teamId": "U10-T05",
+              "coachId": null,
+              "playerCount": 3,
+              "maxRosterSize": 4,
+              "slotsRemaining": 1,
+              "fillRate": 0.75
+            }
+          ],
+          "summary": {
+            "totalPlayers": 16,
+            "totalCapacity": 20,
+            "averageFillRate": 0.8,
+            "teamsNeedingPlayers": ["U10-T04", "U10-T05"]
+          }
+        },
+        "U12": {
+          "teamStats": [
+            {
+              "teamId": "U12-T01",
+              "coachId": null,
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "U12-T02",
+              "coachId": null,
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            }
+          ],
+          "summary": {
+            "totalPlayers": 8,
+            "totalCapacity": 8,
+            "averageFillRate": 1,
+            "teamsNeedingPlayers": [],
+            "teamCountConstraints": {
+              "minTeams": null,
+              "maxTeams": 2
+            }
+          }
+        }
+      },
+      "skillBalanceByDivision": {
+        "U10": {
+          "teamStats": [
+            {
+              "teamId": "U10-T01",
+              "coachId": "coach-a",
+              "playerCount": 4,
+              "skillTotal": 4,
+              "averageSkill": 1
+            },
+            {
+              "teamId": "U10-T02",
+              "coachId": "coach-b",
+              "playerCount": 4,
+              "skillTotal": 13,
+              "averageSkill": 3.25
+            },
+            {
+              "teamId": "U10-T03",
+              "coachId": null,
+              "playerCount": 4,
+              "skillTotal": 11,
+              "averageSkill": 2.75
+            },
+            {
+              "teamId": "U10-T04",
+              "coachId": null,
+              "playerCount": 1,
+              "skillTotal": 0,
+              "averageSkill": 0
+            },
+            {
+              "teamId": "U10-T05",
+              "coachId": null,
+              "playerCount": 3,
+              "skillTotal": 3,
+              "averageSkill": 1
+            }
+          ],
+          "summary": {
+            "totalSkill": 31,
+            "averageSkillPerPlayer": 1.9375,
+            "minAverageSkill": 0,
+            "maxAverageSkill": 3.25,
+            "spread": 3.25
+          }
+        },
+        "U12": {
+          "teamStats": [
+            {
+              "teamId": "U12-T01",
+              "coachId": null,
+              "playerCount": 4,
+              "skillTotal": 14,
+              "averageSkill": 3.5
+            },
+            {
+              "teamId": "U12-T02",
+              "coachId": null,
+              "playerCount": 4,
+              "skillTotal": 6,
+              "averageSkill": 1.5
+            }
+          ],
+          "summary": {
+            "totalSkill": 20,
+            "averageSkillPerPlayer": 2.5,
+            "minAverageSkill": 1.5,
+            "maxAverageSkill": 3.5,
+            "spread": 2
+          }
+        }
+      }
+    },
+    "freshPipeline": {
+      "teamsByDivision": {
+        "U10": [
+          {
+            "id": "U10-T01",
+            "name": "U10 Team 01",
+            "division": "U10",
+            "coachId": "coach-p",
+            "coachNeeded": false,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 10,
+            "players": [
+              {
+                "id": "pl-child",
+                "division": "U10",
+                "dob": "2017-04-01",
+                "firstName": "Kid",
+                "lastName": "Coach",
+                "coachId": "coach-p",
+                "isCoachChild": true,
+                "registeredDivision": "U10",
+                "naturalAge": 9,
+                "placement": "play_up_sanctioned",
+                "playUpSanctioned": true,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-g4",
+                "division": "U10",
+                "dob": "2016-04-15",
+                "skillRating": 3,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-g8",
+                "division": "U10",
+                "dob": "2016-08-15",
+                "skillRating": 3,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-g3",
+                "division": "U10",
+                "dob": "2016-03-15",
+                "skillRating": 2,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-g7",
+                "division": "U10",
+                "dob": "2016-07-15",
+                "skillRating": 2,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              }
+            ]
+          },
+          {
+            "id": "U10-T02",
+            "name": "U10 Team 02",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 1,
+            "players": [
+              {
+                "id": "pl-g6",
+                "division": "U10",
+                "dob": "2016-06-15",
+                "skillRating": 1,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-c",
+                "division": "U10",
+                "registeredDivision": "U10",
+                "naturalAge": null,
+                "placement": "unknown",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-g5",
+                "division": "U10",
+                "dob": "2016-05-15",
+                "skillRating": 0,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              }
+            ]
+          },
+          {
+            "id": "U10-T03",
+            "name": "U10 Team 03",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 1,
+            "players": [
+              {
+                "id": "pl-g2",
+                "division": "U10",
+                "dob": "2016-02-15",
+                "skillRating": 1,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-a",
+                "division": "U10",
+                "dob": "2016-02-01",
+                "buddyId": "pl-b",
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-b",
+                "division": "U10",
+                "dob": "2016-09-01",
+                "buddyId": "pl-a",
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              },
+              {
+                "id": "pl-g1",
+                "division": "U10",
+                "dob": "2016-01-15",
+                "skillRating": 0,
+                "registeredDivision": "U10",
+                "naturalAge": 10,
+                "placement": "in_band",
+                "playUpSanctioned": false,
+                "needsReview": false,
+                "reviewReason": null
+              }
+            ]
+          }
+        ]
+      },
+      "overflowByDivision": {
+        "U10": []
+      },
+      "overflowSummaryByDivision": {
+        "U10": {
+          "totalUnits": 0,
+          "totalPlayers": 0,
+          "byReason": {}
+        }
+      },
+      "buddyDiagnosticsByDivision": {
+        "U10": {
+          "mutualPairs": [
+            {
+              "playerIds": ["pl-a", "pl-b"]
+            }
+          ],
+          "unmatchedRequests": []
+        }
+      },
+      "coachCoverageByDivision": {
+        "U10": {
+          "totalTeams": 3,
+          "volunteerCoaches": 1,
+          "teamsWithCoach": 1,
+          "teamsWithoutCoach": 2,
+          "coverageRate": 0.3333,
+          "needsAdditionalCoaches": true,
+          "additionalCoachesNeeded": 2
+        }
+      },
+      "rosterBalanceByDivision": {
+        "U10": {
+          "teamStats": [
+            {
+              "teamId": "U10-T01",
+              "coachId": "coach-p",
+              "playerCount": 5,
+              "maxRosterSize": 5,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "U10-T02",
+              "coachId": null,
+              "playerCount": 3,
+              "maxRosterSize": 5,
+              "slotsRemaining": 2,
+              "fillRate": 0.6
+            },
+            {
+              "teamId": "U10-T03",
+              "coachId": null,
+              "playerCount": 4,
+              "maxRosterSize": 5,
+              "slotsRemaining": 1,
+              "fillRate": 0.8
+            }
+          ],
+          "summary": {
+            "totalPlayers": 12,
+            "totalCapacity": 15,
+            "averageFillRate": 0.8,
+            "teamsNeedingPlayers": ["U10-T02", "U10-T03"]
+          }
+        }
+      },
+      "skillBalanceByDivision": {
+        "U10": {
+          "teamStats": [
+            {
+              "teamId": "U10-T01",
+              "coachId": "coach-p",
+              "playerCount": 5,
+              "skillTotal": 10,
+              "averageSkill": 2
+            },
+            {
+              "teamId": "U10-T02",
+              "coachId": null,
+              "playerCount": 3,
+              "skillTotal": 1,
+              "averageSkill": 0.3333
+            },
+            {
+              "teamId": "U10-T03",
+              "coachId": null,
+              "playerCount": 4,
+              "skillTotal": 1,
+              "averageSkill": 0.25
+            }
+          ],
+          "summary": {
+            "totalSkill": 12,
+            "averageSkillPerPlayer": 1,
+            "minAverageSkill": 0.25,
+            "maxAverageSkill": 2,
+            "spread": 1.75
+          }
+        }
+      }
+    },
+    "reviewRerun": {
+      "teamsByDivision": {
+        "U10": [
+          {
+            "id": "0b2e0000-0000-4000-8000-000000000001",
+            "name": "Team One",
+            "division": "U10",
+            "coachId": "coach-r",
+            "coachNeeded": false,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 0,
+            "players": [
+              {
+                "id": "r1",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r1",
+                "name": "Player r1",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-r",
+                "assignment_source": "auto",
+                "locked": false
+              },
+              {
+                "id": "r2",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r2",
+                "name": "Player r2",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-r",
+                "assignment_source": "manual",
+                "locked": true
+              },
+              {
+                "id": "r3",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r3",
+                "name": "Player r3",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-r",
+                "assignment_source": "auto",
+                "locked": false
+              },
+              {
+                "id": "late-3",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "late-3",
+                "name": "Player late-3",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "coachId": "coach-r"
+              }
+            ]
+          },
+          {
+            "id": "0b2e0000-0000-4000-8000-000000000002",
+            "name": "Team Two",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": false,
+            "assistantCoachIds": [],
+            "skillTotal": 4,
+            "players": [
+              {
+                "id": "r4",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r4",
+                "name": "Player r4",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "assignment_source": "auto",
+                "locked": false
+              },
+              {
+                "id": "r5",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r5",
+                "name": "Player r5",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "assignment_source": "auto",
+                "locked": true
+              },
+              {
+                "id": "r6",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r6",
+                "name": "Player r6",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "assignment_source": "auto",
+                "locked": false
+              },
+              {
+                "id": "late-2",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "late-2",
+                "name": "Player late-2",
+                "placement": "unknown",
+                "naturalAge": null,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 4
+              }
+            ]
+          },
+          {
+            "id": "0b2e0000-0000-4000-8000-000000000003",
+            "name": "Team Three",
+            "division": "U10",
+            "coachId": null,
+            "coachNeeded": true,
+            "locked": true,
+            "assistantCoachIds": [],
+            "skillTotal": 0,
+            "players": [
+              {
+                "id": "r7",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r7",
+                "name": "Player r7",
+                "placement": "play_up_sanctioned",
+                "naturalAge": 9,
+                "playUpSanctioned": true,
+                "needsReview": false,
+                "reviewReason": null,
+                "assignment_source": "auto",
+                "locked": false
+              },
+              {
+                "id": "r8",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "r8",
+                "name": "Player r8",
+                "placement": "play_up_sanctioned",
+                "naturalAge": 9,
+                "playUpSanctioned": true,
+                "needsReview": false,
+                "reviewReason": null,
+                "buddyId": "late-4",
+                "assignment_source": "auto",
+                "locked": false
+              }
+            ]
+          }
+        ]
+      },
+      "overflowByDivision": {
+        "U10": [
+          {
+            "players": [
+              {
+                "id": "late-4",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "late-4",
+                "name": "Player late-4",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "buddyId": "r8"
+              }
+            ],
+            "reason": "buddy-target-locked",
+            "metadata": {
+              "targetTeamId": "0b2e0000-0000-4000-8000-000000000003",
+              "buddyId": "r8"
+            }
+          },
+          {
+            "players": [
+              {
+                "id": "late-1",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "late-1",
+                "name": "Player late-1",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null,
+                "skillRating": 2
+              }
+            ],
+            "reason": "insufficient-capacity",
+            "metadata": {
+              "unitSize": 1,
+              "teamCountPolicy": "preserve-existing"
+            }
+          },
+          {
+            "players": [
+              {
+                "id": "late-5",
+                "division": "U10",
+                "firstName": "Player",
+                "lastName": "late-5",
+                "name": "Player late-5",
+                "placement": "in_band",
+                "naturalAge": 10,
+                "needsReview": false,
+                "reviewReason": null
+              }
+            ],
+            "reason": "insufficient-capacity",
+            "metadata": {
+              "unitSize": 1,
+              "teamCountPolicy": "preserve-existing"
+            }
+          }
+        ]
+      },
+      "overflowSummaryByDivision": {
+        "U10": {
+          "totalUnits": 3,
+          "totalPlayers": 3,
+          "byReason": {
+            "buddy-target-locked": {
+              "units": 1,
+              "players": 1
+            },
+            "insufficient-capacity": {
+              "units": 2,
+              "players": 2
+            }
+          }
+        }
+      },
+      "buddyDiagnosticsByDivision": {
+        "U10": {
+          "mutualPairs": [],
+          "unmatchedRequests": []
+        }
+      },
+      "coachCoverageByDivision": {
+        "U10": {
+          "totalTeams": 3,
+          "volunteerCoaches": 1,
+          "teamsWithCoach": 1,
+          "teamsWithoutCoach": 2,
+          "coverageRate": 0.3333,
+          "needsAdditionalCoaches": true,
+          "additionalCoachesNeeded": 2
+        }
+      },
+      "rosterBalanceByDivision": {
+        "U10": {
+          "teamStats": [
+            {
+              "teamId": "0b2e0000-0000-4000-8000-000000000001",
+              "coachId": "coach-r",
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "0b2e0000-0000-4000-8000-000000000002",
+              "coachId": null,
+              "playerCount": 4,
+              "maxRosterSize": 4,
+              "slotsRemaining": 0,
+              "fillRate": 1
+            },
+            {
+              "teamId": "0b2e0000-0000-4000-8000-000000000003",
+              "coachId": null,
+              "playerCount": 2,
+              "maxRosterSize": 4,
+              "slotsRemaining": 2,
+              "fillRate": 0.5
+            }
+          ],
+          "summary": {
+            "totalPlayers": 10,
+            "totalCapacity": 12,
+            "averageFillRate": 0.8333,
+            "teamsNeedingPlayers": ["0b2e0000-0000-4000-8000-000000000003"]
+          }
+        }
+      },
+      "skillBalanceByDivision": {
+        "U10": {
+          "teamStats": [
+            {
+              "teamId": "0b2e0000-0000-4000-8000-000000000001",
+              "coachId": "coach-r",
+              "playerCount": 4,
+              "skillTotal": 0,
+              "averageSkill": 0
+            },
+            {
+              "teamId": "0b2e0000-0000-4000-8000-000000000002",
+              "coachId": null,
+              "playerCount": 4,
+              "skillTotal": 4,
+              "averageSkill": 1
+            },
+            {
+              "teamId": "0b2e0000-0000-4000-8000-000000000003",
+              "coachId": null,
+              "playerCount": 2,
+              "skillTotal": 0,
+              "averageSkill": 0
+            }
+          ],
+          "summary": {
+            "totalSkill": 4,
+            "averageSkillPerPlayer": 0.4,
+            "minAverageSkill": 0,
+            "maxAverageSkill": 1,
+            "spread": 1
+          }
+        }
+      },
+      "changeDiagnosticsByDivision": {
+        "U10": {
+          "mode": "review",
+          "teamCountPolicy": "preserve-existing",
+          "existingTeamsPreserved": 3,
+          "newTeamsCreated": 0,
+          "teamCountChangeBlocked": true,
+          "lockedAssignmentsPreserved": 2,
+          "latePlayersAssigned": 2,
+          "latePlayersOverflowed": 3,
+          "buddyTargetAssignments": [],
+          "assistantBackfills": [],
+          "coachDrops": [],
+          "coachReplacements": [],
+          "manualReview": [],
+          "droppedPlayersRemoved": 0,
+          "manualAssignmentsPreserved": 1,
+          "capacityViolations": [],
+          "minRosterWarnings": [],
+          "structuralWarnings": []
+        }
+      },
+      "snapshotDiagnostics": []
+    }
+  }
+}

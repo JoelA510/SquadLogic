@@ -16,8 +16,10 @@
 --        (tests/fixtures/rsvpAppliedCalendarCases.json and its Vitest arm);
 --        docs/sql/20261005000000_revert.sql is still checked on a build up to
 --        this migration.
---   W15  a parent member reads the same practice_exceptions rows as an admin;
---        a non-member reads none.
+--   W15  a member who is not an admin reads the same practice_exceptions rows as
+--        an admin; a non-member reads none. The member was a parent until
+--        20261024010000 (R3) removed that role; it is now a coach who coaches
+--        no team.
 -- Every subject set is enumerated from the rows this file SEEDS, never from
 -- what a call or a read returned. Every name and id is synthetic.
 
@@ -26,7 +28,7 @@
 DO $$
 DECLARE
     c_admin  constant uuid := 'd1200000-0000-4000-8000-0000000000a1';
-    c_parent constant uuid := 'd1200000-0000-4000-8000-0000000000d1';
+    c_member constant uuid := 'd1200000-0000-4000-8000-0000000000d1';
     c_outsider constant uuid := 'd1200000-0000-4000-8000-0000000000e1';
     v_org uuid; v_loc uuid; v_field uuid; v_season uuid; v_div uuid;
     v_team uuid[] := ARRAY[]::uuid[];
@@ -37,21 +39,21 @@ DECLARE
     v_id uuid;
     v_live_relocated int; v_live_tbd int; v_withdrawn int; v_open int; v_unreadable int;
     r record;
-    v_parent_ids uuid[]; v_admin_ids uuid[]; v_outsider_n int;
+    v_member_ids uuid[]; v_admin_ids uuid[]; v_outsider_n int;
     i int;
 BEGIN
     -- ---- the fixture (as the table owner) -----------------------------------
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
       (c_admin, 'd12-admin@example.test', jsonb_build_object('password_length', 16)),
-      (c_parent, 'd12-parent@example.test', jsonb_build_object('password_length', 16)),
+      (c_member, 'd12-member@example.test', jsonb_build_object('password_length', 16)),
       (c_outsider, 'd12-outsider@example.test', jsonb_build_object('password_length', 16));
     INSERT INTO public.profiles (id, email) VALUES
-      (c_admin, 'd12-admin@example.test'), (c_parent, 'd12-parent@example.test'),
+      (c_admin, 'd12-admin@example.test'), (c_member, 'd12-member@example.test'),
       (c_outsider, 'd12-outsider@example.test') ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org D12', 'smoke-org-d12') RETURNING id INTO v_org;
     -- The outsider is a member of no organisation at all.
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-      (v_org, c_admin, 'admin'), (v_org, c_parent, 'parent');
+      (v_org, c_admin, 'admin'), (v_org, c_member, 'coach');
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'D12 Park') RETURNING id INTO v_loc;
     INSERT INTO public.fields (organization_id, location_id, name, active)
       VALUES (v_org, v_loc, 'D12 Pitch', true) RETURNING id INTO v_field;
@@ -66,7 +68,6 @@ BEGIN
           VALUES (v_org, v_div, 'Sample' || i, 'Player') RETURNING id INTO v_id;
         v_player := v_player || v_id;
         INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_team[i], v_player[i], v_org);
-        INSERT INTO public.profile_players (profile_id, player_id, organization_id) VALUES (c_parent, v_player[i], v_org);
     END LOOP;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
       VALUES (v_org, v_field, 'tue', '17:00', '18:30', '2026-09-01', '2026-12-31') RETURNING id INTO v_tue;
@@ -129,9 +130,9 @@ BEGIN
         cardinality(v_seeded), v_live_relocated, v_live_tbd, v_withdrawn, v_open, v_unreadable;
 
     -- ---- W15: who reads practice_exceptions --------------------------------
-    PERFORM set_config('request.jwt.claim.sub', c_parent::text, true);
+    PERFORM set_config('request.jwt.claim.sub', c_member::text, true);
     SET LOCAL ROLE authenticated;
-    SELECT coalesce(array_agg(id ORDER BY id), ARRAY[]::uuid[]) INTO v_parent_ids
+    SELECT coalesce(array_agg(id ORDER BY id), ARRAY[]::uuid[]) INTO v_member_ids
       FROM public.practice_exceptions WHERE id = ANY (v_seeded);
     RESET ROLE;
     PERFORM set_config('request.jwt.claim.sub', c_admin::text, true);
@@ -145,14 +146,14 @@ BEGIN
     RESET ROLE;
     PERFORM set_config('request.jwt.claim.sub', '', true);
     IF v_admin_ids IS DISTINCT FROM (SELECT array_agg(x ORDER BY x) FROM unnest(v_seeded) AS x)
-       OR v_parent_ids IS DISTINCT FROM v_admin_ids
+       OR v_member_ids IS DISTINCT FROM v_admin_ids
        OR v_outsider_n <> 0 THEN
-        RAISE EXCEPTION 'practice_exceptions reads wrong: the admin read % of % seeded, the parent % (same set: %), the non-member %',
-            cardinality(v_admin_ids), cardinality(v_seeded), cardinality(v_parent_ids),
-            v_parent_ids IS NOT DISTINCT FROM v_admin_ids, v_outsider_n;
+        RAISE EXCEPTION 'practice_exceptions reads wrong: the admin read % of % seeded, the member % (same set: %), the non-member %',
+            cardinality(v_admin_ids), cardinality(v_seeded), cardinality(v_member_ids),
+            v_member_ids IS NOT DISTINCT FROM v_admin_ids, v_outsider_n;
     END IF;
-    RAISE NOTICE 'exception reads: the parent read % of % seeded rows, the same set as the admin; a non-member read %',
-        cardinality(v_parent_ids), cardinality(v_seeded), v_outsider_n;
+    RAISE NOTICE 'exception reads: a member who coaches no team read % of % seeded rows, the same set as the admin; a non-member read %',
+        cardinality(v_member_ids), cardinality(v_seeded), v_outsider_n;
 END;
 $$;
 

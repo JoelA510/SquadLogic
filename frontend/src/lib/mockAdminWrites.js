@@ -26,13 +26,16 @@
  * alphanumerics.
  */
 
+import { ASSIGNABLE_ROLES } from '../constants/permissions.js';
+
 export const ADMIN_WRITE_RPCS = Object.freeze([
   'admin_upsert_division_settings',
   'create_org_invite',
   'redeem_org_invite',
 ]);
 
-const INVITE_ROLES = ['admin', 'coach', 'player', 'parent', 'staff'];
+// create_org_invite's whitelist (20261024010000: no parent or player).
+const INVITE_ROLES = ASSIGNABLE_ROLES;
 const DIVISION_RULES = [
   'max_roster_size',
   'min_roster_size',

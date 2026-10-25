@@ -1,12 +1,12 @@
 Feature: Calendar Sync
-  As a parent or coach
+  As a coach
   I want a unique calendar subscription link
   So that I can sync my team's events to my personal calendar
 
   Background:
-    Given I am logged into SquadLogic as a "parent"
+    Given I am logged into SquadLogic as a "coach"
     And I have an organization labeled "Test Org"
-    And my child "Alex" is on the "Tigers" team
+    And I coach the "Tigers" team, which has the player "Alex"
     And I am on the "Team Portal" page for the "Tigers"
     
   Scenario: Copying the Calendar Sync Link

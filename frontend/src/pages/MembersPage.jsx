@@ -11,14 +11,15 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../hooks/usePermission.js';
 import { logger } from '../lib/logger.js';
+import { ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
-const ROLE_OPTIONS = ['admin', 'coach', 'staff', 'parent', 'player'];
+// The roles admin_change_member_role accepts (no parent or player since
+// 20261024010000).
+const ROLE_OPTIONS = ASSIGNABLE_ROLES;
 const ROLE_TONE = {
   admin: 'danger',
   coach: 'info',
   staff: 'warning',
-  parent: 'neutral',
-  player: 'success',
 };
 
 export default function MembersPage() {

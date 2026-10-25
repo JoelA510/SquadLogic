@@ -18,7 +18,7 @@ All tables that previously relied on implicit scoping (e.g., through JOINs to pa
 ## Authentication & Authorization
 
 - **Auth Provider**: Supabase Auth (email/password, magic link)
-- **Membership**: Users are linked to organizations via the `organization_members` table with a role (`admin`, `coach`, `player`, `parent`, `staff`)
+- **Membership**: Users are linked to organizations via the `organization_members` table with a role (`admin`, `coach`, `staff`, or `tenant_admin`; no `parent` or `player` since `20261024010000`)
 - **RLS Enforcement**: Every table has a `USING (is_org_member(organization_id))` policy — there is no cross-org data access even for admin users
 - **Edge Functions**: Validate both JWT authenticity and organization membership before any write operation
 - **Frontend**: `OrganizationContext` manages the active org selection, backed by `organization_members` queries. The active org is cached in `localStorage` as a preference (not as an auth token) and validated against the user's membership list on load

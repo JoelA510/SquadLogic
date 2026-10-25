@@ -28,7 +28,7 @@ import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
-import { ADMIN_ROLES } from '../constants/permissions.js';
+import { ADMIN_ROLES, ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
@@ -123,20 +123,10 @@ const initialMockData = {
       role: 'coach',
       organization_id: MOCK_ORG_ID,
     },
-    {
-      id: 'mock-parent-id',
-      first_name: 'Mock',
-      last_name: 'Parent',
-      full_name: 'Mock Parent',
-      email: 'parent@example.com',
-      role: 'parent',
-      organization_id: MOCK_ORG_ID,
-    },
   ],
   organization_members: [
     { organization_id: MOCK_ORG_ID, profile_id: 'mock-admin-id', role: 'admin' },
     { organization_id: MOCK_ORG_ID, profile_id: 'mock-coach-id', role: 'coach' },
-    { organization_id: MOCK_ORG_ID, profile_id: 'mock-parent-id', role: 'parent' },
   ],
   season_settings: [
     {
@@ -315,10 +305,6 @@ const initialMockData = {
       organization_id: MOCK_ORG_ID,
       created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
     },
-  ],
-  profile_players: [
-    { profile_id: 'mock-parent-id', player_id: 'player-1' },
-    { profile_id: 'mock-parent-id', player_id: 'player-2' },
   ],
   practice_slots: [
     {
@@ -643,8 +629,9 @@ const mergeSource = (db, source) => {
               String(r.player_id) === String(record.player_id) &&
               String(r.buddy_player_id) === String(record.buddy_player_id)
             );
-          // **`team_players` and `profile_players` are the same shape as the
-          // two above and did not have the same contract**, which made every
+          // **`team_players` is the same shape as the two above and did not
+          // have the same contract** (nor did `profile_players`, the guardian
+          // link table 20261024010000 dropped), which made every
           // write EXPONENTIAL rather than merely wrong. They are join rows
           // with a composite key and no `id`, so the `r.id && record.id`
           // branch never fires, no other branch matched them, and each merge
@@ -658,11 +645,6 @@ const mergeSource = (db, source) => {
           if (key === 'team_players')
             return (
               String(r.team_id) === String(record.team_id) &&
-              String(r.player_id) === String(record.player_id)
-            );
-          if (key === 'profile_players')
-            return (
-              String(r.profile_id) === String(record.profile_id) &&
               String(r.player_id) === String(record.player_id)
             );
           if (key === 'team_calendar_tokens') return String(r.team_id) === String(record.team_id);
@@ -726,7 +708,6 @@ const getDB = () => {
 const TOMBSTONE_KEY_FNS = {
   organization_members: (row) => `${row.organization_id}:${row.profile_id}`,
   team_players: (row) => `${row.team_id}:${row.player_id}`,
-  profile_players: (row) => `${row.profile_id}:${row.player_id}`,
   player_buddies: (row) => `${row.player_id}:${row.buddy_player_id}`,
   team_calendar_tokens: (row) => String(row.team_id),
 };
@@ -1677,7 +1658,7 @@ const createMockQuery = (table, data = null) => {
           }
         }
         if (
-          (table === 'team_players' || table === 'profile_players') &&
+          table === 'team_players' &&
           (queryContent.includes('players') || queryContent.includes('player'))
         ) {
           const players = getMockData('players');
@@ -1944,12 +1925,17 @@ export const mockSupabase = {
       if (password === MOCK_PASSWORD) {
         const role = email.split('@')[0];
         const userId = `mock-${role}-id`;
+        // A demo account named for a role SquadLogic has (admin, coach, staff)
+        // is seeded into the demo organization with it; any other (an old
+        // parent@ or player@, an outsider@) is not seeded, and lands with no
+        // organization rather than as a privileged member (20261024010000).
+        const seededRole = ASSIGNABLE_ROLES.includes(role) ? role : null;
         const session = {
           user: {
             id: userId,
             email,
             user_metadata: { full_name: `Mock ${role.charAt(0).toUpperCase() + role.slice(1)}` },
-            app_metadata: { role: role === 'admin' || role === 'coach' ? role : 'parent' },
+            app_metadata: { role: seededRole },
           },
           access_token: 'mock-token',
         };
@@ -1975,6 +1961,7 @@ export const mockSupabase = {
         // organisation, which is what real Supabase does.
         const seededMembership = { organization_id: MOCK_ORG_ID, profile_id: userId };
         if (
+          seededRole &&
           !typedDb.organization_members.find((m) => m.profile_id === userId) &&
           !isMockDeleted(
             typedDb,
@@ -2415,11 +2402,11 @@ export const mockSupabase = {
         if (!lighting.error) saveDB(db);
         return lighting;
       }
-      // Server-side reads (migration 20261021010000): the guardian link, the
-      // contact card, the roster/staff/directory reads, refusals included.
+      // Server-side reads (migration 20261021010000, without the guardian
+      // since 20261024010000): the contact card and the roster, staff and
+      // directory reads, refusals included.
       const reads = handleServerSideReadRpc(db, name, params, {
         currentUserId: storedSession ? currentUserId : null,
-        sessionEmail: storedSession ? JSON.parse(storedSession)?.user?.email : null,
       });
       if (reads) {
         if (!reads.error) saveDB(db);
@@ -7079,6 +7066,20 @@ export const mockSupabase = {
 
     if (name === 'admin_change_member_role') {
       const { p_organization_id, p_profile_id, p_role } = params || {};
+      // As the SQL, in its order: the arguments (23502), then its whitelist,
+      // which refuses parent and player (20261024010000), then the admin check.
+      if (!p_organization_id || !p_profile_id) {
+        return {
+          data: null,
+          error: {
+            message: `${p_organization_id ? 'p_profile_id' : 'p_organization_id'} is required`,
+            code: '23502',
+          },
+        };
+      }
+      if (!ASSIGNABLE_ROLES.includes(p_role)) {
+        return { data: null, error: { message: `invalid role: ${p_role}`, code: '22023' } };
+      }
       const session =
         typeof window !== 'undefined'
           ? JSON.parse(sessionStorage.getItem('__MOCK_SESSION__') || 'null')

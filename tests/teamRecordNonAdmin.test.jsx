@@ -1,5 +1,7 @@
-// The team page as a non-admin (Phase A3a, migration 20261021010000): the
-// roster shows the guardian contacts the server-side read returned, the Staff
+// The team page as a non-admin, a coach since 20261024010000 removed the parent
+// role (Phase A3a, migration 20261021010000): the roster shows what the
+// server-side read returned (names only for a coach; guardian contacts only
+// to an admin, whose read returns them), the Staff
 // tab lists every current coach from get_team_staff, and the Balance tab
 // (gender, years played, rating: admin-only fields) is not offered.
 import React from 'react';
@@ -26,7 +28,7 @@ vi.mock('../frontend/src/hooks/useTeamPortal.js', () => ({
 vi.mock('../frontend/src/hooks/usePermission.js', () => ({
   usePermission: () => ({
     can: () => mocks.admin,
-    role: mocks.admin ? 'admin' : 'parent',
+    role: mocks.admin ? 'admin' : 'coach',
     PERMISSIONS: { MANAGE_ALL_TEAMS: 'manage_all_teams' },
   }),
 }));
@@ -70,7 +72,6 @@ beforeEach(() => {
         player_id: 'p-1',
         first_name: 'Pia',
         last_name: 'Able',
-        is_my_child: true,
         guardian_contacts: [
           { name: 'Gwen Able', email: 'gwen@example.test', phone: '555-0201' },
           { name: 'Gus Able', email: 'gus@example.test' },
@@ -81,7 +82,6 @@ beforeEach(() => {
         player_id: 'p-2',
         first_name: 'Rex',
         last_name: 'Baker',
-        is_my_child: false,
         guardian_contacts: [{ name: 'Rhea Baker', email: 'rhea@example.test' }],
       },
       {
@@ -89,7 +89,6 @@ beforeEach(() => {
         player_id: 'p-3',
         first_name: 'Quinn',
         last_name: 'Cole',
-        is_my_child: false,
         guardian_contacts: [],
       },
     ],
@@ -99,7 +98,21 @@ beforeEach(() => {
 });
 
 describe('TeamRecordPage as a non-admin', () => {
-  it('shows each player the contacts the roster read returned, and none where it returned none', () => {
+  it('shows a coach the names their roster read returned, and no guardian contact', () => {
+    // As get_team_roster answers a coach since 20261024010000: no contacts.
+    mocks.portalState = {
+      ...mocks.portalState,
+      roster: mocks.portalState.roster.map((row) => ({ ...row, guardian_contacts: [] })),
+    };
+    render(<TeamRecordPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /Roster/ }));
+    expect(screen.getByText('Pia Able')).toBeInTheDocument();
+    expect(screen.getByText('Quinn Cole')).toBeInTheDocument();
+    expect(screen.queryAllByRole('list', { name: 'Guardian contacts' })).toHaveLength(0);
+  });
+
+  it('shows an admin each player the contacts the roster read returned, and none where it returned none', () => {
+    mocks.admin = true;
     render(<TeamRecordPage />);
     fireEvent.click(screen.getByRole('tab', { name: /Roster/ }));
     const lists = screen.getAllByRole('list', { name: 'Guardian contacts' });

@@ -111,6 +111,11 @@ bucket is dropped only when empty: `storage.protect_delete()` refuses SQL delete
 **Tests** (pgTAP; personas seeded as `server_side_reads.sql` does: admin, staff, current coach,
 former coach, coach-role member with no assignment, parent, Org B admin, anon):
 
+> Since R3 (`20261024010000`, `docs/changes/2026-10-22-admin-focus.md`) there is no `parent` role:
+> the parent persona below, in pgTAP and in E2E, is to be read as the coach-role member with no
+> assignment, and the "redirected from `/permits`" case needs a role without `VIEW_FIELD_PERMITS`,
+> which none has until R6. To settle when this phase is built.
+
 - `supabase/tests/facility_permits.sql`: SELECT returns Org A's permit to admin, staff and the
   current coach, and nothing to the other five; every direct INSERT/UPDATE/DELETE is refused; each
   RPC refuses a non-admin (42501), a scope in another org, `valid_to < valid_from`, no scope, and

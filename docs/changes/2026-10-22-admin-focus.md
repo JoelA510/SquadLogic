@@ -184,6 +184,110 @@ at once (AGENTS.md section 11).
   at `$M39`, the live definitions, and new M39 and R39 plants are added. The revert is checked by
   a catalogue fingerprint.
 
+## As built (R3)
+
+- **Migration `20261024010000`, in this order.** A guard refuses to run while any member or invite
+  holds `parent` or `player` (an access decision for an admin, not a migration), and a NOTICE counts
+  the guardian links and stored `guardian_contact_sharing` values it leaves behind. Then the admin
+  read is created on its own (`players_select_admin`, `team_players_select_admin`:
+  `is_org_admin(organization_id)`, so admins, tenant_admins and staff) **before** the two
+  admin-or-guardian policies are dropped; the calendar-token policy loses its guardian arm (ALTER
+  POLICY); `get_team_roster` is dropped and recreated (its result loses `is_my_child`, which
+  CREATE OR REPLACE cannot do; grants and comment restated) and `get_team_staff` replaced, both
+  from their `20261021010000` bodies without the guardian arm; then `link_my_guardian_records()`,
+  `is_team_guardian(uuid)`, `guardian_contacts_view(uuid, jsonb, boolean)`, the
+  `profile_players_select_own_or_admin` policy and `profile_players` are dropped by exact name with
+  no CASCADE; then the roles. A closing check refuses to commit if `players` or `team_players` has
+  any other read policy, if the admin one is missing, or if any function or policy still names a
+  dropped object. Planting the old team_players policy left in place makes the table drop fail
+  (`M41 the admin-or-guardian read is left on team_players`), which is the CASCADE hazard caught.
+- **"Names only" for a coach is enforced by the roster read, not by a table policy.** Row
+  security chooses rows, not columns, and a column grant would bind every `authenticated` caller,
+  admins included (the admin pages read `players` with `select *`). So a coach keeps no direct
+  read of `players` or `team_players` (the guardian arm never admitted one), and
+  `get_team_roster` gives a current coach `first_name`, `last_name`, `preferred_name` and
+  `jersey_number`; `guardian_contacts` is `[]` and gender, years played, rating and coaching
+  interest are NULL. **Two calls for the owner:** the jersey number is kept for a coach (not a
+  name, but a team-sheet field); and the coach's guardian contacts are cut here rather than in R4,
+  because the R3 row says "names only" (production holds no players, so nothing a coach saw
+  changes today). Admins read guardian contacts as imported: with no guardian accounts no contact
+  card can apply, so `guardian_contacts_view` went and its admin projection is inline.
+- **The roles are text CHECK constraints, not an enum**, so no type is rebuilt:
+  `organization_members_role_check` is now admin, coach, staff, tenant_admin;
+  `organization_invites_role_check` admin, coach, staff. `create_org_invite` and
+  `admin_change_member_role` are their latest repo bodies (`20260421034626`, `20261020030000`)
+  with only the role list changed (22023 for parent or player). Production's `create_org_invite`
+  differs from its file only by the file's comments (read 2026-10-24); the revert restores the
+  file's text.
+- **Kept.** The `guardian.linked` audit action; the `guardian_contact_sharing` key in
+  `FEATURE_FLAGS` (out of the catalogue and the defaults, as R1 did for `medical_forms`);
+  `players.guardian_contacts`, the contact card, `set_my_contact_card`, `get_coach_directory` and
+  `get_team_staff`'s contact columns (all R4). `team_players.role = 'player'` and the
+  `organization_schemas` entity type `player` are not membership roles and are untouched.
+- **Production, read-only, 2026-10-24** (catalogue and counts only, through the SQL endpoint):
+  every object the migration drops or replaces exists as the repo builds it (md5 of each function
+  body and policy expression compared with a local build at `20261023010000`: equal, except
+  `create_org_invite`, comments only, and `is_org_member` and `redeem_org_invite`, which the
+  migration does not touch); the dependents of `profile_players` are exactly the three policies
+  named above, and `is_team_guardian`'s exactly the calendar-token policy; no view, trigger or
+  publication names `profile_players`; `profile_players` 0 rows, `players` 0, `team_players` 0,
+  `team_calendar_tokens` 0, `organization_invites` 0, `organization_members` 1 (admin), members or
+  invites holding `parent` or `player` 0, organizations storing `guardian_contact_sharing` 0,
+  `guardian.linked` audit rows 0; ledger at `20261023010000`.
+- **The UI.** No `parent` or `player` in `ROLES` (and the `view_own_team` permission only they held
+  is gone); a membership still carrying either is granted nothing. The parent home, its nav and
+  the Family label go; the coach is the only flat nav; the role preview offers a coach only;
+  members and invites offer admin, coach and staff (`ASSIGNABLE_ROLES`, the server's whitelist);
+  `OrganizationContext` no longer calls the guardian link. A membership still carrying a removed
+  role (a cached one, or a row written before the migration) gets Home only and a notice that it
+  has no role, not the admin shell. The mock twin follows the SQL; a demo sign-in seeds a
+  membership only for an account named for a role that exists (admin, coach, staff), so an old
+  `parent@` lands with no organization. **Not mirrored in the mock:** the role CHECKs on a
+  direct table write, and `admin_change_member_role`'s audit metadata keys (pre-existing).
+- **Tests.**
+  - pgTAP: `guardian_view_removed.sql` (objects gone, with a control; the admin read alone and
+    still reading; the coach's reads; no `is_my_child`; both role checks; parent refused).
+    `rls_policy_matrix.sql`: the parent persona becomes a second coach of Org A (every cell as
+    before but `players` and `team_players`, which a parent read for their own child),
+    `profile_players` leaves the subjects (23 tables), and eight assertions cover the roster read
+    (admin every column, coach names only, another team's coach, the outsider and Org B's admin
+    refused) and the roles (parent and player invites 22023, a parent member 23514). Run on
+    `origin/main`, the names-only and the three role assertions fail; the refusals and the admin
+    read hold there too, as they should. `restricted_reads.sql`, `server_side_reads.sql`,
+    `identity_guards.sql` and `staff_is_admin.sql` move their parent personas to a coach-role
+    member and drop the guardian cases.
+  - Smokes run at head: `20261003000000`, `20261004000000`, `20261005000000`, `20261020030000`
+    and `20261020040000` use a coach who coaches no team where they used a parent;
+    `20261018030000` counts 23 tables and 79 policies, and its member reads no player;
+    `20261021010000` and `20261021020000` lose the guardian link, guardian reads and sharing cases
+    (the contact card is checked on a coach through `get_team_staff`).
+  - Vitest: the mock reads, read policies, invites and member role change refuse the removed
+    roles; a stale parent or player role is granted nothing; no parent preview is offered (fails
+    on the old `TopBar`); `teamPortalPracticeExceptions.test.jsx` renders as a coach.
+  - E2E: `calendar_sync`, `team_portal_practice_changes` and `privacy_server_reads` sign in as the
+    team's coach (a shared step, "I coach the ... team, which has the player ..."); the privacy
+    scenario checks the coach sees names and no guardian contact (it showed every contact before);
+    the blackout repair checks the team's coach sees the change. **Retired:** the read-only
+    scenario of `rbac_multi_tenancy.feature` (no role is read-only until R6 takes
+    `MANAGE_SCHEDULE` from coaches; R6 brings it back as the coach's). **Changed:** the score
+    entry scenario of `visual_rbac_enforcement.feature` signs in as a coach and checks the game of
+    two teams the coach does not coach offers no score entry. `auth_setup` refuses a parent or
+    player persona rather than running it as an admin; `TEST_PARENT_EMAIL` goes from CI and
+    `.env.test.example`.
+- **Harness.** The revert is checked by a catalogue fingerprint against a build at
+  `20261023010000`. Nine guardian plants retire with the objects they mutated (six in
+  `20261021010000`, three policies in `20261021020000`); the roster, calendar-token and
+  staff-demotion plants are re-aimed at `$M41`, the live definitions; ten M41 plants (two of them
+  refused by the migration itself: a widened admin read, and the old team_players policy left in
+  place, which makes the table drop fail) and three R41 plants are added. Each new or re-aimed
+  plant was applied by hand and the harness run: each failed with its expected check.
+- **Found for later PRs, not done here.** R4: the player record's Guardians tab and the roster's
+  guardian contacts component (admin-only now), the contact card, the "guardian(s) volunteered to
+  coach" line. R6: a coach still holds `MANAGE_SCHEDULE`, so sees practice and game edit controls
+  and score entry for their own games (the retired read-only scenario); the role preview finds its
+  coach by `profiles.role`, which nothing sets (production's four profiles all read `user`), so it
+  never offers a preview there. Phase C's plan uses a parent persona (noted in that plan).
+
 ## Docs updated across the PRs
 
 AGENTS.md section 2 (data rules), `docs/agents-reference.md`, `README.md`,

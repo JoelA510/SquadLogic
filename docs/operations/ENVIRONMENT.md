@@ -192,7 +192,8 @@ gate:
 2. Copy `.env.local.example` → `.env.local` (gitignored — contains secrets).
 3. Optionally copy `.env.test.example` → `.env.test` for E2E credentials
    against a real backend (`TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`,
-   `TEST_PARENT_EMAIL`, `TEST_PASSWORD`). They are read at the Node layer by
+   `TEST_PASSWORD`; `TEST_PARENT_EMAIL` went with the parent role in
+   `20261024010000`). They are read at the Node layer by
    the Playwright steps (`tests/e2e/steps/auth_setup.ts`), never by the app,
    and carry no `VITE_` prefix, so they never reach the bundle. The mock
    client needs none of them: it accepts one fixed demo password,

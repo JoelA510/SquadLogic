@@ -21,7 +21,7 @@ _Note on Epics: Epics 10 through 17 established the v1.0 baseline. Current docum
 - **Frontend Shell**: React Router, the "Lightning-class" design system (cobalt light/dark themes), Theme Context, Dashboard Aggregation Hooks.
 - **Facility Management**: Full CRUD UI for Venues, Fields, and Blackout Dates.
 - **Communication (M3.2)**: Trigger-based notifications (Rainouts, Schedule Changes). RSVP tracking and Team Chat shipped and were removed on 2026-10-22 (owner decision: family communication is out of scope; plan `docs/changes/2026-10-22-admin-focus.md`, R2).
-- **Calendar Sync (M3.3)**: Public ICS feeds for parents and coaches.
+- **Calendar Sync (M3.3)**: Public ICS feeds for parents and coaches (coaches and admins since R3 removed the guardian view, `20261024010000`).
 - **Registration & Compliance (M3.4)**: Custom form builder, waiver tracking, and boolean compliance dashboards.
 - **Reporting (M3.5)**: Game score entry, standings calculations, and tie-breaker logic.
 

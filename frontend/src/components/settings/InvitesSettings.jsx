@@ -13,14 +13,11 @@ import { supabase } from '../../lib/supabaseClient.js';
 import { logger } from '../../lib/logger.js';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import Button from '../ui/Button.jsx';
+import { ASSIGNABLE_ROLES } from '../../constants/permissions.js';
 
-const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'coach', label: 'Coach' },
-  { value: 'staff', label: 'Staff' },
-  { value: 'parent', label: 'Parent' },
-  { value: 'player', label: 'Player' },
-];
+const ROLE_LABELS = { admin: 'Admin', coach: 'Coach', staff: 'Staff' };
+// The roles create_org_invite accepts (no parent or player since 20261024010000).
+const ROLE_OPTIONS = ASSIGNABLE_ROLES.map((value) => ({ value, label: ROLE_LABELS[value] }));
 
 const EXPIRY_OPTIONS = [
   { value: '1 day', label: '1 day' },
@@ -248,7 +245,7 @@ export default function InvitesSettings() {
               />
             </div>
             {justCreated.expires_at && (
-              <p className="text-[10px] text-text-muted">
+              <p className="text-[10px] text-text-secondary">
                 Expires {new Date(justCreated.expires_at).toLocaleString()}
               </p>
             )}

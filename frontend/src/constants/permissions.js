@@ -2,10 +2,10 @@ export const ROLES = {
   TENANT_ADMIN: 'tenant_admin',
   ADMIN: 'admin',
   COACH: 'coach',
-  PLAYER: 'player',
-  PARENT: 'parent',
   STAFF: 'staff',
 };
+// No `parent` or `player` role: the guardian view and both roles were removed
+// (migration 20261024010000; plan docs/changes/2026-10-22-admin-focus.md, R3).
 
 export const PERMISSIONS = {
   // Org Level
@@ -17,7 +17,6 @@ export const PERMISSIONS = {
   MANAGE_ALL_TEAMS: 'manage_all_teams',
   MANAGE_OWN_TEAM: 'manage_own_team',
   VIEW_ALL_TEAMS: 'view_all_teams',
-  VIEW_OWN_TEAM: 'view_own_team',
 
   // Schedule
   MANAGE_SCHEDULE: 'manage_schedule',
@@ -45,6 +44,13 @@ export const ADMIN_ROLES = Object.freeze([ROLES.ADMIN, ROLES.TENANT_ADMIN, ROLES
 
 /** True when an organization role is admin-equivalent. */
 export const isAdminRole = (role) => ADMIN_ROLES.includes(role);
+
+/**
+ * The roles an admin can invite a member as or assign one: the whitelist of
+ * `create_org_invite` and `admin_change_member_role` (20261024010000), and the
+ * `organization_invites` role check. `tenant_admin` is never assigned here.
+ */
+export const ASSIGNABLE_ROLES = Object.freeze([ROLES.ADMIN, ROLES.COACH, ROLES.STAFF]);
 
 export const ROLE_PERMISSIONS = {
   [ROLES.TENANT_ADMIN]: [
@@ -86,16 +92,6 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.VIEW_SCHEDULE,
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
     PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE,
-  ],
-  [ROLES.PLAYER]: [
-    PERMISSIONS.VIEW_ORGANIZATION,
-    PERMISSIONS.VIEW_OWN_TEAM,
-    PERMISSIONS.VIEW_SCHEDULE,
-  ],
-  [ROLES.PARENT]: [
-    PERMISSIONS.VIEW_ORGANIZATION,
-    PERMISSIONS.VIEW_OWN_TEAM,
-    PERMISSIONS.VIEW_SCHEDULE,
   ],
 };
 

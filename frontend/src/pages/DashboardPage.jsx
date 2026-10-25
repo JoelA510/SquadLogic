@@ -34,6 +34,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
+import { isAdminRole } from '../constants/permissions.js';
 
 /**
  * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
@@ -788,100 +789,17 @@ CoachDirectory.propTypes = {
   ).isRequired,
 };
 
-/** Parent Home — my players and the schedule. */
-function ParentDashboard() {
-  const { user } = useAuth();
-  const [players, setPlayers] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data: links } = await supabase
-          .from('profile_players')
-          .select('player_id')
-          .eq('profile_id', user?.profile?.id || user?.id);
-        const ids = (links || []).map((link) => link.player_id);
-        if (ids.length > 0) {
-          const { data } = await supabase
-            .from('players')
-            .select('id, first_name, last_name, status, team_id')
-            .in('id', ids);
-          if (!cancelled) setPlayers(data || []);
-        }
-      } catch (err) {
-        logger.error('[ParentDashboard] load failed:', err);
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  if (!loaded) return <LoadingScreen />;
-
+/**
+ * Home for a membership whose role SquadLogic no longer has (a stale `parent`
+ * or `player`, both removed in 20261024010000): it says so, and reads nothing.
+ */
+function NoRoleHome() {
   return (
-    <Page
-      header={
-        <PageHeader
-          title="My Dashboard"
-          subtitle="Your players, their teams, and what's coming up."
-          icon={
-            <span className="page-obj-icon" style={{ background: 'var(--accent-teal)' }}>
-              <User size={20} aria-hidden="true" />
-            </span>
-          }
-          crumbs={['Home']}
-        />
-      }
-    >
-      <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {players.length === 0 && (
-          <div className="card">
-            <div className="card-body muted">
-              No players are linked to your account yet. Your league administrator can link them.
-            </div>
-          </div>
-        )}
-        {players.map((player) => {
-          const name = `${player.first_name} ${player.last_name}`;
-          return (
-            <div className="card" key={player.id}>
-              <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Avatar name={name} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700 }}>{name}</div>
-                  <div className="muted" style={{ fontSize: 12.5 }}>
-                    {player.status === 'waitlist' ? 'On the waitlist' : 'Registered'}
-                  </div>
-                </div>
-                {player.team_id && (
-                  <Link to={`/team/${player.team_id}`}>
-                    <Button variant="secondary" size="sm" icon={ArrowRight}>
-                      Team page
-                    </Button>
-                  </Link>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        <div className="card">
-          <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Link to="/schedule/game">
-              <Button variant="secondary" size="sm" icon={Flag}>
-                Schedule
-              </Button>
-            </Link>
-            <Link to="/standings">
-              <Button variant="secondary" size="sm" icon={History}>
-                Standings
-              </Button>
-            </Link>
-          </div>
+    <Page header={<PageHeader title="My Dashboard" crumbs={['Home']} />}>
+      <div className="card" style={{ maxWidth: 720 }}>
+        <div className="card-body muted">
+          Your account has no role in this organization that SquadLogic recognizes. Ask a league
+          administrator to set your role.
         </div>
       </div>
     </Page>
@@ -889,8 +807,10 @@ function ParentDashboard() {
 }
 
 /**
- * Home — role-scoped: admins get the league overview, coaches and parents
- * get their focused dashboards. Under role preview the previewed role wins.
+ * Home — role-scoped: admins get the league overview, coaches their focused
+ * dashboard (there is no parent or player home since 20261024010000; a
+ * membership still carrying either gets NoRoleHome). Under role preview the
+ * previewed role wins.
  */
 export default function DashboardPage() {
   // E2E Testing Error Trigger (resilience scenarios force a render error here)
@@ -919,9 +839,9 @@ export default function DashboardPage() {
   const Home =
     effectiveRole === 'coach'
       ? CoachDashboard
-      : effectiveRole === 'parent' || effectiveRole === 'player'
-        ? ParentDashboard
-        : AdminHome;
+      : !effectiveRole || isAdminRole(effectiveRole)
+        ? AdminHome
+        : NoRoleHome;
   return (
     <>
       {banner}

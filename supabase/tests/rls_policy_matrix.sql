@@ -1,5 +1,5 @@
 -- RLS persona matrix: what each persona can read and write, table by table,
--- on the 24 tables whose policies the Supabase performance advisors flag
+-- on the 23 tables whose policies the Supabase performance advisors flag
 -- (`auth_rls_initplan`, `multiple_permissive_policies`; the waivers in
 -- docs/security/supabase-advisor-waivers.json). docs/PLAN_RLS_ADVISOR_REWRITE.md
 -- section 4.2.
@@ -15,18 +15,26 @@
 --
 -- **Personas** (eight): the fixtures' Alice (admin of Org A), Charlie (coach
 -- of Org A) and Bob (admin of Org B), plus four seeded here: a
--- `tenant_admin` of Org A, a parent of Org A, a `staff` member of Org A, and a
--- signed-in user with no membership anywhere ("outsider"); and the `anon` role.
+-- `tenant_admin` of Org A, a second coach of Org A ("coach2_a"), a `staff`
+-- member of Org A, and a signed-in user with no membership anywhere
+-- ("outsider"); and the `anon` role. Charlie is the current lead coach of
+-- A-Team and the second coach of A-Team Two (coach rows and assignments seeded
+-- here; none of the subject tables' policies reads them). The second coach was
+-- a parent of Org A until 20261024010000 removed the guardian view and the
+-- `parent` role (plan docs/changes/2026-10-22-admin-focus.md, R3); every cell
+-- they had is kept but players and team_players, which a parent read for
+-- their own child.
 --
 -- **Subjects**: the 26 tables, as a literal list taken from the advisor
 -- findings (the plan's section 1), never derived from `pg_policies`, so a
 -- dropped policy cannot shrink the set. 24 since 20261022020000 dropped
 -- `registration_forms` and `registrations` with the in-app registration flow
--- (plan docs/changes/2026-10-22-admin-focus.md, R1). Each table carries one row in Org A
+-- (plan docs/changes/2026-10-22-admin-focus.md, R1), and 23 since 20261024010000
+-- dropped `profile_players` with the guardian view (R3). Each table carries one row in Org A
 -- and one in Org B (from the fixtures where they have one, seeded below
 -- otherwise).
 --
--- **Probes**, per persona and table (24 x 8 x 5 = 960 cells):
+-- **Probes**, per persona and table (23 x 8 x 5 = 920 cells):
 --   sel  which of the two subject rows SELECT returns: 'AB', 'A', 'B' or '-';
 --   ins  an INSERT of a new Org A row: 'ok';
 --   upd  how many rows an UPDATE of Org A's subject row reaches, setting one
@@ -51,28 +59,28 @@
 -- after the write and catches only that (and 42501, the refusal it is
 -- measuring), so its subtransaction rolls back and no probe sees another's
 -- effect. Any other error is not caught: it aborts the test. A write reads
--- 'ok' once its statement has returned, foreign keys checked; none of the 24
+-- 'ok' once its statement has returned, foreign keys checked; none of the 23
 -- tables has a deferred constraint or a constraint trigger that would run
 -- only at commit (checked on a31ddde).
 --
--- **Assertions** (30): five meta-assertions (the 24 subject tables exist and
+-- **Assertions** (37): five meta-assertions (the 23 subject tables exist and
 -- each has RLS enabled, every subject row was seeded, every persona ran as the
--- identity it claims on every table, the expected table covers all 192
--- table-persona pairs, the probes produced all 960 cells); one that no cell
--- anywhere differs from the literal expected table below; and one
--- `results_eq` per table, so a failure names its table. Every differing cell
--- is printed as a diagnostic.
---
--- The expected table was generated on `main` (a31ddde, 82 policies) and each
--- row was then checked by hand against the policy text it follows; the notes
--- beside the rows say which policy decides.
+-- identity it claims on every table, the expected table covers all 184
+-- table-persona pairs, the probes produced all 920 cells); one that no cell
+-- anywhere differs from the literal expected table below; one `results_eq` per
+-- table, so a failure names its table; and eight on the coach persona and the
+-- roles (R3): a coach reads their own team's players through
+-- `get_team_roster`, names only, while an admin reads every column, and a
+-- coach of another team, the outsider and another organization's admin are
+-- refused; `parent` and `player` are refused as an invite's role and as a
+-- member's. Every differing cell is printed as a diagnostic.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(30);
+SELECT plan(37);
 
 -- ── 1. The three personas the fixtures lack, and a spare user ─────────────
 -- The spare user exists only so the profiles INSERT probe has an auth user
@@ -82,7 +90,7 @@ VALUES
     ('44444444-4444-4444-4444-444444444444', 'tara@test.local',
      jsonb_build_object('full_name', 'Tara Tenant-Admin-A', 'password_length', 12), 'authenticated', 'authenticated'),
     ('55555555-5555-5555-5555-555555555555', 'pat@test.local',
-     jsonb_build_object('full_name', 'Pat Parent-A', 'password_length', 12),       'authenticated', 'authenticated'),
+     jsonb_build_object('full_name', 'Pat Coach-Two-A', 'password_length', 12),    'authenticated', 'authenticated'),
     ('66666666-6666-6666-6666-666666666666', 'olive@test.local',
      jsonb_build_object('full_name', 'Olive Outsider', 'password_length', 12),     'authenticated', 'authenticated'),
     ('77777777-7777-7777-7777-777777777777', 'spare@test.local',
@@ -94,7 +102,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.profiles (id, email, full_name)
 VALUES
     ('44444444-4444-4444-4444-444444444444', 'tara@test.local',  'Tara Tenant-Admin-A'),
-    ('55555555-5555-5555-5555-555555555555', 'pat@test.local',   'Pat Parent-A'),
+    ('55555555-5555-5555-5555-555555555555', 'pat@test.local',   'Pat Coach-Two-A'),
     ('66666666-6666-6666-6666-666666666666', 'olive@test.local', 'Olive Outsider'),
     ('88888888-8888-8888-8888-888888888888', 'sam@test.local',   'Sam Staff-A')
 ON CONFLICT (id) DO NOTHING;
@@ -110,7 +118,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.organization_members (organization_id, profile_id, role)
 VALUES
     ('a1111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444', 'tenant_admin'),
-    ('a1111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555', 'parent'),
+    ('a1111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555', 'coach'),
     ('a1111111-1111-1111-1111-111111111111', '88888888-8888-8888-8888-888888888888', 'staff')
 ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
@@ -234,19 +242,13 @@ INSERT INTO public.organization_schema_history (id, organization_id, entity_type
     ('e0000022-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111', 'player'),
     ('e0000022-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222', 'player');
 
--- 23 profile_players: Org A's links the parent; Org B's links the outsider,
--- so the policy's own-row arm (profile_id = auth.uid()) shows on its own.
-INSERT INTO public.profile_players (profile_id, player_id, organization_id) VALUES
-    ('55555555-5555-5555-5555-555555555555', 'e0000010-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111'),
-    ('66666666-6666-6666-6666-666666666666', 'e0000010-0000-0000-0000-00000000000b', 'b2222222-2222-2222-2222-222222222222');
-
 -- ── 3. The matrix's own tables (temporary, owned by the test role) ────────
 CREATE TEMP TABLE matrix_persona (ord int PRIMARY KEY, persona text UNIQUE, db_role text, uid uuid);
 INSERT INTO matrix_persona VALUES
     (1, 'admin_a',  'authenticated', '11111111-1111-1111-1111-111111111111'),
     (2, 'tenant_a', 'authenticated', '44444444-4444-4444-4444-444444444444'),
     (3, 'coach_a',  'authenticated', '33333333-3333-3333-3333-333333333333'),
-    (4, 'parent_a', 'authenticated', '55555555-5555-5555-5555-555555555555'),
+    (4, 'coach2_a', 'authenticated', '55555555-5555-5555-5555-555555555555'),
     (5, 'admin_b',  'authenticated', '22222222-2222-2222-2222-222222222222'),
     (6, 'outsider', 'authenticated', '66666666-6666-6666-6666-666666666666'),
     (7, 'anon',     'anon',          NULL),
@@ -383,13 +385,6 @@ INSERT INTO matrix_subject VALUES
      'organization_id',
      $$INSERT INTO public.organization_schema_history (id, organization_id, entity_type)
        VALUES ('e0000022-0000-0000-0000-0000000000fa', 'a1111111-1111-1111-1111-111111111111', 'team')$$),
-    ('profile_players',
-     $$profile_id = '55555555-5555-5555-5555-555555555555' AND player_id = 'e0000010-0000-0000-0000-00000000000a'$$,
-     $$profile_id = '66666666-6666-6666-6666-666666666666' AND player_id = 'e0000010-0000-0000-0000-00000000000b'$$,
-     'organization_id',
-     $$INSERT INTO public.profile_players (profile_id, player_id, organization_id)
-       VALUES ('55555555-5555-5555-5555-555555555555', 'e0000010-0000-0000-0000-00000000002a',
-               'a1111111-1111-1111-1111-111111111111')$$),
     ('profiles',
      $$id = '33333333-3333-3333-3333-333333333333'$$, $$id = '22222222-2222-2222-2222-222222222222'$$,
      'full_name',
@@ -540,7 +535,7 @@ $matrix$;
 -- admin and tenant_admin): every member of Org A reads A's row, A's admin and
 -- tenant_admin write it and cannot move rows to Org C (the WITH CHECK refuses:
 -- 'rls'; so does Bob's, on B's rows), Bob reads B's only, and the outsider
--- and anon read nothing. None of the 24 tables has a policy for `anon`, so anon's writes are
+-- and anon read nothing. None of the 23 tables has a policy for `anon`, so anon's writes are
 -- refused by RLS (or by the grant, where the table grants anon nothing).
 CREATE TEMP TABLE matrix_expected (
     tbl text, persona text, sel text, ins text, upd text, mov text, del text,
@@ -551,7 +546,7 @@ INSERT INTO matrix_expected VALUES
     ('audit_log',                   'admin_a',  'A',  'rls',   '0',   '0',     '0'),
     ('audit_log',                   'tenant_a', '-',  'rls',   '0',   '0',     '0'),
     ('audit_log',                   'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('audit_log',                   'parent_a', '-',  'rls',   '0',   '0',     '0'),
+    ('audit_log',                   'coach2_a', '-',  'rls',   '0',   '0',     '0'),
     ('audit_log',                   'admin_b',  'B',  'rls',   '0',   '0',     '0'),
     ('audit_log',                   'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('audit_log',                   'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -560,7 +555,7 @@ INSERT INTO matrix_expected VALUES
     ('email_log',                   'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('email_log',                   'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('email_log',                   'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('email_log',                   'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('email_log',                   'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('email_log',                   'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('email_log',                   'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('email_log',                   'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -569,7 +564,7 @@ INSERT INTO matrix_expected VALUES
     ('evaluation_findings',         'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_findings',         'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_findings',         'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('evaluation_findings',         'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_findings',         'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('evaluation_findings',         'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('evaluation_findings',         'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('evaluation_findings',         'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -578,7 +573,7 @@ INSERT INTO matrix_expected VALUES
     ('evaluation_metrics',          'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_metrics',          'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_metrics',          'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('evaluation_metrics',          'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_metrics',          'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('evaluation_metrics',          'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('evaluation_metrics',          'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('evaluation_metrics',          'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -587,7 +582,7 @@ INSERT INTO matrix_expected VALUES
     ('evaluation_run_events',       'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_run_events',       'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_run_events',       'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('evaluation_run_events',       'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_run_events',       'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('evaluation_run_events',       'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('evaluation_run_events',       'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('evaluation_run_events',       'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -596,7 +591,7 @@ INSERT INTO matrix_expected VALUES
     ('evaluation_runs',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_runs',             'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('evaluation_runs',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('evaluation_runs',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('evaluation_runs',             'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('evaluation_runs',             'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('evaluation_runs',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('evaluation_runs',             'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -605,7 +600,7 @@ INSERT INTO matrix_expected VALUES
     ('export_jobs',                 'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('export_jobs',                 'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('export_jobs',                 'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('export_jobs',                 'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('export_jobs',                 'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('export_jobs',                 'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('export_jobs',                 'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('export_jobs',                 'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -614,7 +609,7 @@ INSERT INTO matrix_expected VALUES
     ('game_slots',                  'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('game_slots',                  'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('game_slots',                  'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('game_slots',                  'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('game_slots',                  'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('game_slots',                  'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('game_slots',                  'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('game_slots',                  'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -623,7 +618,7 @@ INSERT INTO matrix_expected VALUES
     ('games',                       'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('games',                       'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('games',                       'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('games',                       'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('games',                       'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('games',                       'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('games',                       'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('games',                       'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -632,7 +627,7 @@ INSERT INTO matrix_expected VALUES
     ('import_jobs',                 'admin_a',  'A',  'rls',   '0',   '0',     '0'),
     ('import_jobs',                 'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
     ('import_jobs',                 'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('import_jobs',                 'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('import_jobs',                 'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('import_jobs',                 'admin_b',  'B',  'rls',   '0',   '0',     '0'),
     ('import_jobs',                 'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('import_jobs',                 'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -641,7 +636,7 @@ INSERT INTO matrix_expected VALUES
     ('organization_members',        'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('organization_members',        'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('organization_members',        'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('organization_members',        'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('organization_members',        'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('organization_members',        'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('organization_members',        'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('organization_members',        'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -650,7 +645,7 @@ INSERT INTO matrix_expected VALUES
     ('organization_schema_history', 'admin_a',  'A',  'rls',   '0',   '0',     '0'),
     ('organization_schema_history', 'tenant_a', '-',  'rls',   '0',   '0',     '0'),
     ('organization_schema_history', 'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('organization_schema_history', 'parent_a', '-',  'rls',   '0',   '0',     '0'),
+    ('organization_schema_history', 'coach2_a', '-',  'rls',   '0',   '0',     '0'),
     ('organization_schema_history', 'admin_b',  'B',  'rls',   '0',   '0',     '0'),
     ('organization_schema_history', 'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('organization_schema_history', 'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -659,7 +654,7 @@ INSERT INTO matrix_expected VALUES
     ('organizations',               'admin_a',  'A',  'rls',   '1',   'n/a',   '1'),
     ('organizations',               'tenant_a', 'A',  'rls',   '1',   'n/a',   '1'),
     ('organizations',               'coach_a',  'A',  'rls',   '0',   'n/a',   '0'),
-    ('organizations',               'parent_a', 'A',  'rls',   '0',   'n/a',   '0'),
+    ('organizations',               'coach2_a', 'A',  'rls',   '0',   'n/a',   '0'),
     ('organizations',               'admin_b',  'B',  'rls',   '0',   'n/a',   '0'),
     ('organizations',               'outsider', '-',  'rls',   '0',   'n/a',   '0'),
     ('organizations',               'anon',     '-',  'rls',   '0',   'n/a',   '0'),
@@ -668,19 +663,21 @@ INSERT INTO matrix_expected VALUES
     ('player_buddies',              'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('player_buddies',              'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('player_buddies',              'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('player_buddies',              'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('player_buddies',              'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('player_buddies',              'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('player_buddies',              'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('player_buddies',              'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- players: member SELECT, admin ALL.
-    -- 20261021020000 (Phase A3): a member who is not an admin reads players,
-    -- team_players and profile_players only for their own children (coach_a
-    -- has none, so reads none), and staging rows not at all.
+    -- 20261021020000 (Phase A3): a member who is not an admin reads players
+    -- and team_players only for their own children, and staging rows not at
+    -- all. 20261024010000 (R3): players_select_admin and
+    -- team_players_select_admin, admins only; a coach reads their team's
+    -- players' names through get_team_roster (section 8).
     ('players',                     'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('players',                     'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('players',                     'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('players',                     'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('players',                     'coach2_a', '-',  'rls',   '0',   '0',     '0'),
     ('players',                     'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('players',                     'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('players',                     'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -689,7 +686,7 @@ INSERT INTO matrix_expected VALUES
     ('practice_assignments',        'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('practice_assignments',        'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('practice_assignments',        'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('practice_assignments',        'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('practice_assignments',        'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('practice_assignments',        'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('practice_assignments',        'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('practice_assignments',        'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -698,26 +695,16 @@ INSERT INTO matrix_expected VALUES
     ('practice_exceptions',         'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('practice_exceptions',         'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('practice_exceptions',         'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('practice_exceptions',         'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('practice_exceptions',         'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('practice_exceptions',         'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('practice_exceptions',         'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('practice_exceptions',         'anon',     'grant','grant', 'grant','grant', 'grant'),
-
-    -- profile_players: own row while a member, or an admin (20261021020000); Org B's row is the
-    -- outsider's own, but the outsider is no Org B member, so it reads nothing; no write policy.
-    ('profile_players',             'admin_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'outsider', '-',  'rls',   '0',   '0',     '0'),
-    ('profile_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
     -- profiles: own row only, read and update; Org A's subject row is Charlie's profile, Org B's is Bob's; no INSERT or DELETE policy.
     ('profiles',                    'admin_a',  '-',  'rls',   '0',   'n/a',   '0'),
     ('profiles',                    'tenant_a', '-',  'rls',   '0',   'n/a',   '0'),
     ('profiles',                    'coach_a',  'A',  'rls',   '1',   'n/a',   '0'),
-    ('profiles',                    'parent_a', '-',  'rls',   '0',   'n/a',   '0'),
+    ('profiles',                    'coach2_a', '-',  'rls',   '0',   'n/a',   '0'),
     ('profiles',                    'admin_b',  'B',  'rls',   '0',   'n/a',   '0'),
     ('profiles',                    'outsider', '-',  'rls',   '0',   'n/a',   '0'),
     -- anon's UPDATE reads 'grant': 20261020040000 revoked anon's UPDATE on profiles
@@ -728,7 +715,7 @@ INSERT INTO matrix_expected VALUES
     ('scheduler_runs',              'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('scheduler_runs',              'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('scheduler_runs',              'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('scheduler_runs',              'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('scheduler_runs',              'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('scheduler_runs',              'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('scheduler_runs',              'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('scheduler_runs',              'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -737,7 +724,7 @@ INSERT INTO matrix_expected VALUES
     ('season_settings',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('season_settings',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
-    ('season_settings',             'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('season_settings',             'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('season_settings',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -746,16 +733,16 @@ INSERT INTO matrix_expected VALUES
     ('staging_players',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('staging_players',             'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('staging_players',             'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('staging_players',             'parent_a', '-',  'rls',   '0',   '0',     '0'),
+    ('staging_players',             'coach2_a', '-',  'rls',   '0',   '0',     '0'),
     ('staging_players',             'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('staging_players',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('staging_players',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 
-    -- team_players: member SELECT, admin ALL.
+    -- team_players: member SELECT, admin ALL; admins only since 20261024010000 (R3).
     ('team_players',                'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
     ('team_players',                'tenant_a', 'A',  'ok',    '1',   'rls',   '1'),
     ('team_players',                'coach_a',  '-',  'rls',   '0',   '0',     '0'),
-    ('team_players',                'parent_a', 'A',  'rls',   '0',   '0',     '0'),
+    ('team_players',                'coach2_a', '-',  'rls',   '0',   '0',     '0'),
     ('team_players',                'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
     ('team_players',                'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('team_players',                'anon',     '-',  'rls',   '0',   '0',     '0'),
@@ -764,7 +751,7 @@ INSERT INTO matrix_expected VALUES
     ('telemetry_log',               'admin_a',  'A',  'ok',    '0',   '0',     '0'),
     ('telemetry_log',               'tenant_a', 'A',  'ok',    '0',   '0',     '0'),
     ('telemetry_log',               'coach_a',  '-',  'ok',    '0',   '0',     '0'),
-    ('telemetry_log',               'parent_a', '-',  'ok',    '0',   '0',     '0'),
+    ('telemetry_log',               'coach2_a', '-',  'ok',    '0',   '0',     '0'),
     ('telemetry_log',               'admin_b',  'B',  'rls',   '0',   '0',     '0'),
     ('telemetry_log',               'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('telemetry_log',               'anon',     '-',  'rls',   '0',   '0',     '0');
@@ -782,13 +769,13 @@ SELECT is(
     (SELECT count(*) FROM matrix_subject s
        JOIN pg_class c ON c.oid = to_regclass('public.' || quote_ident(s.tbl))
       WHERE c.relkind = 'r' AND c.relrowsecurity),
-    24::bigint,
-    'the 24 subject tables exist, each an ordinary table with RLS enabled'
+    23::bigint,
+    'the 23 subject tables exist, each an ordinary table with RLS enabled'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_seen WHERE a_n = 1 AND b_n = 1),
-    24::bigint,
+    23::bigint,
     'every subject table holds exactly one Org A and one Org B subject row'
 );
 
@@ -797,21 +784,21 @@ SELECT is(
        JOIN matrix_persona p ON p.persona = i.persona
        JOIN matrix_subject s ON s.tbl = i.tbl
       WHERE i.db_role = p.db_role AND i.uid IS NOT DISTINCT FROM p.uid),
-    192::bigint,
-    'every persona ran as the role and user it claims, on every table (24 x 8)'
+    184::bigint,
+    'every persona ran as the role and user it claims, on every table (23 x 8)'
 );
 
 SELECT is(
     (SELECT count(*) FROM matrix_expected e
        JOIN matrix_subject USING (tbl) JOIN matrix_persona USING (persona)),
-    192::bigint,
-    'the expected table covers every table and persona (24 x 8)'
+    184::bigint,
+    'the expected table covers every table and persona (23 x 8)'
 );
 
 SELECT is(
     (SELECT count(sel) + count(ins) + count(upd) + count(mov) + count(del) FROM matrix_result),
-    960::bigint,
-    'the probes produced every cell (24 tables x 8 personas x 5 probes)'
+    920::bigint,
+    'the probes produced every cell (23 tables x 8 personas x 5 probes)'
 );
 
 -- Every differing cell, anywhere in the matrix: printed, then counted. This
@@ -864,13 +851,89 @@ SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'player_buddies'), pg_tem
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'players'), pg_temp.matrix_rows('matrix_expected', 'players'), 'persona matrix: players');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'practice_assignments'), pg_temp.matrix_rows('matrix_expected', 'practice_assignments'), 'persona matrix: practice_assignments');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'practice_exceptions'), pg_temp.matrix_rows('matrix_expected', 'practice_exceptions'), 'persona matrix: practice_exceptions');
-SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'profile_players'), pg_temp.matrix_rows('matrix_expected', 'profile_players'), 'persona matrix: profile_players');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'profiles'), pg_temp.matrix_rows('matrix_expected', 'profiles'), 'persona matrix: profiles');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'scheduler_runs'), pg_temp.matrix_rows('matrix_expected', 'scheduler_runs'), 'persona matrix: scheduler_runs');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'season_settings'), pg_temp.matrix_rows('matrix_expected', 'season_settings'), 'persona matrix: season_settings');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'staging_players'), pg_temp.matrix_rows('matrix_expected', 'staging_players'), 'persona matrix: staging_players');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'team_players'), pg_temp.matrix_rows('matrix_expected', 'team_players'), 'persona matrix: team_players');
 SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'telemetry_log'), pg_temp.matrix_rows('matrix_expected', 'telemetry_log'), 'persona matrix: telemetry_log');
+
+-- ── 8. The coach persona and the roles (20261024010000, R3) ──────────────
+-- A coach reads no player or roster row directly (the matrix above); they
+-- read their own team's players through get_team_roster, names and jersey
+-- number only. Charlie leads A-Team, the second coach leads A-Team Two; both
+-- assignments are current. Ada (on A-Team) carries a rating, a gender and a
+-- guardian contact, so an empty column is the read's doing, not the seed's.
+INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
+    ('e0000040-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111',
+     '33333333-3333-3333-3333-333333333333', 'Charlie Coach-A', 'charlie@test.local', 'active'),
+    ('e0000040-0000-0000-0000-00000000002a', 'a1111111-1111-1111-1111-111111111111',
+     '55555555-5555-5555-5555-555555555555', 'Pat Coach-Two-A', 'pat@test.local', 'active');
+INSERT INTO public.team_coach_assignments
+    (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
+VALUES
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001',
+     'e0000040-0000-0000-0000-00000000000a', 'lead',
+     public.team_local_today('aaaaaaaa-0000-0000-0000-000000000001') - 5, NULL, 'pgtap', NULL),
+    ('a1111111-1111-1111-1111-111111111111', 'e0000032-0000-0000-0000-00000000000a',
+     'e0000040-0000-0000-0000-00000000002a', 'lead',
+     public.team_local_today('e0000032-0000-0000-0000-00000000000a') - 5, NULL, 'pgtap', NULL);
+UPDATE public.players
+   SET rating = 3, gender = 'F', years_played = 2, willing_to_coach = true, jersey_number = 7,
+       guardian_contacts = '[{"name": "Matrix Guardian", "email": "guardian@test.local", "phone": "555-0100"}]'
+ WHERE id = 'e0000010-0000-0000-0000-00000000000a';
+
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(
+    (SELECT string_agg(concat_ws(':', r.first_name, r.last_name, r.jersey_number, r.gender, r.years_played,
+                                 r.rating, r.willing_to_coach, r.guardian_contacts -> 0 ->> 'email'), ',')
+       FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
+    'Ada:Matrix:7:F:2:3:t:guardian@test.local',
+    'an admin reads every column of their team''s roster'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+SELECT is(
+    (SELECT string_agg(concat_ws(':', r.first_name, r.last_name, r.jersey_number,
+                                 coalesce(r.gender, '-'), coalesce(r.years_played::text, '-'),
+                                 coalesce(r.rating::text, '-'), coalesce(r.willing_to_coach::text, '-'),
+                                 r.guardian_contacts::text), ',')
+       FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
+    'Ada:Matrix:7:-:-:-:-:[]',
+    'a coach reads their own team''s players, names and jersey number only'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"55555555-5555-5555-5555-555555555555"}';
+SELECT throws_ok(
+    $$SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001')$$,
+    '42501', NULL, 'a coach of another team is refused the roster'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"66666666-6666-6666-6666-666666666666"}';
+SELECT throws_ok(
+    $$SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001')$$,
+    '42501', NULL, 'a signed-in user with no membership is refused the roster'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT throws_ok(
+    $$SELECT * FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001')$$,
+    '42501', NULL, 'another organization''s admin is refused the roster'
+);
+
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT throws_ok(
+    $$SELECT * FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'parent')$$,
+    '22023', NULL, 'an admin inviting a parent is refused'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'player')$$,
+    '22023', NULL, 'an admin inviting a player is refused'
+);
+RESET role;
+SELECT throws_ok(
+    $$UPDATE public.organization_members SET role = 'parent'
+       WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
+         AND profile_id = '55555555-5555-5555-5555-555555555555'$$,
+    '23514', NULL, 'no member holds the parent role, even written past the RPCs'
+);
 
 SELECT * FROM finish();
 ROLLBACK;

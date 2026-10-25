@@ -236,15 +236,10 @@ export const ROLE_NAV = {
       path: '/schedule/practice-lighting',
     },
   ],
-  parent: [
-    { id: 'home', label: 'My Dashboard', icon: Home, path: '/' },
-    { id: 'games', label: 'Schedule', icon: Flag, path: '/schedule/game' },
-    { id: 'standings', label: 'Standings', icon: Trophy, path: '/standings' },
-  ],
 };
-ROLE_NAV.player = ROLE_NAV.parent;
+// No parent or player nav: both roles were removed (20261024010000, R3).
 // Staff have no flat nav: they are admins (ADMIN_ROLES) and get the grouped
-// admin NAV, filtered by permission, as SideNav's isAdminNav decides.
+// admin NAV, filtered by permission, as SideNav decides.
 
 /** path -> { label, groupLabel } for breadcrumbs / PageHeader. */
 export const ROUTE_META = {};

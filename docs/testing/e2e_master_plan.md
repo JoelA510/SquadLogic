@@ -47,7 +47,7 @@ We leverage AI browser agents (like the Antigravity IDE `browser_subagent`) to v
 - **Scenarios**:
   - A Coach attempting to view a team they do not manage (should be blocked by RLS and UI routing).
   - An Admin from "Organization A" attempting to access "Organization B" data.
-  - A Parent viewing a public ICS feed without accessing PII (Personally Identifiable Information) of other players.
+  - A coach viewing a public ICS feed without accessing PII (Personally Identifiable Information) of other players (a Parent until `20261024010000` removed the role).
 - **Key Assertions**: API calls return 403/Empty arrays; UI renders "Unauthorized" states gracefully.
 
 ### Pillar 4: The Customization Test (Edge Cases)

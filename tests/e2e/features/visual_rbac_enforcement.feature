@@ -1,5 +1,5 @@
 Feature: Visual Role-Based Access Control
-  As a restricted user (Coach or Parent)
+  As a restricted user (a Coach)
   I want the UI to hide administrative controls
   So that I am not confused by actions I cannot perform
 
@@ -23,9 +23,11 @@ Feature: Visual Role-Based Access Control
     And I assign "Morgan Reyes" to "Tigers" from the Coaches page
     Then the coach row for "Morgan Reyes" should show team "Tigers"
 
+  # A coach of neither team in the game (the parent persona until R3,
+  # 20261024010000, removed the role).
   Scenario: Score Entry Restrictions in League Standings
-    Given I am logged into SquadLogic as a "Parent"
+    Given I am logged into SquadLogic as a "Coach"
     And I navigate to the "League Standings" page
     When I view the "Recent Games" section
     Then I should see the final scores of past games
-    But the score input fields and "Save" buttons should be completely hidden
+    But the score inputs and "Save" buttons should be hidden on the game I do not coach

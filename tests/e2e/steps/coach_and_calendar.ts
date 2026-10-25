@@ -21,7 +21,6 @@ Given('I have been assigned to the {string}', async ({ page }, teamName: string)
       // Wipe players to ensure clean slate for this test
       db.players = [];
       db.team_players = [];
-      db.profile_players = [];
       db.coaches = db.coaches || [];
       db.season_settings = db.season_settings || [];
       db.divisions = db.divisions || [];
@@ -120,7 +119,6 @@ Given('my team has {int} players assigned', async ({ page }, count: number) => {
 
       db.team_players = db.team_players || [];
       db.players = db.players || [];
-      db.profile_players = db.profile_players || [];
       for (let i = 0; i < num; i++) {
         const pid = `p-${i}`;
         db.team_players.push({

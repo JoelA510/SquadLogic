@@ -48,7 +48,8 @@ config) + Prettier, knip for unused code; TypeScript checkJs/allowJs, `strict: f
   imports); components in `frontend/src/components/` (feature subdirs such as `scheduling/`,
   `teaming/`, `ui/`); hooks (`use…`) in `frontend/src/hooks/`; pages in `frontend/src/pages/`;
   contexts in `frontend/src/contexts/`; Edge Functions in `supabase/functions/<name>/index.ts`.
-- **RBAC:** roles `admin`, `coach`, `player`, `parent`, `staff` (and `tenant_admin`); `staff` are
+- **RBAC:** roles `admin`, `coach`, `staff` (and `tenant_admin`; no `parent` or `player` since
+  `20261024010000`); `staff` are
   admins, as `ADMIN_ROLES` in `frontend/src/constants/permissions.js` says and `is_org_admin()` and
   the Edge `verifyOrgAdmin` agree (`tests/adminRolesParity.test.js`); permissions in
   `frontend/src/constants/permissions.js`, enforced by the `usePermission` hook and
@@ -106,7 +107,7 @@ surface in both themes. New colors go into `index.css` (light **and** dark block
 - `VITE_USE_MOCK_SUPABASE` — force the mock client (`true`): `.env.local` or CI.
 - `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional.
 - `VITE_SENTRY_DSN` — the frontend Sentry DSN, optional: Vercel.
-- `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` — E2E test
+- `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PASSWORD` — E2E test
   accounts: `.env.test`.
 
 Only `frontend/src/env.js` reads `import.meta.env`, by name; a production build fails on a missing

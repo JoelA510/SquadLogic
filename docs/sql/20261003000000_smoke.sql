@@ -91,7 +91,7 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 2. The round trip, as two admins, three coaches and a parent
+-- 2. The round trip, as two admins, three coaches and a member who coaches no team
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -100,7 +100,7 @@ DECLARE
     v_ua uuid := gen_random_uuid();
     v_ub uuid := gen_random_uuid();
     v_uc uuid := gen_random_uuid();
-    v_parent uuid := gen_random_uuid();
+    v_member uuid := gen_random_uuid();
     v_outsider uuid := gen_random_uuid();
     v_org uuid; v_other_org uuid;
     v_loc uuid; v_field uuid; v_s uuid; v_d uuid;
@@ -122,12 +122,12 @@ BEGIN
         (v_ua, 'plo-a@example.test', '{"password_length": 16}'),
         (v_ub, 'plo-b@example.test', '{"password_length": 16}'),
         (v_uc, 'plo-c@example.test', '{"password_length": 16}'),
-        (v_parent, 'plo-parent@example.test', '{"password_length": 16}'),
+        (v_member, 'plo-member@example.test', '{"password_length": 16}'),
         (v_outsider, 'plo-outsider@example.test', '{"password_length": 16}');
     INSERT INTO public.profiles (id, email) VALUES
         (v_admin, 'plo-admin@example.test'), (v_admin2, 'plo-admin2@example.test'),
         (v_ua, 'plo-a@example.test'), (v_ub, 'plo-b@example.test'), (v_uc, 'plo-c@example.test'),
-        (v_parent, 'plo-parent@example.test'), (v_outsider, 'plo-outsider@example.test')
+        (v_member, 'plo-member@example.test'), (v_outsider, 'plo-outsider@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org D14 PRB', 'smoke-org-d14-prb')
         RETURNING id INTO v_org;
@@ -136,7 +136,7 @@ BEGIN
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin'), (v_org, v_admin2, 'admin'),
         (v_org, v_ua, 'coach'), (v_org, v_ub, 'coach'), (v_org, v_uc, 'coach'),
-        (v_org, v_parent, 'parent'), (v_other_org, v_outsider, 'admin');
+        (v_org, v_member, 'coach'), (v_other_org, v_outsider, 'admin');
     INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
         VALUES (v_org, v_ua, 'Coach A', 'plo-a@example.test', 'active') RETURNING id INTO v_ca;
     INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
@@ -181,7 +181,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_uc::text, true);
     BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
     EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
-    PERFORM set_config('request.jwt.claim.sub', v_parent::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
     BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
     EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
     PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
@@ -191,7 +191,7 @@ BEGIN
     IF v_refused <> 4 OR v_n <> 1 THEN
         RAISE EXCEPTION '(b) % of 4 non-coach requests were refused and % row(s) exist; expected 4 and 1', v_refused, v_n;
     END IF;
-    RAISE NOTICE 'lighting overrides: coach A (coaches a team on the slot) requested; a coach of another slot''s team, a lapsed coach, a parent and another organisation''s admin were each refused 42501, 4 of 4, and wrote nothing';
+    RAISE NOTICE 'lighting overrides: coach A (coaches a team on the slot) requested; a coach of another slot''s team, a lapsed coach, a member who coaches no team and another organisation''s admin were each refused 42501, 4 of 4, and wrote nothing';
 
     -- ---- (c) a coach approving is refused, their own request included ------
     -- Coach B did not request the row, so the self-approval refusal cannot be
@@ -363,11 +363,11 @@ BEGIN
         RESET ROLE;
         RAISE EXCEPTION '(i) the lapsed coach C read % row(s)', v_n;
     END IF;
-    PERFORM set_config('request.jwt.claim.sub', v_parent::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
     SELECT count(*) INTO v_n FROM public.practice_lighting_overrides;
     IF v_n <> 0 THEN
         RESET ROLE;
-        RAISE EXCEPTION '(i) a parent member read % row(s)', v_n;
+        RAISE EXCEPTION '(i) a member who coaches no team read % row(s)', v_n;
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_admin2::text, true);
     SELECT count(*) INTO v_n FROM public.practice_lighting_overrides;
@@ -381,7 +381,7 @@ BEGIN
     IF v_n <> 0 THEN
         RAISE EXCEPTION '(i) an admin of another organisation read % row(s)', v_n;
     END IF;
-    RAISE NOTICE 'lighting overrides: coach A read the 5 rows of slot 1 and none of slot 2; coach B the 2 of slot 2 and none of slot 1; a lapsed coach and a parent 0; the admin 7 of 7; another organisation''s admin 0';
+    RAISE NOTICE 'lighting overrides: coach A read the 5 rows of slot 1 and none of slot 2; coach B the 2 of slot 2 and none of slot 1; a lapsed coach and a member who coaches no team 0; the admin 7 of 7; another organisation''s admin 0';
 
     -- ---- (j) malformed windows and kinds are refused ----------------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);

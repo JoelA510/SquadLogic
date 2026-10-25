@@ -14,16 +14,25 @@ const { Given, Then } = createBdd();
 
 // --- Existing Steps ---
 
+/*
+ * The signed-in coach (mock-coach-id) leads `team` today, and `player` is on
+ * its roster. It was "my child ... is on the ... team", signed in as a parent,
+ * until 20261024010000 (R3) removed the guardian view and the parent role.
+ * Every row carries `organization_id`; the assignment's window holds today in
+ * any season timezone. Synthetic names only.
+ */
 Given(
-  'my child {string} is on the {string} team',
-  async ({ page }, childName: string, teamName: string) => {
+  'I coach the {string} team, which has the player {string}',
+  async ({ page }, teamName: string, playerName: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ child, team, mockOrgId }) => {
+      ({ team, player, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
         const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const teamId = team.toLowerCase().replace(/\s+/g, '-');
-        const playerId = `player-${child.toLowerCase()}`;
+        const playerId = `player-${player.toLowerCase()}`;
+        const coachUserId = 'mock-coach-id';
+        const coachId = `coach-${teamId}`;
 
         db.teams = db.teams || [];
         // CRITICAL FIX: Aggressively clear previous state to prevent cross-worker contamination
@@ -51,7 +60,7 @@ Given(
         db.players = db.players.filter((p: Record<string, unknown>) => p.id !== playerId);
         db.players.push({
           id: playerId,
-          first_name: child,
+          first_name: player,
           last_name: 'Test',
           organization_id: orgId,
         });
@@ -60,18 +69,48 @@ Given(
         db.team_players = db.team_players.filter(
           (tp: Record<string, unknown>) => tp.player_id !== playerId
         );
-        db.team_players.push({ team_id: teamId, player_id: playerId });
+        db.team_players.push({ team_id: teamId, player_id: playerId, organization_id: orgId });
 
-        db.profile_players = db.profile_players || [];
-        db.profile_players = db.profile_players.filter(
-          (pp: Record<string, unknown>) => pp.player_id !== playerId
+        // The coach: a member of the organization, a coach row linked to the
+        // account, and a current lead assignment, which is what the
+        // server-side reads admit a coach by.
+        const org = (db.organizations || []).find((o: Record<string, unknown>) => o.id === orgId);
+        db.organization_members = (db.organization_members || []).filter(
+          (m: Record<string, unknown>) =>
+            !(m.organization_id === orgId && m.profile_id === coachUserId)
         );
-        db.profile_players.push({ profile_id: 'mock-parent-id', player_id: playerId });
+        db.organization_members.push({
+          organization_id: orgId,
+          profile_id: coachUserId,
+          role: 'coach',
+          organizations: org,
+        });
+        db.coaches = (db.coaches || []).filter((c: Record<string, unknown>) => c.id !== coachId);
+        db.coaches.push({
+          id: coachId,
+          organization_id: orgId,
+          user_id: coachUserId,
+          full_name: 'Mock Coach',
+          status: 'active',
+        });
+        db.team_coach_assignments = (db.team_coach_assignments || []).filter(
+          (row: Record<string, unknown>) => row.team_id !== teamId
+        );
+        db.team_coach_assignments.push({
+          id: `tca-${teamId}-lead`,
+          organization_id: orgId,
+          team_id: teamId,
+          coach_id: coachId,
+          role: 'lead',
+          effective_from: '2020-01-01',
+          effective_to: null,
+          started_via: 'e2e',
+        });
 
         localStorage.setItem('test_target_team_id', teamId);
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { child: childName, team: teamName, mockOrgId: MOCK_ORG_ID }
+      { team: teamName, player: playerName, mockOrgId: MOCK_ORG_ID }
     );
   }
 );

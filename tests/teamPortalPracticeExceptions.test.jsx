@@ -18,7 +18,7 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TeamRecordPage from '../frontend/src/pages/TeamRecordPage.jsx';
@@ -39,7 +39,8 @@ vi.mock('react-router-dom', () => ({
 vi.mock('../frontend/src/hooks/usePermission.js', () => ({
   usePermission: () => ({
     can: () => false,
-    role: 'parent',
+    // A coach since 20261024010000 (R3): there is no parent role.
+    role: 'coach',
     PERMISSIONS: { MANAGE_ALL_TEAMS: 'manage_all_teams' },
   }),
 }));
@@ -227,7 +228,7 @@ const shiftWindows = (exceptions, days) =>
 
 // --- The fake client: honours eq, is and range; `fail` makes a table err. ---
 
-function fakeClient(db, { fail = [], gone = [], user = 'parent-1', rosterError = null } = {}) {
+function fakeClient(db, { fail = [], gone = [], user = 'coach-1', rosterError = null } = {}) {
   const from = (table) => {
     const filters = [];
     let single = false;
@@ -264,8 +265,8 @@ function fakeClient(db, { fail = [], gone = [], user = 'parent-1', rosterError =
   };
   return {
     from,
-    // The roster comes through get_team_roster (20261021010000), which marks
-    // the caller's own children; every other RPC answers empty.
+    // The roster comes through get_team_roster (20261021010000): names only for
+    // a coach since 20261024010000; every other RPC answers empty.
     rpc: (name, params) => {
       if (name !== 'get_team_roster') return Promise.resolve({ data: [], error: null });
       if (rosterError) return Promise.resolve({ data: null, error: rosterError });
@@ -275,9 +276,6 @@ function fakeClient(db, { fail = [], gone = [], user = 'parent-1', rosterError =
           player_id: r.player.id,
           first_name: r.player.first_name,
           last_name: r.player.last_name,
-          is_my_child: (db.profile_players ?? []).some(
-            (link) => link.profile_id === user && link.player_id === r.player.id
-          ),
           guardian_contacts: [],
         }));
       return Promise.resolve({ data: rows, error: null });
@@ -302,7 +300,6 @@ function dbOf(exceptions = EXCEPTIONS) {
     games: [],
     practice_assignments: ROWS,
     practice_exceptions: exceptions,
-    profile_players: [{ profile_id: 'parent-1', player_id: 'player-1' }],
   };
 }
 
@@ -443,19 +440,6 @@ describe('team portal: saved practice exceptions are applied (W12, W4 portal)', 
       expect(within(card).getAllByText(/^Moved from /)).toHaveLength(1);
       expect(within(card).getByText(from)).toBeInTheDocument();
     }
-  });
-
-  it('a coach sees the same schedule as a parent', async () => {
-    const details = () =>
-      screen
-        .getAllByRole('heading', { level: 3 })
-        .map((h) => panelOf(h).querySelector('.space-y-2').textContent);
-    await renderPortal({ user: 'parent-1' });
-    const parent = details();
-    cleanup();
-    await renderPortal({ user: 'coach-1' });
-    expect(details()).toEqual(parent);
-    expect(parent.length).toBe(EXPECTED.length);
   });
 });
 

@@ -72,8 +72,9 @@ export default function TeamRecordPage() {
   const [staffError, setStaffError] = useState(false);
 
   // Staff tab: every current coach, through the server-side read
-  // (20261021010000), which admits admins, the team's current coaches and its
-  // guardians, and shows a coach's contact card in place of imported details.
+  // (20261021010000), which admits admins and the team's current coaches (no
+  // guardian since 20261024010000), and shows a coach's contact card in place
+  // of imported details.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -311,7 +312,7 @@ export default function TeamRecordPage() {
               {roster.length === 0 && (
                 <div className="col-span-full text-center text-text-muted py-8">
                   {rosterUnavailable === 'refused'
-                    ? "The roster is shown to the team's coaches, its families and league admins."
+                    ? "The roster is shown to the team's coaches and league admins."
                     : rosterUnavailable === 'failed'
                       ? 'The roster could not be loaded. Try again shortly.'
                       : 'No players assigned yet.'}
@@ -454,9 +455,9 @@ export default function TeamRecordPage() {
 /**
  * Phase 2.3 (H-2): Calendar modal with token rotation support.
  *
- * The token is read from `team_calendar_tokens` (20261021020000), which admins,
- * the team's current coaches and its guardians can read; anyone else gets no
- * row and is told so. `canRotate` (an admin or the team's current coach)
+ * The token is read from `team_calendar_tokens` (20261021020000), which admins
+ * and the team's current coaches can read (no guardian since 20261024010000);
+ * anyone else gets no row and is told so. `canRotate` (an admin or the team's current coach)
  * offers Regenerate; the server refuses everyone else regardless.
  */
 export function CalendarModal({ team, canRotate = false, onClose }) {
@@ -546,7 +547,7 @@ export function CalendarModal({ team, canRotate = false, onClose }) {
           <p className="text-sm text-status-warning-text mb-3">
             {canRotate
               ? 'No calendar link is currently available. Regenerate the link before sharing it.'
-              : "The calendar link is shared with the team's coaches, its families and league admins."}
+              : "The calendar link is shared with the team's coaches and league admins."}
           </p>
         )}
         {tokenState === 'failed' && (
@@ -609,10 +610,9 @@ CalendarModal.propTypes = {
 };
 
 /**
- * The guardian contacts the roster read returned for one player: every contact
- * to an admin, the team's coach and the player's own guardians; a teammate's
- * primary contact to other guardians on the team, unless the league turned
- * that off. Nothing renders when the read returned none.
+ * The guardian contacts the roster read returned for one player: every contact,
+ * to an admin only; a coach's read returns none (20261024010000). Nothing
+ * renders when the read returned none.
  */
 function GuardianContacts({ contacts }) {
   const list = Array.isArray(contacts)

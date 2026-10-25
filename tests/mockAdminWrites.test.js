@@ -172,16 +172,20 @@ describe('create_org_invite and redeem_org_invite', () => {
         ctxFor(db, 'coach-1')
       ).error.code
     ).toBe('42501');
-    expect(
-      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'owner' }).error.code
-    ).toBe('22023');
+    // No parent or player role since 20261024010000 (R3), as the SQL's whitelist.
+    for (const role of ['owner', 'parent', 'player']) {
+      expect(
+        call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: role }).error?.code,
+        role
+      ).toBe('22023');
+    }
     expect(call(db, 'redeem_org_invite', { p_code: 'X' }, ctxFor(db, 'u', false)).error.code).toBe(
       '28000'
     );
     expect(call(db, 'redeem_org_invite', { p_code: 'NOPE' }).error.message).toMatch(/not found/);
     const [{ code }] = call(db, 'create_org_invite', {
       p_org_id: MOCK_ORG_ID,
-      p_role: 'parent',
+      p_role: 'coach',
       p_expires_in: '1 hours',
     }).data;
     const later = { ...ctxFor(db, 'u'), now: new Date('2026-10-02T18:00:00Z') };

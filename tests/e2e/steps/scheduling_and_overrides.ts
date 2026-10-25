@@ -699,7 +699,7 @@ Given('I am viewing the Team Roster page', async ({ page }) => {
     // No extra import needed — import-1 from initialMockData provides player data
 
     // Through saveDB, which also replaces the page's in-memory copy: written to
-    // sessionStorage alone, an RPC that saves on load (link_my_guardian_records)
+    // sessionStorage alone, an RPC that saves on load (then link_my_guardian_records)
     // merged the stale copy back and restored the seeded run-1, with no roster.
     window.__saveMockDB__(db);
   }, MOCK_ORG_ID);

@@ -125,6 +125,11 @@ R39="$REPO/docs/sql/20261022030000_revert.sql"
 # a `division` column appended), and the revert.
 M40="$REPO/supabase/migrations/20261023010000_restore_reporting_views.sql"
 R40="$REPO/docs/sql/20261023010000_revert.sql"
+# R3: the guardian view and the parent and player roles removed (the people
+# read policies, the roster and staff reads, the calendar token, the role
+# checks and the two role RPCs replaced), and the revert.
+M41="$REPO/supabase/migrations/20261024010000_remove_guardian_view_and_roles.sql"
+R41="$REPO/docs/sql/20261024010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3377,7 +3382,7 @@ plant "R20 the revert does not drop the enact wrapper" "$R20" \
 # 20261022030000 (R2) dropped upsert_team_event_rsvp and event_rsvps, the head
 # build the smokes run on has no RSVP to plant in, and the smoke checks that
 # neither came back. W15's plant and the revert claim still hold.
-# W15's plan plant: the select policy tightened to admins, so a parent reads
+# W15's plan plant: the select policy tightened to admins, so a non-admin member reads
 # no exception (and the portal would show the series as if nothing changed).
 plant "M15 the practice_exceptions select policy admits admins only" "$M15" \
   "    ON public.practice_exceptions FOR SELECT TO authenticated
@@ -3753,7 +3758,9 @@ plant "M31 is_org_admin still refuses staff" "$M31" \
     );" \
   "smoke 20261020030000"
 
-plant "M31 the demotion guard does not count staff" "$M31" \
+# Aimed at $M41: 20261024010000 replaces admin_change_member_role (R3: no
+# parent or player), so its guard is the live one.
+plant "M31 the demotion guard does not count staff" "$M41" \
   "    IF v_old_role IN ('admin', 'tenant_admin', 'staff') AND p_role NOT IN ('admin', 'tenant_admin', 'staff') THEN" \
   "    IF v_old_role IN ('admin', 'tenant_admin') AND p_role NOT IN ('admin', 'tenant_admin') THEN" \
   "smoke 20261020030000"
@@ -3822,32 +3829,20 @@ plant "R32 the revert does not restore the profiles grant" "$R32" \
   "revert 20261020040000"
 
 # Server-side reads. The smoke RAISEs on each; the revert claim on a function
-# or column left behind.
+# or column left behind. Since 20261024010000 (R3) there is no guardian: the
+# six guardian plants (teammate contacts, the sharing setting, the unshared
+# card on a guardian contact, the unverified link, the card helper's grant and
+# the sign-in email change) went with get_team_roster's guardian arm,
+# guardian_contacts_view and link_my_guardian_records, and the roster plant is
+# aimed at $M41, the live get_team_roster.
 plant "M33 a former coach still reads the roster" "$M33" \
   "           AND (a.effective_to IS NULL OR a.effective_to >= d.today)
            AND public.is_org_member(a.organization_id)" \
   "           AND public.is_org_member(a.organization_id)" \
   "smoke 20261021010000"
 
-plant "M33 a guardian gets every teammate contact" "$M33" \
-  "                   THEN public.guardian_contacts_view(p.id, p.guardian_contacts, true)" \
-  "                   THEN public.guardian_contacts_view(p.id, p.guardian_contacts, false)" \
-  "smoke 20261021010000"
-
-plant "M33 the sharing setting is ignored" "$M33" \
-  "    v_share := public.org_flag(v_org, 'guardian_contact_sharing', true);" \
-  "    v_share := true;" \
-  "smoke 20261021010000"
-
-plant "M33 an unshared card still shows details" "$M33" \
-  "                   ELSE jsonb_strip_nulls(jsonb_build_object('name', g.c ->> 'name'))
-               END AS contact" \
-  "                   ELSE jsonb_strip_nulls(jsonb_build_object('name', g.c ->> 'name', 'email', g.c ->> 'email'))
-               END AS contact" \
-  "smoke 20261021010000"
-
-plant "M33 an unrelated member reads the roster" "$M33" \
-  "    IF NOT (v_admin OR v_coach OR v_guardian) THEN
+plant "M33 an unrelated member reads the roster" "$M41" \
+  "    IF NOT (v_admin OR v_coach) THEN
         RAISE EXCEPTION 'not permitted to read this team''s roster' USING ERRCODE = '42501';" \
   "    IF v_org IS NULL THEN
         RAISE EXCEPTION 'not permitted to read this team''s roster' USING ERRCODE = '42501';" \
@@ -3858,28 +3853,6 @@ plant "M33 the directory ignores its setting" "$M33" \
                 AND EXISTS" \
   "            OR (true
                 AND EXISTS" \
-  "smoke 20261021010000"
-
-plant "M33 an unverified email links a guardian" "$M33" \
-  "     WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL;
-    IF v_email IS NULL OR v_email = '' THEN
-        RETURN jsonb_build_object('status', 'email_not_verified', 'linked', 0);" \
-  "     WHERE u.id = v_uid;
-    IF v_email IS NULL OR v_email = '' THEN
-        RETURN jsonb_build_object('status', 'email_not_verified', 'linked', 0);" \
-  "smoke 20261021010000"
-
-plant "M33 the card helper is callable by clients" "$M33" \
-  "REVOKE ALL ON FUNCTION public.guardian_contacts_view(uuid, jsonb, boolean) FROM PUBLIC, anon, authenticated;" \
-  "REVOKE ALL ON FUNCTION public.guardian_contacts_view(uuid, jsonb, boolean) FROM anon;" \
-  "smoke 20261021010000"
-
-plant "M33 a sign-in email change defeats the card" "$M33" \
-  "                 AND (lower(trim(pp.matched_email)) IN (lower(trim(g.c ->> 'email')),
-                                                       lower(trim(g.c ->> 'alternate_email')))
-                      OR (u.email_confirmed_at" \
-  "                 AND (false
-                      OR (u.email_confirmed_at" \
   "smoke 20261021010000"
 
 plant "M33 the preview read admits a non-admin" "$M33" \
@@ -3900,22 +3873,11 @@ plant "R33 the revert leaves the contact card columns" "$R33" \
   "revert 20261021010000"
 
 # Restricted reads. The smoke RAISEs on each; the revert claim on a policy,
-# column or body left different.
-plant "M34 a guardian reads a teammate" "$M34" \
-  "        public.is_org_admin(organization_id)
-        OR (public.is_org_member(organization_id)
-            AND id IN (SELECT pp.player_id FROM public.profile_players pp
-                   WHERE pp.profile_id = (SELECT auth.uid())))" \
-  "        public.is_org_member(organization_id)" \
-  "smoke 20261021020000"
-
-plant "M34 a removed guardian still reads their child" "$M34" \
-  "        OR (public.is_org_member(organization_id)
-            AND player_id IN" \
-  "        OR (true
-            AND player_id IN" \
-  "smoke 20261021020000"
-
+# column or body left different. Since 20261024010000 (R3) replaced the
+# players and team_players read policies and dropped profile_players, the
+# three guardian plants (a teammate read, a removed guardian's child and own
+# links) went with them, and the calendar token plant is aimed at $M41's
+# ALTER POLICY, the live expression.
 plant "M34 a removed coach still reads their coach row" "$M34" \
   "        OR (public.is_org_member(organization_id) AND user_id = (SELECT auth.uid()))" \
   "        OR (true AND user_id = (SELECT auth.uid()))" \
@@ -3930,11 +3892,6 @@ DO \$\$
 DECLARE
     v_extra text;" \
   "applying 20261021020000_restrict_people_reads.sql"
-
-plant "M34 a removed guardian still reads their own links" "$M34" \
-  "        (public.is_org_member(organization_id) AND profile_id = (SELECT auth.uid()))" \
-  "        profile_id = (SELECT auth.uid())" \
-  "smoke 20261021020000"
 
 plant "M34 the reconcile leaves a re-added member-wide coaches read" "$M39" \
   "           AND policyname = 'Coaches: members access'
@@ -3965,9 +3922,8 @@ plant "M34 staging rows stay member-readable" "$M34" \
     USING (public.is_org_member(organization_id));" \
   "smoke 20261021020000"
 
-plant "M34 any member reads a calendar token" "$M34" \
+plant "M34 any member reads a calendar token" "$M41" \
   "        OR public.is_current_team_coach(team_id)
-        OR public.is_team_guardian(team_id)
     );" \
   "        OR public.is_org_member((SELECT t.organization_id FROM public.teams t WHERE t.id = team_id))
     );" \
@@ -4335,6 +4291,101 @@ AS" \
 AS" \
   "revert 20261023010000"
 
+# R3: no guardian view, no parent or player role. The smoke RAISEs on each;
+# the migration's own refusals on a guardian read left standing; the revert
+# claim on a policy left out, a grant left in and a body that drifted.
+# The migration's own end-state check refuses an admin read widened in place.
+plant "M41 the admin read on players admits any member" "$M41" \
+  "CREATE POLICY players_select_admin ON public.players
+    FOR SELECT TO authenticated
+    USING (public.is_org_admin(organization_id));" \
+  "CREATE POLICY players_select_admin ON public.players
+    FOR SELECT TO authenticated
+    USING (public.is_org_member(organization_id));" \
+  "applying 20261024010000_remove_guardian_view_and_roles.sql"
+
+# A member read added past that check (after it, before COMMIT): the smoke's
+# direct-read and read-policy checks are what refuse it.
+plant "M41 a coach reads players directly" "$M41" \
+  "
+COMMIT;" \
+  "
+CREATE POLICY planted_member_read ON public.players
+    FOR SELECT TO authenticated
+    USING (public.is_org_member(organization_id));
+
+COMMIT;" \
+  "smoke 20261024010000"
+
+plant "M41 the admin-or-guardian read is left on team_players" "$M41" \
+  "DROP POLICY team_players_select_admin_or_guardian ON public.team_players;
+" \
+  "" \
+  "applying 20261024010000_remove_guardian_view_and_roles.sql"
+
+plant "M41 a coach's roster carries guardian contacts" "$M41" \
+  "           CASE
+               WHEN v_admin THEN (" \
+  "           CASE
+               WHEN v_admin OR v_coach THEN (" \
+  "smoke 20261024010000"
+
+plant "M41 a coach's roster carries the rating" "$M41" \
+  "           CASE WHEN v_admin THEN p.rating END," \
+  "           p.rating," \
+  "smoke 20261024010000"
+
+plant "M41 the staff read admits any member" "$M41" \
+  "    IF NOT (v_admin
+            OR (v_org IS NOT NULL AND public.is_current_team_coach(p_team_id))) THEN" \
+  "    IF NOT (v_admin
+            OR (v_org IS NOT NULL AND public.is_org_member(v_org))) THEN" \
+  "smoke 20261024010000"
+
+plant "M41 an unshared card still shows a coach's phone" "$M41" \
+  "           CASE WHEN pr.share_contact IS NULL THEN c.phone
+                WHEN pr.share_contact THEN pr.contact_phone END," \
+  "           CASE WHEN pr.share_contact IS NULL THEN c.phone
+                WHEN pr.share_contact THEN pr.contact_phone ELSE c.phone END," \
+  "smoke 20261021010000"
+
+plant "M41 profile_players is left behind" "$M41" \
+  "DROP TABLE public.profile_players;
+" \
+  "" \
+  "smoke 20261024010000"
+
+plant "M41 the member role check keeps parent" "$M41" \
+  "    CHECK (role = ANY (ARRAY['admin'::text, 'coach'::text, 'staff'::text, 'tenant_admin'::text]));" \
+  "    CHECK (role = ANY (ARRAY['admin'::text, 'coach'::text, 'parent'::text, 'staff'::text, 'tenant_admin'::text]));" \
+  "smoke 20261024010000"
+
+plant "M41 create_org_invite accepts a parent" "$M41" \
+  "  IF p_role NOT IN ('admin', 'coach', 'staff') THEN
+    RAISE EXCEPTION 'Invalid role: %'" \
+  "  IF p_role NOT IN ('admin', 'coach', 'parent', 'staff') THEN
+    RAISE EXCEPTION 'Invalid role: %'" \
+  "smoke 20261024010000"
+
+plant "R41 the revert leaves the guardian link policy out" "$R41" \
+  "CREATE POLICY profile_players_select_own_or_admin ON public.profile_players FOR SELECT TO authenticated USING (((public.is_org_member(organization_id) AND (profile_id = ( SELECT auth.uid() AS uid))) OR public.is_org_admin(organization_id)));
+" \
+  "" \
+  "revert 20261024010000"
+
+# A grant the default privileges would not give back: guardian_contacts_view
+# is internal, and the fingerprint sees authenticated EXECUTE on it.
+plant "R41 the revert leaves the contact helper callable" "$R41" \
+  "REVOKE ALL ON FUNCTION public.guardian_contacts_view(p_player_id uuid, p_contacts jsonb, p_primary_only boolean) FROM anon, authenticated;
+" \
+  "" \
+  "revert 20261024010000"
+
+plant "R41 the revert restores a drifted get_team_roster body" "$R41" \
+  "    v_share := public.org_flag(v_org, 'guardian_contact_sharing', true);" \
+  "    v_share := public.org_flag(v_org, 'guardian_contact_sharing', false);" \
+  "revert 20261024010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4425,7 +4476,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"]="M13 the read policy lets every org member read every coach's preferences"
   ["(checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"]="M13 the request RPC stops auditing"
   ["(checked) the database refuses a second approved practice preference for one coach and dimension"]="M13 the one-approved index stops being unique"
-  ["(checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a parent and another organisation's admin are refused"]="M19 the request RPC stops checking the caller coaches the slot"
+  ["(checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a member who coaches no team and another organisation's admin are refused"]="M19 the request RPC stops checking the caller coaches the slot"
   ["(checked) only an org admin decides a lighting override; a coach approving is refused, their own request or another's"]="M19 the decide RPC stops checking the caller is an org admin"
   ["(checked) the admin who requested a lighting override may not approve it; another admin may"]="M19 the requester may approve their own request"
   ["(checked) the database refuses two overlapping approved lighting windows on one slot, a shared last day included"]="M19 the exclusion constraint compares windows for equality, not overlap"
@@ -4434,7 +4485,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"]="M19 the read policy lets every org member read every override"
   ["(checked) the revert counted the lighting overrides it was about to destroy, the slots they span, and the approved ones"]="R19 the lighting override warning stops counting slots distinctly"
   ["(checked) a practice slot holding lighting overrides cannot be deleted out from under them (23503); none is destroyed unreported"]="M19 a slot delete cascades to its lighting overrides"
-  ["(checked) only an org admin with a uid enacts a practice recommendation: a coach, a parent and a no-uid caller are refused by the wrapper itself"]="M20 the enact wrapper stops checking the caller is an org admin"
+  ["(checked) only an org admin with a uid enacts a practice recommendation: a coach, a member who coaches no team and a no-uid caller are refused by the wrapper itself"]="M20 the enact wrapper stops checking the caller is an org admin"
   ["(checked) an enact is refused while the retirement is uncommitted, or committed with a different date, reading the stored fields.effective_to, and writes nothing"]="M20 Plant A: the enact wrapper drops the commit gate (step 2a)"
   ["(checked) an enact with no base_fingerprint is refused (22023): it is never blind"]="M20 the enact wrapper accepts a NULL base_fingerprint"
   ["(checked) an enact that touches any series but its own, by a list the writer returns or by its upsert, is refused (22023) and rolled back"]="M20 the enact wrapper drops the only-S check"
@@ -4445,7 +4496,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) an enact leaves one practice.recommendation_enacted row on its series with the plan section 5 keys, the stored retirement date and the writer's result fingerprint"]="M20 the enact audit leaves result_fingerprint unfilled"
   ["(checked) a repeated enact key is idempotent: the second call returns idempotent: true and writes nothing"]="M20 the enact wrapper drops the idempotency lookup"
   ["(checked) the enact revert drops enact_practice_recommendation and leaves the 20261002000000 writer in place"]="R20 the revert does not drop the enact wrapper"
-  ["(checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"]="M15 the practice_exceptions select policy admits admins only"
+  ["(checked) a member who is not an admin reads the same practice_exceptions rows as an admin, and a non-member reads none"]="M15 the practice_exceptions select policy admits admins only"
   ["(checked) the RSVP revert restores the 20260504070000 upsert_team_event_rsvp body byte for byte, SECURITY DEFINER with search_path=public"]="R21 the revert leaves the 12d body in place"
   ["(checked) only an admin of the organisation sets its heat settings: a coach and another organisation's admin are refused"]="M22 the heat settings RPC stops checking the caller is an org admin"
   ["(checked) the heat settings RPC refuses a threshold category outside 1-3 (22023)"]="M22 the heat settings RPC stops refusing an out-of-range category"
@@ -4474,6 +4525,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the RSVP and chat revert restores both tables with their keys, index, trigger, policies and grants, the two dropped functions, and the two replaced functions' previous bodies, each with its grants, comment and posture as before"]="R39 the revert leaves the chat read policy out|R39 the revert leaves the RSVP trigger out|R39 the revert restores a drifted admin_delete_team body"
   ["(checked) the registration revert restores the seven functions, both tables, the view and the three players columns, and the three replaced functions' previous bodies, each with its grants, policies, triggers and posture as before"]="R38 the revert leaves submit_registration closed to anon|R38 the revert leaves a registrations policy out|R38 the revert restores a drifted apply_player_patch body"
   ["(checked) the reporting views revert leaves view_org_metrics and view_league_standings as a build at 20261022020000 has them: definition, columns, security_invoker and grants"]="R40 the revert drops both views|R40 the revert restates view_org_metrics without security_invoker"
+  ["(checked) the guardian revert restores profile_players with its keys, policy and grants, the three guardian functions, the roster and staff reads' guardian arms, the people and calendar token read policies and the parent and player roles, each with its grants, comment and posture as at 20261023010000"]="R41 the revert leaves the guardian link policy out|R41 the revert leaves the contact helper callable|R41 the revert restores a drifted get_team_roster body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

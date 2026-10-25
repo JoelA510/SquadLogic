@@ -72,7 +72,7 @@ describe('CalendarModal', () => {
   it('tells a member the policy refuses that the link is not theirs to see', async () => {
     render(<CalendarModal team={{ id: 'team-1' }} onClose={vi.fn()} />);
     expect(
-      await screen.findByText(/shared with the team's coaches, its families and league admins/)
+      await screen.findByText(/shared with the team's coaches and league admins/)
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Regenerate Link' })).not.toBeInTheDocument();
   });

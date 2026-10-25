@@ -46,8 +46,8 @@ When('I open the roster of the {string}', async ({ page }, teamName: string) => 
   await rosterTab.click();
 });
 
-Then('I should see the guardian contact {string}', async ({ page }, email: string) => {
-  await expect(page.getByRole('link', { name: email })).toBeVisible();
+Then('I should see the player {string} on the roster', async ({ page }, name: string) => {
+  await expect(page.getByText(name).first()).toBeVisible({ timeout: 15000 });
 });
 
 Then('I should not see the guardian contact {string}', async ({ page }, email: string) => {

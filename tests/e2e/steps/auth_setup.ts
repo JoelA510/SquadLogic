@@ -17,12 +17,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
   // In mock mode, use the mock seed's organization to align with pre-seeded initialMockData.
   // Random UUIDs cause org ID fragmentation — hooks filter by active org and find nothing.
   const dynamicOrgId = isMockMode ? MOCK_ORG_ID : randomUUID();
-  const _email =
-    role === 'coach'
-      ? 'coach@squadlogic.app'
-      : role === 'parent'
-        ? 'parent@squadlogic.app'
-        : 'admin@squadlogic.app';
+  const _email = role === 'coach' ? 'coach@squadlogic.app' : 'admin@squadlogic.app';
   const userId = `mock-${role}-id`;
 
   if (!supabaseUrl || !supabaseKey || process.env.VITE_USE_MOCK_SUPABASE === 'true') {
@@ -102,7 +97,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
       },
       {
         orgId: dynamicOrgId,
-        roleName: role === 'parent' ? 'parent' : role,
+        roleName: role,
         uId: userId,
         mockSeasonId: MOCK_SEASON_ID,
       }
@@ -133,16 +128,18 @@ Given(
     const roleMap: Record<string, string> = {
       admin: process.env.TEST_ADMIN_EMAIL || 'admin@squadlogic.app',
       coach: process.env.TEST_COACH_EMAIL || 'coach@squadlogic.app',
-      parent: process.env.TEST_PARENT_EMAIL || 'parent@squadlogic.app',
-      player: process.env.TEST_PLAYER_EMAIL || 'player@squadlogic.app',
     };
 
     // Robust role parsing to handle names like "Coach Alice"
     const rawRole = role.toLowerCase();
     let cleanRole = 'admin';
     if (rawRole.includes('coach')) cleanRole = 'coach';
-    else if (rawRole.includes('parent')) cleanRole = 'parent';
-    else if (rawRole.includes('player')) cleanRole = 'player';
+    else if (rawRole.includes('parent') || rawRole.includes('player')) {
+      // Refused, not mapped to the default admin: there is no parent or player
+      // role since 20261024010000 (R3), and a scenario signed in as one would
+      // otherwise run as an admin and pass for the wrong reason.
+      throw new Error(`No "${role}" persona: the parent and player roles were removed (R3)`);
+    }
 
     const email = roleMap[cleanRole] || roleMap.admin;
     const password = process.env.TEST_PASSWORD || 'test-password-123';

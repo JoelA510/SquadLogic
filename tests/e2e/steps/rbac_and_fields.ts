@@ -1,5 +1,5 @@
 import { createBdd } from 'playwright-bdd';
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -296,10 +296,40 @@ Then(
   }
 );
 
-// The read-only user's route checks went with the parent persona (R3,
-// 20261024010000): no remaining role is read-only. A coach becomes one when R6
-// takes MANAGE_SCHEDULE from coaches (docs/changes/2026-10-22-admin-focus.md),
-// and that PR brings the scenario back as the coach's.
+// The read-only route checks, the parent's until R3 (20261024010000), are the
+// coach's since R6 (20261028010000; docs/changes/2026-10-22-admin-focus.md):
+// a coach holds no MANAGE_SCHEDULE or VIEW_SCHEDULE, so each admin page sends
+// them home with the route guard's notice.
+const coachRedirects: string[] = [];
+
+/** Open `route` and wait to land on the Dashboard with the guard's notice. */
+async function expectRedirectedHome(page: Page, route: string) {
+  await page.goto(route);
+  await page.waitForURL((url) => url.pathname === '/', { timeout: 15000 });
+  await expect(page.getByText('Unauthorized access').first()).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('heading', { name: 'My Dashboard' })).toBeVisible();
+}
+
+When('I open the guarded team and schedule routes as a coach', async ({ page }) => {
+  coachRedirects.length = 0;
+  for (const route of ['/teams', '/schedule/practice', '/schedule/game']) {
+    await expectRedirectedHome(page, route);
+    coachRedirects.push(route);
+  }
+});
+
+Then(
+  'Team Management, Practice Scheduling and Game Scheduling each redirect the coach to the Dashboard',
+  async () => {
+    expect(coachRedirects).toEqual(['/teams', '/schedule/practice', '/schedule/game']);
+  }
+);
+
+Then('the lighting, scores and standings pages redirect the coach too', async ({ page }) => {
+  for (const route of ['/schedule/practice-lighting', '/scores', '/standings']) {
+    await expectRedirectedHome(page, route);
+  }
+});
 
 // ────────────────────────────────────────────────────────────
 // Field Management steps (shared with field_management_efficiency.feature)

@@ -65,7 +65,6 @@ Feature: Every top-level route passes an automated accessibility scan
       | /teams/builder                | Team Builder             | Alex Smith                              |
       | /team/t1                      | Team A                   | Team Schedule                           |
       | /scheduling/blackouts         | Blackout Dates           | No closures on file                     |
-      | /scores                       | Scores & Results         | Final                                   |
       | /exports                      | Exports                  | Nothing has been published yet          |
       | /admin/members                | Members & Roles          | Mock Coach                              |
       | /coaches                      | Coaches                  | Casey Rivera                            |
@@ -80,7 +79,6 @@ Feature: Every top-level route passes an automated accessibility scan
       | /schedule/game                | Game Scheduling          | No Game Schedule Yet                    |
       | /settings                     | Settings                 | League Name                             |
       | /account                      | Account Settings         | Update Password                         |
-      | /standings                    | League Standings         | Team A                                  |
       | /setup                        | Season Setup             | Import registrations                    |
       | /setup/features               | Choose your tools        | Years Played                            |
       | /organizations/new            | Welcome to SquadLogic    | Establish Organization                  |
@@ -102,6 +100,52 @@ Feature: Every top-level route passes an automated accessibility scan
     When I switch to the dark theme and reopen "/invite/NOSUCHCODE" with its "Invite could not be redeemed" heading
     Then the scan sees "Back to onboarding" on the page
     And axe finds no serious or critical violations on "/invite/NOSUCHCODE" in the "dark" theme
+
+  # Score entry and standings are off until the league turns them on (admin focus R6,
+  # 20261028010000), so each is scanned with its setting on.
+
+  Scenario: Scores & Results passes axe in the light and dark themes
+    Given I am logged into SquadLogic as an admin
+    And the league has turned on score entry and standings
+    When I open "/scores" and see its "Scores & Results" heading
+    Then the scan sees "Final" on the page
+    And axe finds no serious or critical violations on "/scores" in the "light" theme
+    When I switch to the dark theme and reopen "/scores" with its "Scores & Results" heading
+    Then the scan sees "Final" on the page
+    And axe finds no serious or critical violations on "/scores" in the "dark" theme
+
+  Scenario: League standings pass axe in the light and dark themes
+    Given I am logged into SquadLogic as an admin
+    And the league has turned on score entry and standings
+    When I open "/standings" and see its "League Standings" heading
+    Then the scan sees "Team A" on the page
+    And axe finds no serious or critical violations on "/standings" in the "light" theme
+    When I switch to the dark theme and reopen "/standings" with its "League Standings" heading
+    Then the scan sees "Team A" on the page
+    And axe finds no serious or critical violations on "/standings" in the "dark" theme
+
+  # The coach's home and "My Team" (admin focus R6). "/my-team" renders nothing of its own: it
+  # takes a coach of one team to that team's page, which is what is scanned under its name.
+
+  Scenario: The coach's home with a schedule and a division on it passes axe in both themes
+    Given I am logged into SquadLogic as a "coach"
+    And Team A has an upcoming game and a weekly practice
+    When I open "/" and see its "My Dashboard" heading
+    Then the scan sees "Your division" on the page
+    And the scan sees "Team A: Practice" on the page
+    And axe finds no serious or critical violations on "/" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "Team A: Practice" on the page
+    And axe finds no serious or critical violations on "/" in the "dark" theme
+
+  Scenario: My Team takes a coach to their team's page, which passes axe in both themes
+    Given I am logged into SquadLogic as a "coach"
+    When I follow "My Team" in the coach navigation to the "Team A" page
+    Then the scan sees "Team Schedule" on the page
+    And axe finds no serious or critical violations on "/my-team" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "Team Schedule" on the page
+    And axe finds no serious or critical violations on "/my-team" in the "dark" theme
 
   # Routes the mock seed leaves empty, scanned again with content on them. The theme is switched
   # on the page itself, so content the page holds only in memory (an invite just generated, a

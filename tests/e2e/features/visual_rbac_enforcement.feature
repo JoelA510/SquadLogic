@@ -6,8 +6,10 @@ Feature: Visual Role-Based Access Control
   Scenario: Coach Visual UI Restrictions in Sidebar
     Given I am logged into SquadLogic as a "Coach"
     When I view the main navigation Sidebar
-    Then I should see links for "My Dashboard", "My Team", and "Practices"
+    Then I should see links for "My Dashboard", "My Team", and "Practice Preferences"
     But I should NOT see links for "Import", "Settings", or "Players"
+    # R6 (20261028010000): scheduling, standings and lighting are an admin's.
+    And I should NOT see links for "Game Schedule", "Standings", or "Practice Lighting"
 
   Scenario: Admin Coach Review Page
     Given I am logged into SquadLogic as an "Admin"
@@ -23,11 +25,13 @@ Feature: Visual Role-Based Access Control
     And I assign "Morgan Reyes" to "Tigers" from the Coaches page
     Then the coach row for "Morgan Reyes" should show team "Tigers"
 
-  # A coach of neither team in the game (the parent persona until R3,
-  # 20261024010000, removed the role).
+  # Score entry and standings are admin functions the league turns on (R6,
+  # 20261028010000): a coach is sent home from both, their own team's games
+  # included, even with the settings on.
   Scenario: Score Entry Restrictions in League Standings
     Given I am logged into SquadLogic as a "Coach"
-    And I navigate to the "League Standings" page
-    When I view the "Recent Games" section
-    Then I should see the final scores of past games
-    But the score inputs and "Save" buttons should be hidden on the game I do not coach
+    And the league has turned on score entry and standings
+    When I navigate to the "League Standings" page
+    Then I should be redirected to the Dashboard
+    When I go to "/scores"
+    Then I should be redirected to the Dashboard

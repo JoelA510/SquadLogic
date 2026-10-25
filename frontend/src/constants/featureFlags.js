@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Clock, History, Star, ThermometerSun, UserRoundCheck, Users } from 'lucide-react';
+import { Clock, History, Scale, Star, ThermometerSun, UserRoundCheck, Users } from 'lucide-react';
 import { IS_DEV_SERVER } from '../env.js';
 
 /**
@@ -32,6 +32,11 @@ export const FEATURE_FLAGS = {
   PLAYER_RATING: 'player_rating',
   BUDDY_REQUESTS: 'buddy_requests',
   COACHING_INTEREST: 'coaching_interest',
+  // Team generation and auto-balance spread coaching leads (players whose parent volunteers
+  // to coach) evenly and give teams with fewer of them more of the experienced players
+  // (plan docs/changes/2026-10-22-phase-b-teaming.md, B6). The same key as
+  // `SPREAD_COACHING_LEADS_FLAG` in packages/core/src/coachingLeads.js.
+  TEAMING_SPREAD_COACHING_LEADS: 'teaming_spread_coaching_leads',
   // Retired with the Compliance page (plan docs/changes/2026-10-22-admin-focus.md,
   // R1): nothing reads it and the settings page no longer offers it. The key
   // stays so an organization that stored it still parses (skill
@@ -95,6 +100,7 @@ export const FEATURE_DEFAULTS = {
   [FEATURE_FLAGS.PLAYER_RATING]: false,
   [FEATURE_FLAGS.BUDDY_REQUESTS]: true,
   [FEATURE_FLAGS.COACHING_INTEREST]: true,
+  [FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS]: true,
   [FEATURE_FLAGS.WAITLIST]: true,
   [GENDER_MODEL_KEY]: 'split',
   [BUDDY_RULE_KEY]: 'mutual',
@@ -134,6 +140,14 @@ export const FEATURE_CATALOG = [
     description: 'Capture parents willing to coach, pulled from registration.',
     icon: UserRoundCheck,
     column: true,
+  },
+  {
+    key: FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS,
+    label: 'Spread Coaching Leads',
+    description:
+      'Spread players whose parent volunteers to coach evenly across teams, and give teams with fewer of them more of the experienced or rated players. A lead is not a coach: only a linked coach anchors a team. Reads the Coaching Interest answers, so it needs Coaching Interest on.',
+    icon: Scale,
+    column: false,
   },
   {
     key: FEATURE_FLAGS.WAITLIST,

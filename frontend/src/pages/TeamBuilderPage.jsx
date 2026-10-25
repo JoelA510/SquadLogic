@@ -4,14 +4,13 @@ import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
 import BalanceBoard from '../components/teaming/BalanceBoard.jsx';
 import Button from '../components/ui/Button.jsx';
-import Toggle from '../components/ui/Toggle.jsx';
 import { useToast } from '../components/ui/ToastHost.jsx';
 import { mapInChunks } from '../utils/asyncChunks.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { usePlayersData } from '../hooks/usePlayersData.js';
 import { useFeatures } from '../hooks/useFeatures.js';
-import { FEATURE_FLAGS } from '../constants/featureFlags.js';
+import { BUDDY_RULE_CHOICES, FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionFilters } from '../utils/divisions.js';
 import {
   balanceSignalKind,
@@ -23,9 +22,11 @@ import LoadingScreen from '../components/LoadingScreen.jsx';
 
 /**
  * Team Builder — drag-and-drop roster balancing per division. Auto-balance
- * runs the serpentine signal balancer (buddy + coach-parent aware); every
- * placement (manual or auto) persists through the audited
- * admin_update_player RPC with optimistic UI.
+ * runs the serpentine signal balancer with the league's own settings, as team
+ * generation does (Phase B6): buddies by the league's buddy rule when Buddy
+ * Requests is on, and coaching leads spread, with compensation, when Spread
+ * Coaching Leads and Coaching Interest are on. Every placement (manual or
+ * auto) persists through the audited admin_update_player RPC with optimistic UI.
  */
 export default function TeamBuilderPage() {
   const { currentOrganization } = useOrganization();
@@ -36,8 +37,6 @@ export default function TeamBuilderPage() {
   const [teams, setTeams] = useState([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
   const [divisionKey, setDivisionKey] = useState(null);
-  const [respectBuddies, setRespectBuddies] = useState(true);
-  const [respectCoach, setRespectCoach] = useState(true);
   const [working, setWorking] = useState(false);
 
   const orgId = currentOrganization?.id;
@@ -109,8 +108,12 @@ export default function TeamBuilderPage() {
   // league's buddy rule, and every player as the roster, so a request or code naming someone
   // off this board is not paired. A player's division is its division id, as the program is
   // in Team Analysis, so a board that folds two divisions (co-ed) pairs nobody across them.
-  // With Buddy Requests off, nothing is matched (the tile and the toggle are hidden).
+  // With Buddy Requests off, nothing is matched (the tile is hidden).
   const buddyRequestsOn = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
+  // A lead is read from the Coaching Interest column, so both must be on to spread leads.
+  const coachingInterestOn = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
+  const spreadLeadsOn =
+    coachingInterestOn && isEnabled(FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS);
   const buddyRoster = useMemo(
     () => players.map((player) => ({ ...player, division: String(player.division_id ?? '') })),
     [players]
@@ -143,8 +146,8 @@ export default function TeamBuilderPage() {
         players: buddyBoard,
         teams: divisionTeams,
         signalKind,
-        respectBuddies: respectBuddies && buddyRequestsOn,
-        respectCoach: respectCoach && isEnabled(FEATURE_FLAGS.COACHING_INTEREST),
+        respectBuddies: buddyRequestsOn,
+        respectCoach: spreadLeadsOn,
         roster: buddyRoster,
         buddyRule,
       });
@@ -166,6 +169,12 @@ export default function TeamBuilderPage() {
           players: assignments.length,
           teams: divisionTeams.length,
           signal: signalKind,
+          // The league settings the deal used (Phase B6), so the row says which rule built it.
+          buddy_requests: buddyRequestsOn,
+          ...(buddyRequestsOn ? { buddy_rule: buddyRule } : {}),
+          coaching_interest: coachingInterestOn,
+          spread_coaching_leads_setting: isEnabled(FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS),
+          spread_coaching_leads: spreadLeadsOn,
         },
       });
       toast(
@@ -268,41 +277,23 @@ export default function TeamBuilderPage() {
             Balancing by <b style={{ color: 'var(--text-primary)' }}>{signalLabel}</b>
           </div>
           <div style={{ flex: 1 }} />
+          {/* The league's settings, changed on the feature settings page (Phase B6). */}
           {buddyRequestsOn && (
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                fontSize: 12.5,
-                fontWeight: 600,
-              }}
-            >
-              <Toggle
-                checked={respectBuddies}
-                onChange={setRespectBuddies}
-                label="Keep buddies together"
-              />
-              Keep buddies together
-            </label>
+            <div className="secondary" style={{ fontSize: 12.5 }}>
+              Buddy rule:{' '}
+              <b style={{ color: 'var(--text-primary)' }}>
+                {BUDDY_RULE_CHOICES.find((choice) => choice.value === buddyRule)?.label ??
+                  buddyRule}
+              </b>
+            </div>
           )}
-          {isEnabled(FEATURE_FLAGS.COACHING_INTEREST) && (
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                fontSize: 12.5,
-                fontWeight: 600,
-              }}
-            >
-              <Toggle
-                checked={respectCoach}
-                onChange={setRespectCoach}
-                label="Spread coach parents"
-              />
-              Spread coach parents
-            </label>
+          {coachingInterestOn && (
+            <div className="secondary" style={{ fontSize: 12.5 }}>
+              Coaching leads:{' '}
+              <b style={{ color: 'var(--text-primary)' }}>
+                {spreadLeadsOn ? 'spread evenly' : 'not spread'}
+              </b>
+            </div>
           )}
         </div>
 

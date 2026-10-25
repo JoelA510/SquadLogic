@@ -139,6 +139,10 @@ R42="$REPO/docs/sql/20261025010000_revert.sql"
 # replaced; the two birth columns dropped), and the revert.
 M43="$REPO/supabase/migrations/20261026010000_natural_age_replaces_birthdates.sql"
 R43="$REPO/docs/sql/20261026010000_revert.sql"
+# R6: the coach view (score entry an admin's behind the setting, no coach
+# lighting requests, the division reads), and the revert.
+M45="$REPO/supabase/migrations/20261028010000_coach_view.sql"
+R45="$REPO/docs/sql/20261028010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3216,11 +3220,10 @@ plant "R18 the revert does not restore the writer" "$R18" \
 # **8.9 D14 PR B: portable-lighting overrides (plan W30, W24).** One plant per
 # claim the smoke's evidence prints. The function-body anchors sit in the only
 # definition of their function (anchor_liveness: LIVE); the constraint and the
-# policy are not function bodies (NA).
-plant "M19 the request RPC stops checking the caller coaches the slot" "$M19" \
-  "       OR NOT ((v_by_coach AND public.is_org_member(v_org)) OR public.is_org_admin(v_org)) THEN" \
-  "       OR NOT ((public.is_org_member(v_org)) OR public.is_org_admin(v_org)) THEN" \
-  "FAIL smoke 20261003000000"
+# policy are not function bodies (NA). Since 20261028010000 (R6) no coach
+# requests lighting: the request RPC is dropped, so its plant retired with it,
+# and withdraw is replaced, so the withdraw plant is aimed at $M45, the live
+# body.
 
 plant "M19 the decide RPC stops checking the caller is an org admin" "$M19" \
   "    IF NOT FOUND OR NOT public.is_org_admin(v_row.organization_id) THEN
@@ -3241,7 +3244,7 @@ plant "M19 the exclusion constraint compares windows for equality, not overlap" 
 
 # W24: a withdraw that writes nothing leaves an approved row approved, and the
 # reader of approved overrides then returns a window nobody has in force.
-plant "M19 withdraw leaves the row as it was" "$M19" \
+plant "M19 withdraw leaves the row as it was" "$M45" \
   "       SET status = 'withdrawn', withdrawn_by = v_uid, withdrawn_at = clock_timestamp()" \
   "       SET status = status" \
   "FAIL smoke 20261003000000"
@@ -3945,11 +3948,8 @@ plant "M34 any member rotates a token" "$M34" \
   "       OR NOT public.is_org_member(v_org_id) THEN" \
   "smoke 20261021020000"
 
-plant "M34 any coach scores any game" "$M34" \
-  "       AND NOT public.is_current_team_coach(v_game.home_team_id)
-       AND NOT public.is_current_team_coach(v_game.away_team_id) THEN" \
-  "       AND v_member_role <> 'coach' THEN" \
-  "smoke 20261021020000"
+# "M34 any coach scores any game" retired with the coach arm it mutated:
+# 20261028010000 (R6, $M45) makes score entry an admin's; its plants are below.
 
 plant "M34 the reconcile spec keeps the member-wide coaches read" "$M39" \
   "            ('coaches', 'coaches_select_admin_or_self', 'SELECT', 'authenticated',
@@ -4561,6 +4561,102 @@ plant "R43 the revert restores a drifted finalize_import_job body" "$R43" \
   "        RAISE EXCEPTION 'Failed import job % cannot be finalized (drifted)', p_import_job_id" \
   "revert 20261026010000"
 
+# R6: the coach view. The migration's own end-state check refuses a coach arm
+# put back in the score writer, the request RPC left in place and a contact
+# column on a division read; the smoke RAISEs on score entry ignoring or
+# defaulting the setting, the division read crossing divisions or naming a
+# lapsed coach, and the preview read admitting a non-admin; the lighting
+# smoke on a withdraw that admits the requester; the revert claim on a read
+# left behind, the request RPC left out and a body that drifted.
+plant "M45 a coach scores their own team's game again" "$M45" \
+  "    IF v_effective_role <> 'service_role'
+       AND NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
+  "    IF v_effective_role <> 'service_role'
+       AND NOT public.is_org_admin(p_organization_id)
+       AND NOT public.is_current_team_coach(v_game.home_team_id) THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
+  "applying 20261028010000_coach_view.sql"
+
+plant "M45 the request RPC is left in place" "$M45" \
+  "DROP FUNCTION public.request_practice_lighting_override(uuid, date, date);
+" \
+  "" \
+  "applying 20261028010000_coach_view.sql"
+
+plant "M45 a division read returns the coaches' emails" "$M45" \
+  "    coach_names text[],
+    is_mine boolean
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS \$\$
+BEGIN
+    IF auth.uid() IS NULL THEN" \
+  "    coach_names text[],
+    is_mine boolean,
+    coach_emails text[]
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS \$\$
+BEGIN
+    IF auth.uid() IS NULL THEN" \
+  "applying 20261028010000_coach_view.sql"
+
+plant "M45 score entry ignores the setting" "$M45" \
+  "    IF NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
+  "    IF false THEN" \
+  "smoke 20261028010000"
+
+plant "M45 score entry is on unless set" "$M45" \
+  "    IF NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
+  "    IF NOT public.org_flag(p_organization_id, 'score_entry', true) THEN" \
+  "smoke 20261028010000"
+
+plant "M45 the division read crosses into other divisions" "$M45" \
+  "           AND t.division_id IN (SELECT m.division_id FROM mine m WHERE m.division_id IS NOT NULL)" \
+  "           AND EXISTS (SELECT 1 FROM mine)" \
+  "smoke 20261028010000"
+
+plant "M45 the division read names a lapsed coach" "$M45" \
+  "                        AND (a.effective_to IS NULL OR a.effective_to >= p.today)
+                        AND c.full_name IS NOT NULL), '{}'::text[])," \
+  "                        AND c.full_name IS NOT NULL), '{}'::text[])," \
+  "smoke 20261028010000"
+
+plant "M45 the preview read admits a non-admin" "$M45" \
+  "    IF auth.uid() IS NULL OR NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'admin_get_division_teams requires an organization admin'" \
+  "    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'admin_get_division_teams requires an organization admin'" \
+  "smoke 20261028010000"
+
+plant "M45 withdraw admits the requester again" "$M45" \
+  "    IF NOT FOUND OR v_uid IS NULL OR NOT public.is_org_admin(v_row.organization_id) THEN" \
+  "    IF NOT FOUND OR v_uid IS NULL OR NOT (public.is_org_admin(v_row.organization_id) OR v_uid = v_row.requested_by) THEN" \
+  "FAIL smoke 20261003000000"
+
+plant "R45 the revert leaves the division read behind" "$R45" \
+  "DROP FUNCTION public.get_my_division_teams(uuid);
+" \
+  "" \
+  "revert 20261028010000"
+
+plant "R45 the revert leaves the request RPC out" "$R45" \
+  "CREATE FUNCTION public.request_practice_lighting_override(" \
+  "CREATE FUNCTION public.harness_plant_unrestored_request(" \
+  "revert 20261028010000"
+
+plant "R45 the revert restores a drifted update_game_score body" "$R45" \
+  "        RAISE EXCEPTION 'Access denied: only a current coach of either team can score this game'" \
+  "        RAISE EXCEPTION 'Access denied: only a current coach of either team can score this game (drifted)'" \
+  "revert 20261028010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4651,12 +4747,12 @@ declare -A CLAIM_PROVER=(
   ["(checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"]="M13 the read policy lets every org member read every coach's preferences"
   ["(checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"]="M13 the request RPC stops auditing"
   ["(checked) the database refuses a second approved practice preference for one coach and dimension"]="M13 the one-approved index stops being unique"
-  ["(checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a member who coaches no team and another organisation's admin are refused"]="M19 the request RPC stops checking the caller coaches the slot"
+  ["(checked) only an org admin withdraws a lighting override; its requester and another coach are refused"]="M45 withdraw admits the requester again"
   ["(checked) only an org admin decides a lighting override; a coach approving is refused, their own request or another's"]="M19 the decide RPC stops checking the caller is an org admin"
   ["(checked) the admin who requested a lighting override may not approve it; another admin may"]="M19 the requester may approve their own request"
   ["(checked) the database refuses two overlapping approved lighting windows on one slot, a shared last day included"]="M19 the exclusion constraint compares windows for equality, not overlap"
   ["(checked) a reader selecting approved lighting overrides gets exactly the approved rows; requested, rejected and withdrawn rows are left out"]="M19 withdraw leaves the row as it was"
-  ["(checked) every lighting override write leaves its audit row, 12 of 12, each naming the row it wrote"]="M19 the decide RPC stops auditing"
+  ["(checked) every lighting override write leaves its audit row, 7 of 7, each naming the row it wrote"]="M19 the decide RPC stops auditing"
   ["(checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"]="M19 the read policy lets every org member read every override"
   ["(checked) the revert counted the lighting overrides it was about to destroy, the slots they span, and the approved ones"]="R19 the lighting override warning stops counting slots distinctly"
   ["(checked) a practice slot holding lighting overrides cannot be deleted out from under them (23503); none is destroyed unreported"]="M19 a slot delete cascades to its lighting overrides"
@@ -4702,6 +4798,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the reporting views revert leaves view_org_metrics and view_league_standings as a build at 20261022020000 has them: definition, columns, security_invoker and grants"]="R40 the revert drops both views|R40 the revert restates view_org_metrics without security_invoker"
   ["(checked) the guardian revert restores profile_players with its keys, policy and grants, the three guardian functions, the roster and staff reads' guardian arms, the people and calendar token read policies and the parent and player roles, each with its grants, comment and posture as at 20261023010000"]="R41 the revert leaves the guardian link policy out|R41 the revert leaves the contact helper callable|R41 the revert restores a drifted get_team_roster body"
   ["(checked) the contact surfaces revert restores the players and contact card columns, the coach interest table with its keys, policy, trigger and grants, the directory, card and lead functions, the staff and roster reads' contact columns, the member list open to members and the player writers' previous bodies, each with its grants, comment and posture as at 20261024010000"]="R42 the revert leaves the coach interest policy out|R42 the revert leaves the card writer callable by PUBLIC|R42 the revert restores a drifted get_team_staff body"
+  ["(checked) the coach view revert restores the coach arm of update_game_score, the coach lighting request and the requester's withdraw, and the lighting table's comment, and drops the three division reads, each with its grants, comment and posture as at 20261026010000"]="R45 the revert leaves the division read behind|R45 the revert leaves the request RPC out|R45 the revert restores a drifted update_game_score body"
   ["(checked) the birthdates revert restores the players birth columns empty, drops the natural age with its check, and restores the allowlist and the player writers' previous bodies, each with its grants, comment and posture as at 20261025010000"]="R43 the revert leaves birth_year out|R43 the revert leaves the natural age behind|R43 the revert restores a drifted finalize_import_job body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"

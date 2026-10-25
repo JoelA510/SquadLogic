@@ -799,10 +799,12 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # RAISE in the same smoke and print as NOTICEs above; they carry no plant,
     # so they are not claims.)
     if [ "$id" = "20261003000000" ]; then
-      if grep -qF "a coach of another slot's team, a lapsed coach, a member who coaches no team and another organisation's admin were each refused 42501, 4 of 4, and wrote nothing" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a member who coaches no team and another organisation's admin are refused"
+      # No coach requests lighting since 20261028010000 (admin focus R6): the
+      # request RPC is gone, and only an admin withdraws.
+      if grep -qF "2 withdrawals by an admin (a requested row and an approved one); the requester and another coach withdrawing were refused 42501, 2 of 2" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin withdraws a lighting override; its requester and another coach are refused"
       else
-        echo "FAIL smoke ${id}: it passed without proving a non-coach cannot request a lighting override"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a coach cannot withdraw a lighting override"; STATUS=1
       fi
       if grep -qF "a coach approving was refused (42501), 2 of 2 (their own request and another coach's), and the row is still requested" $SCRATCH/harness_smoke; then
         echo "  | (checked) only an org admin decides a lighting override; a coach approving is refused, their own request or another's"
@@ -824,8 +826,8 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving only approved lighting overrides are read as approved"; STATUS=1
       fi
-      if grep -qF "every write audited -- 12 of 12 (5 requested, 2 approved, 1 rejected, 2 withdrawn, 2 set), each naming its row" $SCRATCH/harness_smoke; then
-        echo "  | (checked) every lighting override write leaves its audit row, 12 of 12, each naming the row it wrote"
+      if grep -qF "every write audited -- 7 of 7 (2 approved, 1 rejected, 2 withdrawn, 2 set), each naming its row" $SCRATCH/harness_smoke; then
+        echo "  | (checked) every lighting override write leaves its audit row, 7 of 7, each naming the row it wrote"
       else
         echo "FAIL smoke ${id}: it passed without proving every lighting override write is audited"; STATUS=1
       fi
@@ -1303,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2856,6 +2858,39 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the birthdates revert did not restore every dropped or replaced object as it was at 20261025010000"
         dump 10 $SCRATCH/harness_birth; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261028010000" ]; then
+      # One fingerprint of every object the migration dropped, replaced or
+      # added, read off the catalogue: the six functions (signature, security,
+      # volatility, SET clauses, result, arguments, sorted grants, md5 of the
+      # body, comment), so the three division reads are gone and the score,
+      # request and withdraw writers are back as they were, and the comment
+      # on practice_lighting_overrides. The expected md5 and row count were
+      # read 2026-10-25 off a build at 20261026010000 with the same query; the
+      # count is part of the verdict, so a lookup that finds nothing cannot
+      # pass.
+      if psql_cmd "SELECT 'COACHVIEW-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*)
+               = '759f924fab34d90bf3c71276d90fd33d:4' THEN 'restored' ELSE 'wrong' END FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('update_game_score', 'request_practice_lighting_override',
+                           'withdraw_practice_lighting_override', 'division_teams_of',
+                           'get_my_division_teams', 'admin_get_division_teams')
+      UNION ALL
+      SELECT 't|' || c.relname || '|' || coalesce(obj_description(c.oid, 'pg_class'), '')
+        FROM pg_class c
+       WHERE c.oid = to_regclass('public.practice_lighting_overrides')
+             ) s;" \
+         >$SCRATCH/harness_coachview 2>&1 && grep -q 'COACHVIEW-VERDICT:restored' $SCRATCH/harness_coachview; then
+        echo "  | (checked) the coach view revert restores the coach arm of update_game_score, the coach lighting request and the requester's withdraw, and the lighting table's comment, and drops the three division reads, each with its grants, comment and posture as at 20261026010000"
+      else
+        echo "FAIL revert ${id}: the coach view revert did not restore every dropped or replaced object as it was at 20261026010000"
+        dump 10 $SCRATCH/harness_coachview; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

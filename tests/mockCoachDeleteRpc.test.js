@@ -12,16 +12,14 @@ describe('mock admin_delete_coaches rpc', () => {
     setMockSession('mock-admin-id');
   });
 
-  it('deletes coaches, unassigns their teams, and drops interest links', async () => {
+  // The coach leads' interest table went with them (20261025010000): an
+  // interested coach is deleted like any other, and no interest link exists.
+  it('deletes coaches, an interested one included, and unassigns their teams', async () => {
     const coaches = getMockData('coaches');
     const assignedCoach = coaches.find((coach) =>
       getMockData('teams').some((team) => String(team.coach_id) === String(coach.id))
     );
-    const leadCoach = coaches.find((coach) =>
-      getMockData('coach_interested_programs').some(
-        (row) => String(row.coach_id) === String(coach.id)
-      )
-    );
+    const leadCoach = coaches.find((coach) => coach.status === 'interested');
     expect(assignedCoach).toBeTruthy();
     expect(leadCoach).toBeTruthy();
 
@@ -37,11 +35,7 @@ describe('mock admin_delete_coaches rpc', () => {
     expect(
       getMockData('teams').some((team) => String(team.coach_id) === String(assignedCoach.id))
     ).toBe(false);
-    expect(
-      getMockData('coach_interested_programs').some(
-        (row) => String(row.coach_id) === String(leadCoach.id)
-      )
-    ).toBe(false);
+    expect(getMockData('coach_interested_programs') ?? []).toEqual([]);
 
     const auditEntry = getMockData('audit_log').find((row) => row.action === 'coach.deleted');
     expect(auditEntry).toBeTruthy();

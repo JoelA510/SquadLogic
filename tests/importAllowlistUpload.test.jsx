@@ -176,10 +176,12 @@ describe('a people import keeps only allowlisted columns', () => {
     });
 
     const player = getMockData('players').find((p) => p.external_registration_id === 'REG-3');
-    expect(player.guardian_contacts).toEqual([]);
-    expect(player.contact_info).toEqual({});
-    // No payment flag since players.paid was dropped (20261022020000).
+    // No payment flag since players.paid was dropped (20261022020000), and no
+    // contact columns since contact_info and guardian_contacts were
+    // (20261025010000).
     expect(player).not.toHaveProperty('paid');
+    expect(player).not.toHaveProperty('guardian_contacts');
+    expect(player).not.toHaveProperty('contact_info');
     expect(player.custom_attributes).toEqual({ team_name: 'Team 3' });
     expect(
       JSON.stringify({

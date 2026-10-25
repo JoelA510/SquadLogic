@@ -58,7 +58,6 @@ const PLAYER_PATCH_FIELDS = new Set([
   'division_id',
   'team_id',
   'date_of_birth',
-  'guardian_contacts',
 ]);
 /** The first key `sanitize_player_patch` would refuse, or undefined. */
 const rejectedPlayerPatchField = (patch) =>
@@ -241,7 +240,6 @@ const initialMockData = {
       jersey_number: 7,
       willing_to_coach: false,
       buddy_request: 'Jamie Jones',
-      guardian_contacts: [{ name: 'Dana Smith', email: 'dana.smith@example.com' }],
     },
     {
       id: 'player-2',
@@ -256,7 +254,6 @@ const initialMockData = {
       rating: null,
       jersey_number: null,
       willing_to_coach: true,
-      guardian_contacts: [],
     },
   ],
   coaches: [
@@ -294,16 +291,6 @@ const initialMockData = {
       import_source: 'player_import_lead',
       last_imported_at: new Date(Date.now() - 2 * 86400000).toISOString(),
       can_coach_multiple_teams: false,
-    },
-  ],
-  coach_interested_programs: [
-    {
-      id: 'coach-interest-1',
-      coach_id: 'coach-lead-1',
-      division_id: 'u8-div-id',
-      inferred_from_player_id: 'player-1',
-      organization_id: MOCK_ORG_ID,
-      created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
     },
   ],
   practice_slots: [
@@ -2403,8 +2390,9 @@ export const mockSupabase = {
         return lighting;
       }
       // Server-side reads (migration 20261021010000, without the guardian
-      // since 20261024010000): the contact card and the roster, staff and
-      // directory reads, refusals included.
+      // since 20261024010000 and the contact surfaces since 20261025010000):
+      // the roster and staff reads and the coached-team reads, refusals
+      // included.
       const reads = handleServerSideReadRpc(db, name, params, {
         currentUserId: storedSession ? currentUserId : null,
       });
@@ -2629,8 +2617,13 @@ export const mockSupabase = {
           String(item.organization_id) === String(p_organization_id) &&
           String(item.profile_id) === String(session?.user?.id)
       );
-      if (!caller) {
-        return { data: null, error: { message: 'Access denied: membership required' } };
+      // Admins and staff only (20261025010000): the list carries every
+      // member's sign-in email.
+      if (!caller || !ADMIN_ROLES.includes(String(caller.role || ''))) {
+        return {
+          data: null,
+          error: { message: 'Access denied: admin required', code: '42501' },
+        };
       }
       const rows = (db.organization_members || [])
         .filter((item) => String(item.organization_id) === String(p_organization_id))
@@ -5097,8 +5090,6 @@ export const mockSupabase = {
           db.players.push({
             id: mockId(),
             created_at: now,
-            contact_info: {},
-            guardian_contacts: [],
             ...basePlayer,
           });
           insertedPlayers += 1;
@@ -6558,143 +6549,6 @@ export const mockSupabase = {
       return { data: { ...result, blocked }, error: null };
     }
 
-    if (name === 'set_import_job_coach_lead_summary') {
-      const { p_import_job_id, p_summary, p_status } = params || {};
-      const job = (db.import_jobs || []).find(
-        (item) => String(item.id) === String(p_import_job_id)
-      );
-      if (!job) {
-        return { data: null, error: { message: 'Import job not found' } };
-      }
-
-      job.warning_summary = {
-        ...(job.warning_summary || {}),
-        coach_leads: p_summary || {},
-      };
-      if (p_status) job.status = p_status;
-      saveDB(db);
-      return { data: true, error: null };
-    }
-
-    if (name === 'upsert_coach_leads') {
-      const leads = Array.isArray(params?.p_leads) ? params.p_leads : null;
-      if (!leads) {
-        return { data: null, error: { message: 'p_leads must be an array' } };
-      }
-
-      const normalizeEmail = (email) =>
-        String(email || '')
-          .trim()
-          .toLowerCase();
-      const validLeads = leads
-        .map((lead) => ({
-          email: normalizeEmail(lead.email),
-          full_name: String(lead.full_name || '').trim(),
-          organization_id: lead.organization_id,
-          division_id: lead.division_id || null,
-          player_id: lead.player_id || null,
-        }))
-        .filter((lead) => lead.email && lead.full_name && lead.organization_id);
-
-      db.coaches = db.coaches || [];
-      db.coach_interested_programs = db.coach_interested_programs || [];
-
-      for (const lead of validLeads) {
-        if (
-          lead.division_id &&
-          !(db.divisions || []).some(
-            (division) =>
-              String(division.id) === String(lead.division_id) &&
-              String(division.organization_id) === String(lead.organization_id)
-          )
-        ) {
-          return {
-            data: null,
-            error: { message: 'Coach lead references a division outside its organization' },
-          };
-        }
-
-        if (
-          lead.player_id &&
-          !(db.players || []).some(
-            (player) =>
-              String(player.id) === String(lead.player_id) &&
-              String(player.organization_id) === String(lead.organization_id)
-          )
-        ) {
-          return {
-            data: null,
-            error: { message: 'Coach lead references a player outside its organization' },
-          };
-        }
-      }
-
-      let leadsCreated = 0;
-      let programsLinked = 0;
-      const coachCandidateEmails = new Set();
-
-      validLeads.forEach((lead) => {
-        if (coachCandidateEmails.has(lead.email)) return;
-        coachCandidateEmails.add(lead.email);
-
-        const existingGlobalCoach = db.coaches.find(
-          (coach) => normalizeEmail(coach.email) === lead.email
-        );
-        if (!existingGlobalCoach) {
-          db.coaches.push({
-            id: mockId(),
-            organization_id: lead.organization_id,
-            full_name: lead.full_name,
-            email: lead.email,
-            status: 'interested',
-            import_source: 'player_import_lead',
-            last_imported_at: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-          });
-          leadsCreated += 1;
-        } else if (String(existingGlobalCoach.organization_id) === String(lead.organization_id)) {
-          existingGlobalCoach.last_imported_at = new Date().toISOString();
-        }
-      });
-
-      validLeads.forEach((lead) => {
-        const coach = db.coaches.find(
-          (item) =>
-            normalizeEmail(item.email) === lead.email &&
-            String(item.organization_id) === String(lead.organization_id)
-        );
-        if (!coach || !lead.division_id) return;
-
-        const existingLink = db.coach_interested_programs.find(
-          (item) =>
-            String(item.coach_id) === String(coach.id) &&
-            String(item.division_id) === String(lead.division_id) &&
-            String(item.inferred_from_player_id || '') === String(lead.player_id || '')
-        );
-        if (existingLink) return;
-
-        db.coach_interested_programs.push({
-          id: mockId(),
-          coach_id: coach.id,
-          division_id: lead.division_id,
-          inferred_from_player_id: lead.player_id,
-          organization_id: lead.organization_id,
-          created_at: new Date().toISOString(),
-        });
-        programsLinked += 1;
-      });
-
-      saveDB(db);
-      return {
-        data: {
-          leads_created: leadsCreated,
-          programs_linked: programsLinked,
-          skipped_existing: validLeads.length - leadsCreated,
-        },
-        error: null,
-      };
-    }
-
     if (name === 'admin_delete_coaches') {
       const { p_coach_ids } = params || {};
       const ids = (p_coach_ids || []).map(String);
@@ -6752,17 +6606,6 @@ export const mockSupabase = {
         );
         if (result.error) return { data: null, error: result.error };
       }
-      const droppedInterests = (db.coach_interested_programs || []).filter((row) =>
-        idSet.has(String(row.coach_id))
-      );
-      markMockDeleted(
-        db,
-        'coach_interested_programs',
-        droppedInterests.map((row) => tombstoneKey('coach_interested_programs', row))
-      );
-      db.coach_interested_programs = (db.coach_interested_programs || []).filter(
-        (row) => !idSet.has(String(row.coach_id))
-      );
       const droppedRequests = (db.coach_team_requests || []).filter((row) =>
         idSet.has(String(row.coach_id))
       );

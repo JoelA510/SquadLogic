@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Calendar, ChevronRight, Clock, Flag, Shield, Star } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
@@ -29,8 +29,10 @@ function Stars({ n = 0 }) {
 }
 
 /**
- * Player record — hero + tabs (Overview / Guardians / Team & Schedule).
- * Inline edits persist through admin_update_player.
+ * Player record — hero + tabs (Overview / Team & Schedule).
+ * Inline edits persist through admin_update_player. No guardians tab: guardian
+ * contacts are not stored (20261025010000; leagues keep them on their
+ * registration platform).
  */
 export default function PlayerRecordPage() {
   const { playerId } = useParams();
@@ -136,20 +138,6 @@ export default function PlayerRecordPage() {
     [player, playerId, toast]
   );
 
-  const guardians = useMemo(
-    () => (Array.isArray(player?.guardian_contacts) ? player.guardian_contacts : []),
-    [player]
-  );
-
-  const saveGuardian = (index, field, value) => {
-    const next = guardians.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry));
-    save({ guardian_contacts: next });
-  };
-
-  const addGuardian = () => {
-    save({ guardian_contacts: [...guardians, {}] });
-  };
-
   if (loading) return <LoadingScreen />;
   if (!player) {
     return (
@@ -179,7 +167,6 @@ export default function PlayerRecordPage() {
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    { id: 'guardians', label: 'Guardians' },
     { id: 'schedule', label: 'Team & Schedule' },
   ];
 
@@ -339,52 +326,6 @@ export default function PlayerRecordPage() {
                 )}
               </div>
             </div>
-          </div>
-        )}
-
-        {tab === 'guardians' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {guardians.length === 0 && (
-              <div className="card">
-                <div className="card-body muted">No guardians on file.</div>
-              </div>
-            )}
-            {guardians.map((guardian, index) => (
-              <div className="card" key={index}>
-                <div className="card-head">
-                  <h3>{index === 0 ? 'Primary guardian' : `Guardian ${index + 1}`}</h3>
-                </div>
-                <div className="card-body">
-                  <div className="rf-grid">
-                    <InlineField
-                      label="Name"
-                      value={guardian.name}
-                      onSave={(v) => saveGuardian(index, 'name', v)}
-                    />
-                    <InlineField
-                      label="Email"
-                      value={guardian.email}
-                      onSave={(v) => saveGuardian(index, 'email', v)}
-                    />
-                    <InlineField
-                      label="Alternate email"
-                      value={guardian.alternate_email}
-                      onSave={(v) => saveGuardian(index, 'alternate_email', v)}
-                      placeholder="None"
-                    />
-                    <InlineField
-                      label="Phone"
-                      value={guardian.phone}
-                      onSave={(v) => saveGuardian(index, 'phone', v)}
-                      placeholder="None"
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-            <Button variant="secondary" size="sm" onClick={addGuardian}>
-              Add guardian
-            </Button>
           </div>
         )}
 

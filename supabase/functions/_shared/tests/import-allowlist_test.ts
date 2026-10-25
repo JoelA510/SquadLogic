@@ -13,7 +13,9 @@ import {
   keepAllowedColumns,
   declaredFieldKey,
   withDeclaredColumns,
+  withoutBirthKeys,
 } from '../import-allowlist.ts';
+import { importNaturalAge, importSeason } from '../natural-age.ts';
 
 const lower = (h: string) => h.toLowerCase().trim();
 
@@ -92,3 +94,33 @@ Deno.test(
     );
   }
 );
+
+Deno.test('no birth key is staged, and the natural age replaces it (R5)', () => {
+  const alias = (h: string) =>
+    ['date of birth', 'dob', 'birthdate'].includes(lower(h)) ? 'date_of_birth' : lower(h);
+  assertEquals(
+    withoutBirthKeys(
+      'players',
+      {
+        'First Name': 'First1',
+        'Date of Birth': '2016-01-01',
+        DOB: '2016-01-01',
+        birth_year: '2016',
+      },
+      alias
+    ),
+    { 'First Name': 'First1' }
+  );
+  const season = { seasonYear: 2026, cutoffMode: 'school_year_aug_jul' };
+  assertEquals(importNaturalAge({ ...season, dob: '2016-03-01', ageGroup: '11' }), 10);
+  assertEquals(importNaturalAge({ ...season, dob: '2016-08-01' }), 9);
+  assertEquals(importNaturalAge({ ageGroup: '11' }), 11);
+  assertEquals(importNaturalAge({}), null);
+  assertEquals(
+    importSeason([
+      { status: 'draft', season_start: '2026-08-01', season_year: 2027 },
+      { status: 'active', season_start: '2025-08-01', season_year: 2026 },
+    ])?.season_year,
+    2026
+  );
+});

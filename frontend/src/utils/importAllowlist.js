@@ -24,10 +24,9 @@ export const PLAYER_IMPORT_KEYS = Object.freeze([
   'gotsport_id',
   'registration_id',
   'player_id',
-  // Age and division (birthdate until a later PR stores natural age instead)
-  'date_of_birth',
-  'dob',
-  'birth_year',
+  // Age and division. `natural_age` is set by import-validation (the age group, else one
+  // computed from the birth date), never read from the file; the birth keys are below.
+  'natural_age',
   'age group',
   'age_group',
   'age',
@@ -66,6 +65,15 @@ export const PLAYER_IMPORT_KEYS = Object.freeze([
   'team age',
   'team gender',
 ]);
+
+/**
+ * The birth keys a player import reads in transit (admin-focus plan R5): import-validation
+ * computes the natural age from them and returns them to the browser, which keeps the file's
+ * birth dates for teaming during the import session; nothing stages or stores them
+ * (`withoutBirthKeys`). Kept by the filter, so they are not in `PLAYER_IMPORT_KEYS`, the keys
+ * the SQL reads.
+ */
+export const PLAYER_BIRTH_KEYS = Object.freeze(['date_of_birth', 'dob', 'birth_year']);
 
 /**
  * The columns a coach's full name is composed from when the export has none
@@ -129,6 +137,7 @@ export function isAllowedImportKey(importType, canonicalKey, declaredFields = []
   const keys = KEYS_BY_TYPE[importType];
   if (!keys) return true;
   if (keys.includes(canonicalKey)) return true;
+  if (importType === 'players' && PLAYER_BIRTH_KEYS.includes(canonicalKey)) return true;
   const identity = declaredFieldKey(canonicalKey);
   if (!identity) return false;
   for (const field of declaredFields) {
@@ -368,4 +377,27 @@ export function importPayloadText(payload, keys) {
     if (text) return text;
   }
   return null;
+}
+
+/**
+ * The row without a birth key, judged by its canonical key (`normalizeHeader`):
+ * what import-validation stages, raw and normalized (admin-focus plan R5). A
+ * declared field whose identity is a birth key goes too. Other import types,
+ * and rows with no birth key, are returned as given.
+ * @template T
+ * @param {string} importType
+ * @param {Record<string, T>} row
+ * @param {(header: string) => string} normalizeHeader
+ * @returns {Record<string, T>}
+ */
+export function withoutBirthKeys(importType, row, normalizeHeader) {
+  if (importType !== 'players' || !row) return row;
+  /** @type {Record<string, T>} */
+  const out = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (PLAYER_BIRTH_KEYS.includes(normalizeHeader(key))) continue;
+    if (PLAYER_BIRTH_KEYS.includes(declaredFieldKey(key))) continue;
+    out[key] = value;
+  }
+  return out;
 }

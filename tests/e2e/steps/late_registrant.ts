@@ -157,6 +157,40 @@ Given('a late registrant appears in the latest import', async ({ page }) => {
   );
 });
 
+Given(
+  'the season is {int} and the late registrant was born in {int}',
+  async ({ page }, seasonYear: number, birthYear: number) => {
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ seasonYear, birthdate, latePlayer, mockOrgId }) => {
+        const db = window.__MOCK_DB__ as MockDb | undefined;
+        if (!db) throw new Error('mock store not initialised');
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+        const season = (db.season_settings ?? []).find(
+          (row) => row.organization_id === orgId && row.status === 'active'
+        );
+        if (!season) throw new Error(`no active season for ${orgId}`);
+        // The season the ages are counted in: U12 in 2027 is born in 2015, as the saved
+        // players are, so only the late registrant is out of the band.
+        season.season_year = seasonYear;
+        season.age_cutoff_mode = 'birth_year';
+        const latest = (db.imports ?? []).find((row) => row.id === 'late-import-latest');
+        const rows = (latest?.data as { data?: MockRow[] } | undefined)?.data;
+        const late = rows?.find((row) => row.id === latePlayer);
+        if (!late) throw new Error('the late registrant is not in the latest import');
+        late.Birthdate = birthdate;
+        window.__saveMockDB__(db);
+      },
+      {
+        seasonYear,
+        birthdate: `${birthYear}-03-01`,
+        latePlayer: LATE_PLAYER,
+        mockOrgId: MOCK_ORG_ID,
+      }
+    );
+  }
+);
+
 When('I re-run teaming from the dashboard workflow', async ({ page }) => {
   // The button asks before it replaces the current draft; the scenario says yes.
   let asked = false;
@@ -220,4 +254,27 @@ Then('the late registrant is on exactly one of them', async ({ page }) => {
   // awaited each original card), so a count of zero would be a real zero.
   await teamColumn(page, TEAMS[0].id);
   await expect.poll(() => cardsOnSavedTeams(page, LATE_PLAYER)).toBe(1);
+});
+
+Then(
+  'the late registrant is listed under "Not placed" as too old for the division',
+  async ({ page }) => {
+    // Player 7 is the late registrant's name in the import (First Name, Last Name).
+    const list = page.getByRole('region', { name: 'Not placed' });
+    await expect(list).toBeVisible({ timeout: 15000 });
+    await expect(list.getByRole('listitem')).toHaveText([
+      'Player 7. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 16.',
+    ]);
+    // Nobody was held on a reviewed roster: the saved players are in the band.
+    await expect(page.getByRole('region', { name: 'Needs review' })).toHaveCount(0);
+  }
+);
+
+Then('the late registrant is on none of them', async ({ page }) => {
+  // Meta-assertion: the columns are open and hold the original players (the previous step
+  // awaited each card), so a count of zero is a real zero.
+  await expect(
+    (await teamColumn(page, TEAMS[0].id)).getByTestId(`player-card-${TEAMS[0].players[0]}`)
+  ).toBeVisible();
+  expect(await cardsOnSavedTeams(page, LATE_PLAYER)).toBe(0);
 });

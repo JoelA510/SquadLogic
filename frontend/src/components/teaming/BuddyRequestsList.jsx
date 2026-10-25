@@ -1,6 +1,7 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { BUDDY_RULE_CHOICES } from '../../constants/featureFlags.js';
+import { notPlacedById } from '../../utils/placementReview.js';
 
 /** Why a request linked nobody, in words (codes from `resolveBuddyRequests` and the pipeline). */
 const UNRESOLVED_REASONS = {
@@ -37,9 +38,29 @@ function currentPlacement(results) {
   };
 }
 
+/**
+ * Why a pair is apart when one of them is on no team (Phase B3): a buddy whose eligibility is
+ * blocked is not placed, and the other is placed alone (`buddy-not-placed`). Null when both are
+ * on teams, or when the run records neither as not placed.
+ */
+function apartBecause(ids, notPlaced) {
+  const missing = ids.map(String).filter((id) => notPlaced.has(id));
+  if (missing.length === 0) return null;
+  return missing
+    .map((id) => {
+      const { name, reason } = /** @type {{ name: string, reason: string }} */ (notPlaced.get(id));
+      return reason === 'eligibility-blocked'
+        ? `${name} is not eligible for this division and is not placed`
+        : `${name} is not placed`;
+    })
+    .join('; ');
+}
+
 function placedText(entry) {
   const placed = !entry.together
-    ? 'Not placed together.'
+    ? entry.apartBecause
+      ? `Not placed together: ${entry.apartBecause}.`
+      : 'Not placed together.'
     : entry.teamName
       ? `Placed together on ${entry.teamName}.`
       : 'Placed together.';
@@ -79,7 +100,11 @@ export default function BuddyRequestsList({ results }) {
   const divisions = Object.entries(results?.buddyRequestsByDivision || {});
   if (divisions.length === 0) return null;
   const placementOf = currentPlacement(results);
-  const placed = (entry, a, b) => (placementOf ? { ...entry, ...placementOf(a, b) } : entry);
+  const notPlaced = notPlacedById(results);
+  const placed = (entry, a, b) => {
+    const now = placementOf ? { ...entry, ...placementOf(a, b) } : entry;
+    return now.together ? now : { ...now, apartBecause: apartBecause([a, b], notPlaced) };
+  };
 
   return (
     <section
@@ -170,6 +195,7 @@ BuddyRequestsList.propTypes = {
         unresolved: PropTypes.arrayOf(PropTypes.object),
       })
     ),
+    overflowByDivision: PropTypes.object,
     team_players: PropTypes.arrayOf(PropTypes.object),
     teams: PropTypes.arrayOf(PropTypes.object),
   }),

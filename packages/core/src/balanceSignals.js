@@ -46,6 +46,18 @@ export function playerSignal(player, kind) {
   return 1;
 }
 
+/**
+ * Whether a player holds a value for the signal kind (`playerSignal` reads it): a rating (or a
+ * generator player's `skillRating`), or years played. Never for `'size'`. A player without one
+ * weighs the default, so a division where nobody carries the signal has nothing to compensate
+ * leads with (Phase B6).
+ */
+export function carriesSignal(player, kind) {
+  if (kind !== 'rating' && kind !== 'years') return false;
+  const value = kind === 'rating' ? (player?.rating ?? player?.skillRating) : player?.years_played;
+  return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value));
+}
+
 /** Live per-team metrics for a column of players. */
 export function teamBalanceMetrics(players = []) {
   const size = players.length;
@@ -131,12 +143,14 @@ export function buddyStats(players = [], { roster, buddyRule } = {}) {
  * `respectBuddies`), sorted by descending unit signal, then dealt
  * serpentine-style to the team with the lowest running signal total.
  *
- * With `respectCoach` (the league's `teaming_spread_coaching_leads`, Phase B6), the rule in
- * `coachingLeads.js` the generator also deals by: units holding a coaching lead
+ * With `respectCoach` (the league's `teaming_spread_coaching_leads`, Phase B6), steps 2 and 3
+ * of the rule in `coachingLeads.js` the generator also deals by (a board has no head-coach
+ * anchors, so step 1 has nothing to place): units holding a coaching lead
  * (`willing_to_coach`) are dealt first, the most leads first, each to a team with the fewest
  * leads, so no two teams differ by more than one except where one unit holds two; then every
  * team's load is its signal total plus `c` per lead (`leadCompensation`: the board's mean
- * player signal, 0 when balancing by roster size only), so a team with fewer leads receives
+ * player signal; 0 when balancing by roster size only or when no player carries the signal),
+ * so a team with fewer leads receives
  * more of the experienced or rated players. Without it, leads are ordinary players.
  *
  * Buddies follow `boardBuddyLinks` (Team Analysis's rule): a mutual pair is one unit; an
@@ -216,13 +230,16 @@ export function serpentineAssign({
     count: 0,
     leads: 0,
   }));
-  // What one lead adds to a team's load (0 when no unit holds one, or by roster size only).
-  const c = units.some((unit) => unit.leads > 0)
-    ? leadCompensation(
-        players.map((player) => playerSignal(player, signalKind)),
-        { signalKind }
-      )
-    : 0;
+  // What one lead adds to a team's load: 0 when no unit holds one, by roster size only, or when
+  // no player carries the signal (nothing to compensate with), as in the generator.
+  const c =
+    units.some((unit) => unit.leads > 0) &&
+    players.some((player) => carriesSignal(player, signalKind))
+      ? leadCompensation(
+          players.map((player) => playerSignal(player, signalKind)),
+          { signalKind }
+        )
+      : 0;
   const loadOf = (bucket) => compensatedLoad(bucket.total, bucket.leads, c);
 
   /** @type {Map<string, any>} the team each dealt player went to */

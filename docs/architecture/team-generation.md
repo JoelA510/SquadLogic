@@ -37,7 +37,14 @@ This document translates the roadmap's team formation phase into actionable plan
   different head coach is broken (`buddy-coach-conflict`), not thrown. The Teams page lists every
   request's outcome in the run's `results.buddyRequestsByDivision`.
 - **Coach volunteers**: From the `coaches` table with `player_id` links and `can_coach_multiple_teams` flag.
-- **Configuration**: Season-level overrides from `season_settings` (roster adjustments, division ordering, lock dates), and per-division bounds on `divisions` (`min_roster_size`, `target_team_size`, `team_count_override`, `min_teams`, `max_teams`; migration `20260502001000`), which admins edit on the Team Analysis page through `admin_upsert_division_settings` and which `normalizeDivisionRosterConstraints` in `packages/core/src/teamGeneration.js` reads as `minRosterSize`, `targetTeamSize`, `teamCountOverride`, `minTeams` and `maxTeams`. A program with no saved row starts on Auto (no `team_count_override`; Phase B4): the page used to pre-fill `ceil(players / 12)` and save it on generation, so every program carried an override nobody set. A saved override is kept, with the recommendation and "Use N" beside it. Before generation the page's program overview and settings panel show `assessTeamCount`'s advice (`packages/core/src/rosterSizing.js`): the count generation will build, the recommended count, and a warning status, with the head coaches the import names counted by the rule generation uses (`toGeneratorPlayer`'s `coachId`, once per distinct coach); it is the import's count, not the run's: coaches linked through `coach_team_requests` at generation are not known there, and a coach whose child is not eligible (Phase B2) anchors no team.
+- **Coaching leads** (Phase B6): `players.willing_to_coach`, a parent who volunteers to coach.
+  A lead is not a coach and anchors no team: only a coach linked to a child through
+  `coach_team_requests` does. The Teams page emits `isCoachingLead` (with Coaching Interest on)
+  and `years_played`, and passes the league's effective flags to `generateTeams`. The rule is
+  `packages/core/src/coachingLeads.js`, shared with TeamBuilder's auto-balance
+  (`serpentineAssign`); the league's `teaming_spread_coaching_leads` setting, on by default,
+  turns it off.
+- **Configuration**: Season-level overrides from `season_settings` (roster adjustments, division ordering, lock dates), and per-division bounds on `divisions` (`min_roster_size`, `target_team_size`, `team_count_override`, `min_teams`, `max_teams`; migration `20260502001000`), which admins edit on the Team Analysis page through `admin_upsert_division_settings` and which `normalizeDivisionRosterConstraints` in `packages/core/src/teamGeneration.js` reads as `minRosterSize`, `targetTeamSize`, `teamCountOverride`, `minTeams` and `maxTeams`. A program with no saved row starts on Auto (no `team_count_override`; Phase B4): the page used to pre-fill `ceil(players / 12)` and save it on generation, so every program carried an override nobody set. A saved override is kept, with the recommendation and "Use N" beside it. Before generation the page's program overview and settings panel show `assessTeamCount`'s advice (`packages/core/src/rosterSizing.js`): the count generation will build, the recommended count, and a warning status, with the head coaches the import names counted by the rule generation uses (`toGeneratorPlayer`'s `coachId`, once per distinct coach; a coaching lead is not one, Phase B6); it is the import's count, not the run's: coaches linked through `coach_team_requests` at generation are not known there, and a coach whose child is not eligible (Phase B2) anchors no team.
 
 ## Processing Steps
 
@@ -58,6 +65,17 @@ This document translates the roadmap's team formation phase into actionable plan
    - Initialize team objects with metadata: division, coach (if already placed), assistant capacity, and roster limit.
    - Iterate through shuffled assignment units, always placing the next unit into the team with the smallest roster load. Use a tie-breaker that favors teams lacking coaches to keep leadership balanced.
    - If adding a unit would exceed the roster cap, place it in an overflow queue for manual resolution.
+   - **Team priorities** (owner, 2026-10-22; Phase B6): coaches' children with their buddies are
+     placed first (step 2); then, when the division holds a coaching lead and the league spreads
+     leads, units holding a lead (the most leads first) each go to a team with the fewest leads,
+     so no two teams differ by more than one except where a buddy unit holds two; then every
+     other unit goes to the team with the lowest `signal total + c × leads`, where the signal is
+     the league's (`player_rating`, else `years_played`; `balanceSignalKind` and `playerSignal`
+     in `balanceSignals.js`), `c` is `LEAD_COMPENSATION_FACTOR` (1, tuned on
+     `fixtures/demo-2026/`) times the division's mean player signal, and 0 when the league uses
+     neither signal. A best-effort buddy (`BuddyEvaluator`) narrows the choice first; ties go to
+     the smallest roster, then the seeded draw. Without a lead, or with the setting off, the
+     evaluators place the units as before. On a rerun the same rule places late players only.
 4. **Skill or experience balancing** (optional phase)
    - When `players.skill_tier` exists, perform a serpentine draft per tier to distribute skill evenly before filling remaining slots randomly.
 5. **Fairness metrics & diagnostics**

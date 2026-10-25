@@ -145,7 +145,7 @@ export const FEATURE_CATALOG = [
     key: FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS,
     label: 'Spread Coaching Leads',
     description:
-      'Spread players whose parent volunteers to coach evenly across teams, and give teams with fewer of them more of the experienced or rated players. A lead is not a coach: only a linked coach anchors a team.',
+      'Spread players whose parent volunteers to coach evenly across teams, and give teams with fewer of them more of the experienced or rated players. A lead is not a coach: only a linked coach anchors a team. Reads the Coaching Interest answers, so it needs Coaching Interest on.',
     icon: Scale,
     column: false,
   },

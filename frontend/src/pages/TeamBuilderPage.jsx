@@ -108,7 +108,7 @@ export default function TeamBuilderPage() {
   // league's buddy rule, and every player as the roster, so a request or code naming someone
   // off this board is not paired. A player's division is its division id, as the program is
   // in Team Analysis, so a board that folds two divisions (co-ed) pairs nobody across them.
-  // With Buddy Requests off, nothing is matched (the tile and the toggle are hidden).
+  // With Buddy Requests off, nothing is matched (the tile is hidden).
   const buddyRequestsOn = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
   // A lead is read from the Coaching Interest column, so both must be on to spread leads.
   const coachingInterestOn = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
@@ -169,6 +169,10 @@ export default function TeamBuilderPage() {
           players: assignments.length,
           teams: divisionTeams.length,
           signal: signalKind,
+          // The league settings the deal used (Phase B6), so the row says which rule built it.
+          buddy_requests: buddyRequestsOn,
+          buddy_rule: buddyRule,
+          spread_coaching_leads: spreadLeadsOn,
         },
       });
       toast(

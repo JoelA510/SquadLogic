@@ -7,17 +7,22 @@
  * (`players.willing_to_coach`). A lead is not a coach: only a coach linked to a child through
  * `coach_team_requests` anchors a team. The owner's order a division's teams are filled in:
  *
- *   1. coaches' children, with their buddies as the league's buddy rule allows;
+ *   1. coaches' children, with their buddies as the league's buddy rule allows (the
+ *      generator; a Team Builder board has no coach anchors);
  *   2. leads, spread so no two teams differ by more than one, except where a buddy unit holds
- *      more than one lead: each unit holding a lead goes to a team with the fewest leads;
+ *      more than one lead: units holding a lead are dealt first, the most leads first, each to a
+ *      team with the fewest leads;
  *   3. experience and skill balance, with compensation: every other unit goes to the team
  *      with the lowest `signal total + c × leads`, where `c` is the division's mean player
- *      signal times `LEAD_COMPENSATION_FACTOR` (one lead counts as one average player).
+ *      signal times `LEAD_COMPENSATION_FACTOR` (one lead counts as one average player; the plan's
+ *      "mean unit signal" read per player, so a buddy pair does not count as one player).
  *
  * The signal is the league's own (`balanceSignalKind` and `playerSignal`): years played, or the
- * skill rating when the league rates players. With neither, there is nothing to compensate
- * with, and `c` is 0. With the league's `teaming_spread_coaching_leads` setting off, steps 2
- * and 3's compensation are skipped and leads are ordinary players.
+ * skill rating when the league rates players. With neither, or when no player of the division
+ * carries it (`carriesSignal`), there is nothing to compensate with: `c` is 0, and the
+ * generator's evaluators balance the rest as they do without leads. With the league's
+ * `teaming_spread_coaching_leads` setting off, steps 2 and 3's compensation are skipped and
+ * leads are ordinary players.
  *
  * Pure module: no React, no I/O.
  */

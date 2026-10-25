@@ -465,7 +465,9 @@ function toGeneratorPlayer(
   const isCoachingLead =
     coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
   const yearsPlayed = parseYearsPlayed(firstNonEmpty(row, YEARS_PLAYED_KEYS));
-  const rating = Number(row?.rating);
+  // The admin's 1-5 rating, from the player record (`withDurableIdentity`); a blank is none.
+  const ratingValue = firstNonEmpty(row, ['rating']);
+  const rating = ratingValue === null ? NaN : Number(ratingValue);
   // Carry the DOB, else the natural age, and play-up signals so the play-up/play-down classifier
   // has an age to work with (without these every player resolves to "unknown"). The DOB is the
   // file's, which only the import session's rows carry: it is counted in the page's season, as
@@ -488,7 +490,7 @@ function toGeneratorPlayer(
         : {}),
     ...(playUpRequested ? { play_up_requested: true } : {}),
     ...(skillRating !== undefined ? { skillRating } : {}),
-    ...(row?.rating != null && Number.isFinite(rating) ? { rating } : {}),
+    ...(Number.isFinite(rating) ? { rating } : {}),
     ...(yearsPlayed !== undefined ? { years_played: yearsPlayed } : {}),
     ...(coachId ? { coachId: String(coachId) } : {}),
     ...(isCoachingLead ? { isCoachingLead: true } : {}),

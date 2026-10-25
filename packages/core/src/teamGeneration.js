@@ -14,7 +14,7 @@ import { reconcileTeamDeltas } from './teamDelta.js';
 import { getCanonicalBuddyId } from './buddyLinking.js';
 import { applyCoachContinuity } from './coachContinuity.js';
 import { isEligibilityBlocked } from './playUp.js';
-import { balanceSignalKind, playerSignal } from './balanceSignals.js';
+import { balanceSignalKind, carriesSignal, playerSignal } from './balanceSignals.js';
 import {
   compensatedLoad,
   countLeads,
@@ -977,6 +977,13 @@ function buildTeamsForDivisionIncremental({
     skillTotal: calculateUnitSkill(team.players),
   }));
 
+  // Leads are counted over the division as it will stand, each player once: the preserved
+  // rosters, before any late player joins them, and the eligible late players.
+  const leadPolicy = resolveLeadPolicy({
+    featureFlags,
+    players: [...teams.flatMap((team) => team.players), ...latePlayers],
+  });
+
   const preservedTeamIdSet = new Set(preservedTeams.map((team) => team.id));
   const assistantBackfills = [];
 
@@ -1187,13 +1194,6 @@ function buildTeamsForDivisionIncremental({
     }
   }
 
-  // Leads are counted over the whole division as it will stand: the preserved rosters and
-  // the late players still to place.
-  const leadPolicy = resolveLeadPolicy({
-    featureFlags,
-    players: [...teams.flatMap((team) => team.players), ...latePlayers],
-  });
-
   for (const assignmentUnit of orderGeneralUnits(generalUnits, leadPolicy)) {
     const unit = assignmentUnit.players;
     const skillTotal = assignmentUnit.skillTotal;
@@ -1342,27 +1342,34 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason: _
 }
 
 /**
- * @typedef {{ signalKind: string, c: number }} LeadPolicy
- *   How a division deals its coaching leads (Phase B6): the league's balance signal and what
- *   one lead adds to a team's load.
+ * @typedef {{ signalKind: string, compensate: boolean, c: number }} LeadPolicy
+ *   How a division deals its coaching leads (Phase B6): the league's balance signal, whether
+ *   the rest of the deal compensates for leads by it, and what one lead adds to a team's load.
  */
 
 /**
  * The lead rule for one division, or `null` when it does not apply: the league turned
  * `teaming_spread_coaching_leads` off, or no player of the division is a lead. `null` keeps
- * placement exactly as it was before B6.
+ * placement exactly as it was before B6. The deal compensates only when the league's signal is
+ * one a player can carry (`player_rating` or `years_played`) and some player of the division
+ * carries it (`carriesSignal`); otherwise there is nothing to compensate with, and the
+ * evaluators balance the rest as they do without leads.
  * @param {{ featureFlags: Object, players: Array<Player> }} params
  * @returns {LeadPolicy | null}
  */
 function resolveLeadPolicy({ featureFlags, players }) {
   if (!spreadsCoachingLeads(featureFlags) || countLeads(players) === 0) return null;
   const signalKind = balanceSignalKind(featureFlags);
+  const compensate = players.some((player) => carriesSignal(player, signalKind));
   return {
     signalKind,
-    c: leadCompensation(
-      players.map((player) => playerSignal(player, signalKind)),
-      { signalKind }
-    ),
+    compensate,
+    c: compensate
+      ? leadCompensation(
+          players.map((player) => playerSignal(player, signalKind)),
+          { signalKind }
+        )
+      : 0,
   };
 }
 
@@ -1374,18 +1381,16 @@ function signalTotalOf(players, signalKind) {
 /**
  * The order the general units are placed in. Without a lead policy, by skill total, as
  * before B6. With one: units holding a lead first, the most leads first, then by the league's
- * signal (or the skill total when the signal is roster size only, which has no order of its
- * own), each group in descending order.
+ * signal when the deal compensates (else by skill total, as before), each in descending order.
  * @param {Array<import('./assignmentUnits.js').AssignmentUnit>} units
  * @param {LeadPolicy | null} leadPolicy
  */
 function orderGeneralUnits(units, leadPolicy) {
   if (!leadPolicy) return [...units].sort((a, b) => b.skillTotal - a.skillTotal);
-  const { signalKind } = leadPolicy;
+  const { signalKind, compensate } = leadPolicy;
   return orderForLeadDeal(units, {
     leadsOf: (unit) => countLeads(unit.players),
-    weightOf: (unit) =>
-      signalKind === 'size' ? unit.skillTotal : signalTotalOf(unit.players, signalKind),
+    weightOf: (unit) => (compensate ? signalTotalOf(unit.players, signalKind) : unit.skillTotal),
   });
 }
 
@@ -1394,10 +1399,10 @@ const buddyEvaluator = new BuddyEvaluator();
 /**
  * The team a general unit joins. With no lead policy, the evaluators decide
  * (`pickTeamWithMostCapacity`), as before B6. With one (`coachingLeads.js`), among the teams
- * with room: a unit holding a lead keeps only the teams with the fewest leads; a buddy the
- * unit asked for (best effort, `BuddyEvaluator`) narrows them to that buddy's team; then the
- * lowest `signal total + c × leads`, the smallest roster, and the seeded random draw among
- * any still tied.
+ * with room, a unit holding a lead keeps only the teams with the fewest leads. Then, when the
+ * deal compensates: a buddy the unit asked for (best effort, `BuddyEvaluator`) narrows them to
+ * that buddy's team; then the lowest `signal total + c × leads`, the smallest roster, and the
+ * seeded random draw among any still tied. When it does not, the evaluators choose among them.
  * @param {Object} params
  * @param {Array<Team>} params.teams - the candidates
  * @param {Array<Team>} params.allTeams - every team of the division
@@ -1419,10 +1424,13 @@ function pickTeamForGeneralUnit({ leadPolicy, allTeams, ...params }) {
   if (countLeads(unit) > 0) {
     candidates = withFewestLeads(candidates, (team) => countLeads(team.players));
   }
+  const { signalKind, compensate, c } = leadPolicy;
+  if (!compensate) {
+    return pickTeamWithMostCapacity({ ...params, teams: candidates, allTeams: params.teams });
+  }
   const buddyScore = (team) =>
     buddyEvaluator.evaluate({ player: unit[0], team, allTeams, featureFlags });
   candidates = keepBest(candidates, buddyScore);
-  const { signalKind, c } = leadPolicy;
   candidates = keepBest(
     candidates,
     (team) => -compensatedLoad(signalTotalOf(team.players, signalKind), countLeads(team.players), c)
@@ -1446,7 +1454,8 @@ function keepBest(candidates, scoreOf) {
 
 /**
  * @param {Object} params
- * @param {Array<Team>} params.teams
+ * @param {Array<Team>} params.teams - the candidates
+ * @param {Array<Team>} [params.allTeams] - the teams the evaluators compare with (default `teams`)
  * @param {Array<Player>} params.unit
  * @param {number} params.unitSkillTotal
  * @param {number} params.maxRosterSize
@@ -1458,6 +1467,7 @@ function keepBest(candidates, scoreOf) {
  */
 function pickTeamWithMostCapacity({
   teams,
+  allTeams = teams,
   unit,
   unitSkillTotal: _unitSkillTotal,
   maxRosterSize,
@@ -1481,7 +1491,7 @@ function pickTeamWithMostCapacity({
       const score = evaluator.evaluate({
         player: unit[0],
         team,
-        allTeams: teams,
+        allTeams,
         featureFlags,
         customWeights,
         globalStats,

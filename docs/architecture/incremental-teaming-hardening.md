@@ -294,7 +294,10 @@ plus a structural warning instead of a crash); ONLY late/unassigned players are 
 PR-03 unit builder and placed by the unchanged scoring helpers; team creation is policy-gated
 (`preserve-or-expand` creates on demand, still respecting `maxTeams`); preserved over-cap teams are
 flagged (`capacityViolations`) and accept no additions by default; `minRosterSize` produces warnings
-(`minRosterWarnings` / `teamsBelowMinRoster`) — never collapses preserved teams.
+(`minRosterWarnings` / `teamsBelowMinRoster`) — never collapses preserved teams. The Teams page shows both
+under "Team sizes" in the review (Phase B4, `summarizeTeamSizeOutcome` in
+`packages/core/src/teamSizeOutcome.js`), counted from the run's rosters against the limits each
+team's stats record, so a fresh run, which carries no `capacityViolations`, is checked too.
 
 Incremental output adds `changeDiagnosticsByDivision` (subset of the §6 target — `mode`,
 `teamCountPolicy`, `existingTeamsPreserved`, `newTeamsCreated`, `latePlayersAssigned`,

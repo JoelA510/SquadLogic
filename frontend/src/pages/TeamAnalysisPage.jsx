@@ -15,6 +15,7 @@ import TeamPersistencePanel from '../components/TeamPersistencePanel.jsx';
 import DataValidationPanel from '../components/teaming/DataValidationPanel.jsx';
 import BuddyRequestsList from '../components/teaming/BuddyRequestsList.jsx';
 import PlacementReviewList from '../components/teaming/PlacementReviewList.jsx';
+import TeamSizeOutcomeList from '../components/teaming/TeamSizeOutcomeList.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
@@ -22,7 +23,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
-import { DEFAULT_ROSTER_LIMITS } from '@squadlogic/core/rosterSizing.js';
+import { DEFAULT_ROSTER_LIMITS, assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
 import { summarizeBuddyRequests } from '@squadlogic/core/buddyLinking.js';
 import { mapSchedulerRunToSummary } from '@squadlogic/core/utils/teamSummaryMapper.js';
@@ -32,6 +33,7 @@ import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { canonicalImportKey } from '../utils/importAllowlist.js';
 import { placementReviewAnnouncement, summarizePlacementReview } from '../utils/placementReview.js';
+import { summarizeTeamSizeReview, teamSizeAnnouncement } from '../utils/teamSizeReview.js';
 import { getPersistenceEndpoint, triggerTeamPersistence } from '../utils/teamPersistenceClient.js';
 import {
   buildExistingSnapshotForRerun,
@@ -100,35 +102,48 @@ function resolveDivisionId(row) {
   return String(explicitId || resolveDivisionName(row)).trim();
 }
 
-function createDefaultConfig(program) {
-  const estimatedTeams = Math.max(
-    1,
-    Math.ceil((program?.playerCount || 0) / DEFAULT_TARGET_TEAM_SIZE)
-  );
+/**
+ * A program's rules before anything is saved. The team count is Auto (no override): generation
+ * builds the count `resolveTeamCount` gives. It used to be pre-filled with `ceil(players / 12)`,
+ * which generation then saved, so every program soon carried an "override" nobody set (Phase B4).
+ * A saved override is kept (`configFromDivisionRow`), with the recommendation beside it.
+ */
+function createDefaultConfig() {
   return {
     targetTeamSize: DEFAULT_TARGET_TEAM_SIZE,
     minRosterSize: DEFAULT_MIN_ROSTER_SIZE,
     maxRosterSize: DEFAULT_MAX_ROSTER_SIZE,
     minTeams: null,
     maxTeams: null,
-    teamCountOverride: estimatedTeams,
+    teamCountOverride: null,
     seed: '',
   };
 }
 
+/**
+ * The programs of an import, with the players and the head coaches each holds. A coach is
+ * counted by the rule generation uses (`toGeneratorPlayer`'s `coachId`), once per distinct
+ * coach, as the generator counts them. It is the import's count, not the run's: coaches the
+ * `coach_team_requests` links add at generation are not known here, and a coach whose child is
+ * not eligible for the division anchors no team (Phase B2), as the registered players are
+ * counted here and the eligible ones by the generator.
+ */
 function derivePrograms(rows) {
   const grouped = new Map();
 
-  rows.forEach((row) => {
+  rows.forEach((row, sourceIndex) => {
     const id = resolveDivisionId(row);
     const name = String(resolveDivisionName(row)).trim() || id;
-    const current = grouped.get(id) || { id, name, playerCount: 0 };
+    const current = grouped.get(id) || { id, name, playerCount: 0, coachIds: new Set() };
     current.playerCount += 1;
+    const { coachId } = toGeneratorPlayer(row, sourceIndex, id);
+    if (coachId) current.coachIds.add(coachId);
     grouped.set(id, current);
   });
 
-  return Array.from(grouped.values()).map((program) => ({
+  return Array.from(grouped.values()).map(({ coachIds, ...program }) => ({
     ...program,
+    coachCount: coachIds.size,
     totalPlayers: program.playerCount,
   }));
 }
@@ -140,11 +155,13 @@ function positiveIntegerOrFallback(value, fallback) {
 
 function deriveProgramStats(program, config = {}) {
   const maxRosterSize = positiveIntegerOrFallback(config.maxRosterSize, DEFAULT_MAX_ROSTER_SIZE);
-  // The count generation will build (coaches unknown here), so the overview, the settings panel
-  // and the generator agree. Empty limits mean what they mean to the generator: no minimum, a
-  // target equal to the maximum.
+  // The count generation will build from the registered players and the head coaches the import
+  // names, by the generator's own rule, so the overview and the settings panel agree with it.
+  // Empty limits mean what they mean to the generator: no minimum, a target equal to the maximum
+  // (an empty maximum is refused; the overview shows no estimate then).
   const estimatedTeams = resolveTeamCount({
     playerCount: program.playerCount,
+    coachCount: program.coachCount ?? 0,
     maxRosterSize,
     targetTeamSize: positiveIntegerOrFallback(config.targetTeamSize, null),
     teamCountOverride: positiveIntegerOrFallback(config.teamCountOverride, null),
@@ -152,10 +169,23 @@ function deriveProgramStats(program, config = {}) {
     maxTeams: positiveIntegerOrFallback(config.maxTeams, null),
     minRosterSize: positiveIntegerOrFallback(config.minRosterSize, null),
   });
+  // The settings panel's advice, for the overview's recommended count and status: the same
+  // call the panel makes, with the config as the admin left it (an empty maximum is "blocked").
+  const assessment = assessTeamCount({
+    playerCount: program.playerCount,
+    coachCount: program.coachCount ?? 0,
+    teamCountOverride: config.teamCountOverride,
+    minRosterSize: config.minRosterSize,
+    maxRosterSize: config.maxRosterSize,
+    targetTeamSize: config.targetTeamSize,
+    minTeams: config.minTeams,
+    maxTeams: config.maxTeams,
+  });
 
   return {
     ...program,
     estimatedTeams,
+    assessment,
     avgRosterSize: Number((program.playerCount / estimatedTeams).toFixed(1)),
     capacity: estimatedTeams * maxRosterSize,
   };
@@ -194,8 +224,8 @@ function findDivisionRowForProgram(program, divisionRows) {
   );
 }
 
-function configFromDivisionRow(program, divisionRow) {
-  const defaults = createDefaultConfig(program);
+function configFromDivisionRow(divisionRow) {
+  const defaults = createDefaultConfig();
   if (!divisionRow) return defaults;
 
   return {
@@ -554,7 +584,7 @@ export default function TeamAnalysisPage() {
   const programs = useMemo(
     () =>
       basePrograms.map((program) =>
-        deriveProgramStats(program, configs[program.id] || createDefaultConfig(program))
+        deriveProgramStats(program, configs[program.id] || createDefaultConfig())
       ),
     [basePrograms, configs]
   );
@@ -615,7 +645,7 @@ export default function TeamAnalysisPage() {
       basePrograms.forEach((program) => {
         if (next[program.id]) return;
         const divisionRow = findDivisionRowForProgram(program, divisionRows);
-        next[program.id] = configFromDivisionRow(program, divisionRow);
+        next[program.id] = configFromDivisionRow(divisionRow);
         changed = true;
       });
 
@@ -763,7 +793,7 @@ export default function TeamAnalysisPage() {
         });
         setConfigs((prev) => ({
           ...prev,
-          [program.id]: configFromDivisionRow(program, savedDivision),
+          [program.id]: configFromDivisionRow(savedDivision),
         }));
         if (!silent) setConfigSaveMessage('Rules saved.');
         return savedDivision;
@@ -923,7 +953,7 @@ export default function TeamAnalysisPage() {
       }
 
       const selectedProgramKey = String(selectedProgram.id);
-      const config = configs[selectedProgramKey] || createDefaultConfig(selectedProgram);
+      const config = configs[selectedProgramKey] || createDefaultConfig();
       const savedDivision = await saveDivisionConfig(selectedProgram, config, { silent: true });
       const rowsForProgram = importedPlayerRows
         .map((row, sourceIndex) => ({ row, sourceIndex }))
@@ -1113,7 +1143,12 @@ export default function TeamAnalysisPage() {
         programName: selectedProgram.name,
       });
       setPlacementAnnouncement(
-        placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results))
+        [
+          teamSizeAnnouncement(summarizeTeamSizeReview(snapshot.runMetadata.results)),
+          placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results)),
+        ]
+          .filter(Boolean)
+          .join(' ')
       );
       setManualTeams(null);
       const coachNote = coverage
@@ -1576,7 +1611,7 @@ export default function TeamAnalysisPage() {
                   selectedProgram &&
                   saveDivisionConfig(
                     selectedProgram,
-                    configs[selectedProgram.id] || createDefaultConfig(selectedProgram)
+                    configs[selectedProgram.id] || createDefaultConfig()
                   ).catch((err) => {
                     console.error('Division rule save failed:', err);
                   })
@@ -1637,6 +1672,7 @@ export default function TeamAnalysisPage() {
             divisions={activeTeamData.divisions}
             generatedAt={activeTeamData.generatedAt}
           />
+          <TeamSizeOutcomeList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <TeamPersistencePanel
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}

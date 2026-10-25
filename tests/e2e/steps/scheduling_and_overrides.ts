@@ -132,52 +132,75 @@ const isoFromToday = (days: number) =>
  */
 const teamIdOf = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
 
+/**
+ * An import of placeholder players, each group in its program, read by the Teams page as the
+ * newest import. One write through the sanctioned `__saveMockDB__`, whichever step calls it.
+ */
+async function importPlayers(page: Page, groups: Array<{ count: number; program: string }>) {
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ groups, adminId, createdAt, mockOrgId }) => {
+      const db = window.__MOCK_DB__ as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      // The page offers Generate Teams only while no team run is in hand,
+      // so the seeded one is retired (in place: the mock re-merges its seed
+      // rows by id).
+      for (const run of db.scheduler_runs ?? []) {
+        if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+      }
+      let next = 0;
+      const rows = groups.flatMap(({ count, program }) =>
+        Array.from({ length: count }, () => {
+          const index = next++;
+          return {
+            id: `pillar1-player-${index + 1}`,
+            'First Name': 'Player',
+            'Last Name': String(index + 1),
+            Birthdate: '2015-03-01',
+            Gender: 'm',
+            division: program,
+            'Skill Rating': (index % 5) + 1,
+          };
+        })
+      );
+      db.imports = [
+        ...(db.imports ?? []),
+        {
+          id: 'import-pillar1',
+          user_id: adminId,
+          organization_id: orgId,
+          import_type: 'players',
+          // Newer than the seed's import, so it is the one the page reads.
+          created_at: createdAt,
+          data: { totalRows: rows.length, validRows: rows.length, data: rows },
+        },
+      ];
+      window.__saveMockDB__(db);
+    },
+    {
+      groups,
+      adminId: MOCK_ADMIN_ID,
+      createdAt: new Date(Date.now() + 60_000).toISOString(),
+      mockOrgId: MOCK_ORG_ID,
+    }
+  );
+}
+
 Given(
   '{int} players are imported into the {string} program',
   async ({ page }, count: number, program: string) => {
-    await waitForMockClient(page);
-    await page.evaluate(
-      ({ count, program, adminId, createdAt, mockOrgId }) => {
-        const db = window.__MOCK_DB__ as MockDb | undefined;
-        if (!db) throw new Error('mock store not initialised');
-        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-        // The page offers Generate Teams only while no team run is in hand,
-        // so the seeded one is retired (in place: the mock re-merges its seed
-        // rows by id).
-        for (const run of db.scheduler_runs ?? []) {
-          if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
-        }
-        const rows = Array.from({ length: count }, (_, index) => ({
-          id: `pillar1-player-${index + 1}`,
-          'First Name': 'Player',
-          'Last Name': String(index + 1),
-          Birthdate: '2015-03-01',
-          Gender: 'm',
-          division: program,
-          'Skill Rating': (index % 5) + 1,
-        }));
-        db.imports = [
-          ...(db.imports ?? []),
-          {
-            id: 'import-pillar1',
-            user_id: adminId,
-            organization_id: orgId,
-            import_type: 'players',
-            // Newer than the seed's import, so it is the one the page reads.
-            created_at: createdAt,
-            data: { totalRows: count, validRows: count, data: rows },
-          },
-        ];
-        window.__saveMockDB__(db);
-      },
-      {
-        count,
-        program,
-        adminId: MOCK_ADMIN_ID,
-        createdAt: new Date(Date.now() + 60_000).toISOString(),
-        mockOrgId: MOCK_ORG_ID,
-      }
-    );
+    await importPlayers(page, [{ count, program }]);
+  }
+);
+
+Given(
+  '{int} players are imported into the {string} program and {int} into the {string} program',
+  async ({ page }, count: number, program: string, otherCount: number, other: string) => {
+    await importPlayers(page, [
+      { count, program },
+      { count: otherCount, program: other },
+    ]);
   }
 );
 
@@ -218,6 +241,69 @@ Then(
     // Enumerated from the list the page renders, not from the total above.
     const listed = page.locator('section[aria-label="Generated Teams"] .font-semibold');
     await expect(listed).toHaveCount(teams);
+  }
+);
+
+/** The program overview's row for a program, found by the button that chooses it (Phase B4). */
+const programRow = (page: Page, program: string) =>
+  page
+    .getByRole('table', { name: 'Program Overview' })
+    .getByRole('row')
+    .filter({ has: page.getByRole('button', { name: program, exact: true }) });
+
+/** A cell of that row, by its column header's position. */
+async function programCell(page: Page, program: string, header: string) {
+  const headers = await page
+    .getByRole('table', { name: 'Program Overview' })
+    .getByRole('columnheader')
+    .allTextContents();
+  const index = headers.findIndex((text) => text.trim() === header);
+  expect(index, `the overview has a "${header}" column`).toBeGreaterThanOrEqual(0);
+  return programRow(page, program).getByRole('cell').nth(index);
+}
+
+Then(
+  'the program overview recommends the fewest teams that hold {int} players at {int} each for {string}',
+  async ({ page }, players: number, perTeam: number, program: string) => {
+    // The expectation is the step's arithmetic, never the page's output.
+    const expected = Math.ceil(players / perTeam);
+    await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
+    await expect(await programCell(page, program, 'Players')).toHaveText(String(players));
+  }
+);
+
+Then(
+  "the program overview's status for {string} is {string}",
+  async ({ page }, program: string, status: string) => {
+    await expect(await programCell(page, program, 'Status')).toHaveText(status);
+    await expect(page.getByRole('table', { name: 'Program Overview' })).not.toContainText('Ready');
+  }
+);
+
+Then(
+  '{string} is chosen in the program overview with the Enter key',
+  async ({ page }, program: string) => {
+    const choose = page
+      .getByRole('table', { name: 'Program Overview' })
+      .getByRole('button', { name: program, exact: true });
+    // Another program is the one being configured first, so the key press is what changes it.
+    await expect(choose).not.toHaveAttribute('aria-current', 'true');
+    await expect(page.getByRole('heading', { name: `${program} Settings` })).toHaveCount(0);
+    await choose.focus();
+    await expect(choose).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(choose).toHaveAttribute('aria-current', 'true');
+    await expect(page.getByRole('heading', { name: `${program} Settings` })).toBeVisible();
+  }
+);
+
+Then(
+  'the review says every team of {string} is within the roster limits',
+  async ({ page }, program: string) => {
+    const sizes = page.getByRole('region', { name: 'Team sizes' });
+    await expect(sizes).toContainText(`${program}: `);
+    await expect(sizes).toContainText('Every team is within the roster limits');
+    await expect(sizes.getByRole('list')).toHaveCount(0);
   }
 );
 

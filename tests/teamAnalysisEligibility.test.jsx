@@ -9,8 +9,8 @@
  * hooks, Supabase and heavy children are stand-ins, as in `teamAnalysisBuddies.test.jsx`. The
  * import rows carry the canonical keys `import-validation` stages (`date_of_birth`,
  * `external_registration_id`, `age_group`). The natural age comes from the birthdate the import
- * row holds, or from the stored natural age on the durable player (R5,
- * docs/changes/2026-10-22-admin-focus.md), which is read first.
+ * row holds or, for a row with none, from the stored natural age on the durable player (R5,
+ * docs/changes/2026-10-22-admin-focus.md).
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -341,15 +341,16 @@ describe('TeamAnalysisPage :: eligibility from stored players only (R5)', () => 
     expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
   });
 
-  it("reads the stored natural age before a session row's birth date", async () => {
-    // Every row is in band by its birth date but REG-1, whose stored age is 13 here anyway.
+  it("reads a session row's birth date before the stored natural age (the page's season)", async () => {
+    // Every row is in band by its birth date; REG-1's stored age (13) is not read while the
+    // session's row carries the date, and REG-2 (no stored age) is in band by its date too.
     seedStoredOnly({ keepBirthDates: true });
     state.rows = state.rows.map((r) => ({ ...r, date_of_birth: IN_BAND }));
     await generate();
-    const entry = stagedResults().overflowByDivision.U10.find(
-      (e) => e.players[0].id === durableIdOf(1)
-    );
-    expect(entry?.metadata).toMatchObject({ placement: 'play_down_blocked', naturalAge: 13 });
+    const results = stagedResults();
+    expect(overflowIds(results)).not.toContain(durableIdOf(1));
+    const placed = results.teamsByDivision.U10.flatMap((team) => team.players);
+    expect(placed.filter((player) => player.placement === 'in_band')).toHaveLength(12);
   });
 });
 

@@ -22,6 +22,13 @@
 -- counts them. The forward migration's NOTICE counted what it dropped
 -- (production: 0 players, read 2026-10-25).
 --
+-- **Revert import-validation with it.** The import-validation Edge Function
+-- deployed with 20261026010000 stages no birth date, and the finalizer this
+-- restores promotes only a row with one: with this revert alone, every later
+-- player import would promote 0 players. Redeploy import-validation (and its
+-- `_shared/` modules) from 20261025010000's commit in the same change, as the
+-- WARNING below says.
+--
 -- Verified: the harness compares a fingerprint of every restored object
 -- (signature, posture, grants, comment and body md5 of the five functions;
 -- the restored columns of `players`; the absence of `natural_age`) with the
@@ -36,6 +43,7 @@ BEGIN
     SELECT count(*) INTO v_players FROM public.players WHERE natural_age IS NOT NULL;
     RAISE NOTICE 'dropping the stored natural age of % player(s); the birth date columns come back empty',
         v_players;
+    RAISE WARNING 'revert the import-validation Edge Function with this: the code deployed with 20261026010000 stages no birth date, and with these bodies back finalize_import_job promotes only a row with one, so every player import would promote nothing';
 END;
 $$;
 

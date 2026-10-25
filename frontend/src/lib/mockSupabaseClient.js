@@ -19,7 +19,7 @@ import {
   withDeclaredColumns,
   withoutBirthKeys,
 } from '../utils/importAllowlist.js';
-import { importNaturalAge } from '@squadlogic/core/ageGroups.js';
+import { NATURAL_AGE_MAX, NATURAL_AGE_MIN, importNaturalAge } from '@squadlogic/core/ageGroups.js';
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
@@ -4970,7 +4970,10 @@ export const mockSupabase = {
       const truthy = (value) =>
         ['true', 't', 'yes', 'y', '1'].includes(String(value ?? '').toLowerCase());
       const naturalAgeText = (text) =>
-        text !== null && /^[0-9]{1,2}$/.test(text) && Number(text) >= 1 && Number(text) <= 25
+        text !== null &&
+        /^[0-9]{1,2}$/.test(text) &&
+        Number(text) >= NATURAL_AGE_MIN &&
+        Number(text) <= NATURAL_AGE_MAX
           ? Number(text)
           : null;
       const storedNaturalAge = (payload) =>

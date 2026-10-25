@@ -133,27 +133,35 @@ describe('no birth key is staged, browser and Edge copies', () => {
       DOB: '2016-01-01',
       Birthdate: '2016-01-01',
       birth_year: '2016',
+      // Declared fields an organization might name like a birth date: stripped too.
+      'Birth Date': '2016-01-01',
+      'Player DOB': '2016-01-01',
       'Age Group': '10',
       natural_age: '10',
+      // Not birth-like: kept (a word containing "dob" is not a dob key).
+      'Adobe ID': 'x',
     };
     for (const copy of [browserAllowlist, edgeAllowlist]) {
       expect(copy.withoutBirthKeys('players', raw, normalize)).toEqual({
         'First Name': 'First1',
         'Age Group': '10',
         natural_age: '10',
+        'Adobe ID': 'x',
       });
       expect(copy.withoutBirthKeys('coaches', raw, normalize)).toBe(raw);
     }
     expect([...edgeAllowlist.PLAYER_BIRTH_KEYS]).toEqual([...browserAllowlist.PLAYER_BIRTH_KEYS]);
   });
 
-  it('keep the birth keys in transit for players only, so import-validation can read them', () => {
+  it('keep the birth date in transit for players only, so import-validation can read it', () => {
     for (const copy of [browserAllowlist, edgeAllowlist]) {
-      for (const key of ['date_of_birth', 'dob', 'birth_year']) {
+      for (const key of ['date_of_birth', 'dob']) {
         expect(copy.isAllowedImportKey('players', key)).toBe(true);
         expect(copy.isAllowedImportKey('coaches', key)).toBe(false);
         expect(copy.PLAYER_IMPORT_KEYS).not.toContain(key);
       }
+      // A birth year alone is read by nothing, so it is dropped like any unlisted column.
+      expect(copy.isAllowedImportKey('players', 'birth_year')).toBe(false);
       expect(copy.PLAYER_IMPORT_KEYS).toContain('natural_age');
     }
   });

@@ -313,7 +313,7 @@ function buddyFieldsOf(row) {
 // What a durable player row holds of a person's identity, buddy request and natural age. The
 // Player Record page edits names and the request on `players`, so these win over the import
 // rows, which keep what the file said. The stored natural age (admin-focus plan R5) is what
-// eligibility reads when the rows carry no birth date: no birth date is stored.
+// eligibility reads when a row carries no birth date: no birth date is stored.
 const DURABLE_PLAYER_FIELDS =
   'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age';
 const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
@@ -429,10 +429,11 @@ function toGeneratorPlayer(row, sourceIndex, division, { buddyRequests = false }
     parseBooleanLike(row.willing_to_coach) ||
     parseBooleanLike(row.coach_volunteer) ||
     parseBooleanLike(row['Willing to Coach']);
-  // Carry the natural age, the DOB and play-up signals so the play-up/play-down classifier has
-  // an age to work with (without these every player resolves to "unknown"). The natural age is
-  // the stored player's, or the one import-validation returned with the row; the classifier
-  // reads it before the DOB (`resolveNaturalAge`), which only the import session's rows carry.
+  // Carry the DOB, else the natural age, and play-up signals so the play-up/play-down classifier
+  // has an age to work with (without these every player resolves to "unknown"). The DOB is the
+  // file's, which only the import session's rows carry: it is counted in the page's season, as
+  // before R5. A row without one carries the stored player's natural age (or the one
+  // import-validation returned), counted in the season of its import; no birth date is stored.
   const naturalAge = Number(firstNonEmpty(row, ['natural_age', 'naturalAge']));
   const dateOfBirth = firstNonEmpty(row, ['date_of_birth', 'DOB', 'Birthdate', 'dob', 'birthdate']);
   const playUpRequested = parseBooleanLike(row.play_up_requested);
@@ -443,8 +444,11 @@ function toGeneratorPlayer(row, sourceIndex, division, { buddyRequests = false }
     firstName,
     lastName,
     name: `${firstName} ${lastName}`.trim() || 'Unnamed Player',
-    ...(Number.isInteger(naturalAge) && naturalAge > 0 ? { naturalAge } : {}),
-    ...(dateOfBirth ? { date_of_birth: dateOfBirth } : {}),
+    ...(dateOfBirth
+      ? { date_of_birth: dateOfBirth }
+      : Number.isInteger(naturalAge) && naturalAge > 0
+        ? { naturalAge }
+        : {}),
     ...(playUpRequested ? { play_up_requested: true } : {}),
     ...(skillRating !== undefined ? { skillRating } : {}),
     ...(coachId || willingToCoach ? { coachId: String(coachId || `coach-${id}`) } : {}),

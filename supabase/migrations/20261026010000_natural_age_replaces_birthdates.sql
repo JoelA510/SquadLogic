@@ -41,9 +41,11 @@
 --          (placed and flagged by teaming, Phase B2). Matching across imports
 --          is unchanged (the external registration id). SECURITY DEFINER,
 --          search_path=public, timezone=UTC.
---   5. Every staged player and import row loses the birth keys the import
---      reads (`date_of_birth`, `dob`, `birth_year`, and the headers that
---      alias to them), from both payloads.
+--   5. Every staged player and import row loses the birth keys
+--      (`date_of_birth`, `dob`, `birth_year`, and the headers that alias to
+--      them), from both payloads. A job staged before this migration and
+--      finalized after it imports its players with the age group the export
+--      states, or none (production: 0 staged rows, 0 unfinished jobs).
 --   6. `players.date_of_birth` and `players.birth_year` dropped.
 --   7. An end-state check: no `public` function body (comments and string
 --      literals stripped, so the purge's list of audit keys to redact is not a

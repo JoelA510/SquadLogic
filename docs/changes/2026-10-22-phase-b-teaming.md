@@ -1,8 +1,8 @@
 # Phase B: teaming
 
 Status: **approved by the owner 2026-10-22, with every recommendation** (AGENTS.md rule 14: B2
-and B6 change the generator, B1 the domain model of buddy requests). B1 to B5 are built (see
-"As built (B1)" to "As built (B5)"). B6 records the owner's team priorities of
+and B6 change the generator, B1 the domain model of buddy requests). B1 to B6 are built (see
+"As built (B1)" to "As built (B6)"). B6 records the owner's team priorities of
 2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
 teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
 migration: everything new is computed, and the run's `results` JSON is stored opaque
@@ -616,6 +616,106 @@ engine conventions), and the demo league is teamed end to end.
   Before B5 a pair across the two was kept together; now it is not, as Team Analysis (one program
   at a time) and the import's `materialize_import_buddy_pairs` (same division) never pair it.
   Should a co-ed board pair across its folded divisions?
+
+## As built (B6)
+
+- **A lead is not a coach.** `toGeneratorPlayer` no longer makes a synthetic `coach-<id>` from a
+  willing-to-coach answer; it emits `isCoachingLead: true` (only with Coaching Interest on, as B1
+  emits buddy fields only with Buddy Requests on) and `years_played`, and the admin's `rating`
+  when the record holds one. A coach the import row names (`coach_email`, `coach_id`) still
+  anchors as before: `PLAYER_IMPORT_KEYS` keeps no such column, so in production only
+  `coach_team_requests` links do, and the mock and tests keep their coach-email rows. B4's coach
+  count follows: a lead adds no team to the advice (`teamingConfigurationAdvice.test.jsx`).
+- **The lead comes from the record.** The durable read (`DURABLE_PLAYER_FIELDS`, beside R5's
+  `natural_age`) now selects `willing_to_coach`, `years_played` and `rating`, and
+  `withDurableIdentity` puts them over the import row, as it does names: the stored flag is what
+  `finalize_import_job` read, whose vocabulary ("Maybe", "Head Coach", "Volunteer" and the
+  rest, `COACHING_LEAD_ANSWERS`) the row fallback now shares. Before, the page read only
+  yes/true/1 from the row, so "Maybe" (166 of the demo league's 1,259 rows) was a volunteer in
+  the database and not on the Teams page.
+- **One rule, `packages/core/src/coachingLeads.js`,** with `divisionLeadCompensation` and
+  `carriesSignal` beside `playerSignal` in `balanceSignals.js`; the generator and TeamBuilder's
+  `serpentineAssign` call the same functions. After coaches' children (priority 1, unchanged),
+  units holding a lead are dealt first, the most leads first, each to a team with the fewest
+  leads among those with room (`withFewestLeads`); every other unit goes to the lowest
+  `signal total + c × leads`, then the smallest roster, then the seeded draw. A best-effort
+  buddy (`BuddyEvaluator`) narrows the teams first, so `one_way_best_effort` is still honoured.
+  A board has no coach anchors (B5), so TeamBuilder applies priorities 2 and 3.
+- **`c` per player, not per unit.** The plan says "the division's mean unit signal (one lead
+  counts as one average player)"; `c` is the mean **player** signal times
+  `LEAD_COMPENSATION_FACTOR`, so a buddy pair does not count as one "average player".
+- **When there is nothing to compensate with, the evaluators decide.** With the league's signal
+  roster size only, or no player of the division carrying a value for it (Years Played on, but no
+  years in the file), `c` is 0: leads are still spread, and the rest is placed by the evaluators
+  (`WeightedAttributeEvaluator` and the custom weights), as in a division without leads (review
+  finding: otherwise one ticked box replaced skill balancing with a deal at weight one). With a
+  signal, the compensated deal replaces the evaluators' skill score for that division, as the
+  plan says; the evaluators still run for every division with no lead.
+- **Unchanged without leads.** With the setting off, or no lead in the division, the generator's
+  path is the pre-B6 one: B2's golden (byte for byte), the characterization, seed, rerun and
+  incremental suites pass unchanged, and a test holds a division with leads and the setting off
+  equal to the same division with the flag stripped.
+- **Reruns.** Late players are placed by the same rule, the leads counted over the preserved
+  rosters and the eligible late players, each once; nobody preserved moves and team UUIDs are
+  kept. Rosters persisted before B6 carry no coach for a lead (`coach_id` is kept only when it is
+  a UUID, `teamReviewPersistence.js:172`), so a rerun sees no dropped coach.
+- **The setting** is `teaming_spread_coaching_leads` (`FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS`,
+  default on, in the catalog as "Spread Coaching Leads"), a boolean, so `FeatureFlagSchema`
+  needs no branch and refuses a non-boolean; it is audited through `update_org_feature_flags`
+  and the page's `settings.flags_updated` row. **No migration:** the RPC stores the JSONB as
+  given and no SQL reads the key (`org_flag` reads booleans by name for the server-side reads,
+  and nothing calls it with this key). TeamBuilder spreads leads when this and Coaching Interest
+  are both on, since a lead is read from that column; its two toggles ("Keep buddies together",
+  "Spread coach parents") give way to a read-only line of the league's settings, and its
+  `teams.auto_balanced` audit row records them.
+- **The Lead mark:** a "lead" badge on the player's card in the Teams page's roster editor (read
+  from the run's rosters, `isCoachingLead`) and a "Lead" mark, in text, on the Team Builder chip
+  (it was an icon with a title only). Nothing about a lead's parent is stored or shown.
+- **Tuning `c`** (_executed_, a scratch script, not committed: the demo league's 21 divisions
+  through `prepareTeamingInput` and `generateTeams` with the page's field mapping, one head coach
+  per export team linked to their child, the README's team counts and roster sizes, ten seeds
+  each, Years Played on). Factor 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2. With rosters exactly full,
+  the spread of "mean years per player, a lead counted as one average player" across a
+  division's teams was 0.204, 0.188, 0.158, 0.130, **0.129**, 0.152, 0.189 and 0.259; with three
+  spare places per roster, 0.461 (factor 0), 0.424, 0.363, **0.299**, 0.299. So **1**, the
+  plan's own reading ("one lead counts as one average player"), is kept. At 1, leads never
+  differ by more than one in any division (the setting off: up to nine), every player is placed,
+  rosters differ by at most one when full (two with spare places), and in 1,390 of 1,400 team
+  pairs with different lead counts the team with fewer leads has the higher mean experience.
+- **The demo league teamed end to end** (_executed_): every division as above, every player
+  placed; and its U10 boys through the Teams page itself (`tests/teamAnalysisCoachingLeads.test.jsx`):
+  88 players, 8 teams, no coach from a lead, leads within one (on `main`: 13 teams, one per
+  "Yes").
+- **Tests** (each fails on `main` or on a planted defect, _executed_): `tests/coachingLeads.test.js`
+  (a lead anchors no team; 2/1/1; 2/2/2 by count, not load; units holding leads placed first; a
+  coach's child who is a lead; mutual leads together; compensation, which fails with the factor
+  0; the setting off; no signal carried; the buddy rule under leads; a late lead on a rerun; the
+  same for the board); `tests/teamAnalysisCoachingLeads.test.jsx` and
+  `tests/teamBuilderCoachingLeads.test.jsx` (the pages from stored flags: default and stored
+  off; Coaching Interest off; the record winning over the file; a blank rating); the Lead mark
+  (`tests/RosterManagerLeadMark.test.jsx`) and the setting (`tests/FeatureFlagSettings.test.jsx`).
+  Planted: the factor 0; no fewest-leads filter (generator and board); no buddy steering; the
+  setting ignored (generator and board); lead units not dealt first; compensating with no
+  signal; `willing_to_coach` not read; a rating of 0 carried; the page emitting leads with
+  Coaching Interest off, passing no flags, ignoring the stored lead, or reading a blank rating as
+  0; the board's audit row without the settings. Each failed at least one test.
+- **Review rounds (`/code-review`, fixed here):** compensation at weight one when nobody carries
+  the signal; a rerun counting late coach and buddy players twice for `c`; a blank rating read as
+  0; TeamBuilder's audit row without the settings; the setting's description silent on Coaching
+  Interest; stale comments calling a lead a coach. Re-review of that round: `c`'s rule copied in
+  two places (now `divisionLeadCompensation`); `carriesSignal` and `playerSignal` disagreeing on a
+  0 or blank rating (now `ratingOf` for both); the docs silent on the fallback; the audit row
+  unable to tell the setting off from Coaching Interest off. Not changed: compensation turns on
+  when **some** player carries the signal, so a file with years for a few players weighs the rest
+  as rookies, as TeamBuilder always has (a GotSport column is filled for every row or absent);
+  the per-candidate rescans of each roster (a division of 120 players and 8 teams is the largest
+  in the demo league; the whole league tunes in seconds); a second placement path beside the
+  evaluator registry rather than a lead evaluator (a hard "fewest leads" filter is not a score).
+  The rerun double count has no test of its own (_statically reviewed_).
+- **Open owner questions:** should a coach the import row itself names still anchor (only the
+  mock and tests carry such rows); should compensation also weigh the custom attribute weights
+  the evaluators use; should Spread Coaching Leads be hidden or disabled while Coaching Interest
+  is off (today its description says it needs it).
 
 ## Not in Phase B
 

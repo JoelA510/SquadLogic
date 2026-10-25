@@ -32,6 +32,12 @@ How to add, gate, and retire an organization-level feature flag safely.
 4. Wrap the UI in `<FeatureGuard flag={FEATURE_FLAGS.MY_FLAG} fallback={…}>`.
 5. Test both states through the real component path (the schema parse, then the guard), not a
    hand-built context the app can't produce (AGENTS.md §3).
+6. A setting the domain logic reads (a flag `generateTeams` or `serpentineAssign` is handed, as
+   the pages pass `useFeatures().features`) keeps its key in `packages/core` too, beside the
+   rule that reads it (`BUDDY_RULES` in `buddyLinking.js`, `SPREAD_COACHING_LEADS_FLAG` in
+   `coachingLeads.js`), with a test holding the two equal and a page test from a stored value
+   for each state. Settings the domain reads today: `buddy_rule`, `teaming_spread_coaching_leads`,
+   `years_played` and `player_rating` (the balance signal).
 
 ## Practices
 

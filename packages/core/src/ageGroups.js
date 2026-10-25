@@ -87,6 +87,43 @@ export function computeAgeNumber(dob, seasonYear, cutoffMode) {
   return month >= SCHOOL_YEAR_START_MONTH ? seasonYear - birthYear - 1 : seasonYear - birthYear;
 }
 
+/** The natural ages an import stores (`players.natural_age`, CHECK 1-25). */
+export const NATURAL_AGE_MIN = 1;
+export const NATURAL_AGE_MAX = 25;
+
+function storableNaturalAge(value) {
+  return Number.isInteger(value) && value >= NATURAL_AGE_MIN && value <= NATURAL_AGE_MAX
+    ? value
+    : null;
+}
+
+/**
+ * The natural age an import stores for a player (admin-focus plan R5): the one computed from the
+ * file's birth date with the season's cutoff, else the age group the export states. A birth date
+ * is never stored; this is what replaces it. The birth date comes first because it is what
+ * teaming read before R5, so no player's placement changes; an export's age group is read
+ * differently in different places (the glossary's natural age; `U(N+1)` in the division
+ * derivation), so it is used only when no birth date gives an age. An age group is read only as
+ * one or two digits (`9`, `09`), as `finalize_import_job` reads it; a value outside 1-25 is not a
+ * natural age. With neither, null: teaming places the player and flags them (Phase B2).
+ *
+ * Twin of `supabase/functions/_shared/natural-age.ts` (import-validation, which computes it before
+ * it stages a row); `tests/naturalAgeParity.test.js` holds the two equal.
+ *
+ * @param {{ ageGroup?: unknown, dob?: unknown, seasonYear?: number|null, cutoffMode?: string|null }} params
+ * @returns {number|null}
+ */
+export function importNaturalAge({ ageGroup, dob, seasonYear, cutoffMode } = {}) {
+  if (Number.isFinite(seasonYear)) {
+    const computed = storableNaturalAge(
+      computeAgeNumber(/** @type {any} */ (dob), Number(seasonYear), cutoffMode)
+    );
+    if (computed !== null) return computed;
+  }
+  const text = ageGroup === null || ageGroup === undefined ? '' : String(ageGroup).trim();
+  return /^[0-9]{1,2}$/.test(text) ? storableNaturalAge(Number(text)) : null;
+}
+
 /**
  * Birthdate window (inclusive) for a single U-number under a cutoff mode.
  *

@@ -17,7 +17,9 @@ import {
   importPayloadText,
   keptPlayerAttributes,
   withDeclaredColumns,
+  withoutBirthKeys,
 } from '../utils/importAllowlist.js';
+import { NATURAL_AGE_MAX, NATURAL_AGE_MIN, importNaturalAge } from '@squadlogic/core/ageGroups.js';
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
@@ -39,7 +41,7 @@ const mockId = (prefix = '') =>
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCHEMA_ENTITIES = new Set(['player', 'coach', 'team']);
 
-// The keys `sanitize_player_patch` accepts (20261022020000). admin_update_player,
+// The keys `sanitize_player_patch` accepts (20261026010000: no birth date). admin_update_player,
 // admin_bulk_update_players and admin_create_player all pass through it, so all
 // three arms refuse any other key, as the SQL does with 22023.
 const PLAYER_PATCH_FIELDS = new Set([
@@ -57,7 +59,6 @@ const PLAYER_PATCH_FIELDS = new Set([
   'willing_to_coach',
   'division_id',
   'team_id',
-  'date_of_birth',
 ]);
 /** The first key `sanitize_player_patch` would refuse, or undefined. */
 const rejectedPlayerPatchField = (patch) =>
@@ -4968,6 +4969,16 @@ export const mockSupabase = {
 
       const truthy = (value) =>
         ['true', 't', 'yes', 'y', '1'].includes(String(value ?? '').toLowerCase());
+      const naturalAgeText = (text) =>
+        text !== null &&
+        /^[0-9]{1,2}$/.test(text) &&
+        Number(text) >= NATURAL_AGE_MIN &&
+        Number(text) <= NATURAL_AGE_MAX
+          ? Number(text)
+          : null;
+      const storedNaturalAge = (payload) =>
+        naturalAgeText(importPayloadText(payload, ['natural_age'])) ??
+        naturalAgeText(importPayloadText(payload, ['age group', 'age_group', 'age']));
 
       stagedRows.forEach((row) => {
         const payload = row.normalized_payload || {};
@@ -5057,12 +5068,11 @@ export const mockSupabase = {
           last_name: payload.last_name,
           preferred_name: payload.preferred_name || payload.nickname || null,
           external_registration_id: externalId,
-          date_of_birth: payload.date_of_birth,
+          // As the SQL (20261026010000): the natural age import-validation computed, else the age
+          // group the export states; no birth date is stored.
+          natural_age: storedNaturalAge(payload),
           grade: payload.grade || null,
           gender: payload.gender || null,
-          birth_year: payload.date_of_birth
-            ? Number.parseInt(String(payload.date_of_birth).slice(0, 4), 10)
-            : null,
           skill_tier: ['novice', 'developing', 'advanced'].includes(
             String(payload.skill_tier || '').toLowerCase()
           )
@@ -7288,6 +7298,13 @@ export const mockSupabase = {
             item.entity_type === ALLOWLIST_ENTITY_TYPES[body.import_type]
         );
         const declaredFields = Object.keys(schemaRow?.schema_definition || {});
+        // As the Edge Function does (R5): a player's natural age is counted in the season the
+        // finalizer attaches divisions to (the mock's active one), and no birth key is staged.
+        const importSeasonRow = (getDB().season_settings || []).find(
+          (item) =>
+            String(item.organization_id) === String(body.organization_id) &&
+            item.status === 'active'
+        );
         filterImportRows(
           body.import_type,
           canonicalizeForUpload(body.import_type, body.rows || []),
@@ -7296,7 +7313,7 @@ export const mockSupabase = {
           const normalized = normalizeImportRow(rawRow, normalizeHeader, sanitize);
           // As the Edge Function does: a declared field whose header is also
           // a global alias is carried under its own identity too.
-          const row = withDeclaredColumns(
+          let row = withDeclaredColumns(
             body.import_type,
             body.import_type === 'coaches' ? composeFullName(normalized, sanitize) : normalized,
             rawRow,
@@ -7304,6 +7321,20 @@ export const mockSupabase = {
             declaredFields,
             sanitize
           );
+          if (body.import_type === 'players') {
+            // Never read from the file, as the Edge Function does.
+            const rest = { ...row };
+            delete rest.natural_age;
+            const naturalAge = importNaturalAge({
+              ageGroup: ['age group', 'age_group', 'age']
+                .map((key) => rest[key])
+                .find((value) => value != null && String(value).trim() !== ''),
+              dob: rest.date_of_birth,
+              seasonYear: importSeasonRow?.season_year ?? null,
+              cutoffMode: importSeasonRow?.age_cutoff_mode ?? null,
+            });
+            row = naturalAge === null ? rest : { ...rest, natural_age: String(naturalAge) };
+          }
 
           required.forEach((field) => {
             if (!row[field]) {
@@ -7335,8 +7366,8 @@ export const mockSupabase = {
                 organization_id: body.organization_id,
                 import_job_id: body.import_job_id,
                 source_row_number: (body.row_offset || 0) + index + 1,
-                raw_payload: rawRow,
-                normalized_payload: row,
+                raw_payload: withoutBirthKeys('players', rawRow, normalizeHeader),
+                normalized_payload: withoutBirthKeys('players', row, normalizeHeader),
                 validation_errors: [],
                 created_at: new Date().toISOString(),
               });

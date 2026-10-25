@@ -311,11 +311,12 @@ function buddyFieldsOf(row) {
   };
 }
 
-// What a durable player row holds of a person's identity and buddy request. The Player
-// Record page edits names and the request on `players`, so these win over the import rows,
-// which keep what the file said.
+// What a durable player row holds of a person's identity, buddy request and natural age. The
+// Player Record page edits names and the request on `players`, so these win over the import
+// rows, which keep what the file said. The stored natural age (admin-focus plan R5) is what
+// eligibility reads when a row carries no birth date: no birth date is stored.
 const DURABLE_PLAYER_FIELDS =
-  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, willing_to_coach, years_played, rating';
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, rating';
 const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
 // The headers a coaching answer and years played are read from (`toGeneratorPlayer`), as
 // `canonicalImportKey` stages them and as older mock rows spell them.
@@ -358,6 +359,7 @@ function withDurableIdentity(row, durable) {
   if (durable.preferred_name) next.preferred_name = durable.preferred_name;
   if (durable.buddy_request) next.buddy_request = durable.buddy_request;
   if (durable.mutual_buddy_code) next.mutual_buddy_code = durable.mutual_buddy_code;
+  if (Number.isFinite(durable.natural_age)) next.natural_age = durable.natural_age;
   return next;
 }
 
@@ -464,8 +466,12 @@ function toGeneratorPlayer(
     coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
   const yearsPlayed = parseYearsPlayed(firstNonEmpty(row, YEARS_PLAYED_KEYS));
   const rating = Number(row?.rating);
-  // Carry DOB + play-up signals so the play-up/play-down classifier has an age
-  // to work with (without these every player resolves to "unknown").
+  // Carry the DOB, else the natural age, and play-up signals so the play-up/play-down classifier
+  // has an age to work with (without these every player resolves to "unknown"). The DOB is the
+  // file's, which only the import session's rows carry: it is counted in the page's season, as
+  // before R5. A row without one carries the stored player's natural age (or the one
+  // import-validation returned), counted in the season of its import; no birth date is stored.
+  const naturalAge = Number(firstNonEmpty(row, ['natural_age', 'naturalAge']));
   const dateOfBirth = firstNonEmpty(row, ['date_of_birth', 'DOB', 'Birthdate', 'dob', 'birthdate']);
   const playUpRequested = parseBooleanLike(row.play_up_requested);
 
@@ -475,7 +481,11 @@ function toGeneratorPlayer(
     firstName,
     lastName,
     name: `${firstName} ${lastName}`.trim() || 'Unnamed Player',
-    ...(dateOfBirth ? { date_of_birth: dateOfBirth } : {}),
+    ...(dateOfBirth
+      ? { date_of_birth: dateOfBirth }
+      : Number.isInteger(naturalAge) && naturalAge > 0
+        ? { naturalAge }
+        : {}),
     ...(playUpRequested ? { play_up_requested: true } : {}),
     ...(skillRating !== undefined ? { skillRating } : {}),
     ...(row?.rating != null && Number.isFinite(rating) ? { rating } : {}),
@@ -541,7 +551,7 @@ function noTeamsMessage(programName, preparedPlayers, result) {
     return `${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
   };
   if (blocked.length > 0 && blocked.length >= preparedPlayers.length) {
-    return `No teams could be generated for ${programName}: none of its players is eligible for the division (each plays down, or plays up without a coaching parent or a coach's child as a buddy). Not eligible (${blocked.length}): ${names(blocked)}. Check their birthdates and the division's age band.`;
+    return `No teams could be generated for ${programName}: none of its players is eligible for the division (each plays down, or plays up without a coaching parent or a coach's child as a buddy). Not eligible (${blocked.length}): ${names(blocked)}. Check their age groups and the division's age band.`;
   }
   const notEligible =
     blocked.length > 0

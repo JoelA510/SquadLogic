@@ -43,11 +43,12 @@ describe('the mock import-validation', () => {
     expect(JSON.stringify(data.validated_data)).not.toContain('MOCK-SENSITIVE');
     const staged = getMockData('staging_players').filter((row) => row.import_job_id === jobId);
     expect(staged).toHaveLength(1);
+    // No birth date is staged (R5); the browser keeps it for the import session.
     expect(staged[0].raw_payload).toEqual({
       'First Name': 'Avery',
       'Last Name': 'Alderbrook',
-      'Date of Birth': '2016-01-01',
     });
+    expect(data.validated_data[0].date_of_birth).toBe('2016-01-01');
     expect(JSON.stringify(staged)).not.toContain('MOCK-SENSITIVE');
   });
 

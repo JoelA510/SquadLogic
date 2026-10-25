@@ -140,7 +140,7 @@ export default function PlacementReviewList({ results }) {
                   Eligibility not checked
                 </h4>
                 <p className="text-sm text-text-secondary">
-                  Placed, with no birthdate or division age band to check against. Nothing holds
+                  Placed, with no age group or division age band to check against. Nothing holds
                   them off a roster.
                 </p>
                 <ul className="text-sm text-text-secondary list-disc pl-5">

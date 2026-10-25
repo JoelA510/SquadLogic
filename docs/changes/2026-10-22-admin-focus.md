@@ -1,8 +1,8 @@
 # Admin focus: removals, data minimisation, coach view and exports
 
 Status: **approved by the owner 2026-10-22**, with the recommended decisions and the additions under
-"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles).
-It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
+"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles). R0 to R4 are merged;
+R5 is built (see "As built (R5)"), its calls for the owner recorded there. It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
 about main (`c15c3b2`) is _statically reviewed_ unless marked _executed_; the inventories behind it
 cite file and line for each item and are summarised here, not repeated.
 
@@ -422,6 +422,137 @@ at once (AGENTS.md section 11).
   been copied whole three times now (R0, R1, R4); R5 copies it again. R6: `org_flag` is ready for
   the score entry and standings settings. R7: the catalogue check covers RPCs only; a coach export
   built in the browser from tables a coach can read is covered by R7's own test.
+
+## As built (R5)
+
+- **Migration `20261026010000`, in this order.** A NOTICE counts what is destroyed (players with a
+  birth date or birth year, staged rows with a birth key). `players.natural_age smallint` is added
+  with `players_natural_age_check` (NULL or 1-25, the age groups the browser's division
+  derivation accepts) and a column comment. `import_allowed_keys` (the SQL copy of the allowlist)
+  loses `date_of_birth`, `dob` and `birth_year` and gains `natural_age`, so the purge drops a birth
+  key from an unfinished job's staged rows too. The player writers are replaced from their R4
+  bodies (`20261025010000`, md5 checked equal to the build before the edit) with only the birth
+  lines changed: `sanitize_player_patch` has no `date_of_birth` arm (a patch naming it is refused
+  22023), `apply_player_patch` does not write it, `admin_bulk_update_players` loses its now
+  unreachable refusal, and `finalize_import_job` reads and stores the natural age and no longer
+  requires a birth date to promote a row. Every staged row loses its birth keys (both payloads,
+  both staging tables). Then `players.date_of_birth` and `birth_year` are dropped by name, with no
+  CASCADE. The end-state check refuses to commit while any public function (comments and literals
+  stripped), view or policy names a dropped column, or any column named like birth or dob is
+  left on `players`, `coaches`, `staging_players` or `staging_import_rows`.
+- **Where the natural age is computed.** Birth dates never reach the server's storage, so the
+  finalizer cannot compute one: `import-validation` does, from the file's birth date with the
+  cutoff and `season_year` of the season the finalizer attaches the import's divisions to (active
+  first, then the latest start; `_shared/natural-age.ts`, the twin of core's `importNaturalAge`,
+  with `tests/naturalAgeParity.test.js` holding them equal), stages it as `natural_age`, strips
+  every key named like a birth date or year from what it stages (a declared field's included),
+  and returns the rows, birth dates included, to the browser for the import session. A
+  `natural_age` column in the file is never read; a birth year alone is read by nothing, so it is
+  no longer kept in transit. The finalizer stores
+  the staged value, else the age group the export states (a row staged without the function),
+  else none. Matching across imports is unchanged (the external registration id). `resolveNaturalAge`
+  already read an explicit natural age before a birth date; its comment now says the stored one
+  is that value. The mock twin follows.
+- **The page (B2's hand-off, taken).** `DURABLE_PLAYER_FIELDS` selects `natural_age`;
+  `withDurableIdentity` carries it and `toGeneratorPlayer` emits it as `naturalAge` for a row with
+  no birth date. A session row's birth date is read first, counted in the page's season as before
+  R5 (review finding: the stored age is counted in the season the import's divisions attach to,
+  which can differ from the page's selected season). The player record shows "Age group U10" where it
+  showed the birth year. The "no eligibility check" and "no teams" messages say age group, not
+  birthdate.
+- **Calls for the owner** (each the narrowest reading of the row and the B2 contract).
+  - **The birth date comes first, the export's age group second.** The row reads "the age group
+    the export states, or computed at import". The repository reads an export's age group two
+    ways: the glossary, the demo and season fixtures as the natural age itself (a child born in
+    2021 is age group 6, `U06B`, for the seasonal year ending 2027), and the division derivation
+    (`finalize_import_job`, `ageGroupDivisionName`) and B2's page test as an age N playing in
+    U(N+1). With the age group first, an export of the second kind would store every player a
+    year younger than their division and block them. With the birth date first (as teaming read
+    before R5), no placement anyone gets today changes; the age group is used only when no birth
+    date gives an age (no season year, or a row staged directly).
+  - **The type is `smallint`, 1-25 or NULL**; a value outside is stored as no age.
+  - **The natural age is the import's season's, not bound to a season by a column.** It goes with
+    the player's division, which a re-import rewrites too; a re-import rewrites the age, to none
+    when the new row gives none (the birth date's contract: the finalizer always wrote the file's
+    date). A player not re-imported keeps last season's division and age.
+  - **Neither an age group nor a birth date** (or no season year at import): the row is promoted
+    with no natural age; teaming places and flags it `unknown` (B2).
+  - **The import still requires a Date of Birth column** (`import-validation`, the browser and the
+    mock): the browser reads it for teaming during the session and the age is computed from it.
+  - **No backfill.** The migration drops existing birth dates without computing natural ages from
+    them (production: 0 players).
+- **Kept.** `divisions.birthdate_start` and `birthdate_end` (a division's window);
+  `season_settings.age_cutoff_mode`; the purge's audit-key list (old audit rows can carry the
+  keys); `coach_team_requests.child_birth_date` (no writer since R0, not named by the row;
+  production 0 rows).
+- **Production, read-only, 2026-10-25** (catalogue and counts only, through the SQL endpoint, once
+  the ledger read `20261025010000`): `import_allowed_keys`, `sanitize_player_patch`,
+  `apply_player_patch`, `admin_bulk_update_players` and `finalize_import_job` equal a local build
+  at `20261025010000` in body md5, security, volatility, SET clauses, result, arguments,
+  `anon`/`authenticated` EXECUTE and comment; exactly `apply_player_patch` and
+  `finalize_import_job` name a birth column in code, as in the build; no view, policy, index,
+  publication or other dependency names either column. Counts: `players` 0 (0 with a birth date
+  or year), `staging_players` 0, `staging_import_rows` 0 (0 with a birth key), unfinished
+  registration jobs 0, organization schemas declaring a birth-like field 0, `coach_team_requests`
+  0, `imports` 0. The one season is active with `season_year` 2026 and the August cutoff.
+- **Tests.**
+  - Core: `tests/naturalAgeSeasonFixture.test.js` (the plan's test). The fixture holds birth years,
+    not dates, so each of the 1,153 registrations is tried with a birth date in every month of its
+    birth year, against every division the fixture names (21), under both cutoffs: eligibility
+    from the stored natural age (computed at import) equals the birth-date result in all 290,556
+    comparisons per cutoff, and every placement kind is seen. The export's age group, used alone,
+    gives the same result for every date it allows (149,961 comparisons; the first case checks that every age group is
+    one an August-cutoff date in its birth year gives for the seasonal year ending 2027). Fails on
+    a planted cutoff defect. Every test file that loads `fixtures/season-2026/` (51) ran green in the
+    full Vitest run.
+  - `tests/naturalAgeParity.test.js`: core and Edge twins agree on a corpus of age groups, dates
+    and seasons; the season is chosen as PostgreSQL orders it; both allowlist copies strip the
+    same birth-like keys. Each fails on a planted twin defect.
+  - Mock: `tests/mockNaturalAge.test.js` (5; all fail on `origin/main`): the age is computed and
+    staged, no birth key staged, the date returned for the session; the age group when no date
+    gives an age; a row with neither promoted with none; a re-import rewrites it; a patch naming
+    `date_of_birth` refused. `mockImportSensitiveColumns` stages no birth date.
+  - Page: `tests/teamAnalysisEligibility.test.jsx` gains two (both fail on `origin/main`): from
+    stored players with no birth date in the rows, a stored play-down is blocked and a player with
+    none placed `unknown`; a session row's birth date is read before the stored age (fails on the
+    reverse precedence). `tests/PlayerRecordPage.test.jsx`: the age group, no birth date or year.
+  - pgTAP: `natural_age.sql` (13; fails on `origin/main`): no column like birth or dob on
+    `players`, `coaches`, `staging_players` or `staging_import_rows`, with a control; nothing
+    names a dropped column; the column's type; the allowlist; the finalizer's promotion, stored
+    ages and re-import; the patch refusals.
+  - Smoke `20261026010000` (both scans shown to fire on planted probes first; the check; the
+    allowlist; the finalizer on rows staged directly; the patch refusals; posture). No older smoke
+    or pgTAP suite needed a change: they stage `date_of_birth` in payloads, which the finalizer
+    now ignores, and none read the dropped columns.
+  - The real-backend E2E (CI only, Docker) is unaffected, _statically reviewed_: its export has
+    Jan-Jul births and an explicit `U10`; import-validation counts them 10 in the seeded season
+    (`season_year` the current year, default August cutoff), the finalizer stores 10, and the
+    page reads the session's birth dates, so all 24 are placed as before.
+- **Harness.** The revert is checked by a catalogue fingerprint (the five functions, every
+  `players` column and constraint) against a build at `20261025010000` (50 rows); the revert also
+  warns that import-validation must be rolled back with it. The catalogue snapshot is unchanged
+  (no signature, trigger, policy or view changes). The M30, M38 (two) and M42 sanitizer plants
+  aimed at bodies R5 replaces are re-aimed at `$M43`; eight M43 plants (two refused by the
+  migration itself: `birth_year` left behind, and `apply_player_patch` still writing the date)
+  and three R43 plants are added. Each new or re-aimed plant was applied by hand in its own copy
+  of the tree and the harness run: each failed with its expected check.
+- **Found for later PRs, not done here.**
+  - **The division derivation reads the age group one way, the fixtures another.**
+    `finalize_import_job` and `ageGroupDivisionName` derive division U(N+1) from age group N,
+    while the glossary, the demo and season fixtures, and the export's own Team Age read N as the
+    U-number (noted in the demo-mode plan). With the birth date first R5 does not depend on it,
+    but a player imported with an age group and no usable birth date gets natural age N in a
+    U(N+1) division, which is a play-up. Related: production's season has `season_year` 2026,
+    while the fixtures' exports count ages for the seasonal year ending 2027; the owner should
+    confirm which year a league enters.
+  - A birth date that parses but gives an age outside 1-25 (a typo such as 2061) falls back to
+    the age group, or none, with no row error.
+  - The SQL finalizer still stores a declared field named like a birth date from a row staged
+    without import-validation (`import_declared_attributes`); production: 0 schemas declare one.
+  - `coach_team_requests.child_birth_date` (no writer; 0 rows).
+  - Not mirrored in the mock: the season chosen for the age is the mock's active one, not
+    `importSeason`'s order.
+  - `finalize_import_job` has now been copied whole four times (R0, R1, R4, R5).
 
 ## Docs updated across the PRs
 

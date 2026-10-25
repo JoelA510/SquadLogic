@@ -15,7 +15,8 @@
 --     slot's weekday, never clash; the slot itself is excluded;
 --   * plays_games through the settings writer: a new division plays games
 --     unless told; false is stored and audited with its before and after; a
---     save without it keeps it and changes nothing;
+--     save without it keeps it and changes nothing, by name or by id; a save
+--     changing only it changes it;
 --   * the reservation writer: an admin sets and clears one (one audit row
 --     each, before and after), a repeat changes and audits nothing, a
 --     division of another organization is refused 22023, a coach and another
@@ -185,8 +186,19 @@ BEGIN
          WHERE organization_id = v_org AND action = 'settings.updated' AND resource_id = v_u10) IS DISTINCT FROM 'true>false' THEN
         RAISE EXCEPTION 'turning U10 practice-only was not audited true>false';
     END IF;
-    UPDATE public.divisions SET plays_games = true WHERE id = v_u10;
-    RAISE NOTICE 'settings writer: a new division plays unless told; false stored and audited once with its before and after; a save without it keeps it and changes nothing';
+    -- A save by id without the setting keeps U10 practice-only; one by name
+    -- that changes nothing but the setting turns it back.
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    SET LOCAL ROLE authenticated;
+    v_got := public.admin_upsert_division_settings(v_org, v_season, v_u10, NULL, NULL, NULL, NULL, NULL, NULL, NULL)::text;
+    v_res := public.admin_upsert_division_settings(v_org, v_season, NULL, 'U10', NULL, NULL, NULL, NULL, NULL, NULL, true);
+    RESET ROLE;
+    IF (v_got::jsonb ->> 'plays_games')::boolean IS DISTINCT FROM false
+       OR (v_res ->> 'changed')::boolean IS DISTINCT FROM true
+       OR (SELECT plays_games FROM public.divisions WHERE id = v_u10) IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'a save by id without plays_games did not keep it (%), or a save by name changing only plays_games did not change it (%)', v_got, v_res;
+    END IF;
+    RAISE NOTICE 'settings writer: a new division plays unless told; false stored and audited once with its before and after; a save without it keeps it and changes nothing, by name or by id; a save changing only it changes it';
 
     -- ---- The reservation writer --------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);

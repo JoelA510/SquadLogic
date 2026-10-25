@@ -205,8 +205,9 @@ describe('create_org_invite and redeem_org_invite', () => {
     ).toBe('2026-10-09T16:00:00.000Z');
   });
 
-  it('claims exactly the three RPCs', () => {
+  it('claims exactly the four RPCs', () => {
     expect([...ADMIN_WRITE_RPCS].sort()).toEqual([
+      'admin_set_practice_slot_division',
       'admin_upsert_division_settings',
       'create_org_invite',
       'redeem_org_invite',

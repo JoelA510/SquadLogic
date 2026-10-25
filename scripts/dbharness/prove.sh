@@ -143,6 +143,11 @@ R43="$REPO/docs/sql/20261026010000_revert.sql"
 # lighting requests, the division reads), and the revert.
 M45="$REPO/supabase/migrations/20261028010000_coach_view.sql"
 R45="$REPO/docs/sql/20261028010000_revert.sql"
+# D2: practice-only divisions and reserved practice slots (the field
+# finalizer, its rollback and the division settings writer replaced; the
+# reservation writer and the clash rule added), and the revert.
+M46="$REPO/supabase/migrations/20261029010000_practice_only_divisions.sql"
+R46="$REPO/docs/sql/20261029010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -1878,7 +1883,8 @@ plant "R4 revert restores the finalizer under a second signature" "$R4" \
 # **The defect itself.** Put the two-table union back in front of the field
 # delete. A field held only by a free-standing assignment or an availability
 # profile then rolls back unrefused, which is LIVE-3 exactly.
-plant "M5 the rollback goes back to its two-table guard" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 the rollback goes back to its two-table guard" "$M46" \
   "                SELECT count(*) INTO v_affected_count
                   FROM public.field_bookings(
                          v_job.organization_id, v_record.target_id, NULL);" \
@@ -1907,7 +1913,8 @@ plant "M5 the profile FK stays SET NULL" "$M5" \
 # **The silent arm, restored.** An unhandled `target_table` is stamped as
 # rolled back having deleted nothing -- the class 8.3 recorded three instances
 # of. Section 5c of the new smoke calls the RPC with exactly such a record.
-plant "M5 an unhandled target_table falls through silently again" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 an unhandled target_table falls through silently again" "$M46" \
   "            ELSE
                 -- **The arm that used to be missing.**" \
   "            ELSIF false THEN
@@ -1916,7 +1923,8 @@ plant "M5 an unhandled target_table falls through silently again" "$M5" \
 
 # **The blocked list, reduced to a counter.** The refusal still fires and the
 # count is still right; what the operator loses is which record and why.
-plant "M5 a blocked record stops saying which one and why" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 a blocked record stops saying which one and why" "$M46" \
   "                    v_blocked := v_blocked || jsonb_build_object(
                         'kind', v_record.target_table,
                         'id', v_record.target_id,
@@ -2017,7 +2025,8 @@ plant "M5-SMOKE section 1b's fields-arm parse degenerates to a one-character cap
 # through `game_slot_id` AND `slot_id`, both CASCADE, and the arm read only the
 # first while its practice sibling read both. Put it back and an assignment
 # carrying `slot_id` alone is destroyed by the rollback with nothing refusing.
-plant "M5 the game_slots arm forgets slot_id again" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 the game_slots arm forgets slot_id again" "$M46" \
   "                      AND (
                         ga.game_slot_id = v_record.target_id
                         OR ga.slot_id = v_record.target_id
@@ -2045,7 +2054,8 @@ plant "M5 a third table references locations unnoticed" "$M5" \
 # rollback refused on a busy season stores an arbitrarily large array in
 # `warning_summary` and the audit row on every attempt -- the hazard
 # 20260907000000 built `field_bookings_digest` for.
-plant "M5 the audit row gets the raw blocked list" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 the audit row gets the raw blocked list" "$M46" \
   "        'blocked', public.field_bookings_digest(v_blocked)" \
   "        'blocked', v_blocked" \
   "smoke 20260909000000"
@@ -2053,7 +2063,8 @@ plant "M5 the audit row gets the raw blocked list" "$M5" \
 # **The lock, removed.** Structural only -- a race needs a second session and
 # the harness runs one -- so the plant proves the ASSERTION can fail, not that
 # the race is reproduced. Said out loud rather than implied.
-plant "M5 the fields arm counts bookings without locking the field" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 the fields arm counts bookings without locking the field" "$M46" \
   "                PERFORM 1 FROM public.fields f
                  WHERE f.id = v_record.target_id
                    AND f.organization_id = v_job.organization_id
@@ -2063,7 +2074,8 @@ plant "M5 the fields arm counts bookings without locking the field" "$M5" \
 
 # Two of three is not three: the field is locked and its slots are not, which
 # is the half that covers `games` and a slot-only assignment.
-plant "M5 the fields arm locks the field but not its slots" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 the fields arm locks the field but not its slots" "$M46" \
   "                PERFORM 1 FROM public.game_slots gs
                  WHERE gs.organization_id = v_job.organization_id
                    AND gs.field_id = v_record.target_id
@@ -2073,7 +2085,8 @@ plant "M5 the fields arm locks the field but not its slots" "$M5" \
 
 # **A lock in another arm.** Correct-looking and a deadlock cycle: it acquires
 # a slot before the field, which is the opposite order to admin_delete_field.
-plant "M5 a second arm starts taking a row lock" "$M5" \
+# Re-aimed at $M46 (D2), which replaces rollback_field_import_job from this body.
+plant "M5 a second arm starts taking a row lock" "$M46" \
   "            ELSIF v_record.target_table = 'practice_slots' THEN
                 IF EXISTS (" \
   "            ELSIF v_record.target_table = 'practice_slots' THEN
@@ -4669,6 +4682,104 @@ plant "R45 the revert restores a drifted update_game_score body" "$R45" \
   "        RAISE EXCEPTION 'Access denied: only a current coach of either team can score this game (drifted)'" \
   "revert 20261028010000"
 
+# D2: practice-only divisions and reserved practice slots. The migration's own
+# end-state check refuses a practice division named organization-wide, the
+# clash rule left callable by a client and plays_games defaulting to false;
+# the smoke RAISEs on back-to-back slots clashing, two halves of one field clashing,
+# windows that share no weekday clashing, an unknown practice division left
+# open, a re-import clearing a reservation, a rollback keeping the import's,
+# the reservation writer admitting a non-admin or another organization's
+# division, and a settings save that resets or ignores plays_games; the
+# revert claims on the reservation writer left behind, a drifted finalizer
+# body and a destruction count over every slot.
+plant "M46 a practice division is named organization-wide" "$M46" \
+  "              AND d.season_settings_id = v_import_season_id
+" \
+  "" \
+  "applying 20261029010000_practice_only_divisions.sql"
+
+plant "M46 back-to-back slots clash" "$M46" \
+  "       AND extract(epoch FROM ps.start_time) < probe.e + probe.turnover" \
+  "       AND extract(epoch FROM ps.start_time) <= probe.e + probe.turnover" \
+  "smoke 20261029010000"
+
+plant "M46 two halves of one field clash" "$M46" \
+  "       AND (p_field_subunit_id IS NULL" \
+  "       AND (true OR p_field_subunit_id IS NULL" \
+  "smoke 20261029010000"
+
+plant "M46 windows that share no weekday clash" "$M46" \
+  "            OR w.lo + ((probe.dow - extract(isodow FROM w.lo)::int + 7) % 7) <= w.hi)" \
+  "            OR true)" \
+  "smoke 20261029010000"
+
+plant "M46 an unknown practice division leaves the slot open" "$M46" \
+  "            IF v_division_id IS NULL THEN" \
+  "            IF false THEN" \
+  "smoke 20261029010000"
+
+plant "M46 a re-import without a Division clears the reservation" "$M46" \
+  "                    division_id = COALESCE(v_division_id, division_id)," \
+  "                    division_id = v_division_id," \
+  "smoke 20261029010000"
+
+plant "M46 a rollback keeps the import's reservation" "$M46" \
+  "                        WHEN NOT (v_previous ? 'division_id') THEN division_id" \
+  "                        WHEN true THEN division_id" \
+  "smoke 20261029010000"
+
+plant "M46 the reservation writer admits a non-admin" "$M46" \
+  "    IF v_uid IS NULL OR NOT FOUND OR NOT public.is_org_admin(v_slot.organization_id) THEN" \
+  "    IF v_uid IS NULL OR NOT FOUND THEN" \
+  "smoke 20261029010000"
+
+plant "M46 the reservation writer takes another organization's division" "$M46" \
+  "           AND d.organization_id = v_slot.organization_id;" \
+  "           AND true;" \
+  "smoke 20261029010000"
+
+plant "M46 a settings save by id without plays_games resets it" "$M46" \
+  "                   plays_games = COALESCE(p_plays_games, plays_games)," \
+  "                   plays_games = COALESCE(p_plays_games, true)," \
+  "smoke 20261029010000"
+
+plant "M46 a settings save by name ignores a changed plays_games" "$M46" \
+  "                   OR (p_plays_games IS NOT NULL
+                       AND public.divisions.plays_games IS DISTINCT FROM p_plays_games)
+" \
+  "" \
+  "smoke 20261029010000"
+
+plant "M46 the clash rule is left callable by a client" "$M46" \
+  "REVOKE ALL ON FUNCTION public.practice_slot_conflicts(uuid, uuid, uuid, public.day_of_week, time, time, date, date, uuid, integer)
+    FROM PUBLIC, anon, authenticated;
+" \
+  "GRANT EXECUTE ON FUNCTION public.practice_slot_conflicts(uuid, uuid, uuid, public.day_of_week, time, time, date, date, uuid, integer)
+    TO authenticated;
+" \
+  "applying 20261029010000_practice_only_divisions.sql"
+
+plant "M46 plays_games defaults to false" "$M46" \
+  "    ADD COLUMN plays_games boolean NOT NULL DEFAULT true;" \
+  "    ADD COLUMN plays_games boolean NOT NULL DEFAULT false;" \
+  "applying 20261029010000_practice_only_divisions.sql"
+
+plant "R46 the revert leaves the reservation writer behind" "$R46" \
+  "DROP FUNCTION public.admin_set_practice_slot_division(uuid, uuid);
+" \
+  "" \
+  "revert 20261029010000"
+
+plant "R46 the revert restores a drifted finalizer body" "$R46" \
+  "'Field row is missing required location/field/slot data or has an invalid slot window'" \
+  "'Field row is missing required location/field/slot data or has an invalid slot window (drifted)'" \
+  "revert 20261029010000"
+
+plant "R46 the revert counts every slot as reserved" "$R46" \
+  "    SELECT count(*) INTO v_reserved FROM public.practice_slots WHERE division_id IS NOT NULL;" \
+  "    SELECT count(*) INTO v_reserved FROM public.practice_slots;" \
+  "revert 20261029010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -4811,6 +4922,8 @@ declare -A CLAIM_PROVER=(
   ["(checked) the guardian revert restores profile_players with its keys, policy and grants, the three guardian functions, the roster and staff reads' guardian arms, the people and calendar token read policies and the parent and player roles, each with its grants, comment and posture as at 20261023010000"]="R41 the revert leaves the guardian link policy out|R41 the revert leaves the contact helper callable|R41 the revert restores a drifted get_team_roster body"
   ["(checked) the contact surfaces revert restores the players and contact card columns, the coach interest table with its keys, policy, trigger and grants, the directory, card and lead functions, the staff and roster reads' contact columns, the member list open to members and the player writers' previous bodies, each with its grants, comment and posture as at 20261024010000"]="R42 the revert leaves the coach interest policy out|R42 the revert leaves the card writer callable by PUBLIC|R42 the revert restores a drifted get_team_staff body"
   ["(checked) the coach view revert restores the coach arm of update_game_score, the coach lighting request and the requester's withdraw, and the lighting table's comment, and drops the three division reads, each with its grants, comment and posture as at 20261026010000"]="R45 the revert leaves the division read behind|R45 the revert leaves the request RPC out|R45 the revert restores a drifted update_game_score body"
+  ["(checked) the practice-only revert counted the slot reservations and practice-only divisions it was about to destroy"]="R46 the revert counts every slot as reserved"
+  ["(checked) the practice-only revert restores the division settings, field finalize and rollback writers as at 20261028010000 and drops the slot reservation RPC, the clash helper, practice_slots.division_id with its reference and index, and divisions.plays_games with its key, each function with its grants, comment and posture"]="R46 the revert leaves the reservation writer behind|R46 the revert restores a drifted finalizer body"
   ["(checked) the birthdates revert restores the players birth columns empty, drops the natural age with its check, and restores the allowlist and the player writers' previous bodies, each with its grants, comment and posture as at 20261025010000"]="R43 the revert leaves birth_year out|R43 the revert leaves the natural age behind|R43 the revert restores a drifted finalize_import_job body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"

@@ -16,7 +16,7 @@
 
 ## Inputs & Prerequisites
 
-1. **Teams & Divisions**: Finalized rosters from the team generation workflow with division metadata and coach assignments.
+1. **Teams & Divisions**: Finalized rosters from the team generation workflow with division metadata and coach assignments. **A practice-only division** (`divisions.plays_games = false`, D2, migration `20261029010000`) plays no games: the page reads each division's current setting with its grid data (the persisted team run carries none), matching a team by its division id when the read knows it, else by name among the season's divisions, and core `buildDivisionRoundRobins` builds such a division no round robin and returns it in `practiceOnlyDivisions`, which the page lists under **Practice only** rather than as unscheduled. A failed read stops generation; a read before the migration (42703) schedules every division, as before.
 2. **Game Slots Catalog**: Structured records from `game_slots` including field, date, time, duration, and optional division restrictions.
 3. **Coach & Family Conflict Context**: Coach multi-team flags plus guardian/household relationships that span multiple teams so siblings or parent-coach combinations are never scheduled in overlapping slots.
 4. **Season Calendar Rules**: Season start/end dates, blackout Saturdays, and special event weekends stored in configuration tables.

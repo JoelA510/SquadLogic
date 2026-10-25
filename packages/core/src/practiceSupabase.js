@@ -180,6 +180,7 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
     }
 
     const capacity = normalizeCapacity(row, index);
+    const divisionId = selectField(row.divisionId ?? row.division_id);
 
     return {
       id,
@@ -193,6 +194,8 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
       fieldSubunitId: selectField(row.fieldSubunitId ?? row.field_subunit_id),
       location: row.location ?? row.fieldLabel ?? null,
       ...(seasonOverrides ? { seasonOverrides } : {}),
+      // D2: the division the slot is reserved to, when it has one.
+      ...(divisionId ? { divisionId } : {}),
     };
   });
 }

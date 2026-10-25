@@ -11,7 +11,11 @@
  *   (`20260504020000_admin_upsert_division_settings_rpc.sql`): 23502 missing
  *   org/season/name; 42501 season not the org's, no uid, not an org admin, or a
  *   division of another org/season; upsert by (season, name) or update by id;
- *   returns the row plus `changed`.
+ *   returns the row plus `changed`. `p_plays_games` (20261029010000): NULL
+ *   keeps the stored value, a new division plays games.
+ * - `admin_set_practice_slot_division` (20261029010000): 23502 no slot;
+ *   42501 no uid, no such slot, or not an admin of its organization; 22023 a
+ *   division of another organization; a repeat returns `changed: false`.
  * - `create_org_invite` (`20260421034626_invite_code_system.sql`): 42501 not
  *   an org admin; 22023 a role outside the whitelist; returns
  *   `[{code, expires_at}]` (the SQL returns TABLE); `p_expires_in` NULL means
@@ -30,6 +34,7 @@ import { ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
 export const ADMIN_WRITE_RPCS = Object.freeze([
   'admin_upsert_division_settings',
+  'admin_set_practice_slot_division',
   'create_org_invite',
   'redeem_org_invite',
 ]);
@@ -126,10 +131,14 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
         ) ?? null;
     }
     const next = Object.fromEntries(DIVISION_RULES.map((k) => [k, p[`p_${k}`] ?? null]));
+    // NULL (or absent) keeps the stored value; a new division plays games.
+    const playsGames =
+      typeof p.p_plays_games === 'boolean' ? p.p_plays_games : (existing?.plays_games ?? true);
     const changed =
       !existing ||
       existing.name !== nameText ||
-      DIVISION_RULES.some((k) => (existing[k] ?? null) !== next[k]);
+      DIVISION_RULES.some((k) => (existing[k] ?? null) !== next[k]) ||
+      (existing.plays_games ?? true) !== playsGames;
     let row = existing;
     if (!existing) {
       row = {
@@ -138,14 +147,52 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
         season_settings_id: seasonId,
         name: nameText,
         ...next,
+        plays_games: playsGames,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
       };
       db.divisions.push(row);
     } else if (changed) {
-      Object.assign(existing, { name: nameText, ...next, updated_at: now.toISOString() });
+      Object.assign(existing, {
+        name: nameText,
+        ...next,
+        plays_games: playsGames,
+        updated_at: now.toISOString(),
+      });
     }
-    return { data: { ...row, changed }, error: null };
+    return { data: { ...row, plays_games: row.plays_games ?? true, changed }, error: null };
+  }
+
+  if (name === 'admin_set_practice_slot_division') {
+    if (!p.p_slot_id) return fail('23502', 'p_slot_id is required');
+    const slot = (db.practice_slots || []).find((s) => same(s.id, p.p_slot_id));
+    if (!uid || !slot || !ctx.isOrgAdmin(slot.organization_id)) {
+      return fail('42501', 'Access denied: only an organization admin reserves a practice slot');
+    }
+    const divisionId = p.p_division_id ?? null;
+    if (divisionId !== null) {
+      const division = (db.divisions || []).find((d) => same(d.id, divisionId));
+      if (!division || !same(division.organization_id, slot.organization_id)) {
+        return fail(
+          '22023',
+          `Division ${divisionId} is not a division of this slot's organization`
+        );
+      }
+    }
+    const changed = (slot.division_id ?? null) !== divisionId;
+    if (changed) {
+      slot.division_id = divisionId;
+      slot.updated_at = now.toISOString();
+    }
+    return {
+      data: {
+        id: slot.id,
+        organization_id: slot.organization_id,
+        division_id: divisionId,
+        changed,
+      },
+      error: null,
+    };
   }
 
   if (name === 'create_org_invite') {

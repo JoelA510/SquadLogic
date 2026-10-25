@@ -53,3 +53,12 @@ describe('CSV import header dedupe', () => {
     expect(parseDownloadedTemplate('fields').meta.fields).toEqual(CSV_TEMPLATES.fields.headers);
   });
 });
+
+describe('the Division column of the fields template (D2)', () => {
+  it('maps to division_name, the key the field finalizer reads for a practice reservation', () => {
+    const { meta } = parseDownloadedTemplate('fields');
+    expect(meta.fields).toContain('Division');
+    const { mappings } = matchHeaders(meta.fields, [], {});
+    expect(mappings.Division).toBe('division_name');
+  });
+});

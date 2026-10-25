@@ -43,6 +43,9 @@ const baseHook = {
   retireFieldSubunit: vi.fn(),
   unretireFieldSubunit: vi.fn(),
   setLocationCoordinates: vi.fn(),
+  // D2: the slot reservations (tests/fieldSlotReservations.test.jsx renders them).
+  reservationsAvailable: false,
+  setSlotDivision: vi.fn(),
   refresh: vi.fn(),
 };
 

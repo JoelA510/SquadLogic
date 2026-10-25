@@ -19,8 +19,13 @@ describe('parsePlayableCount', () => {
     assert.equal(parsePlayableCount(' 9V9 '), 9);
   });
 
-  it('throws when format is invalid', () => {
-    assert.throws(() => parsePlayableCount('solo'), /unable to parse/);
+  it('returns null for a format that names no NvN (D2), and still refuses a non-string', () => {
+    assert.equal(parsePlayableCount('solo'), null);
+    assert.equal(parsePlayableCount('Minis (U5 intro)'), null);
+    // @ts-expect-error -- a number is the input this guard refuses.
+    assert.throws(() => parsePlayableCount(7), /must be a string/);
+    assert.throws(() => parsePlayableCount('  '), /cannot be empty/);
+    assert.throws(() => parsePlayableCount('0v0'), /invalid playable count/);
   });
 });
 
@@ -41,6 +46,25 @@ describe('calculateMaxRosterSize', () => {
 });
 
 describe('deriveDivisionRosterConfigs', () => {
+  it('gives a division whose format names no NvN its own limits over the defaults, not a throw (D2)', () => {
+    const configs = deriveDivisionRosterConfigs([
+      { id: 'U4', playFormat: 'Minis (U5 intro)', minRosterSize: 12, targetTeamSize: 14 },
+      { id: 'U5', playFormat: 'Minis' },
+    ]);
+    assert.equal(configs.U4.source, 'default-limits');
+    assert.equal(configs.U4.playableCount, null);
+    assert.equal(configs.U4.maxRosterSize, 14);
+    assert.equal(configs.U4.minRosterSize, 12);
+    assert.equal(configs.U4.targetTeamSize, 14);
+    assert.equal(configs.U5.maxRosterSize, 14);
+    // Its own maximum still wins, as for any division record.
+    assert.equal(
+      deriveDivisionRosterConfigs([{ id: 'U4', playFormat: 'Minis', maxRosterSize: 15 }]).U4
+        .maxRosterSize,
+      15
+    );
+  });
+
   it('prefers overrides when available', () => {
     const divisions = [{ id: 'U10', playFormat: '7v7' }];
     const overrides = {

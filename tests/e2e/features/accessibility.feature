@@ -245,6 +245,27 @@ Feature: Every top-level route passes an automated accessibility scan
     Then the scan sees "Harvest festival" on the page
     And axe finds no serious or critical violations on "/fields" in the "dark" theme
 
+  Scenario: Game scheduling with a practice-only division on it passes axe in both themes
+    Given I am logged into SquadLogic as an admin
+    And the team run's division "U8 Boys" plays no games
+    When I open "/schedule/game" and see its "Game Scheduling" heading
+    Then the scan sees "These divisions play no games" on the page
+    And axe finds no serious or critical violations on "/schedule/game" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "These divisions play no games" on the page
+    And axe finds no serious or critical violations on "/schedule/game" in the "dark" theme
+
+  Scenario: Field management with a field's practice slot divisions open passes axe in both themes
+    Given I am logged into SquadLogic as an admin
+    When I open "/fields" and see its "Field Management" heading
+    And I open the practice slot divisions on "Field 1"
+    Then the scan sees "0 of 1 reserved" on the page
+    And axe finds no serious or critical violations on "/fields" in the "light" theme
+    When I switch to the dark theme on this page
+    And I open the practice slot divisions on "Field 1"
+    Then the scan sees "0 of 1 reserved" on the page
+    And axe finds no serious or critical violations on "/fields" in the "dark" theme
+
   Scenario: The reports page above its three-player masking threshold passes axe in both themes
     Given I am logged into SquadLogic as an admin
     And the organization has 6 players with a custom attribute

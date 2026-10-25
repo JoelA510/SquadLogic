@@ -10,7 +10,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { generateRoundRobinWeeks, scheduleGames } from '@squadlogic/core/gameScheduling.js';
+import { buildDivisionRoundRobins, scheduleGames } from '@squadlogic/core/gameScheduling.js';
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useDashboardData } from '../hooks/useDashboardData.js';
@@ -82,12 +82,31 @@ function getAssignmentWeekIndex(assignment, slot) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
-function normalizeTeam(team) {
+/**
+ * A team-run team as the game scheduler reads it.
+ *
+ * `playsGames` is the division's CURRENT `divisions.plays_games` (D2,
+ * `docs/changes/2026-10-22-demo-mode.md`), not anything the persisted run
+ * carries: the run holds no division settings, so the flag reaches the
+ * generator only through `practiceOnly`, which the page builds from its own
+ * read of `divisions`. Matched by division id when the id names a division
+ * the read returned, else by name among the season's divisions; a division
+ * neither finds plays (the column's default).
+ *
+ * @param {Record<string, any>} team
+ * @param {{ ids: Set<string>, names: Set<string>, knownIds?: Set<string> }} [practiceOnly]
+ */
+export function normalizeTeam(team, practiceOnly = { ids: new Set(), names: new Set() }) {
   const id = team?.id ?? team?.teamId;
   if (!id) return null;
   const divisionId = team.divisionId ?? team.division_id ?? null;
   const division =
     team.division ?? team.divisionName ?? team.divisions?.name ?? divisionId ?? 'Unassigned';
+  const isPracticeOnly =
+    divisionId !== null &&
+    (practiceOnly.knownIds?.has(String(divisionId)) || practiceOnly.ids.has(String(divisionId)))
+      ? practiceOnly.ids.has(String(divisionId))
+      : practiceOnly.names.has(String(division).trim().toLowerCase());
 
   return {
     id,
@@ -95,7 +114,37 @@ function normalizeTeam(team) {
     division,
     divisionId,
     coachId: team.coachId ?? team.coach_id ?? team.coach?.id ?? null,
+    playsGames: !isPracticeOnly,
   };
+}
+
+/**
+ * The divisions that play no games (D2), from a read of `divisions`: their ids,
+ * and their names among the selected season's divisions (a team-run team may
+ * carry only its division's name). With no season selected, every division's
+ * name counts.
+ *
+ * @param {Array<{ id?: unknown, name?: unknown, season_settings_id?: unknown, plays_games?: unknown }>} rows
+ * @param {string|null|undefined} seasonSettingsId
+ */
+export function practiceOnlyDivisionsOf(rows, seasonSettingsId) {
+  const ids = new Set();
+  const names = new Set();
+  const knownIds = new Set();
+  for (const row of rows ?? []) {
+    if (row?.id) knownIds.add(String(row.id));
+    if (row?.plays_games !== false) continue;
+    if (row.id) ids.add(String(row.id));
+    if (!seasonSettingsId || String(row.season_settings_id) === String(seasonSettingsId)) {
+      names.add(
+        String(row.name ?? '')
+          .trim()
+          .toLowerCase()
+      );
+    }
+  }
+  names.delete('');
+  return { ids, names, knownIds };
 }
 
 /**
@@ -274,6 +323,8 @@ import { describeUnplaceableSlots, isSeasonClockLoading } from '../utils/seasonC
  * @param {number} input.placeableSlotCount
  * @param {number} input.unplaceableSlotCount
  * @param {boolean} input.seasonClockLoading
+ * @param {number} [input.practiceOnlyTeamCount] - teams in practice-only divisions (D2), not
+ *   counted in `teamCount`
  * @returns {string|null}
  */
 export function composeSchedulerReadinessMessage({
@@ -282,12 +333,18 @@ export function composeSchedulerReadinessMessage({
   placeableSlotCount,
   unplaceableSlotCount,
   seasonClockLoading,
+  practiceOnlyTeamCount = 0,
 }) {
   const parts = seasonClockLoading
     ? [referenceError, 'Loading this season\u2019s settings\u2026']
     : [
         referenceError,
-        teamCount === 0 ? 'No generated teams are available for game scheduling.' : null,
+        // D2: teams that exist but all play no games are not "no teams".
+        teamCount === 0 && practiceOnlyTeamCount > 0
+          ? 'Every generated team is in a practice-only division, so there are no games to schedule.'
+          : teamCount === 0
+            ? 'No generated teams are available for game scheduling.'
+            : null,
         placeableSlotCount === 0 && unplaceableSlotCount === 0
           ? 'No game slots are available for this organization.'
           : null,
@@ -365,24 +422,6 @@ const GRID_DRAG_INSTRUCTIONS =
   'To move a game, press space or enter on its drag handle, use the arrow keys to move ' +
   'between fields and time slots, then press space or enter to drop it, or escape to cancel. ' +
   'Each game also has a Move to list.';
-
-function buildRoundRobinByDivision(teams) {
-  const teamsByDivision = new Map();
-  for (const team of teams) {
-    const bucket = teamsByDivision.get(team.division) ?? [];
-    bucket.push(team.id);
-    teamsByDivision.set(team.division, bucket);
-  }
-
-  /** @type {Record<string, ReturnType<typeof generateRoundRobinWeeks>>} */
-  const roundRobinByDivision = {};
-  for (const [division, teamIds] of teamsByDivision.entries()) {
-    if (teamIds.length >= 2) {
-      roundRobinByDivision[division] = generateRoundRobinWeeks({ teamIds });
-    }
-  }
-  return roundRobinByDivision;
-}
 
 function formatUnscheduledMatchup(entry) {
   return `${entry.matchup?.homeTeamId ?? 'Home'} vs ${entry.matchup?.awayTeamId ?? 'Away'}`;
@@ -498,6 +537,9 @@ export default function GameSchedulingPage() {
   const [allFields, setAllFields] = useState([]);
   const { closures: fieldClosures } = useFieldClosures();
   const [gameSlotRows, setGameSlotRows] = useState([]);
+  // D2: each division's current `plays_games`, read with the grid's
+  // reference data. The persisted team run carries no division settings.
+  const [divisionRows, setDivisionRows] = useState([]);
   const [referenceError, setReferenceError] = useState(null);
   const [activeGame, setActiveGame] = useState(null);
 
@@ -540,6 +582,7 @@ export default function GameSchedulingPage() {
         setFields([]);
         setAllFields([]);
         setGameSlotRows([]);
+        setDivisionRows([]);
         setReferenceError(null);
         return;
       }
@@ -551,6 +594,7 @@ export default function GameSchedulingPage() {
           { data: fieldRows, error: fieldError },
           { data: slotRows, error: slotError },
           { data: venueRows, error: venueError },
+          { data: divisionData, error: divisionReadError },
         ] = await Promise.all([
           // **No `.eq('active', true)` any more.** `fields.active` is a
           // WRITE-TIME CACHE of `effective_to`, not a continuously true
@@ -581,6 +625,13 @@ export default function GameSchedulingPage() {
           supabase
             .from('locations')
             .select('id, effective_to')
+            .eq('organization_id', currentOrganization.id),
+          // **Which divisions play games (D2).** A failed read is an error like
+          // the others: guessing "every division plays" would build fixtures
+          // for a division that plays none.
+          supabase
+            .from('divisions')
+            .select('id, name, season_settings_id, plays_games')
             .eq('organization_id', currentOrganization.id),
         ]);
 
@@ -618,6 +669,22 @@ export default function GameSchedulingPage() {
         // every pitch instead, which looks different and is the same defect.
         if (venueFault) throw venueFault;
 
+        // **The same deploy order, for `plays_games`.** The SPA ships before
+        // migration 20261029010000; until it lands PostgREST answers 42703,
+        // and a division without the column is the pre-migration world, where
+        // every division plays. Any other error stays fatal.
+        /** @type {Array<Record<string, any>>|null} */
+        let divisionList = divisionData;
+        let divisionFault = divisionReadError;
+        if (divisionFault?.code === '42703') {
+          logger.warn(
+            'divisions.plays_games is absent, so practice-only divisions are not migrated yet and every division plays games'
+          );
+          divisionList = [];
+          divisionFault = null;
+        }
+        if (divisionFault) throw divisionFault;
+
         setAllFields(fieldRows ?? []);
         // The two halves of "may the scheduler still offer this" live in one
         // testable producer, because the reading is the point of the change and
@@ -628,11 +695,13 @@ export default function GameSchedulingPage() {
           (fieldRows ?? []).filter((row) => isFieldOfferableOn(row, asOf, venueOf(row, venuesById)))
         );
         setGameSlotRows(slotRows ?? []);
+        setDivisionRows(divisionList ?? []);
       } catch (err) {
         if (!isMounted) return;
         setFields([]);
         setAllFields([]);
         setGameSlotRows([]);
+        setDivisionRows([]);
         setReferenceError(err.message || 'Game schedule reference data could not be loaded.');
       }
     }
@@ -644,9 +713,24 @@ export default function GameSchedulingPage() {
     };
   }, [currentOrganization?.id]);
 
+  const practiceOnly = useMemo(
+    () => practiceOnlyDivisionsOf(divisionRows, currentSeasonSetting?.id),
+    [currentSeasonSetting?.id, divisionRows]
+  );
+
   const schedulerTeams = useMemo(
-    () => (team?.teams ?? []).map(normalizeTeam).filter(Boolean),
-    [team?.teams]
+    () => (team?.teams ?? []).map((entry) => normalizeTeam(entry, practiceOnly)).filter(Boolean),
+    [practiceOnly, team?.teams]
+  );
+
+  // D2: the teams that play, their round robins, and the practice-only
+  // divisions, listed apart rather than counted as unscheduled.
+  const divisionPlan = useMemo(() => buildDivisionRoundRobins(schedulerTeams), [schedulerTeams]);
+  const gameTeams = /** @type {typeof schedulerTeams} */ (divisionPlan.gameTeams);
+  // The practice-only divisions' teams, counted once (D2).
+  const practiceOnlyTeamCount = divisionPlan.practiceOnlyDivisions.reduce(
+    (sum, entry) => sum + entry.teamIds.length,
+    0
   );
 
   const teamById = useMemo(() => {
@@ -766,7 +850,7 @@ export default function GameSchedulingPage() {
     !canManageSchedule ||
     schedulerStatus === 'running' ||
     seasonClockLoading ||
-    !schedulerTeams.length ||
+    !gameTeams.length ||
     !gameSlots.length ||
     Boolean(referenceError);
 
@@ -775,7 +859,8 @@ export default function GameSchedulingPage() {
   // arrangement are needed and why appending it here printed it twice.
   const schedulerReadinessMessage = composeSchedulerReadinessMessage({
     referenceError,
-    teamCount: schedulerTeams.length,
+    teamCount: gameTeams.length,
+    practiceOnlyTeamCount,
     placeableSlotCount: gameSlots.length,
     unplaceableSlotCount: unplaceableSlots.length,
     seasonClockLoading,
@@ -814,16 +899,16 @@ export default function GameSchedulingPage() {
     await Promise.resolve();
 
     try {
-      const roundRobinByDivision = buildRoundRobinByDivision(schedulerTeams);
+      const { roundRobinByDivision } = divisionPlan;
       const start = performance.now();
       const result = scheduleGames({
-        teams: schedulerTeams,
+        teams: gameTeams,
         slots: gameSlots,
         roundRobinByDivision,
       });
       const evaluation = evaluateGameSchedule({
         assignments: result.assignments,
-        teams: schedulerTeams,
+        teams: gameTeams,
         byes: result.byes,
         unscheduled: result.unscheduled,
         sharedSlotUsage: result.sharedSlotUsage,
@@ -876,7 +961,7 @@ export default function GameSchedulingPage() {
       setApplyStatus('error');
       setApplyError(err.message || 'Game schedule generation failed.');
     }
-  }, [fieldById, gameSlots, schedulerDisabled, schedulerTeams, slotById, teamById]);
+  }, [divisionPlan, fieldById, gameSlots, gameTeams, schedulerDisabled, slotById, teamById]);
 
   // Auto-run when arriving from the dashboard "Run Game Scheduling" button.
   // Fires once the page is ready (teams + slots loaded, permission granted);
@@ -931,7 +1016,10 @@ export default function GameSchedulingPage() {
           seasonSettingsId: currentSeasonSetting?.id,
           parameters: {
             organizationId: currentOrganization?.id,
+            // Every generated team, as before D2; of them, the practice-only
+            // divisions' teams, which the run gave no games.
             teamCount: schedulerTeams.length,
+            practiceOnlyTeamCount,
             slotCount: gameSlots.length,
             generationMode,
           },
@@ -955,6 +1043,7 @@ export default function GameSchedulingPage() {
       currentOrganization?.id,
       currentSeasonSetting?.id,
       gameSlots.length,
+      practiceOnlyTeamCount,
       schedulerTeams.length,
       slotById,
     ]
@@ -1504,9 +1593,41 @@ export default function GameSchedulingPage() {
             gameSummary={reviewSummary}
             generatedAt={schedulerResult?.generatedAt ?? game?.generatedAt}
           />
+
+          <PracticeOnlyDivisions divisions={divisionPlan.practiceOnlyDivisions} />
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The divisions that play no games (D2): listed so their teams read as meant
+ * to have no fixtures, not as unscheduled.
+ *
+ * @param {{ divisions: Array<{ division: string, teamIds: string[] }> }} props
+ */
+function PracticeOnlyDivisions({ divisions }) {
+  const headingId = useId();
+  if (!divisions.length) return null;
+  return (
+    <section className="section-panel glass-panel" aria-labelledby={headingId}>
+      <header className="section-header">
+        <h2 id={headingId}>Practice only</h2>
+      </header>
+      <p className="text-sm text-text-muted">
+        These divisions play no games, so the scheduler builds them no fixtures. Their teams still
+        practise.
+      </p>
+      <ul className="mt-2 space-y-1 text-sm text-text-primary">
+        {divisions.map((entry) => (
+          <li key={entry.division}>
+            <span className="font-semibold">{entry.division}</span>
+            {` \u00b7 ${entry.teamIds.length} team${entry.teamIds.length === 1 ? '' : 's'}, no games`}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

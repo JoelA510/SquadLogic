@@ -225,12 +225,22 @@ function findDivisionRowForProgram(program, divisionRows) {
   );
 }
 
+/** The division columns the teaming rules read (`plays_games` is added when it exists, D2). */
+const DIVISION_SETTING_COLUMNS =
+  'id, organization_id, season_settings_id, name, max_roster_size, min_roster_size, ' +
+  'target_team_size, team_count_override, min_teams, max_teams';
+
 function configFromDivisionRow(divisionRow) {
   const defaults = createDefaultConfig();
   if (!divisionRow) return defaults;
 
   return {
     ...defaults,
+    // D2: only a stored division carries its games setting, and only once
+    // the column exists; without it the settings offer no games toggle.
+    ...(typeof divisionRow.plays_games === 'boolean'
+      ? { playsGames: divisionRow.plays_games }
+      : {}),
     targetTeamSize: divisionRow.target_team_size ?? defaults.targetTeamSize,
     minRosterSize: divisionRow.min_roster_size ?? defaults.minRosterSize,
     maxRosterSize: divisionRow.max_roster_size ?? defaults.maxRosterSize,
@@ -251,6 +261,9 @@ function toDivisionConfigPayload({ program, config, organizationId, seasonSettin
     team_count_override: config.teamCountOverride ?? null,
     min_teams: config.minTeams ?? null,
     max_teams: config.maxTeams ?? null,
+    // D2: sent only when the division's setting was read (a boolean), so a
+    // save before the migration calls the ten-argument writer it has.
+    ...(typeof config.playsGames === 'boolean' ? { plays_games: config.playsGames } : {}),
   };
 }
 
@@ -726,25 +739,20 @@ export default function TeamAnalysisPage() {
 
       setDivisionRows(null);
       setDivisionSettingsError(null);
-      const { data, error } = await supabase
-        .from('divisions')
-        .select(
-          `
-          id,
-          organization_id,
-          season_settings_id,
-          name,
-          max_roster_size,
-          min_roster_size,
-          target_team_size,
-          team_count_override,
-          min_teams,
-          max_teams
-        `
-        )
-        .eq('organization_id', currentOrganization.id)
-        .eq('season_settings_id', currentSeasonSetting.id)
-        .order('name', { ascending: true });
+      const readDivisions = (columns) =>
+        supabase
+          .from('divisions')
+          .select(columns)
+          .eq('organization_id', currentOrganization.id)
+          .eq('season_settings_id', currentSeasonSetting.id)
+          .order('name', { ascending: true });
+      let { data, error } = await readDivisions(`${DIVISION_SETTING_COLUMNS}, plays_games`);
+      // D2: before migration 20261029010000 `plays_games` does not exist
+      // (42703); the rules are read without it and no division offers the
+      // games setting. Every other error stays an error.
+      if (!cancelled && error?.code === '42703') {
+        ({ data, error } = await readDivisions(DIVISION_SETTING_COLUMNS));
+      }
 
       if (cancelled) return;
       if (error) {
@@ -811,6 +819,9 @@ export default function TeamAnalysisPage() {
           p_team_count_override: payload.team_count_override,
           p_min_teams: payload.min_teams,
           p_max_teams: payload.max_teams,
+          ...(typeof payload.plays_games === 'boolean'
+            ? { p_plays_games: payload.plays_games }
+            : {}),
         });
 
         if (error) {

@@ -1305,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1840,6 +1840,36 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-000000000002','[2026-10-01,2026-10-16)','requested','ed000000-0000-4000-8000-0000000000f1',NULL,NULL);" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the three lighting override rows the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261029010000's revert DESTROYS every slot reservation and every
+  # practice-only flag**, so its warning is the check. THREE reserved slots
+  # and TWO practice-only divisions, beside an open slot and a division that
+  # plays: every figure distinct, so counting every slot, or every division,
+  # prints a different number. Inserted as the table owner (the RPC is the
+  # smoke's); every name is synthetic.
+  if [ "$id" = "20261029010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('d2000000-0000-4000-8000-00000000000a','Reserve Org','reserve-org');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('d2000000-0000-4000-8000-00000000000d','d2000000-0000-4000-8000-00000000000a','Reserve Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name, plays_games) VALUES
+                ('d2000000-0000-4000-8000-0000000000d1','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000d','Reserve U4', false),
+                ('d2000000-0000-4000-8000-0000000000d2','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000d','Reserve U5', false),
+                ('d2000000-0000-4000-8000-0000000000d3','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000d','Reserve U10', true);
+              INSERT INTO public.locations (id, organization_id, name) VALUES
+                ('d2000000-0000-4000-8000-00000000000b','d2000000-0000-4000-8000-00000000000a','Reserve Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name, active) VALUES
+                ('d2000000-0000-4000-8000-00000000000c','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000b','Reserve Pitch', true);
+              INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, division_id) VALUES
+                ('d2000000-0000-4000-8000-000000000001','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000c','sat','09:00','09:30','d2000000-0000-4000-8000-0000000000d1'),
+                ('d2000000-0000-4000-8000-000000000002','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000c','sat','09:45','10:15','d2000000-0000-4000-8000-0000000000d1'),
+                ('d2000000-0000-4000-8000-000000000003','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000c','sat','10:30','11:00','d2000000-0000-4000-8000-0000000000d2'),
+                ('d2000000-0000-4000-8000-000000000004','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000c','mon','17:00','18:00',NULL);" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the reserved slots and practice-only divisions the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -2891,6 +2921,57 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the coach view revert did not restore every dropped or replaced object as it was at 20261026010000"
         dump 10 $SCRATCH/harness_coachview; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261029010000" ]; then
+      # The seed planted 3 reserved slots (and 1 open) and 2 practice-only
+      # divisions (and 1 that plays).
+      if grep -q 'this revert DESTROYS 3 practice slot reservation(s), which open to every division, and 2 practice-only division flag(s), which play games again' $SCRATCH/harness_rev; then
+        echo "  | (checked) the practice-only revert counted the slot reservations and practice-only divisions it was about to destroy"
+      else
+        echo "FAIL revert ${id}: planted 3 reserved slots and 2 practice-only divisions and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # One fingerprint of every object the migration replaced or added, read
+      # off the catalogue: the five functions (signature, security,
+      # volatility, SET clauses, result, arguments, sorted grants, md5 of the
+      # body, comment), so the slot RPC and the clash helper are gone and the
+      # division settings, finalize and rollback writers are back as they
+      # were; and every column (name, type, nullability, default, comment),
+      # constraint and index of divisions and practice_slots, so plays_games,
+      # division_id, the composite key and the reference are gone. The
+      # expected md5 and row count were read 2026-10-25 off a build at
+      # 20261028010000 with the same query; the count is part of the verdict,
+      # so a lookup that finds nothing cannot pass.
+      if psql_cmd "SELECT 'PRACTICEONLY-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*)
+               = '4a7321df503bfe4ca450cd7d14c774fd:65' THEN 'restored' ELSE 'wrong' END FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('admin_upsert_division_settings', 'finalize_field_import_job', 'rollback_field_import_job',
+                           'admin_set_practice_slot_division', 'practice_slot_conflicts')
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+         AND c.relname IN ('divisions', 'practice_slots')
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint WHERE conrelid IN (to_regclass('public.divisions'), to_regclass('public.practice_slots'))
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid IN (to_regclass('public.divisions'), to_regclass('public.practice_slots'))
+             ) s;" \
+         >$SCRATCH/harness_practiceonly 2>&1 && grep -q 'PRACTICEONLY-VERDICT:restored' $SCRATCH/harness_practiceonly; then
+        echo "  | (checked) the practice-only revert restores the division settings, field finalize and rollback writers as at 20261028010000 and drops the slot reservation RPC, the clash helper, practice_slots.division_id with its reference and index, and divisions.plays_games with its key, each function with its grants, comment and posture"
+      else
+        echo "FAIL revert ${id}: the practice-only revert did not restore every replaced object and drop every added one as at 20261028010000"
+        dump 10 $SCRATCH/harness_practiceonly; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

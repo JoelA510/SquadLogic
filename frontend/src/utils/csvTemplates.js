@@ -50,6 +50,9 @@ export const CSV_TEMPLATES = {
       'Valid Until',
       'Surface Type',
       'Supports Halves',
+      // D2: optional. A practice slot named for a division of the season is
+      // reserved to it; blank leaves it open to every division.
+      'Division',
     ],
     example: [
       'Main Park',
@@ -65,6 +68,7 @@ export const CSV_TEMPLATES = {
       '2026-05-31',
       'Grass',
       'yes',
+      '',
     ],
     filename: 'squadlogic-fields-template.csv',
   },

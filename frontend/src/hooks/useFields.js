@@ -1,7 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
+import { z } from 'zod';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { logger } from '../lib/logger.js';
+
+/**
+ * A practice slot's reservation as `admin_set_practice_slot_division` takes it
+ * (D2, migration 20261029010000): the slot, and a division id or `null` to
+ * open the slot to every division.
+ */
+const SlotReservationSchema = z
+  .object({
+    slotId: z.string().min(1, 'a practice slot id is required'),
+    divisionId: z.string().min(1, 'a division id is required').nullable(),
+  })
+  .strict();
+
+/** The fields read, with each field's subunits and practice slots. */
+const FIELD_SELECT = (slotColumns) => `
+          *,
+          field_subunits ( id, label, effective_to ),
+          practice_slots ( ${slotColumns} )
+        `;
+const SLOT_COLUMNS = 'id, day_of_week, start_time, end_time, capacity, field_subunit_id';
 
 export function useFields() {
   const [locations, setLocations] = useState([]);
@@ -9,6 +30,9 @@ export function useFields() {
   const [availabilityProfiles, setAvailabilityProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // False until a read shows `practice_slots.division_id` exists (D2): the SPA
+  // ships before its migration, and the reservation select waits for it.
+  const [reservationsAvailable, setReservationsAvailable] = useState(false);
   const { currentOrganization } = useOrganization();
 
   const fetchLocationsAndFields = useCallback(async () => {
@@ -33,21 +57,30 @@ export function useFields() {
       if (locError) throw locError;
       setLocations(locData || []);
 
-      // 2. Fetch Fields, joined with subunits
-      const { data: fieldData, error: fieldError } = await supabase
-        .from('fields')
-        .select(
-          `
-          *,
-          field_subunits ( id, label, effective_to ),
-          practice_slots ( id, day_of_week, start_time, end_time, capacity )
-        `
-        )
-        .eq('organization_id', currentOrganization.id)
-        .order('name');
+      // 2. Fetch Fields, joined with subunits and each slot's reservation (D2).
+      const readFields = (slotColumns) =>
+        supabase
+          .from('fields')
+          .select(FIELD_SELECT(slotColumns))
+          .eq('organization_id', currentOrganization.id)
+          .order('name');
+      let { data: fieldData, error: fieldError } = await readFields(`${SLOT_COLUMNS}, division_id`);
+      let hasReservations = true;
+      // **The deploy order, handled by name.** Before migration
+      // 20261029010000 the column does not exist and PostgREST answers
+      // 42703; the fields are read again without it and no slot offers a
+      // reservation. Every other error stays fatal.
+      if (fieldError?.code === '42703') {
+        logger.warn(
+          'practice_slots.division_id is absent, so slot reservations are not migrated yet'
+        );
+        hasReservations = false;
+        ({ data: fieldData, error: fieldError } = await readFields(SLOT_COLUMNS));
+      }
 
       if (fieldError) throw fieldError;
       setFields(fieldData || []);
+      setReservationsAvailable(hasReservations);
 
       const { data: availabilityData, error: availabilityError } = await supabase
         .from('field_availability_profiles')
@@ -456,12 +489,44 @@ export function useFields() {
     return data;
   };
 
+  /**
+   * Reserve a practice slot to a division, or open it again (`null`): the
+   * admin-only, audited `admin_set_practice_slot_division` (D2). The slot is
+   * updated in place from the RPC's answer.
+   *
+   * @param {string} slotId
+   * @param {string|null} divisionId
+   */
+  const setSlotDivision = async (slotId, divisionId) => {
+    const parsed = SlotReservationSchema.parse({ slotId, divisionId });
+    const { data, error: rpcError } = await supabase.rpc('admin_set_practice_slot_division', {
+      p_slot_id: parsed.slotId,
+      p_division_id: parsed.divisionId,
+    });
+    if (rpcError) throw rpcError;
+    if (!data || String(data.id) !== parsed.slotId) {
+      throw new Error('admin_set_practice_slot_division returned no readable result');
+    }
+    const stored = data.division_id ?? null;
+    setFields((current) =>
+      current.map((field) => ({
+        ...field,
+        practice_slots: (field.practice_slots ?? []).map((slot) =>
+          String(slot.id) === parsed.slotId ? { ...slot, division_id: stored } : slot
+        ),
+      }))
+    );
+    return data;
+  };
+
   return {
     locations,
     fields,
     availabilityProfiles,
     loading,
     error,
+    reservationsAvailable,
+    setSlotDivision,
     addLocation,
     addField,
     updateField,

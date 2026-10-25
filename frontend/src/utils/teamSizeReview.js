@@ -18,8 +18,14 @@ export function summarizeTeamSizeReview(results) {
   let rosterSizeByTeamId = null;
   if (rows.length > 0) {
     rosterSizeByTeamId = new Map();
+    // One team per player, the first row's, as the placement review reads the rows
+    // (`placementReview.js`), so a duplicate row never counts a player twice.
+    const seen = new Set();
     for (const row of rows) {
       if (!isRosterPlayerRow(row)) continue;
+      const playerId = String(row?.player_id);
+      if (seen.has(playerId)) continue;
+      seen.add(playerId);
       const teamId = String(row?.team_id);
       rosterSizeByTeamId.set(teamId, (rosterSizeByTeamId.get(teamId) ?? 0) + 1);
     }

@@ -42,8 +42,8 @@ ProgramStatus.propTypes = {
 /**
  * Every program of the import, with the count generation will build, the recommended count and
  * a status from the settings panel's advice. Choosing a program is a button in its row's first
- * cell (WCAG 2.1.1), pressed while that program is the one being configured; the row stays
- * clickable with a mouse.
+ * cell (WCAG 2.1.1), marked `aria-current` while that program is the one being configured (a
+ * single selection, not a toggle); the row stays clickable with a mouse.
  */
 export default function ProgramOverview({ programs, onSelectProgram, selectedProgramId }) {
   return (
@@ -96,7 +96,7 @@ export default function ProgramOverview({ programs, onSelectProgram, selectedPro
                     <button
                       type="button"
                       className="text-left font-medium text-text-primary hover:underline rounded"
-                      aria-pressed={selected}
+                      aria-current={selected ? 'true' : undefined}
                       onClick={(event) => {
                         // The row's own click would select it a second time.
                         event.stopPropagation();
@@ -107,7 +107,10 @@ export default function ProgramOverview({ programs, onSelectProgram, selectedPro
                     </button>
                   </td>
                   <td className="p-4 text-text-secondary">{program.playerCount}</td>
-                  <td className="p-4 text-text-secondary">{program.estimatedTeams}</td>
+                  <td className="p-4 text-text-secondary">
+                    {/* Generation refuses rules the advice calls blocked: no count to estimate. */}
+                    {program.assessment?.blocked ? '—' : program.estimatedTeams}
+                  </td>
                   <td className="p-4 text-text-secondary">{recommended ?? '—'}</td>
                   <td className="p-4 text-text-secondary">{program.avgRosterSize}</td>
                   <td className="p-4">

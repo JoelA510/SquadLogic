@@ -29,11 +29,12 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
   # overview is scanned with axe here, where it renders (the accessibility feature's "/teams"
   # row scans the seeded run's view).
   Scenario: The program overview recommends a count and warns, and is operable from the keyboard
-    Given 100 players are imported into the "U12 Boys" program
+    Given 100 players are imported into the "U12 Boys" program and 24 into the "U10 Girls" program
     When I ask the Teams page for 5 teams of at most 10 players
     Then the program overview recommends the fewest teams that hold 100 players at 10 each for "U12 Boys"
     And the program overview's status for "U12 Boys" is "Override not used"
-    And "U12 Boys" is chosen in the program overview with the Enter key
+    And "U10 Girls" is chosen in the program overview with the Enter key
+    And the program overview's status for "U12 Boys" is "Override not used"
     And axe finds no serious or critical violations on "/teams" in the "light" theme
     When I switch to the dark theme on this page
     Then axe finds no serious or critical violations on "/teams" in the "dark" theme

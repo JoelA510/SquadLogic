@@ -146,6 +146,33 @@ describe('Team sizes on the Teams page', () => {
     );
   });
 
+  it("counts a player with two rows once, on the first row's team, as the placement review does", () => {
+    const results = fresh(10, { maxRosterSize: 10, minRosterSize: 8 });
+    const [team] = results.teamsByDivision.U10;
+    const [first] = results.team_players;
+    // A stray second row for one player on a team the run does not know.
+    const edited = {
+      ...results,
+      team_players: [...results.team_players, { ...first, team_id: 'stray-team' }],
+    };
+    const [outcome] = summarizeTeamSizeReview(edited).divisions;
+    expect(outcome.playersPlaced).toBe(10);
+    expect(outcome.underMin).toEqual([]);
+    expect(team.players).toHaveLength(10);
+  });
+
+  it("reads the rosters when the run's rows seat nobody on the division's teams", () => {
+    const results = fresh(10, { maxRosterSize: 10, minRosterSize: 8 });
+    // Only coach rows: no player row names a team of the division.
+    const coachesOnly = {
+      ...results,
+      team_players: [{ team_id: results.teamsByDivision.U10[0].id, player_id: 'c', role: 'coach' }],
+    };
+    const [outcome] = summarizeTeamSizeReview(coachesOnly).divisions;
+    expect(outcome.playersPlaced).toBe(10);
+    expect(outcome.underMin).toEqual([]);
+  });
+
   it("says a run that holds no rosters was not checked, as the mock seed's saved run", () => {
     render(
       <TeamSizeOutcomeList

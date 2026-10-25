@@ -77,7 +77,8 @@ function recordedLimits(rosterBalance) {
  * @param {any} result - `generateTeams`' result, or a stored run's `results`
  *   (`buildTeamReviewSnapshot`'s shape, whose team ids are the persisted ones)
  * @param {{ rosterSizeByTeamId?: Map<string, number> | null }} [options] - each team's current
- *   size, when the run's rows say where players are now; a team missing from it has none
+ *   size, when the run's rows say where players are now; a team missing from it has none, unless
+ *   the rows seat nobody on any of the division's teams (then its rosters are read instead)
  * @returns {{ divisions: DivisionTeamSizeOutcome[] } | null} null when the result holds no
  *   division's rosters
  */
@@ -99,15 +100,17 @@ export function summarizeTeamSizeOutcome(result, { rosterSizeByTeamId = null } =
     // the first on a fresh team, the stored rosters the second.
     /** @type {Map<string, TeamSize>} */
     const sizeById = new Map();
-    // A size is known from the run's rows, or from a team's own roster; a team with neither (a
-    // team row with no players array) leaves the division's sizes unknown, not zero.
-    const rostersKnown =
-      rosterSizeByTeamId !== null || teams.every((team) => Array.isArray(team?.players));
+    // A size is known from the run's rows, when they seat anyone on this division's teams (a
+    // team they leave out has nobody), or else from each team's own roster; a team with neither
+    // (a team row with no players array) leaves the division's sizes unknown, not zero.
+    const rowsCoverDivision =
+      rosterSizeByTeamId !== null && teams.some((team) => rosterSizeByTeamId.has(String(team?.id)));
+    const rostersKnown = rowsCoverDivision || teams.every((team) => Array.isArray(team?.players));
     /** @type {TeamSize[]} */
     const sizes = teams.map((team) => {
       const teamId = String(team?.id);
       const rosterSize = Array.isArray(team?.players) ? team.players.length : 0;
-      const playerCount = rosterSizeByTeamId ? (rosterSizeByTeamId.get(teamId) ?? 0) : rosterSize;
+      const playerCount = rowsCoverDivision ? (rosterSizeByTeamId?.get(teamId) ?? 0) : rosterSize;
       const size = { teamId, teamName: team?.name ? String(team.name) : teamId, playerCount };
       sizeById.set(teamId, size);
       if (team?.generatorId != null) sizeById.set(String(team.generatorId), size);

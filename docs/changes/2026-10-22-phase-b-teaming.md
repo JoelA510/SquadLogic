@@ -491,7 +491,9 @@ engine conventions), and the demo league is teamed end to end.
   the package has no index). Per division of `teamsByDivision`: `underMin`, `overMax` (each a
   list of `{ teamId, teamName, playerCount }`) and `notPlacedForCapacity`. Teams are enumerated
   from the rosters and sized from them (or from the run's current `team_players`, coach rows
-  left out by `isRosterPlayerRow`, so a manual edit shows); the limits are the ones the
+  left out by `isRosterPlayerRow` and each player counted once, on the first row's team, as the
+  placement review reads them, so a manual edit shows; rows that seat nobody on a division's
+  teams leave it to its rosters); the limits are the ones the
   generator wrote on each team's `rosterBalanceByDivision` stats. So a fresh run, which carries
   no `capacityViolations`, is checked from its rosters; a rerun's `capacityViolations` is used
   only when the stats carry no maximum. A division it cannot check (no recorded maximum, or team
@@ -510,15 +512,18 @@ engine conventions), and the demo league is teamed end to end.
 - **The overview** shows Est. Teams (the count generation will build), Recommended and a status
   from `assessTeamCount`: "Fits the limits", a badge per warning ("Teams over the maximum",
   "Teams under the minimum", "Too few players for one team", "Override not used"), or "Settings
-  need fixing" when generation would refuse the rules. Each program's name is a native button
-  in the row's first cell (`aria-pressed` while it is the one being configured); the row stays
-  clickable with a mouse. Est. Teams now counts the head coaches too, so it agrees with the panel
-  and the generator.
+  need fixing" when generation would refuse the rules (Est. Teams then reads "—"). Each
+  program's name is a native button in the row's first cell, `aria-current` while it is the one
+  being configured (a single selection, not a toggle); the row stays clickable with a mouse.
+  Est. Teams now counts the head coaches too, so it agrees with the panel.
 - **Coaches** are counted in `derivePrograms` by calling `toGeneratorPlayer` on each import row
   and collecting the distinct `coachId`s, the generator's own count: a coach email, or a
   willing-to-coach flag (which today makes the player a synthetic coach; B6 changes that, and
-  this count follows). Coaches that `coach_team_requests` links at generation are not read
-  before it, so the count is a floor; the panel says "and N head coaches".
+  this count follows). It is the import's count, not the run's: coaches that
+  `coach_team_requests` links at generation are not read before it (they can add teams), and a
+  coach whose child is not eligible anchors no team (B2; it can remove one), as the advice counts
+  the registered players and the generator the eligible ones (Risks, above). The panel says "and
+  N head coaches".
 - **Auto by default:** `createDefaultConfig` sets no override, so a program with no saved
   division row generates and saves `team_count_override = null`. A saved override (decision 4)
   is kept as before; the panel already showed the recommendation and "Use N" when the two
@@ -528,12 +533,23 @@ engine conventions), and the demo league is teamed end to end.
   without `capacityViolations` or limits reading `null`, a stored run's ids and current rows);
   `tests/teamSizeReview.test.jsx` (the section and the announcement); the page tests in
   `tests/teamingConfigurationAdvice.test.jsx`; e2e, a Pillar 1 scenario reads the overview's
-  count and status, chooses the program with the Enter key and scans the overview with axe in
-  both themes, and the generation scenario reads "Team sizes". The late-registrant scenarios'
+  count and status for one of two programs, chooses the other with the Enter key (failing with
+  the row's control planted back as a span) and scans the overview with axe in both themes
+  (failing on a planted unnamed button), and the generation scenario reads "Team sizes". The
+  Pillar 1 import step now builds its rows in one helper, so the two-program step adds no mock
+  write of its own. The late-registrant scenarios'
   axe scans now include the section's warnings (the saved teams are under the minimum).
 - **Contrast** of the warnings is the tokens' pair B3 measured (`--warning-text` on
   `--warning-weak`); the overview's badges are the `Badge` primitive's, scanned by axe in both
   themes.
+- **Review round (`/code-review`, fixed here):** the Enter-key step chose a program already
+  chosen (now one of two); duplicate rows counted a player twice; rows that seat nobody on a
+  division's teams read every team as empty; a toggle (`aria-pressed`) for a single selection;
+  an estimate shown for rules generation refuses; and the coach count called a floor when a
+  blocked child can lower it. Not changed: a player not placed and then seated by hand would
+  still count under "no room", but the roster editor shows only rostered players, so no user can
+  produce that state (B3's finding); the name and pluralising helpers are not shared with B3's
+  module, which would be a refactor of B3's file.
 
 ## Not in Phase B
 

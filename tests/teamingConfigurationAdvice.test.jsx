@@ -241,6 +241,19 @@ describe('Team counts per program on the Teams page (Phase B4)', () => {
     expect(screen.queryByText('Ready')).toBeNull();
   });
 
+  it('gives no estimate for rules generation would refuse, and says they need fixing', async () => {
+    page.rows = importRows('U10', 30);
+    await renderPage();
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(String(Math.ceil(30 / 12)));
+    // The admin clears the maximum roster, which generation requires.
+    fireEvent.change(screen.getByLabelText('Max Roster'), { target: { value: '' } });
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Status')).toHaveTextContent('Settings need fixing')
+    );
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent('—');
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('—');
+  });
+
   it('makes each program a button in its row, so it can be chosen from the keyboard', async () => {
     page.rows = [...importRows('U10', 12), ...importRows('U12', 12)];
     await renderPage();
@@ -250,14 +263,15 @@ describe('Team counts per program on the Teams page (Phase B4)', () => {
     expect(u12.tagName).toBe('BUTTON');
     expect(u12).toHaveAttribute('type', 'button');
     expect(u12).not.toHaveAttribute('tabindex', '-1');
-    expect(u12).toHaveAttribute('aria-pressed', 'false');
+    expect(u12).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: 'U10' })).toHaveAttribute('aria-current', 'true');
     // A native button: Enter and Space activate it as a click (the browser's, in the e2e).
     u12.focus();
     expect(document.activeElement).toBe(u12);
     fireEvent.click(u12);
     expect(await screen.findByRole('heading', { name: 'U12 Settings' })).toBeInTheDocument();
-    expect(u12).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'U10' })).toHaveAttribute('aria-pressed', 'false');
+    expect(u12).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('button', { name: 'U10' })).not.toHaveAttribute('aria-current');
     // Still a table: the button sits in the row's first cell.
     expect(u12.closest('td')).toBe(within(overviewRow('U12')).getAllByRole('cell')[0]);
   });

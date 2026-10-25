@@ -123,8 +123,10 @@ function createDefaultConfig() {
 /**
  * The programs of an import, with the players and the head coaches each holds. A coach is
  * counted by the rule generation uses (`toGeneratorPlayer`'s `coachId`), once per distinct
- * coach, as the generator counts them. Coaches the `coach_team_requests` links add at generation
- * are not known here, so the count is a floor.
+ * coach, as the generator counts them. It is the import's count, not the run's: coaches the
+ * `coach_team_requests` links add at generation are not known here, and a coach whose child is
+ * not eligible for the division anchors no team (Phase B2), as the registered players are
+ * counted here and the eligible ones by the generator.
  */
 function derivePrograms(rows) {
   const grouped = new Map();
@@ -153,9 +155,10 @@ function positiveIntegerOrFallback(value, fallback) {
 
 function deriveProgramStats(program, config = {}) {
   const maxRosterSize = positiveIntegerOrFallback(config.maxRosterSize, DEFAULT_MAX_ROSTER_SIZE);
-  // The count generation will build, with the head coaches the import names, so the overview,
-  // the settings panel and the generator agree. Empty limits mean what they mean to the
-  // generator: no minimum, a target equal to the maximum.
+  // The count generation will build from the registered players and the head coaches the import
+  // names, by the generator's own rule, so the overview and the settings panel agree with it.
+  // Empty limits mean what they mean to the generator: no minimum, a target equal to the maximum
+  // (an empty maximum is refused; the overview shows no estimate then).
   const estimatedTeams = resolveTeamCount({
     playerCount: program.playerCount,
     coachCount: program.coachCount ?? 0,

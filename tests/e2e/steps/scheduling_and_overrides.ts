@@ -221,6 +221,66 @@ Then(
   }
 );
 
+/** The program overview's row for a program, found by the button that chooses it (Phase B4). */
+const programRow = (page: Page, program: string) =>
+  page
+    .getByRole('table', { name: 'Program Overview' })
+    .getByRole('row')
+    .filter({ has: page.getByRole('button', { name: program, exact: true }) });
+
+/** A cell of that row, by its column header's position. */
+async function programCell(page: Page, program: string, header: string) {
+  const headers = await page
+    .getByRole('table', { name: 'Program Overview' })
+    .getByRole('columnheader')
+    .allTextContents();
+  const index = headers.findIndex((text) => text.trim() === header);
+  expect(index, `the overview has a "${header}" column`).toBeGreaterThanOrEqual(0);
+  return programRow(page, program).getByRole('cell').nth(index);
+}
+
+Then(
+  'the program overview recommends the fewest teams that hold {int} players at {int} each for {string}',
+  async ({ page }, players: number, perTeam: number, program: string) => {
+    // The expectation is the step's arithmetic, never the page's output.
+    const expected = Math.ceil(players / perTeam);
+    await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
+    await expect(await programCell(page, program, 'Players')).toHaveText(String(players));
+  }
+);
+
+Then(
+  "the program overview's status for {string} is {string}",
+  async ({ page }, program: string, status: string) => {
+    await expect(await programCell(page, program, 'Status')).toHaveText(status);
+    await expect(page.getByRole('table', { name: 'Program Overview' })).not.toContainText('Ready');
+  }
+);
+
+Then(
+  '{string} is chosen in the program overview with the Enter key',
+  async ({ page }, program: string) => {
+    const choose = page
+      .getByRole('table', { name: 'Program Overview' })
+      .getByRole('button', { name: program, exact: true });
+    await choose.focus();
+    await expect(choose).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(choose).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('heading', { name: `${program} Settings` })).toBeVisible();
+  }
+);
+
+Then(
+  'the review says every team of {string} is within the roster limits',
+  async ({ page }, program: string) => {
+    const sizes = page.getByRole('region', { name: 'Team sizes' });
+    await expect(sizes).toContainText(`${program}: `);
+    await expect(sizes).toContainText('Every team is within the roster limits');
+    await expect(sizes.getByRole('list')).toHaveCount(0);
+  }
+);
+
 Then(
   'all {int} players are assigned and none is left for manual review',
   async ({ page }, players: number) => {

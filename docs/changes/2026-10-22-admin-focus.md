@@ -408,9 +408,11 @@ at once (AGENTS.md section 11).
   `20261024010000` (41 rows). The purge, patch helper, finalizer, roster, staff and member plants
   that aimed at bodies R4 replaces are re-aimed at `$M42`; the directory plant ("the directory
   ignores its setting"), the roster guardian-contact plant and the unshared-card plant retire with
-  what they mutated. Seven M42 plants (two refused by the migration itself: an email column put
-  back on the staff read, and the purge still writing `guardian_contacts`) and three R42 plants
-  are added.
+  what they mutated. Eight M42 plants (three refused by the migration itself: an email column put
+  back on the staff read; the purge still writing `guardian_contacts`; and `players.contact_info`
+  left in place, which leaves `admin_create_player` and `admin_update_player` returning rows with a
+  contact column) and three R42 plants are added. Each new or re-aimed plant was applied by hand
+  in its own copy of the tree and the harness run: each failed with its expected check.
 - **Found for later PRs, not done here.** `email_log` (no reader or writer in the app; 0 rows) is
   readable by any member (`email_log_select_member`) and carries `recipient_email`.
   `organizations.contact_info` is member-readable; it holds the league's settings (its timezone),

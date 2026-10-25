@@ -4431,12 +4431,22 @@ plant "M42 the sanitizer takes guardian_contacts again" "$M42" \
   "            WHEN 'date_of_birth', 'guardian_contacts' THEN" \
   "smoke 20261025010000"
 
+# Refused by the migration itself: with the column left, admin_create_player
+# and admin_update_player return players rows carrying a contact column.
 plant "M42 players.contact_info is left behind" "$M42" \
   "ALTER TABLE public.players
     DROP COLUMN contact_info,
     DROP COLUMN guardian_contacts;" \
   "ALTER TABLE public.players
     DROP COLUMN guardian_contacts;" \
+  "applying 20261025010000_remove_contact_surfaces.sql"
+
+# No function a coach may call returns profiles rows, so a card column left
+# behind passes the migration's check: the smoke's column check refuses it.
+plant "M42 profiles.share_contact is left behind" "$M42" \
+  "    DROP COLUMN contact_email,
+    DROP COLUMN share_contact;" \
+  "    DROP COLUMN contact_email;" \
   "smoke 20261025010000"
 
 plant "M42 coach_interested_programs is left behind" "$M42" \

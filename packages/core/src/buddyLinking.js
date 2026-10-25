@@ -680,6 +680,61 @@ export function resolveBuddyRequests({ players, roster } = /** @type {any} */ ({
   return { requests };
 }
 
+/**
+ * Turn resolved requests into `buddyId`s under the league's rule, and say what became of
+ * each request. A mutual pair (each names the other) always links, here. A one-way request is
+ * honoured only under `one_way_best_effort`, and only when the named player listed no buddy of
+ * their own; its `buddyId` is returned separately (`oneWayBuddyIds`) and set on the requester
+ * after play-up eligibility, so it is scored best effort by `BuddyEvaluator`, never forms a
+ * unit, and never sanctions a play-up (route B needs a pair that is placed together).
+ * The request text is consumed here, so `normalizeBuddyLinks` keeps its rules for codes and
+ * explicit references and never reads a name as a registration key. Each `buddyId` is the
+ * target's own id value (a numeric id stays a number), as the generator compares strictly.
+ * `prepareTeamingInput` (Team Analysis) and TeamBuilder's auto-balance (`balanceSignals.js`,
+ * Phase B5) both apply it.
+ *
+ * @param {{ players: any[], requests: any[], buddyRule?: string }} params
+ */
+export function applyBuddyRule({ players, requests, buddyRule }) {
+  const byId = new Map(players.map((player) => [String(player.id), player]));
+  const rawId = (id) => byId.get(id)?.id ?? id;
+  const buddyIdByPlayer = new Map();
+  const oneWayBuddyIds = new Map();
+  const outcomes = requests.map((request) => {
+    if (request.status !== BUDDY_REQUEST_STATUS.RESOLVED) {
+      return { ...request, outcome: request.status, honoured: false };
+    }
+    if (request.reciprocated) {
+      buddyIdByPlayer.set(request.playerId, rawId(request.targetId));
+      return { ...request, outcome: 'mutual', honoured: true };
+    }
+    if (buddyRule !== BUDDY_RULES.ONE_WAY_BEST_EFFORT) {
+      return { ...request, outcome: 'one-way', honoured: false, reason: 'buddy-rule-mutual' };
+    }
+    if (listsABuddy(byId.get(request.targetId))) {
+      return {
+        ...request,
+        outcome: 'one-way',
+        honoured: false,
+        reason: 'named-player-listed-another-buddy',
+      };
+    }
+    oneWayBuddyIds.set(request.playerId, rawId(request.targetId));
+    return { ...request, outcome: 'one-way', honoured: true };
+  });
+
+  const consumed = new Set(requests.map((request) => request.playerId));
+  const stripped = players.map((player) => {
+    const id = String(player.id);
+    if (!consumed.has(id)) return player;
+    const next = { ...player };
+    for (const key of BUDDY_REQUEST_FIELDS) delete next[key];
+    if (buddyIdByPlayer.has(id)) next.buddyId = buddyIdByPlayer.get(id);
+    return next;
+  });
+  return { players: stripped, outcomes, oneWayBuddyIds };
+}
+
 /** `normalizeBuddyLinks` and pipeline diagnostics that leave a player without the buddy asked for. */
 const UNLINKED_DIAGNOSTIC_CODES = new Set([
   'buddy-coach-conflict',

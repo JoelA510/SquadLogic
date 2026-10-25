@@ -272,8 +272,10 @@ at once (AGENTS.md section 11).
 - **Harness.** The revert is checked by a catalogue fingerprint against a build at
   `20261023010000`. Nine guardian plants retire with the objects they mutated (six in
   `20261021010000`, three policies in `20261021020000`); the roster, calendar-token and
-  staff-demotion plants are re-aimed at `$M41`, the live definitions; nine M41 and three R41
-  plants are added.
+  staff-demotion plants are re-aimed at `$M41`, the live definitions; ten M41 plants (two of them
+  refused by the migration itself: a widened admin read, and the old team_players policy left in
+  place, which makes the table drop fail) and three R41 plants are added. Each new or re-aimed
+  plant was applied by hand and the harness run: each failed with its expected check.
 - **Found for later PRs, not done here.** R4: the player record's Guardians tab and the roster's
   guardian contacts component (admin-only now), the contact card, the "guardian(s) volunteered to
   coach" line. R6: a coach still holds `MANAGE_SCHEDULE`, so sees practice and game edit controls

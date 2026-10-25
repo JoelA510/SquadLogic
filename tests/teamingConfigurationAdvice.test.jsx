@@ -136,6 +136,9 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
           team_count_override: params.p_team_count_override,
           min_teams: params.p_min_teams,
           max_teams: params.p_max_teams,
+          ...(typeof params.p_plays_games === 'boolean'
+            ? { plays_games: params.p_plays_games }
+            : {}),
         },
         error: null,
       };
@@ -342,5 +345,41 @@ describe('Team counts per program on the Teams page (Phase B4)', () => {
         .map((node) => node.textContent)
         .join(' ')
     ).toContain('Team sizes: 1 team under the minimum roster.');
+  });
+});
+
+describe('A division plays games, or is practice only (D2)', () => {
+  beforeEach(() => {
+    page.rows = [];
+    page.divisions = [];
+    page.saves = [];
+    sessionStorage.clear();
+  });
+  afterEach(() => cleanup());
+
+  it("shows a stored division's setting and saves the admin's change with the rules", async () => {
+    page.rows = importRows('U4', 12);
+    page.divisions = [savedDivision('U4', { plays_games: true })];
+    await renderPage();
+    const box = await screen.findByRole('checkbox', { name: 'Plays games' });
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(box).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Rules' }));
+    await waitFor(() => expect(page.saves).toHaveLength(1));
+    expect(page.saves[0]).toMatchObject({ p_name: 'U4', p_plays_games: false });
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'Plays games' })).not.toBeChecked()
+    );
+  });
+
+  it('before the migration (a row without plays_games) offers no setting and sends none', async () => {
+    page.rows = importRows('U10', 12);
+    page.divisions = [savedDivision('U10')];
+    await renderPage();
+    expect(screen.queryByRole('checkbox', { name: 'Plays games' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Rules' }));
+    await waitFor(() => expect(page.saves).toHaveLength(1));
+    expect('p_plays_games' in page.saves[0]).toBe(false);
   });
 });

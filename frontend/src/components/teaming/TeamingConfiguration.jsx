@@ -207,6 +207,33 @@ export default function TeamingConfiguration({
           </div>
         </div>
 
+        {typeof config?.playsGames === 'boolean' && (
+          <div className="pt-4 border-t border-border-subtle">
+            <div className="flex items-start gap-3">
+              <input
+                id="division-plays-games"
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-border-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                checked={config.playsGames}
+                onChange={(e) => onUpdate(program.id, { playsGames: e.target.checked })}
+                aria-describedby="division-plays-games-hint"
+              />
+              <div>
+                <label
+                  htmlFor="division-plays-games"
+                  className="block text-sm font-medium text-text-secondary"
+                >
+                  Plays games
+                </label>
+                <p id="division-plays-games-hint" className="text-xs text-text-muted mt-1">
+                  Off makes the division practice only: the game scheduler builds it no fixtures,
+                  and its teams still practise. Saved with the rules.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="pt-4 border-t border-border-subtle">
           <label
             htmlFor="random-seed"

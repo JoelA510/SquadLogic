@@ -152,6 +152,7 @@ const initialMockData = {
       target_team_size: 9,
       min_teams: 1,
       max_teams: 4,
+      plays_games: true,
     },
     {
       id: 'u10-div-id',
@@ -161,6 +162,7 @@ const initialMockData = {
       max_roster_size: 14,
       min_roster_size: 10,
       target_team_size: 12,
+      plays_games: true,
     },
   ],
   teams: [
@@ -792,6 +794,59 @@ const applyFieldRetirementTrigger = (row) => {
   if (row && row.effective_to && String(row.effective_to) < today) row.active = false;
   return row;
 };
+
+/** Seconds past midnight of an `HH:MM[:SS]` wall time, or null. */
+const mockWallSeconds = (value) => {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(value ?? '').trim());
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0) : null;
+};
+const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+
+/**
+ * The first stored practice slot a new one would clash with (migration
+ * 20261029010000's `practice_slot_conflicts`, mirrored): same surface (the
+ * same subunit, or for a whole field the field and each of its subunits), the
+ * same weekday, effective dates sharing that weekday, and overlapping or less
+ * than the turnover (15 minutes) apart.
+ *
+ * @param {Array<Record<string, any>>} slots
+ * @param {{ organizationId: string, fieldId: string, fieldSubunitId: string|null, day: string,
+ *   start: string, end: string, validFrom: string|null, validUntil: string|null,
+ *   excludeSlotId?: string|null }} probe
+ */
+function mockPracticeSlotConflict(slots, probe) {
+  const turnover = 15 * 60;
+  const s = mockWallSeconds(probe.start);
+  const e = mockWallSeconds(probe.end);
+  const dow = MOCK_ISO_DOW[probe.day];
+  return (
+    (slots || []).find((ps) => {
+      if (String(ps.organization_id) !== String(probe.organizationId)) return false;
+      if (String(ps.field_id) !== String(probe.fieldId)) return false;
+      if (String(ps.day_of_week).slice(0, 3) !== probe.day) return false;
+      if (probe.excludeSlotId && String(ps.id) === String(probe.excludeSlotId)) return false;
+      if (
+        probe.fieldSubunitId &&
+        ps.field_subunit_id &&
+        String(ps.field_subunit_id) !== String(probe.fieldSubunitId)
+      ) {
+        return false;
+      }
+      const lo = [ps.valid_from, probe.validFrom].filter(Boolean).sort().at(-1) ?? null;
+      const hi = [ps.valid_until, probe.validUntil].filter(Boolean).sort()[0] ?? null;
+      if (lo && hi) {
+        if (lo > hi) return false;
+        const first = new Date(`${lo}T00:00:00Z`);
+        const shift = (dow - (first.getUTCDay() || 7) + 7) % 7;
+        first.setUTCDate(first.getUTCDate() + shift);
+        if (first.toISOString().slice(0, 10) > hi) return false;
+      }
+      const ps0 = mockWallSeconds(ps.start_time);
+      const ps1 = mockWallSeconds(ps.end_time);
+      return ps0 < e + turnover && s < ps1 + turnover;
+    }) ?? null
+  );
+}
 
 /**
  * The LAST DAY a practice range covers, and the two producers that read it.
@@ -5729,6 +5784,22 @@ export const mockSupabase = {
         });
       };
 
+      // 20261029010000: the season a practice row's Division is named in, as
+      // the SQL chooses it (the active one first, then the latest start).
+      const importSeason =
+        [...(db.season_settings || [])]
+          .filter((s) => String(s.organization_id) === String(job.organization_id))
+          .sort(
+            (a, b) =>
+              Number(b.status === 'active') - Number(a.status === 'active') ||
+              String(b.season_start ?? '').localeCompare(String(a.season_start ?? '')) ||
+              String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
+          )[0] ?? null;
+      const failRow = (row, error) => {
+        invalidRows += 1;
+        row.validation_errors = [{ ...error, source_row_number: row.source_row_number }];
+      };
+
       stagedRows.forEach((row) => {
         const payload = row.normalized_payload || {};
         const locationName = String(payload.location || payload.location_name || '').trim();
@@ -5760,6 +5831,78 @@ export const mockSupabase = {
             },
           ];
           return;
+        }
+
+        // 20261029010000: a practice row's Division, within the season; an
+        // unknown name fails the row before anything is written.
+        let practiceDivisionId = null;
+        const divisionText = String(payload.division || payload.division_name || '').trim();
+        if (slotType === 'practice' && payload.division_id) {
+          practiceDivisionId = payload.division_id;
+        } else if (slotType === 'practice' && divisionText) {
+          const division = (db.divisions || []).find(
+            (d) =>
+              String(d.organization_id) === String(job.organization_id) &&
+              importSeason &&
+              String(d.season_settings_id) === String(importSeason.id) &&
+              String(d.name || '').toLowerCase() === divisionText.toLowerCase()
+          );
+          if (!division) {
+            failRow(row, {
+              message: importSeason
+                ? `Practice row names division ${divisionText}, which season ${importSeason.name} does not have`
+                : `Practice row names division ${divisionText}, but the organization has no season to find it in`,
+              reason: 'division_unknown',
+              division: divisionText,
+            });
+            return;
+          }
+          practiceDivisionId = division.id;
+        }
+
+        // 20261029010000: overlap and turnover on the same surface, refused
+        // before anything is written (the twin of practice_slot_conflicts).
+        if (slotType === 'practice') {
+          const existingLocation = db.locations.find(
+            (item) =>
+              String(item.organization_id) === String(job.organization_id) &&
+              String(item.name || '').toLowerCase() === locationName.toLowerCase()
+          );
+          const existingField =
+            existingLocation &&
+            db.fields.find(
+              (item) =>
+                String(item.organization_id) === String(job.organization_id) &&
+                String(item.location_id) === String(existingLocation.id) &&
+                String(item.name || '').toLowerCase() === fieldName.toLowerCase()
+            );
+          if (existingField) {
+            const existingSubunit = payload.subunit
+              ? (db.field_subunits.find(
+                  (item) =>
+                    String(item.field_id) === String(existingField.id) &&
+                    String(item.label || '').toLowerCase() === String(payload.subunit).toLowerCase()
+                ) ?? { id: '00000000-0000-0000-0000-000000000000' })
+              : null;
+            const clash = mockPracticeSlotConflict(db.practice_slots, {
+              organizationId: job.organization_id,
+              fieldId: existingField.id,
+              fieldSubunitId: existingSubunit?.id ?? null,
+              day: day.slice(0, 3),
+              start,
+              end,
+              validFrom,
+              validUntil,
+            });
+            if (clash) {
+              failRow(row, {
+                message: `Practice slot ${day.slice(0, 3)} ${start}-${end} on ${locationName} ${fieldName} overlaps, or starts less than 15 minutes from, the practice slot at ${String(clash.start_time).slice(0, 5)}-${String(clash.end_time).slice(0, 5)} on the same ground`,
+                reason: 'practice_slot_conflict',
+                conflicting_slot_id: clash.id,
+              });
+              return;
+            }
+          }
         }
 
         let location = db.locations.find(
@@ -5844,6 +5987,7 @@ export const mockSupabase = {
             valid_from: validFrom,
             valid_until: validUntil,
             label: payload.label || null,
+            division_id: practiceDivisionId,
             created_at: now,
             updated_at: now,
           };

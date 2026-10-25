@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Button from '../components/ui/Button.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import Toggle from '../components/ui/Toggle.jsx';
 import { MapPin, Plus, Edit2, Trash2, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
 import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
+import SlotReservations from '../components/setup/SlotReservations.jsx';
 import PracticeRepairLauncher from '../components/scheduling/PracticeRepairLauncher.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { supabase } from '../lib/supabaseClient.js';
@@ -63,12 +64,45 @@ export default function FieldManagementPage() {
     retireFieldSubunit,
     unretireFieldSubunit,
     setLocationCoordinates,
+    reservationsAvailable,
+    setSlotDivision,
   } = useFields();
   const { can } = usePermission();
   // The route is already admin-only; this is the same gate, held again at the
   // field so the coordinates form never renders for a caller the RPC refuses.
   const canEditCoordinates = can(PERMISSIONS.MANAGE_ORGANIZATION);
-  const organizationId = /** @type {any} */ (useOrganization())?.currentOrganization?.id ?? null;
+  const organization = /** @type {any} */ (useOrganization());
+  const organizationId = organization?.currentOrganization?.id ?? null;
+  const seasonSettingsId = organization?.currentSeasonSetting?.id ?? null;
+  // D2: the season's divisions, which a practice slot can be reserved to.
+  // Read only once the slots carry their reservation (after the migration).
+  const [seasonDivisions, setSeasonDivisions] = useState(/** @type {any[]} */ ([]));
+  const [divisionsError, setDivisionsError] = useState(/** @type {string|null} */ (null));
+  useEffect(() => {
+    let active = true;
+    // Nothing shows the divisions until the slots carry a reservation.
+    if (!organizationId || !seasonSettingsId || !reservationsAvailable) return undefined;
+    (async () => {
+      const { data, error: readError } = await supabase
+        .from('divisions')
+        .select('id, name')
+        .eq('organization_id', organizationId)
+        .eq('season_settings_id', seasonSettingsId)
+        .order('name');
+      if (!active) return;
+      if (readError) {
+        logger.error('Error reading the divisions a practice slot can be reserved to:', readError);
+        setDivisionsError(`The season's divisions could not be read: ${readError.message}`);
+        setSeasonDivisions([]);
+        return;
+      }
+      setDivisionsError(null);
+      setSeasonDivisions(data ?? []);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [organizationId, reservationsAvailable, seasonSettingsId]);
   const [openCoordinatesId, setOpenCoordinatesId] = useState(/** @type {string|null} */ (null));
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -668,6 +702,16 @@ export default function FieldManagementPage() {
               </div>
             )}
 
+            {/* D2: each slot's division reservation. */}
+            {reservationsAvailable && (
+              <SlotReservations
+                field={field}
+                divisions={seasonDivisions}
+                canEdit={canEditCoordinates && !divisionsError}
+                onReserve={setSlotDivision}
+              />
+            )}
+
             {/* Visual 7-Day Grid */}
             <div className="grid grid-cols-7 gap-1 mt-4 pt-4 border-t border-border-subtle">
               {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => {
@@ -721,6 +765,12 @@ export default function FieldManagementPage() {
       {lifecycleError && (
         <div className="badge danger" role="alert">
           {lifecycleError}
+        </div>
+      )}
+
+      {divisionsError && (
+        <div className="badge danger" role="alert">
+          {divisionsError}
         </div>
       )}
 

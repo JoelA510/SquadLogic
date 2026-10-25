@@ -29,7 +29,8 @@ PRs (C1 database, C2 admin, C3 coach), each reviewed once before it opens.
 - **Who a coach is.** A live `team_coach_assignments` row of the caller's linked coach, judged on
   the team's season date: `team_local_today`, `is_current_team_coach`, `coached_team_ids_of`,
   `get_my_coached_team_ids` (`20261021010000_server_side_reads.sql:161-263`). The coach directory
-  admits "an admin, or anyone with a current coached team" (`:557-560`). An `organization_members`
+  admitted "an admin, or anyone with a current coached team" (`:557-560`) until R4 of
+  `2026-10-22-admin-focus.md` (`20261025010000`) dropped it. An `organization_members`
   role of `coach` with no assignment is not a coach to the server.
 - **UI.** `/fields` is admin-only (`App.jsx:260-265`); `FieldManagementPage.jsx` (924 lines) has a
   venues section (`:415`) and per-field detail (`:591`), data through `useFields.js`. Coaches see
@@ -167,7 +168,8 @@ list; a failed signed URL is announced); E2E in `field_permits.feature` at a 390
 coach sees the warning and opens the file, a parent going to `/permits` is redirected; a real-backend
 scenario (`tests/e2e/real-backend/features/real_backend_permits.feature`): the coach's signed URL
 returns 200, the parent's `createSignedUrl` is refused, an upload declared `text/html` is refused by
-the bucket. **Unchanged:** `privacy_server_reads.feature` and the coach directory.
+the bucket. **Unchanged:** `privacy_server_reads.feature` (the coach directory is gone since R4,
+`20261025010000`).
 
 ## Owner decisions (recommendations)
 

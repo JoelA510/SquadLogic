@@ -288,6 +288,139 @@ at once (AGENTS.md section 11).
   coach by `profiles.role`, which nothing sets (production's four profiles all read `user`), so it
   never offers a preview there. Phase C's plan uses a parent persona (noted in that plan).
 
+## As built (R4)
+
+- **Migration `20261025010000`, in this order.** A NOTICE counts what the drops destroy (players
+  with a contact or guardian contact, saved contact cards, coach interest rows, import jobs
+  holding a `coach_leads` summary, organizations storing `coach_directory`). `get_team_staff` is
+  dropped and recreated (its result loses `phone` and `email`, which CREATE OR REPLACE cannot do)
+  from its `20261024010000` body without the contact card join: coach id, name, role, and status
+  to admins and staff. `get_team_roster` is dropped and recreated the same way without
+  `guardian_contacts`. `get_organization_members` admits admins and staff only. Then
+  `get_coach_directory` and `set_my_contact_card` are dropped, and the contact card: the checks
+  `profiles_contact_phone_check` and `profiles_contact_email_check` and the columns
+  `contact_phone`, `contact_email` and `share_contact`. The player writers are replaced from
+  their latest bodies with only the contact lines removed: `sanitize_player_patch` (a patch naming
+  `guardian_contacts` is refused 22023 like any unknown key), `apply_player_patch`,
+  `admin_bulk_update_players` (its now unreachable bulk refusal of the key),
+  `finalize_import_job` and `minimise_import_people_data` (its coach half and its list of audit
+  metadata keys to redact are unchanged). Then `players.contact_info` and
+  `players.guardian_contacts` are dropped. Last the coach leads: `upsert_coach_leads`,
+  `set_import_job_coach_lead_summary`, the table's policy and org-scope trigger, the table
+  `coach_interested_programs`, and the trigger's function. Every drop names its object with no
+  CASCADE. Each copied body was extracted from its file and its md5 checked equal to the build's
+  before it was edited. A closing check refuses to commit while any `public` function (comments and
+  string literals stripped), view or policy names a dropped object, or while any function
+  `authenticated` may execute returns a column, or rows of a table with a column, named like an
+  email, a phone, a contact or a guardian, other than `get_organization_members` and
+  `get_settings_audit_log`.
+- **Not in the R4 row, forced by its test.** `get_organization_members` admitted any member
+  (`is_org_member`) and returns every member's sign-in email, so a coach could read them all. Its
+  only caller is the Members page, behind `MANAGE_ORGANIZATION`; it now checks `is_org_admin`
+  (admins, tenant admins and staff), same body otherwise. Production has one member, the admin, so
+  nobody loses a read today. The mock twin follows.
+- **"No read a coach can call returns an email or phone", as enforced.** The catalogue is every
+  `public` function `authenticated` may EXECUTE (from the grants, not from the functions R4
+  touched), judged by its result column names and by the columns of a table whose rows it
+  returns; it must be exactly the two admin reads, and pgTAP calls both as a coach and expects a
+  refusal. Declared blind spot: a function returning `jsonb` or a bare `record`. Read 2026-10-25,
+  every such function a coach may call that mentions an email or phone is admin-gated
+  (`finalize_coach_import_job`, `rollback_coach_import_job`, `admin_set_season_timezone`) or
+  returns no contact (`link_my_coach_record`: a status and the coach id). Direct table reads are
+  outside this catalogue: a coach reads only their own `coaches` and `profiles` rows; see "Found
+  for later PRs" for the two member-readable tables.
+- **Calls for the owner.**
+  - `interested` stays a coach status (admins set it; a coach import still promotes it to
+    `active`). The plan names `upsert_coach_leads` "and the coach-leads code"; the status is also
+    the Coaches page's "Interested" filter and bulk action and the coach import's promotion, and
+    no lead is captured any more, so it now means "said they would coach". Its column comment is
+    restated. Production holds no `interested` coach.
+  - `coaches.phone` and `coaches.contact_info` stay. R0's row said they would be dropped; R0
+    emptied them instead (no phone stored, `contact_info` the sign-in email), and the R4 row does
+    not name them. Dropping them means replacing the coach finalizer and its rollback. Nothing
+    returns either to a coach. The Coaches page still has a Phone column, always blank (production:
+    0 coaches with a phone).
+  - The team page's Staff tab shows names and roles to admins too; admins find a coach's
+    sign-in email on the Coaches page (the R4 row's wording).
+  - The coaching-interest line (the "guardian(s) volunteered to coach" R3 handed over) stays as a
+    count: `willing_to_coach` is the coaching lead Phase B reads. It reads "N player(s) on this
+    roster have a family member willing to coach" and names nobody.
+  - `org_flag(uuid, text, boolean)` stays, with no caller now: it is the internal settings
+    helper, and R6's score entry and standings settings are the next readers.
+- **Kept.** The `profile.contact_card_updated` audit action; the `coach_directory` key in
+  `FEATURE_FLAGS` (out of the catalogue and the defaults, as R1 and R3 did); `coaches.email`;
+  `organizations.contact_info` (the league's own settings: its timezone); the coach import's
+  `contact_info` writes. A comment in `admin_delete_coaches` still names the dropped table; it is
+  left alone, because changing it would mean replacing that function.
+- **Production, read-only, 2026-10-25** (catalogue and counts only, through the SQL endpoint, once
+  the ledger read `20261024010000`): the md5 of every function body the migration drops or
+  replaces equals a local build at `20261024010000` (`get_team_staff`, `get_team_roster`,
+  `get_organization_members`, `get_coach_directory`, `set_my_contact_card`,
+  `sanitize_player_patch`, `apply_player_patch`, `admin_bulk_update_players`,
+  `finalize_import_job`, `minimise_import_people_data`, `upsert_coach_leads`,
+  `enforce_coach_interested_programs_org_scope`), as do their security, volatility, SET clauses,
+  results and `anon`/`authenticated` EXECUTE, except
+  `set_import_job_coach_lead_summary`, which production holds with a different body (it is dropped
+  by signature, so the body does not matter). Two functions R4 does not touch differ too:
+  `admin_update_player` (production's names no contact column) and `get_settings_audit_log`
+  (production's is still admin-gated). Exactly the functions the build names as using a dropped
+  object do so in production too, and the same five use `contact_info` (coaches and
+  organizations). No view, policy or publication names a dropped object. The dependents of the
+  five dropped columns are their two checks and two defaults, and of `coach_interested_programs`
+  its policy, trigger, keys, indexes and defaults. Counts: `players` 0 (none with a contact or
+  guardian contact), `profiles` 4 (0 cards saved), `coach_interested_programs` 0, `coaches` 130
+  (0 `interested`, 0 with a phone), import jobs with a `coach_leads` summary 0, organizations
+  storing `coach_directory` 0, `profile.contact_card_updated` audit rows 0, members other than
+  admins 0, `email_log` 0.
+- **The UI.** The player record has no Guardians tab; the roster shows no guardian contacts; the
+  Staff tab shows no email or phone; the account page has no contact card
+  (`ContactCardSettings.jsx` and `utils/contactCard.js` deleted); the coach home has no coach
+  directory; the Coaches page stops reading `coach_interested_programs` (a coach's programs are the
+  divisions of their teams; the "from <player>" note and its search key go); `utils/coachLeads.js`,
+  unused since R0, is deleted. The mock twin follows the SQL (removed RPCs fall through to the
+  client's PGRST202 refusal).
+- **Tests.**
+  - pgTAP: `contact_surfaces_removed.sql` (19): the objects are gone, with a control; the
+    catalogue equals the two admin reads; a coach is refused both; the staff read is names and
+    roles; an admin still reads member and coach sign-in emails; a `guardian_contacts` patch is
+    refused. Run against `origin/main` it fails the catalogue (the staff, roster and directory
+    reads, and `admin_create_player` and `admin_update_player`, which returned `players` rows with
+    the contact columns) and the coach's member-list refusal. `coach_leads.sql` is deleted;
+    `server_side_reads.sql` (17), `rls_policy_matrix.sql`, `import_allowlist.sql`,
+    `finalize_import_reimport_coalesce.sql` (the guardian preservation case becomes the preferred
+    name, the same coalesce), `import_rpc_readiness_contract.sql` (9) and
+    `guardian_view_removed.sql` (its control read `get_coach_directory`) lose their contact cases.
+  - Smokes run at head: the new `20261025010000` smoke (the scan and the catalogue each shown to
+    fire on a planted probe; the reads; the player writers run without the columns; posture).
+    `20261021010000`, `20261022010000` and `20261024010000` lose their contact, card and directory
+    cases; `20261021040000` counts 37 pinned functions (`upsert_coach_leads` was one).
+  - Vitest: the account page offers no contact card, the player record no Guardians tab, the coach
+    home no directory (whatever a stored `coach_directory` says), and the team page no contact on
+    the roster or the staff (each fails on `origin/main`); the mock reads return no contact; the
+    mock member list refuses a coach (fails on `origin/main`); the tombstone census pins 21 sites.
+    The roster and staff fixtures still carry contacts, as the database returns them until CI
+    applies the migration after the frontend ships.
+  - E2E: `privacy_server_reads.feature` checks a coach sees no phone or email link and loses the
+    contact card scenario; `contact_surfaces.feature` is new: an admin sees a coach's sign-in email
+    on the Coaches page and no guardians on a player record; a coach is offered no contact card and
+    no coach directory.
+- **Harness.** The revert is checked by a catalogue fingerprint against a build at
+  `20261024010000` (41 rows). The purge, patch helper, finalizer, roster, staff and member plants
+  that aimed at bodies R4 replaces are re-aimed at `$M42`; the directory plant ("the directory
+  ignores its setting"), the roster guardian-contact plant and the unshared-card plant retire with
+  what they mutated. Seven M42 plants (two refused by the migration itself: an email column put
+  back on the staff read, and the purge still writing `guardian_contacts`) and three R42 plants
+  are added.
+- **Found for later PRs, not done here.** `email_log` (no reader or writer in the app; 0 rows) is
+  readable by any member (`email_log_select_member`) and carries `recipient_email`.
+  `organizations.contact_info` is member-readable; it holds the league's settings (its timezone),
+  not a person's, but nothing stops a contact being written there. `coaches.phone` and
+  `coaches.contact_info` (above). Production's `admin_update_player` and `get_settings_audit_log`
+  bodies differ from the repo's (drift; neither leaks a contact). R5: `finalize_import_job` has
+  been copied whole three times now (R0, R1, R4); R5 copies it again. R6: `org_flag` is ready for
+  the score entry and standings settings. R7: the catalogue check covers RPCs only; a coach export
+  built in the browser from tables a coach can read is covered by R7's own test.
+
 ## Docs updated across the PRs
 
 AGENTS.md section 2 (data rules), `docs/agents-reference.md`, `README.md`,

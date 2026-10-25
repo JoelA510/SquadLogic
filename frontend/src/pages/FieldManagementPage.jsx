@@ -719,12 +719,12 @@ export default function FieldManagementPage() {
               </div>
             )}
 
-            {/* D2: each slot's division reservation. */}
-            {reservationsAvailable && (
+            {/* D2: each slot's division reservation, once this season's divisions are read. */}
+            {reservationsAvailable && currentDivisionRead && (
               <SlotReservations
                 field={field}
                 divisions={seasonDivisions}
-                canEdit={canEditCoordinates && currentDivisionRead !== null && !divisionsError}
+                canEdit={canEditCoordinates && !divisionsError}
                 onReserve={setSlotDivision}
               />
             )}

@@ -161,14 +161,8 @@ describe('FieldManagementPage :: practice slot divisions (D2)', () => {
     );
     mocks.seasonId = null;
     view.rerender(<FieldManagementPage />);
-    await waitFor(() =>
-      expect(within(select).queryByRole('option', { name: 'U8 Coed' })).toBeNull()
-    );
-    expect(
-      within(select)
-        .getAllByRole('option')
-        .map((o) => o.textContent)
-    ).toEqual(['Any division']);
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: SELECT_NAME })).toBeNull());
+    expect(screen.getByText('Field 1')).toBeInTheDocument();
   });
 
   it('before the migration (42703) still lists the fields and offers no reservation', async () => {

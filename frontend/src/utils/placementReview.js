@@ -52,6 +52,18 @@ function indexRun(results) {
       }
     }
   }
+  // A not-placed player carries their placement too, for when an admin seats them by hand.
+  /** @type {Map<string, any>} */
+  const overflowPlayerById = new Map();
+  for (const entries of Object.values(results?.overflowByDivision || {})) {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      for (const player of Array.isArray(entry?.players) ? entry.players : []) {
+        const id = String(player?.id);
+        noteName(id, displayName(player));
+        if (!overflowPlayerById.has(id)) overflowPlayerById.set(id, player);
+      }
+    }
+  }
   for (const team of Array.isArray(results?.teams) ? results.teams : []) {
     const teamId = String(team?.id);
     if (team?.name && !teamNameById.has(teamId)) teamNameById.set(teamId, String(team.name));
@@ -82,6 +94,7 @@ function indexRun(results) {
     teamNameById,
     divisionByTeamId,
     generatedById,
+    overflowPlayerById,
     currentTeamOf,
   };
 }
@@ -193,7 +206,7 @@ export function summarizePlacementReview(results) {
     const review = divisionOf(division);
     review.placedCount += 1;
     if (!run.hasRosters) continue;
-    const player = generated?.player;
+    const player = generated?.player ?? run.overflowPlayerById.get(id);
     if (player && isEligibilityBlocked(player)) {
       if (listedForReview.has(id)) continue;
       listedForReview.add(id);
@@ -247,7 +260,9 @@ export function placementReviewAnnouncement(summary) {
     ].filter(Boolean);
     parts.push(`${count(notPlaced, 'player', 'players')} not placed (${why.join(', ')})`);
   }
-  if (needsReview > 0) parts.push(`${count(needsReview, 'player', 'players')} need review`);
+  if (needsReview > 0) {
+    parts.push(`${count(needsReview, 'player needs', 'players need')} review`);
+  }
   if (unchecked > 0) {
     parts.push(`${count(unchecked, 'placed player', 'placed players')}: eligibility not checked`);
   }

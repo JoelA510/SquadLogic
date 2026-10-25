@@ -278,3 +278,19 @@ Then('the late registrant is on none of them', async ({ page }) => {
   ).toBeVisible();
   expect(await cardsOnSavedTeams(page, LATE_PLAYER)).toBe(0);
 });
+
+Then(
+  'all {int} players are flagged "Eligibility not checked" and none is held off a team',
+  async ({ page }, players: number) => {
+    // The season has no year, so no age can be checked: each placed player is flagged beside
+    // their name, and nobody is listed as not placed.
+    const list = page.getByRole('region', { name: 'Eligibility not checked' });
+    await expect(list).toBeVisible({ timeout: 15000 });
+    const items = list.getByRole('listitem');
+    await expect(items).toHaveCount(players);
+    for (const item of await items.all()) {
+      await expect(item).toContainText('Eligibility not checked');
+    }
+    await expect(page.getByRole('region', { name: 'Not placed' })).toHaveCount(0);
+  }
+);

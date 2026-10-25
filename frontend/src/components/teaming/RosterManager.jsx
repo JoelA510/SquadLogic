@@ -72,7 +72,7 @@ const PlayerCard = ({ player }) => {
             )}
             {/* Phase B3: placed with no age to check; a flag, never a hold. */}
             {player.eligibilityNotChecked && (
-              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-status-warning/10 text-status-warning-text border border-status-warning/30">
+              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-status-warning-bg text-status-warning-text border border-status-warning/30">
                 eligibility not checked
               </span>
             )}

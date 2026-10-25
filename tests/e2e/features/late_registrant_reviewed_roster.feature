@@ -18,7 +18,10 @@ Feature: A late registrant and a roster that has already been reviewed
 
   Phase B3: a late registrant whose play-down is blocked (U12 in 2027 is born
   in 2015; one born in 2011 is 16) is never seated, and the review lists them
-  under "Not placed" with the reason; the reviewed teams do not change.
+  under "Not placed" with the reason; the reviewed teams do not change. The
+  review's lists are scanned with axe where they are rendered: the first
+  scenario's season has no year, so every player is flagged "Eligibility not
+  checked" there; the second lists a player not placed, in both themes.
 
   Background:
     Given I am logged into SquadLogic as an "admin"
@@ -29,6 +32,10 @@ Feature: A late registrant and a roster that has already been reviewed
     When I re-run teaming from the dashboard workflow
     Then the page reports 2 saved teams kept and 1 late player seated
     And all 7 players are assigned and none is left for manual review
+    And all 7 players are flagged "Eligibility not checked" and none is held off a team
+    And axe finds no serious or critical violations on "/teams" in the "light" theme
+    When I switch to the dark theme on this page
+    Then axe finds no serious or critical violations on "/teams" in the "dark" theme
     And the saved teams keep their ids and original players
     And the late registrant is on exactly one of them
 
@@ -37,5 +44,8 @@ Feature: A late registrant and a roster that has already been reviewed
     When I re-run teaming from the dashboard workflow
     Then the page reports 2 saved teams kept and 0 late players seated
     And the late registrant is listed under "Not placed" as too old for the division
+    And axe finds no serious or critical violations on "/teams" in the "light" theme
+    When I switch to the dark theme on this page
+    Then axe finds no serious or critical violations on "/teams" in the "dark" theme
     And the saved teams keep their ids and original players
     And the late registrant is on none of them

@@ -119,6 +119,25 @@ describe('placement review :: not placed', () => {
   });
 });
 
+describe('placement review :: a not-placed player moved by hand', () => {
+  it('stays listed, and says where they are now', () => {
+    const results = run({
+      teamA: [inBand('a')],
+      overflow: [{ players: [inBand('y')], reason: 'insufficient-capacity' }],
+      rows: [
+        { team_id: 'team-a', player_id: 'a', role: 'player', player_name: 'Player A' },
+        { team_id: 'team-b', player_id: 'y', role: 'player', player_name: 'Player Y' },
+      ],
+    });
+    render(<PlacementReviewList results={results} />);
+    expect(itemsOf('Not placed')[0]).toHaveTextContent(
+      'Player Y. No room: the teams were full. Natural age 10. Since placed by hand on Team B.'
+    );
+    // Their check came with them: in the band, so not flagged as unchecked.
+    expect(screen.queryByRole('region', { name: 'Eligibility not checked' })).toBeNull();
+  });
+});
+
 describe('placement review :: needs review', () => {
   const blocked = (id) =>
     player(id, {
@@ -143,6 +162,9 @@ describe('placement review :: needs review', () => {
       ],
     });
     render(<PlacementReviewList results={results} />);
+    expect(placementReviewAnnouncement(summarizePlacementReview(results))).toBe(
+      'Players to review: 1 player needs review.'
+    );
 
     expect(itemsOf('Needs review').map((item) => item.textContent)).toEqual([
       "Player H, on Team B. Not eligible for this division. Younger than the division allows, with no coaching parent or coach's child as a buddy to sanction playing up. Kept on the reviewed roster; move them by hand if you agree.",

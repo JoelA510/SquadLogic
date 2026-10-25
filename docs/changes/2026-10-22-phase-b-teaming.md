@@ -466,8 +466,17 @@ engine conventions), and the demo league is teamed end to end.
   `assistantCoachId`) names the coach, and `coachCoverageByDivision` says whether any team has
   them; the list would need the coach's name, from the `coaches` read the Coaches page makes or
   from the coach import.
-- **No jest-axe:** the repository has no unit-level axe pattern; the lists are covered by the
-  `/teams` rows of `accessibility.feature` (axe, both themes) and by role queries in the tests.
+- **Accessibility.** The repository has no unit-level axe (jest-axe) pattern. The lists are
+  scanned where they render: both `late_registrant_reviewed_roster.feature` scenarios run the
+  accessibility feature's axe step on the staged review in the light and dark themes (the first
+  shows seven "Eligibility not checked" flags, the second a "Not placed" entry), and a planted
+  unnamed `role="img"` on the flag fails it. Contrast is not proven by that scan: axe left the
+  badge's colour pair unresolved even with its text planted at the background's colour, so it is
+  computed from the tokens instead (`--warning-text` on `--warning-weak`: 5.20:1 light, 8.42:1
+  dark), with the opaque `bg-status-warning-bg` rather than a translucent tint.
+- **A not-placed player seated by hand** (not reachable from the roster editor today, which shows
+  only rostered players) stays listed, with "Since placed by hand on …", and keeps the placement
+  their overflow entry recorded for the "not checked" flag.
 
 ## Not in Phase B
 

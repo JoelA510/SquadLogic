@@ -87,7 +87,7 @@ export default function PlacementReviewList({ results }) {
           <div key={division} className="space-y-4">
             <p className="text-sm text-text-secondary">
               {division}: {notPlaced.length} not placed ({notEligible} not eligible for the
-              division, {otherReason} for another reason), {needsReview.length} need review,{' '}
+              division, {otherReason} for another reason), {needsReview.length} needing review,{' '}
               {unchecked.length} with eligibility not checked.
             </p>
             {notPlaced.length > 0 && (
@@ -147,7 +147,7 @@ export default function PlacementReviewList({ results }) {
                   {unchecked.map((entry) => (
                     <li key={entry.playerId}>
                       <span className="font-medium text-text-primary">{entry.name}</span>{' '}
-                      <span className="text-xs font-semibold rounded-full px-2 py-0.5 border bg-status-warning/10 border-status-warning/30 text-status-warning-text">
+                      <span className="text-xs font-semibold rounded-full px-2 py-0.5 border bg-status-warning-bg border-status-warning/30 text-status-warning-text">
                         Eligibility not checked
                       </span>
                       {entry.teamName ? ` on ${entry.teamName}.` : '.'}

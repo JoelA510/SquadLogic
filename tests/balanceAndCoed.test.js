@@ -256,7 +256,7 @@ describe('TeamBuilder buddies: the resolver and the league buddy rule', () => {
     expect(buddyStats(coded, { roster })).toEqual({ requested: 0, satisfied: 0 });
   });
 
-  it('one_way_best_effort: best effort never leaves a roster over one above the smallest', () => {
+  it("one_way_best_effort: many requests naming one player do not pile onto that player's team", () => {
     // Six players name Cal, who listed nobody: every request is honoured, but steering them
     // all to Cal's team would make it 7 against 3.
     const players = [
@@ -282,10 +282,31 @@ describe('TeamBuilder buddies: the resolver and the league buddy rule', () => {
     expect(boardBuddyLinks(players, { buddyRule: 'one_way_best_effort' }).oneWay.size).toBe(6);
   });
 
+  it("one_way_best_effort: steers when the named player's team is no larger than the deal's pick", () => {
+    // Before Bea is dealt: t1 holds Big alone (total 10), t2 Cal and Sid (6), t3 Pia and Quin
+    // (5). The deal picks t3; Cal's t2 holds no more players, so Bea joins Cal there, though
+    // t1 is the smallest team.
+    const players = [
+      player('big', { rating: 10 }),
+      player('cal', { first_name: 'Cal', last_name: 'Three', rating: 4 }),
+      player('pia', { rating: 3 }),
+      player('quin', { rating: 2 }),
+      player('sid', { rating: 2 }),
+      player('bea', { first_name: 'Bea', last_name: 'Two', buddy_request: 'Cal Three', rating: 1 }),
+    ];
+    const teams = [{ id: 't1' }, { id: 't2' }, { id: 't3' }];
+    expect(assign(players, 'mutual', { teams }).bea).toBe('t3');
+    const teamOf = assign(players, 'one_way_best_effort', { teams });
+    expect(teamOf.cal).toBe('t2');
+    expect(teamOf.bea).toBe('t2');
+  });
+
   it('finds the same buddies as the Team Analysis pipeline', () => {
-    // Every board above, under both rules: the mutual pairs are the pipeline's reciprocal
-    // buddyIds, and the honoured one-way requests are its honoured one-way outcomes.
-    const boards = [
+    // Every board above, under both rules, and boards whose roster reaches beyond them: the
+    // mutual pairs are the pipeline's reciprocal buddyIds, and the honoured one-way requests
+    // are its honoured one-way outcomes.
+    const u10 = (board) => board.map((p) => ({ ...p, division: 'U10' }));
+    const cases = [
       namesakes(),
       namesakes({ sam1: { buddy_request: 'Ada One' } }),
       oneWay(),
@@ -302,12 +323,42 @@ describe('TeamBuilder buddies: the resolver and the league buddy rule', () => {
             ? { ...p, mutual_buddy_code: 'k9' }
             : p
       ),
-    ].map((board) => board.map((p) => ({ ...p, division: 'U10' })));
+    ].map((board) => ({ board: u10(board), extra: [] }));
+    const coded = u10(oneWay()).map((p) =>
+      p.id === 'dee' || p.id === 'eve' ? { ...p, mutual_buddy_code: 'Z1' } : p
+    );
+    cases.push(
+      // Two board players and a U12 player share a code: three holders, no pair.
+      { board: coded, extra: [player('far', { division: 'U12', mutual_buddy_code: 'z1' })] },
+      // One board player and a U12 player share a code: cross-division, no pair.
+      {
+        board: u10(oneWay()).map((p) => (p.id === 'dee' ? { ...p, mutual_buddy_code: 'Z2' } : p)),
+        extra: [player('far', { division: 'U12', mutual_buddy_code: 'Z2' })],
+      },
+      // A request naming a U12 player (cross-division), and one naming a U10 player who is
+      // not on the board (a waitlisted player, say): not found.
+      {
+        board: u10(oneWay()).map((p) => (p.id === 'bea' ? { ...p, buddy_request: 'Gil Far' } : p)),
+        extra: [player('gil', { first_name: 'Gil', last_name: 'Far', division: 'U12' })],
+      },
+      {
+        board: u10(oneWay()).map((p) => (p.id === 'bea' ? { ...p, buddy_request: 'Hal Off' } : p)),
+        extra: [player('hal', { first_name: 'Hal', last_name: 'Off', division: 'U10' })],
+      }
+    );
     const sorted = (map) => [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
     const compared = { mutual: 0, oneWay: 0 };
-    for (const board of boards) {
+    const statuses = new Set();
+    const codeDiagnostics = new Set();
+    for (const { board, extra } of cases) {
+      const roster = extra.length > 0 ? [...board, ...extra] : undefined;
       for (const buddyRule of RULES) {
-        const prepared = prepareTeamingInput({ players: board, buddyRule, seasonYear: 2026 });
+        const prepared = prepareTeamingInput({
+          players: board,
+          roster,
+          buddyRule,
+          seasonYear: 2026,
+        });
         const byId = new Map(prepared.players.map((p) => [String(p.id), p]));
         const mutual = new Map();
         for (const [id, p] of byId) {
@@ -319,16 +370,23 @@ describe('TeamBuilder buddies: the resolver and the league buddy rule', () => {
             .filter((outcome) => outcome.outcome === 'one-way' && outcome.honoured)
             .map((outcome) => [outcome.playerId, String(outcome.targetId)])
         );
-        const links = boardBuddyLinks(board, { buddyRule });
+        const links = boardBuddyLinks(board, { roster, buddyRule });
         expect(sorted(links.mutual)).toEqual(sorted(mutual));
         expect(sorted(links.oneWay)).toEqual(sorted(oneWayLinks));
         compared.mutual += mutual.size;
         compared.oneWay += oneWayLinks.size;
+        prepared.diagnostics.buddyRequests.forEach((r) => statuses.add(r.status));
+        prepared.diagnostics.buddyLinking.forEach((d) => codeDiagnostics.add(d.code));
       }
     }
-    // The comparison examined links of both kinds, not only empty maps.
+    // The comparison examined links of both kinds, and the off-board paths, not only empty maps.
     expect(compared.mutual).toBeGreaterThan(0);
     expect(compared.oneWay).toBeGreaterThan(0);
+    for (const status of ['ambiguous', 'cross-division', 'not-found']) {
+      expect(statuses).toContain(status);
+    }
+    expect(codeDiagnostics).toContain('duplicate-buddy-code');
+    expect(codeDiagnostics).toContain('cross-division-buddy');
   });
 
   it('one_way_best_effort: a requester a buddy code pairs keeps the code pair', () => {

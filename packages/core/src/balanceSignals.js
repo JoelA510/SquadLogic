@@ -126,9 +126,11 @@ export function buddyStats(players = [], { roster, buddyRule } = {}) {
  * Buddies follow `boardBuddyLinks` (Team Analysis's rule): a mutual pair is one unit; an
  * honoured one-way request (`one_way_best_effort`) is best effort, never a unit. Whichever of
  * the two is dealt second goes to the other's team when that team is still a candidate (the
- * coach spread can rule it out) and is no larger than the smallest team, so best effort never
- * leaves a roster more than one player above the smallest (as `BuddyEvaluator` scores the
- * request in the generator, beside the roster limits, rather than obeying it).
+ * coach spread can rule it out) and holds no more players than the team the deal would pick
+ * anyway, so honouring a request never makes the rosters less even than the plain deal
+ * would at that step. Many requests naming one player cannot pile onto that player's team.
+ * (In the generator, `BuddyEvaluator` scores the request beside the roster limits; the board
+ * has no roster limits, so the size check stands in for them.)
  *
  * `roster` is every player (each with its `division`), so a request or code naming someone
  * outside the board is not paired; `buddyRule` is the league's `buddy_rule` (default mutual).
@@ -207,9 +209,17 @@ export function serpentineAssign({
       const minCoach = Math.min(...buckets.map((b) => b.coachUnits));
       candidates = buckets.filter((b) => b.coachUnits === minCoach);
     }
-    // best effort: a candidate team already holding a one-way partner of a member, while it
-    // is no larger than the smallest team
-    const smallest = Math.min(...buckets.map((b) => b.count));
+    // lowest signal total, then smallest roster, then stable order
+    const lowest = (options) =>
+      options.reduce((best, bucket) => {
+        if (!best) return bucket;
+        if (bucket.total !== best.total) return bucket.total < best.total ? bucket : best;
+        if (bucket.count !== best.count) return bucket.count < best.count ? bucket : best;
+        return best;
+      }, null);
+    const deal = lowest(candidates);
+    // best effort: a candidate team already holding a one-way partner of a member, when it
+    // holds no more players than the team the deal would pick
     const partnerTeams = new Set(
       unit.members.flatMap((member) =>
         (oneWayPartners.get(String(member.id)) ?? [])
@@ -218,16 +228,9 @@ export function serpentineAssign({
       )
     );
     const withPartner = candidates.filter(
-      (b) => partnerTeams.has(b.teamId) && b.count + unit.members.length <= smallest + 1
+      (b) => partnerTeams.has(b.teamId) && b.count <= deal.count
     );
-    if (withPartner.length > 0) candidates = withPartner;
-    // lowest signal total, then smallest roster, then stable order
-    return candidates.reduce((best, bucket) => {
-      if (!best) return bucket;
-      if (bucket.total !== best.total) return bucket.total < best.total ? bucket : best;
-      if (bucket.count !== best.count) return bucket.count < best.count ? bucket : best;
-      return best;
-    }, null);
+    return withPartner.length > 0 ? lowest(withPartner) : deal;
   };
 
   const sorted = [...units].sort(

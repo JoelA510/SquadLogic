@@ -268,7 +268,7 @@ export default function TeamBuilderPage() {
             Balancing by <b style={{ color: 'var(--text-primary)' }}>{signalLabel}</b>
           </div>
           <div style={{ flex: 1 }} />
-          {isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS) && (
+          {buddyRequestsOn && (
             <label
               style={{
                 display: 'flex',
@@ -344,7 +344,7 @@ export default function TeamBuilderPage() {
               unassigned
             </span>
           </div>
-          {isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS) && (
+          {buddyRequestsOn && (
             <div className="metric-tile" style={{ padding: '8px 14px' }}>
               <Link2
                 size={13}

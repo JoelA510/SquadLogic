@@ -123,13 +123,21 @@ function movedFromText(movedFrom) {
  */
 function whenOf(event) {
   const date = text(event.date);
+  const moved = event.kind === 'relocated';
   if (event.timeTbd) {
+    // A moved practice that cannot be placed (its new time falls in a clock
+    // gap) still says which practice it replaces, as the team page does.
     return {
       status: date ? TEAM_SCHEDULE_STATUS.TIME_TBD : TEAM_SCHEDULE_STATUS.DATE_TBD,
       date,
       start: '',
       end: '',
-      reason: text(event.reason) || 'no confirmed time',
+      reason: [
+        text(event.reason) || 'no confirmed time',
+        moved ? movedFromText(event.movedFrom) : null,
+      ]
+        .filter(Boolean)
+        .join('; '),
       code: text(event.reasonCode),
     };
   }
@@ -162,7 +170,6 @@ function whenOf(event) {
       code: TIMING_REASON.WALL_TIME_UNREADABLE,
     };
   }
-  const moved = event.kind === 'relocated';
   const notes = Array.isArray(event.timingNotes) ? event.timingNotes : [];
   return {
     status: moved ? TEAM_SCHEDULE_STATUS.MOVED : TEAM_SCHEDULE_STATUS.SCHEDULED,

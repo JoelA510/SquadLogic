@@ -286,6 +286,37 @@ describe('the schedule export: one row per event, none dropped', () => {
     ]);
   });
 
+  it('keeps the moved-from line on a moved practice that is TIME TBD', () => {
+    // expandPractices gives a relocation into the spring-forward gap both
+    // `timeTbd` and `movedFrom` (teamPortalPracticeDst.test.js).
+    const [row] = teamScheduleRows([
+      {
+        team: TEAM,
+        timeZone: ZONE,
+        events: [
+          {
+            type: 'practice',
+            kind: 'relocated',
+            date: '2026-03-08',
+            timeTbd: true,
+            reason: 'the time does not exist on this date',
+            reasonCode: 'WALL_TIME_NONEXISTENT',
+            movedFrom: {
+              dayOfWeek: 'sun',
+              startTime: '02:30:00',
+              location: 'Central Park - Field 1',
+            },
+          },
+        ],
+      },
+    ]);
+    expect(row[H.STATUS]).toBe('TIME TBD');
+    expect(row[H.REASON_CODE]).toBe('WALL_TIME_NONEXISTENT');
+    expect(row[H.REASON]).toBe(
+      'the time does not exist on this date; Moved from Sunday 02:30, Central Park - Field 1'
+    );
+  });
+
   it('refuses a schedule with no team or no events rather than writing nothing', () => {
     expect(() => teamScheduleRows(null)).toThrow(TypeError);
     expect(() => teamScheduleRows([/** @type {any} */ ({ events: [] })])).toThrow(TypeError);

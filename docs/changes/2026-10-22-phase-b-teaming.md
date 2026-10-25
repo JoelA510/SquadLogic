@@ -1,8 +1,8 @@
 # Phase B: teaming
 
 Status: **approved by the owner 2026-10-22, with every recommendation** (AGENTS.md rule 14: B2
-and B6 change the generator, B1 the domain model of buddy requests). B1, B2, B3 and B4 are built
-(see "As built (B1)" to "As built (B4)"). B6 records the owner's team priorities of
+and B6 change the generator, B1 the domain model of buddy requests). B1 to B5 are built (see
+"As built (B1)" to "As built (B5)"). B6 records the owner's team priorities of
 2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
 teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
 migration: everything new is computed, and the run's `results` JSON is stored opaque
@@ -555,6 +555,67 @@ engine conventions), and the demo league is teamed end to end.
   still count under "no room", but the roster editor shows only rostered players, so no user can
   produce that state (B3's finding); the name and pluralising helpers are not shared with B3's
   module, which would be a refactor of B3's file.
+
+## As built (B5)
+
+- **One rule, three steps, shared.** `boardBuddyLinks(players, { roster, buddyRule })` in
+  `balanceSignals.js` calls what `prepareTeamingInput` calls, in its order:
+  `resolveBuddyRequests`, `applyBuddyRule` (moved unchanged from `teamingPipeline.js` to
+  `buddyLinking.js`, beside `BUDDY_RULES`; the pipeline imports it) and `normalizeBuddyLinks`;
+  then a one-way request whose requester a buddy code paired is dropped, as the pipeline drops
+  it. A board has no head-coach anchors, so the pipeline's `buddy-coach-conflict` break has
+  nothing to break. `buddyStats` and `serpentineAssign` read it. A parity test
+  (`tests/balanceAndCoed.test.js`, "finds the same buddies as the Team Analysis pipeline") holds
+  its mutual pairs and honoured one-way requests equal to the pipeline's for every board in the
+  suite, under both rules, including codes and requests reaching another division or a player off
+  the board.
+- **Buddy codes pair on the board too** (beyond the plan's text, for decision 5's "the two pages
+  cannot disagree"): before, TeamBuilder read `buddy_request` only and ignored
+  `players.mutual_buddy_code`, which Team Analysis pairs. A code shared by exactly two players of
+  one division is a mutual pair; a third holder anywhere on the roster, or a holder in another
+  division, pairs nobody.
+- **Mutual (the default):** a mutual pair is one unit, dealt together. A one-way request is
+  neither paired nor counted in "buddies met" (before, every one-way name match paired).
+- **One-way best effort:** an honoured request (the named player listed no buddy) is never a
+  unit. Whichever of the two is dealt second goes to the other's team when that team is still a
+  candidate (the coach spread can rule it out) and holds no more players than the team the deal
+  would pick anyway, so requests naming one player cannot pile onto that player's team (review
+  finding: ten requesters gave 11 against 3). This size check stands in for the roster limits the
+  generator has and the board does not; so the board can honour fewer requests than the
+  generator does. "Buddies met" counts each honoured one-way request once and each member of a
+  mutual pair once.
+- **The page** reads `buddyRule` from `useFeatures` and passes it, with every player as the
+  roster, to the tile and to auto-balance. A player's buddy division is its `division_id`, as the
+  program is in Team Analysis: under the co-ed model a board folds U10B and U10G into one, and a
+  pair across the two is not paired (open question below). Waitlisted players stay off the board
+  as before, so a request naming one is not found. With Buddy Requests off nothing is matched.
+  The "Keep buddies together" toggle and `respectCoach` are unchanged; replacing them with league
+  settings is B6.
+- **Cost** (_executed_): `buddyStats` on a 100-player board with a 2,000-player roster takes about
+  5.7 ms. It runs again on each `players` change, including each optimistic move during
+  auto-balance; not memoised.
+- **Tests:** `tests/balanceAndCoed.test.js` (two players of one name, unsettled and settled by
+  reciprocity, under both rules; one-way under both rules, with steering both ways, a name
+  variant, the coach spread parting the two, a named player who listed another buddy, a requester
+  a code pairs, many requests naming one player, and steering when the smallest team is not a
+  candidate; buddy codes across the roster; the parity test) and
+  `tests/teamBuilderBuddyRule.test.jsx` (the page from stored flags: default, stored `mutual`,
+  stored `one_way_best_effort`, and a co-ed board of two divisions; it reads the tile and the
+  audited per-player moves). Every new case fails against `main`'s code. Thirteen planted
+  defects, one or more per rule, each failed at least one test.
+- **Review rounds (`/code-review`, fixed here):** unbounded steering; the board's filter key as
+  the buddy division (co-ed boards paired across divisions); the pipeline import pulling coach
+  linking and play-up into the board; a hand copy of the rule with no drift check (now the parity
+  test); the resolver running with the flag off. Re-review of that round: the cap compared
+  against the smallest team overall, refusing harmless steering, and the doc comment claimed an
+  invariant only the size signal kept; the parity test had no off-board case. Not changed: the
+  full re-resolution on each move (measured above); a waitlisted third holder of a code breaking
+  a pair (Team Analysis's roster holds waitlisted players too, so it breaks the pair there as
+  well).
+- **Open owner question:** a co-ed league whose U10B and U10G are not yet merged sees one board.
+  Before B5 a pair across the two was kept together; now it is not, as Team Analysis (one program
+  at a time) and the import's `materialize_import_buddy_pairs` (same division) never pair it.
+  Should a co-ed board pair across its folded divisions?
 
 ## Not in Phase B
 

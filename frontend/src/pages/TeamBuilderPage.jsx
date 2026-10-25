@@ -30,7 +30,7 @@ import LoadingScreen from '../components/LoadingScreen.jsx';
 export default function TeamBuilderPage() {
   const { currentOrganization } = useOrganization();
   const { players, divisions, loading, updatePlayer } = usePlayersData();
-  const { features, isEnabled, genderModel } = useFeatures();
+  const { features, isEnabled, genderModel, buddyRule } = useFeatures();
   const toast = useToast();
 
   const [teams, setTeams] = useState([]);
@@ -105,7 +105,27 @@ export default function TeamBuilderPage() {
     return map;
   }, [divisionTeams, divisionPlayers]);
 
-  const buddies = useMemo(() => buddyStats(divisionPlayers), [divisionPlayers]);
+  // Buddies are matched as Team Analysis matches them (Phase B5): the resolver, the
+  // league's buddy rule, and every player as the roster, so a request or code naming someone
+  // off this board is not paired. A player's division is its division id, as the program is
+  // in Team Analysis, so a board that folds two divisions (co-ed) pairs nobody across them.
+  // With Buddy Requests off, nothing is matched (the tile and the toggle are hidden).
+  const buddyRequestsOn = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
+  const buddyRoster = useMemo(
+    () => players.map((player) => ({ ...player, division: String(player.division_id ?? '') })),
+    [players]
+  );
+  const buddyBoard = useMemo(() => {
+    const ids = new Set(divisionPlayers.map((player) => player.id));
+    return buddyRoster.filter((player) => ids.has(player.id));
+  }, [buddyRoster, divisionPlayers]);
+  const buddies = useMemo(
+    () =>
+      buddyRequestsOn
+        ? buddyStats(buddyBoard, { roster: buddyRoster, buddyRule })
+        : { requested: 0, satisfied: 0 },
+    [buddyRequestsOn, buddyBoard, buddyRoster, buddyRule]
+  );
 
   const handleMove = async (playerId, teamId) => {
     const result = await updatePlayer(playerId, { team_id: teamId });
@@ -120,11 +140,13 @@ export default function TeamBuilderPage() {
     setWorking(true);
     try {
       const assignments = serpentineAssign({
-        players: divisionPlayers,
+        players: buddyBoard,
         teams: divisionTeams,
         signalKind,
-        respectBuddies: respectBuddies && isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS),
+        respectBuddies: respectBuddies && buddyRequestsOn,
         respectCoach: respectCoach && isEnabled(FEATURE_FLAGS.COACHING_INTEREST),
+        roster: buddyRoster,
+        buddyRule,
       });
       // The bulk RPC disallows team_id, so each placement is a per-player
       // audited update; run them in bounded-concurrency chunks.
@@ -246,7 +268,7 @@ export default function TeamBuilderPage() {
             Balancing by <b style={{ color: 'var(--text-primary)' }}>{signalLabel}</b>
           </div>
           <div style={{ flex: 1 }} />
-          {isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS) && (
+          {buddyRequestsOn && (
             <label
               style={{
                 display: 'flex',
@@ -322,7 +344,7 @@ export default function TeamBuilderPage() {
               unassigned
             </span>
           </div>
-          {isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS) && (
+          {buddyRequestsOn && (
             <div className="metric-tile" style={{ padding: '8px 14px' }}>
               <Link2
                 size={13}

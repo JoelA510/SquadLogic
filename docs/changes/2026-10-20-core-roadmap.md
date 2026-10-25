@@ -14,7 +14,10 @@ minimal.
 
 ## Decisions recorded
 
-On the five research defects (`2026-10-20-research-defects.md`):
+On the five research defects (`2026-10-20-research-defects.md`). Items 1.1 (the paperwork
+booleans), 1.2, 1.3 and 1.5 were superseded by the owner's 2026-10-22 decisions
+(`2026-10-22-admin-focus.md`): no paperwork flags (R1), no guardian view (R3), and no guardian
+contacts, contact card or coach directory (R4, `20261025010000`).
 
 | # | Decision |
 | --- | --- |

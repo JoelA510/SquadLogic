@@ -11,14 +11,16 @@
 --   * a re-import of that coach (the UPDATE branch) drops a phone the row's
 --     contact_info held, drops a declared date that does not parse instead of
 --     failing, and keeps the stored one;
---   * a player import stores no contact, guardian or payment value, writes
---     '{}' and '[]' for contact_info and guardian_contacts (and false for
---     paid until 20261022020000 dropped it), and keeps team placement,
+--   * a player import stores no contact, guardian or payment value (it wrote
+--     '{}' and '[]' for contact_info and guardian_contacts until
+--     20261025010000 dropped both, and false for paid until 20261022020000
+--     dropped it), and keeps team placement,
 --     play-up and the declared fields; a re-import drops an undeclared key
 --     the player already held;
 --   * `minimise_import_people_data()`: a planted coach reduced to its declared
 --     attributes with no phone, its import snapshot scrubbed; a planted
---     player's contacts, guardians and undeclared keys cleared; the staged
+--     player's undeclared keys cleared (its contacts and guardians since
+--     20261025010000 have no column to be planted in); the staged
 --     people rows of a completed and a failed job deleted, a finished field
 --     job's rows kept, a ready job's coach row kept and reduced to the
 --     allowlist; emails and a player patch's name redacted in `audit_log`
@@ -162,15 +164,14 @@ BEGIN
     IF EXISTS (SELECT 1 FROM unnest(v_secrets) s WHERE strpos(v_text, s) > 0) THEN
         RAISE EXCEPTION 'the player import stored a contact, guardian, payment or undeclared value: %', v_text;
     END IF;
-    -- `paid` is not checked since 20261022020000 dropped the column; the
-    -- payment value is still in v_secrets above.
-    IF v_player.contact_info IS DISTINCT FROM '{}'::jsonb
-       OR v_player.guardian_contacts IS DISTINCT FROM '[]'::jsonb
-       OR v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
+    -- `paid` is not checked since 20261022020000 dropped the column, nor
+    -- `contact_info` and `guardian_contacts` since 20261025010000 dropped
+    -- them; the payment, contact and guardian values are still in v_secrets
+    -- above, which the whole row is searched for.
+    IF v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
             'shirt_size', 'YM', 'joined_on', '2024-01-02', 'team_name', 'Smoke Team',
             'team_age', 'U10', 'team_gender', 'Girls', 'play_up', 'yes') THEN
-        RAISE EXCEPTION 'the player import wrote the wrong contact, guardian or attributes: % % %',
-            v_player.contact_info, v_player.guardian_contacts, v_player.custom_attributes;
+        RAISE EXCEPTION 'the player import wrote the wrong attributes: %', v_player.custom_attributes;
     END IF;
     RAISE NOTICE 'player INSERT: no contact, guardian, payment or undeclared value stored; team placement, play-up and the declared fields kept';
 
@@ -212,9 +213,7 @@ BEGIN
            custom_attributes = v_coach_payload - 'full_name' - 'email' - 'phone' - 'cert date'
      WHERE id = v_coach.id;
     UPDATE public.players
-       SET contact_info = '{"phone": "555-0102"}'::jsonb,
-           guardian_contacts = '[{"email": "guardian-two@example.test"}]'::jsonb,
-           custom_attributes = custom_attributes || '{"undeclared column": "Childfirst"}'::jsonb
+       SET custom_attributes = custom_attributes || '{"undeclared column": "Childfirst"}'::jsonb
      WHERE id = v_player.id;
     UPDATE public.import_application_records
        SET previous_payload = to_jsonb(v_coach) || jsonb_build_object(
@@ -243,12 +242,10 @@ BEGIN
         RAISE EXCEPTION 'the purge left an undeclared attribute or a phone on the coach: %', to_jsonb(v_coach);
     END IF;
     SELECT * INTO v_player FROM public.players WHERE id = v_player.id;
-    IF v_player.contact_info IS DISTINCT FROM '{}'::jsonb
-       OR v_player.guardian_contacts IS DISTINCT FROM '[]'::jsonb
-       OR v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
+    IF v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
             'shirt_size', 'YM', 'joined_on', '2024-01-02', 'team_name', 'Smoke Team',
             'team_age', 'U10', 'team_gender', 'Girls', 'play_up', 'yes') THEN
-        RAISE EXCEPTION 'the purge left a player contact, guardian or undeclared attribute: %', to_jsonb(v_player);
+        RAISE EXCEPTION 'the purge left an undeclared player attribute: %', to_jsonb(v_player);
     END IF;
     SELECT string_agg(COALESCE(r.previous_payload::text, '') || r.applied_payload::text
                       || COALESCE(r.rollback_payload::text, ''), '')

@@ -81,9 +81,9 @@ than storing it.
 | `team name`, `team age`, `team gender`                                                                                                                     | `custom_attributes.team_name` / `team_age` / `team_gender` | Phase B (teams formed outside SquadLogic) |
 | a declared player field                                                                                                                                    | `custom_attributes.<declared name>`, typed as declared     | The organization's own use                |
 
-A player import no longer writes `contact_info` (new rows get `{}`) or
-`guardian_contacts` (new rows get `[]`); an existing player's values are left as
-they are until those columns are dropped (R4). `players.paid` and the paperwork
+A player stores no contact details or guardian contacts: R4 (`20261025010000`)
+dropped `players.contact_info` and `players.guardian_contacts`, which the import
+had stopped writing in R0. `players.paid` and the paperwork
 flags `waiver_received` and `medical_form_received` were dropped in R1
 (`20261022020000`): payments and paperwork are tracked on the league's
 registration platform, and the waitlist status stays the teaming gate. The
@@ -140,7 +140,8 @@ can be restored:
   `coaches.phone` cleared and `phone` removed from `contact_info`, and the same
   in the coach snapshots `import_application_records` keeps for rollback;
 - every player's `custom_attributes` reduced to its declared fields and the
-  import's own keys, `contact_info` emptied and `guardian_contacts` emptied;
+  import's own keys, `contact_info` emptied and `guardian_contacts` emptied (both
+  columns dropped since, by `20261025010000`);
 - the staged player and coach rows of every completed or failed import deleted.
   Field and field-availability rows stay (a refused field row waits on its job
   for replay), and so do the rows of an import still waiting to be applied,

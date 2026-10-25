@@ -13,7 +13,8 @@
   - `division_id` (UUID → `divisions.id`)
   - `first_name`, `last_name`, `preferred_name`
   - `date_of_birth` (date) and `grade` (text) for eligibility rules
-  - `guardian_contacts` (JSONB array with name/email/phone)
+  - No guardian contacts or contact details: `guardian_contacts` and `contact_info` were dropped
+    by `20261025010000` (leagues keep families' contacts on their registration platform).
   - `mutual_buddy_code` (text) – only honored when a matching code exists
   - `skill_tier` (enum: `novice`, `developing`, `advanced`) – optional balancing input
   - `coach_volunteer` (legacy registration volunteer flag), `willing_to_coach` (canonical import-normalized flag), and `notes`
@@ -37,31 +38,18 @@
     approved by an admin.)
   - `can_coach_multiple_teams` (boolean)
   - `status` (`active`, `pending-confirmation`, `inactive`, `interested`); `interested` is a
-    coach lead captured from a player import (migration `20260421060000`), see Coach Leads below
-  - `import_source` (`player_import_lead` for a captured lead, `coach_csv` once a coach import
-    has applied the row) and `last_imported_at`
+    coach who has said they would coach, set by an admin, and a coach import promotes it to
+    `active`. Leads are no longer captured from player imports: the capture stopped in
+    `20261022010000` and its RPCs and the `coach_interested_programs` table went in
+    `20261025010000`.
+  - `import_source` (`player_import_lead` on a lead captured before then, `coach_csv` once a
+    coach import has applied the row) and `last_imported_at`
+  - `email` is the address the coach signs in with; admins see it on `/coaches`. No read a coach
+    can call returns it (`20261025010000`). `phone` is no longer written (`20261022010000`).
 - **Indexes & constraints**:
   - Unique index on `email`.
   - Foreign key `player_id` references `players.id` with `ON DELETE SET NULL`.
   - Enum-backed availability days ensure consistent weekday values.
-
-### Coach Leads
-
-- **Purpose**: Record which divisions an `interested` coach lead asked to coach, and which player
-  registration flagged them, so admins can filter "who is interested in U12B?" on `/coaches` and
-  trace a lead back to its source.
-- **Table** `coach_interested_programs` (`20260421060000`): `id`, `coach_id` (→ `coaches.id`,
-  `ON DELETE CASCADE`), `division_id` (→ `divisions.id`, `ON DELETE CASCADE`),
-  `inferred_from_player_id` (→ `players.id`, `ON DELETE SET NULL`), `organization_id`,
-  `created_at`.
-- **Indexes & constraints**:
-  - `UNIQUE NULLS NOT DISTINCT` on (`coach_id`, `division_id`, `inferred_from_player_id`), so a
-    re-import whose player id is null does not insert duplicates.
-  - The `coach_interested_programs_org_scope` trigger (`20260503000000`) requires the coach, the
-    division and the player to belong to the row's `organization_id` (`23514` otherwise).
-  - Members read through one SELECT policy; there is no write policy. `upsert_coach_leads` is the
-    writer, and deleting a coach (`admin_delete_coaches`) cascades its links. See
-    [`persistence-rpc-layer.md`](persistence-rpc-layer.md) §2.9 and §2.20.
 
 ### Divisions
 
@@ -201,16 +189,12 @@ Detailed ingestion workflows live in `docs/operations/ingestion-pipeline.md`. Hi
 1. **Registration Importer**
    - Parses GotSport CSV exports.
    - Stages validated player rows, then promotes them into `players` with `finalize_import_job`.
-   - Normalizes guardian contact information into structured JSON where source columns are present.
+   - Stores no guardian contact information: the import keeps only allowlisted columns
+     ([`gotsport-import-contract.md`](gotsport-import-contract.md)).
    - Normalizes GotSport coach-interest fields into `willing_to_coach` and mirrors the value to the legacy `coach_volunteer` flag for existing reports.
    - Validates mutual buddy codes by checking for reciprocal entries before linking pairs.
-   - Captures coach leads: after promotion, a row with positive coach intent (`willing_to_coach` or
-     `coach_volunteer`) and a resolvable guardian name and email is sent to `upsert_coach_leads`,
-     which creates an `interested` coach (`import_source = 'player_import_lead'`) when no coach
-     has that email yet. A coach in the same organization that already has the email keeps its
-     status and import source; only its `last_imported_at` is updated. Either way the lead gets a
-     `coach_interested_programs` link per division. A later coach CSV with the same email updates
-     that row to the CSV's status (default `active`) in `finalize_coach_import_job`.
+   - Captures no coach leads (the capture and `upsert_coach_leads` are gone, `20261025010000`):
+     the player's `willing_to_coach` flag is the coaching lead teaming reads.
    - Flags duplicate registrations or missing division assignments for manual review.
 2. **Field Availability Importer**
    - Accepts standardized CSV with `location,field,subunit,day,start,end,type,capacity,valid_until` columns.

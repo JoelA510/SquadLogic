@@ -39,9 +39,10 @@ BEGIN
      WHERE p.pronamespace = 'public'::regnamespace
        AND EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, ARRAY[]::text[])) c WHERE lower(c) = 'timezone=utc');
     -- 42 when this was written; 20261022020000 dropped three pinned
-    -- registration functions with the in-app registration flow, and
-    -- 20261022030000 the pinned upsert_team_event_rsvp with RSVPs.
-    IF v_n < 38 THEN
+    -- registration functions with the in-app registration flow,
+    -- 20261022030000 the pinned upsert_team_event_rsvp with RSVPs, and
+    -- 20261025010000 the pinned upsert_coach_leads with the coach leads.
+    IF v_n < 37 THEN
         RAISE EXCEPTION 'only % functions are pinned to UTC; the scan examined less than the migration pinned', v_n;
     END IF;
     RAISE NOTICE 'idiom: no function uses it as a timestamp unpinned (% pinned)', v_n;

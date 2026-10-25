@@ -3,7 +3,11 @@
 // directions: the caller admitted gets the data, the caller refused gets 42501.
 // Since 20261024010000 (R3) there is no guardian: no guardian link, a coach's
 // roster is names only, and the member with no tie to a team ('mo') is a
-// coach-role member who coaches none.
+// coach-role member who coaches none. Since 20261025010000 (R4) there is no
+// contact surface: no read returns a contact, and the contact card writer and
+// the coach directory are not arms of this module. The seed still carries a
+// coach's imported phone and email and players' guardian contacts, as a row
+// written before R4 might, so a read leaking one would show.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleServerSideReadRpc, localDateIn } from '../frontend/src/lib/mockServerSideReads.js';
 
@@ -111,7 +115,6 @@ const call = (user, name, params = {}) =>
   handleServerSideReadRpc(db, name, params, {
     currentUserId: user,
     now: NOW,
-    newId: () => 'id',
   });
 const roster = (user) => call(user, 'get_team_roster', { p_team_id: 'team-a' });
 
@@ -126,33 +129,61 @@ describe('mock server-side reads', () => {
     expect(localDateIn(null, NOW)).toBe(TODAY);
   });
 
-  it('has no guardian link to call', () => {
-    expect(call('cora', 'link_my_guardian_records')).toBeNull();
+  it('has no guardian link, contact card or coach directory to call', () => {
+    for (const name of ['link_my_guardian_records', 'set_my_contact_card', 'get_coach_directory']) {
+      expect(call('cora', name, { p_organization_id: ORG })).toBeNull();
+      expect(call('admin', name, { p_organization_id: ORG })).toBeNull();
+    }
   });
 
   it('admits admins, staff and the current coach to the roster, the coach to names only', () => {
     for (const user of ['admin', 'staff']) {
-      expect(
-        roster(user).data.map((r) => `${r.first_name}:${r.rating}:${r.guardian_contacts.length}`)
-      ).toEqual(['Pia:3:2', 'Rex:4:2']);
+      expect(roster(user).data.map((r) => `${r.first_name}:${r.rating}`)).toEqual([
+        'Pia:3',
+        'Rex:4',
+      ]);
     }
-    expect(roster('admin').data[1].guardian_contacts[0]).toEqual({
-      name: 'Rhea',
-      email: 'rhea@example.test',
-      alternate_email: 'rhea2@example.test',
-      phone: '555-0202',
-    });
     const coach = roster('cora').data;
     expect(coach.map((r) => `${r.first_name} ${r.last_name}`)).toEqual(['Pia Able', 'Rex Baker']);
     for (const row of coach) {
       expect(row).not.toHaveProperty('is_my_child');
-      expect(row.guardian_contacts).toEqual([]);
       expect([row.gender, row.years_played, row.rating, row.willing_to_coach]).toEqual([
         null,
         null,
         null,
         null,
       ]);
+    }
+  });
+
+  it('returns no contact to anyone: no guardian contact on the roster, no phone or email on the staff', () => {
+    for (const user of ['admin', 'staff', 'cora']) {
+      for (const row of roster(user).data) {
+        expect(Object.keys(row).filter((key) => /mail|phone|contact|guardian/i.test(key))).toEqual(
+          []
+        );
+      }
+      const staff = call(user, 'get_team_staff', { p_team_id: 'team-a' }).data;
+      expect(staff).toEqual([
+        {
+          coach_id: 'c-cora',
+          full_name: 'Cora',
+          role: 'lead',
+          status: user === 'cora' ? null : 'active',
+        },
+      ]);
+    }
+    const text = JSON.stringify([
+      roster('admin').data,
+      call('admin', 'get_team_staff', { p_team_id: 'team-a' }).data,
+    ]);
+    for (const value of [
+      '555-0102',
+      'cora@example.test',
+      'GWEN@example.test',
+      'rhea2@example.test',
+    ]) {
+      expect(text).not.toContain(value);
     }
   });
 
@@ -165,55 +196,6 @@ describe('mock server-side reads', () => {
     expect(call(null, 'get_team_roster', { p_team_id: 'team-a' }).error?.code).toBe('42501');
   });
 
-  it('keeps only the contact objects of a malformed contact list, as the SQL does', () => {
-    db.players[1].guardian_contacts = ['legacy text', { name: 'Pat', email: 'pat@example.test' }];
-    expect(roster('admin').data[1].guardian_contacts).toEqual([
-      { name: 'Pat', email: 'pat@example.test' },
-    ]);
-    expect(roster('cora').data[1].guardian_contacts).toEqual([]);
-  });
-
-  it('reads a stored guardian_contact_sharing nowhere', () => {
-    db.organizations[0].feature_flags.guardian_contact_sharing = false;
-    expect(roster('admin').data.map((r) => r.guardian_contacts.length)).toEqual([2, 2]);
-  });
-
-  it('a saved card replaces a coach’s imported details, an unshared one shows none, and each save is audited', () => {
-    expect(
-      call('cora', 'set_my_contact_card', { p_phone: 'call me', p_email: null, p_share: true })
-        .error?.code
-    ).toBe('22023');
-    expect(
-      call('cora', 'set_my_contact_card', { p_phone: '+1 555 0199', p_email: 'card@example.test' })
-        .error?.code
-    ).toBe('23502');
-    call('cora', 'set_my_contact_card', {
-      p_phone: '+1 555 0199',
-      p_email: 'card@example.test',
-      p_share: true,
-    });
-    const staff = () => call('admin', 'get_team_staff', { p_team_id: 'team-a' }).data;
-    expect(staff()[0]).toMatchObject({ phone: '+1 555 0199', email: 'card@example.test' });
-    call('cora', 'set_my_contact_card', { p_phone: '', p_email: '', p_share: false });
-    expect(call('cora', 'get_team_staff', { p_team_id: 'team-a' }).data).toEqual([
-      {
-        coach_id: 'c-cora',
-        full_name: 'Cora',
-        role: 'lead',
-        phone: null,
-        email: null,
-        status: null,
-      },
-    ]);
-    const audits = db.audit_log.filter((row) => row.action === 'profile.contact_card_updated');
-    expect(audits).toHaveLength(2);
-    expect(audits[1].metadata).toEqual({
-      share_contact: false,
-      has_phone: false,
-      has_email: false,
-    });
-  });
-
   it('answers an admin’s role preview of a coach, and refuses a non-admin', () => {
     expect(
       call('admin', 'admin_get_coached_team_ids', { p_organization_id: ORG, p_user_id: 'cora' })
@@ -223,21 +205,6 @@ describe('mock server-side reads', () => {
       call('otto', 'admin_get_coached_team_ids', { p_organization_id: ORG, p_user_id: 'cora' })
         .error?.code
     ).toBe('42501');
-  });
-
-  it('the directory admits a current coach while on, refuses them while off, and admits staff either way', () => {
-    const names = (user) =>
-      call(user, 'get_coach_directory', { p_organization_id: ORG }).data?.map((d) => d.full_name);
-    expect(names('otto')).toEqual(['Cora', 'Otto']);
-    expect(call('mo', 'get_coach_directory', { p_organization_id: ORG }).error?.code).toBe('42501');
-    expect(call('finn', 'get_coach_directory', { p_organization_id: ORG }).error?.code).toBe(
-      '42501'
-    );
-    db.organizations[0].feature_flags.coach_directory = false;
-    expect(call('otto', 'get_coach_directory', { p_organization_id: ORG }).error?.code).toBe(
-      '42501'
-    );
-    expect(names('staff')).toEqual(['Cora', 'Otto']);
   });
 
   it('lists the teams the caller currently coaches', () => {

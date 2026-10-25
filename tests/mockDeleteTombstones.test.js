@@ -226,8 +226,10 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
     // Pinned exactly, on LIVE-3's precedent: adding a delete path or folding
     // two into a helper must be a deliberate edit to this number, not a
     // silent drift past a >= with a margin of one.
-    // 22 since R1 removed the registration form delete and its two sites.
-    expect(sites).toHaveLength(22);
+    // 22 since R1 removed the registration form delete and its two sites; 21
+    // since R4 removed coach_interested_programs and the coach delete's site
+    // for it.
+    expect(sites).toHaveLength(21);
     const tables = new Set(sites.map((site) => site.table));
     for (const table of ['field_subunits', 'team_players', 'practice_assignments', 'teams']) {
       expect(tables).toContain(table);
@@ -310,8 +312,9 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
 
   it('builds every tombstone key through tombstoneKey, never by hand', () => {
     const calls = scanTombstoneCalls(SOURCE);
-    // 22 since R1 removed the registration form delete's two calls.
-    expect(calls.length, 'the call scanner matched nothing').toBeGreaterThanOrEqual(22);
+    // 22 since R1 removed the registration form delete's two calls; 21 since
+    // R4 removed the coach delete's coach_interested_programs call.
+    expect(calls.length, 'the call scanner matched nothing').toBeGreaterThanOrEqual(21);
     const handBuilt = calls
       .filter((call) => !/tombstoneKey\(/.test(call.text))
       .map((call) => `${call.line}: ${call.text.trim().slice(0, 80)}`);

@@ -6,8 +6,9 @@
 > **Implementation Status: PARTIAL** — team import promotion remains v1.1 scope.
 > The June 2026 redesign expanded the player finalize mapping (migration
 > `20260611000200`): years played, tri-state payment status, waitlist (gated by
-> the org's `waitlist` feature flag), Guardian 1/2 → `guardian_contacts`, and
-> gendered `U{n}B`/`U{n}G` division derivation honoring the org `gender_model`,
+> the org's `waitlist` feature flag), Guardian 1/2 → `guardian_contacts` (no
+> longer: R0 stopped storing guardians and R4, `20261025010000`, dropped the
+> column), and gendered `U{n}B`/`U{n}G` division derivation honoring the org `gender_model`,
 > with season-scoped division auto-creation.
 >
 > The validation and player-promotion slice of the ingestion pipeline has been
@@ -16,7 +17,7 @@
 > - CSV parsing uses **PapaParse** (not `@fast-csv/parse`)
 > - Client-side validation is in `ImportContext.jsx`; server-side validation is in the `import-validation` Edge Function
 > - Valid player rows are staged in `staging_players` with source row numbers and promoted by `finalize_import_job(uuid, jsonb)` into `players`
-> - Player-import coach volunteer rows create durable interested coach leads after player promotion; reciprocal player-import buddy requests are materialized into `player_buddies`; coach CSV and field-slot CSV imports now have durable validate-only, apply, cancel, and rollback RPC-backed flows, while team promotion remains pending v1.1 follow-up work
+> - Player-import coach volunteer rows no longer create interested coach leads (R0 stopped the capture; R4, `20261025010000`, dropped its RPCs and table); reciprocal player-import buddy requests are materialized into `player_buddies`; coach CSV and field-slot CSV imports now have durable validate-only, apply, cancel, and rollback RPC-backed flows, while team promotion remains pending v1.1 follow-up work
 > - Header matching uses a strict alias map (not fuzzy `.includes()`)
 > - Testing uses **Vitest** (not Jest)
 > - File size enforcement (10 MB) is implemented both client-side and via Supabase Storage policy
@@ -63,7 +64,7 @@ This document expands on the roadmap tasks for importing GotSport registrations 
    - Mark promoted staging rows with `promoted_at` / `promoted_by` so re-running finalization for the same job does not duplicate players.
    - Store promotion counts in `import_jobs.warning_summary.finalize` and mark the import job `completed` or `completed_with_warnings`.
 3. For player imports, call `materialize_import_buddy_pairs` after finalization. The RPC creates mutual directional `player_buddies` rows only when imported players reciprocally reference each other by external registration id or share an exactly two-player mutual buddy code; unmatched, self, non-reciprocal, and cross-division requests are preserved as warning metadata.
-4. For player imports, call `upsert_coach_leads` after finalization for rows with positive coach intent. The RPC creates interested coaches idempotently and rejects division/player references outside the caller's organization.
+4. (Removed.) Player imports no longer capture coach leads: `upsert_coach_leads` and its table were dropped by `20261025010000`; the player's `willing_to_coach` flag is the coaching lead.
 5. Coach CSV and field-slot imports use dedicated validate-only, apply, cancel, and rollback RPCs backed by `staging_import_rows`, `import_jobs.warning_summary.deferred_apply`, and `import_application_records`.
 6. Chunked validation writes `last_heartbeat_at`, `processed_rows`, and `progress_percent`; `/import` calls `fail_stale_import_jobs` before rehydrating active work so interrupted browser-driven imports fail cleanly for retry.
 7. Pending follow-up: team creation.
@@ -89,11 +90,11 @@ status migration (`20260503090000`) must precede the lifecycle RPC migration
 (`20260504080000`) because `create_import_job`, `update_import_job_progress`,
 `fail_import_job`, `mark_import_job_ready_to_apply`, and `cancel_ready_import_job`
 insert or update `import_jobs.status` values including `importing`,
-`ready_to_apply`, and `failed`. Finalization (`finalize_import_job`), buddy
-materialization (`materialize_import_buddy_pairs`), and coach-lead capture
-(`upsert_coach_leads`, `set_import_job_coach_lead_summary`) come from the earlier
-`20260502000000`, `20260503080000`, and `20260503000000` migrations and must also
-be present before a player import can finish.
+`ready_to_apply`, and `failed`. Finalization (`finalize_import_job`) and buddy
+materialization (`materialize_import_buddy_pairs`) come from the earlier
+`20260502000000` and `20260503080000` migrations and must also be present before
+a player import can finish. (The coach-lead RPCs from `20260503000000` were
+dropped by `20261025010000`.)
 
 Run this SQL against the target Supabase database to confirm every import
 lifecycle RPC signature is present (each row should report `present = true`):
@@ -108,9 +109,7 @@ from unnest(array[
   'cancel_ready_import_job(uuid,text)',
   'fail_import_job(uuid,text,jsonb)',
   'finalize_import_job(uuid,jsonb)',
-  'materialize_import_buddy_pairs(uuid)',
-  'upsert_coach_leads(jsonb)',
-  'set_import_job_coach_lead_summary(uuid,jsonb,text)'
+  'materialize_import_buddy_pairs(uuid)'
 ]) as fn
 order by fn;
 ```

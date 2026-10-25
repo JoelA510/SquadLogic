@@ -55,19 +55,46 @@ Then('I should not see the guardian contact {string}', async ({ page }, email: s
   await expect(page.getByRole('link', { name: email })).toHaveCount(0);
 });
 
-When(
-  'I save a contact card with phone {string} and choose to share it',
-  async ({ page }, phone: string) => {
-    await page.goto('/account');
-    const card = page.getByRole('region', { name: 'Contact card' });
-    await expect(card).toBeVisible({ timeout: 15000 });
-    await card.getByLabel('Phone', { exact: true }).fill(phone);
-    await card.getByLabel('Share this phone and email').check();
-    await card.getByRole('button', { name: 'Save Contact Card' }).click();
-  }
-);
+Then('I should see no phone or email link', async ({ page }) => {
+  await expect(page.locator('a[href^="tel:"], a[href^="mailto:"]')).toHaveCount(0);
+});
 
-Then('the contact card should be saved', async ({ page }) => {
-  const card = page.getByRole('region', { name: 'Contact card' });
-  await expect(card.getByRole('status')).toHaveText('Contact card saved.');
+When('I open the player record {string}', async ({ page }, playerId: string) => {
+  await page.goto(`/players/${playerId}`);
+  await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible({ timeout: 15000 });
+});
+
+Then('the player record offers no guardians', async ({ page }) => {
+  const tabs = page.getByRole('tab');
+  await expect(tabs.first()).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Guardians' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add guardian' })).toHaveCount(0);
+});
+
+When('I open my account settings', async ({ page }) => {
+  await page.goto('/account');
+  await expect(page.getByRole('heading', { name: 'Account Settings' })).toBeVisible({
+    timeout: 15000,
+  });
+});
+
+Then('I should be offered no contact card', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: 'Account Settings' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Contact card' })).toHaveCount(0);
+  await expect(page.getByLabel('Share this phone and email')).toHaveCount(0);
+});
+
+When('I open my home page', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'My Dashboard' })).toBeVisible({
+    timeout: 15000,
+  });
+});
+
+Then('I should see no coach directory', async ({ page }) => {
+  await expect(page.getByRole('link', { name: /^Open / }).first()).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByRole('heading', { name: 'Coach directory' })).toHaveCount(0);
+  await expect(page.locator('a[href^="tel:"], a[href^="mailto:"]')).toHaveCount(0);
 });

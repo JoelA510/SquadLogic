@@ -1,7 +1,8 @@
 // The coach home as a coach (Phase A3a, migration 20261021010000): it finds the
 // coach's teams through get_my_coached_team_ids (not by reading every coach row
-// and matching emails in the browser), shows the coach directory while the
-// league's setting is on, and says so when the reads fail.
+// and matching emails in the browser), and says so when the read fails. It
+// shows no coach directory: coaches see no contact details (R4, migration
+// 20261025010000, which dropped get_coach_directory).
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,17 +55,6 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
 }));
 
-const DIRECTORY = [
-  {
-    coach_id: 'c-cora',
-    full_name: 'Cora Lead',
-    phone: '555-0102',
-    email: 'cora@example.test',
-    team_names: ['A-Team'],
-  },
-  { coach_id: 'c-otto', full_name: 'Otto Lead', phone: null, email: null, team_names: ['B-Team'] },
-];
-
 function teamsTable(rows) {
   const q = {
     select: () => q,
@@ -82,7 +72,6 @@ beforeEach(() => {
   mocks.rpc.mockImplementation(async (name) => {
     if (name === 'get_my_coached_team_ids') return { data: ['team-a'], error: null };
     if (name === 'admin_get_coached_team_ids') return { data: ['team-b'], error: null };
-    if (name === 'get_coach_directory') return { data: DIRECTORY, error: null };
     return { data: null, error: null };
   });
   mocks.from.mockReset();
@@ -118,30 +107,17 @@ describe('Coach home', () => {
     expect(mocks.rpc).not.toHaveBeenCalledWith('get_my_coached_team_ids', expect.anything());
   });
 
-  it('lists the coach directory while the league setting is on', async () => {
-    render(<DashboardPage />);
-    expect(await screen.findByRole('heading', { name: 'Coach directory' })).toBeInTheDocument();
-    expect(screen.getByText('Otto Lead')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '555-0102' })).toHaveAttribute('href', 'tel:555-0102');
-  });
-
-  it('neither shows nor reads the directory while the league setting is off', async () => {
-    mocks.flags = { coach_directory: false };
-    render(<DashboardPage />);
-    await screen.findByRole('link', { name: 'Open A-Team' });
-    expect(screen.queryByRole('heading', { name: 'Coach directory' })).not.toBeInTheDocument();
-    expect(mocks.rpc).not.toHaveBeenCalledWith('get_coach_directory', expect.anything());
-  });
-
-  it('keeps the teams when only the directory read is refused', async () => {
-    mocks.rpc.mockImplementation(async (name) => {
-      if (name === 'get_my_coached_team_ids') return { data: ['team-a'], error: null };
-      return { data: null, error: { code: '42501', message: 'not permitted' } };
-    });
-    render(<DashboardPage />);
-    expect(await screen.findByRole('link', { name: 'Open A-Team' })).toBeInTheDocument();
-    expect(screen.getByText('The coach directory could not be loaded.')).toBeInTheDocument();
-    expect(screen.queryByText(/Your teams could not be loaded/)).not.toBeInTheDocument();
+  it('shows no coach directory and reads none, whatever a stored coach_directory says', async () => {
+    for (const flags of [{}, { coach_directory: true }]) {
+      mocks.flags = flags;
+      mocks.rpc.mockClear();
+      const { unmount } = render(<DashboardPage />);
+      await screen.findByRole('link', { name: 'Open A-Team' });
+      expect(screen.queryByRole('heading', { name: 'Coach directory' })).not.toBeInTheDocument();
+      expect(document.querySelector('a[href^="tel:"], a[href^="mailto:"]')).toBeNull();
+      expect(mocks.rpc).not.toHaveBeenCalledWith('get_coach_directory', expect.anything());
+      unmount();
+    }
   });
 
   it('says the teams could not be loaded when the read fails, not that none are assigned', async () => {

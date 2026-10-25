@@ -90,25 +90,12 @@ function formatDate(value) {
   }).format(date);
 }
 
-export function buildCoachReviewRows({
-  coaches = [],
-  interestedPrograms = [],
-  divisions = [],
-  players = [],
-  teams = [],
-} = {}) {
+// A coach's programs are the divisions of the teams they coach. The divisions
+// a player import once recorded a coaching lead in (`coach_interested_programs`)
+// are gone with the leads (20261025010000).
+export function buildCoachReviewRows({ coaches = [], divisions = [], teams = [] } = {}) {
   const divisionsById = new Map(divisions.map((division) => [String(division.id), division]));
-  const playersById = new Map(players.map((player) => [String(player.id), player]));
-  const interestsByCoach = new Map();
   const teamsByCoach = new Map();
-
-  for (const interest of interestedPrograms) {
-    const coachId = String(interest.coach_id || '');
-    if (!coachId) continue;
-    const entries = interestsByCoach.get(coachId) || [];
-    entries.push(interest);
-    interestsByCoach.set(coachId, entries);
-  }
 
   for (const team of teams) {
     const coachId = String(team.coach_id || '');
@@ -120,22 +107,13 @@ export function buildCoachReviewRows({
 
   return coaches.map((coach) => {
     const coachId = String(coach.id);
-    const interests = interestsByCoach.get(coachId) || [];
     const assignedTeams = teamsByCoach.get(coachId) || [];
     const status = coach.status || 'active';
-    const divisionIds = uniqueValues([
-      ...interests.map((interest) => (interest.division_id ? String(interest.division_id) : null)),
-      ...assignedTeams.map((team) => (team.division_id ? String(team.division_id) : null)),
-    ]);
+    const divisionIds = uniqueValues(
+      assignedTeams.map((team) => (team.division_id ? String(team.division_id) : null))
+    );
     const programNames = uniqueValues(
       divisionIds.map((divisionId) => divisionsById.get(divisionId)?.name || divisionId)
-    );
-    const playerNames = uniqueValues(
-      interests.map((interest) => {
-        const player = playersById.get(String(interest.inferred_from_player_id || ''));
-        if (!player) return null;
-        return `${player.first_name || ''} ${player.last_name || ''}`.trim() || player.id;
-      })
     );
 
     return {
@@ -152,13 +130,11 @@ export function buildCoachReviewRows({
       canCoachMultipleTeams: Boolean(coach.can_coach_multiple_teams),
       divisionIds,
       programNames,
-      playerNames,
       teams: assignedTeams.map((team) => ({
         id: team.id,
         name: team.name || team.id,
         divisionId: team.division_id || null,
       })),
-      interestedProgramCount: interests.length,
     };
   });
 }
@@ -192,7 +168,6 @@ export function filterCoachReviewRows(
       row.phone,
       row.statusLabel,
       ...row.programNames,
-      ...row.playerNames,
       ...row.teams.map((team) => team.name),
     ]
       .join(' ')
@@ -251,9 +226,7 @@ export default function CoachesPage() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [coaches, setCoaches] = useState([]);
-  const [interestedPrograms, setInterestedPrograms] = useState([]);
   const [divisions, setDivisions] = useState([]);
-  const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [divisionFilter, setDivisionFilter] = useState('all');
@@ -274,9 +247,7 @@ export default function CoachesPage() {
 
     if (!currentOrganization?.id) {
       setCoaches([]);
-      setInterestedPrograms([]);
       setDivisions([]);
-      setPlayers([]);
       setTeams([]);
       setAssignmentRows(null);
       setLoading(false);
@@ -286,72 +257,44 @@ export default function CoachesPage() {
     setError(null);
 
     try {
-      const [coachResult, interestResult, divisionResult, teamResult, assignmentResult] =
-        await Promise.all([
+      const [coachResult, divisionResult, teamResult, assignmentResult] = await Promise.all([
+        supabase
+          .from('coaches')
+          .select(
+            'id, organization_id, full_name, email, phone, status, import_source, last_imported_at, can_coach_multiple_teams, created_at'
+          )
+          .eq('organization_id', currentOrganization.id)
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('divisions')
+          .select('id, name, organization_id')
+          .eq('organization_id', currentOrganization.id)
+          .order('name', { ascending: true }),
+        supabase
+          .from('teams')
+          .select('id, name, division_id, coach_id, organization_id')
+          .eq('organization_id', currentOrganization.id)
+          .order('name', { ascending: true }),
+        // Paged: the history only grows (nothing is deleted), and an unranged
+        // select is cut at the server's row cap -- a partial history would
+        // make covered teams read as uncoached in the preview.
+        fetchAllPages(() =>
           supabase
-            .from('coaches')
-            .select(
-              'id, organization_id, full_name, email, phone, status, import_source, last_imported_at, can_coach_multiple_teams, created_at'
-            )
+            .from('team_coach_assignments')
+            .select('id, team_id, coach_id, role, effective_from, effective_to')
             .eq('organization_id', currentOrganization.id)
-            .order('full_name', { ascending: true }),
-          supabase
-            .from('coach_interested_programs')
-            .select(
-              'id, coach_id, division_id, inferred_from_player_id, organization_id, created_at'
-            )
-            .eq('organization_id', currentOrganization.id)
-            .order('created_at', { ascending: false }),
-          supabase
-            .from('divisions')
-            .select('id, name, organization_id')
-            .eq('organization_id', currentOrganization.id)
-            .order('name', { ascending: true }),
-          supabase
-            .from('teams')
-            .select('id, name, division_id, coach_id, organization_id')
-            .eq('organization_id', currentOrganization.id)
-            .order('name', { ascending: true }),
-          // Paged: the history only grows (nothing is deleted), and an unranged
-          // select is cut at the server's row cap -- a partial history would
-          // make covered teams read as uncoached in the preview.
-          fetchAllPages(() =>
-            supabase
-              .from('team_coach_assignments')
-              .select('id, team_id, coach_id, role, effective_from, effective_to')
-              .eq('organization_id', currentOrganization.id)
-          ).then(
-            (data) => ({ data, error: null }),
-            (error) => ({ data: null, error })
-          ),
-        ]);
+        ).then(
+          (data) => ({ data, error: null }),
+          (error) => ({ data: null, error })
+        ),
+      ]);
 
-      const resultError =
-        coachResult.error || interestResult.error || divisionResult.error || teamResult.error;
+      const resultError = coachResult.error || divisionResult.error || teamResult.error;
       if (resultError) throw resultError;
       if (latestRequestRef.current !== requestId) return;
 
-      const sourcePlayerIds = uniqueValues(
-        (interestResult.data || []).map((interest) =>
-          interest.inferred_from_player_id ? String(interest.inferred_from_player_id) : null
-        )
-      );
-      const playerResult =
-        sourcePlayerIds.length > 0
-          ? await supabase
-              .from('players')
-              .select('id, first_name, last_name, organization_id')
-              .eq('organization_id', currentOrganization.id)
-              .in('id', sourcePlayerIds)
-          : { data: [], error: null };
-
-      if (playerResult.error) throw playerResult.error;
-      if (latestRequestRef.current !== requestId) return;
-
       setCoaches(coachResult.data || []);
-      setInterestedPrograms(interestResult.data || []);
       setDivisions(divisionResult.data || []);
-      setPlayers(playerResult.data || []);
       setTeams(teamResult.data || []);
       // An unreadable coaching record is NOT an empty one: null makes the
       // preview say "could not be computed" instead of "no effect".
@@ -385,8 +328,8 @@ export default function CoachesPage() {
   }, [currentOrganization?.id]);
 
   const allRows = useMemo(
-    () => buildCoachReviewRows({ coaches, interestedPrograms, divisions, players, teams }),
-    [coaches, interestedPrograms, divisions, players, teams]
+    () => buildCoachReviewRows({ coaches, divisions, teams }),
+    [coaches, divisions, teams]
   );
   const summary = useMemo(() => summarizeCoachRows(allRows), [allRows]);
   const teamAssignmentOptions = useMemo(
@@ -404,7 +347,6 @@ export default function CoachesPage() {
             .map((name) => divisionDisplayName(name, genderModel))
             .join(', '),
           _teams: row.teams.map((team) => team.name).join(', '),
-          _players: row.playerNames.join(', '),
         })
       ),
     [allRows, statusFilter, divisionFilter, genderModel]
@@ -650,14 +592,7 @@ export default function CoachesPage() {
         label: 'Programs',
         width: 200,
         render: (row) =>
-          row._programs ? (
-            <span title={row._players ? `From ${row._players}` : undefined}>
-              {row._programs}
-              {row._players && <span className="muted"> · from {row._players}</span>}
-            </span>
-          ) : (
-            <span className="muted">No lead programs</span>
-          ),
+          row._programs ? <span>{row._programs}</span> : <span className="muted">No programs</span>,
       },
       {
         key: '_teams',
@@ -706,15 +641,7 @@ export default function CoachesPage() {
         setSelected={setSelected}
         search={search}
         setSearch={setSearch}
-        searchKeys={[
-          'fullName',
-          'email',
-          'phone',
-          'statusLabel',
-          '_programs',
-          '_teams',
-          '_players',
-        ]}
+        searchKeys={['fullName', 'email', 'phone', 'statusLabel', '_programs', '_teams']}
         onCellChange={canManageCoaches ? handleCellChange : undefined}
         rowActions={
           canManageCoaches

@@ -73,8 +73,9 @@ export default function TeamRecordPage() {
 
   // Staff tab: every current coach, through the server-side read
   // (20261021010000), which admits admins and the team's current coaches (no
-  // guardian since 20261024010000), and shows a coach's contact card in place
-  // of imported details.
+  // guardian since 20261024010000) and returns names and roles, with no
+  // contact details (20261025010000); an admin finds a coach's sign-in email
+  // on the Coaches page.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -303,7 +304,6 @@ export default function TeamRecordPage() {
                           {player.jersey_number != null ? `#${player.jersey_number} · ` : ''}
                           Player
                         </div>
-                        <GuardianContacts contacts={player.guardian_contacts} />
                       </div>
                     </div>
                   </div>
@@ -351,8 +351,6 @@ export default function TeamRecordPage() {
                           </span>
                         )}
                       />
-                      <InlineField label="Email" value={member.email} editable={false} />
-                      <InlineField label="Phone" value={member.phone} editable={false} />
                       {member.status != null && (
                         <InlineField
                           label="Status"
@@ -373,7 +371,7 @@ export default function TeamRecordPage() {
                 <>
                   <div className="divider" />
                   <div style={{ fontSize: 13 }} className="secondary">
-                    {volunteers} guardian(s) on this roster volunteered to coach.
+                    {volunteers} player(s) on this roster have a family member willing to coach.
                   </div>
                 </>
               )}
@@ -607,60 +605,4 @@ CalendarModal.propTypes = {
   }),
   canRotate: PropTypes.bool,
   onClose: PropTypes.func.isRequired,
-};
-
-/**
- * The guardian contacts the roster read returned for one player: every contact,
- * to an admin only; a coach's read returns none (20261024010000). Nothing
- * renders when the read returned none.
- */
-function GuardianContacts({ contacts }) {
-  const list = Array.isArray(contacts)
-    ? contacts.filter((c) => c && (c.name || c.email || c.phone))
-    : [];
-  if (list.length === 0) return null;
-  return (
-    <ul className="text-xs text-text-secondary mt-1" aria-label="Guardian contacts">
-      {list.map((contact, index) => (
-        <li key={`${contact.email ?? ''}-${contact.name ?? ''}-${index}`}>
-          {contact.name || 'Guardian'}
-          {contact.email && (
-            <>
-              {' · '}
-              <a className="linklike" href={`mailto:${contact.email}`}>
-                {contact.email}
-              </a>
-            </>
-          )}
-          {contact.phone && (
-            <>
-              {' · '}
-              <a className="linklike" href={`tel:${contact.phone}`}>
-                {contact.phone}
-              </a>
-            </>
-          )}
-          {contact.alternate_email && (
-            <>
-              {' · '}
-              <a className="linklike" href={`mailto:${contact.alternate_email}`}>
-                {contact.alternate_email}
-              </a>
-            </>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-GuardianContacts.propTypes = {
-  contacts: PropTypes.arrayOf(
-    PropTypes.shape({
-      name: PropTypes.string,
-      email: PropTypes.string,
-      phone: PropTypes.string,
-      alternate_email: PropTypes.string,
-    })
-  ),
 };

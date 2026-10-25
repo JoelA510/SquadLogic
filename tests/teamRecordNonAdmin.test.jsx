@@ -1,11 +1,13 @@
 // The team page as a non-admin, a coach since 20261024010000 removed the parent
 // role (Phase A3a, migration 20261021010000): the roster shows what the
-// server-side read returned (names only for a coach; guardian contacts only
-// to an admin, whose read returns them), the Staff
-// tab lists every current coach from get_team_staff, and the Balance tab
-// (gender, years played, rating: admin-only fields) is not offered.
+// server-side read returned (names only for a coach), the Staff tab lists
+// every current coach from get_team_staff, and the Balance tab (gender, years
+// played, rating: admin-only fields) is not offered. Since 20261025010000 (R4)
+// neither read returns a contact and the page shows none, to anyone: the
+// fixtures below still carry guardian contacts and a coach's phone and email,
+// as a response from before R4 would, so a page rendering one would show.
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamRecordPage from '../frontend/src/pages/TeamRecordPage.jsx';
 
@@ -111,19 +113,46 @@ describe('TeamRecordPage as a non-admin', () => {
     expect(screen.queryAllByRole('list', { name: 'Guardian contacts' })).toHaveLength(0);
   });
 
-  it('shows an admin each player the contacts the roster read returned, and none where it returned none', () => {
+  it('shows an admin no guardian contact, even one a stale roster row carries', () => {
     mocks.admin = true;
     render(<TeamRecordPage />);
     fireEvent.click(screen.getByRole('tab', { name: /Roster/ }));
-    const lists = screen.getAllByRole('list', { name: 'Guardian contacts' });
-    expect(lists).toHaveLength(2);
-    expect(within(lists[0]).getAllByRole('listitem')).toHaveLength(2);
-    expect(within(lists[0]).getByRole('link', { name: '555-0201' })).toHaveAttribute(
-      'href',
-      'tel:555-0201'
-    );
-    expect(within(lists[1]).getByRole('link', { name: 'rhea@example.test' })).toBeInTheDocument();
     expect(screen.getByText('Quinn Cole')).toBeInTheDocument();
+    expect(screen.queryAllByRole('list', { name: 'Guardian contacts' })).toHaveLength(0);
+    expect(
+      screen.queryByText(/Gwen Able|gwen@example\.test|555-0201|rhea@example\.test/)
+    ).toBeNull();
+    expect(document.querySelector('a[href^="tel:"], a[href^="mailto:"]')).toBeNull();
+  });
+
+  it('shows the staff with no email or phone, to an admin as to a coach', async () => {
+    for (const admin of [false, true]) {
+      mocks.admin = admin;
+      const { unmount } = render(<TeamRecordPage />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Staff' }));
+      expect(await screen.findByText('Cora Lead')).toBeInTheDocument();
+      expect(screen.queryByText('Email')).not.toBeInTheDocument();
+      expect(screen.queryByText('Phone')).not.toBeInTheDocument();
+      expect(screen.queryByText(/cora@example\.test|555-0102/)).toBeNull();
+      unmount();
+    }
+  });
+
+  it('tells an admin how many players have a family member willing to coach, without naming one', async () => {
+    mocks.admin = true;
+    mocks.portalState = {
+      ...mocks.portalState,
+      roster: mocks.portalState.roster.map((row, index) => ({
+        ...row,
+        willing_to_coach: index === 0,
+      })),
+    };
+    render(<TeamRecordPage />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Staff' }));
+    expect(
+      await screen.findByText('1 player(s) on this roster have a family member willing to coach.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/guardian/i)).toBeNull();
   });
 
   it('lists every current coach from get_team_staff, and no status or volunteer count', async () => {
@@ -135,7 +164,7 @@ describe('TeamRecordPage as a non-admin', () => {
     expect(screen.getByText('Assistant coach')).toBeInTheDocument();
     expect(mocks.rpc).toHaveBeenCalledWith('get_team_staff', { p_team_id: 'team-1' });
     expect(screen.queryByText('Status')).not.toBeInTheDocument();
-    expect(screen.queryByText(/volunteered to coach/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/willing to coach/)).not.toBeInTheDocument();
   });
 
   it('says so when the staff read is refused, instead of "No coach assigned"', async () => {

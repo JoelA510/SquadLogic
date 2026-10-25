@@ -1303,7 +1303,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2750,6 +2750,72 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the guardian revert did not restore every dropped or replaced object as it was at 20261023010000"
         dump 10 $SCRATCH/harness_guardian; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261025010000" ]; then
+      # Structure only (the dropped contacts, cards and leads cannot come
+      # back). One fingerprint of every object the migration dropped or
+      # replaced, read off the catalogue: the thirteen functions (signature,
+      # security, volatility, SET clauses, result, arguments, sorted grants,
+      # md5 of the body, comment), `coach_interested_programs` (kind, row
+      # security, sorted grants, options, comment) with its columns,
+      # constraints, indexes, trigger and policy, the restored columns of
+      # `players` and `profiles` (name, type, nullability, default, comment;
+      # not their position, which a re-added column cannot keep) with the two
+      # card checks, and the comment on `coaches.status`. The expected md5 and
+      # row count were read 2026-10-25 off a build at 20261024010000 with the
+      # same query; the count is part of the verdict, so a lookup that finds
+      # nothing cannot pass.
+      if psql_cmd "SELECT 'CONTACTS-VERDICT:' || CASE WHEN md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*)
+               = '059f7fab3794efbf3d40826284b6412d:41' THEN 'restored' ELSE 'wrong' END FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('get_team_staff', 'get_team_roster', 'get_organization_members', 'get_coach_directory',
+                           'set_my_contact_card', 'sanitize_player_patch', 'apply_player_patch',
+                           'admin_bulk_update_players', 'finalize_import_job', 'minimise_import_people_data',
+                           'upsert_coach_leads', 'set_import_job_coach_lead_summary',
+                           'enforce_coach_interested_programs_org_scope')
+      UNION ALL
+      SELECT 'c|' || c.relname || '|' || c.relkind::text || '|' || c.relrowsecurity || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(c.relacl) e), '') || '|'
+             || coalesce(array_to_string(c.reloptions, ','), '') || '|' || coalesce(obj_description(c.oid, 'pg_class'), '')
+        FROM pg_class c
+       WHERE c.relnamespace = 'public'::regnamespace AND c.relname = 'coach_interested_programs'
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+             || '|' || CASE WHEN c.relname = 'coach_interested_programs' THEN a.attnum::text ELSE '' END
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+         AND (c.relname = 'coach_interested_programs'
+              OR (c.relname = 'players' AND a.attname IN ('guardian_contacts', 'contact_info'))
+              OR (c.relname = 'profiles' AND a.attname IN ('contact_phone', 'contact_email', 'share_contact'))
+              OR (c.relname = 'coaches' AND a.attname = 'status'))
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint
+       WHERE conrelid = to_regclass('public.coach_interested_programs')
+          OR conname IN ('profiles_contact_phone_check', 'profiles_contact_email_check')
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid = to_regclass('public.coach_interested_programs')
+      UNION ALL
+      SELECT 't|' || pg_get_triggerdef(t.oid) FROM pg_trigger t
+       WHERE NOT t.tgisinternal AND t.tgrelid = to_regclass('public.coach_interested_programs')
+      UNION ALL
+      SELECT 'p|' || tablename || '|' || policyname || '|' || permissive || '|' || cmd || '|' || roles::text || '|'
+             || coalesce(qual, '') || '|' || coalesce(with_check, '')
+        FROM pg_policies WHERE schemaname = 'public' AND tablename = 'coach_interested_programs'
+             ) s;" \
+         >$SCRATCH/harness_contacts 2>&1 && grep -q 'CONTACTS-VERDICT:restored' $SCRATCH/harness_contacts; then
+        echo "  | (checked) the contact surfaces revert restores the players and contact card columns, the coach interest table with its keys, policy, trigger and grants, the directory, card and lead functions, the staff and roster reads' contact columns, the member list open to members and the player writers' previous bodies, each with its grants, comment and posture as at 20261024010000"
+      else
+        echo "FAIL revert ${id}: the contact surfaces revert did not restore every dropped or replaced object as it was at 20261024010000"
+        dump 10 $SCRATCH/harness_contacts; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

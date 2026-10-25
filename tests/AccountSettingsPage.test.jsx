@@ -47,12 +47,6 @@ vi.mock('../frontend/src/components/settings/InvitesSettings.jsx', () => ({
   default: () => <div>Invite Admin Panel</div>,
 }));
 
-// The contact card has its own tests (tests/contactCard.test.jsx); here it would
-// read the profile through this file's `from` mock, which the profile form owns.
-vi.mock('../frontend/src/components/settings/ContactCardSettings.jsx', () => ({
-  default: () => <section aria-label="Contact card" />,
-}));
-
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     rpc: mocks.rpc,
@@ -159,6 +153,15 @@ describe('AccountSettingsPage', () => {
     expect(await screen.findByRole('heading', { name: 'Account Settings' })).toBeInTheDocument();
     expect(screen.getByLabelText('Email')).toHaveValue('coach@example.com');
     expect(screen.queryByRole('heading', { name: 'Admin Invites' })).not.toBeInTheDocument();
+  });
+
+  it('offers no contact card: coaches share no contact details (R4)', () => {
+    render(<AccountSettingsPage />);
+
+    expect(screen.getByRole('heading', { name: 'Account Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Contact card' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Phone', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Share this phone and email')).not.toBeInTheDocument();
   });
 
   it('blocks mismatched password changes and associates the error with both fields', () => {

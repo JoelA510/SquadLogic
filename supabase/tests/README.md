@@ -40,7 +40,7 @@ npm run test:db:once supabase/tests/rls_cross_org_isolation.sql
 | `rls_admin_vs_coach.sql`                 | `audit_log` visible to admins, invisible to coaches.                              |
 | `rls_service_role_bypass.sql`            | `service_role` sees every row across orgs.                                        |
 | `rls_import_efficiency_metrics_view.sql` | `security_invoker = on` view is org-scoped for its caller.                        |
-| `coach_leads.sql`                        | Player-import coach lead RPC stays idempotent and org-scoped.                     |
+| `contact_surfaces_removed.sql`           | No read a coach can call returns an email or phone; the contact surfaces stay gone. |
 | `division_roster_constraints.sql`        | Division roster/team bounds persist and stay admin-owned.                         |
 | `storage_exports_bucket.sql`             | `exports` is private: members of the folder's org read, its admins upload.        |
 | `rls_policy_matrix.sql`                  | Seven personas' read and write access on the 26 advisor-flagged tables.           |

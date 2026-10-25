@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import PropTypes from 'prop-types';
 import {
   AlertTriangle,
   ArrowRight,
-  BookUser,
   Calendar,
   CheckCircle2,
   Flag,
@@ -33,7 +31,6 @@ import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
-import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { isAdminRole } from '../constants/permissions.js';
 
 /**
@@ -556,19 +553,15 @@ function AdminHome() {
   );
 }
 
-/** Coach Home — my teams at a glance, and the league's coach directory. */
+/** Coach Home — my teams at a glance. No coach directory: coaches see no contact details (R4). */
 function CoachDashboard() {
   const { currentOrganization } = useOrganization();
   const { user, isImpersonating } = useAuth();
   // An admin's role preview keeps the admin's session (auth.uid()), so the
   // previewed coach's teams come from the admin-only read for that profile.
   const previewUserId = isImpersonating ? (user?.profile?.id ?? null) : null;
-  const { isEnabled } = useFeatures();
-  const directoryOn = isEnabled(FEATURE_FLAGS.COACH_DIRECTORY);
   const [teams, setTeams] = useState(/** @type {{ id: string, name: string }[]} */ ([]));
-  const [directory, setDirectory] = useState(/** @type {any[] | null} */ (null));
   const [loadError, setLoadError] = useState(/** @type {string | null} */ (null));
-  const [directoryError, setDirectoryError] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -578,8 +571,6 @@ function CoachDashboard() {
       if (!orgId) return;
       // Nothing of the previous organization stays on screen while this one loads.
       setTeams([]);
-      setDirectory(null);
-      setDirectoryError(false);
       setLoadError(null);
       try {
         // The teams the caller currently coaches (20261021010000): a live
@@ -607,29 +598,6 @@ function CoachDashboard() {
           setTeams(mine);
           setLoadError(null);
         }
-        // The directory is its own read: the server may refuse it (the league
-        // just turned it off) without taking the coach's teams with it.
-        let coaches = null;
-        let coachesFailed = false;
-        if (directoryOn && mine.length > 0) {
-          const { data: rows, error: directoryReadError } = await supabase.rpc(
-            'get_coach_directory',
-            { p_organization_id: orgId }
-          );
-          if (directoryReadError) {
-            logger.warn('[CoachDashboard] coach directory not loaded', {
-              code: directoryReadError.code,
-              message: directoryReadError.message,
-            });
-            coachesFailed = true;
-          } else {
-            coaches = rows || [];
-          }
-        }
-        if (!cancelled) {
-          setDirectory(coaches);
-          setDirectoryError(coachesFailed);
-        }
       } catch (err) {
         logger.error('[CoachDashboard] load failed:', err);
         if (!cancelled) setLoadError('Your teams could not be loaded. Try again shortly.');
@@ -640,7 +608,7 @@ function CoachDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [currentOrganization?.id, directoryOn, previewUserId]);
+  }, [currentOrganization?.id, previewUserId]);
 
   if (!loaded) return <LoadingScreen />;
 
@@ -714,80 +682,10 @@ function CoachDashboard() {
             </Link>
           </div>
         </div>
-        {directory && <CoachDirectory coaches={directory} />}
-        {directoryError && (
-          <div className="card">
-            <div className="card-body muted">The coach directory could not be loaded.</div>
-          </div>
-        )}
       </div>
     </Page>
   );
 }
-
-/**
- * Every current coach in the league with their contact details, from
- * `get_coach_directory` (which admits a current coach only while the league's
- * Coach Directory setting is on). A coach's contact card replaces imported
- * details, and an unshared card leaves them blank.
- */
-function CoachDirectory({ coaches }) {
-  return (
-    <section className="card" aria-labelledby="coach-directory-heading">
-      <div className="card-head">
-        <BookUser size={17} aria-hidden="true" />
-        <h3 id="coach-directory-heading">Coach directory</h3>
-      </div>
-      <div className="card-body">
-        {coaches.length === 0 ? (
-          <span className="muted">No coaches are assigned yet.</span>
-        ) : (
-          <ul className="flex flex-col gap-2.5">
-            {coaches.map((coach) => (
-              <li key={coach.coach_id} className="flex items-center gap-2.5">
-                <Avatar name={coach.full_name || '?'} size="sm" />
-                <div className="flex-1 text-sm">
-                  <div className="font-semibold">{coach.full_name || 'Coach'}</div>
-                  <div className="muted">
-                    {(coach.team_names || []).join(', ')}
-                    {coach.email && (
-                      <>
-                        {' · '}
-                        <a className="linklike" href={`mailto:${coach.email}`}>
-                          {coach.email}
-                        </a>
-                      </>
-                    )}
-                    {coach.phone && (
-                      <>
-                        {' · '}
-                        <a className="linklike" href={`tel:${coach.phone}`}>
-                          {coach.phone}
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
-  );
-}
-
-CoachDirectory.propTypes = {
-  coaches: PropTypes.arrayOf(
-    PropTypes.shape({
-      coach_id: PropTypes.string.isRequired,
-      full_name: PropTypes.string,
-      email: PropTypes.string,
-      phone: PropTypes.string,
-      team_names: PropTypes.arrayOf(PropTypes.string),
-    })
-  ).isRequired,
-};
 
 /**
  * Home for a membership whose role SquadLogic no longer has (a stale `parent`

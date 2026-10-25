@@ -21,6 +21,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 
 - **Teams**: Records from the `teams` table joined with `divisions`.
 - **Practice Slots**: Rows from `practice_slots` joined to `field_subunits` and `fields`, filtered by the current effective date range.
+- **Division reservations** (D2, `docs/changes/2026-10-22-demo-mode.md`; migration `20261029010000`): `practice_slots.division_id`. A reserved slot is used only by its division's teams, and a division with a reserved slot among the run's slots uses only those, matched by division id (a team with none known is refused every reserved slot). The auto-scheduler Edge Function loads each run slot's reservation and each team's `teams.division_id` itself, as the caller through RLS, never from the request body, and refuses the run (503 `SLOT_RESERVATIONS_UNREADABLE`) when it cannot read them (`_shared/engines/practice-reservations.ts`); its hard constraint (`checkHardConstraints`) applies the rule to every new placement, so the seed, the search and the unplaced re-derivation agree. Core `schedulePractices` and the (not live) core optimiser apply the same rule (`reservationRefusal`); `tests/autoSchedulerReservations.test.js` holds the two equal. A locked practice is never judged, so a reservation set after a practice was saved does not move it. A team left with no open slot is unplaced with the search's own reason (core: `no practice slot is open to this division (reservations)`).
 - **Coach Availability**: `coaches.can_coach_multiple_teams`, and the approved rows of `coach_practice_preferences` (weekday, start time and venue, each `must_keep` / `prefer_keep` / `dont_care`) for the coaches `team_coach_assignments` holds current. The auto-scheduler Edge Function loads these itself, as the caller through RLS, and never from the request body (8.6 PR 3b PR 8). The old `coaches.preferred_practice_days` / `preferred_practice_window` columns were never read and were dropped in `20261001000000`.
 - **Season Configuration**: Values from `season_settings` describing early/late season durations, fallback days, and scoring weights for preference satisfaction.
 - **Manual Overrides**: Optional locks stored in `practice_assignments` with `source = 'manual'` that should not be reassigned automatically.
@@ -42,6 +43,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
    - Select the highest-scoring slot that still has capacity and no coach conflict. If multiple slots tie, choose the earliest start time.
    - Record the assignment in a staging structure and decrement the slot capacity.
    - If no slot meets hard constraints, flag the team as `needs_manual_assignment` with candidate slots ranked by score.
+   - A slot a division reservation refuses is never a candidate (D2); it is left out when the unplaced reason is read, so a reserved division whose slots are full reads `no available capacity`.
 3. **Conflict Resolution**
    - After the initial pass, scan for:
      - Coaches scheduled with overlapping slots across their teams.

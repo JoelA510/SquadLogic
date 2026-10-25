@@ -68,6 +68,9 @@
     `teamCountOverride`, `minTeams` and `maxTeams` (`packages/core/src/rosterSizing.js`); see
     [`team-generation.md`](team-generation.md).
   - `play_format` (text, e.g., `7v7`)
+  - `plays_games` (boolean NOT NULL DEFAULT true, `20261029010000`): false makes the division
+    practice only. The game page reads it with its grid data and builds the division no round
+    robin, listing it as practice only rather than unscheduled; its teams still practise.
   - `season_start`, `season_end` (date)
 - **Indexes & constraints**:
   - Unique index on `name` per season range to prevent duplicates.
@@ -75,9 +78,14 @@
     `divisions_team_count_bounds` (`min_teams <= max_teams`) and
     `divisions_team_count_override_min_bound` / `_max_bound` (an override stays within
     `min_teams` and `max_teams`), each passing when either side is null.
-  - Writers: `admin_upsert_division_settings` (admin-only, audited; `20260504020000`), called from
-    the Team Analysis page's rules form (`frontend/src/pages/TeamAnalysisPage.jsx`). Members read
-    divisions; admins insert, update and delete through per-command policies.
+  - `divisions_id_organization_id_key UNIQUE (id, organization_id)` (`20261029010000`), the key a
+    reference from a row of the same organization needs (`practice_slots.division_id`).
+  - Writers: `admin_upsert_division_settings` (admin-only, audited; `20260504020000`, and since
+    `20261029010000` `p_plays_games`, NULL keeping the stored value), called from the Team
+    Analysis page's rules form (`frontend/src/pages/TeamAnalysisPage.jsx`, whose **Plays games**
+    box shows for a stored division). Members read divisions; admins insert, update and delete
+    through per-command policies, so an admin can still write `plays_games` directly, unaudited,
+    as every other division column (declared).
 
 ### Teams
 
@@ -139,11 +147,24 @@
 ### Time Slots
 
 - **Practice slots** (`practice_slots`):
-  - `id`, `field_subunit_id` (nullable → falls back to full field), `day_of_week` (enum Mon–Thu),
-    `start_time`, `end_time`, `capacity` (smallint, default 1),
+  - `id`, `field_id`, `field_subunit_id` (nullable → falls back to full field), `day_of_week`
+    (Mon–Sun since `20260503070000`), `start_time`, `end_time`, `capacity` (smallint, default 1),
     `valid_from`, `valid_until` for daylight adjustments.
+  - `division_id` (uuid NULL, `20261029010000`): the division the slot is reserved to, a reference
+    to `divisions (id, organization_id)` in the slot's own organization, `ON DELETE SET NULL
+(division_id)`. A reserved slot is used only by its division's teams, and a division with a
+    reserved slot uses only its reserved slots (core `schedulePractices`, the Edge solver). Set by
+    the fields CSV's **Division** column and `admin_set_practice_slot_division` (Field
+    Management's select on each slot).
   - Index on (`day_of_week`, `start_time`) for quick lookups.
-  - Partial unique indexes prevent double-booking full fields vs. subunits in the same time window.
+  - **No overlap or turnover on one surface, refused at write** (`20261029010000`): the field
+    import refuses a practice slot that overlaps, or starts less than 15 minutes from, another on
+    the same bookable surface (the same subunit; or for a whole field, the field and each of its
+    subunits), on the same weekday, whose effective windows share that weekday
+    (`practice_slot_conflicts`). There is no index or constraint behind it: a rollback restores the
+    slots it replaced without the check, and rows written before the migration are not judged
+    (declared). Earlier versions of this page claimed partial unique indexes did this; none
+    existed.
 - **Game slots** (`game_slots`):
   - `id`, `field_id`, `week_index` (smallint), `slot_date`, `start_time`, `end_time`, `division_id` (nullable for shared fields).
   - Unique constraint on (`field_id`, `slot_date`, `start_time`).

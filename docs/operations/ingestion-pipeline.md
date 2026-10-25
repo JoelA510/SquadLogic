@@ -147,7 +147,7 @@ database that has not yet defined it and PostgREST returns
 
 ### 2.1 Template Expectations
 
-- Provide a downloadable CSV template with columns: `Location`, `Field`, `Subunit`, `Day`, `Start`, `End`, `Type`, `Capacity`, `Valid From`, `Valid Until`.
+- Provide a downloadable CSV template with columns: `Location`, `Field`, `Subunit`, `Day`, `Start`, `End`, `Type`, `Capacity`, `Valid From`, `Valid Until`, and an optional `Division` (D2, migration `20261029010000`): a practice slot whose row names a division of the season is reserved to it (an unknown name fails the row); blank leaves it open, and a re-import with it blank keeps a reservation already set.
 - Accept multiple rows per field to represent early/late season durations or split fields.
 - Validate that `Type` is either `practice` or `game`; other values trigger a friendly error.
 
@@ -162,7 +162,7 @@ database that has not yet defined it and PostgREST returns
 
 ### 2.3 Validation Rules
 
-- Reject overlapping slots on the same field/subunit with identical day/time ranges.
+- Reject a practice slot that overlaps, or starts less than 15 minutes from, another on the same bookable surface (the same subunit; a whole field clashes with each of its subunits, two subunits never with each other), on the same weekday, whose effective windows share that weekday (`finalize_field_import_job` through `practice_slot_conflicts`, migration `20261029010000`). The row fails with `reason: practice_slot_conflict` before anything it names is written. Game slots are not judged.
 - Ensure `Capacity` is at least 1; default to 1 if blank.
 - Verify that `Valid From` and `Valid Until` fall within the active season defined in `season_settings`.
 - Provide warnings (not failures) when a field lacks lighting but the slot ends after sunset—use seasonal sunset heuristics from configuration.

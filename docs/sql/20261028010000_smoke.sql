@@ -12,7 +12,8 @@
 --     setting absent, false, or not a boolean, an admin is refused 55000 and
 --     nothing is written; with it on, an admin and a staff member score (one
 --     audit row each); a current coach of the home team, a member who coaches
---     no team and another organization's admin are refused 42501;
+--     no team and another organization's admin are refused 42501; the service
+--     role, which skips every caller check, is not refused with it off;
 --   * withdrawing a lighting override: its requester (still a coach of the
 --     slot) is refused 42501; an admin withdraws it;
 --   * the division read: a coach gets every team of each division they
@@ -221,7 +222,20 @@ BEGIN
     IF v_refused <> 4 OR (SELECT score_home FROM public.games WHERE id = v_game) IS DISTINCT FROM 3::smallint THEN
         RAISE EXCEPTION 'score entry: % of 4 non-admins (the home and away coaches, a member who coaches no team, another organization''s admin) refused 42501, or the score moved', v_refused;
     END IF;
-    RAISE NOTICE 'score entry: off (absent, false, a string) refused an admin 55000, 3 of 3, writing nothing; on, an admin and a staff member scored, 2 audit rows; both teams'' coaches, a member who coaches no team and another organization''s admin refused 42501, 4 of 4';
+    -- The service role (a server-side job) skips the setting, as it skips the
+    -- role checks: with the setting off its call is not refused 55000. (It
+    -- repeats the stored score, a no-op: a changed score would need an audit
+    -- row, and `audit_log.user_id` is NOT NULL while the service role has no
+    -- uid, so the service role cannot change a score either way; pre-existing.)
+    UPDATE public.organizations SET feature_flags = '{}'::jsonb WHERE id = v_org;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+    v_res := public.update_game_score(v_org, v_game, 3::smallint, 1::smallint, '{}'::jsonb);
+    PERFORM set_config('request.jwt.claim.role', '', true);
+    IF (v_res ->> 'changed')::boolean IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'the service role''s repeat of the stored score was not a no-op: %', v_res;
+    END IF;
+    RAISE NOTICE 'score entry: off (absent, false, a string) refused an admin 55000, 3 of 3, writing nothing; on, an admin and a staff member scored, 2 audit rows; both teams'' coaches, a member who coaches no team and another organization''s admin refused 42501, 4 of 4; the service role was not refused with it off';
 
     -- ---- Withdraw: an admin only -------------------------------------------
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'R6 Park') RETURNING id INTO v_loc;

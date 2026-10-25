@@ -29,22 +29,23 @@ export default function DivisionTeamsCard({ orgId, previewUserId }) {
     let cancelled = false;
     (async () => {
       setState({ rows: [], loaded: false, error: false });
-      const { data, error } = previewUserId
-        ? await supabase.rpc('admin_get_division_teams', {
-            p_organization_id: orgId,
-            p_user_id: previewUserId,
-          })
-        : await supabase.rpc('get_my_division_teams', { p_organization_id: orgId });
-      if (cancelled) return;
-      if (error) {
+      try {
+        const { data, error } = previewUserId
+          ? await supabase.rpc('admin_get_division_teams', {
+              p_organization_id: orgId,
+              p_user_id: previewUserId,
+            })
+          : await supabase.rpc('get_my_division_teams', { p_organization_id: orgId });
+        if (error) throw error;
+        if (!cancelled) setState({ rows: data || [], loaded: true, error: false });
+      } catch (err) {
+        // A refusal the client returns, or a call that throws: the card says so either way.
         logger.error('[DivisionTeamsCard] division teams not loaded', {
-          code: error.code,
-          message: error.message,
+          code: err?.code,
+          message: err?.message,
         });
-        setState({ rows: [], loaded: true, error: true });
-        return;
+        if (!cancelled) setState({ rows: [], loaded: true, error: true });
       }
-      setState({ rows: data || [], loaded: true, error: false });
     })();
     return () => {
       cancelled = true;

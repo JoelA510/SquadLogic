@@ -51,6 +51,25 @@ export const PRACTICE_CHANGES_UNREAD_TEXT =
 const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
+ * The order a schedule is shown in, on the team page and the coach home: by
+ * wall date and time, a dated TIME TBD after that day's timed events, and an
+ * undated event last (a stable sort keeps those in row order). Wall dates and
+ * zero-padded wall times compare as strings: a `Date` built from a dated TIME
+ * TBD has no time, so it is Invalid and would unsort the list.
+ *
+ * @param {{ date?: string | null, startTime?: string | null }} a
+ * @param {{ date?: string | null, startTime?: string | null }} b
+ */
+export function compareTeamEvents(a, b) {
+  if (a.date == null || b.date == null) return Number(a.date == null) - Number(b.date == null);
+  return (
+    order(a.date, b.date) ||
+    Number(a.startTime == null) - Number(b.startTime == null) ||
+    order(String(a.startTime ?? ''), String(b.startTime ?? ''))
+  );
+}
+
+/**
  * useTeamPortal
  * Fetches the data for the Team Portal: the team, its roster, and its games and
  * practices. Handles practice expansion (season wall dates and saved practice
@@ -263,16 +282,7 @@ export async function fetchTeamEvents(teamId, timeZone) {
   // 5. Combine and Sort Events. Wall dates and zero-padded wall times are
   // compared as strings (a dated TIME TBD has no time, so a `Date` built
   // from it is Invalid and would unsort the list).
-  const allEvents = [...mappedGames, ...expandedPractices].sort((a, b) => {
-    // Undated TIME TBD entries have no date to order by; they go last, in row order.
-    if (a.date == null || b.date == null) return Number(a.date == null) - Number(b.date == null);
-    return (
-      order(a.date, b.date) ||
-      // A dated TIME TBD goes after that day's timed events.
-      Number(a.startTime == null) - Number(b.startTime == null) ||
-      order(String(a.startTime ?? ''), String(b.startTime ?? ''))
-    );
-  });
+  const allEvents = [...mappedGames, ...expandedPractices].sort(compareTeamEvents);
   return { events: allEvents, practiceChangesUnread: changesUnread };
 }
 

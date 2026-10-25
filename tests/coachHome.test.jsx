@@ -248,6 +248,97 @@ describe('the coach home', () => {
     }
   });
 
+  it('lists a game between two of the coach’s teams once, named by both', async () => {
+    seedSchedule();
+    seedMockDb({
+      team_coach_assignments: [
+        {
+          id: 'tca-tigers-too',
+          organization_id: MOCK_ORG_ID,
+          team_id: '00000000-0000-0000-0000-000000000001',
+          coach_id: 'mock-coach-id',
+          role: 'lead',
+          effective_from: '2026-01-01',
+          effective_to: null,
+          started_via: 'backfill',
+        },
+      ],
+      game_slots: [
+        {
+          id: 'gs-derby',
+          organization_id: MOCK_ORG_ID,
+          field_id: 'v1',
+          slot_date: day(3),
+          start_time: '08:00:00',
+          end_time: '09:00:00',
+        },
+      ],
+      games: [
+        {
+          id: 'game-derby',
+          organization_id: MOCK_ORG_ID,
+          home_team_id: 't1',
+          away_team_id: '00000000-0000-0000-0000-000000000001',
+          game_slot_id: 'gs-derby',
+        },
+      ],
+    });
+    render(<DashboardPage />);
+    const events = await within(
+      await screen.findByRole('region', { name: 'Your schedule' })
+    ).findAllByTestId('coach-schedule-event');
+    const derby = events.filter((li) => li.textContent.includes('08:00 - 09:00'));
+    expect(derby).toHaveLength(1);
+    expect(derby[0]).toHaveTextContent('Team A vs Tigers');
+  });
+
+  it('keeps the teams that loaded when one team’s schedule fails, and names that team', async () => {
+    seedSchedule();
+    seedMockDb({
+      team_coach_assignments: [
+        {
+          id: 'tca-tigers-too',
+          organization_id: MOCK_ORG_ID,
+          team_id: '00000000-0000-0000-0000-000000000001',
+          coach_id: 'mock-coach-id',
+          role: 'lead',
+          effective_from: '2026-01-01',
+          effective_to: null,
+          started_via: 'backfill',
+        },
+      ],
+    });
+    const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    const spy = vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      const real = realFrom(table);
+      if (table !== 'practice_assignments') return real;
+      return /** @type {any} */ ({
+        select: (...args) => {
+          const chain = real.select(...args);
+          return {
+            eq: (column, value) =>
+              String(value) === '00000000-0000-0000-0000-000000000001'
+                ? Promise.resolve({ data: null, error: { message: 'boom' } })
+                : chain.eq(column, value),
+          };
+        },
+      });
+    });
+    try {
+      render(<DashboardPage />);
+      expect(
+        await screen.findByText('The schedule of Tigers could not be loaded. Try again shortly.')
+      ).toBeInTheDocument();
+      const events = within(screen.getByRole('region', { name: 'Your schedule' })).getAllByTestId(
+        'coach-schedule-event'
+      );
+      expect(events.some((li) => /^PracticeTeam A: Practice/.test(li.textContent))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('lists the teams of the coach’s division with their coaches, names only', async () => {
     seedSchedule();
     render(<DashboardPage />);

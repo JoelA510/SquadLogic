@@ -35,6 +35,7 @@
 --      TimeZone with ALTER FUNCTION) with the coach arm removed: an admin or
 --      staff member (`is_org_admin`) only, 42501 for anyone else; and only
 --      while `org_flag(org, 'score_entry', false)` is true, 55000 otherwise.
+--      The service role skips both, as it skipped every caller check before.
 --      `updated_at = timezone('utc', now())` becomes `now()` (the UTC idiom
 --      guard, tests/utcNowIdiom.test.js; the column is a timestamptz). The
 --      SET clauses are restated (CREATE OR REPLACE resets those set by ALTER
@@ -56,7 +57,9 @@
 --      lead first), and whether the user coaches it. No contact column, and
 --      nothing outside those divisions.
 --   6. An end-state check: the request RPC is gone, the two replaced bodies
---      name no coach arm (comments and string literals stripped), and no
+--      name no coach arm (comments and string literals stripped: no coach
+--      helper, no coach or assignment table, no test of the member's role,
+--      no requester test), and no
 --      result column of the new reads is named like an email, a phone, a
 --      contact or a guardian (R4's catalogue rule, 20261025010000).
 --
@@ -204,7 +207,10 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
-    IF NOT public.org_flag(p_organization_id, 'score_entry', false) THEN
+    -- The service role (a server-side job; no client holds it) skips the
+    -- setting as it skips the role checks above.
+    IF v_effective_role <> 'service_role'
+       AND NOT public.org_flag(p_organization_id, 'score_entry', false) THEN
         RAISE EXCEPTION 'Score entry is off for organization %: an admin turns it on in Settings', p_organization_id
             USING ERRCODE = '55000';
     END IF;
@@ -395,7 +401,8 @@ BEGIN
     IF auth.uid() IS NULL THEN
         RAISE EXCEPTION 'get_my_division_teams requires a signed-in caller' USING ERRCODE = '42501';
     END IF;
-    RETURN QUERY SELECT * FROM public.division_teams_of(p_organization_id, auth.uid());
+    RETURN QUERY SELECT * FROM public.division_teams_of(p_organization_id, auth.uid()) t
+                  ORDER BY t.division_name, t.team_name, t.team_id;
 END;
 $$;
 
@@ -419,7 +426,8 @@ BEGIN
     IF auth.uid() IS NULL OR NOT public.is_org_admin(p_organization_id) THEN
         RAISE EXCEPTION 'admin_get_division_teams requires an organization admin' USING ERRCODE = '42501';
     END IF;
-    RETURN QUERY SELECT * FROM public.division_teams_of(p_organization_id, p_user_id);
+    RETURN QUERY SELECT * FROM public.division_teams_of(p_organization_id, p_user_id) t
+                  ORDER BY t.division_name, t.team_name, t.team_id;
 END;
 $$;
 
@@ -454,7 +462,7 @@ BEGIN
        AND p.oid IN ('public.update_game_score(uuid, uuid, smallint, smallint, jsonb)'::regprocedure,
                      'public.withdraw_practice_lighting_override(uuid)'::regprocedure)
        AND regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '''[^'']*''', '', 'g')
-           ~ '\m(is_current_team_coach|caller_coaches_practice_slot|coached_team_ids_of)\M';
+           ~ '(\m(is_current_team_coach|is_current_org_coach|caller_coaches_practice_slot|coached_team_ids_of|team_coach_assignments|coaches)\M|\mv_member_role\s*(=|<>|!=|\mIN\M)|\mrequested_by\s*=)';
     IF v_left IS NOT NULL THEN
         RAISE EXCEPTION 'these still admit a coach: %', v_left;
     END IF;

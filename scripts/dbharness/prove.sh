@@ -4609,14 +4609,26 @@ BEGIN
   "applying 20261028010000_coach_view.sql"
 
 plant "M45 score entry ignores the setting" "$M45" \
-  "    IF NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
-  "    IF false THEN" \
+  "       AND NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
+  "       AND false THEN" \
   "smoke 20261028010000"
 
 plant "M45 score entry is on unless set" "$M45" \
-  "    IF NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
-  "    IF NOT public.org_flag(p_organization_id, 'score_entry', true) THEN" \
+  "       AND NOT public.org_flag(p_organization_id, 'score_entry', false) THEN" \
+  "       AND NOT public.org_flag(p_organization_id, 'score_entry', true) THEN" \
   "smoke 20261028010000"
+
+# The end-state check reads a coach arm in any of its spellings, not only the
+# helper: here a test of the member's role.
+plant "M45 a coach-role member scores again" "$M45" \
+  "    IF v_effective_role <> 'service_role'
+       AND NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
+  "    IF v_effective_role <> 'service_role'
+       AND NOT public.is_org_admin(p_organization_id)
+       AND v_member_role <> 'coach' THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin enters scores'" \
+  "applying 20261028010000_coach_view.sql"
 
 plant "M45 the division read crosses into other divisions" "$M45" \
   "           AND t.division_id IN (SELECT m.division_id FROM mine m WHERE m.division_id IS NOT NULL)" \

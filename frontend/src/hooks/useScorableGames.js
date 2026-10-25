@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabaseClient.js';
+import { fetchCoachedTeamIds } from './useMyCoachedTeams.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { isAdminRole } from '../constants/permissions.js';
@@ -47,12 +47,7 @@ export function useScorableGames({ enabled = true } = {}) {
         setTeamIds(new Set());
         return;
       }
-      const { data, error: readError } = previewUserId
-        ? await supabase.rpc('admin_get_coached_team_ids', {
-            p_organization_id: orgId,
-            p_user_id: previewUserId,
-          })
-        : await supabase.rpc('get_my_coached_team_ids', { p_organization_id: orgId });
+      const { data, error: readError } = await fetchCoachedTeamIds(orgId, previewUserId);
       if (cancelled) return;
       if (readError) {
         logger.warn('[useScorableGames] coached teams not loaded', {

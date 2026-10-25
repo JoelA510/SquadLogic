@@ -5,7 +5,11 @@ import { Calendar } from 'lucide-react';
 import { seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 import Badge from '../ui/Badge.jsx';
 import DataErrorBanner from '../ui/DataErrorBanner.jsx';
-import { fetchTeamEvents, PRACTICE_CHANGES_UNREAD_TEXT } from '../../hooks/useTeamPortal.js';
+import {
+  compareTeamEvents,
+  fetchTeamEvents,
+  PRACTICE_CHANGES_UNREAD_TEXT,
+} from '../../hooks/useTeamPortal.js';
 import { todayIso } from '../../utils/today.js';
 import { logger } from '../../lib/logger.js';
 
@@ -34,8 +38,38 @@ function whenOf(event) {
   return `${longDate(event.date)}, ${event.startTime?.substring(0, 5)} - ${event.endTime?.substring(0, 5)}`;
 }
 
-/** Plain code-unit order: wall dates and zero-padded wall times sort as strings. */
+/** Plain code-unit order, for the team-name tiebreak. */
 const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * Every team's events as one list: a game between two teams the coach coaches
+ * comes back once per team, so it is kept once, named by both teams; then the
+ * team page's order (`compareTeamEvents`), the team's name breaking a tie.
+ *
+ * @param {Array<Record<string, any>>} events
+ */
+export function mergeTeamEvents(events) {
+  const games = new Map();
+  const merged = [];
+  for (const event of events) {
+    if (event.type === 'game' && event.id != null) {
+      const first = games.get(String(event.id));
+      if (first) {
+        first.teamName = null;
+        first.description = `${first.homeTeam} vs ${first.awayTeam}`;
+        continue;
+      }
+      const copy = { ...event };
+      games.set(String(event.id), copy);
+      merged.push(copy);
+    } else {
+      merged.push(event);
+    }
+  }
+  return merged.sort(
+    (a, b) => compareTeamEvents(a, b) || order(String(a.teamName ?? ''), String(b.teamName ?? ''))
+  );
+}
 
 /**
  * The coach's own upcoming schedule, games and practices, across every team
@@ -53,10 +87,10 @@ const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
  */
 export default function CoachScheduleCard({ teams }) {
   const [state, setState] = useState(
-    /** @type {{ events: any[], unread: boolean, error: boolean, loaded: boolean }} */ ({
+    /** @type {{ events: any[], unread: boolean, failed: string[], loaded: boolean }} */ ({
       events: [],
       unread: false,
-      error: false,
+      failed: [],
       loaded: false,
     })
   );
@@ -65,51 +99,49 @@ export default function CoachScheduleCard({ teams }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setState({ events: [], unread: false, error: false, loaded: false });
-      try {
-        const perTeam = await Promise.all(
-          teams.map(async (team) => {
-            const timeZone = team.division?.season?.timezone ?? null;
-            const today = seasonCalendarDate(Date.now(), timeZone) ?? todayIso();
-            const { events, practiceChangesUnread } = await fetchTeamEvents(team.id, timeZone);
-            return {
-              unread: practiceChangesUnread,
-              events: events
-                .filter((event) => event.date == null || event.date >= today)
-                .map(
-                  (event) =>
-                    /** @type {Record<string, any>} */ ({
-                      ...event,
-                      teamId: team.id,
-                      teamName: team.name,
-                    })
-                ),
-            };
-          })
-        );
-        if (cancelled) return;
-        const events = perTeam
-          .flatMap((entry) => entry.events)
-          .sort((a, b) => {
-            if (a.date == null || b.date == null)
-              return Number(a.date == null) - Number(b.date == null);
-            return (
-              order(a.date, b.date) ||
-              Number(a.startTime == null) - Number(b.startTime == null) ||
-              order(String(a.startTime ?? ''), String(b.startTime ?? '')) ||
-              order(String(a.teamName), String(b.teamName))
-            );
+      setState({ events: [], unread: false, failed: [], loaded: false });
+      // Team by team: one team's failed read takes only that team's events
+      // away, and the card names the team.
+      const perTeam = await Promise.allSettled(
+        teams.map(async (team) => {
+          const timeZone = team.division?.season?.timezone ?? null;
+          const today = seasonCalendarDate(Date.now(), timeZone) ?? todayIso();
+          const { events, practiceChangesUnread } = await fetchTeamEvents(team.id, timeZone);
+          return {
+            unread: practiceChangesUnread,
+            events: events
+              .filter((event) => event.date == null || event.date >= today)
+              .map(
+                (event) =>
+                  /** @type {Record<string, any>} */ ({
+                    ...event,
+                    teamId: team.id,
+                    teamName: team.name,
+                  })
+              ),
+          };
+        })
+      );
+      if (cancelled) return;
+      const failed = [];
+      const loaded = [];
+      perTeam.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          loaded.push(result.value);
+        } else {
+          logger.error('[CoachScheduleCard] schedule load failed', {
+            teamId: teams[index].id,
+            message: result.reason?.message,
           });
-        setState({
-          events,
-          unread: perTeam.some((entry) => entry.unread),
-          error: false,
-          loaded: true,
-        });
-      } catch (err) {
-        logger.error('[CoachScheduleCard] schedule load failed:', err);
-        if (!cancelled) setState({ events: [], unread: false, error: true, loaded: true });
-      }
+          failed.push(teams[index].name);
+        }
+      });
+      setState({
+        events: mergeTeamEvents(loaded.flatMap((entry) => entry.events)),
+        unread: loaded.some((entry) => entry.unread),
+        failed,
+        loaded: true,
+      });
     })();
     return () => {
       cancelled = true;
@@ -131,8 +163,14 @@ export default function CoachScheduleCard({ teams }) {
       </div>
       <div className="card-body" aria-busy={!state.loaded}>
         {!state.loaded && <p className="muted">Loading your schedule…</p>}
-        {state.error && (
-          <DataErrorBanner message="Your schedule could not be loaded. Try again shortly." />
+        {state.failed.length > 0 && (
+          <DataErrorBanner
+            message={
+              state.failed.length === teams.length
+                ? 'Your schedule could not be loaded. Try again shortly.'
+                : `The schedule of ${state.failed.join(', ')} could not be loaded. Try again shortly.`
+            }
+          />
         )}
         {state.unread && (
           <div
@@ -143,7 +181,7 @@ export default function CoachScheduleCard({ teams }) {
             {PRACTICE_CHANGES_UNREAD_TEXT}
           </div>
         )}
-        {state.loaded && !state.error && shown.length === 0 && (
+        {state.loaded && state.failed.length === 0 && shown.length === 0 && (
           <p className="muted">No upcoming games or practices.</p>
         )}
         {shown.length > 0 && (
@@ -165,7 +203,8 @@ export default function CoachScheduleCard({ teams }) {
                   {event.type === 'game' ? 'Game' : 'Practice'}
                 </Badge>
                 <span style={{ fontWeight: 600 }}>
-                  {event.teamName}: {event.description}
+                  {event.teamName ? `${event.teamName}: ` : ''}
+                  {event.description}
                 </span>
                 <span className="muted" style={{ fontSize: 13 }}>
                   {whenOf(event)}

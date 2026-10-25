@@ -1,8 +1,8 @@
 # Phase B: teaming
 
 Status: **approved by the owner 2026-10-22, with every recommendation** (AGENTS.md rule 14: B2
-and B6 change the generator, B1 the domain model of buddy requests). B1 is built (see "As built
-(B1)"). B6 records the owner's team priorities of
+and B6 change the generator, B1 the domain model of buddy requests). B1 and B2 are built (see
+"As built (B1)" and "As built (B2)"). B6 records the owner's team priorities of
 2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
 teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
 migration: everything new is computed, and the run's `results` JSON is stored opaque
@@ -348,6 +348,68 @@ engine conventions), and the demo league is teamed end to end.
 - **Header variants.** The page reads the keys `materialize_import_buddy_pairs` reads, and any
   header the import's alias map stages under one of them (`canonicalImportKey`). Every one is on
   the import allowlist (`PLAYER_IMPORT_KEYS`).
+
+## As built (B2)
+
+- **Natural age comes from the page's existing annotation, not a stored one (item 2, decided by
+  the orchestrator).** R5 (the stored natural age) is not built, so B2 adds no column and leaves
+  the durable-player query (`DURABLE_PLAYER_FIELDS`) as it is. The generator honours whatever
+  `placement` and `naturalAge` `applyPlayUpEligibility` annotates from the data the page already
+  has: the import row's birthdate (`toGeneratorPlayer` emits `date_of_birth`) against the
+  division's age bounds (the saved division row, or the U-number in the program's name), with the
+  season's `season_year` and cutoff. The page test (`tests/teamAnalysisEligibility.test.jsx`)
+  generates from import rows with birthdates, fresh and on a rerun. **Moved to R5**
+  (`2026-10-22-admin-focus.md`, R5's row): the durable query selecting the natural age,
+  `toGeneratorPlayer` emitting it, and the page test that generates from stored players only.
+- **Where the annotation was lost** (_executed_, the page test against the old generator): not on
+  the page. `prepared.players` reaches `generateTeams` with `placement`, `needsReview`,
+  `reviewReason` and `naturalAge`, and the generator clones every field; it read none of them, so a
+  play-down was seated (the plan's "Today" holds). The one path that loses it is the pipeline's
+  `catch`, which generates from the raw roster when the pipeline throws; B3 removes it. A program
+  whose division row has no age bounds and whose name carries no U-number classifies everyone
+  `unknown`: placed, never blocked.
+- **One rule, beside `PLACEMENT`:** `isEligibilityBlocked(player)` in `playUp.js` (blocked means
+  `play_up_blocked` or `play_down_blocked`; anything else, a missing annotation included, is not).
+  The generator calls it; B3 can.
+- **One overflow entry per blocked player**, never a unit, ahead of the division's other overflow
+  entries, in input order. `metadata.naturalAge` is `null` when not a finite number; `coachId` is
+  the player's (`null` when none). Beyond the plan, `metadata.assistantCoachId` is added when the
+  blocked player carries one, so an assistant left on no team is named (review finding).
+- **A division where every player is blocked builds no teams** (review finding): before, the
+  team count's floor of one (or `teamCountOverride`, `minTeams`) built empty shells that the page
+  would stage and sync as if teamed. Now the division has no teams, every player is in overflow,
+  and the page stops at its existing "No teams could be generated" guard and stages nothing
+  (`tests/teamAnalysisEligibility.test.jsx`); the wording of that message is B3's.
+- **A remapped player is not blocked** (review finding): with `remapBlocked: true` (a
+  multi-division flow; the page passes `false`), `applyPlayUpEligibility` moves a blocked player
+  to their natural division but keeps the placement it judged in the registered one.
+  `isEligibilityBlocked` blocks only while `division` is still `registeredDivision` (or no
+  registered division is recorded), so the moved player is placed where they belong.
+- **Buddy reasons.** The unit builder sees eligible players only, so a request naming a blocked
+  player would read `missing-player`. It is relabelled in the generator's
+  `buddyDiagnosticsByDivision[div].unmatchedRequests`: `buddy-not-placed` when the blocked player
+  names the requester back (the mutual buddy, placed alone), `not-reciprocated` (as before B2)
+  when they do not. Two blocked buddies both overflow and leave no entry. On a rerun, a late
+  player whose reciprocal buddy is a preserved (held) blocked player is still routed to that team,
+  as before.
+- **`eligibilityHolds`** is always present on an incremental division (`[]` when nobody is held)
+  and is read from the final rosters: every blocked player seated anywhere is listed, and only a
+  preserved one can be. Team ids are the preserved (persisted) ones. A blocked late player counts
+  in `latePlayersOverflowed`.
+- **Unchanged on purpose:** coach continuity (a blocked late player's `coachId` still shows their
+  coach as registered, so the coach is not reported dropped; a held child still counts as a coach
+  candidate on their team), and the org means `WeightedAttributeEvaluator` normalises against,
+  which are computed over every registered player, the blocked included, as they include every
+  player overflowed for capacity.
+- **The golden** (`tests/fixtures/teamGenerationEligibility.golden.json`, written by
+  `scripts/generate-teaming-eligibility-golden.mjs`) was captured at `a18734d` in the branch's
+  first commit: a fresh roster with every non-blocking annotation, both existing overflow reasons,
+  buddies, coaches and an assistant; a fresh roster through the real pipeline; and a review-mode
+  rerun with preserved UUIDs, manual, locked and late players. The test compares the serialized
+  output byte for byte (the rerun after removing its empty `eligibilityHolds`), and fails when the
+  placement order changes (planted).
+- **Season fixture:** every test file that loads `fixtures/season-2026/` and the "Must stay
+  unchanged" suites ran green; as above, the fixture holds no player roster.
 
 ## Not in Phase B
 

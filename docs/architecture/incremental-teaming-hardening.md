@@ -72,7 +72,7 @@ export function generateTeams({
 Return shape (per-division maps):
 
 - `teamsByDivision[div]` — `Array<{ id, name, division, coachId, coachNeeded, assistantCoachIds, skillTotal, players }>`
-- `overflowByDivision[div]` — `Array<{ players, reason, metadata? }>` (reasons today: `coach-capacity`, `insufficient-capacity`)
+- `overflowByDivision[div]` — `Array<{ players, reason, metadata? }>` (reasons today: `coach-capacity`, `insufficient-capacity`; Phase B2 adds `eligibility-blocked`, §6f)
 - `overflowSummaryByDivision[div]` — `{ totalUnits, totalPlayers, byReason }`
 - `buddyDiagnosticsByDivision[div]` — `{ mutualPairs, unmatchedRequests }`
 - `coachCoverageByDivision[div]` — `{ totalTeams, volunteerCoaches, teamsWithCoach, teamsWithoutCoach, coverageRate, needsAdditionalCoaches, additionalCoachesNeeded }`
@@ -393,9 +393,18 @@ generation omits the key entirely.
 | `capacityViolations`                            | `[{teamId, playerCount, maxRosterSize}]`        | Final rosters above cap (pre-existing or `allowOverCapAssignments`).                                                                                                                                                   |
 | `minRosterWarnings`                             | `string[]` (team ids)                           | Teams below `minRosterSize` (warning — preserved teams are never collapsed).                                                                                                                                           |
 | `structuralWarnings`                            | `string[]`                                      | e.g. snapshot-only division with no division config.                                                                                                                                                                   |
+| `eligibilityHolds`                              | `[{playerId, teamId, placement, reviewReason}]` | Phase B2: a blocked player (`play_up_blocked` / `play_down_blocked`) on a final roster. Only a preserved one can be: they stay on their reviewed team (owner decision 3) and are listed; a late one overflows.         |
 
 **Overflow reason codes** (`overflowByDivision[].reason`, machine-readable kebab-case):
-`insufficient-capacity`, `coach-capacity`, `buddy-target-capacity`, `buddy-target-locked`.
+`insufficient-capacity`, `coach-capacity`, `buddy-target-capacity`, `buddy-target-locked`,
+`eligibility-blocked` (Phase B2, `docs/changes/2026-10-22-phase-b-teaming.md`: one entry per
+player whose `placement` is `play_up_blocked` or `play_down_blocked`, metadata
+`{ placement, reviewReason, naturalAge, coachId }` (plus `assistantCoachId` when the player has
+one), in fresh generation and for a late player on
+a rerun; `unknown` is placed, never blocked). A blocked player leaves the pool before the team
+count and coach anchors are built, and a mutual buddy of one is placed alone with the unmatched
+request reason `buddy-not-placed`. With nobody blocked the output is unchanged
+(`tests/teamGenerationEligibility.test.js`, a golden from `main`).
 
 **Manual-review codes**: `ambiguous-coach-replacement`, `coach-replacement-candidate`,
 `coach-replacement-target-anchored`, `ambiguous-coach-attachment`,

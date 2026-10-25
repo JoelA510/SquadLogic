@@ -48,7 +48,7 @@ const PlayerCard = ({ player }) => {
       style={style}
       data-testid={`player-card-${player.id}`}
       role="listitem"
-      aria-label={`${playerName}, Skill: ${playerSkill}${player.assignment_source === 'manual' ? ', manually assigned' : ''}${player.eligibilityNotChecked ? ', eligibility not checked' : ''}`}
+      aria-label={`${playerName}, Skill: ${playerSkill}${player.assignment_source === 'manual' ? ', manually assigned' : ''}${player.isCoachingLead ? ', coaching lead' : ''}${player.eligibilityNotChecked ? ', eligibility not checked' : ''}`}
       aria-roledescription="draggable item"
       className={`p-3 bg-bg-surface border border-border-subtle rounded-md flex items-center justify-between shadow-sm cursor-grab active:cursor-grabbing ${isDragging ? 'shadow-lg border-blue-500/50' : 'hover:border-border-highlight'}`}
       {...attributes}
@@ -68,6 +68,15 @@ const PlayerCard = ({ player }) => {
             {player.assignment_source === 'manual' && (
               <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-status-warning-text border border-amber-500/30">
                 manual
+              </span>
+            )}
+            {/* Phase B6: a parent volunteers to coach. A mark only: a lead is not a coach. */}
+            {player.isCoachingLead && (
+              <span
+                className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-bg-surface-hover text-text-secondary border border-border-subtle"
+                title="Coaching lead: a parent volunteers to coach"
+              >
+                lead
               </span>
             )}
             {/* Phase B3: placed with no age to check; a flag, never a hold. */}

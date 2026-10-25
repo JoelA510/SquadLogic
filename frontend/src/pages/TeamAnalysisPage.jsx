@@ -26,6 +26,7 @@ import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { DEFAULT_ROSTER_LIMITS, assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
 import { summarizeBuddyRequests } from '@squadlogic/core/buddyLinking.js';
+import { isCoachingLeadAnswer } from '@squadlogic/core/coachingLeads.js';
 import { mapSchedulerRunToSummary } from '@squadlogic/core/utils/teamSummaryMapper.js';
 import { formatChangeNote } from '@squadlogic/core/teamDiagnostics.js';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -314,8 +315,12 @@ function buddyFieldsOf(row) {
 // Record page edits names and the request on `players`, so these win over the import rows,
 // which keep what the file said.
 const DURABLE_PLAYER_FIELDS =
-  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code';
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, willing_to_coach, years_played, rating';
 const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
+// The headers a coaching answer and years played are read from (`toGeneratorPlayer`), as
+// `canonicalImportKey` stages them and as older mock rows spell them.
+const COACHING_ANSWER_KEYS = ['willing_to_coach', 'coach_volunteer', 'Willing to Coach'];
+const YEARS_PLAYED_KEYS = ['years_played', 'Years Played', 'yearsPlayed'];
 const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
 const LOOKUP_CHUNK = 200;
 const LOOKUP_CONCURRENCY = 8;
@@ -324,16 +329,27 @@ const LOOKUP_CONCURRENCY = 8;
  * The import row with the durable player's identity and buddy request over it. Every header
  * the import reads as a name or a request is replaced, so a request the admin cleared on the
  * record is cleared here too. The code stays the import's unless the player row holds one.
+ * The teaming signals the record holds win too (Phase B6): `willing_to_coach` (what makes a
+ * coaching lead, as the import stored it), `years_played` and the admin's `rating`.
  */
 function withDurableIdentity(row, durable) {
   if (!durable) return row;
+  const storedLead = typeof durable.willing_to_coach === 'boolean';
+  const storedYears = Number.isInteger(durable.years_played);
   const next = {};
   for (const [header, value] of Object.entries(row || {})) {
     const key = canonicalImportKey(header);
     if (BUDDY_REQUEST_KEYS.includes(key) || IDENTITY_KEYS.includes(key)) continue;
     if (IDENTITY_CAMEL_KEYS.includes(header)) continue;
+    if (storedLead && (COACHING_ANSWER_KEYS.includes(key) || COACHING_ANSWER_KEYS.includes(header)))
+      continue;
+    if (storedYears && (YEARS_PLAYED_KEYS.includes(key) || YEARS_PLAYED_KEYS.includes(header)))
+      continue;
     next[header] = value;
   }
+  if (storedLead) next.willing_to_coach = durable.willing_to_coach;
+  if (storedYears) next.years_played = durable.years_played;
+  if (Number.isFinite(durable.rating)) next.rating = durable.rating;
   // A name the player row lacks (a mock row, a partial select) keeps the import's.
   next.first_name =
     durable.first_name ?? firstNonEmpty(row, ['first_name', 'First Name', 'firstName']) ?? '';
@@ -406,7 +422,28 @@ function toBuddyRosterEntry(row, id, division) {
   };
 }
 
-function toGeneratorPlayer(row, sourceIndex, division, { buddyRequests = false } = {}) {
+/** Years played as the import stores it: a whole number from 0 to 30, else none. */
+function parseYearsPlayed(value) {
+  if (value === null || value === undefined) return undefined;
+  const text = String(value).trim();
+  if (!/^[0-9]{1,2}$/.test(text)) return undefined;
+  const years = Number(text);
+  return years <= 30 ? years : undefined;
+}
+
+/**
+ * A generator player from an import row (the durable player's fields over it). With
+ * `coachingLeads` (the Coaching Interest flag) a player whose parent volunteers to coach is a
+ * coaching lead, `isCoachingLead` (Phase B6). A lead is not a coach: only a coach linked to a
+ * child through `coach_team_requests` anchors a team (`prepareTeamingInput`), or a coach the
+ * row names.
+ */
+function toGeneratorPlayer(
+  row,
+  sourceIndex,
+  division,
+  { buddyRequests = false, coachingLeads = false } = {}
+) {
   const id = String(
     firstNonEmpty(row, [
       'id',
@@ -423,10 +460,10 @@ function toGeneratorPlayer(row, sourceIndex, division, { buddyRequests = false }
     firstNonEmpty(row, ['skillRating', 'skill_rating', 'Skill Rating', 'skill_tier', 'Skill Tier'])
   );
   const coachId = firstNonEmpty(row, ['coach_id', 'coachId', 'coach_email', 'Coach Email']);
-  const willingToCoach =
-    parseBooleanLike(row.willing_to_coach) ||
-    parseBooleanLike(row.coach_volunteer) ||
-    parseBooleanLike(row['Willing to Coach']);
+  const isCoachingLead =
+    coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
+  const yearsPlayed = parseYearsPlayed(firstNonEmpty(row, YEARS_PLAYED_KEYS));
+  const rating = Number(row?.rating);
   // Carry DOB + play-up signals so the play-up/play-down classifier has an age
   // to work with (without these every player resolves to "unknown").
   const dateOfBirth = firstNonEmpty(row, ['date_of_birth', 'DOB', 'Birthdate', 'dob', 'birthdate']);
@@ -441,7 +478,10 @@ function toGeneratorPlayer(row, sourceIndex, division, { buddyRequests = false }
     ...(dateOfBirth ? { date_of_birth: dateOfBirth } : {}),
     ...(playUpRequested ? { play_up_requested: true } : {}),
     ...(skillRating !== undefined ? { skillRating } : {}),
-    ...(coachId || willingToCoach ? { coachId: String(coachId || `coach-${id}`) } : {}),
+    ...(row?.rating != null && Number.isFinite(rating) ? { rating } : {}),
+    ...(yearsPlayed !== undefined ? { years_played: yearsPlayed } : {}),
+    ...(coachId ? { coachId: String(coachId) } : {}),
+    ...(isCoachingLead ? { isCoachingLead: true } : {}),
     ...(buddyRequests ? buddyFieldsOf(row) : {}),
   };
 }
@@ -545,8 +585,9 @@ export default function TeamAnalysisPage() {
   const { importedData } = useImport();
   const { currentOrganization, currentSeasonSetting, permissions = [] } = useOrganization();
   const { session, user: authUser } = useAuth();
-  const { isEnabled, buddyRule } = useFeatures();
+  const { features, isEnabled, buddyRule } = useFeatures();
   const buddyRequestsEnabled = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
+  const coachingInterestEnabled = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
@@ -920,6 +961,7 @@ export default function TeamAnalysisPage() {
 
         return toGeneratorPlayer(rowForGeneration, sourceIndex, selectedProgramKey, {
           buddyRequests: buddyRequestsEnabled,
+          coachingLeads: coachingInterestEnabled,
         });
       });
 
@@ -932,7 +974,7 @@ export default function TeamAnalysisPage() {
 
       return { generatorPlayers, generationRows };
     },
-    [buddyRequestsEnabled, currentOrganization?.id]
+    [buddyRequestsEnabled, coachingInterestEnabled, currentOrganization?.id]
   );
 
   const handleGenerateTeams = useCallback(async () => {
@@ -1087,6 +1129,9 @@ export default function TeamAnalysisPage() {
         seed: config.seed,
         existingSnapshot,
         generationMode,
+        // The league's effective settings (defaults applied): the balance signal and whether
+        // coaching leads are spread (Phase B6).
+        featureFlags: features,
       });
       // The "Buddy requests" list, kept in the run's results so it survives a reload.
       const result =
@@ -1177,6 +1222,7 @@ export default function TeamAnalysisPage() {
     buddyRule,
     configs,
     canManageTeams,
+    features,
     currentOrganization?.id,
     currentSeasonSetting?.id,
     currentSeasonSetting?.season_year,
@@ -1369,6 +1415,19 @@ export default function TeamAnalysisPage() {
     );
   }, [displayPersistenceSnapshot?.runMetadata?.results]);
 
+  // Coaching leads (Phase B6), marked beside their name in the roster editor: read from the
+  // run's rosters, which carry each player's `isCoachingLead`.
+  const leadPlayerIds = useMemo(() => {
+    const teamsByDivision = displayPersistenceSnapshot?.runMetadata?.results?.teamsByDivision ?? {};
+    return new Set(
+      Object.values(teamsByDivision)
+        .flat()
+        .flatMap((team) => team?.players ?? [])
+        .filter((player) => player?.isCoachingLead === true)
+        .map((player) => String(player.id))
+    );
+  }, [displayPersistenceSnapshot?.runMetadata?.results]);
+
   // Map persistence snapshot to nested structure for RosterManager
   const mappedTeams = useMemo(() => {
     const { teamRows = [], teamPlayerRows = [] } = displayPersistenceSnapshot?.payload || {};
@@ -1399,6 +1458,7 @@ export default function TeamAnalysisPage() {
             age: playerDetails?.age || playerDetails?.Age || 10,
             assignment_source: tp.source,
             eligibilityNotChecked: uncheckedPlayerIds.has(String(tp.player_id)),
+            isCoachingLead: leadPlayerIds.has(String(tp.player_id)),
           };
         });
 
@@ -1412,7 +1472,7 @@ export default function TeamAnalysisPage() {
         players,
       };
     });
-  }, [displayPersistenceSnapshot?.payload, importedPlayerRows, uncheckedPlayerIds]);
+  }, [displayPersistenceSnapshot?.payload, importedPlayerRows, uncheckedPlayerIds, leadPlayerIds]);
 
   // Use real data from the dashboard hook if available, otherwise empty array
   // Map automated results if persistence is empty
@@ -1447,10 +1507,11 @@ export default function TeamAnalysisPage() {
             age: playerDetails?.age || playerDetails?.Age || 10,
             assignment_source: tp.source,
             eligibilityNotChecked: uncheckedPlayerIds.has(String(tp.player_id)),
+            isCoachingLead: leadPlayerIds.has(String(tp.player_id)),
           };
         }),
     }));
-  }, [mappedTeams, activeTeamData, importedPlayerRows, uncheckedPlayerIds]);
+  }, [mappedTeams, activeTeamData, importedPlayerRows, uncheckedPlayerIds, leadPlayerIds]);
 
   const handleEditButtonClick = useCallback(() => {
     if (isEditMode) {

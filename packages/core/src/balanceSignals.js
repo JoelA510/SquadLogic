@@ -21,6 +21,13 @@ import {
   normalizeBuddyLinks,
   resolveBuddyRequests,
 } from './buddyLinking.js';
+import {
+  compensatedLoad,
+  countLeads,
+  leadCompensation,
+  orderForLeadDeal,
+  withFewestLeads,
+} from './coachingLeads.js';
 
 /** @returns {'rating'|'years'|'size'} */
 export function balanceSignalKind(features = {}) {
@@ -29,9 +36,12 @@ export function balanceSignalKind(features = {}) {
   return 'size';
 }
 
-/** Numeric balancing weight for one player under the given signal kind. */
+/**
+ * Numeric balancing weight for one player under the given signal kind. A board player's
+ * rating is `rating`; a generator player without one reads its `skillRating` (Phase B6).
+ */
 export function playerSignal(player, kind) {
-  if (kind === 'rating') return Number(player?.rating) || 1;
+  if (kind === 'rating') return Number(player?.rating ?? player?.skillRating) || 1;
   if (kind === 'years') return (Number(player?.years_played) || 0) + 1;
   return 1;
 }
@@ -120,8 +130,14 @@ export function buddyStats(players = [], { roster, buddyRule } = {}) {
  * Players are grouped into units (a mutual pair, by the league's rule, when
  * `respectBuddies`), sorted by descending unit signal, then dealt
  * serpentine-style to the team with the lowest running signal total.
- * With `respectCoach`, units containing a coach-volunteering guardian are
- * spread first, one per team where possible.
+ *
+ * With `respectCoach` (the league's `teaming_spread_coaching_leads`, Phase B6), the rule in
+ * `coachingLeads.js` the generator also deals by: units holding a coaching lead
+ * (`willing_to_coach`) are dealt first, the most leads first, each to a team with the fewest
+ * leads, so no two teams differ by more than one except where one unit holds two; then every
+ * team's load is its signal total plus `c` per lead (`leadCompensation`: the board's mean
+ * player signal, 0 when balancing by roster size only), so a team with fewer leads receives
+ * more of the experienced or rated players. Without it, leads are ordinary players.
  *
  * Buddies follow `boardBuddyLinks` (Team Analysis's rule): a mutual pair is one unit; an
  * honoured one-way request (`one_way_best_effort`) is best effort, never a unit. Whichever of
@@ -176,7 +192,7 @@ export function serpentineAssign({
     const unit = {
       members,
       signal: members.reduce((total, m) => total + playerSignal(m, signalKind), 0),
-      hasCoach: members.some((m) => m.willing_to_coach),
+      leads: respectCoach ? countLeads(members) : 0,
     };
     members.forEach((m) => unitOf.set(String(m.id), unit));
     units.push(unit);
@@ -198,22 +214,27 @@ export function serpentineAssign({
     teamId: team.id,
     total: 0,
     count: 0,
-    coachUnits: 0,
+    leads: 0,
   }));
+  // What one lead adds to a team's load (0 when no unit holds one, or by roster size only).
+  const c = units.some((unit) => unit.leads > 0)
+    ? leadCompensation(
+        players.map((player) => playerSignal(player, signalKind)),
+        { signalKind }
+      )
+    : 0;
+  const loadOf = (bucket) => compensatedLoad(bucket.total, bucket.leads, c);
 
   /** @type {Map<string, any>} the team each dealt player went to */
   const teamIdOf = new Map();
   const pick = (unit) => {
-    let candidates = buckets;
-    if (respectCoach && unit.hasCoach) {
-      const minCoach = Math.min(...buckets.map((b) => b.coachUnits));
-      candidates = buckets.filter((b) => b.coachUnits === minCoach);
-    }
-    // lowest signal total, then smallest roster, then stable order
+    const candidates =
+      unit.leads > 0 ? withFewestLeads(buckets, (bucket) => bucket.leads) : buckets;
+    // lowest load (the signal total, plus c per lead), then smallest roster, then stable order
     const lowest = (options) =>
       options.reduce((best, bucket) => {
         if (!best) return bucket;
-        if (bucket.total !== best.total) return bucket.total < best.total ? bucket : best;
+        if (loadOf(bucket) !== loadOf(best)) return loadOf(bucket) < loadOf(best) ? bucket : best;
         if (bucket.count !== best.count) return bucket.count < best.count ? bucket : best;
         return best;
       }, null);
@@ -233,16 +254,17 @@ export function serpentineAssign({
     return withPartner.length > 0 ? lowest(withPartner) : deal;
   };
 
-  const sorted = [...units].sort(
-    (a, b) => (b.hasCoach ? 1 : 0) - (a.hasCoach ? 1 : 0) || b.signal - a.signal
-  );
+  const sorted = orderForLeadDeal(units, {
+    leadsOf: (unit) => unit.leads,
+    weightOf: (unit) => unit.signal,
+  });
 
   const assignments = [];
   sorted.forEach((unit) => {
     const bucket = pick(unit);
     bucket.total += unit.signal;
     bucket.count += unit.members.length;
-    if (unit.hasCoach) bucket.coachUnits += 1;
+    bucket.leads += unit.leads;
     unit.members.forEach((member) => {
       teamIdOf.set(String(member.id), bucket.teamId);
       assignments.push({ playerId: member.id, teamId: bucket.teamId });

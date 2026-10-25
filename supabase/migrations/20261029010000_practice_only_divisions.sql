@@ -28,8 +28,10 @@
 --      surface (the same subunit; or, for a whole field, the field and each
 --      of its subunits, since a subunit is narrower than its field), on the
 --      same weekday, whose effective windows share a date on that weekday,
---      and that overlap it or sit less than the turnover apart (default 15
---      minutes; touching at exactly the turnover is allowed). Two halves of
+--      and that overlap it or sit less than the turnover apart (default 0:
+--      back-to-back slots are allowed, an overlap is not; owner, 2026-10-25,
+--      since real grids run back to back. A league that needs a gap, as the
+--      demo's U4 cohorts do, spaces its slots). Two halves of
 --      one field never clash.
 --   5. `finalize_field_import_job(uuid, jsonb)` replaced from its latest body
 --      (20260503070000; 20261021040000 pinned its TimeZone with ALTER
@@ -145,7 +147,7 @@ CREATE FUNCTION public.practice_slot_conflicts(
     p_valid_from date,
     p_valid_until date,
     p_exclude_slot_id uuid DEFAULT NULL,
-    p_turnover_minutes integer DEFAULT 15
+    p_turnover_minutes integer DEFAULT 0
 )
 RETURNS TABLE (
     slot_id uuid,
@@ -164,7 +166,7 @@ AS $$
     -- The windows must share a date that IS the weekday: two windows that
     -- meet only on other days of the week never hold the slot on one day.
     WITH probe AS (
-        SELECT greatest(COALESCE(p_turnover_minutes, 15), 0) * 60 AS turnover,
+        SELECT greatest(COALESCE(p_turnover_minutes, 0), 0) * 60 AS turnover,
                extract(epoch FROM p_start_time) AS s,
                extract(epoch FROM p_end_time) AS e,
                CASE p_day_of_week
@@ -197,7 +199,7 @@ REVOKE ALL ON FUNCTION public.practice_slot_conflicts(uuid, uuid, uuid, public.d
     FROM PUBLIC, anon, authenticated;
 
 COMMENT ON FUNCTION public.practice_slot_conflicts(uuid, uuid, uuid, public.day_of_week, time, time, date, date, uuid, integer) IS
-    'Internal: the practice slots a slot on this surface, weekday, window and dates would clash with: the same subunit, or for a whole field the field and each of its subunits; the same weekday; effective windows sharing that weekday; overlapping, or less than the turnover (default 15 minutes) apart. Read by finalize_field_import_job. 20261029010000.';
+    'Internal: the practice slots a slot on this surface, weekday, window and dates would clash with: the same subunit, or for a whole field the field and each of its subunits; the same weekday; effective windows sharing that weekday; overlapping, or less than the turnover (default 0: back to back is allowed) apart. Read by finalize_field_import_job. 20261029010000.';
 
 -- The pairs already stored that the rule would refuse, each pair once (the
 -- relation is symmetric). Kept as they are; reported so an operator can look.
@@ -211,7 +213,7 @@ BEGIN
          a.organization_id, a.field_id, a.field_subunit_id, a.day_of_week,
          a.start_time, a.end_time, a.valid_from, a.valid_until, a.id) c
      WHERE c.slot_id > a.id;
-    RAISE NOTICE '% stored pair(s) of practice slots on the same ground and weekday overlap or sit less than 15 minutes apart: kept as they are; a new or changed slot is judged from now on',
+    RAISE NOTICE '% stored pair(s) of practice slots on the same ground and weekday overlap: kept as they are; a new or changed slot is judged from now on',
         v_pairs;
 END;
 $$;
@@ -584,7 +586,7 @@ BEGIN
                     UPDATE public.staging_import_rows
                     SET validation_errors = jsonb_build_array(jsonb_build_object(
                             'message', format(
-                                'Practice slot %s %s-%s on %s %s overlaps, or starts less than 15 minutes from, the practice slot at %s-%s on the same ground',
+                                'Practice slot %s %s-%s on %s %s overlaps the practice slot at %s-%s on the same ground',
                                 v_day, to_char(v_start_time, 'HH24:MI'), to_char(v_end_time, 'HH24:MI'),
                                 v_location_name, v_field_name,
                                 to_char(v_conflict.start_time, 'HH24:MI'), to_char(v_conflict.end_time, 'HH24:MI')),
@@ -1177,7 +1179,7 @@ $$;
 
 
 COMMENT ON FUNCTION public.finalize_field_import_job(uuid, jsonb) IS
-    'Admin-only apply of a staged fields CSV: locations, fields, subunits, practice and game slots, each recorded for rollback. As of 20261029010000 a practice row''s Division reserves its slot (named within the import''s season; an unknown name fails the row) and a practice slot that would overlap, or start less than 15 minutes from, another on the same ground and weekday in the same dates fails the row (practice_slot_conflicts); both fail before anything is written.';
+    'Admin-only apply of a staged fields CSV: locations, fields, subunits, practice and game slots, each recorded for rollback. As of 20261029010000 a practice row''s Division reserves its slot (named within the import''s season; an unknown name fails the row) and a practice slot that would overlap another on the same ground and weekday in the same dates fails the row (practice_slot_conflicts); both fail before anything is written.';
 
 -- ---------------------------------------------------------------------------
 -- 6. rollback_field_import_job: the reservation comes back with the slot.

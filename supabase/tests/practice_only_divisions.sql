@@ -4,9 +4,9 @@
 -- The writers: `admin_upsert_division_settings` takes `plays_games`;
 -- `admin_set_practice_slot_division` sets or clears a slot's reservation; the
 -- fields CSV's Division reserves a practice slot, named within the season.
--- Overlap and turnover are refused at write, per surface and window: an
--- overlapping slot and one starting 10 minutes after another are refused, one
--- starting 15 minutes after is not; the two halves of one field run at once;
+-- Overlap is refused at write, per surface and window (the turnover defaults
+-- to 0): an overlapping slot is refused, one starting as another ends or 15
+-- minutes after it is not; the two halves of one field run at once;
 -- slots whose effective windows do not meet never clash; a whole field
 -- clashes with its halves. An unknown division fails its row before anything
 -- is written. Each write is audited.
@@ -61,10 +61,10 @@ SELECT 'a1111111-1111-1111-1111-111111111111',
       (1, 'D2 Park', 'Pitch 1', 'A', '09:00', '09:30', '2026-09-05', '2026-11-28', 'org a u4'),
       -- 2: overlaps 1 on the same half.
       (2, 'D2 Park', 'Pitch 1', 'A', '09:15', '09:45', '2026-09-05', '2026-11-28', NULL),
-      -- 3: starts 10 minutes after 1 ends.
-      (3, 'D2 Park', 'Pitch 1', 'A', '09:40', '10:10', '2026-09-05', '2026-11-28', NULL),
-      -- 4: starts 15 minutes after 1 ends.
-      (4, 'D2 Park', 'Pitch 1', 'A', '09:45', '10:15', '2026-09-05', '2026-11-28', NULL),
+      -- 3: starts as 1 ends (back to back).
+      (3, 'D2 Park', 'Pitch 1', 'A', '09:30', '10:00', '2026-09-05', '2026-11-28', NULL),
+      -- 4: starts 15 minutes after 3 ends.
+      (4, 'D2 Park', 'Pitch 1', 'A', '10:15', '10:45', '2026-09-05', '2026-11-28', NULL),
       -- 5: the other half, at the same time as 1.
       (5, 'D2 Park', 'Pitch 1', 'B', '09:00', '09:30', '2026-09-05', '2026-11-28', NULL),
       -- 6: the same half and time as 1, in December only.
@@ -153,8 +153,8 @@ SELECT is(
 SELECT results_eq(
     $$ SELECT (r->>'inserted_practice_slots')::int, (r->>'invalid_rows')::int
          FROM public.finalize_field_import_job('d2d2d2d2-0000-4000-8000-000000000001', '[]'::jsonb) AS r $$,
-    $$ VALUES (4, 4) $$,
-    'the import applies rows 1, 4, 5 and 6 and fails rows 2, 3, 7 and 8'
+    $$ VALUES (5, 3) $$,
+    'the import applies rows 1, 3, 4, 5 and 6 and fails rows 2, 7 and 8'
 );
 
 SELECT is(
@@ -174,11 +174,10 @@ SELECT is(
     'a slot overlapping another on the same half is refused'
 );
 
-SELECT is(
-    (SELECT validation_errors->0->>'reason' FROM public.staging_import_rows
+SELECT ok(
+    (SELECT applied_at IS NOT NULL FROM public.staging_import_rows
       WHERE import_job_id = 'd2d2d2d2-0000-4000-8000-000000000001' AND source_row_number = 3),
-    'practice_slot_conflict',
-    'a slot starting 10 minutes after another ends on the same half is refused'
+    'a slot starting as another ends on the same half is applied (back to back)'
 );
 
 SELECT ok(

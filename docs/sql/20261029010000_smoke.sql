@@ -8,9 +8,9 @@
 --     client role; `divisions.plays_games` is NOT NULL DEFAULT true and
 --     `practice_slots.division_id` references a division of the slot's own
 --     organization;
---   * the clash rule, on a planted pitch with two halves: overlap and a start
---     10 minutes after another's end clash, 15 minutes does not, either
---     order; the other half never clashes; the whole field clashes with each
+--   * the clash rule, on a planted pitch with two halves (the turnover
+--     defaults to 0): an overlap clashes, a slot touching another or 15
+--     minutes from it does not, either order; the other half never clashes; the whole field clashes with each
 --     half; windows that share no date, or share dates on no day of the
 --     slot's weekday, never clash; the slot itself is excluded;
 --   * plays_games through the settings writer: a new division plays games
@@ -141,9 +141,9 @@ BEGIN
                v_org, v_field, x.sub, 'sat', x.s, x.e, x.f, x.u, x.excl))), ',' ORDER BY x.label) INTO v_got
       FROM (VALUES
           ('a overlap', v_half_a, '09:15'::time, '09:45'::time, '2026-09-05'::date, '2026-11-28'::date, NULL::uuid),
-          ('b after 10', v_half_a, '09:40', '10:10', '2026-09-05', '2026-11-28', NULL),
+          ('b touching after', v_half_a, '09:30', '10:00', '2026-09-05', '2026-11-28', NULL),
           ('c after 15', v_half_a, '09:45', '10:15', '2026-09-05', '2026-11-28', NULL),
-          ('d before 10', v_half_a, '08:20', '08:50', '2026-09-05', '2026-11-28', NULL),
+          ('d touching before', v_half_a, '08:30', '09:00', '2026-09-05', '2026-11-28', NULL),
           ('e before 15', v_half_a, '08:15', '08:45', '2026-09-05', '2026-11-28', NULL),
           ('f other half', v_half_b, '09:00', '09:30', '2026-09-05', '2026-11-28', NULL),
           ('g whole field', NULL, '09:00', '09:30', '2026-09-05', '2026-11-28', NULL),
@@ -153,10 +153,10 @@ BEGIN
           ('k open dates', v_half_a, '09:00', '09:30', NULL, NULL, NULL),
           ('l itself', v_half_a, '09:00', '09:30', '2026-09-05', '2026-11-28', v_slot)
       ) AS x(label, sub, s, e, f, u, excl);
-    IF v_got IS DISTINCT FROM 'a overlap=1,b after 10=1,c after 15=0,d before 10=1,e before 15=0,f other half=0,g whole field=1,h december=0,i no saturday=0,j last saturday=1,k open dates=1,l itself=0' THEN
+    IF v_got IS DISTINCT FROM 'a overlap=1,b touching after=0,c after 15=0,d touching before=0,e before 15=0,f other half=0,g whole field=1,h december=0,i no saturday=0,j last saturday=1,k open dates=1,l itself=0' THEN
         RAISE EXCEPTION 'the clash rule: %', v_got;
     END IF;
-    RAISE NOTICE 'clash rule: overlap and 10 minutes either side clash, 15 does not; the other half never, the whole field always; December, and dates that share no Saturday, never; the last shared Saturday and open dates do; a slot not with itself';
+    RAISE NOTICE 'clash rule: an overlap clashes, touching or 15 minutes either side does not; the other half never, the whole field always; December, and dates that share no Saturday, never; the last shared Saturday and open dates do; a slot not with itself';
 
     -- ---- plays_games through the settings writer ---------------------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -273,9 +273,9 @@ BEGIN
           (3, jsonb_build_object('location', 'D2 Nowhere', 'name', 'Pitch 9', 'type', 'practice',
                'day', 'Sat', 'start', '09:00', 'end', '09:30', 'valid_from', '2026-09-05',
                'valid_until', '2026-11-28', 'division_name', 'U99')),
-          -- 4: half A, starting 10 minutes after the stored slot ends.
+          -- 4: half A, overlapping the stored slot's last ten minutes.
           (4, jsonb_build_object('location', 'D2 Park', 'name', 'Pitch 1', 'subunit', 'A', 'type', 'practice',
-               'day', 'Sat', 'start', '09:40', 'end', '10:10', 'valid_from', '2026-09-05',
+               'day', 'Sat', 'start', '09:20', 'end', '09:50', 'valid_from', '2026-09-05',
                'valid_until', '2026-11-28')),
           -- 5: a new half C at the stored slot's time: no clash.
           (5, jsonb_build_object('location', 'D2 Park', 'name', 'Pitch 1', 'subunit', 'C', 'type', 'practice',

@@ -4685,7 +4685,7 @@ plant "R45 the revert restores a drifted update_game_score body" "$R45" \
 # D2: practice-only divisions and reserved practice slots. The migration's own
 # end-state check refuses a practice division named organization-wide, the
 # clash rule left callable by a client and plays_games defaulting to false;
-# the smoke RAISEs on a turnover of zero, two halves of one field clashing,
+# the smoke RAISEs on back-to-back slots clashing, two halves of one field clashing,
 # windows that share no weekday clashing, an unknown practice division left
 # open, a re-import clearing a reservation, a rollback keeping the import's,
 # the reservation writer admitting a non-admin or another organization's
@@ -4698,9 +4698,9 @@ plant "M46 a practice division is named organization-wide" "$M46" \
   "" \
   "applying 20261029010000_practice_only_divisions.sql"
 
-plant "M46 the turnover is zero" "$M46" \
-  "    p_turnover_minutes integer DEFAULT 15" \
-  "    p_turnover_minutes integer DEFAULT 0" \
+plant "M46 back-to-back slots clash" "$M46" \
+  "       AND extract(epoch FROM ps.start_time) < probe.e + probe.turnover" \
+  "       AND extract(epoch FROM ps.start_time) <= probe.e + probe.turnover" \
   "smoke 20261029010000"
 
 plant "M46 two halves of one field clash" "$M46" \

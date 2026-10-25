@@ -1,9 +1,9 @@
 // The mock client's twin of migration 20261029010000 (plan
 // docs/changes/2026-10-22-demo-mode.md, D2): the fields CSV's Division
 // reserves a practice slot within the season and an unknown one fails its row;
-// a practice slot that overlaps another on the same ground, or starts less than
-// 15 minutes from it, fails its row, while the other half of the field and a
-// slot 15 minutes later do not; the reservation writer and the division
+// a practice slot that overlaps another on the same ground fails its row, while
+// the other half of the field, a slot starting as another ends (the turnover
+// defaults to 0) and one 15 minutes later do not; the reservation writer and the division
 // settings writer's plays_games follow the SQL's refusals and no-ops.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
@@ -79,10 +79,10 @@ describe('mock finalize_field_import_job :: reservations and clashes (D2)', () =
       row({ Subunit: 'A', Start: '09:00', End: '09:30', Division: 'u8 coed' }),
       // 2: overlaps 1.
       row({ Subunit: 'A', Start: '09:15', End: '09:45' }),
-      // 3: starts 10 minutes after 1 ends.
-      row({ Subunit: 'A', Start: '09:40', End: '10:10' }),
-      // 4: starts 15 minutes after 1 ends.
-      row({ Subunit: 'A', Start: '09:45', End: '10:15' }),
+      // 3: starts as 1 ends (back to back).
+      row({ Subunit: 'A', Start: '09:30', End: '10:00' }),
+      // 4: starts 15 minutes after 3 ends.
+      row({ Subunit: 'A', Start: '10:15', End: '10:45' }),
       // 5: the other half, at 1's time.
       row({ Subunit: 'B', Start: '09:00', End: '09:30' }),
       // 6: an unknown division, on ground that does not exist yet.
@@ -93,14 +93,14 @@ describe('mock finalize_field_import_job :: reservations and clashes (D2)', () =
     expect(outcomes).toEqual([
       'applied',
       'practice_slot_conflict',
-      'practice_slot_conflict',
+      'applied',
       'applied',
       'applied',
       'division_unknown',
       'practice_slot_conflict',
     ]);
-    expect(result.invalid_rows).toBe(4);
-    expect(result.inserted_practice_slots).toBe(3);
+    expect(result.invalid_rows).toBe(3);
+    expect(result.inserted_practice_slots).toBe(4);
     const reserved = getMockData('practice_slots').find(
       (s) => s.start_time === '09:00' && s.division_id === 'u8-div-id'
     );

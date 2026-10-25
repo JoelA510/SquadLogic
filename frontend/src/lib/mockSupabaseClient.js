@@ -806,8 +806,8 @@ const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
  * The first stored practice slot a new one would clash with (migration
  * 20261029010000's `practice_slot_conflicts`, mirrored): same surface (the
  * same subunit, or for a whole field the field and each of its subunits), the
- * same weekday, effective dates sharing that weekday, and overlapping or less
- * than the turnover (15 minutes) apart.
+ * same weekday, effective dates sharing that weekday, and overlapping (the
+ * turnover defaults to 0: back to back is allowed).
  *
  * @param {Array<Record<string, any>>} slots
  * @param {{ organizationId: string, fieldId: string, fieldSubunitId: string|null, day: string,
@@ -815,7 +815,7 @@ const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
  *   excludeSlotId?: string|null }} probe
  */
 function mockPracticeSlotConflict(slots, probe) {
-  const turnover = 15 * 60;
+  const turnover = 0;
   const s = mockWallSeconds(probe.start);
   const e = mockWallSeconds(probe.end);
   const dow = MOCK_ISO_DOW[probe.day];
@@ -5920,7 +5920,7 @@ export const mockSupabase = {
             });
             if (clash) {
               failRow(row, {
-                message: `Practice slot ${day.slice(0, 3)} ${start}-${end} on ${locationName} ${fieldName} overlaps, or starts less than 15 minutes from, the practice slot at ${String(clash.start_time).slice(0, 5)}-${String(clash.end_time).slice(0, 5)} on the same ground`,
+                message: `Practice slot ${day.slice(0, 3)} ${start}-${end} on ${locationName} ${fieldName} overlaps the practice slot at ${String(clash.start_time).slice(0, 5)}-${String(clash.end_time).slice(0, 5)} on the same ground`,
                 reason: 'practice_slot_conflict',
                 conflicting_slot_id: clash.id,
               });

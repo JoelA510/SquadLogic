@@ -158,7 +158,7 @@
     Management's select on each slot).
   - Index on (`day_of_week`, `start_time`) for quick lookups.
   - **No overlap or turnover on one surface, refused at write** (`20261029010000`): the field
-    import refuses a practice slot that overlaps, or starts less than 15 minutes from, another on
+    import refuses a practice slot that overlaps (the turnover defaults to 0: back to back is allowed) another on
     the same bookable surface (the same subunit; or for a whole field, the field and each of its
     subunits), on the same weekday, whose effective windows share that weekday
     (`practice_slot_conflicts`). There is no index or constraint behind it: a rollback restores the

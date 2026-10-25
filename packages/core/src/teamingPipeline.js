@@ -37,8 +37,11 @@ import {
  * The request text is consumed here, so `normalizeBuddyLinks` keeps its rules for codes and
  * explicit references and never reads a name as a registration key. Each `buddyId` is the
  * target's own id value (a numeric id stays a number), as the generator compares strictly.
+ * TeamBuilder's auto-balance applies the same rule (`balanceSignals.js`, Phase B5).
+ *
+ * @param {{ players: any[], requests: any[], buddyRule?: string }} params
  */
-function applyBuddyRule({ players, requests, buddyRule }) {
+export function applyBuddyRule({ players, requests, buddyRule }) {
   const byId = new Map(players.map((player) => [String(player.id), player]));
   const rawId = (id) => byId.get(id)?.id ?? id;
   const buddyIdByPlayer = new Map();

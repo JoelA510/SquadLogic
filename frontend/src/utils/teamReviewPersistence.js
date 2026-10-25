@@ -444,6 +444,13 @@ const ASSISTANT_COACH_ROLES = new Set(['assistant_coach', 'assistant coach', 'as
 const roleOf = (row) => String(row?.role ?? 'player').toLowerCase();
 
 /**
+ * Is a relational `team_players` row a rostered player (not a coach or assistant)? The one test,
+ * for every reader of the rows: a row with no role is a player.
+ * @param {any} row
+ */
+export const isRosterPlayerRow = (row) => !NON_ROSTER_ROLES.has(roleOf(row));
+
+/**
  * Build an `existingSnapshot` (consumable by core `generateTeams`) from a previously persisted
  * team snapshot, so a re-run PRESERVES team UUIDs, coach/assistant assignments, and manual roster
  * moves instead of regenerating fresh. Division-scoped when `divisionKey` is supplied. Returns null
@@ -483,7 +490,7 @@ export function buildExistingSnapshotForRerun(baseSnapshot, { divisionKey } = {}
     if (divisionKey != null && division !== String(divisionKey)) continue;
 
     const relationalRows = playerRowsByTeam.get(team.id) || [];
-    const relationalPlayers = relationalRows.filter((row) => !NON_ROSTER_ROLES.has(roleOf(row)));
+    const relationalPlayers = relationalRows.filter(isRosterPlayerRow);
     const players =
       relationalPlayers.length > 0
         ? relationalPlayers.map((row) => ({

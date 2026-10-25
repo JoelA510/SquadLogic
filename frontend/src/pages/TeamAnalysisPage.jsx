@@ -14,12 +14,14 @@ import RosterManager from '../components/teaming/RosterManager.jsx';
 import TeamPersistencePanel from '../components/TeamPersistencePanel.jsx';
 import DataValidationPanel from '../components/teaming/DataValidationPanel.jsx';
 import BuddyRequestsList from '../components/teaming/BuddyRequestsList.jsx';
+import PlacementReviewList from '../components/teaming/PlacementReviewList.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
+import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { DEFAULT_ROSTER_LIMITS } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
 import { summarizeBuddyRequests } from '@squadlogic/core/buddyLinking.js';
@@ -29,6 +31,7 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { canonicalImportKey } from '../utils/importAllowlist.js';
+import { placementReviewAnnouncement, summarizePlacementReview } from '../utils/placementReview.js';
 import { getPersistenceEndpoint, triggerTeamPersistence } from '../utils/teamPersistenceClient.js';
 import {
   buildExistingSnapshotForRerun,
@@ -452,6 +455,31 @@ function collectPlayerLookupKeys(rowsForProgram) {
   };
 }
 
+/**
+ * Why a run built no teams. A division whose every player is blocked builds none (Phase B2), and
+ * the players are imported: say they are not eligible, and name some. Otherwise the generic
+ * reason, with how many of the players were not eligible when some were.
+ */
+function noTeamsMessage(programName, preparedPlayers, result) {
+  const blocked = Object.values(result.overflowByDivision || {})
+    .flat()
+    .filter((entry) => entry?.reason === TEAM_GENERATION.REASON_EligibilityBlocked)
+    .flatMap((entry) => entry.players || []);
+  const names = (players) => {
+    const shown = players.slice(0, 3).map((player) => player.name || String(player.id));
+    const more = players.length - shown.length;
+    return `${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
+  };
+  if (blocked.length > 0 && blocked.length >= preparedPlayers.length) {
+    return `No teams could be generated for ${programName}: none of its players is eligible for the division (each plays down, or plays up without a coaching parent or a coach's child as a buddy). Not eligible (${blocked.length}): ${names(blocked)}. Check their birthdates and the division's age band.`;
+  }
+  const notEligible =
+    blocked.length > 0
+      ? ` ${blocked.length} of its ${preparedPlayers.length} players are not eligible for the division: ${names(blocked)}.`
+      : '';
+  return `No teams could be generated for ${programName}. Check that players are imported for this program and that the roster settings allow at least one team.${notEligible}`;
+}
+
 export default function TeamAnalysisPage() {
   // No `timezone` here: the one consumer was `TeamOverviewPanel`, which
   // deliberately renders its `generatedAt` on the viewer's clock and no longer
@@ -498,6 +526,9 @@ export default function TeamAnalysisPage() {
   const [configs, setConfigs] = useState({});
   const [generationError, setGenerationError] = useState(null);
   const [reviewMessage, setReviewMessage] = useState('');
+  // The polite live region's text: set once per generation, when a review is staged, so the
+  // lists are announced once rather than on every remount of the view that shows them.
+  const [placementAnnouncement, setPlacementAnnouncement] = useState('');
   const [stagedReview, setStagedReview] = useState(null);
   const [divisionRows, setDivisionRows] = useState(null);
   const [divisionSettingsError, setDivisionSettingsError] = useState(null);
@@ -538,6 +569,8 @@ export default function TeamAnalysisPage() {
 
   useEffect(() => {
     loadedReviewKeyRef.current = reviewStorageKey;
+    // Another organization's or season's review: what was announced was about the last one.
+    setPlacementAnnouncement('');
     if (!reviewStorageKey || typeof sessionStorage === 'undefined') {
       setStagedReview(null);
       return;
@@ -875,6 +908,7 @@ export default function TeamAnalysisPage() {
   const handleGenerateTeams = useCallback(async () => {
     setIsGenerating(true);
     setGenerationError(null);
+    setPlacementAnnouncement('');
     try {
       const user = authUser || session?.user;
       if (!user?.id) throw new Error('Sign in before generating teams.');
@@ -949,52 +983,54 @@ export default function TeamAnalysisPage() {
 
       // Coach-anchored teaming + play-up/play-down eligibility. Imported coaches
       // (via coach_team_requests) drive which players anchor a coach's team, and
-      // a coach-child or qualifying buddy sanctions a play-up. Guarded so the
-      // page falls back to the raw roster if coach links are unavailable.
-      let preparedPlayers = generatorPlayers;
-      let preparedDiagnostics = null;
-      try {
-        const { data: coachLinks } = await supabase
-          .from('coach_team_requests')
-          .select('coach_id, player_id, preferred_co_coach_id')
-          .eq('organization_id', currentOrganization.id);
-        const coachesById = new Map();
-        for (const link of coachLinks || []) {
-          if (!link.player_id) continue;
-          const entry = coachesById.get(link.coach_id) || {
-            id: link.coach_id,
-            children: [],
-            preferred_co_coach_id: link.preferred_co_coach_id || null,
-          };
-          entry.children.push({ player_id: link.player_id });
-          coachesById.set(link.coach_id, entry);
-        }
-        const prepared = prepareTeamingInput({
-          players: generatorPlayers,
-          roster: buddyRoster,
-          buddyRule,
-          coaches: [...coachesById.values()],
-          divisions: [
-            {
-              id: selectedProgramKey,
-              name: selectedProgram.name,
-              min_age: savedDivision.min_age,
-              max_age: savedDivision.max_age,
-              birthdate_start: savedDivision.birthdate_start,
-              birthdate_end: savedDivision.birthdate_end,
-              gender_policy: savedDivision.gender_policy,
-            },
-          ],
-          seasonYear: currentSeasonSetting?.season_year,
-          cutoffMode: currentSeasonSetting?.age_cutoff_mode,
-          // Single-division flow: annotate eligibility, do not remap across divisions.
-          remapBlocked: false,
-        });
-        preparedPlayers = prepared.players;
-        preparedDiagnostics = prepared.diagnostics;
-      } catch (pipelineErr) {
-        console.warn('Teaming pipeline (coach links / play-up) skipped:', pipelineErr?.message);
+      // a coach-child or qualifying buddy sanctions a play-up. Not guarded (Phase B3): a
+      // refused read or a pipeline that throws stops the run here, through the catch below,
+      // instead of generating the raw roster with no coach anchors and no eligibility check.
+      const { data: coachLinks, error: coachLinksError } = await supabase
+        .from('coach_team_requests')
+        .select('coach_id, player_id, preferred_co_coach_id')
+        .eq('organization_id', currentOrganization.id);
+      if (coachLinksError) {
+        throw new Error(
+          `Could not read the coaches' team links, so teams were not generated: ${
+            coachLinksError.message || 'the read was refused'
+          }.`
+        );
       }
+      const coachesById = new Map();
+      for (const link of coachLinks || []) {
+        if (!link.player_id) continue;
+        const entry = coachesById.get(link.coach_id) || {
+          id: link.coach_id,
+          children: [],
+          preferred_co_coach_id: link.preferred_co_coach_id || null,
+        };
+        entry.children.push({ player_id: link.player_id });
+        coachesById.set(link.coach_id, entry);
+      }
+      const prepared = prepareTeamingInput({
+        players: generatorPlayers,
+        roster: buddyRoster,
+        buddyRule,
+        coaches: [...coachesById.values()],
+        divisions: [
+          {
+            id: selectedProgramKey,
+            name: selectedProgram.name,
+            min_age: savedDivision.min_age,
+            max_age: savedDivision.max_age,
+            birthdate_start: savedDivision.birthdate_start,
+            birthdate_end: savedDivision.birthdate_end,
+            gender_policy: savedDivision.gender_policy,
+          },
+        ],
+        seasonYear: currentSeasonSetting?.season_year,
+        cutoffMode: currentSeasonSetting?.age_cutoff_mode,
+        // Single-division flow: annotate eligibility, do not remap across divisions.
+        remapBlocked: false,
+      });
+      const preparedPlayers = prepared.players;
+      const preparedDiagnostics = prepared.diagnostics;
 
       const divisionConfig = {
         id: selectedProgramKey,
@@ -1043,9 +1079,7 @@ export default function TeamAnalysisPage() {
           : generated;
       const generatedTeams = result.teamsByDivision?.[selectedProgramKey] ?? [];
       if (generatedTeams.length === 0) {
-        throw new Error(
-          `No teams could be generated for ${selectedProgram.name}. Check that players are imported for this program and that the roster settings allow at least one team.`
-        );
+        throw new Error(noTeamsMessage(selectedProgram.name, preparedPlayers, result));
       }
       const coverage = result.coachCoverageByDivision?.[selectedProgramKey] ?? null;
       const now = new Date().toISOString();
@@ -1078,6 +1112,9 @@ export default function TeamAnalysisPage() {
         createdAt: now,
         programName: selectedProgram.name,
       });
+      setPlacementAnnouncement(
+        placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results))
+      );
       setManualTeams(null);
       const coachNote = coverage
         ? coverage.teamsWithoutCoach > 0
@@ -1177,6 +1214,7 @@ export default function TeamAnalysisPage() {
     (result) => {
       if (stagedReview) {
         setStagedReview(null);
+        setPlacementAnnouncement('');
         // The page's own line, so it survives the panel: the sync's counts are kept here
         // because the panel below is remounted while the synced run is read back.
         const counts =
@@ -1198,6 +1236,7 @@ export default function TeamAnalysisPage() {
 
   const handleDiscardReview = useCallback(() => {
     setStagedReview(null);
+    setPlacementAnnouncement('');
     setManualTeams(null);
     setIsEditMode(false);
     setReviewMessage('Team review discarded.');
@@ -1285,6 +1324,16 @@ export default function TeamAnalysisPage() {
     stagedReview,
   ]);
 
+  // Placed players with no eligibility check, flagged beside their name in the roster editor too.
+  const uncheckedPlayerIds = useMemo(() => {
+    const review = summarizePlacementReview(displayPersistenceSnapshot?.runMetadata?.results);
+    return new Set(
+      (review?.divisions ?? []).flatMap((division) =>
+        division.unchecked.map((entry) => entry.playerId)
+      )
+    );
+  }, [displayPersistenceSnapshot?.runMetadata?.results]);
+
   // Map persistence snapshot to nested structure for RosterManager
   const mappedTeams = useMemo(() => {
     const { teamRows = [], teamPlayerRows = [] } = displayPersistenceSnapshot?.payload || {};
@@ -1314,6 +1363,7 @@ export default function TeamAnalysisPage() {
             gender: playerDetails?.gender || playerDetails?.Gender,
             age: playerDetails?.age || playerDetails?.Age || 10,
             assignment_source: tp.source,
+            eligibilityNotChecked: uncheckedPlayerIds.has(String(tp.player_id)),
           };
         });
 
@@ -1327,7 +1377,7 @@ export default function TeamAnalysisPage() {
         players,
       };
     });
-  }, [displayPersistenceSnapshot?.payload, importedPlayerRows]);
+  }, [displayPersistenceSnapshot?.payload, importedPlayerRows, uncheckedPlayerIds]);
 
   // Use real data from the dashboard hook if available, otherwise empty array
   // Map automated results if persistence is empty
@@ -1361,10 +1411,11 @@ export default function TeamAnalysisPage() {
             gender: playerDetails?.gender || playerDetails?.Gender,
             age: playerDetails?.age || playerDetails?.Age || 10,
             assignment_source: tp.source,
+            eligibilityNotChecked: uncheckedPlayerIds.has(String(tp.player_id)),
           };
         }),
     }));
-  }, [mappedTeams, activeTeamData, importedPlayerRows]);
+  }, [mappedTeams, activeTeamData, importedPlayerRows, uncheckedPlayerIds]);
 
   const handleEditButtonClick = useCallback(() => {
     if (isEditMode) {
@@ -1428,6 +1479,9 @@ export default function TeamAnalysisPage() {
   return (
     <div className="animate-fadeIn space-y-8 max-w-[65ch] mx-auto w-full">
       <DataErrorBanner message={dataError} />
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {stagedReview ? placementAnnouncement : ''}
+      </p>
 
       <div className="flex justify-between items-start mb-8">
         <div>
@@ -1587,6 +1641,7 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
+          <PlacementReviewList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (
             <section

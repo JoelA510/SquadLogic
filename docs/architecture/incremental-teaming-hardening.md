@@ -404,7 +404,9 @@ one), in fresh generation and for a late player on
 a rerun; `unknown` is placed, never blocked). A blocked player leaves the pool before the team
 count and coach anchors are built, and a mutual buddy of one is placed alone with the unmatched
 request reason `buddy-not-placed`. With nobody blocked the output is unchanged
-(`tests/teamGenerationEligibility.test.js`, a golden from `main`).
+(`tests/teamGenerationEligibility.test.js`, a golden from `main`). The Teams page lists every
+overflow entry under "Not placed" with its reason, and `eligibilityHolds` under "Needs review"
+(Phase B3, `PlacementReviewList.jsx`).
 
 **Manual-review codes**: `ambiguous-coach-replacement`, `coach-replacement-candidate`,
 `coach-replacement-target-anchored`, `ambiguous-coach-attachment`,

@@ -8,12 +8,20 @@
 
 import { TEAM_GENERATION } from './constants.js';
 import { PlayerSchema } from './schemas/index.js';
-import { EVALUATOR_REGISTRY } from './evaluators/index.js';
+import { BuddyEvaluator, EVALUATOR_REGISTRY } from './evaluators/index.js';
 import { buildAssignmentUnits, calculateUnitSkill } from './assignmentUnits.js';
 import { reconcileTeamDeltas } from './teamDelta.js';
 import { getCanonicalBuddyId } from './buddyLinking.js';
 import { applyCoachContinuity } from './coachContinuity.js';
 import { isEligibilityBlocked } from './playUp.js';
+import { balanceSignalKind, divisionLeadCompensation, playerSignal } from './balanceSignals.js';
+import {
+  compensatedLoad,
+  countLeads,
+  orderForLeadDeal,
+  spreadsCoachingLeads,
+  withFewestLeads,
+} from './coachingLeads.js';
 
 /** @typedef {import('./types.js').Player} Player */
 /** @typedef {import('./types.js').Team} Team */
@@ -48,6 +56,15 @@ import { isEligibilityBlocked } from './playUp.js';
  * `eligibility-blocked`, one entry per player, metadata `{ placement, reviewReason, naturalAge,
  * coachId }`; a mutual buddy is placed alone (`buddy-not-placed`). A blocked player already on a
  * preserved roster stays there and is listed in `changeDiagnosticsByDivision[div].eligibilityHolds`.
+ *
+ * Coaching leads (Phase B6, `coachingLeads.js`): a player with `isCoachingLead` is not a coach
+ * and anchors no team. Once coaches' children are placed, units holding a lead are dealt to a
+ * team with the fewest leads, the most leads first, and every other unit to the team with the
+ * lowest `signal total + c × leads` (the league's signal: `featureFlags.player_rating`, else
+ * `years_played`). With neither, or when no player of the division carries the signal, `c` is 0
+ * and the evaluators place what the lead spread leaves. With `featureFlags.teaming_spread_coaching_leads`
+ * false, or no lead in the division, placement is exactly as before B6. On a rerun the same rule
+ * places the late players; preserved players never move.
  * @returns {{
  *   teamsByDivision: Record<string, Array<Team>>,
  *   overflowByDivision: Record<string, Array<{ players: Array<Player>, reason: string, metadata?: Object }>>,
@@ -873,13 +890,14 @@ function buildTeamsForDivision({
     }
   }
 
-  generalUnits.sort((a, b) => b.skillTotal - a.skillTotal);
+  const leadPolicy = resolveLeadPolicy({ featureFlags, players });
 
-  for (const assignmentUnit of generalUnits) {
+  for (const assignmentUnit of orderGeneralUnits(generalUnits, leadPolicy)) {
     const unit = assignmentUnit.players;
     const skillTotal = assignmentUnit.skillTotal;
-    const team = pickTeamWithMostCapacity({
+    const team = pickTeamForGeneralUnit({
       teams,
+      allTeams: teams,
       unit,
       unitSkillTotal: skillTotal,
       maxRosterSize,
@@ -887,6 +905,7 @@ function buildTeamsForDivision({
       featureFlags,
       customWeights,
       globalStats,
+      leadPolicy,
     });
     if (!team) {
       overflow.push({
@@ -957,6 +976,13 @@ function buildTeamsForDivisionIncremental({
     players: [...team.players],
     skillTotal: calculateUnitSkill(team.players),
   }));
+
+  // Leads are counted over the division as it will stand, each player once: the preserved
+  // rosters, before any late player joins them, and the eligible late players.
+  const leadPolicy = resolveLeadPolicy({
+    featureFlags,
+    players: [...teams.flatMap((team) => team.players), ...latePlayers],
+  });
 
   const preservedTeamIdSet = new Set(preservedTeams.map((team) => team.id));
   const assistantBackfills = [];
@@ -1168,15 +1194,14 @@ function buildTeamsForDivisionIncremental({
     }
   }
 
-  generalUnits.sort((a, b) => b.skillTotal - a.skillTotal);
-
-  for (const assignmentUnit of generalUnits) {
+  for (const assignmentUnit of orderGeneralUnits(generalUnits, leadPolicy)) {
     const unit = assignmentUnit.players;
     const skillTotal = assignmentUnit.skillTotal;
     // Locked preserved teams accept no late additions (filtered per unit so teams created
     // during expansion remain candidates).
-    let team = pickTeamWithMostCapacity({
+    let team = pickTeamForGeneralUnit({
       teams: teams.filter((candidate) => !candidate.locked),
+      allTeams: teams,
       unit,
       unitSkillTotal: skillTotal,
       maxRosterSize: effectiveMaxRosterSize,
@@ -1184,6 +1209,7 @@ function buildTeamsForDivisionIncremental({
       featureFlags,
       customWeights,
       globalStats,
+      leadPolicy,
     });
     if (!team && unit.length <= effectiveMaxRosterSize) {
       // 'preserve-or-expand': create a team only when a unit actually needs one and can fit.
@@ -1316,8 +1342,111 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason: _
 }
 
 /**
+ * @typedef {{ signalKind: string, c: number }} LeadPolicy
+ *   How a division deals its coaching leads (Phase B6): the league's balance signal and what
+ *   one lead adds to a team's load; with `c` 0 the deal does not compensate, and the
+ *   evaluators balance what the lead spread leaves.
+ */
+
+/**
+ * The lead rule for one division, or `null` when it does not apply: the league turned
+ * `teaming_spread_coaching_leads` off, or no player of the division is a lead. `null` keeps
+ * placement exactly as it was before B6. The deal compensates only when the league's signal is
+ * one a player can carry (`player_rating` or `years_played`) and some player of the division
+ * carries it (`carriesSignal`); otherwise there is nothing to compensate with, and the
+ * evaluators balance the rest as they do without leads.
+ * @param {{ featureFlags: Object, players: Array<Player> }} params
+ * @returns {LeadPolicy | null}
+ */
+function resolveLeadPolicy({ featureFlags, players }) {
+  if (!spreadsCoachingLeads(featureFlags) || countLeads(players) === 0) return null;
+  const signalKind = balanceSignalKind(featureFlags);
+  return { signalKind, c: divisionLeadCompensation(players, signalKind) };
+}
+
+/** A unit's (or roster's) total of the league's balance signal. */
+function signalTotalOf(players, signalKind) {
+  return players.reduce((total, player) => total + playerSignal(player, signalKind), 0);
+}
+
+/**
+ * The order the general units are placed in. Without a lead policy, by skill total, as
+ * before B6. With one: units holding a lead first, the most leads first, then by the league's
+ * signal when the deal compensates (else by skill total, as before), each in descending order.
+ * @param {Array<import('./assignmentUnits.js').AssignmentUnit>} units
+ * @param {LeadPolicy | null} leadPolicy
+ */
+function orderGeneralUnits(units, leadPolicy) {
+  if (!leadPolicy) return [...units].sort((a, b) => b.skillTotal - a.skillTotal);
+  const { signalKind, c } = leadPolicy;
+  return orderForLeadDeal(units, {
+    leadsOf: (unit) => countLeads(unit.players),
+    weightOf: (unit) => (c > 0 ? signalTotalOf(unit.players, signalKind) : unit.skillTotal),
+  });
+}
+
+const buddyEvaluator = new BuddyEvaluator();
+
+/**
+ * The team a general unit joins. With no lead policy, the evaluators decide
+ * (`pickTeamWithMostCapacity`), as before B6. With one (`coachingLeads.js`), among the teams
+ * with room, a unit holding a lead keeps only the teams with the fewest leads. Then, when the
+ * deal compensates: a buddy the unit asked for (best effort, `BuddyEvaluator`) narrows them to
+ * that buddy's team; then the lowest `signal total + c × leads`, the smallest roster, and the
+ * seeded random draw among any still tied. When it does not, the evaluators choose among them.
  * @param {Object} params
- * @param {Array<Team>} params.teams
+ * @param {Array<Team>} params.teams - the candidates
+ * @param {Array<Team>} params.allTeams - every team of the division
+ * @param {Array<Player>} params.unit
+ * @param {number} params.unitSkillTotal
+ * @param {number} params.maxRosterSize
+ * @param {function(): number} params.random
+ * @param {Object} params.featureFlags
+ * @param {Object} [params.customWeights]
+ * @param {Object} [params.globalStats]
+ * @param {LeadPolicy | null} params.leadPolicy
+ * @returns {Team | null}
+ */
+function pickTeamForGeneralUnit({ leadPolicy, allTeams, ...params }) {
+  if (!leadPolicy) return pickTeamWithMostCapacity(params);
+  const { teams, unit, maxRosterSize, random, featureFlags } = params;
+  let candidates = teams.filter((team) => team.players.length + unit.length <= maxRosterSize);
+  if (candidates.length === 0) return null;
+  if (countLeads(unit) > 0) {
+    candidates = withFewestLeads(candidates, (team) => countLeads(team.players));
+  }
+  const { signalKind, c } = leadPolicy;
+  if (c === 0) {
+    return pickTeamWithMostCapacity({ ...params, teams: candidates, allTeams: params.teams });
+  }
+  const buddyScore = (team) =>
+    buddyEvaluator.evaluate({ player: unit[0], team, allTeams, featureFlags });
+  candidates = keepBest(candidates, buddyScore);
+  candidates = keepBest(
+    candidates,
+    (team) => -compensatedLoad(signalTotalOf(team.players, signalKind), countLeads(team.players), c)
+  );
+  candidates = keepBest(candidates, (team) => -team.players.length);
+  return candidates[Math.floor(random() * candidates.length)];
+}
+
+/**
+ * The candidates with the highest score, in their order.
+ * @template T
+ * @param {T[]} candidates
+ * @param {(candidate: T) => number} scoreOf
+ * @returns {T[]}
+ */
+function keepBest(candidates, scoreOf) {
+  const scores = candidates.map(scoreOf);
+  const best = Math.max(...scores);
+  return candidates.filter((_, index) => scores[index] === best);
+}
+
+/**
+ * @param {Object} params
+ * @param {Array<Team>} params.teams - the candidates
+ * @param {Array<Team>} [params.allTeams] - the teams the evaluators compare with (default `teams`)
  * @param {Array<Player>} params.unit
  * @param {number} params.unitSkillTotal
  * @param {number} params.maxRosterSize
@@ -1329,6 +1458,7 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason: _
  */
 function pickTeamWithMostCapacity({
   teams,
+  allTeams = teams,
   unit,
   unitSkillTotal: _unitSkillTotal,
   maxRosterSize,
@@ -1352,7 +1482,7 @@ function pickTeamWithMostCapacity({
       const score = evaluator.evaluate({
         player: unit[0],
         team,
-        allTeams: teams,
+        allTeams,
         featureFlags,
         customWeights,
         globalStats,

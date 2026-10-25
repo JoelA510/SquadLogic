@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FeatureFlagSettings from '../frontend/src/components/settings/FeatureFlagSettings.jsx';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
 
 const mocks = vi.hoisted(() => ({
   updateFeatureFlags: vi.fn(),
@@ -95,6 +96,38 @@ describe('FeatureFlagSettings (FeatureControls)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Future placements only' }));
     await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
     expect(mocks.updateFeatureFlags.mock.calls[0][0]).toMatchObject({ gender_model: 'coed' });
+  });
+
+  // Phase B6: the league's Spread Coaching Leads setting, on by default, read through the schema.
+  it('offers Spread Coaching Leads, on by default, and turns it off through the audited path', async () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({});
+    render(<FeatureFlagSettings />);
+    const spread = screen.getByRole('switch', { name: 'Spread Coaching Leads' });
+    expect(spread).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(spread);
+    await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
+    expect(mocks.updateFeatureFlags.mock.calls[0][0]).toEqual({
+      teaming_spread_coaching_leads: false,
+    });
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'record_audit_event',
+        expect.objectContaining({
+          p_action: 'settings.flags_updated',
+          p_metadata: expect.objectContaining({ flags: { teaming_spread_coaching_leads: false } }),
+        })
+      )
+    );
+  });
+
+  it('reads a stored-off Spread Coaching Leads as off, and the schema refuses a non-boolean', () => {
+    expect(FeatureFlagSchema.parse({ teaming_spread_coaching_leads: 'no' })).toEqual({});
+    mocks.featureFlags = FeatureFlagSchema.parse({ teaming_spread_coaching_leads: false });
+    render(<FeatureFlagSettings />);
+    expect(screen.getByRole('switch', { name: 'Spread Coaching Leads' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
   });
 
   it('keeps legacy advanced flags togglable', async () => {

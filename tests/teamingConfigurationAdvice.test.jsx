@@ -206,21 +206,22 @@ describe('Team counts per program on the Teams page (Phase B4)', () => {
   afterEach(() => cleanup());
 
   it('raises the recommendation for the head coaches the import names, counted once each', async () => {
-    // Thirty players, recommended ceil(30 / 12) = 3 teams; five rows name a coach, by the rule
-    // generation uses (a coach email, or a willing-to-coach flag that makes the player a coach),
-    // two of them the same coach: four distinct head coaches, so four teams.
+    // Twenty-four players, recommended ceil(24 / 12) = 2 teams; four rows name a coach by email,
+    // two of them the same coach: three distinct head coaches, so three teams. A fifth row is a
+    // coaching lead (a parent willing to coach), which is not a coach and adds no team
+    // (Phase B6; before it, the lead made a fourth).
     const coachOf = ['a@coaches.test', 'b@coaches.test', 'c@coaches.test', 'c@coaches.test'];
-    page.rows = importRows('U10', 30, (i) =>
+    page.rows = importRows('U10', 24, (i) =>
       i < coachOf.length ? { coach_email: coachOf[i] } : i === 4 ? { willing_to_coach: 'yes' } : {}
     );
-    const coaches = new Set([...coachOf, 'volunteer']).size;
-    const expected = Math.max(Math.ceil(30 / 12), coaches);
-    expect(expected).toBe(4);
+    const coaches = new Set(coachOf).size;
+    const expected = Math.max(Math.ceil(24 / 12), coaches);
+    expect(expected).toBe(3);
     page.divisions = [savedDivision('U10')];
     await renderPage();
 
     expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
-      `Recommended: ${expected} teams for 30 players and ${coaches} head coaches`
+      `Recommended: ${expected} teams for 24 players and ${coaches} head coaches`
     );
     expect(overviewCell('U10', 'Recommended')).toHaveTextContent(String(expected));
     expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(String(expected));

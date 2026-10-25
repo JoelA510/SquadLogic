@@ -50,9 +50,11 @@ function PlayerChip({ player, signalKind, teams, onMove, currentTeamId }) {
       </span>
       <Avatar name={name || '?'} size="sm" />
       <span className="pchip-name">{name}</span>
+      {/* A coaching lead (Phase B6): a parent volunteers to coach. A mark, not a coach. */}
       {player.willing_to_coach && (
-        <span className="pchip-ico" title="Guardian will coach">
+        <span className="pchip-sig" title="Coaching lead: a parent volunteers to coach">
           <UserRoundCheck size={13} aria-hidden="true" />
+          Lead
         </span>
       )}
       {player.buddy_request && (

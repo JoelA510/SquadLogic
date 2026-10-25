@@ -4,10 +4,11 @@
  *
  * The generator (`teamGeneration.js`) creates one team per unique
  * `player.coachId` within a division and keeps the coach's child on that team.
- * Historically `coachId` was only derived from a `willing_to_coach` flag on the
+ * Historically `coachId` was derived from a `willing_to_coach` flag on the
  * player row; this module instead projects the durable `coaches` table (and its
  * resolved child links) onto the player set, so a separately-imported coach
- * roster actually drives teaming.
+ * roster actually drives teaming. Since Phase B6 a `willing_to_coach` player is
+ * a coaching lead (`coachingLeads.js`), not a coach, and carries no `coachId`.
  *
  * Pure module — no React / Supabase imports.
  */
@@ -42,7 +43,7 @@ function coachChildLinks(coach) {
  * @param {Array<Object>} params.players - generator players (each with an id)
  * @param {Array<Object>} params.coaches - imported coach rows with child links
  * @param {boolean} [params.overrideExisting=true] - when true, an imported coach
- *   link wins over a `willing_to_coach`-derived coachId already on the player.
+ *   link wins over a coachId already on the player (one the import row names).
  * @returns {{ players: Array<Object>, diagnostics: Object }}
  */
 export function linkCoachesToPlayers({ players, coaches, overrideExisting = true }) {

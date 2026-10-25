@@ -409,6 +409,15 @@ describe('TeamAnalysisPage :: not placed and flagged, on the review (B3)', () =>
     expect(screen.queryByText(/Players to review:/)).toBeNull();
   });
 
+  it('clears the announcement with the review it was about', async () => {
+    await generate();
+    expect(screen.getByText(/^Players to review:/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Review' }));
+    await screen.findByText('Team review discarded.');
+    expect(screen.queryByText(/^Players to review:/)).toBeNull();
+  });
+
   it('says why a buddy pair is apart when one of them is blocked', async () => {
     // A mutual pair by name (letters only: a name with a digit is read as an id), the
     // blocked player 1 and player 10, who is placed alone (`buddy-not-placed`).

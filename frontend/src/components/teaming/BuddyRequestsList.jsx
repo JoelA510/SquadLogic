@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import PropTypes from 'prop-types';
+import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { BUDDY_RULE_CHOICES } from '../../constants/featureFlags.js';
 import { notPlacedById } from '../../utils/placementReview.js';
 
@@ -40,8 +41,8 @@ function currentPlacement(results) {
 
 /**
  * Why a pair is apart when one of them is on no team (Phase B3): a buddy whose eligibility is
- * blocked is not placed, and the other is placed alone (`buddy-not-placed`). Null when both are
- * on teams, or when the run records neither as not placed.
+ * blocked is not placed, and the other is placed alone (`buddy-not-placed`). Null when the run
+ * records neither as not placed (`notPlacedById`, which leaves out anyone its rows seat).
  */
 function apartBecause(ids, notPlaced) {
   const missing = ids.map(String).filter((id) => notPlaced.has(id));
@@ -49,7 +50,7 @@ function apartBecause(ids, notPlaced) {
   return missing
     .map((id) => {
       const { name, reason } = /** @type {{ name: string, reason: string }} */ (notPlaced.get(id));
-      return reason === 'eligibility-blocked'
+      return reason === TEAM_GENERATION.REASON_EligibilityBlocked
         ? `${name} is not eligible for this division and is not placed`
         : `${name} is not placed`;
     })
@@ -97,10 +98,10 @@ function candidatesText(candidates) {
  * linked by the page; a wrong request is fixed on the player's record.
  */
 export default function BuddyRequestsList({ results }) {
+  const notPlaced = useMemo(() => notPlacedById(results), [results]);
   const divisions = Object.entries(results?.buddyRequestsByDivision || {});
   if (divisions.length === 0) return null;
   const placementOf = currentPlacement(results);
-  const notPlaced = notPlacedById(results);
   const placed = (entry, a, b) => {
     const now = placementOf ? { ...entry, ...placementOf(a, b) } : entry;
     return now.together ? now : { ...now, apartBecause: apartBecause([a, b], notPlaced) };

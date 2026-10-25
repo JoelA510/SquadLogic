@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import PropTypes from 'prop-types';
+import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { summarizePlacementReview } from '../../utils/placementReview.js';
 
 /** Why the generator left a player off every team, in words (`overflowByDivision[].reason`). */
@@ -27,7 +28,7 @@ function eligibilityText(placement, reviewReason) {
 }
 
 function notPlacedText(entry) {
-  if (entry.reason === 'eligibility-blocked') {
+  if (entry.reason === TEAM_GENERATION.REASON_EligibilityBlocked) {
     return eligibilityText(entry.placement, entry.reviewReason);
   }
   // A reason this list has no words for is still shown, as the generator recorded it.
@@ -51,7 +52,7 @@ const anchorId = (division, list) =>
  * page's own live region, once per generation, not here.
  */
 export default function PlacementReviewList({ results }) {
-  const summary = summarizePlacementReview(results);
+  const summary = useMemo(() => summarizePlacementReview(results), [results]);
   if (!summary) return null;
   const { totals } = summary;
   const nothingToReview =
@@ -81,7 +82,9 @@ export default function PlacementReviewList({ results }) {
         if (notPlaced.length === 0 && needsReview.length === 0 && unchecked.length === 0) {
           return null;
         }
-        const notEligible = notPlaced.filter((e) => e.reason === 'eligibility-blocked').length;
+        const notEligible = notPlaced.filter(
+          (e) => e.reason === TEAM_GENERATION.REASON_EligibilityBlocked
+        ).length;
         const otherReason = notPlaced.length - notEligible;
         return (
           <div key={division} className="space-y-4">
@@ -103,9 +106,6 @@ export default function PlacementReviewList({ results }) {
                     <li key={`${entry.playerId}:${index}`}>
                       <span className="font-medium text-text-primary">{entry.name}</span>.{' '}
                       {notPlacedText(entry)} {ageText(entry.naturalAge)}
-                      {entry.currentTeamName
-                        ? ` Since placed by hand on ${entry.currentTeamName}.`
-                        : ''}
                     </li>
                   ))}
                 </ul>

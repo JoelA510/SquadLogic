@@ -474,9 +474,15 @@ engine conventions), and the demo league is teamed end to end.
   badge's colour pair unresolved even with its text planted at the background's colour, so it is
   computed from the tokens instead (`--warning-text` on `--warning-weak`: 5.20:1 light, 8.42:1
   dark), with the opaque `bg-status-warning-bg` rather than a translucent tint.
-- **A not-placed player seated by hand** (not reachable from the roster editor today, which shows
-  only rostered players) stays listed, with "Since placed by hand on …", and keeps the placement
-  their overflow entry recorded for the "not checked" flag.
+- **Review round (`/code-review`, fixed here):** "not checked" is said only for a division whose
+  generated rosters hold player records (a manual-edit snapshot can rebuild them from team rows
+  with no players, which would have flagged everyone); coach rows are read out of the roster by
+  the persistence module's role rule (`isRosterPlayerRow`, now exported beside
+  `NON_ROSTER_ROLES`); the Buddy requests list does not call a buddy whom the current rows seat
+  "not placed"; the announcement is cleared with the review it was about (sync, discard, another
+  organization or season); a placed player whose team names no division is listed under
+  "Division not recorded". A "placed by hand" note for a not-placed player was dropped: the
+  roster editor shows only rostered players, so no user can produce that state.
 
 ## Not in Phase B
 

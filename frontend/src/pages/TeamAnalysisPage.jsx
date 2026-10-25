@@ -569,6 +569,8 @@ export default function TeamAnalysisPage() {
 
   useEffect(() => {
     loadedReviewKeyRef.current = reviewStorageKey;
+    // Another organization's or season's review: what was announced was about the last one.
+    setPlacementAnnouncement('');
     if (!reviewStorageKey || typeof sessionStorage === 'undefined') {
       setStagedReview(null);
       return;
@@ -1212,6 +1214,7 @@ export default function TeamAnalysisPage() {
     (result) => {
       if (stagedReview) {
         setStagedReview(null);
+        setPlacementAnnouncement('');
         // The page's own line, so it survives the panel: the sync's counts are kept here
         // because the panel below is remounted while the synced run is read back.
         const counts =
@@ -1477,7 +1480,7 @@ export default function TeamAnalysisPage() {
     <div className="animate-fadeIn space-y-8 max-w-[65ch] mx-auto w-full">
       <DataErrorBanner message={dataError} />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {placementAnnouncement}
+        {stagedReview ? placementAnnouncement : ''}
       </p>
 
       <div className="flex justify-between items-start mb-8">

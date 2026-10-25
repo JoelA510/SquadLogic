@@ -1,5 +1,6 @@
 import { PLACEMENT, isEligibilityBlocked } from '@squadlogic/core/playUp.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
+import { isRosterPlayerRow } from './teamReviewPersistence.js';
 
 /**
  * The Teams page's placement review (Phase B3, docs/changes/2026-10-22-phase-b-teaming.md):
@@ -13,6 +14,9 @@ import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 const CHECKED_PLACEMENTS = new Set([PLACEMENT.IN_BAND, PLACEMENT.PLAY_UP_SANCTIONED]);
 
 const finiteOrNull = (value) => (Number.isFinite(value) ? value : null);
+
+/** The group a placed player is listed under when the run does not say which team's division. */
+const DIVISION_NOT_RECORDED = 'Division not recorded';
 
 function displayName(player) {
   if (!player) return null;
@@ -38,9 +42,15 @@ function indexRun(results) {
     if (id != null && name && !nameById.has(String(id))) nameById.set(String(id), String(name));
   };
 
+  // The divisions whose generated rosters hold player records (with each player's placement).
+  // A run without them (a seeded run, or rosters rebuilt from team rows with no players) cannot
+  // tell who was checked.
+  /** @type {Set<string>} */
+  const divisionsWithRosters = new Set();
   const teamsByDivision = results?.teamsByDivision;
-  const hasRosters = teamsByDivision != null && typeof teamsByDivision === 'object';
-  for (const [division, teams] of Object.entries(hasRosters ? teamsByDivision : {})) {
+  for (const [division, teams] of Object.entries(
+    teamsByDivision && typeof teamsByDivision === 'object' ? teamsByDivision : {}
+  )) {
     for (const team of Array.isArray(teams) ? teams : []) {
       const teamId = String(team?.id);
       if (team?.name) teamNameById.set(teamId, String(team.name));
@@ -48,19 +58,8 @@ function indexRun(results) {
       for (const player of Array.isArray(team?.players) ? team.players : []) {
         const id = String(player?.id);
         noteName(id, displayName(player));
+        divisionsWithRosters.add(division);
         if (!generatedById.has(id)) generatedById.set(id, { player, division, teamId });
-      }
-    }
-  }
-  // A not-placed player carries their placement too, for when an admin seats them by hand.
-  /** @type {Map<string, any>} */
-  const overflowPlayerById = new Map();
-  for (const entries of Object.values(results?.overflowByDivision || {})) {
-    for (const entry of Array.isArray(entries) ? entries : []) {
-      for (const player of Array.isArray(entry?.players) ? entry.players : []) {
-        const id = String(player?.id);
-        noteName(id, displayName(player));
-        if (!overflowPlayerById.has(id)) overflowPlayerById.set(id, player);
       }
     }
   }
@@ -79,7 +78,7 @@ function indexRun(results) {
   const currentTeamOf = new Map();
   const rows = Array.isArray(results?.team_players) ? results.team_players : [];
   for (const row of rows) {
-    if (row?.role && row.role !== 'player') continue;
+    if (!isRosterPlayerRow(row)) continue;
     const id = String(row?.player_id);
     noteName(id, row?.player_name);
     if (!currentTeamOf.has(id)) currentTeamOf.set(id, String(row?.team_id));
@@ -89,19 +88,18 @@ function indexRun(results) {
   }
 
   return {
-    hasRosters,
     nameById,
     teamNameById,
     divisionByTeamId,
     generatedById,
-    overflowPlayerById,
+    divisionsWithRosters,
     currentTeamOf,
   };
 }
 
 /**
  * @typedef {{ playerId: string, name: string, reason: string, placement: string | null,
- *   reviewReason: string | null, naturalAge: number | null, currentTeamName: string | null }} NotPlacedEntry
+ *   reviewReason: string | null, naturalAge: number | null }} NotPlacedEntry
  * @typedef {{ playerId: string, name: string, teamName: string | null, placement: string | null,
  *   reviewReason: string | null }} NeedsReviewEntry
  * @typedef {{ playerId: string, name: string, teamName: string | null,
@@ -121,8 +119,8 @@ function indexRun(results) {
  *   found on a current roster that the holds do not name (enumerated from the rosters, not from
  *   the holds alone).
  * - **Eligibility not checked:** each placed player whose placement is not a passed check
- *   (`unknown`, an unrecognised value, or none recorded). Only said when the run carries its
- *   generated rosters (`teamsByDivision`); a run without them cannot tell.
+ *   (`unknown`, an unrecognised value, or none recorded). Only said for a division whose
+ *   generated rosters (`teamsByDivision`) hold player records; a run without them cannot tell.
  *
  * @param {any} results
  * @returns {{ divisions: DivisionReview[], totals: { notPlaced: number, notEligible: number,
@@ -148,7 +146,7 @@ export function summarizePlacementReview(results) {
         needsReview: [],
         unchecked: [],
         placedCount: 0,
-        rostersKnown: run.hasRosters,
+        rostersKnown: run.divisionsWithRosters.has(division),
       });
     }
     return /** @type {DivisionReview} */ (byDivision.get(division));
@@ -162,7 +160,6 @@ export function summarizePlacementReview(results) {
       const metadata = entry?.metadata || {};
       for (const player of Array.isArray(entry?.players) ? entry.players : []) {
         const id = String(player?.id);
-        const currentTeamId = run.currentTeamOf.get(id);
         review.notPlaced.push({
           playerId: id,
           name: displayName(player) ?? nameOf(id),
@@ -170,7 +167,6 @@ export function summarizePlacementReview(results) {
           placement: metadata.placement ?? player?.placement ?? null,
           reviewReason: metadata.reviewReason ?? player?.reviewReason ?? null,
           naturalAge: finiteOrNull(metadata.naturalAge) ?? finiteOrNull(player?.naturalAge),
-          currentTeamName: currentTeamId === undefined ? null : teamNameOf(currentTeamId),
         });
       }
     }
@@ -202,11 +198,11 @@ export function summarizePlacementReview(results) {
   for (const [id, teamId] of run.currentTeamOf) {
     const generated = run.generatedById.get(id);
     const division =
-      run.divisionByTeamId.get(teamId) ?? generated?.division ?? TEAM_GENERATION.REASON_Unknown;
+      run.divisionByTeamId.get(teamId) ?? generated?.division ?? DIVISION_NOT_RECORDED;
     const review = divisionOf(division);
     review.placedCount += 1;
-    if (!run.hasRosters) continue;
-    const player = generated?.player ?? run.overflowPlayerById.get(id);
+    if (!review.rostersKnown) continue;
+    const player = generated?.player;
     if (player && isEligibilityBlocked(player)) {
       if (listedForReview.has(id)) continue;
       listedForReview.add(id);
@@ -271,19 +267,22 @@ export function placementReviewAnnouncement(summary) {
 
 /**
  * Each not-placed player of a run, by id, with the reason: for the Buddy requests list, which
- * says why a pair is not together.
+ * says why a pair is not together. A player the run's current rows seat is not in it.
  * @param {any} results
  * @returns {Map<string, { reason: string, name: string }>}
  */
 export function notPlacedById(results) {
   /** @type {Map<string, { reason: string, name: string }>} */
   const byId = new Map();
+  const rows = Array.isArray(results?.team_players) ? results.team_players : [];
+  const seated = new Set(rows.filter(isRosterPlayerRow).map((row) => String(row?.player_id)));
   for (const entries of Object.values(results?.overflowByDivision || {})) {
     if (!Array.isArray(entries)) continue;
     for (const entry of entries) {
       const reason = entry?.reason ? String(entry.reason) : TEAM_GENERATION.REASON_Unknown;
       for (const player of Array.isArray(entry?.players) ? entry.players : []) {
         const id = String(player?.id);
+        if (seated.has(id)) continue;
         if (!byId.has(id)) byId.set(id, { reason, name: displayName(player) ?? id });
       }
     }

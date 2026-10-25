@@ -119,25 +119,6 @@ describe('placement review :: not placed', () => {
   });
 });
 
-describe('placement review :: a not-placed player moved by hand', () => {
-  it('stays listed, and says where they are now', () => {
-    const results = run({
-      teamA: [inBand('a')],
-      overflow: [{ players: [inBand('y')], reason: 'insufficient-capacity' }],
-      rows: [
-        { team_id: 'team-a', player_id: 'a', role: 'player', player_name: 'Player A' },
-        { team_id: 'team-b', player_id: 'y', role: 'player', player_name: 'Player Y' },
-      ],
-    });
-    render(<PlacementReviewList results={results} />);
-    expect(itemsOf('Not placed')[0]).toHaveTextContent(
-      'Player Y. No room: the teams were full. Natural age 10. Since placed by hand on Team B.'
-    );
-    // Their check came with them: in the band, so not flagged as unchecked.
-    expect(screen.queryByRole('region', { name: 'Eligibility not checked' })).toBeNull();
-  });
-});
-
 describe('placement review :: needs review', () => {
   const blocked = (id) =>
     player(id, {
@@ -217,6 +198,30 @@ describe('placement review :: eligibility not checked', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('flags nobody when the rosters hold no player records (rebuilt from team rows)', () => {
+    // `buildManualRosterSnapshot` rebuilds `teamsByDivision` from team rows with empty `players`
+    // when the run had none: the rows say who is placed, nothing says who was checked.
+    const results = {
+      teamsByDivision: { U10: [{ id: 'team-a', name: 'Team A', division: 'U10', players: [] }] },
+      teams: [{ id: 'team-a', name: 'Team A', division: 'U10' }],
+      team_players: [{ team_id: 'team-a', player_id: 'a', role: 'player' }],
+    };
+    const { container } = render(<PlacementReviewList results={results} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("reads coach rows out of the roster, by the persistence module's role rule", () => {
+    const results = run({ teamA: [inBand('a')] });
+    results.team_players.push(
+      { team_id: 'team-a', player_id: 'coach-1', role: 'Head Coach' },
+      { team_id: 'team-a', player_id: 'b', role: 'Player' }
+    );
+    const summary = summarizePlacementReview(results);
+    // The coach is not a placed player; a capitalised "Player" row is.
+    expect(summary?.divisions[0].placedCount).toBe(2);
+    expect(summary?.divisions[0].unchecked.map((entry) => entry.playerId)).toEqual(['b']);
+  });
+
   it('renders nothing and announces nothing for no run', () => {
     const { container } = render(<PlacementReviewList results={undefined} />);
     expect(container).toBeEmptyDOMElement();
@@ -249,6 +254,13 @@ describe('Buddy requests :: why a pair is apart', () => {
         },
       },
     };
+    // A player the current rows seat is not reported as not placed.
+    expect(
+      notPlacedById({
+        ...results,
+        team_players: [...results.team_players, { team_id: 'team-b', player_id: 'c' }],
+      }).has('c')
+    ).toBe(false);
     expect(notPlacedById(results).get('a')).toEqual({
       reason: 'eligibility-blocked',
       name: 'Player A',

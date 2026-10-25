@@ -75,6 +75,11 @@ describe('PlayerRecordPage', () => {
           // A row read before 20261025010000 dropped the column: the page
           // must not show it.
           guardian_contacts: [{ name: 'Dana Smith', email: 'dana@example.com' }],
+          natural_age: 8,
+          // A row read before 20261026010000 dropped the columns (R5): the page
+          // must not show them.
+          date_of_birth: '2018-02-03',
+          birth_year: 2018,
         },
       ],
       divisions: [{ id: 'd1', name: 'U8B', organization_id: MOCK_ORG_ID }],
@@ -115,6 +120,20 @@ describe('PlayerRecordPage', () => {
       fireEvent.click(tab);
       expect(screen.queryByText(/Dana Smith|dana@example\.com/)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Add guardian' })).not.toBeInTheDocument();
+    }
+  });
+
+  // No birth date is stored (docs/changes/2026-10-22-admin-focus.md, R5): the
+  // record shows the stored natural age as an age group, and no birth date or year.
+  it('shows the age group and no birth date or birth year', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Alex Smith' });
+    expect(screen.getByText('Age group')).toBeInTheDocument();
+    expect(screen.getByText('U8')).toBeInTheDocument();
+    expect(screen.queryByText(/Birth year/i)).not.toBeInTheDocument();
+    for (const tab of screen.getAllByRole('tab')) {
+      fireEvent.click(tab);
+      expect(screen.queryByText(/2018/)).not.toBeInTheDocument();
     }
   });
 

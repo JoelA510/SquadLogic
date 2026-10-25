@@ -39,10 +39,9 @@ export const PLAYER_IMPORT_KEYS: readonly string[] = Object.freeze([
   'gotsport_id',
   'registration_id',
   'player_id',
-  // Age and division (birthdate until a later PR stores natural age instead)
-  'date_of_birth',
-  'dob',
-  'birth_year',
+  // Age and division. `natural_age` is set by import-validation (the age group, else one
+  // computed from the birth date), never read from the file; the birth keys are below.
+  'natural_age',
   'age group',
   'age_group',
   'age',
@@ -81,6 +80,18 @@ export const PLAYER_IMPORT_KEYS: readonly string[] = Object.freeze([
   'team age',
   'team gender',
 ]);
+
+/**
+ * The birth keys a player import reads in transit (admin-focus plan R5): import-validation
+ * computes the natural age from the birth date and returns it to the browser, which keeps the
+ * file's birth dates for teaming during the import session; nothing stages or stores them
+ * (`withoutBirthKeys`). Kept by the filter, so they are not in `PLAYER_IMPORT_KEYS`, the keys
+ * the SQL reads. A birth year alone is not read (it is dropped like any unlisted column).
+ */
+export const PLAYER_BIRTH_KEYS: readonly string[] = Object.freeze(['date_of_birth', 'dob']);
+
+/** A key that names a birth date or year, by its canonical key or its identity. */
+const BIRTH_LIKE = /birth|(^|_)dob(_|$)/i;
 
 /**
  * The columns a coach's full name is composed from when the export has none
@@ -140,6 +151,7 @@ export function isAllowedImportKey(
   const keys = KEYS_BY_TYPE[importType];
   if (!keys) return true;
   if (keys.includes(canonicalKey)) return true;
+  if (importType === 'players' && PLAYER_BIRTH_KEYS.includes(canonicalKey)) return true;
   const identity = declaredFieldKey(canonicalKey);
   if (!identity) return false;
   for (const field of declaredFields) {
@@ -220,6 +232,28 @@ export function withDeclaredColumns(
     const cleaned = clean(value);
     if (cleaned.trim() === '') continue;
     if (out[identity] === undefined || String(out[identity]).trim() === '') out[identity] = cleaned;
+  }
+  return out;
+}
+
+/**
+ * The row without a birth-like key, judged by its canonical key (`normalizeHeader`)
+ * and its identity:
+ * what import-validation stages, raw and normalized (admin-focus plan R5).
+ * Every key named like a birth date or year goes (`date_of_birth`, `birth_year`,
+ * a declared `Birth Date` or `Player DOB`), so a declared field cannot carry
+ * one into `custom_attributes` either. Other import types are returned as given.
+ */
+export function withoutBirthKeys<T>(
+  importType: string,
+  row: Record<string, T>,
+  normalizeHeader: (header: string) => string
+): Record<string, T> {
+  if (importType !== 'players' || !row) return row;
+  const out: Record<string, T> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (BIRTH_LIKE.test(normalizeHeader(key)) || BIRTH_LIKE.test(declaredFieldKey(key))) continue;
+    out[key] = value;
   }
   return out;
 }

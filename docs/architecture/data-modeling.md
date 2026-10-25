@@ -12,7 +12,10 @@
   - `external_registration_id` (text, unique per GotSport record)
   - `division_id` (UUID → `divisions.id`)
   - `first_name`, `last_name`, `preferred_name`
-  - `date_of_birth` (date) and `grade` (text) for eligibility rules
+  - `natural_age` (smallint, 1-25 or NULL) for play-up eligibility: the age group the player is
+    in for the season of the import that wrote it, computed at import from the file's birth date
+    with the season's cutoff, else the age group the export states. No birth date is stored:
+    `date_of_birth` and `birth_year` were dropped by `20261026010000` (R5). `grade` (text).
   - No guardian contacts or contact details: `guardian_contacts` and `contact_info` were dropped
     by `20261025010000` (leagues keep families' contacts on their registration platform).
   - `mutual_buddy_code` (text) – only honored when a matching code exists

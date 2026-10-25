@@ -135,6 +135,10 @@ R41="$REPO/docs/sql/20261024010000_revert.sql"
 # contact columns and the coach leads dropped), and the revert.
 M42="$REPO/supabase/migrations/20261025010000_remove_contact_surfaces.sql"
 R42="$REPO/docs/sql/20261025010000_revert.sql"
+# R5: birthdates out, a natural age in (the allowlist and the player writers
+# replaced; the two birth columns dropped), and the revert.
+M43="$REPO/supabase/migrations/20261026010000_natural_age_replaces_birthdates.sql"
+R43="$REPO/docs/sql/20261026010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3725,10 +3729,10 @@ END;
 # No medical data. The smoke RAISEs on each; the revert claim on a column left
 # out and on a body that drifted.
 # Re-aimed at 20261022010000, whose finalize_import_job replaces this file's,
-# again at 20261022020000, which replaces that one, and again at
-# 20261025010000 ($M42), the live body: the staged payload stored whole as
-# custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M42" \
+# again at 20261022020000, which replaces that one, again at 20261025010000,
+# and again at 20261026010000 ($M43), the live body: the staged payload stored
+# whole as custom_attributes again.
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M43" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4153,10 +4157,10 @@ plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" 
 
 # R1: no registration, compliance or payment flag. The smoke RAISEs on each;
 # the revert claim on a grant left out, a policy left out and a body that
-# drifted. The patch helper plants are aimed at $M42, whose
-# sanitize_player_patch and apply_player_patch (R4: no guardian contacts)
-# replace this file's.
-plant "M38 the patch sanitizer still takes paid" "$M42" \
+# drifted. The patch helper plants are aimed at $M43, whose
+# sanitize_player_patch and apply_player_patch (R5: no birth date) replace
+# this file's (and R4's).
+plant "M38 the patch sanitizer still takes paid" "$M43" \
   "            WHEN 'willing_to_coach' THEN" \
   "            WHEN 'paid', 'willing_to_coach' THEN" \
   "smoke 20261022020000"
@@ -4167,7 +4171,7 @@ plant "M38 coach_update_player_compliance is left behind" "$M38" \
   "" \
   "smoke 20261022020000"
 
-plant "M38 apply_player_patch loses its UTC pin" "$M42" \
+plant "M38 apply_player_patch loses its UTC pin" "$M43" \
   "LANGUAGE plpgsql
 SET search_path = public
 SET timezone = 'UTC'
@@ -4426,9 +4430,11 @@ plant "M42 the member list admits any member" "$M42" \
         RAISE EXCEPTION 'Access denied: admin required for organization %', p_organization_id" \
   "smoke 20261025010000"
 
-plant "M42 the sanitizer takes guardian_contacts again" "$M42" \
-  "            WHEN 'date_of_birth' THEN" \
-  "            WHEN 'date_of_birth', 'guardian_contacts' THEN" \
+# The sanitizer is R5's since 20261026010000 ($M43), which has no birth date
+# arm: the key is taken with the text fields.
+plant "M42 the sanitizer takes guardian_contacts again" "$M43" \
+  "                 'buddy_request' THEN" \
+  "                 'buddy_request', 'guardian_contacts' THEN" \
   "smoke 20261025010000"
 
 # Refused by the migration itself: with the column left, admin_create_player
@@ -4473,6 +4479,87 @@ plant "R42 the revert restores a drifted get_team_staff body" "$R42" \
   "        RAISE EXCEPTION 'not permitted to read this team''s staff' USING ERRCODE = '42501';" \
   "        RAISE EXCEPTION 'not permitted to read this team''s staff (drifted)' USING ERRCODE = '42501';" \
   "revert 20261025010000"
+
+# R5: no birthdates, a natural age. The migration's own end-state check
+# refuses a birth column left behind and a writer still naming one; the smoke
+# RAISEs on a promotion that needs an age, the wrong precedence, a re-import
+# that keeps an old age, a sanitizer that takes the birth date again, the
+# allowlist keeping a birth key and the age check gone; the revert claim on a
+# column left out, a natural age left behind and a body that drifted.
+plant "M43 players.birth_year is left behind" "$M43" \
+  "    DROP COLUMN date_of_birth,
+    DROP COLUMN birth_year;" \
+  "    DROP COLUMN date_of_birth;" \
+  "applying 20261026010000_natural_age_replaces_birthdates.sql"
+
+plant "M43 apply_player_patch still writes the birth date" "$M43" \
+  "        team_id         = CASE WHEN p_sanitized ? 'team_id' THEN (p_sanitized->>'team_id')::uuid ELSE p.team_id END,
+        updated_at      = now()" \
+  "        team_id         = CASE WHEN p_sanitized ? 'team_id' THEN (p_sanitized->>'team_id')::uuid ELSE p.team_id END,
+        date_of_birth   = CASE WHEN p_sanitized ? 'date_of_birth' THEN (p_sanitized->>'date_of_birth')::date ELSE p.date_of_birth END,
+        updated_at      = now()" \
+  "applying 20261026010000_natural_age_replaces_birthdates.sql"
+
+plant "M43 the finalizer promotes only a row with a natural age" "$M43" \
+  "        WHERE p.first_name IS NOT NULL
+          AND p.last_name IS NOT NULL
+    )," \
+  "        WHERE p.first_name IS NOT NULL
+          AND p.last_name IS NOT NULL
+          AND COALESCE(p.natural_age_text, p.age_group_text) IS NOT NULL
+    )," \
+  "smoke 20261026010000"
+
+plant "M43 the finalizer prefers the age group to the staged natural age" "$M43" \
+  "                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
+                    THEN p.natural_age_text::smallint
+                WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
+                    THEN p.age_group_text::smallint" \
+  "                WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
+                    THEN p.age_group_text::smallint
+                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
+                    THEN p.natural_age_text::smallint" \
+  "smoke 20261026010000"
+
+plant "M43 a re-import keeps the old natural age" "$M43" \
+  "            natural_age = de.natural_age," \
+  "            natural_age = COALESCE(de.natural_age, p.natural_age)," \
+  "smoke 20261026010000"
+
+plant "M43 the sanitizer takes date_of_birth again" "$M43" \
+  "                 'buddy_request' THEN" \
+  "                 'buddy_request', 'date_of_birth' THEN" \
+  "smoke 20261026010000"
+
+plant "M43 the allowlist keeps dob" "$M43" \
+  "            'gotsport_id', 'registration_id', 'player_id', 'natural_age'," \
+  "            'gotsport_id', 'registration_id', 'player_id', 'natural_age', 'dob'," \
+  "smoke 20261026010000"
+
+plant "M43 the natural age has no check" "$M43" \
+  "    ADD COLUMN natural_age smallint,
+    ADD CONSTRAINT players_natural_age_check
+        CHECK (natural_age IS NULL OR natural_age BETWEEN 1 AND 25);" \
+  "    ADD COLUMN natural_age smallint;" \
+  "smoke 20261026010000"
+
+plant "R43 the revert leaves birth_year out" "$R43" \
+  "    ADD COLUMN date_of_birth date,
+    ADD COLUMN birth_year integer;" \
+  "    ADD COLUMN date_of_birth date;" \
+  "revert 20261026010000"
+
+plant "R43 the revert leaves the natural age behind" "$R43" \
+  "ALTER TABLE public.players
+    DROP COLUMN natural_age;
+" \
+  "" \
+  "revert 20261026010000"
+
+plant "R43 the revert restores a drifted finalize_import_job body" "$R43" \
+  "        RAISE EXCEPTION 'Failed import job % cannot be finalized', p_import_job_id" \
+  "        RAISE EXCEPTION 'Failed import job % cannot be finalized (drifted)', p_import_job_id" \
+  "revert 20261026010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
@@ -4615,6 +4702,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the reporting views revert leaves view_org_metrics and view_league_standings as a build at 20261022020000 has them: definition, columns, security_invoker and grants"]="R40 the revert drops both views|R40 the revert restates view_org_metrics without security_invoker"
   ["(checked) the guardian revert restores profile_players with its keys, policy and grants, the three guardian functions, the roster and staff reads' guardian arms, the people and calendar token read policies and the parent and player roles, each with its grants, comment and posture as at 20261023010000"]="R41 the revert leaves the guardian link policy out|R41 the revert leaves the contact helper callable|R41 the revert restores a drifted get_team_roster body"
   ["(checked) the contact surfaces revert restores the players and contact card columns, the coach interest table with its keys, policy, trigger and grants, the directory, card and lead functions, the staff and roster reads' contact columns, the member list open to members and the player writers' previous bodies, each with its grants, comment and posture as at 20261024010000"]="R42 the revert leaves the coach interest policy out|R42 the revert leaves the card writer callable by PUBLIC|R42 the revert restores a drifted get_team_staff body"
+  ["(checked) the birthdates revert restores the players birth columns empty, drops the natural age with its check, and restores the allowlist and the player writers' previous bodies, each with its grants, comment and posture as at 20261025010000"]="R43 the revert leaves birth_year out|R43 the revert leaves the natural age behind|R43 the revert restores a drifted finalize_import_job body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

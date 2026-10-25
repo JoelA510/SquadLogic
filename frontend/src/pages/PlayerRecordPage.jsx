@@ -245,7 +245,13 @@ export default function PlayerRecordPage() {
                   onSave={(v) => save({ gender: v })}
                   render={(v) => (v === 'm' ? 'Male' : v === 'f' ? 'Female' : null)}
                 />
-                <InlineField label="Birth year" value={player.birth_year} editable={false} />
+                {/* The natural age the import stored; no birth date is (R5). */}
+                <InlineField
+                  label="Age group"
+                  value={player.natural_age}
+                  editable={false}
+                  render={(v) => (Number.isFinite(v) ? `U${v}` : null)}
+                />
                 <InlineField
                   label="Division"
                   value={divisionLabel}

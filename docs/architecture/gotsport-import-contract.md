@@ -70,7 +70,7 @@ than storing it.
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
 | `external_registration_id`, `gotsport_id`, `registration_id`, `player_id`                                                                                  | `external_registration_id`                                 | Dedupe, re-import, buddy matching         |
 | `first_name`, `last_name`, `preferred_name`, `nickname`                                                                                                    | `first_name`, `last_name`, `preferred_name`                | Roster identity                           |
-| `date_of_birth`, `dob`, `birth_year`                                                                                                                       | `date_of_birth`, `birth_year`                              | Age band + play-up (until a later PR, R5) |
+| `date_of_birth`, `dob`                                                                                                                                     | nothing: read at import for `natural_age`, never staged    | Age band + play-up (R5)                   |
 | `age group`, `age_group`, `age`, `gender`, `grade`                                                                                                         | the derived division, `gender`, `grade`                    | Division                                  |
 | `division_id`, `division_name`, `division`, `group`, `program`                                                                                             | `division_id`                                              | Division                                  |
 | `skill_tier`, `skill_level`, `years_played` (and the GotSport question)                                                                                    | `skill_tier`, `years_played`                               | Team balancing                            |
@@ -80,6 +80,22 @@ than storing it.
 | `buddy_request`, `buddy_id`, `buddy_external_registration_id`, `buddy_registration_id`, `friend_request`, `mutual_buddy_code`, `buddy_code`, `friend_code` | `buddy_request`, `player_buddies`                          | Buddy pairing                             |
 | `team name`, `team age`, `team gender`                                                                                                                     | `custom_attributes.team_name` / `team_age` / `team_gender` | Phase B (teams formed outside SquadLogic) |
 | a declared player field                                                                                                                                    | `custom_attributes.<declared name>`, typed as declared     | The organization's own use                |
+
+A player stores no birth date (R5, `20261026010000`). `import-validation` reads
+the file's birth date only to compute the player's **natural age** with the
+season's cutoff (the season `finalize_import_job` attaches the import's
+divisions to: the active one, else the latest), falling back to the age group
+the export states (one or two digits, 1-25) when no birth date gives one; it
+stages `natural_age` and strips every birth key from both staged payloads, and
+returns the rows, birth dates included, to the browser, which keeps them for
+teaming during the import session. The finalizer stores `players.natural_age`
+from the staged value, else from the age group, else none (teaming places and
+flags the player); it promotes a row without a birth date, and a re-import
+rewrites the natural age as it rewrites the division. A `natural_age` column in
+the file is never read, a birth year alone is not read (it is dropped like any
+unlisted column), and every key named like a birth date or year is stripped
+before staging, a declared field's included, so none reaches
+`custom_attributes`. The import still requires a Date of Birth column.
 
 A player stores no contact details or guardian contacts: R4 (`20261025010000`)
 dropped `players.contact_info` and `players.guardian_contacts`, which the import
@@ -165,15 +181,20 @@ holds it equal to the two code copies.
 
 ## Age cutoff (configurable per season)
 
-`season_settings.age_cutoff_mode` selects how a birthdate maps to a U-band:
+`season_settings.age_cutoff_mode` selects how a birthdate maps to a U-band (at
+import, into the stored natural age; and in the browser during the import
+session, from the file's rows):
 
 - **`school_year_aug_jul`** (default) — Aug 1 cutoff; the U(N) cohort is born
   Aug 1 (S−N−1) … Jul 31 (S−N).
 - **`birth_year`** — calendar cutoff; the U(N) cohort is born in calendar year
   S−N.
 
-Derivation lives in `packages/core/src/ageGroups.js`. Per-division birthdate
-windows (`divisions.birthdate_start/end`) are authoritative when set; otherwise
+Derivation lives in `packages/core/src/ageGroups.js` (`importNaturalAge`; its
+Edge twin is `supabase/functions/_shared/natural-age.ts`). Per-division birthdate
+windows (`divisions.birthdate_start/end`) are authoritative when set (only where a
+birth date is at hand, `isEligibleForDivision`; play-up eligibility compares the
+natural age with the band); otherwise
 the band is computed from the division's `min_age`/`max_age` (which support the
 pilot's single-year and multi-year bands, e.g. U11–U12).
 

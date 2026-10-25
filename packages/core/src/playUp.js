@@ -137,6 +137,12 @@ function normalizeGender(value) {
 /**
  * Resolve a single player's natural age number from explicit value or DOB.
  *
+ * The explicit value is the stored natural age (`players.natural_age`, admin-focus plan R5: the
+ * birth date with the season's cutoff, else the age group the export states), which a generator
+ * player carries as `naturalAge` when it has no birth date: no birth date is stored, and the
+ * Teams page sends the import session's birth date, counted in the page's season, when a row has
+ * one. Given both, the explicit value wins.
+ *
  * @param {Object} player
  * @param {number} seasonYear
  * @param {string} [cutoffMode]

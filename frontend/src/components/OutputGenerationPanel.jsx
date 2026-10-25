@@ -14,6 +14,7 @@ import {
   baselineParitySoundness,
 } from '@squadlogic/core/publication/index.js';
 import { IS_MOCK_MODE } from '../config.js';
+import { csvBlob, saveFile, xlsxBlob } from '../utils/scheduleDownloads.js';
 import { logger } from '../lib/logger.js';
 import {
   teamsWithCoachSourceDisagreement,
@@ -202,10 +203,20 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
 
   const exportTeams = Array.from(teamDirectory.values());
   const exportTeamIds = new Set(exportTeams.map((team) => String(team.id)));
-  const exportPractices = (Array.isArray(practiceAssignments) ? practiceAssignments : [])
+  const practiceRows = Array.isArray(practiceAssignments) ? practiceAssignments : [];
+  const gameRows = Array.isArray(gameAssignments) ? gameAssignments : [];
+  // An assignment with no time is not in the master files: `generateScheduleExports`
+  // requires a start and an end (GAP-16/17/28, `reserve/publication.js`). It is
+  // counted here and said beside the files (admin focus R7), never left out
+  // without a word; each team's own export (its team page) lists it as TIME TBD.
+  const untimed = {
+    practices: practiceRows.filter((a) => a && !normalizePracticeForExport(a)).length,
+    games: gameRows.filter((a) => a && !normalizeGameForExport(a)).length,
+  };
+  const exportPractices = practiceRows
     .map(normalizePracticeForExport)
     .filter((assignment) => assignment && exportTeamIds.has(String(assignment.teamId)));
-  const exportGames = (Array.isArray(gameAssignments) ? gameAssignments : [])
+  const exportGames = gameRows
     .map(normalizeGameForExport)
     .filter(
       (assignment) =>
@@ -214,7 +225,26 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
         exportTeamIds.has(String(assignment.awayTeamId))
     );
 
-  return { teams: exportTeams, practiceAssignments: exportPractices, gameAssignments: exportGames };
+  return {
+    teams: exportTeams,
+    practiceAssignments: exportPractices,
+    gameAssignments: exportGames,
+    untimed,
+  };
+}
+
+/**
+ * The sentence for the assignments the master files leave out, or null.
+ *
+ * @param {{ practices: number, games: number }} untimed
+ */
+export function untimedAssignmentsNote(untimed) {
+  const parts = [
+    untimed.games > 0 ? `${untimed.games} game assignment(s)` : null,
+    untimed.practices > 0 ? `${untimed.practices} practice assignment(s)` : null,
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  return `${parts.join(' and ')} with no start or end time are not in these files. Each team's page downloads its schedule with them listed as TIME TBD and the reason.`;
 }
 
 /**
@@ -622,6 +652,7 @@ export default function OutputGenerationPanel({
         setMessage(
           [
             'CSVs generated successfully.',
+            untimedAssignmentsNote(exportPayload.untimed),
             teamsWithDisagreement.length === 0
               ? null
               : `${teamsWithDisagreement.length} team(s) have sources that disagree about their coaches; every coach is exported and none is treated as the primary.`,
@@ -816,16 +847,26 @@ export default function OutputGenerationPanel({
     }
   };
 
-  const downloadCsv = (filename, content) => {
-    const blob = new Blob([content], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const downloadCsv = (filename, content) => saveFile(filename, csvBlob(content));
+
+  /**
+   * The master file as XLSX (admin focus R7): exactly the CSV's rows and
+   * columns, `Coach Emails` included (this page is an admin's), every cell as
+   * text.
+   */
+  const [xlsxError, setXlsxError] = useState(/** @type {string | null} */ (null));
+  const downloadMasterXlsx = async () => {
+    if (!generated || csvBlocked) return;
+    setXlsxError(null);
+    try {
+      saveFile(
+        'master-schedule.xlsx',
+        await xlsxBlob(generated.master.headers, generated.master.rows, 'Master schedule')
+      );
+    } catch (err) {
+      logger.error('XLSX export error:', err);
+      setXlsxError(`The XLSX file could not be made: ${err?.message ?? String(err)}`);
+    }
   };
 
   return (
@@ -896,14 +937,29 @@ export default function OutputGenerationPanel({
             <div className="bg-bg-surface rounded-lg p-4 border border-border-subtle mt-2">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-sm font-medium text-text-primary">Generated Files</h3>
-                <button
-                  type="button"
-                  onClick={() => downloadCsv('master-schedule.csv', generated.master.csv)}
-                  className="relative z-20 text-xs text-text-accent"
-                >
-                  Download Master CSV
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => downloadCsv('master-schedule.csv', generated.master.csv)}
+                    className="relative z-20 text-xs text-text-accent"
+                  >
+                    Download Master CSV
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="download-master-xlsx"
+                    onClick={downloadMasterXlsx}
+                    className="relative z-20 text-xs text-text-accent"
+                  >
+                    Download Master XLSX
+                  </button>
+                </div>
               </div>
+              {xlsxError && (
+                <p role="alert" className="text-xs text-status-error-text mb-2">
+                  {xlsxError}
+                </p>
+              )}
               <div className="text-xs text-text-muted font-mono">
                 <div>Master Schedule: {generated.master.rows.length} rows</div>
                 <div>Team Schedules: {generated.perTeam.length} files</div>

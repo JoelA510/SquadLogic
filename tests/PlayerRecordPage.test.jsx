@@ -72,6 +72,8 @@ describe('PlayerRecordPage', () => {
           rating: null,
           willing_to_coach: false,
           buddy_request: 'Jamie Jones',
+          // A row read before 20261025010000 dropped the column: the page
+          // must not show it.
           guardian_contacts: [{ name: 'Dana Smith', email: 'dana@example.com' }],
         },
       ],
@@ -102,13 +104,18 @@ describe('PlayerRecordPage', () => {
     );
   });
 
-  it('shows guardians in their tab', async () => {
+  // Guardian contacts are not stored (docs/changes/2026-10-22-admin-focus.md,
+  // R4): no Guardians tab, and a contact on a stale row is shown nowhere.
+  it('has no Guardians tab and shows no guardian contact', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Alex Smith' });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Guardians' }));
-    expect(screen.getByText('Primary guardian')).toBeInTheDocument();
-    expect(screen.getByText('Dana Smith')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Guardians' })).not.toBeInTheDocument();
+    for (const tab of screen.getAllByRole('tab')) {
+      fireEvent.click(tab);
+      expect(screen.queryByText(/Dana Smith|dana@example\.com/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add guardian' })).not.toBeInTheDocument();
+    }
   });
 
   // Paperwork and payment are tracked on the league's registration platform
@@ -118,7 +125,6 @@ describe('PlayerRecordPage', () => {
     await screen.findByRole('heading', { name: 'Alex Smith' });
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Overview',
-      'Guardians',
       'Team & Schedule',
     ]);
   });

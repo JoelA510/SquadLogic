@@ -1,16 +1,17 @@
 /**
  * Mock arms for the server-side reads of migration
  * `20261021010000_server_side_reads.sql` (Phase A3a), as
- * `20261024010000_remove_guardian_view_and_roles.sql` (R3) left them: the
- * contact card writer and the four reads that apply the access table. There is
- * no guardian: the guardian link and the guardian arms went in R3.
+ * `20261025010000_remove_contact_surfaces.sql` (R4) left them: the roster and
+ * staff reads that apply the access table, and the two coached-team reads.
+ * There is no guardian (R3) and no contact surface (R4): neither read returns
+ * a contact column, and the contact card writer and the coach directory are
+ * gone, so a call to either falls through to the client's PGRST202 refusal,
+ * as the API answers a function that does not exist.
  *
  * **Refusals included** (LESSONS_LEARNED #13), with the SQL's error codes:
  *   - 42501 a caller with no session; a roster or staff read by anyone but an
  *     org admin or staff member or a current coach of the team (an unknown
- *     team id is refused the same way); a directory read by anyone but an
- *     admin or a current coach while `coach_directory` is on;
- *   - 23502 `p_share` missing; 22023 a phone or email that is not one.
+ *     team id is refused the same way).
  *
  * "Current coach" is a `team_coach_assignments` row of the caller's linked
  * coach (`coaches.user_id`) whose INCLUSIVE window holds today in the team's
@@ -26,20 +27,14 @@
  */
 
 import { ADMIN_ROLES } from '../constants/permissions.js';
-import { FEATURE_FLAGS } from '../constants/featureFlags.js';
-import { CONTACT_PHONE_PATTERN } from '../utils/contactCard.js';
 import { seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 
 export const SERVER_SIDE_READ_RPCS = Object.freeze([
-  'set_my_contact_card',
   'get_team_roster',
   'get_team_staff',
-  'get_coach_directory',
   'get_my_coached_team_ids',
   'admin_get_coached_team_ids',
 ]);
-
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const denied = (message) => ({ data: null, error: { message, code: '42501' } });
 
@@ -111,11 +106,6 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
     );
   const rosterOf = (teamId) =>
     (db.team_players || []).filter((row) => String(row.team_id) === String(teamId));
-  const orgFlag = (orgId, key, fallback) => {
-    const org = (db.organizations || []).find((o) => String(o.id) === String(orgId));
-    const value = org?.feature_flags?.[key];
-    return typeof value === 'boolean' ? value : fallback;
-  };
   return {
     roleIn,
     isOrgAdmin,
@@ -127,7 +117,6 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
     myCoachIds,
     isCurrentTeamCoach,
     rosterOf,
-    orgFlag,
   };
 }
 
@@ -135,13 +124,12 @@ export function createAccessHelpers(db, currentUserId, now = new Date()) {
  * @param {Record<string, any[]>} db
  * @param {string} name
  * @param {Record<string, any> | null | undefined} params
- * @param {{ currentUserId: string | null, now?: Date, newId?: () => string }} ctx
+ * @param {{ currentUserId: string | null, now?: Date }} ctx
  */
 export function handleServerSideReadRpc(db, name, params, ctx) {
   if (!SERVER_SIDE_READ_RPCS.includes(name)) return null;
   const { currentUserId } = ctx;
   const now = ctx.now ?? new Date();
-  const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
   const p = params || {};
   if (!currentUserId) return denied(`${name} requires a signed-in caller`);
 
@@ -154,32 +142,7 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     myCoachIds,
     isCurrentTeamCoach,
     rosterOf,
-    orgFlag,
   } = createAccessHelpers(db, currentUserId, now);
-  const profileById = (id) =>
-    (db.profiles || []).find((profile) => String(profile.id) === String(id)) ?? null;
-  const coachContact = (coach) => {
-    const card = coach.user_id ? profileById(coach.user_id) : null;
-    const share = card?.share_contact ?? null;
-    if (share === null) return { phone: coach.phone ?? null, email: coach.email ?? null };
-    if (share) return { phone: card.contact_phone ?? null, email: card.contact_email ?? null };
-    return { phone: null, email: null };
-  };
-  const stripNulls = (obj) =>
-    Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== null && v !== undefined));
-  // An admin's view of a player's guardian contacts: every contact object, as
-  // imported (no contact card applies to one since R3).
-  const guardianContactsView = (player) =>
-    (Array.isArray(player.guardian_contacts) ? player.guardian_contacts : [])
-      .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
-      .map((c) =>
-        stripNulls({
-          name: c.name,
-          email: c.email,
-          phone: c.phone,
-          alternate_email: c.alternate_email,
-        })
-      );
   const myCoachedTeamIds = (orgId) =>
     isOrgMember(orgId)
       ? [
@@ -195,57 +158,6 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
           ),
         ]
       : [];
-
-  if (name === 'set_my_contact_card') {
-    if (typeof p.p_share !== 'boolean') {
-      return { data: null, error: { message: 'p_share is required', code: '23502' } };
-    }
-    const phone = String(p.p_phone ?? '').trim() || null;
-    const cardEmail = String(p.p_email ?? '').trim() || null;
-    if (phone !== null && !CONTACT_PHONE_PATTERN.test(phone)) {
-      return {
-        data: null,
-        error: { message: 'contact phone is not a phone number', code: '22023' },
-      };
-    }
-    if (cardEmail !== null && (cardEmail.length > 254 || !EMAIL_RE.test(cardEmail))) {
-      return {
-        data: null,
-        error: { message: 'contact email is not an email address', code: '22023' },
-      };
-    }
-    const profile = profileById(currentUserId);
-    if (!profile)
-      return { data: null, error: { message: 'no profile for the caller', code: 'P0002' } };
-    Object.assign(profile, {
-      contact_phone: phone,
-      contact_email: cardEmail,
-      share_contact: p.p_share,
-    });
-    // One audit row per organization the caller belongs to, without the values.
-    db.audit_log = db.audit_log || [];
-    for (const member of db.organization_members || []) {
-      if (String(member.profile_id) !== String(currentUserId)) continue;
-      db.audit_log.push({
-        id: newId(),
-        organization_id: member.organization_id,
-        user_id: currentUserId,
-        action: 'profile.contact_card_updated',
-        resource_type: 'profiles',
-        resource_id: currentUserId,
-        metadata: {
-          share_contact: p.p_share,
-          has_phone: phone !== null,
-          has_email: cardEmail !== null,
-        },
-        created_at: now.toISOString(),
-      });
-    }
-    return {
-      data: { contact_phone: phone, contact_email: cardEmail, share_contact: p.p_share },
-      error: null,
-    };
-  }
 
   if (name === 'get_my_coached_team_ids') {
     return { data: myCoachedTeamIds(p.p_organization_id), error: null };
@@ -282,37 +194,6 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     return { data: ids, error: null };
   }
 
-  if (name === 'get_coach_directory') {
-    const orgId = p.p_organization_id;
-    const admitted =
-      isOrgAdmin(orgId) ||
-      (orgFlag(orgId, FEATURE_FLAGS.COACH_DIRECTORY, true) && myCoachedTeamIds(orgId).length > 0);
-    if (!admitted) return denied('not permitted to read the coach directory');
-    const byCoach = new Map();
-    for (const row of db.team_coach_assignments || []) {
-      if (String(row.organization_id) !== String(orgId) || !isLive(row)) continue;
-      const coach = coachById(row.coach_id);
-      const team = teamById(row.team_id);
-      if (!coach || !team) continue;
-      const entry = byCoach.get(String(coach.id)) ?? {
-        coach_id: coach.id,
-        full_name: coach.full_name ?? null,
-        ...coachContact(coach),
-        team_names: [],
-      };
-      if (!entry.team_names.includes(team.name)) entry.team_names.push(team.name);
-      byCoach.set(String(coach.id), entry);
-    }
-    const rows = [...byCoach.values()]
-      .map((entry) => ({ ...entry, team_names: [...entry.team_names].sort() }))
-      .sort(
-        (a, b) =>
-          String(a.full_name ?? '').localeCompare(String(b.full_name ?? '')) ||
-          String(a.coach_id).localeCompare(String(b.coach_id))
-      );
-    return { data: rows, error: null };
-  }
-
   // get_team_roster, get_team_staff
   const team = teamById(p.p_team_id);
   const admin = !!team && isOrgAdmin(team.organization_id);
@@ -335,7 +216,6 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
           coach_id: c.id,
           full_name: c.full_name ?? null,
           role: row.role,
-          ...coachContact(c),
           status: admin ? (c.status ?? null) : null,
         };
       })
@@ -361,7 +241,6 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
         last_name: player.last_name ?? null,
         preferred_name: player.preferred_name ?? null,
         jersey_number: player.jersey_number ?? null,
-        guardian_contacts: admin ? guardianContactsView(player) : [],
         gender: admin ? (player.gender ?? null) : null,
         years_played: admin ? (player.years_played ?? null) : null,
         rating: admin ? (player.rating ?? null) : null,

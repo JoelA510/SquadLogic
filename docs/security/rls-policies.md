@@ -116,9 +116,8 @@ that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_s
 
 | Function                       | Admits                                                         | Returns                                                                                                                                                                                                                                          |
 | ------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `get_team_roster(team)`        | admins, staff; a current coach of the team                     | names and jersey number; guardian contacts (as imported) and balance fields to admins and staff only (since `20261024010000`: a coach reads names only) |
-| `get_team_staff(team)`         | the same                                                       | every current coach's name, role, phone and email                                                                                                                                                                                              |
-| `get_coach_directory(org)`     | admins, staff; a current coach while `coach_directory` is on   | every current coach's contact details                                                                                                                                                                                                            |
+| `get_team_roster(team)`        | admins, staff; a current coach of the team                     | names and jersey number; balance fields to admins and staff only (since `20261024010000`: a coach reads names only; since `20261025010000`: no guardian contacts) |
+| `get_team_staff(team)`         | the same                                                       | every current coach's name and role, and status to admins and staff (no phone or email since `20261025010000`)                                                                                                                                  |
 | `get_my_coached_team_ids(org)` | any member                                                     | the teams the caller currently coaches                                                                                                                                                                                                           |
 | `admin_get_coached_team_ids(org, user)` | admins, staff                                         | the teams another member currently coaches (an admin's role preview)                                                                                                                                                                             |
 
@@ -127,10 +126,17 @@ set by `link_my_coach_record()`) whose inclusive window holds today in the team'
 (`team_local_today()`, UTC when unset). There is no guardian since `20261024010000`, which
 dropped `profile_players`, `link_my_guardian_records()`, `is_team_guardian()` and
 `guardian_contacts_view()` and retired the `guardian_contact_sharing` setting. A refused call
-raises 42501, the same for a team that does not exist. A user's contact card
-(`profiles.contact_phone`, `contact_email`, `share_contact`, written only by
-`set_my_contact_card()`) replaces imported details wherever these functions return them; an
-unshared card returns none.
+raises 42501, the same for a team that does not exist.
+
+**No read a coach can call returns an email or phone** (`20261025010000`, R4 of
+`docs/changes/2026-10-22-admin-focus.md`): the contact card (`set_my_contact_card()` and its
+`profiles` columns), `get_coach_directory()` and the `coach_directory` setting are gone, and
+`get_organization_members()`, which returns every member's sign-in email, admits admins and staff
+only. The only functions `authenticated` may execute whose result names an email, phone, contact
+or guardian column are `get_organization_members` and `get_settings_audit_log`, both admin-only;
+the migration's end-state check, its smoke and `supabase/tests/contact_surfaces_removed.sql` hold
+the catalogue to that (a function returning `jsonb` or a bare `record` is not seen). Admins read a
+coach's sign-in email from `coaches` directly, on the Coaches page.
 
 Since `20261021020000` (A3b) those functions are the only non-admin path. A member who is not an
 admin or staff reads `coaches` and `team_coach_assignments` only for their own coach record (only

@@ -8,8 +8,10 @@
 -- and willing_to_coach to false. After the fix, both are preserved.
 --
 -- Since 20261022010000 (the import allowlist) an import stores no guardian
--- contact at all: the first import leaves guardian_contacts at [], and the
--- re-import must leave a contact an admin entered by hand untouched.
+-- contact at all, and since 20261025010000 (R4) there is no guardian_contacts
+-- column: the first import stores the guardian columns nowhere on the player,
+-- and the re-import must leave a field an admin entered by hand (the
+-- preferred name, which the same fix coalesces) untouched.
 
 BEGIN;
 
@@ -55,13 +57,13 @@ RESET role;
 
 SELECT is(
     (
-        SELECT jsonb_array_length(guardian_contacts)
-        FROM public.players
+        SELECT strpos(to_jsonb(p)::text, 'pat.guardian@test.local') + strpos(to_jsonb(p)::text, 'Guardian')
+        FROM public.players p
         WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
           AND external_registration_id = 'REIMPORT-EXT-100'
     ),
     0,
-    'first import: the CSV''s guardian columns are not stored (guardian_contacts stays [])'
+    'first import: the CSV''s guardian columns are stored nowhere on the player'
 );
 
 SELECT is(
@@ -75,9 +77,9 @@ SELECT is(
     'first import: willing_to_coach is set true from the CSV'
 );
 
--- An admin records a guardian contact by hand between the two imports.
+-- An admin records a preferred name by hand between the two imports.
 UPDATE public.players
-SET guardian_contacts = '[{"name": "Pat Guardian"}]'::jsonb
+SET preferred_name = 'Dee'
 WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
   AND external_registration_id = 'REIMPORT-EXT-100';
 
@@ -116,13 +118,13 @@ RESET role;
 
 SELECT is(
     (
-        SELECT jsonb_array_length(guardian_contacts)
+        SELECT preferred_name
         FROM public.players
         WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
           AND external_registration_id = 'REIMPORT-EXT-100'
     ),
-    1,
-    'narrower re-import: the admin-entered guardian_contacts is PRESERVED, not wiped to []'
+    'Dee',
+    'narrower re-import: the admin-entered preferred name is PRESERVED, not wiped'
 );
 
 SELECT is(

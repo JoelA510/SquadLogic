@@ -1,13 +1,5 @@
 import { z } from 'zod';
-import {
-  BookUser,
-  Clock,
-  History,
-  Star,
-  ThermometerSun,
-  UserRoundCheck,
-  Users,
-} from 'lucide-react';
+import { Clock, History, Star, ThermometerSun, UserRoundCheck, Users } from 'lucide-react';
 import { IS_DEV_SERVER } from '../env.js';
 
 /**
@@ -50,9 +42,11 @@ export const FEATURE_FLAGS = {
   // Field heat-stress (WBGT) forecast; off unless an admin turns it on.
   HEAT_FORECAST: 'heat_forecast',
 
-  // League privacy setting (Phase A3), on unless an admin turns it off. The
-  // server-side read checks it (migration 20261021010000); the UI only
-  // follows.
+  // Retired with the coach directory (plan docs/changes/2026-10-22-admin-focus.md,
+  // R4; migration 20261025010000): coaches see no contact details, so nothing
+  // reads it and the settings page no longer offers it. The key stays so an
+  // organization that stored it still parses (skill
+  // squadlogic-feature-guardians, "Retiring").
   COACH_DIRECTORY: 'coach_directory',
   // Retired with the guardian view (plan docs/changes/2026-10-22-admin-focus.md,
   // R3; migration 20261024010000): nothing reads it and the settings page no
@@ -102,7 +96,6 @@ export const FEATURE_DEFAULTS = {
   [FEATURE_FLAGS.BUDDY_REQUESTS]: true,
   [FEATURE_FLAGS.COACHING_INTEREST]: true,
   [FEATURE_FLAGS.WAITLIST]: true,
-  [FEATURE_FLAGS.COACH_DIRECTORY]: true,
   [GENDER_MODEL_KEY]: 'split',
   [BUDDY_RULE_KEY]: 'mutual',
 };
@@ -155,13 +148,6 @@ export const FEATURE_CATALOG = [
     description:
       'Forecast field WBGT per venue and kickoff from the NWS forecast, banded by U.S. Soccer heat guidelines. Decision support; on-site readings govern.',
     icon: ThermometerSun,
-    column: false,
-  },
-  {
-    key: FEATURE_FLAGS.COACH_DIRECTORY,
-    label: 'Coach Directory',
-    description: "Current coaches see every current coach's phone and email on their home page.",
-    icon: BookUser,
     column: false,
   },
 ];

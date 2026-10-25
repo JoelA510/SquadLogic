@@ -48,12 +48,14 @@ SELECT is(
     'no public function or policy names a dropped guardian object'
 );
 -- Positive control for the scan above: the same pattern finds a real body
--- that names the organization's flag reader, so it reads real bodies.
+-- that names the current-coach helper, so it reads real bodies. (It read
+-- get_coach_directory's call of org_flag until 20261025010000 dropped the
+-- directory.)
 SELECT ok(
     EXISTS (SELECT 1 FROM pg_proc p
-             WHERE p.oid = 'public.get_coach_directory(uuid)'::regprocedure
-               AND regexp_replace(p.prosrc, '--[^\n]*', '', 'g') ~ '\morg_flag\M'),
-    'control: the scan reads real bodies (get_coach_directory calls org_flag)'
+             WHERE p.oid = 'public.get_team_roster(uuid)'::regprocedure
+               AND regexp_replace(p.prosrc, '--[^\n]*', '', 'g') ~ '\mis_current_team_coach\M'),
+    'control: the scan reads real bodies (get_team_roster calls is_current_team_coach)'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.audit_actions WHERE action = 'guardian.linked'),

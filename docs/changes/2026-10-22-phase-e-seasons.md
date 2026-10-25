@@ -35,7 +35,8 @@ LAST, s.created_at DESC LIMIT 1`. `import_jobs` has no season column (`202603310
   columns: `20260331000000:282-296`, `20260502001000`, `20260530000000:27-31`.
 - **"Programs" are divisions in the UI.** `TeamAnalysisPage.derivePrograms` (:111-126) groups by
   division; `resolveDivisionName` (:74-88) reads the CSV's `Program` column as a division name;
-  `ProgramOverview.jsx` and `coach_interested_programs` (`20260421060000:54-62`) agree.
+  `ProgramOverview.jsx` and `coach_interested_programs` (`20260421060000:54-62`) agree (the
+  table was dropped with the coach leads by `20261025010000`).
 - **Only `finalize_import_job` reads `season_settings.status`** in SQL (grep of 2026
   migrations); `packages/core/src` queries no season, it takes the row as input.
 

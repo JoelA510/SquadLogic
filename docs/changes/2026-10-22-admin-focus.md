@@ -1,8 +1,8 @@
 # Admin focus: removals, data minimisation, coach view and exports
 
 Status: **approved by the owner 2026-10-22**, with the recommended decisions and the additions under
-"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles). R0 to R5 are merged;
-R6 is built (see "As built (R6)"), its calls for the owner recorded there. It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
+"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles).
+R0 to R6 are merged; R7 is built (see "As built (R7)"), its calls for the owner recorded there. It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
 about main (`c15c3b2`) is _statically reviewed_ unless marked _executed_; the inventories behind it
 cite file and line for each item and are summarised here, not repeated.
 
@@ -702,6 +702,128 @@ at once (AGENTS.md section 11).
     where nothing uses them.
   - Not mirrored in the mock: `update_org_feature_flags`'s audit row; the division reads' order
     is code-unit, the database's is its collation.
+
+## As built (R7)
+
+- **No migration.** Every export reads what the team page already reads, under the caller's own
+  session: `fetchTeamEvents` (`useTeamPortal.js`; R6's extraction) reads `games` with their slot,
+  ground and team names, `practice_assignments` with their slot and ground, and the team's live
+  `practice_exceptions`, all `is_org_member(organization_id)` reads (statically reviewed:
+  `20260331000000:1052-1068`, `20260929000000:160`), and the season's timezone through the team's
+  division. None of those reads selects a person's contact; the coach's teams come from R6's
+  `get_my_coached_team_ids`. Authorization stays the server's: the UI only offers the buttons on
+  the coach's own teams, and a coach could already read any team's schedule in their league
+  through the same tables (the schedule is member-readable today; R6 recorded it). R4's hand-off
+  (a coach export built in the browser is covered by R7's own test) is the "no contact" test below.
+- **One row model for every per-team file** (`packages/core/src/teamScheduleExport.js`): one row
+  per event `fetchTeamEvents` returns, in its order, with the columns Team, Division, Event Type,
+  Opponent, Home/Away, Date, Start, End, Time Zone, Location, Status, Reason, Reason Code. Status
+  is Scheduled, Moved (a practice a saved exception relocated; the reason is "Moved from ..."),
+  TIME TBD (a day and no time) or Date and time TBD (no day). A TIME TBD practice keeps the code and
+  sentence the expansion gave it; a game with no slot is the feed's `GAME_SLOT_MISSING`; a slot
+  with no wall date or time is the feed's `WALL_TIME_UNREADABLE`, worded from the season clock's
+  table, so a row and its calendar entry give one reason. Dates and times are the season-local
+  wall reading the page shows, with the season's zone beside them (blank when it has none, never
+  a guessed one); blank cells stay blank. No contact, coach or email column exists in the shape.
+  `fetchTeamEvents` gains, additively, `role` and `hasSlot` on each game, the slot's `start` and
+  `end` instants in its select, and `rows` (the three reads as returned).
+- **CSV** goes through `outputGeneration.formatCsv` and the export's one cell writer
+  (`csv.js`: formula neutralised, RFC 4180 quoting). **XLSX** (`frontend/src/utils/scheduleDownloads.js`)
+  writes a bold, frozen header row and every value as a text cell: `007` stays `007`, `=1+1` is
+  text (an XLSX text cell is never a formula), XML-illegal control characters are dropped.
+- **The calendar is the feed's own code.** `teamCalendarIcs` renames the page's embeds to the
+  feed's (`field` to `fields`, `location` to `locations`, `game_slot` to `game_slots`, `slot` to
+  `practice_slots`; nothing else) and calls `buildFeedEvents` and `renderIcsCalendar` from
+  `supabase/functions/_shared/calendar/icsFeed.ts`, as `composeTeamFeed` does after its reads:
+  the same placement on the season clock, the same all-day TENTATIVE "TIME TBD" entries with their
+  code, the same CALDESC count of what has no day, and the "practice changes could not be read"
+  sentence when the page's exceptions read failed. The feed's own reads (service role, token) are
+  unchanged.
+- **Where the buttons are.** The team page's Schedule tab ("Download this team's schedule": CSV,
+  Excel, Calendar), which is an admin's per-team export and a coach's My Team export; the coach
+  home's "Your schedule" card (the whole season of every team they coach, in one CSV or XLSX,
+  and one calendar per team). A team whose schedule cannot be read makes no file and is named; a
+  file with unread practice changes says so beside the download. The buttons stay focusable while
+  a file is made (`aria-disabled`), the status is a polite live region, tokens only.
+- **Admins' all-teams export.** The Exports page's master schedule gains **Download Master XLSX**:
+  exactly the master CSV's rows and columns, `Coach Emails` included (the page is an admin's).
+  The master is built from the latest run's assignments by `generateScheduleExports`, which
+  requires a start and an end (GAP-16/17/28); a run assignment with no time was left out
+  without a word, and is now counted and said beside the files.
+- **Decision 6, the XLSX library: `write-excel-file` 4.1.1** (registry; MIT; about 980,000 weekly
+  downloads; released 2026-06-08, with releases through 2026; one dependency, `fflate` 0.8.3, MIT;
+  no advisory against either: `npm audit` 0 vulnerabilities, and the registry's bulk advisory
+  endpoint lists only `fflate`'s moderate `unzipSync` loop for `<0.8.3`, which is not the version
+  installed and is a reader this writer does not call). Loaded only when an XLSX is asked for: a
+  lazy chunk of 19.10 KB gz. Rejected: **`xlsx`** (SheetJS) 0.18.5, the last registry release
+  (2022-03), carries two open high advisories (GHSA-4r6h-8v6p-xvw6 prototype pollution, fixed in
+  0.19.3; GHSA-5pgg-2g8v-p4x9 ReDoS, fixed in 0.20.2) whose fixes ship only from SheetJS's own CDN,
+  which `allow-remote=none` forbids; **`exceljs`** 4.4.0 (2023-10, a 2024 prerelease since; nine
+  dependencies including `archiver`, `unzipper`, `jszip`, `readable-stream` and `tmp`, whose
+  range admits versions with a high advisory, GHSA-ph9p-34f9-6g65, `<0.2.6`), Node streams to
+  polyfill in the browser, and several hundred KB more to load for a write-only need.
+- **Bundle** (the build CI makes, stand-in Sentry DSN; `npm run check:bundle` passes): main entry
+  174.11 to 174.13 KB gz, lucide vendor 8.89 to 9.05 KB (three icons), first paint 274.10 to
+  274.28 KB of 289.06 KB. Lazy: `write-excel-file` 19.10 KB, the feed renderer 7.13 KB,
+  `ScheduleExports` 4.45 KB (it absorbed the 2.05 KB `useTeamPortal` chunk), the download helpers
+  0.94 KB. No budget changed.
+- **The mock follows the SQL.** Its practice slot embed put the ground under `fields` whatever the
+  select named, without the venue, so the team page showed every practice at "Venue - Field" in
+  mock mode, and `field:fields(location_id)` (the preference review) read nothing. It now uses the
+  select's own keys, with the venue when asked, as the exceptions embed already did.
+- **Calls for the owner.**
+  - **The master files still leave out a run assignment with no time** (now said, with a count).
+    Putting TIME TBD rows into the master means relaxing `generateScheduleExports` and the
+    publication baseline that records those rows (GAP-16/17/28): a change to persistence, so a plan
+    first (AGENTS.md rule 14). Every per-team file lists every event with no time.
+  - **There is no all-teams file built from the saved schedule.** The per-team files read the saved
+    `games` and practices (as the team page does); the master reads the latest run. An all-teams
+    file from the saved schedule would read three tables per team in the browser (hundreds of
+    reads for a large league) or need a new server read.
+  - **A game between two of a coach's teams is one row per team** in the coach home's file (each
+    row says which team), as the master's per-team flattening does; the card lists it once.
+  - **A game with no season timezone** shows its wall time in the CSV and XLSX (as the team page
+    does, Time Zone blank) and is an all-day TIME TBD entry in the calendar (as the feed rules:
+    no instant without a zone).
+  - **A slot that holds only instants** (`start` and `end`, no `slot_date`) is "Date and time TBD"
+    in the CSV (the page reads the wall columns) and placed in the calendar (the feed prefers the
+    instant). Production holds no game slot today; the page reading only the wall columns is
+    pre-existing.
+- **Tests.**
+  - Vitest `teamScheduleExport.test.js` (14), through the real `fetchTeamEvents` against the mock:
+    a seeded season (a timed game, a slot with a day and no time, the base seed's two slotless
+    games, a weekly practice with a TIME TBD date and a moved week, a row with no end date) gives
+    exactly the nine rows written out from the seed, in order (the plan's "rows equal the
+    schedule's events"); the reasons are the feed's (`UNPLACEABLE_CAUSES`); blank stays blank and
+    `007` stays text; the CSV neutralises a formula. No contact: no column named like an email,
+    phone, contact, guardian or coach, and none of the mock's people's emails or phones (enumerated
+    from the `coaches` and `profiles` tables) nor any address appears in the CSV, the XLSX or the
+    calendar. The calendar parses (strict: CRLF, 75 octets, balanced components) and round-trips:
+    every dated row has its VEVENT by UID, a timed one whose UTC instants read back in the season's
+    zone as the row's date and wall times, a TIME TBD one as an all-day TENTATIVE entry with its
+    code; nothing extra; the undated ones counted in the CALDESC; no zone means every entry
+    all-day and no `X-WR-TIMEZONE`. The XLSX reads back (a small ZIP and sheet reader,
+    `tests/helpers/readXlsx.js`, that throws on a formula or a non-text cell) equal to the rows.
+  - Plants, each run and each failing as expected: an event dropped (three tests), a `Coach
+Emails` column carrying an address (three), the calendar ignoring saved exceptions (one), the
+    calendar on a guessed zone (two), a numeric-looking identifier written as a number (one), a
+    team whose read fails exported as empty (one, the UI test), slotless games dropped (both E2E
+    team scenarios); the old mock fails the ground assertion.
+  - Vitest `scheduleExportsUi.test.jsx` (5): the coach home's CSV, XLSX and per-team calendar,
+    each equal to the rows read independently; a failed read makes no file and names the team;
+    the buttons stay focusable and the status is said. `outputGenerationXlsx.test.jsx` (3): the
+    master XLSX equals the core export's rows, and the left-out count is said.
+  - E2E `schedule_exports.feature` (3): a coach downloads CSV, XLSX and calendar from the home; an
+    admin from the team page; an admin the master XLSX. Each file is caught with Playwright's
+    `download` event and read from disk.
+- **Found for later PRs, not done here.**
+  - The team page shows a game with no slot as "Invalid Date" (`TeamRecordPage.jsx`, `longDate`
+    of an undefined date); R6 fixed the coach home only.
+  - The master export dates a practice row with no readable range on 2026-01-01
+    (`getDateFromRange` in `OutputGenerationPanel.jsx`), a date nobody scheduled.
+  - The feed's games select embeds `teams` twice without aliases
+    (`teams!games_home_team_id_fkey(name)`, `teams!games_away_team_id_fkey(name)`, `teamFeed.ts`)
+    and reads neither; production has no game to show what PostgREST answers.
 
 ## Docs updated across the PRs
 

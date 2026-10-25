@@ -205,7 +205,8 @@ describe("the solver: a reserved slot is its division's, and the division keeps 
 
 describe("the Edge rule equals core's twin", () => {
   it('agrees on every pairing of team division, slot reservation and reserved set', () => {
-    const divisions = [null, U4, U10];
+    // Each id also as a body might spell it: blank, upper-case, padded.
+    const divisions = [null, '', U4, ` ${U4.toUpperCase()} `, U10];
     const reservedSets = [new Set(), new Set([U4]), new Set([U4, U10])];
     let compared = 0;
     for (const team of divisions)
@@ -220,7 +221,7 @@ describe("the Edge rule equals core's twin", () => {
           assert.equal(edge, core, JSON.stringify({ team, slot, reserved: [...reserved] }));
           compared += 1;
         }
-    assert.equal(compared, 27);
+    assert.equal(compared, 75);
     assert.deepEqual(
       [...reservedDivisionIdsOf([{ divisionId: U4 }, {}, { divisionId: U4 }])],
       [U4]

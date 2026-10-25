@@ -1011,7 +1011,9 @@ export default function GameSchedulingPage() {
           seasonSettingsId: currentSeasonSetting?.id,
           parameters: {
             organizationId: currentOrganization?.id,
-            teamCount: schedulerTeams.length,
+            // The teams the run scheduled; a practice-only division's are counted apart (D2).
+            teamCount: gameTeams.length,
+            practiceOnlyTeamCount: schedulerTeams.length - gameTeams.length,
             slotCount: gameSlots.length,
             generationMode,
           },
@@ -1035,6 +1037,7 @@ export default function GameSchedulingPage() {
       currentOrganization?.id,
       currentSeasonSetting?.id,
       gameSlots.length,
+      gameTeams.length,
       schedulerTeams.length,
       slotById,
     ]

@@ -206,8 +206,11 @@ export const RESERVATION_REASON = Object.freeze({
   OUTSIDE_DIVISION_RESERVATION: 'outside-division-reservation',
 });
 
+// A division id as both engines compare it: trimmed, lower-case (a uuid's
+// spelling), and blank as none. The Edge's `idOrNull` (`practice-reservations.ts`)
+// and `reservationRefuses` (`practice-coaches.ts`) read it the same way.
 const blankToNull = (value) => {
-  const text = value === undefined || value === null ? '' : String(value).trim();
+  const text = value === undefined || value === null ? '' : String(value).trim().toLowerCase();
   return text === '' ? null : text;
 };
 

@@ -13,6 +13,8 @@ import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js'
 
 const mocks = vi.hoisted(() => ({
   isAdmin: true,
+  /** The selected season: `undefined` for the seed's, `null` for none. */
+  seasonId: /** @type {string|null|undefined} */ (undefined),
   /** Fail the fields read that names `division_id` with this error. */
   fieldsError: /** @type {null | { code: string, message: string }} */ (null),
   /** Fail the reservation RPC with this error. */
@@ -55,7 +57,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: MOCK_ORG_ID },
-    currentSeasonSetting: { id: MOCK_SEASON_ID },
+    currentSeasonSetting: mocks.seasonId === null ? null : { id: mocks.seasonId ?? MOCK_SEASON_ID },
   }),
 }));
 vi.mock('../frontend/src/hooks/usePermission.js', () => ({
@@ -100,6 +102,7 @@ beforeEach(() => {
   delete window.__MOCK_DB__;
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
   mocks.isAdmin = true;
+  mocks.seasonId = undefined;
   mocks.fieldsError = null;
   mocks.rpcError = null;
   seed();
@@ -148,6 +151,24 @@ describe('FieldManagementPage :: practice slot divisions (D2)', () => {
     mocks.isAdmin = false;
     render(<FieldManagementPage />);
     expect(await screen.findByRole('combobox', { name: SELECT_NAME })).toBeDisabled();
+  });
+
+  it("with the season cleared offers none of the last season's divisions", async () => {
+    const view = render(<FieldManagementPage />);
+    const select = await screen.findByRole('combobox', { name: SELECT_NAME });
+    await waitFor(() =>
+      expect(within(select).getByRole('option', { name: 'U8 Coed' })).toBeInTheDocument()
+    );
+    mocks.seasonId = null;
+    view.rerender(<FieldManagementPage />);
+    await waitFor(() =>
+      expect(within(select).queryByRole('option', { name: 'U8 Coed' })).toBeNull()
+    );
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Any division']);
   });
 
   it('before the migration (42703) still lists the fields and offers no reservation', async () => {

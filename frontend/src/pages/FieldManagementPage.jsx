@@ -75,13 +75,24 @@ export default function FieldManagementPage() {
   const organizationId = organization?.currentOrganization?.id ?? null;
   const seasonSettingsId = organization?.currentSeasonSetting?.id ?? null;
   // D2: the season's divisions, which a practice slot can be reserved to.
-  // Read only once the slots carry their reservation (after the migration).
-  const [seasonDivisions, setSeasonDivisions] = useState(/** @type {any[]} */ ([]));
-  const [divisionsError, setDivisionsError] = useState(/** @type {string|null} */ (null));
+  // Read only once the slots carry their reservation (after the migration). A
+  // read is kept with the organization and season it was for, so another
+  // season's divisions are never offered while this one's are read.
+  const divisionsKey =
+    organizationId && seasonSettingsId && reservationsAvailable
+      ? `${organizationId}:${seasonSettingsId}`
+      : null;
+  const [divisionRead, setDivisionRead] = useState(
+    /** @type {{ key: string|null, rows: any[], error: string|null }} */ ({
+      key: null,
+      rows: [],
+      error: null,
+    })
+  );
   useEffect(() => {
     let active = true;
     // Nothing shows the divisions until the slots carry a reservation.
-    if (!organizationId || !seasonSettingsId || !reservationsAvailable) return undefined;
+    if (!divisionsKey) return undefined;
     (async () => {
       const { data, error: readError } = await supabase
         .from('divisions')
@@ -92,17 +103,23 @@ export default function FieldManagementPage() {
       if (!active) return;
       if (readError) {
         logger.error('Error reading the divisions a practice slot can be reserved to:', readError);
-        setDivisionsError(`The season's divisions could not be read: ${readError.message}`);
-        setSeasonDivisions([]);
+        setDivisionRead({
+          key: divisionsKey,
+          rows: [],
+          error: `The season's divisions could not be read: ${readError.message}`,
+        });
         return;
       }
-      setDivisionsError(null);
-      setSeasonDivisions(data ?? []);
+      setDivisionRead({ key: divisionsKey, rows: data ?? [], error: null });
     })();
     return () => {
       active = false;
     };
-  }, [organizationId, reservationsAvailable, seasonSettingsId]);
+  }, [divisionsKey, organizationId, seasonSettingsId]);
+  const currentDivisionRead =
+    divisionsKey && divisionRead.key === divisionsKey ? divisionRead : null;
+  const seasonDivisions = currentDivisionRead?.rows ?? [];
+  const divisionsError = currentDivisionRead?.error ?? null;
   const [openCoordinatesId, setOpenCoordinatesId] = useState(/** @type {string|null} */ (null));
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -707,7 +724,7 @@ export default function FieldManagementPage() {
               <SlotReservations
                 field={field}
                 divisions={seasonDivisions}
-                canEdit={canEditCoordinates && !divisionsError}
+                canEdit={canEditCoordinates && currentDivisionRead !== null && !divisionsError}
                 onReserve={setSlotDivision}
               />
             )}

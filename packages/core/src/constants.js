@@ -25,6 +25,9 @@ export const TEAM_GENERATION = {
   REASON_Balancing: 'balancing assignment',
   REASON_BuddyTargetCapacity: 'buddy-target-capacity',
   REASON_BuddyTargetLocked: 'buddy-target-locked',
+  // A player whose play-up or play-down is blocked (`isEligibilityBlocked`, playUp.js) is
+  // never seated by the generator; a rostered one stays and is listed instead (Phase B2).
+  REASON_EligibilityBlocked: 'eligibility-blocked',
   REASON_Unknown: 'unknown',
 
   // Limits

@@ -67,8 +67,12 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn(), debug: vi.fn() },
 }));
 
-const { default: GameSchedulingPage } =
-  await import('../frontend/src/pages/GameSchedulingPage.jsx');
+const {
+  default: GameSchedulingPage,
+  composeSchedulerReadinessMessage,
+  normalizeTeam,
+  practiceOnlyDivisionsOf,
+} = await import('../frontend/src/pages/GameSchedulingPage.jsx');
 
 const U4_COHORTS = ['U4A', 'U4B', 'U4C', 'U4D'];
 const U10_TEAMS = ['Owls', 'Hawks', 'Foxes', 'Bears'];
@@ -237,5 +241,52 @@ describe('GameSchedulingPage :: a practice-only division (D2)', () => {
     expect(
       screen.getByRole('button', { name: 'Auto-Generate: run auto-scheduler optimization' })
     ).toBeDisabled();
+  });
+});
+
+describe('GameSchedulingPage :: reading the setting (D2)', () => {
+  it('matches a team to its practice-only division by id, else by name in the season only', () => {
+    const practiceOnly = practiceOnlyDivisionsOf(
+      [
+        { id: 'u4', name: 'U4', season_settings_id: 's-now', plays_games: false },
+        { id: 'u5-old', name: 'U5', season_settings_id: 's-old', plays_games: false },
+        { id: 'u10', name: 'U10', season_settings_id: 's-now', plays_games: true },
+        { id: 'u12', name: 'U12', season_settings_id: 's-now' },
+      ],
+      's-now'
+    );
+    const plays = (team) => normalizeTeam(team, practiceOnly).playsGames;
+    expect(plays({ id: 't1', division: 'U4' })).toBe(false);
+    expect(plays({ id: 't2', division: 'Cohorts', divisionId: 'u4' })).toBe(false);
+    expect(plays({ id: 't3', division: ' u4 ' })).toBe(false);
+    // Last season's U5 is practice-only by id, not by name in this season.
+    expect(plays({ id: 't4', division: 'U5' })).toBe(true);
+    expect(plays({ id: 't5', division: 'U5', divisionId: 'u5-old' })).toBe(false);
+    expect(plays({ id: 't6', division: 'U10' })).toBe(true);
+    // A known id decides, whatever the name says.
+    expect(plays({ id: 't9', division: 'U4', divisionId: 'u10' })).toBe(true);
+    // A row without the column plays (the column's default).
+    expect(plays({ id: 't7', division: 'U12' })).toBe(true);
+    expect(normalizeTeam({ id: 't8', division: 'U4' }).playsGames).toBe(true);
+  });
+
+  it('says a roster of practice-only teams has no games, not that it has no teams', () => {
+    const base = {
+      referenceError: null,
+      placeableSlotCount: 4,
+      unplaceableSlotCount: 0,
+      seasonClockLoading: false,
+    };
+    expect(
+      composeSchedulerReadinessMessage({ ...base, teamCount: 0, practiceOnlyTeamCount: 4 })
+    ).toBe(
+      'Every generated team is in a practice-only division, so there are no games to schedule.'
+    );
+    expect(composeSchedulerReadinessMessage({ ...base, teamCount: 0 })).toBe(
+      'No generated teams are available for game scheduling.'
+    );
+    expect(
+      composeSchedulerReadinessMessage({ ...base, teamCount: 4, practiceOnlyTeamCount: 4 })
+    ).toBeNull();
   });
 });

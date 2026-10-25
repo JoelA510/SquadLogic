@@ -721,13 +721,15 @@ export default function FieldManagementPage() {
                 return (
                   <div
                     key={day}
+                    // No opacity on the inactive days and the secondary text token: at 10px the
+                    // muted token, faded, read at 1.6:1 (axe, D2's Field Management scan).
                     className={`flex flex-col items-center p-1.5 rounded border transition-all ${
                       isActive
                         ? 'bg-blue-500/10 border-blue-500/30'
-                        : 'bg-bg-app border-border-subtle opacity-40'
+                        : 'bg-bg-app border-border-subtle'
                     }`}
                   >
-                    <span className="text-[10px] uppercase font-bold text-text-muted mb-1">
+                    <span className="text-[10px] uppercase font-bold text-text-secondary mb-1">
                       {day.substring(0, 3)}
                     </span>
                     {isActive ? (
@@ -743,7 +745,7 @@ export default function FieldManagementPage() {
                         ))}
                       </div>
                     ) : (
-                      <span className="text-[10px] font-mono text-text-muted opacity-50">—</span>
+                      <span className="text-[10px] font-mono text-text-secondary">—</span>
                     )}
                   </div>
                 );

@@ -89,11 +89,12 @@ function getAssignmentWeekIndex(assignment, slot) {
  * `docs/changes/2026-10-22-demo-mode.md`), not anything the persisted run
  * carries: the run holds no division settings, so the flag reaches the
  * generator only through `practiceOnly`, which the page builds from its own
- * read of `divisions`. Matched by division id, else by name among the
- * season's divisions; a division neither finds plays (the column's default).
+ * read of `divisions`. Matched by division id when the id names a division
+ * the read returned, else by name among the season's divisions; a division
+ * neither finds plays (the column's default).
  *
  * @param {Record<string, any>} team
- * @param {{ ids: Set<string>, names: Set<string> }} [practiceOnly]
+ * @param {{ ids: Set<string>, names: Set<string>, knownIds?: Set<string> }} [practiceOnly]
  */
 export function normalizeTeam(team, practiceOnly = { ids: new Set(), names: new Set() }) {
   const id = team?.id ?? team?.teamId;
@@ -102,8 +103,10 @@ export function normalizeTeam(team, practiceOnly = { ids: new Set(), names: new 
   const division =
     team.division ?? team.divisionName ?? team.divisions?.name ?? divisionId ?? 'Unassigned';
   const isPracticeOnly =
-    (divisionId !== null && practiceOnly.ids.has(String(divisionId))) ||
-    practiceOnly.names.has(String(division).trim().toLowerCase());
+    divisionId !== null &&
+    (practiceOnly.knownIds?.has(String(divisionId)) || practiceOnly.ids.has(String(divisionId)))
+      ? practiceOnly.ids.has(String(divisionId))
+      : practiceOnly.names.has(String(division).trim().toLowerCase());
 
   return {
     id,
@@ -127,7 +130,9 @@ export function normalizeTeam(team, practiceOnly = { ids: new Set(), names: new 
 export function practiceOnlyDivisionsOf(rows, seasonSettingsId) {
   const ids = new Set();
   const names = new Set();
+  const knownIds = new Set();
   for (const row of rows ?? []) {
+    if (row?.id) knownIds.add(String(row.id));
     if (row?.plays_games !== false) continue;
     if (row.id) ids.add(String(row.id));
     if (!seasonSettingsId || String(row.season_settings_id) === String(seasonSettingsId)) {
@@ -139,7 +144,7 @@ export function practiceOnlyDivisionsOf(rows, seasonSettingsId) {
     }
   }
   names.delete('');
-  return { ids, names };
+  return { ids, names, knownIds };
 }
 
 /**
@@ -318,6 +323,8 @@ import { describeUnplaceableSlots, isSeasonClockLoading } from '../utils/seasonC
  * @param {number} input.placeableSlotCount
  * @param {number} input.unplaceableSlotCount
  * @param {boolean} input.seasonClockLoading
+ * @param {number} [input.practiceOnlyTeamCount] - teams in practice-only divisions (D2), not
+ *   counted in `teamCount`
  * @returns {string|null}
  */
 export function composeSchedulerReadinessMessage({
@@ -326,12 +333,18 @@ export function composeSchedulerReadinessMessage({
   placeableSlotCount,
   unplaceableSlotCount,
   seasonClockLoading,
+  practiceOnlyTeamCount = 0,
 }) {
   const parts = seasonClockLoading
     ? [referenceError, 'Loading this season\u2019s settings\u2026']
     : [
         referenceError,
-        teamCount === 0 ? 'No generated teams are available for game scheduling.' : null,
+        // D2: teams that exist but all play no games are not "no teams".
+        teamCount === 0 && practiceOnlyTeamCount > 0
+          ? 'Every generated team is in a practice-only division, so there are no games to schedule.'
+          : teamCount === 0
+            ? 'No generated teams are available for game scheduling.'
+            : null,
         placeableSlotCount === 0 && unplaceableSlotCount === 0
           ? 'No game slots are available for this organization.'
           : null,
@@ -842,6 +855,7 @@ export default function GameSchedulingPage() {
   const schedulerReadinessMessage = composeSchedulerReadinessMessage({
     referenceError,
     teamCount: gameTeams.length,
+    practiceOnlyTeamCount: schedulerTeams.length - gameTeams.length,
     placeableSlotCount: gameSlots.length,
     unplaceableSlotCount: unplaceableSlots.length,
     seasonClockLoading,

@@ -332,6 +332,13 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
+    -- 20261029010000: two fields imports of one organization must not both
+    -- pass the practice-slot clash check before either writes its slot, so
+    -- they run one at a time, held to commit.
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('finalize_field_import_job:' || v_job.organization_id::text, 0)
+    );
+
     -- 20261029010000: the season a practice row's division is named in, as
     -- finalize_import_job chooses the season it attaches divisions to (the
     -- active one first, then the latest start).

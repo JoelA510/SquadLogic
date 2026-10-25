@@ -30,7 +30,7 @@ import LoadingScreen from '../components/LoadingScreen.jsx';
 export default function TeamBuilderPage() {
   const { currentOrganization } = useOrganization();
   const { players, divisions, loading, updatePlayer } = usePlayersData();
-  const { features, isEnabled, genderModel } = useFeatures();
+  const { features, isEnabled, genderModel, buddyRule } = useFeatures();
   const toast = useToast();
 
   const [teams, setTeams] = useState([]);
@@ -105,7 +105,28 @@ export default function TeamBuilderPage() {
     return map;
   }, [divisionTeams, divisionPlayers]);
 
-  const buddies = useMemo(() => buddyStats(divisionPlayers), [divisionPlayers]);
+  // Buddies are matched as Team Analysis matches them (Phase B5): the resolver, the
+  // league's buddy rule, and every player as the roster, so a request or code naming someone
+  // outside this board is not paired. Each player's division is its board (the division
+  // filter), so one board is one division.
+  const buddyRoster = useMemo(() => {
+    const boardKeyByDivisionId = new Map();
+    filters.forEach((filter) =>
+      filter.divisionIds.forEach((id) => boardKeyByDivisionId.set(id, filter.key))
+    );
+    return players.map((player) => ({
+      ...player,
+      division: boardKeyByDivisionId.get(player.division_id) ?? String(player.division_id ?? ''),
+    }));
+  }, [players, filters]);
+  const buddyBoard = useMemo(() => {
+    const ids = new Set(divisionPlayers.map((player) => player.id));
+    return buddyRoster.filter((player) => ids.has(player.id));
+  }, [buddyRoster, divisionPlayers]);
+  const buddies = useMemo(
+    () => buddyStats(buddyBoard, { roster: buddyRoster, buddyRule }),
+    [buddyBoard, buddyRoster, buddyRule]
+  );
 
   const handleMove = async (playerId, teamId) => {
     const result = await updatePlayer(playerId, { team_id: teamId });
@@ -120,11 +141,13 @@ export default function TeamBuilderPage() {
     setWorking(true);
     try {
       const assignments = serpentineAssign({
-        players: divisionPlayers,
+        players: buddyBoard,
         teams: divisionTeams,
         signalKind,
         respectBuddies: respectBuddies && isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS),
         respectCoach: respectCoach && isEnabled(FEATURE_FLAGS.COACHING_INTEREST),
+        roster: buddyRoster,
+        buddyRule,
       });
       // The bulk RPC disallows team_id, so each placement is a per-player
       // audited update; run them in bounded-concurrency chunks.

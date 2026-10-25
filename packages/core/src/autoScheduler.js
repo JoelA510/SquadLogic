@@ -24,7 +24,12 @@
  * Retiring it is a separate refactor, to be flagged first.
  */
 
-import { listTeamCoachIds, schedulePractices } from './practiceScheduling.js';
+import {
+  listTeamCoachIds,
+  reservationRefusal,
+  reservedDivisionIdsOf,
+  schedulePractices,
+} from './practiceScheduling.js';
 import { evaluatePracticeSchedule } from './practiceMetrics.js';
 
 // ---------------------------------------------------------------------------
@@ -155,8 +160,9 @@ export function computeFitness(evaluation) {
  * Reuses the same logic as practiceScheduling.js without importing private functions.
  *
  * @param {Object} params
- * @param {{ id: string, coachId?: string | null, coachIds: string[] }} params.team - Carries
- *   `coachIds` (head plus assistants) precomputed by `optimizePracticeSchedule`.
+ * @param {{ id: string, coachId?: string | null, coachIds: string[], divisionId?: string | null, reservedDivisionIds?: ReadonlySet<string> }} params.team - Carries
+ *   `coachIds` (head plus assistants) and the division reservation (D2) precomputed by
+ *   `optimizePracticeSchedule`.
  * @param {Object} params.slot
  * @param {Map<string, Array<{ start: Date, end: Date }>>} params.coachAssignments
  * @param {Map<string, number>} params.slotCapacityMap - Remaining capacity per slot.
@@ -164,6 +170,12 @@ export function computeFitness(evaluation) {
  * @returns {{ valid: boolean, reason?: string }}
  */
 function checkHardConstraints({ team, slot, coachAssignments, slotCapacityMap, coachPreferences }) {
+  // A division reservation (D2), as the seed honours it.
+  const reserved = reservationRefusal(team, slot, team.reservedDivisionIds ?? new Set());
+  if (reserved) {
+    return { valid: false, reason: reserved };
+  }
+
   // Capacity
   if ((slotCapacityMap.get(slot.id) ?? 0) <= 0) {
     return { valid: false, reason: 'no-capacity' };
@@ -494,7 +506,14 @@ export function optimizePracticeSchedule({
     end: new Date(s.end),
   }));
   // Every coach per team (head plus assistants), resolved once rather than per mutation.
-  const preparedTeams = teams.map((t) => ({ ...t, coachIds: listTeamCoachIds(t) }));
+  // And the division reservations (D2), so a mutation cannot move a team onto
+  // another division's slot or a reserved division onto an open one.
+  const reservedDivisionIds = reservedDivisionIdsOf(slots);
+  const preparedTeams = teams.map((t) => ({
+    ...t,
+    coachIds: listTeamCoachIds(t),
+    reservedDivisionIds,
+  }));
 
   // 3. Hill Climbing loop
   while (iteration < cfg.maxIterations) {

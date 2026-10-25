@@ -7,6 +7,57 @@ import { SlotSchema, TeamSchema } from './schemas/index.js';
 const BYE = '__BYE__';
 
 /**
+ * The round robins a season's teams play, by division, and the divisions that
+ * play none (plan `docs/changes/2026-10-22-demo-mode.md`, D2).
+ *
+ * A team whose division is practice-only (`divisions.plays_games = false`,
+ * carried as `playsGames: false`) gets no fixture, and its division is listed
+ * in `practiceOnlyDivisions` rather than left to read as unscheduled: it was
+ * never meant to play. Every other division with two or more teams gets a
+ * round robin, as the game page always built one; a division of one team gets
+ * none (there is no one to play). `playsGames` absent means it plays, the
+ * column's default, so a caller that does not read the setting schedules
+ * exactly what it did before.
+ *
+ * @template {{ id: string, division: string, playsGames?: boolean }} T
+ * @param {ReadonlyArray<T>} teams
+ * @returns {{
+ *   roundRobinByDivision: Record<string, ReturnType<typeof generateRoundRobinWeeks>>,
+ *   gameTeams: T[],
+ *   practiceOnlyDivisions: Array<{ division: string, teamIds: string[] }>,
+ * }}
+ */
+export function buildDivisionRoundRobins(teams) {
+  if (!Array.isArray(teams)) {
+    throw new TypeError('teams must be an array');
+  }
+  /** @type {Map<string, string[]>} */
+  const playing = new Map();
+  /** @type {Map<string, string[]>} */
+  const practiceOnly = new Map();
+  const gameTeams = [];
+  for (const team of teams) {
+    const bucket = team.playsGames === false ? practiceOnly : playing;
+    const ids = bucket.get(team.division) ?? [];
+    ids.push(team.id);
+    bucket.set(team.division, ids);
+    if (team.playsGames !== false) gameTeams.push(team);
+  }
+
+  /** @type {Record<string, ReturnType<typeof generateRoundRobinWeeks>>} */
+  const roundRobinByDivision = {};
+  for (const [division, teamIds] of playing.entries()) {
+    if (teamIds.length >= 2) {
+      roundRobinByDivision[division] = generateRoundRobinWeeks({ teamIds });
+    }
+  }
+  const practiceOnlyDivisions = [...practiceOnly.entries()]
+    .map(([division, teamIds]) => ({ division, teamIds: [...teamIds].sort() }))
+    .sort((a, b) => a.division.localeCompare(b.division));
+  return { roundRobinByDivision, gameTeams, practiceOnlyDivisions };
+}
+
+/**
  * Generate a deterministic round-robin schedule for a division.
  *
  * @param {Object} params

@@ -12,8 +12,13 @@ export const DEFAULT_ROSTER_LIMITS = Object.freeze({
 /**
  * Parse the playable roster size from a format string like "7v7" or "9V9".
  *
+ * A format that names no "NvN" (the season's "Minis (U5 intro)", a practice
+ * cohort) has no on-field count, and says so with `null` rather than throwing
+ * (D2, `docs/changes/2026-10-22-demo-mode.md`): the division's own roster
+ * limits apply instead (`deriveDivisionRosterConfigs`).
+ *
  * @param {string} playFormat - Format describing on-field players per side.
- * @returns {number}
+ * @returns {number|null}
  */
 export function parsePlayableCount(playFormat) {
   if (typeof playFormat !== 'string') {
@@ -27,7 +32,7 @@ export function parsePlayableCount(playFormat) {
 
   const match = trimmed.match(/(\d+)\s*v\s*(\d+)/i);
   if (!match) {
-    throw new Error(`unable to parse playable count from format: ${playFormat}`);
+    return null;
   }
 
   const playable = Number.parseInt(match[1], 10);
@@ -122,6 +127,16 @@ export function deriveDivisionRosterConfigs(divisions, { overrides = {} } = {}) 
     }
 
     const playableCount = resolvePlayableCount(division, identifier);
+    if (playableCount === null) {
+      // A format with no on-field count (D2): the division's own limits, which
+      // `withOptionalRosterConstraints` reads, over the program defaults.
+      configs[identifier] = withOptionalRosterConstraints(division, {
+        maxRosterSize: DEFAULT_ROSTER_LIMITS.maxRosterSize,
+        playableCount: null,
+        source: 'default-limits',
+      });
+      continue;
+    }
     const maxRosterSize = calculateMaxRosterSize(playableCount);
     configs[identifier] = withOptionalRosterConstraints(division, {
       maxRosterSize,

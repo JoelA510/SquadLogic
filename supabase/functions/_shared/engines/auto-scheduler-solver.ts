@@ -77,6 +77,8 @@ export interface SchedulerSlot {
   end: Date;
   capacity: number;
   baseSlotId?: string;
+  /** The division the slot is reserved to, from the store (D2); absent or `null`: open. */
+  divisionId?: string | null;
 }
 
 /**

@@ -33,6 +33,8 @@
  * @property {boolean} [coachNeeded] - True when the team has no head coach yet (placeholder slot)
  * @property {string} [head_coach_id] - UUID of the assigned head coach (DB terminology)
  * @property {string[]} [assistantCoachIds] - Array of assistant coach IDs
+ * @property {string|null} [divisionId] - The division's id (D2: matched against a slot's reservation)
+ * @property {boolean} [playsGames] - false for a practice-only division's team (D2; absent: plays)
  * @property {number} [skillTotal] - Total skill rating of all players
  * @property {Player[]} [players] - List of players on the team
  * @property {string} [created_at] - ISO timestamp
@@ -64,6 +66,7 @@
  * @property {string} start - ISO string or Date
  * @property {string} end - ISO string or Date
  * @property {number} capacity
+ * @property {string|null} [divisionId] - The division the slot is reserved to (D2); absent: open
  */
 
 /**

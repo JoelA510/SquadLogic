@@ -52,6 +52,11 @@ export interface DatedCandidate {
   span: LiveDays | null;
   startSec: number;
   endSec: number;
+  /**
+   * The division the slot is reserved to (D2, `practice_slots.division_id`, loaded from the
+   * store by `practice-reservations.ts`); absent or `null`: open to every division.
+   */
+  divisionId?: string | null;
 }
 
 /**
@@ -87,6 +92,25 @@ export interface CoachedTeam {
 /** A team with its coach list resolved once, at input preparation. */
 export interface PreparedTeam extends CoachedTeam {
   coachIds: string[];
+  /** The team's division id from the store (D2); absent or `null`: none known. */
+  divisionId?: string | null;
+  /** The divisions holding a reserved slot in the run (D2); absent: none. */
+  reservedDivisionIds?: ReadonlySet<string>;
+}
+
+/**
+ * Whether a division reservation refuses `slot` to `team` (D2): a reserved slot is its
+ * division's only, and a division with a reserved slot uses only those. The twin of core
+ * `reservationRefusal` (`packages/core/src/practiceScheduling.js`).
+ */
+export function reservationRefuses(
+  team: Pick<PreparedTeam, 'divisionId' | 'reservedDivisionIds'>,
+  slot: Pick<DatedCandidate, 'divisionId'>
+): boolean {
+  const slotDivision = slot.divisionId ?? null;
+  const teamDivision = team.divisionId ?? null;
+  if (slotDivision !== null) return slotDivision !== teamDivision;
+  return teamDivision !== null && (team.reservedDivisionIds?.has(teamDivision) ?? false);
 }
 
 /**
@@ -169,6 +193,7 @@ export function conflictPairKey(
 /**
  * Whether a NEW placement of `team` on `slot` is legal (M4.8, plan §3.2). Refused when:
  *
+ * 0. a division reservation refuses the slot to the team (D2, `reservationRefuses`);
  * 1. the candidate has no live date (the slot has none from today on, plan Q3);
  * 2. the slot's busiest live date inside the candidate's span, with the candidate added, would
  *    exceed `slotCapacity` -- occupants are clipped to the candidate's span, so two holders that
@@ -192,6 +217,7 @@ export function checkHardConstraints(
   slotOccupants: Map<string, LiveDays[]>,
   slotCapacity: Map<string, number>
 ): boolean {
+  if (reservationRefuses(team, slot)) return false;
   const span = slot.span;
   if (span === null) return false;
   const live: LiveDays[] = [span];

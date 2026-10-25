@@ -61,6 +61,14 @@
  * slots they coach) only removes exemptions, so it fails safe and runs, and
  * the response and audit say whose view it was (`lightingOverrideRead`). See
  * `_shared/engines/practice-lighting-overrides.ts`.
+ *
+ * Division reservations (D2, migration 20261029010000): each run slot's
+ * `practice_slots.division_id` and each team's division, loaded as the caller
+ * through RLS and never from the body. A reserved slot is its division's only,
+ * and a division with a reserved slot in the run uses only those
+ * (`checkHardConstraints`); locked rows are never judged. A failed read, or a
+ * run slot the read does not return, refuses the run (503
+ * `SLOT_RESERVATIONS_UNREADABLE`). See `_shared/engines/practice-reservations.ts`.
  */
 
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
@@ -74,6 +82,10 @@ import {
 } from '../_shared/engines/coach-preference-load.ts';
 import { loadVenueDaylight, toDaylightSlot } from '../_shared/engines/practice-daylight.ts';
 import { loadLightingOverrides } from '../_shared/engines/practice-lighting-overrides.ts';
+import {
+  applySlotReservations,
+  loadSlotReservations,
+} from '../_shared/engines/practice-reservations.ts';
 import {
   runPracticeOptimizer,
   SLOT_DATING_UNREADABLE,
@@ -489,6 +501,40 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         503
       );
     }
+    // 5g. DIVISION RESERVATIONS (D2, migration 20261029010000). Each run
+    //     slot's division and each team's, loaded as the caller through RLS
+    //     -- never from the body. A failed read, or a run slot the read does
+    //     not return, refuses the run: it never runs as if a reserved slot
+    //     were open to every division.
+    const reservations = await loadSlotReservations(createUserClient(req, supabaseUrl, anonKey), {
+      organizationId: input.organizationId,
+      slotIds: anchored.rows.map((s) => s.id),
+      teamIds: input.teams.map((t) => t.id),
+    });
+    if (!reservations.ok) {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read slot reservations', {
+        orgId: input.organizationId,
+        seasonSettingsId,
+        message: reservations.message,
+      });
+      await recordAuditNow(auditClient, logCtx, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: { reason: reservations.code, message: auditErrorText(reservations.message) },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            "The practice slots' division reservations could not be read, so the run was " +
+            `refused rather than scheduled as if every slot were open (${reservations.message}).`,
+          code: reservations.code,
+        },
+        503
+      );
+    }
+
     //     Disclosed, not refused: an org admin's read is every approved row;
     //     anyone else's is the rows on slots they coach, so the run may be
     //     stricter than the data. Membership only -- no override content is
@@ -528,20 +574,28 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         teamsConstrainedByPreferences: preferences.teamsConstrained,
         coachAssignmentsLoaded: preferences.coachAssignmentsLoaded,
         lightingOverrideRead,
+        reservedRunSlots: [...reservations.slotDivision.values()].filter(Boolean).length,
         config: input.config,
       },
     });
 
     // 7. Prepare data (the slots were prepared at 5c-bis, before the
     //    preference load that judges them).
-    const teams = input.teams.map((t) => prepareTeam(t));
+    //    D2: the store's reservations on both, so every placement the search
+    //    makes is judged by them (`checkHardConstraints`).
+    const reserved = applySlotReservations(
+      input.teams.map((t) => prepareTeam(t)),
+      slots,
+      reservations
+    );
+    const teams = reserved.teams;
 
     // 8-9. Greedy seed + hill climbing over the placeable teams only. Every
     //      loaded row -- a TIME TBD series' row included -- is fixed
     //      occupancy, one entry per ROW.
     const run = await runPracticeOptimizer({
       teams,
-      slots,
+      slots: reserved.slots,
       locked: lock.rows.map((row) => ({
         assignmentId: row.id,
         teamId: row.teamId,

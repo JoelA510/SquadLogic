@@ -198,6 +198,62 @@ function getDivisionDayKey(slot, division) {
   return `${slot.day}::${division}`;
 }
 
+/** Why a slot is refused to a team by a division reservation (D2). */
+export const RESERVATION_REASON = Object.freeze({
+  /** The slot is reserved to another division. */
+  RESERVED_FOR_ANOTHER_DIVISION: 'reserved-for-another-division',
+  /** The team's division has reserved slots, and this one is not among them. */
+  OUTSIDE_DIVISION_RESERVATION: 'outside-division-reservation',
+});
+
+const blankToNull = (value) => {
+  const text = value === undefined || value === null ? '' : String(value).trim();
+  return text === '' ? null : text;
+};
+
+/**
+ * The divisions that hold a reserved slot among `slots`
+ * (`practice_slots.division_id`, carried as `divisionId`; plan
+ * `docs/changes/2026-10-22-demo-mode.md`, D2). Read from every slot the run is
+ * given, before any filter, so a division whose reserved slots are all
+ * filtered out is left with none rather than spilling onto open ones.
+ *
+ * @param {ReadonlyArray<Record<string, any>>} slots
+ * @returns {Set<string>}
+ */
+export function reservedDivisionIdsOf(slots) {
+  const ids = new Set();
+  for (const slot of slots ?? []) {
+    const id = blankToNull(slot?.divisionId);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * Whether a division reservation refuses `slot` to `team`, and why: a slot
+ * with a division is used only by that division's teams, and a division with a
+ * reserved slot uses only its reserved slots. Teams and slots are matched by
+ * division **id** (`team.divisionId`, `slot.divisionId`); a team that carries
+ * no division id is refused every reserved slot and is never held to one.
+ * The Edge solver's `checkHardConstraints` (`practice-coaches.ts`) is the twin.
+ *
+ * @param {Record<string, any>} team
+ * @param {Record<string, any>} slot
+ * @param {ReadonlySet<string>} reservedDivisionIds - `reservedDivisionIdsOf(slots)`
+ * @returns {string|null} a `RESERVATION_REASON`, or `null` when the slot is open to the team
+ */
+export function reservationRefusal(team, slot, reservedDivisionIds) {
+  const slotDivision = blankToNull(slot?.divisionId);
+  const teamDivision = blankToNull(team?.divisionId);
+  if (slotDivision !== null) {
+    return slotDivision === teamDivision ? null : RESERVATION_REASON.RESERVED_FOR_ANOTHER_DIVISION;
+  }
+  return teamDivision !== null && reservedDivisionIds.has(teamDivision)
+    ? RESERVATION_REASON.OUTSIDE_DIVISION_RESERVATION
+    : null;
+}
+
 /**
  * **Every coach a team carries, whichever shape the team arrived in.**
  *
@@ -326,6 +382,8 @@ export function schedulePractices({
   }
 
   const weights = sanitizeScoringWeights(scoringWeights);
+  // D2: the reservations, from every slot given (see `reservedDivisionIdsOf`).
+  const reservedDivisionIds = reservedDivisionIdsOf(slots);
 
   const sanitizedTeams = teams.map((team) => {
     TeamSchema.parse(team);
@@ -333,6 +391,8 @@ export function schedulePractices({
     return {
       id: team.id,
       division: team.division,
+      divisionId: blankToNull(team.divisionId),
+      reservedDivisionIds,
       coachId: team.coachId ?? null,
       coachIds: listTeamCoachIds(team),
       busiestCoachCount: 0,
@@ -359,6 +419,7 @@ export function schedulePractices({
       start: parsed.start,
       end: parsed.end,
       capacity: slot.capacity,
+      divisionId: blankToNull(slot.divisionId),
     };
 
     slotCapacityMap.set(slot.id, slot.capacity);
@@ -603,8 +664,9 @@ export function schedulePractices({
  * scores used by the scheduler to choose the optimal assignment.
  *
  * @param {Object} params
- * @param {{ id: string, division: string, coachId: string | null, coachIds: string[] }} params.team
- *   - The team being evaluated. `coachIds` carries every coach (head plus assistants).
+ * @param {{ id: string, division: string, coachId: string | null, coachIds: string[], divisionId?: string | null, reservedDivisionIds?: ReadonlySet<string> }} params.team
+ *   - The team being evaluated. `coachIds` carries every coach (head plus assistants);
+ *   `divisionId` and `reservedDivisionIds` are its division reservation (D2).
  * @param {Map<string, { id: string, day: string | null, start: Date, end: Date, capacity: number, assignedTeams: string[] }>} params.slotsById
  *   - Lookup of slot metadata by identifier.
  * @param {Object<string, { preferredDays?: Array<string>, preferredSlotIds?: Array<string>, unavailableSlotIds?: Array<string> }>} params.coachPreferences
@@ -663,6 +725,11 @@ function evaluateSlotsForTeam(
     let rejectionReason = null;
     if (excludedSlots && excludedSlots.has(slot.id)) {
       rejectionReason = 'excluded-slot';
+    } else {
+      // D2: a reservation refuses the slot before anything is scored, like an
+      // excluded one; the swap repair goes through here too, so it can never
+      // move a team onto another division's slot.
+      rejectionReason = reservationRefusal(team, slot, team.reservedDivisionIds ?? new Set());
     }
 
     const currentCapacity = slotCapacityMap.get(slot.id);
@@ -726,9 +793,17 @@ function evaluateSlotsForTeam(
   return { slotScores, viableSlots, blockedSlots };
 }
 
-function deriveUnassignmentReason(blockedSlots) {
-  if (!Array.isArray(blockedSlots) || blockedSlots.length === 0) {
+const RESERVATION_REASONS = new Set(Object.values(RESERVATION_REASON));
+
+function deriveUnassignmentReason(allBlockedSlots) {
+  if (!Array.isArray(allBlockedSlots) || allBlockedSlots.length === 0) {
     return 'no available slots meeting hard constraints';
+  }
+  // D2: a slot a reservation refuses was never the team's, so the reason is
+  // read over the rest. A team left with none is named for the reservation.
+  const blockedSlots = allBlockedSlots.filter((entry) => !RESERVATION_REASONS.has(entry?.reason));
+  if (blockedSlots.length === 0) {
+    return 'no practice slot is open to this division (reservations)';
   }
 
   const reasonCounts = blockedSlots.reduce((acc, entry) => {

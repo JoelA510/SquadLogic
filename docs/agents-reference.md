@@ -53,7 +53,9 @@ config) + Prettier, knip for unused code; TypeScript checkJs/allowJs, `strict: f
   admins, as `ADMIN_ROLES` in `frontend/src/constants/permissions.js` says and `is_org_admin()` and
   the Edge `verifyOrgAdmin` agree (`tests/adminRolesParity.test.js`); permissions in
   `frontend/src/constants/permissions.js`, enforced by the `usePermission` hook and
-  `<ProtectedRoute>`.
+  `<ProtectedRoute>`. A coach holds no scheduling permission since `20261028010000` (R6): their
+  schedule is on their home, and score entry and standings are admin functions behind the
+  `score_entry` and `standings` settings (off by default).
 
 ## 6. Design System — "Lightning-class" (Light + Dark)
 

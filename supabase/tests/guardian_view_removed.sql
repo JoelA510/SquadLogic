@@ -11,7 +11,8 @@
 --     still reads both (the admin arm the old admin-or-guardian policies held
 --     was not dropped with them);
 --   * `get_team_roster` no longer returns `is_my_child`; the calendar token
---     and `get_team_staff` admit the team's current coach and no other member;
+--     and `get_team_staff` admit the team's current coach, and refuse a member
+--     who coaches no team;
 --   * the role checks admit admin, coach, staff (and tenant_admin for a
 --     member) and nothing else; `admin_change_member_role` refuses `parent`
 --     (22023).
@@ -22,7 +23,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(17);
+SELECT plan(20);
 
 -- ── 1. What the migration dropped ──────────────────────────────────────────
 SELECT ok(to_regclass('public.profile_players') IS NULL, 'profile_players is gone');
@@ -106,10 +107,35 @@ SELECT is(
     'the current coach reads the roster''s names'
 );
 SELECT is(
-    (SELECT count(*)::int FROM public.team_calendar_tokens WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001')
-    + (SELECT count(*)::int FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001')),
-    2,
-    'the current coach reads the team''s calendar token and staff'
+    (SELECT count(*)::int FROM public.team_calendar_tokens WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+    1,
+    'the current coach reads the team''s calendar token'
+);
+SELECT is(
+    (SELECT array_agg(s.full_name) FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') s),
+    ARRAY['R3 Coach'],
+    'the current coach reads the team''s staff'
+);
+-- Any other member of Org A: Dee, a coach-role member who coaches no team.
+RESET role;
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+    ('a1111111-0000-4000-8000-0000000003d1', 'r3-dee@test.local', '{"password_length": 12}')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, email, full_name) VALUES
+    ('a1111111-0000-4000-8000-0000000003d1', 'r3-dee@test.local', 'Dee')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+    ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000003d1', 'coach');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"a1111111-0000-4000-8000-0000000003d1"}';
+SELECT is(
+    (SELECT count(*)::int FROM public.team_calendar_tokens WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+    0,
+    'a member who coaches no team reads no calendar token'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001')$$,
+    '42501', NULL, 'a member who coaches no team is refused the staff'
 );
 RESET role;
 SELECT ok(

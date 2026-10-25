@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, FlaskConical } from 'lucide-react';
 import { NAV, ROLE_NAV } from '../../constants/navigation.js';
+import { isAdminRole } from '../../constants/permissions.js';
 import { usePermission } from '../../hooks/usePermission.js';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useNavBadges } from '../../hooks/useNavBadges.js';
@@ -78,10 +79,16 @@ export default function SideNav({
     if (window.innerWidth < 900) onMobileClose?.();
   };
 
-  // Every role but coach gets the admin nav, filtered by permission: a role
-  // with no permissions (a stale `parent` or `player`, both removed in
-  // 20261024010000) sees only the items that need none.
-  const flatItems = effectiveRole === 'coach' ? ROLE_NAV.coach : null;
+  // Admins (and a role not loaded yet) get the grouped admin nav, filtered by
+  // permission; a coach the coach's flat nav. Any other role (a stale `parent`
+  // or `player`, both removed in 20261024010000) gets Home and nothing else,
+  // not the admin shell.
+  const isAdminNav = !effectiveRole || isAdminRole(effectiveRole);
+  const flatItems = isAdminNav
+    ? null
+    : effectiveRole === 'coach'
+      ? ROLE_NAV.coach
+      : ROLE_NAV.coach.filter((item) => item.id === 'home');
 
   const visible = (item) =>
     (!item.permission || can(item.permission)) && (!item.feature || isEnabled(item.feature));
@@ -104,7 +111,7 @@ export default function SideNav({
             <>
               {!collapsed && (
                 <div className="nav-group-label" style={{ pointerEvents: 'none' }}>
-                  Coach
+                  {effectiveRole === 'coach' ? 'Coach' : 'Account'}
                 </div>
               )}
               {flatItems.map((item) => (

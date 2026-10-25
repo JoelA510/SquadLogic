@@ -1925,14 +1925,17 @@ export const mockSupabase = {
       if (password === MOCK_PASSWORD) {
         const role = email.split('@')[0];
         const userId = `mock-${role}-id`;
+        // A demo account named for a role SquadLogic has (admin, coach, staff)
+        // is seeded into the demo organization with it; any other (an old
+        // parent@ or player@, an outsider@) is not seeded, and lands with no
+        // organization rather than as a privileged member (20261024010000).
+        const seededRole = ASSIGNABLE_ROLES.includes(role) ? role : null;
         const session = {
           user: {
             id: userId,
             email,
             user_metadata: { full_name: `Mock ${role.charAt(0).toUpperCase() + role.slice(1)}` },
-            // Any demo account but the admin signs in as a coach: there is no
-            // parent or player role (20261024010000).
-            app_metadata: { role: role === 'admin' ? 'admin' : 'coach' },
+            app_metadata: { role: seededRole },
           },
           access_token: 'mock-token',
         };
@@ -1958,6 +1961,7 @@ export const mockSupabase = {
         // organisation, which is what real Supabase does.
         const seededMembership = { organization_id: MOCK_ORG_ID, profile_id: userId };
         if (
+          seededRole &&
           !typedDb.organization_members.find((m) => m.profile_id === userId) &&
           !isMockDeleted(
             typedDb,
@@ -7062,8 +7066,17 @@ export const mockSupabase = {
 
     if (name === 'admin_change_member_role') {
       const { p_organization_id, p_profile_id, p_role } = params || {};
-      // As the SQL, before the admin check: its whitelist refuses parent and
-      // player (20261024010000).
+      // As the SQL, in its order: the arguments (23502), then its whitelist,
+      // which refuses parent and player (20261024010000), then the admin check.
+      if (!p_organization_id || !p_profile_id) {
+        return {
+          data: null,
+          error: {
+            message: `${p_organization_id ? 'p_profile_id' : 'p_organization_id'} is required`,
+            code: '23502',
+          },
+        };
+      }
       if (!ASSIGNABLE_ROLES.includes(p_role)) {
         return { data: null, error: { message: `invalid role: ${p_role}`, code: '22023' } };
       }

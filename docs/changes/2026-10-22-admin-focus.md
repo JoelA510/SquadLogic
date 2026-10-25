@@ -238,7 +238,12 @@ at once (AGENTS.md section 11).
   is gone); a membership still carrying either is granted nothing. The parent home, its nav and
   the Family label go; the coach is the only flat nav; the role preview offers a coach only;
   members and invites offer admin, coach and staff (`ASSIGNABLE_ROLES`, the server's whitelist);
-  `OrganizationContext` no longer calls the guardian link. The mock twin follows the SQL.
+  `OrganizationContext` no longer calls the guardian link. A membership still carrying a removed
+  role (a cached one, or a row written before the migration) gets Home only and a notice that it
+  has no role, not the admin shell. The mock twin follows the SQL; a demo sign-in seeds a
+  membership only for an account named for a role that exists (admin, coach, staff), so an old
+  `parent@` lands with no organization. **Not mirrored in the mock:** the role CHECKs on a
+  direct table write, and `admin_change_member_role`'s audit metadata keys (pre-existing).
 - **Tests.**
   - pgTAP: `guardian_view_removed.sql` (objects gone, with a control; the admin read alone and
     still reading; the coach's reads; no `is_my_child`; both role checks; parent refused).

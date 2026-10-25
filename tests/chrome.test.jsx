@@ -328,6 +328,22 @@ describe('SideNav', () => {
     expect(screen.queryByRole('link', { name: 'My Team' })).not.toBeInTheDocument();
   });
 
+  // No parent or player role since 20261024010000 (R3): a membership still
+  // carrying one gets Home and nothing else, not the admin shell.
+  it.each(['parent', 'player'])('shows a stale %s role Home only', (role) => {
+    configureRole(role);
+    mocks.auth.isAdmin = false;
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
+      </MemoryRouter>
+    );
+    expect(screen.getAllByRole('link').map((link) => link.textContent.trim())).toEqual([
+      'My Dashboard',
+    ]);
+    expect(screen.queryByRole('button', { name: /Scheduling/ })).not.toBeInTheDocument();
+  });
+
   it('scopes navigation to the previewed role while impersonating', () => {
     mocks.auth.isImpersonating = true;
     mocks.auth.user = {

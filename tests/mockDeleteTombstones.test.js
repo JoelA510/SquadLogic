@@ -671,6 +671,19 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
     ).toHaveLength(1);
   });
 
+  // No parent or player role since 20261024010000 (R3): a demo account named for
+  // one is seeded nowhere, rather than as a member with someone else's rights.
+  it('seeds no membership for a demo account named for a removed role', async () => {
+    for (const email of ['parent@example.com', 'player@example.com']) {
+      await supabase.auth.signInWithPassword({ email, password: 'test-password-123' });
+      const id = `mock-${email.split('@')[0]}-id`;
+      expect(
+        getMockData('organization_members').filter((m) => m.profile_id === id),
+        email
+      ).toHaveLength(0);
+    }
+  });
+
   it('persists what sign-in seeds, which writing past saveDB did not', async () => {
     // The real half of the finding that produced the resurrection: the direct
     // assignment never reached sessionStorage, so rows sign-in created were

@@ -150,5 +150,11 @@ Then(
     await expect(card.getByText('-', { exact: true }).first()).toBeVisible();
     await expect(card.locator('input[type="number"]')).toHaveCount(0);
     await expect(card.getByRole('button', { name: /Save/i })).toHaveCount(0);
+    // Control: the per-game gate, not a page that offers nobody score entry.
+    // The mock's own game of the coach's team (t1) still offers it, until R6
+    // makes score entry an admin's (docs/changes/2026-10-22-admin-focus.md).
+    await expect(
+      page.getByTestId('game-score-card').filter({ has: page.getByLabel('Home Score') })
+    ).not.toHaveCount(0);
   }
 );

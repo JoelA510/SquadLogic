@@ -34,6 +34,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
+import { isAdminRole } from '../constants/permissions.js';
 
 /**
  * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
@@ -789,9 +790,27 @@ CoachDirectory.propTypes = {
 };
 
 /**
+ * Home for a membership whose role SquadLogic no longer has (a stale `parent`
+ * or `player`, both removed in 20261024010000): it says so, and reads nothing.
+ */
+function NoRoleHome() {
+  return (
+    <Page header={<PageHeader title="My Dashboard" crumbs={['Home']} />}>
+      <div className="card" style={{ maxWidth: 720 }}>
+        <div className="card-body muted">
+          Your account has no role in this organization that SquadLogic recognizes. Ask a league
+          administrator to set your role.
+        </div>
+      </div>
+    </Page>
+  );
+}
+
+/**
  * Home — role-scoped: admins get the league overview, coaches their focused
- * dashboard (there is no parent or player home since 20261024010000). Under
- * role preview the previewed role wins.
+ * dashboard (there is no parent or player home since 20261024010000; a
+ * membership still carrying either gets NoRoleHome). Under role preview the
+ * previewed role wins.
  */
 export default function DashboardPage() {
   // E2E Testing Error Trigger (resilience scenarios force a render error here)
@@ -817,7 +836,12 @@ export default function DashboardPage() {
   const routeError = location.state?.error;
   const banner = <DataErrorBanner message={routeError} className="mx-6 mt-3" />;
 
-  const Home = effectiveRole === 'coach' ? CoachDashboard : AdminHome;
+  const Home =
+    effectiveRole === 'coach'
+      ? CoachDashboard
+      : !effectiveRole || isAdminRole(effectiveRole)
+        ? AdminHome
+        : NoRoleHome;
   return (
     <>
       {banner}

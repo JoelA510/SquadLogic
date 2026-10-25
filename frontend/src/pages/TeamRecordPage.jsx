@@ -312,7 +312,7 @@ export default function TeamRecordPage() {
               {roster.length === 0 && (
                 <div className="col-span-full text-center text-text-muted py-8">
                   {rosterUnavailable === 'refused'
-                    ? "The roster is shown to the team's coaches, its families and league admins."
+                    ? "The roster is shown to the team's coaches and league admins."
                     : rosterUnavailable === 'failed'
                       ? 'The roster could not be loaded. Try again shortly.'
                       : 'No players assigned yet.'}
@@ -547,7 +547,7 @@ export function CalendarModal({ team, canRotate = false, onClose }) {
           <p className="text-sm text-status-warning-text mb-3">
             {canRotate
               ? 'No calendar link is currently available. Regenerate the link before sharing it.'
-              : "The calendar link is shared with the team's coaches, its families and league admins."}
+              : "The calendar link is shared with the team's coaches and league admins."}
           </p>
         )}
         {tokenState === 'failed' && (

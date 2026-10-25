@@ -239,7 +239,7 @@ export const ROLE_NAV = {
 };
 // No parent or player nav: both roles were removed (20261024010000, R3).
 // Staff have no flat nav: they are admins (ADMIN_ROLES) and get the grouped
-// admin NAV, filtered by permission, as SideNav's isAdminNav decides.
+// admin NAV, filtered by permission, as SideNav decides.
 
 /** path -> { label, groupLabel } for breadcrumbs / PageHeader. */
 export const ROUTE_META = {};

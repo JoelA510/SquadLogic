@@ -112,6 +112,8 @@ BEGIN
     SET LOCAL ROLE authenticated;
     SELECT count(*) INTO v_n FROM public.players WHERE organization_id = v_org;
     IF v_n <> 0 THEN RESET ROLE; RAISE EXCEPTION 'a coach read % player rows', v_n; END IF;
+    SELECT count(*) INTO v_n FROM public.team_players WHERE organization_id = v_org;
+    IF v_n <> 0 THEN RESET ROLE; RAISE EXCEPTION 'a coach read % roster rows', v_n; END IF;
     IF (SELECT count(*) FROM public.coaches WHERE organization_id = v_org) <> 1
        OR NOT EXISTS (SELECT 1 FROM public.coaches WHERE id = v_c)
        OR (SELECT count(*) FROM public.team_coach_assignments WHERE organization_id = v_org) <> 1 THEN
@@ -121,15 +123,16 @@ BEGIN
         RESET ROLE; RAISE EXCEPTION 'the current coach could not read their team''s token';
     END IF;
     RESET ROLE;
-    RAISE NOTICE 'coach: own coach row and assignment, their team''s token; no player rows';
+    RAISE NOTICE 'coach: own coach row and assignment, their team''s token; no player or roster rows';
 
     -- Unrelated member
     PERFORM set_config('request.jwt.claim.sub', v_m::text, true);
     SET LOCAL ROLE authenticated;
     IF EXISTS (SELECT 1 FROM public.players WHERE organization_id = v_org)
+       OR EXISTS (SELECT 1 FROM public.team_players WHERE organization_id = v_org)
        OR EXISTS (SELECT 1 FROM public.staging_players WHERE organization_id = v_org)
        OR EXISTS (SELECT 1 FROM public.team_calendar_tokens WHERE team_id IN (v_ta, v_tb, v_tc)) THEN
-        RESET ROLE; RAISE EXCEPTION 'an unrelated member read players, staging rows or a token';
+        RESET ROLE; RAISE EXCEPTION 'an unrelated member read players, roster rows, staging rows or a token';
     END IF;
     RESET ROLE;
     SELECT token INTO v_tok FROM public.team_calendar_tokens WHERE team_id = v_ta;
@@ -139,7 +142,7 @@ BEGIN
     IF v_r->>'status' <> 'error' OR (SELECT token FROM public.team_calendar_tokens WHERE team_id = v_ta) <> v_tok THEN
         RAISE EXCEPTION 'an unrelated member rotated a team''s token: %', v_r;
     END IF;
-    RAISE NOTICE 'unrelated member: no players, staging rows or tokens; rotate refused, token unchanged';
+    RAISE NOTICE 'unrelated member: no players, roster rows, staging rows or tokens; rotate refused, token unchanged';
 
     -- Rotate as the coach
     PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
@@ -177,8 +180,9 @@ BEGIN
     PERFORM public.update_game_score(v_org, v_game, 3::smallint, 1::smallint, '{}'::jsonb);
     IF (SELECT count(*) FROM public.players WHERE organization_id = v_org) <> 2
        OR (SELECT count(*) FROM public.coaches WHERE organization_id = v_org) <> 2
+       OR (SELECT count(*) FROM public.team_players WHERE organization_id = v_org) <> 2
        OR (SELECT count(*) FROM public.staging_players WHERE organization_id = v_org) <> 1 THEN
-        RESET ROLE; RAISE EXCEPTION 'an admin no longer reads every player, coach and staging row';
+        RESET ROLE; RAISE EXCEPTION 'an admin no longer reads every player, roster row, coach and staging row';
     END IF;
     RESET ROLE;
     IF (SELECT score_home FROM public.games WHERE id = v_game) <> 3 THEN

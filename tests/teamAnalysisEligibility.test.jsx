@@ -9,8 +9,8 @@
  * hooks, Supabase and heavy children are stand-ins, as in `teamAnalysisBuddies.test.jsx`. The
  * import rows carry the canonical keys `import-validation` stages (`date_of_birth`,
  * `external_registration_id`, `age_group`). The natural age comes from the birthdate the import
- * row holds; a stored natural age on the durable player is R5's
- * (docs/changes/2026-10-22-admin-focus.md).
+ * row holds, or from the stored natural age on the durable player (R5,
+ * docs/changes/2026-10-22-admin-focus.md), which is read first.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -291,6 +291,65 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
     // Conservation, enumerated from the import: the two late players are seated or not placed.
     const seated = results.team_players.map((tp) => tp.player_id);
     expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
+  });
+});
+
+describe('TeamAnalysisPage :: eligibility from stored players only (R5)', () => {
+  // The import rows carry no birth date (no birth date is stored, and a row reloaded after the
+  // import session has none); the natural age is the durable player's, as `finalize_import_job`
+  // stored it (docs/changes/2026-10-22-admin-focus.md, R5, taking B2's hand-off).
+  const NATURAL_AGE = { 'REG-1': 13, 'REG-2': null };
+  function seedStoredOnly({ keepBirthDates = false } = {}) {
+    seedImport();
+    if (!keepBirthDates) {
+      state.rows = state.rows.map(({ date_of_birth: _dropped, ...rest }) => rest);
+    }
+    state.durablePlayers = state.durablePlayers.map((player) => ({
+      ...player,
+      natural_age:
+        NATURAL_AGE[player.external_registration_id] === undefined
+          ? 10
+          : NATURAL_AGE[player.external_registration_id],
+    }));
+  }
+  beforeEach(() => {
+    sessionStorage.clear();
+    state.persistenceSnapshot = null;
+    state.coachLinksError = null;
+    state.pipelineThrows = false;
+  });
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('blocks a stored play-down with no birth date in the rows; a player with none is seated, unknown', async () => {
+    seedStoredOnly();
+    expect(state.rows.some((r) => 'date_of_birth' in r)).toBe(false);
+    await generate();
+
+    const results = stagedResults();
+    const seated = results.team_players.map((tp) => tp.player_id);
+    expect(seated).not.toContain(durableIdOf(1));
+    const entry = results.overflowByDivision.U10.find((e) => e.players[0].id === durableIdOf(1));
+    expect(entry).toMatchObject({
+      reason: 'eligibility-blocked',
+      metadata: { placement: 'play_down_blocked', naturalAge: 13 },
+    });
+    const placed = results.teamsByDivision.U10.flatMap((team) => team.players);
+    expect(placed.find((player) => player.id === durableIdOf(2)).placement).toBe('unknown');
+    expect(placed.filter((player) => player.placement === 'in_band')).toHaveLength(10);
+    expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
+  });
+
+  it("reads the stored natural age before a session row's birth date", async () => {
+    // Every row is in band by its birth date but REG-1, whose stored age is 13 here anyway.
+    seedStoredOnly({ keepBirthDates: true });
+    state.rows = state.rows.map((r) => ({ ...r, date_of_birth: IN_BAND }));
+    await generate();
+    const entry = stagedResults().overflowByDivision.U10.find(
+      (e) => e.players[0].id === durableIdOf(1)
+    );
+    expect(entry?.metadata).toMatchObject({ placement: 'play_down_blocked', naturalAge: 13 });
   });
 });
 

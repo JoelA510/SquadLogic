@@ -44,7 +44,9 @@ export function saveFile(filename, blob) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Released after the click has been handled: revoking in the same task can
+  // cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /** @param {string} csv */

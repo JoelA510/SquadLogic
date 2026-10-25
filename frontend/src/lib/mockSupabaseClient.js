@@ -1717,8 +1717,9 @@ const createMockQuery = (table, data = null) => {
           // returns it (`field:fields(name, location:locations(name))` on the
           // team page, `fields(name, locations(name))` in the feed), as the
           // exceptions embed above does (admin focus R7: the schedule exports
-          // and the calendar name the ground). `fields` stays for the readers
-          // that predate the aliases.
+          // and the calendar name the ground). Only under the key the select
+          // names: a reader reading `fields` after selecting `field:fields`
+          // gets nothing from PostgREST, so it gets nothing here either.
           const aliasOf = (name) =>
             new RegExp(`(\\w+)\\s*:\\s*${name}\\s*\\(`).exec(queryContent)?.[1] || name;
           const fieldKey = aliasOf('fields');
@@ -1732,14 +1733,12 @@ const createMockQuery = (table, data = null) => {
             let enrichedSlot = slot ? { ...slot } : null;
             if (enrichedSlot) {
               const field = fields.find((f) => String(f.id) === String(slot.field_id)) || null;
-              enrichedSlot.fields = field;
-              if (field && embedsLocation) {
-                const location =
-                  locations.find((l) => String(l.id) === String(field.location_id)) || null;
-                enrichedSlot[fieldKey] = { ...field, [locationKey]: location };
-              } else if (fieldKey !== 'fields') {
-                enrichedSlot[fieldKey] = field;
-              }
+              const location =
+                field && embedsLocation
+                  ? locations.find((l) => String(l.id) === String(field.location_id)) || null
+                  : undefined;
+              enrichedSlot[fieldKey] =
+                field && embedsLocation ? { ...field, [locationKey]: location } : field;
             }
 
             let enrichedTeam = team ? { ...team } : null;

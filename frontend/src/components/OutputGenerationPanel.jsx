@@ -208,9 +208,12 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
   // An assignment with no time is not in the master files: `generateScheduleExports`
   // requires a start and an end (GAP-16/17/28, `reserve/publication.js`). It is
   // counted here and said beside the files (admin focus R7), never left out
-  // without a word; each team's own export (its team page) lists it as TIME TBD.
+  // without a word. (A practice row with no team is not counted: it names no
+  // team to export it under, and is not a time question.)
   const untimed = {
-    practices: practiceRows.filter((a) => a && !normalizePracticeForExport(a)).length,
+    practices: practiceRows.filter(
+      (a) => a && getAssignmentTeamId(a) && !normalizePracticeForExport(a)
+    ).length,
     games: gameRows.filter((a) => a && !normalizeGameForExport(a)).length,
   };
   const exportPractices = practiceRows
@@ -244,7 +247,7 @@ export function untimedAssignmentsNote(untimed) {
     untimed.practices > 0 ? `${untimed.practices} practice assignment(s)` : null,
   ].filter(Boolean);
   if (parts.length === 0) return null;
-  return `${parts.join(' and ')} with no start or end time are not in these files. Each team's page downloads its schedule with them listed as TIME TBD and the reason.`;
+  return `${parts.join(' and ')} with no start or end time are not in these files. The downloads on each team's page list that team's saved schedule, with every event that has no time marked TIME TBD and its reason.`;
 }
 
 /**
@@ -514,6 +517,8 @@ export default function OutputGenerationPanel({
   const [parityReport, setParityReport] = useState(null);
   const [parityError, setParityError] = useState(null);
   const [parityBusy, setParityBusy] = useState(false);
+  // The master XLSX download's failure, said beside the files (admin focus R7).
+  const [xlsxError, setXlsxError] = useState(/** @type {string | null} */ (null));
 
   // The CSV export flattens teams, practices and games into one file; the
   // email drafts read teams and practices only.
@@ -600,6 +605,8 @@ export default function OutputGenerationPanel({
 
   const handleGenerate = () => {
     if (csvBlocked) return;
+    // An XLSX failure from the previous files is not about the next ones.
+    setXlsxError(null);
     setStatus('generating');
     setMessage('Generating CSVs...');
 
@@ -854,7 +861,6 @@ export default function OutputGenerationPanel({
    * columns, `Coach Emails` included (this page is an admin's), every cell as
    * text.
    */
-  const [xlsxError, setXlsxError] = useState(/** @type {string | null} */ (null));
   const downloadMasterXlsx = async () => {
     if (!generated || csvBlocked) return;
     setXlsxError(null);

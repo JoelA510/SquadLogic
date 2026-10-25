@@ -13,6 +13,7 @@
  */
 
 import { peakLiveCount, sharedLiveDates } from './practice-live-dates.ts';
+import { idOrNull } from './practice-reservations.ts';
 
 /** A weekly run of dates, as day numbers, on one weekday (M4.7's live span). */
 export interface LiveDays {
@@ -98,12 +99,6 @@ export interface PreparedTeam extends CoachedTeam {
   reservedDivisionIds?: ReadonlySet<string>;
 }
 
-/** A division id trimmed and lower-cased, blank as none (core's `blankToNull`). */
-const divisionIdOrNull = (value: unknown): string | null => {
-  const text = value === undefined || value === null ? '' : String(value).trim().toLowerCase();
-  return text === '' ? null : text;
-};
-
 /**
  * Whether a division reservation refuses `slot` to `team` (D2): a reserved slot is its
  * division's only, and a division with a reserved slot uses only those. The twin of core
@@ -113,8 +108,8 @@ export function reservationRefuses(
   team: Pick<PreparedTeam, 'divisionId' | 'reservedDivisionIds'>,
   slot: Pick<DatedCandidate, 'divisionId'>
 ): boolean {
-  const slotDivision = divisionIdOrNull(slot.divisionId);
-  const teamDivision = divisionIdOrNull(team.divisionId);
+  const slotDivision = idOrNull(slot.divisionId);
+  const teamDivision = idOrNull(team.divisionId);
   if (slotDivision !== null) return slotDivision !== teamDivision;
   return teamDivision !== null && (team.reservedDivisionIds?.has(teamDivision) ?? false);
 }

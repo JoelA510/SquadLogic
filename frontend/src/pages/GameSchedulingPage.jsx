@@ -727,6 +727,11 @@ export default function GameSchedulingPage() {
   // divisions, listed apart rather than counted as unscheduled.
   const divisionPlan = useMemo(() => buildDivisionRoundRobins(schedulerTeams), [schedulerTeams]);
   const gameTeams = /** @type {typeof schedulerTeams} */ (divisionPlan.gameTeams);
+  // The practice-only divisions' teams, counted once (D2).
+  const practiceOnlyTeamCount = divisionPlan.practiceOnlyDivisions.reduce(
+    (sum, entry) => sum + entry.teamIds.length,
+    0
+  );
 
   const teamById = useMemo(() => {
     const map = new Map();
@@ -855,7 +860,7 @@ export default function GameSchedulingPage() {
   const schedulerReadinessMessage = composeSchedulerReadinessMessage({
     referenceError,
     teamCount: gameTeams.length,
-    practiceOnlyTeamCount: schedulerTeams.length - gameTeams.length,
+    practiceOnlyTeamCount,
     placeableSlotCount: gameSlots.length,
     unplaceableSlotCount: unplaceableSlots.length,
     seasonClockLoading,
@@ -1011,9 +1016,10 @@ export default function GameSchedulingPage() {
           seasonSettingsId: currentSeasonSetting?.id,
           parameters: {
             organizationId: currentOrganization?.id,
-            // The teams the run scheduled; a practice-only division's are counted apart (D2).
-            teamCount: gameTeams.length,
-            practiceOnlyTeamCount: schedulerTeams.length - gameTeams.length,
+            // Every generated team, as before D2; of them, the practice-only
+            // divisions' teams, which the run gave no games.
+            teamCount: schedulerTeams.length,
+            practiceOnlyTeamCount,
             slotCount: gameSlots.length,
             generationMode,
           },
@@ -1037,7 +1043,7 @@ export default function GameSchedulingPage() {
       currentOrganization?.id,
       currentSeasonSetting?.id,
       gameSlots.length,
-      gameTeams.length,
+      practiceOnlyTeamCount,
       schedulerTeams.length,
       slotById,
     ]

@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   fieldsError: /** @type {null | { code: string, message: string }} */ (null),
   /** Fail the reservation RPC with this error. */
   rpcError: /** @type {null | { code: string, message: string }} */ (null),
+  /** Fail the divisions read with this error. */
+  divisionsError: /** @type {null | { code: string, message: string }} */ (null),
+  /** Hold every divisions read until this promise settles. */
+  divisionsGate: /** @type {null | Promise<void>} */ (null),
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
@@ -35,6 +39,23 @@ vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   return {
     supabase: {
       from: (table) => {
+        if (table === 'divisions') {
+          // Recorded, then run against the mock once the gate (if any) opens.
+          const ops = [];
+          const chain = {
+            select: (...args) => (ops.push(['select', args]), chain),
+            eq: (...args) => (ops.push(['eq', args]), chain),
+            order: (...args) => (ops.push(['order', args]), chain),
+            then: (resolve, reject) =>
+              Promise.resolve(mocks.divisionsGate)
+                .then(() => {
+                  if (mocks.divisionsError) return { data: null, error: mocks.divisionsError };
+                  return ops.reduce((q, [op, args]) => q[op](...args), mockSupabase.from(table));
+                })
+                .then(resolve, reject),
+          };
+          return chain;
+        }
         const real = mockSupabase.from(table);
         if (table !== 'fields' || !mocks.fieldsError) return real;
         return {
@@ -72,7 +93,8 @@ vi.mock('../frontend/src/components/scheduling/PracticeRepairLauncher.jsx', () =
 
 const { default: FieldManagementPage } =
   await import('../frontend/src/pages/FieldManagementPage.jsx');
-const { getMockData } = await import('../frontend/src/lib/mockSupabaseClient.js');
+const { getMockData, mockSupabase: supabase } =
+  await import('../frontend/src/lib/mockSupabaseClient.js');
 
 const SELECT_NAME = 'Division for the Sat 09:00 (A) practice slot on Field 1';
 
@@ -105,6 +127,8 @@ beforeEach(() => {
   mocks.seasonId = undefined;
   mocks.fieldsError = null;
   mocks.rpcError = null;
+  mocks.divisionsError = null;
+  mocks.divisionsGate = null;
   seed();
 });
 
@@ -153,16 +177,48 @@ describe('FieldManagementPage :: practice slot divisions (D2)', () => {
     expect(await screen.findByRole('combobox', { name: SELECT_NAME })).toBeDisabled();
   });
 
-  it("with the season cleared offers none of the last season's divisions", async () => {
+  it("never offers the last season's divisions while the next season's are read", async () => {
     const view = render(<FieldManagementPage />);
     const select = await screen.findByRole('combobox', { name: SELECT_NAME });
     await waitFor(() =>
       expect(within(select).getByRole('option', { name: 'U8 Coed' })).toBeInTheDocument()
     );
-    mocks.seasonId = null;
+    let open = () => {};
+    mocks.divisionsGate = new Promise((resolve) => {
+      open = resolve;
+    });
+    mocks.seasonId = 'd2-next-season';
     view.rerender(<FieldManagementPage />);
-    await waitFor(() => expect(screen.queryByRole('combobox', { name: SELECT_NAME })).toBeNull());
-    expect(screen.getByText('Field 1')).toBeInTheDocument();
+    // The next season's read is held: only "Any division" is offered meanwhile.
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('combobox', { name: SELECT_NAME }))
+          .getAllByRole('option')
+          .map((o) => o.textContent)
+      ).toEqual(['Any division'])
+    );
+    open();
+    mocks.divisionsGate = null;
+  });
+
+  it('with a failed divisions read still shows a reservation and lets an admin clear it', async () => {
+    await supabase.rpc('admin_set_practice_slot_division', {
+      p_slot_id: 'd2-slot',
+      p_division_id: 'u8-div-id',
+    });
+    mocks.divisionsError = { code: '500', message: 'divisions are unreadable' };
+    render(<FieldManagementPage />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('divisions are unreadable');
+    const select = await screen.findByRole('combobox', { name: SELECT_NAME });
+    expect(select).toHaveValue('u8-div-id');
+    // Shown as reserved, never as another season's (the season's were not read).
+    expect(within(select).getByRole('option', { name: 'A reserved division' })).toBeInTheDocument();
+    expect(within(select).queryByRole('option', { name: /another season/ })).toBeNull();
+    expect(select).toBeEnabled();
+    fireEvent.change(select, { target: { value: '' } });
+    await waitFor(() =>
+      expect(getMockData('practice_slots').find((s) => s.id === 'd2-slot').division_id).toBeNull()
+    );
   });
 
   it('before the migration (42703) still lists the fields and offers no reservation', async () => {

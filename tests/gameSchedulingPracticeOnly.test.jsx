@@ -63,6 +63,14 @@ vi.mock('../frontend/src/hooks/useFieldClosures.js', () => ({
 vi.mock('../frontend/src/hooks/useFeatures.js', () => ({
   useFeatures: () => ({ genderModel: 'mixed', isEnabled: () => false }),
 }));
+// The save's request, captured (the real client posts to the Edge Function).
+const persist = vi.hoisted(() => ({ calls: /** @type {any[]} */ ([]) }));
+vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
+  persistGameScheduleReview: async (args) => {
+    persist.calls.push(args);
+    return { success: true };
+  },
+}));
 vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn(), debug: vi.fn() },
 }));
@@ -178,6 +186,7 @@ beforeEach(() => {
   delete window.__MOCK_DB__;
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
   mocks.divisionError = null;
+  persist.calls = [];
 });
 
 afterEach(() => {
@@ -207,6 +216,18 @@ describe('GameSchedulingPage :: a practice-only division (D2)', () => {
     // Not unscheduled: the review counts no game it could not place.
     expect(screen.getByText('6 game assignments staged for review')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Practice only' })).not.toHaveTextContent('U10');
+  });
+
+  it("saves the run's team count as before, with the practice-only teams counted apart", async () => {
+    seed({ u4PlaysGames: false });
+    await generate();
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply Schedule' }));
+    await vi.waitFor(() => expect(persist.calls).toHaveLength(1));
+    const { parameters } = persist.calls[0].runMetadata;
+    // Enumerated from the seed: every generated team, and U4's four of them.
+    expect(parameters.teamCount).toBe(U4_COHORTS.length + U10_TEAMS.length);
+    expect(parameters.practiceOnlyTeamCount).toBe(U4_COHORTS.length);
+    expect(persist.calls[0].assignments).toHaveLength(6);
   });
 
   it('CONTROL: with U4 playing, the same page schedules U4 its fixtures and lists nothing as practice only', async () => {

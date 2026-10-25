@@ -21,18 +21,21 @@ const hhmm = (value) => String(value ?? '').substring(0, 5);
  * once through `onReserve` (the audited `admin_set_practice_slot_division`);
  * a refusal is announced and the select shows the stored value again.
  *
- * Divisions are the selected season's; a slot reserved to a division of
- * another season keeps it as an option, marked, so nothing changes unless an
- * admin chooses.
+ * Divisions are the selected season's, once read (`divisionsRead`); a slot
+ * reserved to a division of another season keeps it as an option, marked, so
+ * nothing changes unless an admin chooses. Until the season's divisions are
+ * read (none selected, the read in flight or failed) a reservation is shown
+ * only as reserved, never as another season's, and can still be cleared.
  *
  * @param {{
  *   field: { id: string, name: string, practice_slots?: Array<Record<string, any>>, field_subunits?: Array<{ id: string, label: string }> },
  *   divisions: Array<{ id: string, name: string }>,
+ *   divisionsRead: boolean,
  *   canEdit: boolean,
  *   onReserve: (slotId: string, divisionId: string|null) => Promise<unknown>,
  * }} props
  */
-export default function SlotReservations({ field, divisions, canEdit, onReserve }) {
+export default function SlotReservations({ field, divisions, divisionsRead, canEdit, onReserve }) {
   const headingId = useId();
   const [savingId, setSavingId] = useState(/** @type {string|null} */ (null));
   const [error, setError] = useState(/** @type {string|null} */ (null));
@@ -87,7 +90,9 @@ export default function SlotReservations({ field, divisions, canEdit, onReserve 
             >
               <option value="">Any division</option>
               {slot.division_id && !known.has(String(slot.division_id)) && (
-                <option value={slot.division_id}>A division of another season</option>
+                <option value={slot.division_id}>
+                  {divisionsRead ? 'A division of another season' : 'A reserved division'}
+                </option>
               )}
               {divisions.map((division) => (
                 <option key={division.id} value={division.id}>

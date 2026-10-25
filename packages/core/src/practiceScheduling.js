@@ -243,7 +243,8 @@ export function reservedDivisionIdsOf(slots) {
  *
  * @param {Record<string, any>} team
  * @param {Record<string, any>} slot
- * @param {ReadonlySet<string>} reservedDivisionIds - `reservedDivisionIdsOf(slots)`
+ * @param {ReadonlySet<string>} reservedDivisionIds - `reservedDivisionIdsOf(slots)`, whose ids
+ *   are spelled as this reads them (trimmed, lower-case); a set built otherwise may miss
  * @returns {string|null} a `RESERVATION_REASON`, or `null` when the slot is open to the team
  */
 export function reservationRefusal(team, slot, reservedDivisionIds) {

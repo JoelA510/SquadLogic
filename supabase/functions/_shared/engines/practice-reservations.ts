@@ -56,7 +56,8 @@ export type SlotReservationLoad =
   | ({ ok: true } & SlotReservations)
   | { ok: false; code: typeof SLOT_RESERVATIONS_UNREADABLE; message: string };
 
-const idOrNull = (value: unknown): string | null => {
+/** A division id trimmed and lower-cased, blank as none (core's `blankToNull`). */
+export const idOrNull = (value: unknown): string | null => {
   const text = value === undefined || value === null ? '' : String(value).trim().toLowerCase();
   return text === '' ? null : text;
 };

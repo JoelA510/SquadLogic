@@ -28,7 +28,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/admin/analytics`              | `AnalyticalDashboard`    | Analytical Insights: fairness trend, conflict frequency (admin)                                                              |
 | `/admin/reports`                | `EnterpriseDashboard`    | Org readiness and distribution analytics (admin)                                                                             |
 | `/standings`                    | `LeagueStandings`        | Standings tables and score entry (admin; the `standings` and `score_entry` settings)                                         |
-| `/team/:teamId`                 | `TeamRecordPage`         | Team record (tabs: schedule, roster, staff, balance)                                                                         |
+| `/team/:teamId`                 | `TeamRecordPage`         | Team record (tabs: schedule, roster, staff, balance); the schedule as CSV, XLSX and `.ics` (R7)                              |
 | `/players`                      | `PlayersPage`            | Virtualized editable players grid (audited RPC mutations)                                                                    |
 | `/players/:playerId`            | `PlayerRecordPage`       | Player record with inline editing                                                                                            |
 | `/teams/builder`                | `TeamBuilderPage`        | Drag-and-drop balance board (`balanceSignals`)                                                                               |
@@ -36,7 +36,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/setup`                        | `SeasonSetupPage`        | Resumable setup checklist (`useSetupProgress`)                                                                               |
 | `/scores`                       | `ScoresPage`             | Grid score entry via `update_game_score` (admin; `score_entry`)                                                              |
 | `/scheduling/blackouts`         | `BlackoutsPage`          | Field blackout windows review grid                                                                                           |
-| `/exports`                      | `ExportsPage`            | Output generation (CSVs, emails)                                                                                             |
+| `/exports`                      | `ExportsPage`            | Output generation (master CSV and XLSX, emails)                                                                              |
 | `/admin/members`                | `MembersPage`            | Invites & membership                                                                                                         |
 | `/schedule/heat`                | `HeatForecastPage`       | Field WBGT forecast (admin, `heat_forecast` feature; NWS API)                                                                |
 | `/coaches`                      | `CoachesPage`            | Coach roster, status and team assignment (admin)                                                                             |
@@ -100,7 +100,8 @@ frontend/src/components/
 ├── DashboardWorkflow.jsx       # 6-step workflow orchestration (WorkflowPage)
 ├── ImportPanel.jsx             # CSV import with validation
 ├── TeamPersistencePanel.jsx    # Team save with optimistic UI
-├── OutputGenerationPanel.jsx   # CSV/email export generation
+├── OutputGenerationPanel.jsx   # CSV/XLSX/email export generation (the admin's master schedule)
+├── ScheduleExports.jsx         # A team's season as CSV, XLSX and .ics (team page, coach home; R7)
 ├── ProtectedRoute.jsx          # RBAC route guard
 ├── ErrorBoundary.jsx           # Global error boundary
 └── ...                         # Other panels and shared components

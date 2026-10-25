@@ -181,12 +181,17 @@ export function useTeamPortal(teamId) {
  *
  * A failed games or practices read throws; a failed exceptions read does not
  * (Q5): the practices still come back as the bare series, with
- * `practiceChangesUnread` true. The team page (`useTeamPortal`) and the coach
- * home (admin focus R6) both read a schedule through this one function.
+ * `practiceChangesUnread` true. The team page (`useTeamPortal`), the coach
+ * home (admin focus R6) and the schedule exports (R7) all read a schedule
+ * through this one function. `rows` are the three reads as returned, which
+ * the calendar download renders through the feed's own builder; the slot's
+ * `start` and `end` instants are asked for because the feed prefers them.
  *
  * @param {string} teamId
  * @param {string | null} timeZone
- * @returns {Promise<{ events: Array<Record<string, any>>, practiceChangesUnread: boolean }>}
+ * @returns {Promise<{ events: Array<Record<string, any>>, practiceChangesUnread: boolean,
+ *   rows: { games: Array<Record<string, any>>, practices: Array<Record<string, any>>,
+ *   exceptions: Array<Record<string, any>> } }>}
  */
 export async function fetchTeamEvents(teamId, timeZone) {
   // 3. Fetch Games
@@ -199,6 +204,8 @@ export async function fetchTeamEvents(teamId, timeZone) {
         slot_date,
         start_time,
         end_time,
+        start,
+        end,
         field:fields (
           name,
           location:locations (name)
@@ -224,6 +231,10 @@ export async function fetchTeamEvents(teamId, timeZone) {
     homeTeam: g.home_team?.name,
     awayTeam: g.away_team?.name,
     opponent: g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name,
+    // For the schedule export (R7): which side the team is on, and whether the
+    // game has a slot at all (a slot can lack the wall date and time).
+    role: g.home_team_id === teamId ? 'Home' : 'Away',
+    hasSlot: Boolean(g.game_slot),
     description: `vs ${g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name}`,
   }));
 
@@ -283,7 +294,17 @@ export async function fetchTeamEvents(teamId, timeZone) {
   // compared as strings (a dated TIME TBD has no time, so a `Date` built
   // from it is Invalid and would unsort the list).
   const allEvents = [...mappedGames, ...expandedPractices].sort(compareTeamEvents);
-  return { events: allEvents, practiceChangesUnread: changesUnread };
+  return {
+    events: allEvents,
+    practiceChangesUnread: changesUnread,
+    // The rows as read, for the calendar download (admin focus R7), which
+    // renders them through the feed's own builder (`utils/scheduleDownloads.js`).
+    rows: {
+      games: gamesData,
+      practices: practiceAssignments ?? [],
+      exceptions: practiceExceptions,
+    },
+  };
 }
 
 /** Same fallback as the feed's `locationOf`, never 'undefined - undefined'. */

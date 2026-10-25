@@ -766,7 +766,7 @@ at once (AGENTS.md section 11).
   174.11 to 174.13 KB gz, lucide vendor 8.89 to 9.05 KB (three icons), first paint 274.10 to
   274.28 KB of 289.06 KB. Lazy: `write-excel-file` 19.10 KB, the feed renderer 7.13 KB,
   `ScheduleExports` 4.45 KB (it absorbed the 2.05 KB `useTeamPortal` chunk), the download helpers
-  0.94 KB. No budget changed.
+  0.91 KB. No budget changed.
 - **The mock follows the SQL.** Its practice slot embed put the ground under `fields` whatever the
   select named, without the venue, so the team page showed every practice at "Venue - Field" in
   mock mode, and `field:fields(location_id)` (the preference review) read nothing. It now uses the

@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { Clock, History, Star, ThermometerSun, UserRoundCheck, Users } from 'lucide-react';
+import {
+  Clock,
+  Flag,
+  History,
+  Star,
+  ThermometerSun,
+  Trophy,
+  UserRoundCheck,
+  Users,
+} from 'lucide-react';
 import { IS_DEV_SERVER } from '../env.js';
 
 /**
@@ -41,6 +50,16 @@ export const FEATURE_FLAGS = {
 
   // Field heat-stress (WBGT) forecast; off unless an admin turns it on.
   HEAT_FORECAST: 'heat_forecast',
+
+  // Score entry and standings: admin functions the league turns on, off
+  // unless set (plan docs/changes/2026-10-22-admin-focus.md, R6, owner
+  // decision 4). `update_game_score` reads `score_entry` itself
+  // (`org_flag(org, 'score_entry', false)`, 20261028010000) and refuses 55000
+  // while it is off; `standings` hides the standings page only (standings are
+  // computed from games every member reads, so it is presentation, not
+  // authorization).
+  SCORE_ENTRY: 'score_entry',
+  STANDINGS: 'standings',
 
   // Retired with the coach directory (plan docs/changes/2026-10-22-admin-focus.md,
   // R4; migration 20261025010000): coaches see no contact details, so nothing
@@ -148,6 +167,22 @@ export const FEATURE_CATALOG = [
     description:
       'Forecast field WBGT per venue and kickoff from the NWS forecast, banded by U.S. Soccer heat guidelines. Decision support; on-site readings govern.',
     icon: ThermometerSun,
+    column: false,
+  },
+  {
+    key: FEATURE_FLAGS.SCORE_ENTRY,
+    label: 'Score Entry',
+    description:
+      'Admins enter game scores (Scores & Results). Coaches do not enter scores. Off unless turned on.',
+    icon: Flag,
+    column: false,
+  },
+  {
+    key: FEATURE_FLAGS.STANDINGS,
+    label: 'Standings',
+    description:
+      'Show league standings to admins, ranked from the entered scores. Off unless turned on.',
+    icon: Trophy,
     column: false,
   },
 ];

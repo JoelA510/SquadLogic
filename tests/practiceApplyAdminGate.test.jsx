@@ -188,16 +188,15 @@ function renderAs(role) {
 const REASON = 'Only an organization admin can apply a practice schedule.';
 
 describe('practice Apply is for org admins only (#64)', () => {
-  it('a coach sees Apply, disabled, described by the reason', async () => {
-    // The premise: a coach CAN manage the schedule, so reaches the review.
-    expect(ROLE_PERMISSIONS[ROLES.COACH]).toContain(PERMISSIONS.MANAGE_SCHEDULE);
+  // Admin focus R6 (20261028010000): a coach holds neither VIEW_SCHEDULE nor
+  // MANAGE_SCHEDULE, so never reaches this page (App.jsx's route); the
+  // disabled-Apply state this test once rendered for a coach is one no role
+  // can reach (declared: the page keeps it for a role with MANAGE_SCHEDULE and
+  // not MANAGE_ORGANIZATION, of which there is none).
+  it('gives a coach no route to the practice scheduling page', () => {
+    expect(ROLE_PERMISSIONS[ROLES.COACH]).not.toContain(PERMISSIONS.VIEW_SCHEDULE);
+    expect(ROLE_PERMISSIONS[ROLES.COACH]).not.toContain(PERMISSIONS.MANAGE_SCHEDULE);
     expect(ROLE_PERMISSIONS[ROLES.COACH]).not.toContain(PERMISSIONS.MANAGE_ORGANIZATION);
-    renderAs(ROLES.COACH);
-
-    const apply = await screen.findByRole('button', { name: /apply schedule/i });
-    expect(apply).toBeDisabled();
-    expect(apply).toHaveAccessibleDescription(REASON);
-    expect(screen.getByText(REASON)).toBeVisible();
   });
 
   it('an admin sees Apply enabled, with no reason', async () => {

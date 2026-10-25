@@ -22,6 +22,7 @@ import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 import { usePermission } from '../../hooks/usePermission.js';
 import { supabase } from '../../lib/supabaseClient.js';
+import { logger } from '../../lib/logger.js';
 import Dropdown from '../ui/Dropdown.jsx';
 import { useToast } from '../ui/ToastHost.jsx';
 import Badge from '../ui/Badge.jsx';
@@ -116,24 +117,58 @@ export default function TopBar({ onToggleNav = undefined }) {
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
-  // Role-preview target (one coach profile), fetched for admins. There is no
-  // parent view to preview since 20261024010000 (R3).
+  // Role-preview target (one coach), fetched for admins. There is no parent
+  // view to preview since 20261024010000 (R3). A coach is a member whose
+  // organization role is `coach` (`organization_members.role`, read through
+  // the admin-only member list): `profiles.role` is set by nothing and every
+  // profile reads `user`, so the preview, which looked there, was never
+  // offered (admin focus R6). The target is shaped as a profile, its role the
+  // membership's, for `impersonateUser` and the role-scoped nav and home.
   const orgId = currentOrganization?.id;
   useEffect(() => {
     if (!isAdmin || !orgId) return undefined;
     let cancelled = false;
     (async () => {
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, email, first_name, last_name, full_name, role, organization_id')
-          .eq('organization_id', orgId)
-          .eq('role', 'coach');
-        if (error || cancelled) return;
-        const coach = (data || []).find((profile) => profile.role === 'coach');
-        setPreviewTargets(coach ? [coach] : []);
-      } catch {
-        /* preview is optional — ignore fetch failures */
+        const { data, error } = await supabase.rpc('get_organization_members', {
+          p_organization_id: orgId,
+        });
+        if (cancelled) return;
+        if (error) {
+          // Preview is optional, but a failure is said, not swallowed.
+          logger.warn('[TopBar] role preview targets not loaded', {
+            code: error.code,
+            message: error.message,
+          });
+          setPreviewTargets([]);
+          return;
+        }
+        const coach = (data || [])
+          .filter((member) => member.role === 'coach' && member.profile_id)
+          .sort(
+            (a, b) =>
+              String(a.full_name ?? a.email ?? '').localeCompare(
+                String(b.full_name ?? b.email ?? '')
+              ) || String(a.profile_id).localeCompare(String(b.profile_id))
+          )[0];
+        setPreviewTargets(
+          coach
+            ? [
+                {
+                  id: coach.profile_id,
+                  email: coach.email ?? null,
+                  first_name: coach.first_name ?? null,
+                  last_name: coach.last_name ?? null,
+                  full_name: coach.full_name ?? null,
+                  role: 'coach',
+                  organization_id: orgId,
+                },
+              ]
+            : []
+        );
+      } catch (err) {
+        // Best effort: the account menu still works without a preview entry.
+        logger.warn('[TopBar] role preview targets not loaded', { message: err?.message });
       }
     })();
     return () => {

@@ -31,62 +31,6 @@ export function windowsOverlap(a, b) {
   return left.from <= right.until && right.from <= left.until;
 }
 
-/**
- * The slots the user coaches, mirroring `public.caller_coaches_practice_slot`:
- * a slot of the organization with a `practice_assignments` row (on
- * `COALESCE(practice_slot_id, slot_id)`) for a team whose
- * `team_coach_assignments` row is current on `today` and names a coach whose
- * `user_id` is the caller. Every join is held to the slot's organization.
- *
- * Enumerated from the roster tables, never from override rows, so a slot with
- * no override yet is still offered.
- *
- * @param {{ userId: string | null | undefined, orgId: string, today: string,
- *   coaches: any[], teamCoachAssignments: any[], practiceAssignments: any[],
- *   practiceSlots: any[] }} input
- * @returns {Set<string>}
- */
-export function coachedPracticeSlotIds({
-  userId,
-  orgId,
-  today,
-  coaches,
-  teamCoachAssignments,
-  practiceAssignments,
-  practiceSlots,
-}) {
-  const slots = new Set();
-  if (!userId) return slots;
-  const sameOrg = (row) => String(row.organization_id) === String(orgId);
-  const coachIds = new Set(
-    (coaches || [])
-      .filter((coach) => sameOrg(coach) && String(coach.user_id ?? '') === String(userId))
-      .map((coach) => String(coach.id))
-  );
-  const teamIds = new Set(
-    (teamCoachAssignments || [])
-      .filter(
-        (row) =>
-          sameOrg(row) &&
-          coachIds.has(String(row.coach_id)) &&
-          String(row.effective_from) <= today &&
-          (row.effective_to === null ||
-            row.effective_to === undefined ||
-            String(row.effective_to) >= today)
-      )
-      .map((row) => String(row.team_id))
-  );
-  const orgSlotIds = new Set((practiceSlots || []).filter(sameOrg).map((slot) => String(slot.id)));
-  for (const row of practiceAssignments || []) {
-    if (!sameOrg(row) || !teamIds.has(String(row.team_id))) continue;
-    const slotId = row.practice_slot_id ?? row.slot_id;
-    if (slotId !== null && slotId !== undefined && orgSlotIds.has(String(slotId))) {
-      slots.add(String(slotId));
-    }
-  }
-  return slots;
-}
-
 /** The EXCLUDE constraint's name, as Postgres reports it in a 23P01. */
 export const NO_OVERLAP_CONSTRAINT = 'practice_lighting_overrides_no_overlap';
 
@@ -146,6 +90,3 @@ export function practiceSlotLabels(slots, fieldNames, subunitNames = null) {
     ])
   );
 }
-
-/** Statuses from which the withdraw RPC accepts a row. */
-export const WITHDRAWABLE_STATUSES = Object.freeze(['requested', 'approved']);

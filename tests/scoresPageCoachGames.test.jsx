@@ -1,7 +1,9 @@
-// The Scores page as a coach (Phase A3b, migration 20261021020000): a coach may
-// score only their own teams' games, so the page asks the server for those
-// games rather than cutting them out of the league's latest 200, where a busy
-// league would leave none; and it says so when the coach's teams cannot be read.
+// The Scores page (admin focus R6, migration 20261028010000): an admin scores
+// every game and nobody else scores any. A coach never reaches the page (no
+// MANAGE_SCHEDULE); an admin previewing a coach does, and sees what the coach
+// could score: nothing. The preview's read still asks the server for the
+// coach's teams' games rather than cutting them out of the league's latest
+// 200, and says so when those teams cannot be read.
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -13,7 +15,7 @@ const mocks = vi.hoisted(() => ({
     ready: true,
     error: false,
     teamIds: /** @type {string[] | null} */ (['team-a', 'team-b']),
-    canScoreGame: () => true,
+    canScoreGame: /** @type {(game: any) => boolean} */ (() => false),
     coachesTeam: () => true,
   },
   calls: /** @type {Array<[string, any[]]>} */ ([]),
@@ -74,33 +76,54 @@ const callsTo = (method) => mocks.calls.filter(([name]) => name === method).map(
 beforeEach(() => {
   mocks.calls = [];
   mocks.games = [];
-  mocks.scorable = { ...mocks.scorable, ready: true, error: false, teamIds: ['team-a', 'team-b'] };
+  // A preview of a coach: the hook answers for the coach (useScorableGames.test.jsx).
+  mocks.scorable = {
+    ...mocks.scorable,
+    ready: true,
+    error: false,
+    teamIds: ['team-a', 'team-b'],
+    canScoreGame: () => false,
+  };
 });
 
-describe('ScoresPage, for a coach', () => {
-  it('asks the server for the coach s own teams games, home or away', async () => {
+const GAME = {
+  id: 'g1',
+  start_time: '2026-10-01T15:00:00Z',
+  score_home: null,
+  score_away: null,
+  home_team: { id: 'team-a', name: 'Aces', division: { name: 'U10' } },
+  away_team: { id: 'team-x', name: 'Rivals' },
+};
+
+describe('ScoresPage', () => {
+  it('asks for every game for an admin, and lists each for entry', async () => {
+    mocks.scorable = { ...mocks.scorable, teamIds: null, canScoreGame: () => true };
+    mocks.games = [GAME];
+    renderPage();
+    await waitFor(() => expect(callsTo('limit')).toHaveLength(1));
+    expect(callsTo('or')).toEqual([]);
+    expect(await screen.findByText('Rivals')).toBeInTheDocument();
+  });
+
+  it('under a preview of a coach, reads the coach s teams games and offers none for entry', async () => {
+    mocks.games = [GAME];
     renderPage();
     await waitFor(() => expect(callsTo('limit')).toHaveLength(1));
     expect(callsTo('or')).toEqual([
       ['home_team_id.in.(team-a,team-b),away_team_id.in.(team-a,team-b)'],
     ]);
+    expect(await screen.findByRole('grid', { name: 'Scores grid' })).toBeInTheDocument();
+    expect(screen.queryByText('Rivals')).not.toBeInTheDocument();
   });
 
-  it('asks for every game for an admin', async () => {
-    mocks.scorable = { ...mocks.scorable, teamIds: null };
-    renderPage();
-    await waitFor(() => expect(callsTo('limit')).toHaveLength(1));
-    expect(callsTo('or')).toEqual([]);
-  });
-
-  it('asks nothing for a coach of no team', async () => {
+  it('asks nothing under a preview of a coach of no team', async () => {
     mocks.scorable = { ...mocks.scorable, teamIds: [] };
     renderPage();
     expect(await screen.findByRole('grid', { name: 'Scores grid' })).toBeInTheDocument();
     expect(mocks.calls).toEqual([]);
   });
 
-  it('says so when the coach s teams could not be read', async () => {
+  it('says so when the previewed coach s teams could not be read', async () => {
     mocks.scorable = { ...mocks.scorable, teamIds: [], error: true };
     renderPage();
     expect(await screen.findByText(/Your teams could not be loaded/)).toBeInTheDocument();

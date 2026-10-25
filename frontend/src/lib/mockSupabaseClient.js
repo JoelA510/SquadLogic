@@ -1669,6 +1669,25 @@ const createMockQuery = (table, data = null) => {
             return { ...item, division: division ? { ...division, season: season || null } : null };
           });
         }
+        if (table === 'games' && queryContent.includes('game_slot:game_slots')) {
+          // `game_slot:game_slots (slot_date, ..., field:fields (name, location:locations (name)))`,
+          // as the team page and the coach home read a game's slot (admin focus R6): the
+          // slot by `game_slot_id`, with its field and that field's venue; null without one.
+          const slots = getMockData('game_slots');
+          const fields = getMockData('fields');
+          const locations = getMockData('locations');
+          results = results.map((item) => {
+            const slot = slots.find((g) => String(g.id) === String(item.game_slot_id)) || null;
+            const field = slot ? fields.find((f) => String(f.id) === String(slot.field_id)) : null;
+            const location = field
+              ? locations.find((l) => String(l.id) === String(field.location_id)) || null
+              : null;
+            return {
+              ...item,
+              game_slot: slot ? { ...slot, field: field ? { ...field, location } : null } : null,
+            };
+          });
+        }
         if (
           table === 'games' &&
           (queryContent.includes('home_team') || queryContent.includes('away_team'))
@@ -4144,8 +4163,9 @@ export const mockSupabase = {
     }
 
     if (MOCK_CAPABLE_BUILD && name === 'update_game_score') {
-      // As 20261021020000: an admin or staff member scores any game, anyone
-      // else only a game of a team they currently coach.
+      // As 20261028010000 (admin focus R6): an admin or staff member only,
+      // and only while the organization's `score_entry` setting is a boolean
+      // true (`org_flag(org, 'score_entry', false)`); 55000 while it is off.
       const game = (db.games || []).find((g) => String(g.id) === String(params?.p_game_id));
       if (
         !game ||
@@ -4159,17 +4179,24 @@ export const mockSupabase = {
           },
         };
       }
-      const access = createAccessHelpers(db, currentUserId);
-      if (
-        !isOrgAdmin(params?.p_organization_id) &&
-        !access.isCurrentTeamCoach(game.home_team_id) &&
-        !access.isCurrentTeamCoach(game.away_team_id)
-      ) {
+      if (!isOrgAdmin(params?.p_organization_id)) {
         return {
           data: null,
           error: {
-            message: 'Access denied: only a current coach of either team can score this game',
+            message: 'Access denied: only an organization admin enters scores',
             code: '42501',
+          },
+        };
+      }
+      const scoringOrg = (db.organizations || []).find(
+        (org) => String(org.id) === String(params?.p_organization_id)
+      );
+      if (scoringOrg?.feature_flags?.score_entry !== true) {
+        return {
+          data: null,
+          error: {
+            message: `Score entry is off for organization ${params?.p_organization_id}: an admin turns it on in Settings`,
+            code: '55000',
           },
         };
       }
@@ -4505,6 +4532,25 @@ export const mockSupabase = {
     }
 
     if (name === 'update_org_feature_flags') {
+      // As the SQL: an org admin replaces the organization's flags. Stored, so
+      // the RPCs that read a setting (update_game_score's `score_entry`,
+      // 20261028010000) see it, as org_flag does. Not mirrored: its audit row.
+      if (!isOrgAdmin(params?.p_org_id)) {
+        return {
+          data: null,
+          error: {
+            message:
+              'Unauthorized: You must be an organization administrator to update feature flags.',
+          },
+        };
+      }
+      const flagOrg = (db.organizations || []).find(
+        (org) => String(org.id) === String(params?.p_org_id)
+      );
+      if (flagOrg) {
+        flagOrg.feature_flags = params?.p_flags ?? {};
+        saveDB(db);
+      }
       return { data: true, error: null };
     }
 

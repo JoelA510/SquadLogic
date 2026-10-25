@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
   toggleThemeMode: vi.fn(),
   impersonateUser: vi.fn().mockResolvedValue(undefined),
   toast: vi.fn(),
-  previewProfiles: [],
+  previewMembers: [],
+  rpc: vi.fn(),
   auth: {},
   org: {},
   permission: {},
@@ -47,19 +48,22 @@ vi.mock('../frontend/src/hooks/useNavBadges.js', () => ({
   useNavBadges: () => ({ players: 42, coaches: 7, teams: 6 }),
 }));
 
+// The role preview's coach comes from the admin-only member list
+// (`get_organization_members`): its `role` is the membership's (admin focus R6;
+// `profiles.role` is set by nothing). `from()` answers nothing, so a preview
+// found by a profile read would not show.
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     from: () => ({
       select: () => ({
         in: () => Promise.resolve({ data: [], error: null }),
-        // Either filter answers with the seeded profiles, so a filter that
-        // let a parent through would show in the menu.
         eq: () => ({
-          eq: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
-          in: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
+          eq: () => Promise.resolve({ data: [], error: null }),
+          in: () => Promise.resolve({ data: [], error: null }),
         }),
       }),
     }),
+    rpc: (name, params) => mocks.rpc(name, params),
   },
 }));
 
@@ -79,7 +83,12 @@ function configureRole(role) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.previewProfiles = [];
+  mocks.previewMembers = [];
+  mocks.rpc.mockImplementation(async (name) =>
+    name === 'get_organization_members'
+      ? { data: mocks.previewMembers, error: null }
+      : { data: null, error: { code: 'PGRST202', message: `no rpc ${name}` } }
+  );
   localStorage.clear();
   mocks.auth.signOut = mocks.signOut;
   mocks.auth.isAdmin = true;
@@ -157,7 +166,9 @@ describe('TopBar', () => {
   });
 
   it('toasts when starting a role preview fails, and not when it starts', async () => {
-    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
+    ];
     mocks.impersonateUser.mockRejectedValueOnce(new Error('rpc down'));
     render(
       <MemoryRouter>
@@ -178,7 +189,9 @@ describe('TopBar', () => {
   });
 
   it('offers role preview to a staff member (staff are admins), passing the org role', async () => {
-    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
+    ];
     mocks.auth.isAdmin = false;
     mocks.auth.user = {
       email: 'staff@example.com',
@@ -202,10 +215,53 @@ describe('TopBar', () => {
     );
   });
 
-  // No parent view to preview since 20261024010000 (R3): a profile still
+  // Admin focus R6: the preview looked for `profiles.role = 'coach'`, which
+  // nothing sets (every profile reads `user`), so it was never offered. The
+  // coach is found by membership role, and handed over shaped as a profile.
+  it('finds the previewed coach by membership role, and previews them as a coach', async () => {
+    mocks.previewMembers = [
+      { profile_id: 'admin-1', role: 'admin', full_name: 'Avery Admin', email: 'a@example.test' },
+      { profile_id: 'coach-2', role: 'coach', full_name: 'Zed Coach', email: 'z@example.test' },
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'c@example.test' },
+    ];
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
+    await waitFor(() => expect(mocks.impersonateUser).toHaveBeenCalledTimes(1));
+    expect(mocks.rpc).toHaveBeenCalledWith('get_organization_members', {
+      p_organization_id: MOCK_ORG_ID,
+    });
+    expect(mocks.impersonateUser.mock.calls[0][0]).toEqual({
+      id: 'coach-1',
+      email: 'c@example.test',
+      first_name: null,
+      last_name: null,
+      full_name: 'Cora Coach',
+      role: 'coach',
+      organization_id: MOCK_ORG_ID,
+    });
+  });
+
+  it('offers no preview when the member list cannot be read', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'no' } });
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    await screen.findByRole('menuitem', { name: 'Sign out' });
+    expect(screen.queryByRole('menuitem', { name: /Preview as/ })).not.toBeInTheDocument();
+  });
+
+  // No parent view to preview since 20261024010000 (R3): a member still
   // carrying the old role is not offered, even if a read returns one.
   it('offers no parent preview', async () => {
-    mocks.previewProfiles = [{ id: 'parent-1', role: 'parent', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [{ profile_id: 'parent-1', role: 'parent', full_name: 'Pat Parent' }];
     render(
       <MemoryRouter>
         <TopBar />
@@ -217,7 +273,9 @@ describe('TopBar', () => {
   });
 
   it('offers no role preview to a coach', () => {
-    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
+    ];
     mocks.auth.isAdmin = false;
     mocks.auth.user = {
       email: 'coach@example.com',

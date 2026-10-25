@@ -76,10 +76,9 @@ const REGISTRY = {
     class: 'series-only',
     why: 'X7: judges a placement in force on a date, makes no dates',
   },
-  'frontend/src/hooks/usePracticeLightingOverrides.js': {
-    class: 'series-only',
-    why: 'X8: slot membership for lighting overrides, not dates',
-  },
+  // X8, the lighting coach view's slot membership, went with coach lighting
+  // requests (20261028010000; plan docs/changes/2026-10-22-admin-focus.md,
+  // R6): `usePracticeLightingOverrides.js` reads no practice_assignments.
   'packages/core/src/practiceSupabase.js': {
     class: 'series-only',
     why:

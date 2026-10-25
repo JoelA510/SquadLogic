@@ -18,7 +18,10 @@ export const PERMISSIONS = {
   MANAGE_OWN_TEAM: 'manage_own_team',
   VIEW_ALL_TEAMS: 'view_all_teams',
 
-  // Schedule
+  // Schedule: the admin scheduling pages, and score entry and standings
+  // (behind the league's settings). Admins only since 20261028010000 (plan
+  // docs/changes/2026-10-22-admin-focus.md, R6): a coach sees their own
+  // schedule on their home, and `update_game_score` refuses a non-admin.
   MANAGE_SCHEDULE: 'manage_schedule',
   VIEW_SCHEDULE: 'view_schedule',
 
@@ -27,9 +30,9 @@ export const PERMISSIONS = {
   REQUEST_PRACTICE_PREFERENCE: 'request_practice_preference',
   DECIDE_PRACTICE_PREFERENCE: 'decide_practice_preference',
 
-  // Portable-lighting overrides (8.9 D14): coaches of the slot request, only
-  // admins decide or set. The RPCs enforce the same split server-side.
-  REQUEST_PRACTICE_LIGHTING_OVERRIDE: 'request_practice_lighting_override',
+  // Portable-lighting overrides (8.9 D14): admins decide, set and withdraw.
+  // No coach requests since 20261028010000 (R6, owner decision 4), so the
+  // request permission is gone with the request RPC.
   DECIDE_PRACTICE_LIGHTING_OVERRIDE: 'decide_practice_lighting_override',
 };
 
@@ -63,7 +66,6 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.VIEW_SCHEDULE,
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
     PERMISSIONS.DECIDE_PRACTICE_PREFERENCE,
-    PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE,
     PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE,
   ],
   [ROLES.ADMIN]: [
@@ -80,7 +82,6 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.VIEW_SCHEDULE,
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
     PERMISSIONS.DECIDE_PRACTICE_PREFERENCE,
-    PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE,
     PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE,
   ],
   [ROLES.COACH]: [
@@ -88,10 +89,10 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.MANAGE_OWN_TEAM,
     // Not VIEW_ALL_TEAMS: a coach sees their own team only (Phase A3, owner
     // decision 2026-10-20); the league's rosters are an admin's.
-    PERMISSIONS.MANAGE_SCHEDULE, // their own games
-    PERMISSIONS.VIEW_SCHEDULE,
+    // Not MANAGE_SCHEDULE or VIEW_SCHEDULE: scheduling, score entry and
+    // standings are an admin's; a coach's own schedule is on their home
+    // (20261028010000, R6). Practice preferences stay (decision 4).
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
-    PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE,
   ],
 };
 

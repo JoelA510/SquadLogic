@@ -7,6 +7,7 @@ import { Trophy, CheckCircle2 } from 'lucide-react';
 import { logger } from '../lib/logger.js';
 import { useScorableGames } from '../hooks/useScorableGames.js';
 import { useFeatures } from '../hooks/useFeatures.js';
+import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 
 const parseScoreInput = (score) => {
@@ -44,11 +45,13 @@ export default function LeagueStandings() {
   const [error, setError] = useState(null);
   const [updatingGameId, setUpdatingGameId] = useState(null);
 
-  const canEditScores = hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE);
-  // Per game: an admin scores any game, a coach only their own team's
-  // (update_game_score refuses the rest, 20261021020000).
+  const { genderModel, isEnabled } = useFeatures();
+  // Score entry is an admin function the league turns on (20261028010000, R6):
+  // update_game_score refuses a non-admin, and anyone while the setting is off.
+  const canEditScores =
+    hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE) &&
+    isEnabled(FEATURE_FLAGS.SCORE_ENTRY);
   const { canScoreGame, error: scorableError } = useScorableGames({ enabled: canEditScores });
-  const { genderModel } = useFeatures();
 
   useEffect(() => {
     async function loadData() {

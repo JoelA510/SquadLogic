@@ -32,6 +32,9 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import { isAdminRole } from '../constants/permissions.js';
+import { useMyCoachedTeams } from '../hooks/useMyCoachedTeams.js';
+import CoachScheduleCard from '../components/coach/CoachScheduleCard.jsx';
+import DivisionTeamsCard from '../components/coach/DivisionTeamsCard.jsx';
 
 /**
  * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
@@ -553,62 +556,18 @@ function AdminHome() {
   );
 }
 
-/** Coach Home — my teams at a glance. No coach directory: coaches see no contact details (R4). */
+/**
+ * Coach Home (plan docs/changes/2026-10-22-admin-focus.md, R6): the teams the
+ * coach coaches, their own schedule (games and practices), and the teams and
+ * coaches of their divisions, names only. No coach directory: coaches see no
+ * contact details (R4). Scheduling, score entry and standings are an admin's,
+ * so nothing here links to them. Permits are not here yet: Phase C
+ * (docs/changes/2026-10-22-phase-c-permits.md) has not been built.
+ */
 function CoachDashboard() {
   const { currentOrganization } = useOrganization();
-  const { user, isImpersonating } = useAuth();
-  // An admin's role preview keeps the admin's session (auth.uid()), so the
-  // previewed coach's teams come from the admin-only read for that profile.
-  const previewUserId = isImpersonating ? (user?.profile?.id ?? null) : null;
-  const [teams, setTeams] = useState(/** @type {{ id: string, name: string }[]} */ ([]));
-  const [loadError, setLoadError] = useState(/** @type {string | null} */ (null));
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const orgId = currentOrganization?.id;
-      if (!orgId) return;
-      // Nothing of the previous organization stays on screen while this one loads.
-      setTeams([]);
-      setLoadError(null);
-      try {
-        // The teams the caller currently coaches (20261021010000): a live
-        // team_coach_assignments row of their linked coach record, judged in
-        // each team's season timezone.
-        const { data: teamIds, error: idsError } = previewUserId
-          ? await supabase.rpc('admin_get_coached_team_ids', {
-              p_organization_id: orgId,
-              p_user_id: previewUserId,
-            })
-          : await supabase.rpc('get_my_coached_team_ids', { p_organization_id: orgId });
-        if (idsError) throw idsError;
-        const ids = (teamIds || []).map(String);
-        let mine = [];
-        if (ids.length > 0) {
-          const { data: teamRows, error: teamsError } = await supabase
-            .from('teams')
-            .select('id, name')
-            .eq('organization_id', orgId)
-            .in('id', ids);
-          if (teamsError) throw teamsError;
-          mine = (teamRows || []).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-        }
-        if (!cancelled) {
-          setTeams(mine);
-          setLoadError(null);
-        }
-      } catch (err) {
-        logger.error('[CoachDashboard] load failed:', err);
-        if (!cancelled) setLoadError('Your teams could not be loaded. Try again shortly.');
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentOrganization?.id, previewUserId]);
+  const { teams, loaded, error, previewUserId } = useMyCoachedTeams();
+  const orgId = currentOrganization?.id ? String(currentOrganization.id) : null;
 
   if (!loaded) return <LoadingScreen />;
 
@@ -617,7 +576,7 @@ function CoachDashboard() {
       header={
         <PageHeader
           title="My Dashboard"
-          subtitle="Your team, schedule, and roster at a glance."
+          subtitle="Your teams, schedule, and division at a glance."
           icon={
             <span className="page-obj-icon" style={{ background: 'var(--primary)' }}>
               <Shield size={20} aria-hidden="true" />
@@ -628,7 +587,7 @@ function CoachDashboard() {
       }
     >
       <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {loadError && <DataErrorBanner message={loadError} />}
+        {error && <DataErrorBanner message="Your teams could not be loaded. Try again shortly." />}
         {teams.length > 0
           ? teams.map((team) => (
               <div className="card" key={team.id}>
@@ -656,28 +615,20 @@ function CoachDashboard() {
                 </div>
               </div>
             ))
-          : !loadError && (
+          : !error && (
               <div className="card">
                 <div className="card-body muted">
                   No team is assigned to you yet — your league admin will assign one.
                 </div>
               </div>
             )}
+        {teams.length > 0 && <CoachScheduleCard teams={teams} />}
+        {orgId && !error && <DivisionTeamsCard orgId={orgId} previewUserId={previewUserId} />}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Link to="/schedule/practice">
+            <Link to="/coaches/practice-preferences">
               <Button variant="secondary" size="sm" icon={Calendar}>
-                Practices
-              </Button>
-            </Link>
-            <Link to="/schedule/game">
-              <Button variant="secondary" size="sm" icon={Flag}>
-                Game schedule
-              </Button>
-            </Link>
-            <Link to="/standings">
-              <Button variant="secondary" size="sm" icon={History}>
-                Standings
+                Practice preferences
               </Button>
             </Link>
           </div>

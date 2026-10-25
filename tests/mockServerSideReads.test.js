@@ -214,3 +214,82 @@ describe('mock server-side reads', () => {
     expect(call('finn', 'get_my_coached_team_ids', { p_organization_id: ORG }).data).toEqual([]);
   });
 });
+
+// Admin focus R6 (20261028010000): the coach's divisions, as division_teams_of
+// answers them -- every team of a division where the user currently coaches a
+// team, its current coaches' names (lead first), and no contact.
+describe('mock division reads', () => {
+  beforeEach(() => {
+    db.divisions = [
+      { id: 'div', organization_id: ORG, season_settings_id: 'season', name: 'U10' },
+      { id: 'div-2', organization_id: ORG, season_settings_id: 'season', name: 'U12' },
+    ];
+    db.teams.push({ id: 'team-c', organization_id: ORG, division_id: 'div-2', name: 'C-Team' });
+    db.coaches.push({
+      id: 'c-uma',
+      organization_id: ORG,
+      user_id: 'uma',
+      full_name: 'Uma',
+      email: 'uma@example.test',
+    });
+    db.organization_members.push({ organization_id: ORG, profile_id: 'uma', role: 'coach' });
+    db.team_coach_assignments.push(
+      {
+        organization_id: ORG,
+        team_id: 'team-c',
+        coach_id: 'c-uma',
+        role: 'lead',
+        effective_from: '2026-09-01',
+        effective_to: null,
+      },
+      // Otto also assists A-Team: named after its lead.
+      {
+        organization_id: ORG,
+        team_id: 'team-a',
+        coach_id: 'c-otto',
+        role: 'assistant',
+        effective_from: '2026-09-01',
+        effective_to: null,
+      }
+    );
+  });
+
+  const teams = (user, name = 'get_my_division_teams', extra = {}) =>
+    call(user, name, { p_organization_id: ORG, ...extra });
+
+  it('gives a coach every team of their division, its current coaches lead first, and no contact', () => {
+    expect(teams('cora').data).toEqual([
+      {
+        division_id: 'div',
+        division_name: 'U10',
+        team_id: 'team-a',
+        team_name: 'A-Team',
+        coach_names: ['Cora', 'Otto'],
+        is_mine: true,
+      },
+      {
+        division_id: 'div',
+        division_name: 'U10',
+        team_id: 'team-b',
+        team_name: 'B-Team',
+        coach_names: ['Otto'],
+        is_mine: false,
+      },
+    ]);
+    // Finn's A-Team assignment ended yesterday: he is named nowhere and reads nothing.
+    expect(JSON.stringify(teams('cora').data)).not.toMatch(/Finn|@|555/);
+    expect(teams('finn').data).toEqual([]);
+    expect(teams('uma').data.map((row) => row.team_name)).toEqual(['C-Team']);
+    for (const user of ['mo', 'admin']) expect(teams(user).data).toEqual([]);
+  });
+
+  it('answers an admin’s preview of a coach, and refuses a non-admin and no session', () => {
+    expect(
+      teams('admin', 'admin_get_division_teams', { p_user_id: 'uma' }).data.map((r) => r.team_id)
+    ).toEqual(['team-c']);
+    expect(teams('cora', 'admin_get_division_teams', { p_user_id: 'uma' }).error?.code).toBe(
+      '42501'
+    );
+    expect(teams(null).error?.code).toBe('42501');
+  });
+});

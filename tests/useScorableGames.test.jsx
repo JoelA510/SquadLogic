@@ -1,8 +1,8 @@
-// Which games the score pages offer for entry (Phase A3b, migration
-// 20261021020000): update_game_score lets an admin or staff member score any
-// game and anyone else only a game of a team they currently coach, so the hook
-// asks the server for the caller's coached teams (or the previewed coach's)
-// rather than deciding from the caller's role.
+// Which games the score pages offer for entry: since 20261028010000 (plan
+// docs/changes/2026-10-22-admin-focus.md, R6) update_game_score lets an admin
+// or staff member score any game and nobody else, a coach's own games
+// included. The hook still asks the server for the caller's coached teams (or
+// the previewed coach's), which the calendar token's `coachesTeam` reads.
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useScorableGames } from '../frontend/src/hooks/useScorableGames.js';
@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 describe('useScorableGames', () => {
-  it('lets a coach score only games of a team they currently coach, home or away', async () => {
+  it('lets a coach score no game, their own teams’ included, and still knows their teams', async () => {
     mocks.rpc.mockResolvedValue({ data: ['team-a'], error: null });
     const { result } = renderHook(() => useScorableGames());
 
@@ -57,7 +57,7 @@ describe('useScorableGames', () => {
     expect(mocks.rpc).toHaveBeenCalledWith('get_my_coached_team_ids', {
       p_organization_id: 'org-a',
     });
-    expect([OWN, AWAY, OTHER].map(result.current.canScoreGame)).toEqual([true, true, false]);
+    expect([OWN, AWAY, OTHER].map(result.current.canScoreGame)).toEqual([false, false, false]);
     expect(result.current.coachesTeam('team-a')).toBe(true);
     expect(result.current.coachesTeam('team-x')).toBe(false);
     expect(result.current.teamIds).toEqual(['team-a']);
@@ -75,7 +75,7 @@ describe('useScorableGames', () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it('answers for the previewed coach, not the admin, during a preview', async () => {
+  it('answers for the previewed coach, not the admin, during a preview: nothing to score', async () => {
     mocks.role = 'admin';
     mocks.impersonating = true;
     mocks.rpc.mockResolvedValue({ data: ['team-x'], error: null });
@@ -86,7 +86,9 @@ describe('useScorableGames', () => {
       p_organization_id: 'org-a',
       p_user_id: 'cora',
     });
-    expect([OWN, AWAY, OTHER].map(result.current.canScoreGame)).toEqual([true, false, true]);
+    expect([OWN, AWAY, OTHER].map(result.current.canScoreGame)).toEqual([false, false, false]);
+    expect(result.current.coachesTeam('team-x')).toBe(true);
+    expect(result.current.coachesTeam('team-a')).toBe(false);
   });
 
   it('offers nothing when the coached teams cannot be read, and says the read failed', async () => {

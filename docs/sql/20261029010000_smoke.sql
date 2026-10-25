@@ -148,7 +148,7 @@ BEGIN
           ('f other half', v_half_b, '09:00', '09:30', '2026-09-05', '2026-11-28', NULL),
           ('g whole field', NULL, '09:00', '09:30', '2026-09-05', '2026-11-28', NULL),
           ('h december', v_half_a, '09:00', '09:30', '2026-12-05', '2026-12-19', NULL),
-          ('i no saturday', v_half_a, '09:00', '09:30', '2026-11-29', '2026-12-04', NULL),
+          ('i no saturday', v_half_a, '09:00', '09:30', '2026-11-23', '2026-11-27', NULL),
           ('j last saturday', v_half_a, '09:00', '09:30', '2026-11-28', '2026-12-04', NULL),
           ('k open dates', v_half_a, '09:00', '09:30', NULL, NULL, NULL),
           ('l itself', v_half_a, '09:00', '09:30', '2026-09-05', '2026-11-28', v_slot)

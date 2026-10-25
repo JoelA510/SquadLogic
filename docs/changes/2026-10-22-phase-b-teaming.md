@@ -12,7 +12,7 @@ and B6 touch the solver. Each is reviewed once before it opens.
 **Superseded in part (owner, 2026-10-22, `2026-10-22-admin-focus.md`):** the paperwork flags
 (payment, waiver, medical form) and the Compliance page are removed in R1, and B2 and B3 below no
 longer flag paperwork; the waitlist stays the gate an admin uses. Birthdates give way to a stored
-natural age in R5, which B2 carries into the generator.
+natural age in R5 (built: `players.natural_age`), which B2 carries into the generator.
 
 Every claim below is _statically reviewed_ against `main` at `6a22d29` unless marked _executed_.
 Line numbers are current; research item 3's (`:776`, `:806-835`) have moved.
@@ -361,6 +361,11 @@ engine conventions), and the demo league is teamed end to end.
   generates from import rows with birthdates, fresh and on a rerun. **Moved to R5**
   (`2026-10-22-admin-focus.md`, R5's row): the durable query selecting the natural age,
   `toGeneratorPlayer` emitting it, and the page test that generates from stored players only.
+  **Taken by R5** (`2026-10-22-admin-focus.md`, As built (R5)): `DURABLE_PLAYER_FIELDS` selects
+  `natural_age`, `withDurableIdentity` carries it and `toGeneratorPlayer` emits it as `naturalAge`
+  (read before a session row's birth date); `tests/teamAnalysisEligibility.test.jsx` generates
+  from import rows with no birth date and durable players with a stored natural age, and gets a
+  blocked play-down and an unknown player placed.
 - **Where the annotation was lost** (_executed_, the page test against the old generator): not on
   the page. `prepared.players` reaches `generateTeams` with `placement`, `needsReview`,
   `reviewReason` and `naturalAge`, and the generator clones every field; it read none of them, so a

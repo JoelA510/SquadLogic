@@ -1,8 +1,8 @@
 # Phase B: teaming
 
 Status: **approved by the owner 2026-10-22, with every recommendation** (AGENTS.md rule 14: B2
-and B6 change the generator, B1 the domain model of buddy requests). B1 and B2 are built (see
-"As built (B1)" and "As built (B2)"). B6 records the owner's team priorities of
+and B6 change the generator, B1 the domain model of buddy requests). B1, B2 and B3 are built (see
+"As built (B1)", "As built (B2)" and "As built (B3)"). B6 records the owner's team priorities of
 2026-10-22. It applies the owner's decisions of 2026-10-20 (`2026-10-20-core-roadmap.md`) to the
 teaming core: buddy requests, research item 3 (eligibility), and team counts per program. No
 migration: everything new is computed, and the run's `results` JSON is stored opaque
@@ -410,6 +410,79 @@ engine conventions), and the demo league is teamed end to end.
   placement order changes (planted).
 - **Season fixture:** every test file that loads `fixtures/season-2026/` and the "Must stay
   unchanged" suites ran green; as above, the fixture holds no player roster.
+
+## As built (B3)
+
+- **Failures stop the run.** The `coach_team_requests` read's `error` throws ("Could not read the
+  coaches' team links, so teams were not generated: …"), and the `try`/`catch` around the
+  pipeline is gone, so a pipeline throw reaches the page's one `catch` with its own message. Both
+  land in `generationError` (the validation panel's "generation" row) and nothing is staged. The
+  admin's read is allowed by the table's one policy, "Org admins manage coach*team_requests"
+  (`20260530000000`, `FOR ALL TO authenticated USING (is_org_admin(...))`): \_statically
+  reviewed*; the real-backend season flow, which reads it as the seeded admin, runs in CI only.
+- **One review, "Players to review"** (`PlacementReviewList.jsx`, from
+  `frontend/src/utils/placementReview.js`), in the review view above "Buddy requests", read from
+  the staged or synced run's `results` as that list is:
+  - **Not placed:** every player in `overflowByDivision`, whatever the reason, each with the
+    reason in words and the natural age ("Natural age unknown." when none). Eligibility and room
+    are worded apart ("Not eligible for this division. Older than the division allows, …" against
+    "No room: the teams were full."), and a per-division line counts them apart ("3 not placed (1
+    not eligible for the division, 2 for another reason)"), so capacity overflow is never reported
+    as eligibility. A reason the list has no words for is shown as recorded ("Not placed (reason
+    recorded: “…”)"), never dropped; an entry with no reason reads `unknown`.
+  - **Needs review:** `eligibilityHolds`, with the team the player is on **now** (the run's
+    `team_players`, which a manual edit rewrites; the hold's team when the rows lack them), plus
+    any blocked player found on a current roster whom the holds do not name: the list is
+    enumerated from the rosters, not only from the diagnostic that names them.
+  - **Eligibility not checked:** each placed player whose `placement` is not a passed check
+    (`in_band`, `play_up_sanctioned`): `unknown`, an unrecognised value, or none recorded. The
+    flag is beside the name, here and on the player's card in the roster editor (Edit Mode); it
+    never holds anyone off a roster. Said only when the run carries `teamsByDivision`; a run
+    without it (the e2e seed's saved run, an old run) shows no such list and no "every player
+    is checked" line, rather than a falsely perfect result.
+  - Each list is a `<section>` labelled by its `<h4>`, inside the review's `<section>` with its
+    `<h3>`, like "Buddy requests".
+- **Announced once.** The page holds one polite live region (`role="status"`, `sr-only`), always
+  mounted, whose text is set when a generation stages a review ("Players to review: 1 player not
+  placed (1 not eligible for the division); 1 placed player: eligibility not checked.") and
+  cleared when a generation starts or the review is discarded. Switching views or reloading
+  re-renders the lists without announcing them again (a page test reloads and checks).
+- **Wording of the all-blocked stop** (B2's hand-off): "No teams could be generated for U10: none
+  of its players is eligible for the division (each plays down, or plays up without a coaching
+  parent or a coach's child as a buddy). Not eligible (12): …, … and 9 more. Check their
+  birthdates and the division's age band." When some, not all, are blocked and no team is
+  built, the generic message gains how many were not eligible.
+- **Buddy requests** say why a pair is apart when one is not placed (B2's `buddy-not-placed`):
+  "Not placed together: Ada Blocked is not eligible for this division and is not placed." The
+  reason is read from the run's `overflowByDivision`; a buddy not placed for room reads "… is not
+  placed".
+- **Unchanged on purpose:** the core metric shape. `metrics.overflowPlayers` and the overview's
+  "Manual Review" count (`totals.manualReviewRequired`, every not-placed player) still sum every
+  overflow reason; the review's per-division line is where the two are told apart. The Dashboard's
+  table view's "Overflow" (`TeamListView`) is not on the Teams page and is left as it is.
+- **Open owner questions, not built:** whether evaluator org means exclude blocked players; and
+  whether to surface a coach whose only child is blocked. Showing the latter would take a join the
+  run already allows: the `eligibility-blocked` entry's `metadata.coachId` (and
+  `assistantCoachId`) names the coach, and `coachCoverageByDivision` says whether any team has
+  them; the list would need the coach's name, from the `coaches` read the Coaches page makes or
+  from the coach import.
+- **Accessibility.** The repository has no unit-level axe (jest-axe) pattern. The lists are
+  scanned where they render: both `late_registrant_reviewed_roster.feature` scenarios run the
+  accessibility feature's axe step on the staged review in the light and dark themes (the first
+  shows seven "Eligibility not checked" flags, the second a "Not placed" entry), and a planted
+  unnamed `role="img"` on the flag fails it. Contrast is not proven by that scan: axe left the
+  badge's colour pair unresolved even with its text planted at the background's colour, so it is
+  computed from the tokens instead (`--warning-text` on `--warning-weak`: 5.20:1 light, 8.42:1
+  dark), with the opaque `bg-status-warning-bg` rather than a translucent tint.
+- **Review round (`/code-review`, fixed here):** "not checked" is said only for a division whose
+  generated rosters hold player records (a manual-edit snapshot can rebuild them from team rows
+  with no players, which would have flagged everyone); coach rows are read out of the roster by
+  the persistence module's role rule (`isRosterPlayerRow`, now exported beside
+  `NON_ROSTER_ROLES`); the Buddy requests list does not call a buddy whom the current rows seat
+  "not placed"; the announcement is cleared with the review it was about (sync, discard, another
+  organization or season); a placed player whose team names no division is listed under
+  "Division not recorded". A "placed by hand" note for a not-placed player was dropped: the
+  roster editor shows only rostered players, so no user can produce that state.
 
 ## Not in Phase B
 

@@ -1,6 +1,8 @@
 /**
  * Eligibility reaches the generator from the Teams page (Phase B2,
- * docs/changes/2026-10-22-phase-b-teaming.md).
+ * docs/changes/2026-10-22-phase-b-teaming.md), and the page shows what the run did with it
+ * (Phase B3): a failure stops the run, and the review lists who was not placed, who needs review
+ * and who was placed without a check.
  *
  * The page is real, and so are the core pipeline (`prepareTeamingInput`, which annotates
  * play-up / play-down eligibility with `remapBlocked: false`) and the generator; its data
@@ -12,7 +14,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createChainMock } from './helpers/index.js';
 import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
@@ -31,7 +33,23 @@ const state = vi.hoisted(() => ({
   durablePlayers: [],
   /** @type {any} */
   persistenceSnapshot: null,
+  /** @type {any} the error the `coach_team_requests` read returns */
+  coachLinksError: null,
+  pipelineThrows: false,
 }));
+
+// The real pipeline, which a test can make throw: nothing in today's input reaches a throw, so
+// the failure is planted at the function's boundary to prove the page's handling of one.
+vi.mock('@squadlogic/core/teamingPipeline.js', async (importOriginal) => {
+  const actual = /** @type {any} */ (await importOriginal());
+  return {
+    ...actual,
+    prepareTeamingInput: (/** @type {any} */ input) => {
+      if (state.pipelineThrows) throw new Error('planted pipeline failure');
+      return actual.prepareTeamingInput(input);
+    },
+  };
+});
 
 vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
   useDashboardData: () => ({
@@ -70,7 +88,9 @@ vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     from: (table) =>
-      createChainMock({ data: table === 'players' ? state.durablePlayers : [], error: null }),
+      table === 'coach_team_requests' && state.coachLinksError
+        ? createChainMock({ data: null, error: state.coachLinksError })
+        : createChainMock({ data: table === 'players' ? state.durablePlayers : [], error: null }),
     rpc: async (name, params) =>
       name === 'admin_upsert_division_settings'
         ? {
@@ -100,9 +120,6 @@ vi.mock('../frontend/src/components/teaming/TeamingConfiguration.jsx', () =>
   stub('teaming-config')
 );
 vi.mock('../frontend/src/components/teaming/RosterManager.jsx', () => stub('roster-manager'));
-vi.mock('../frontend/src/components/teaming/DataValidationPanel.jsx', () =>
-  stub('data-validation')
-);
 
 const { default: TeamAnalysisPage } = await import('../frontend/src/pages/TeamAnalysisPage.jsx');
 
@@ -135,7 +152,7 @@ function seedImport() {
     first_name: r.first_name,
     last_name: r.last_name,
     preferred_name: null,
-    buddy_request: null,
+    buddy_request: r.buddy_request ?? null,
     mutual_buddy_code: null,
   }));
 }
@@ -145,7 +162,7 @@ const durableIdOf = (n) =>
   state.durablePlayers[state.rows.findIndex((r) => r.external_registration_id === `REG-${n}`)].id;
 const allDurableIds = () => state.durablePlayers.map((player) => player.id);
 
-async function generate() {
+async function clickGenerate() {
   render(
     <MemoryRouter>
       <TeamAnalysisPage />
@@ -156,8 +173,32 @@ async function generate() {
   await act(async () => {
     fireEvent.click(button);
   });
+  return button;
+}
+
+async function generate() {
+  await clickGenerate();
   await screen.findByText('Team Review Pending');
 }
+
+/** A rerun's saved team: ten players, the blocked one (1) among them; 18 and 19 are late. */
+function seedSavedTeam() {
+  const rostered = [1, 2, 10, 11, 12, 13, 14, 15, 16, 17];
+  state.persistenceSnapshot = {
+    payload: {
+      teamRows: [{ id: IDS.team, division: 'U10', name: 'Saved Team' }],
+      teamPlayerRows: rostered.map((n) => ({
+        team_id: IDS.team,
+        player_id: durableIdOf(n),
+        role: 'player',
+        source: 'auto',
+      })),
+    },
+  };
+}
+
+/** A list of the review by its heading (each is a `<section>` labelled by its heading). */
+const reviewList = (name) => screen.getByRole('region', { name });
 
 function stagedResults() {
   return JSON.parse(sessionStorage.getItem(REVIEW_KEY) || 'null')?.snapshot?.runMetadata?.results;
@@ -170,6 +211,8 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
   beforeEach(() => {
     sessionStorage.clear();
     state.persistenceSnapshot = null;
+    state.coachLinksError = null;
+    state.pipelineThrows = false;
     seedImport();
   });
   afterEach(() => {
@@ -214,26 +257,19 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
     await act(async () => {
       fireEvent.click(button);
     });
-    // The run stops at the page's own guard (no teams); B3 words the reason.
+    // The run stops at the page's own guard (no teams), and says why (B3): the players are
+    // imported, and not one is eligible for the division.
     await waitFor(() => expect(button).toBeEnabled());
     expect(screen.queryByText('Team Review Pending')).not.toBeInTheDocument();
     expect(sessionStorage.getItem(REVIEW_KEY)).toBeNull();
+    expect(screen.getByText(/none of its players is eligible for the division/)).toHaveTextContent(
+      /Not eligible \(12\): Kid1 Placeholder1, Kid2 Placeholder2, Kid10 Placeholder10 and 9 more\./
+    );
+    expect(screen.queryByText(/Check that players are imported/)).not.toBeInTheDocument();
   });
 
   it('on a rerun keeps a rostered blocked player on their saved team and lists the hold', async () => {
-    // A saved run of ten on one team, the blocked player among them; 18 and 19 are late.
-    const rostered = [1, 2, 10, 11, 12, 13, 14, 15, 16, 17];
-    state.persistenceSnapshot = {
-      payload: {
-        teamRows: [{ id: IDS.team, division: 'U10', name: 'Saved Team' }],
-        teamPlayerRows: rostered.map((n) => ({
-          team_id: IDS.team,
-          player_id: durableIdOf(n),
-          role: 'player',
-          source: 'auto',
-        })),
-      },
-    };
+    seedSavedTeam();
     await generate();
 
     const results = stagedResults();
@@ -255,5 +291,151 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
     // Conservation, enumerated from the import: the two late players are seated or not placed.
     const seated = results.team_players.map((tp) => tp.player_id);
     expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
+  });
+});
+
+describe('TeamAnalysisPage :: failures stop generation (B3)', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    state.persistenceSnapshot = null;
+    state.coachLinksError = null;
+    state.pipelineThrows = false;
+    seedImport();
+  });
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('a refused coach_team_requests read shows the error and stages no review', async () => {
+    state.coachLinksError = { message: 'permission denied for table coach_team_requests' };
+    const button = await clickGenerate();
+
+    expect(
+      await screen.findByText(
+        "Could not read the coaches' team links, so teams were not generated: permission denied for table coach_team_requests."
+      )
+    ).toBeInTheDocument();
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText('Team Review Pending')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(REVIEW_KEY)).toBeNull();
+  });
+
+  it('a teaming pipeline that throws shows the error and stages no review', async () => {
+    state.pipelineThrows = true;
+    const button = await clickGenerate();
+
+    expect(await screen.findByText('planted pipeline failure')).toBeInTheDocument();
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText('Team Review Pending')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(REVIEW_KEY)).toBeNull();
+  });
+});
+
+describe('TeamAnalysisPage :: not placed and flagged, on the review (B3)', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    state.persistenceSnapshot = null;
+    state.coachLinksError = null;
+    state.pipelineThrows = false;
+    seedImport();
+  });
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('lists a blocked player under "Not placed" with the reason in words and the natural age', async () => {
+    await generate();
+
+    const list = reviewList('Not placed');
+    const items = within(list).getAllByRole('listitem');
+    // Enumerated from the import: the one blocked player, and nobody else.
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent(
+      'Kid1 Placeholder1. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 13.'
+    );
+    expect(screen.getByText(/^U10: 1 not placed \(1 not eligible/)).toBeInTheDocument();
+  });
+
+  it('places a player with no natural age and flags them "Eligibility not checked"', async () => {
+    await generate();
+
+    const list = reviewList('Eligibility not checked');
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent(
+      /^Kid2 Placeholder2 Eligibility not checked on U10 Team \d+\.$/
+    );
+    // Placed, not held: they are on a staged roster and not under "Not placed".
+    expect(stagedResults().team_players.map((tp) => tp.player_id)).toContain(durableIdOf(2));
+    expect(within(reviewList('Not placed')).queryByText(/Kid2 Placeholder2/)).toBeNull();
+  });
+
+  it('lists a rerun hold under "Needs review": who, which team, why', async () => {
+    seedSavedTeam();
+    await generate();
+
+    const items = within(reviewList('Needs review')).getAllByRole('listitem');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent(
+      'Kid1 Placeholder1, on Saved Team. Not eligible for this division. Older than the division allows, and playing down is not permitted. Kept on the reviewed roster; move them by hand if you agree.'
+    );
+    // Held, so not under "Not placed".
+    expect(screen.queryByRole('region', { name: 'Not placed' })).toBeNull();
+  });
+
+  it('announces the lists once, through one polite live region', async () => {
+    await generate();
+
+    const regions = screen
+      .getAllByRole('status')
+      .filter((node) => node.getAttribute('aria-live') === 'polite');
+    const announcement = regions.find((node) => /Players to review/.test(node.textContent || ''));
+    expect(announcement).toHaveTextContent(
+      'Players to review: 1 player not placed (1 not eligible for the division); 1 placed player: eligibility not checked.'
+    );
+    expect(regions.filter((node) => /Players to review/.test(node.textContent || ''))).toHaveLength(
+      1
+    );
+
+    // A reload shows the staged lists again, without announcing them a second time.
+    cleanup();
+    render(
+      <MemoryRouter>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    await screen.findByText('Team Review Pending');
+    expect(reviewList('Not placed')).toBeInTheDocument();
+    expect(screen.queryByText(/Players to review:/)).toBeNull();
+  });
+
+  it('clears the announcement with the review it was about', async () => {
+    await generate();
+    expect(screen.getByText(/^Players to review:/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Review' }));
+    await screen.findByText('Team review discarded.');
+    expect(screen.queryByText(/^Players to review:/)).toBeNull();
+  });
+
+  it('says why a buddy pair is apart when one of them is blocked', async () => {
+    // A mutual pair by name (letters only: a name with a digit is read as an id), the
+    // blocked player 1 and player 10, who is placed alone (`buddy-not-placed`).
+    const pair = {
+      'REG-1': { first_name: 'Ada', last_name: 'Blocked', buddy_request: 'Bea Placed' },
+      'REG-10': { first_name: 'Bea', last_name: 'Placed', buddy_request: 'Ada Blocked' },
+    };
+    state.rows = state.rows.map((r) => ({ ...r, ...pair[r.external_registration_id] }));
+    state.durablePlayers = state.durablePlayers.map((player) => ({
+      ...player,
+      ...pair[player.external_registration_id],
+    }));
+    await generate();
+
+    const paired = within(reviewList('Paired')).getAllByRole('listitem');
+    expect(paired).toHaveLength(1);
+    expect(paired[0]).toHaveTextContent(
+      'Ada Blocked and Bea Placed. Not placed together: Ada Blocked is not eligible for this division and is not placed.'
+    );
   });
 });

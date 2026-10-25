@@ -27,8 +27,12 @@ export default function TeamingConfiguration({
     onUpdate(program.id, { [field]: value });
   };
 
+  // The head coaches the import names (counted as generation counts them, `derivePrograms`):
+  // each gets a team, which can raise the recommendation.
+  const coachCount = Number.isInteger(program.coachCount) ? program.coachCount : 0;
   const assessment = assessTeamCount({
     playerCount: program.playerCount,
+    coachCount,
     teamCountOverride: config?.teamCountOverride,
     minRosterSize: config?.minRosterSize,
     maxRosterSize: config?.maxRosterSize,
@@ -173,6 +177,9 @@ export default function TeamingConfiguration({
               <p className="text-sm text-text-secondary" data-testid="team-count-recommendation">
                 Recommended: {recommendedTeamCount} {recommendedTeamCount === 1 ? 'team' : 'teams'}{' '}
                 for {program.playerCount} players
+                {coachCount > 0
+                  ? ` and ${coachCount} head ${coachCount === 1 ? 'coach' : 'coaches'}`
+                  : ''}
                 {fitRange && fitRange.min !== fitRange.max
                   ? ` (${fitRange.min} to ${fitRange.max} fit the roster limits)`
                   : ''}

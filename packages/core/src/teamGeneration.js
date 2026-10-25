@@ -14,11 +14,10 @@ import { reconcileTeamDeltas } from './teamDelta.js';
 import { getCanonicalBuddyId } from './buddyLinking.js';
 import { applyCoachContinuity } from './coachContinuity.js';
 import { isEligibilityBlocked } from './playUp.js';
-import { balanceSignalKind, carriesSignal, playerSignal } from './balanceSignals.js';
+import { balanceSignalKind, divisionLeadCompensation, playerSignal } from './balanceSignals.js';
 import {
   compensatedLoad,
   countLeads,
-  leadCompensation,
   orderForLeadDeal,
   spreadsCoachingLeads,
   withFewestLeads,
@@ -62,7 +61,8 @@ import {
  * and anchors no team. Once coaches' children are placed, units holding a lead are dealt to a
  * team with the fewest leads, the most leads first, and every other unit to the team with the
  * lowest `signal total + c × leads` (the league's signal: `featureFlags.player_rating`, else
- * `years_played`; `c` is 0 with neither). With `featureFlags.teaming_spread_coaching_leads`
+ * `years_played`). With neither, or when no player of the division carries the signal, `c` is 0
+ * and the evaluators place what the lead spread leaves. With `featureFlags.teaming_spread_coaching_leads`
  * false, or no lead in the division, placement is exactly as before B6. On a rerun the same rule
  * places the late players; preserved players never move.
  * @returns {{
@@ -1342,9 +1342,10 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason: _
 }
 
 /**
- * @typedef {{ signalKind: string, compensate: boolean, c: number }} LeadPolicy
- *   How a division deals its coaching leads (Phase B6): the league's balance signal, whether
- *   the rest of the deal compensates for leads by it, and what one lead adds to a team's load.
+ * @typedef {{ signalKind: string, c: number }} LeadPolicy
+ *   How a division deals its coaching leads (Phase B6): the league's balance signal and what
+ *   one lead adds to a team's load; with `c` 0 the deal does not compensate, and the
+ *   evaluators balance what the lead spread leaves.
  */
 
 /**
@@ -1360,17 +1361,7 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason: _
 function resolveLeadPolicy({ featureFlags, players }) {
   if (!spreadsCoachingLeads(featureFlags) || countLeads(players) === 0) return null;
   const signalKind = balanceSignalKind(featureFlags);
-  const compensate = players.some((player) => carriesSignal(player, signalKind));
-  return {
-    signalKind,
-    compensate,
-    c: compensate
-      ? leadCompensation(
-          players.map((player) => playerSignal(player, signalKind)),
-          { signalKind }
-        )
-      : 0,
-  };
+  return { signalKind, c: divisionLeadCompensation(players, signalKind) };
 }
 
 /** A unit's (or roster's) total of the league's balance signal. */
@@ -1387,10 +1378,10 @@ function signalTotalOf(players, signalKind) {
  */
 function orderGeneralUnits(units, leadPolicy) {
   if (!leadPolicy) return [...units].sort((a, b) => b.skillTotal - a.skillTotal);
-  const { signalKind, compensate } = leadPolicy;
+  const { signalKind, c } = leadPolicy;
   return orderForLeadDeal(units, {
     leadsOf: (unit) => countLeads(unit.players),
-    weightOf: (unit) => (compensate ? signalTotalOf(unit.players, signalKind) : unit.skillTotal),
+    weightOf: (unit) => (c > 0 ? signalTotalOf(unit.players, signalKind) : unit.skillTotal),
   });
 }
 
@@ -1424,8 +1415,8 @@ function pickTeamForGeneralUnit({ leadPolicy, allTeams, ...params }) {
   if (countLeads(unit) > 0) {
     candidates = withFewestLeads(candidates, (team) => countLeads(team.players));
   }
-  const { signalKind, compensate, c } = leadPolicy;
-  if (!compensate) {
+  const { signalKind, c } = leadPolicy;
+  if (c === 0) {
     return pickTeamWithMostCapacity({ ...params, teams: candidates, allTeams: params.teams });
   }
   const buddyScore = (team) =>

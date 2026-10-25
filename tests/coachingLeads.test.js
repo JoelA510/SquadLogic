@@ -7,7 +7,12 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { generateTeams } from '../packages/core/src/teamGeneration.js';
-import { serpentineAssign } from '../packages/core/src/balanceSignals.js';
+import {
+  carriesSignal,
+  divisionLeadCompensation,
+  playerSignal,
+  serpentineAssign,
+} from '../packages/core/src/balanceSignals.js';
 import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import {
   LEAD_COMPENSATION_FACTOR,
@@ -68,6 +73,28 @@ describe('the setting and the answers', () => {
     expect(leadCompensation([1, 2, 3, 6], { signalKind: 'years' })).toBe(3);
     expect(leadCompensation([1, 2, 3, 6], { signalKind: 'size' })).toBe(0);
     expect(leadCompensation([], { signalKind: 'years' })).toBe(0);
+  });
+});
+
+describe('c, for the generator and the board alike', () => {
+  it('is the mean player signal when a lead is present and someone carries the signal', () => {
+    const players = [lead('a', 2), kid('b', 4), kid('c', 0)];
+    expect(divisionLeadCompensation(players, 'years')).toBe((3 + 5 + 1) / 3);
+    expect(divisionLeadCompensation([kid('b', 4)], 'years')).toBe(0);
+    expect(divisionLeadCompensation(players, 'size')).toBe(0);
+    const noYears = players.map(({ years_played: _y, ...rest }) => rest);
+    expect(divisionLeadCompensation(noYears, 'years')).toBe(0);
+  });
+
+  it('reads a rating as playerSignal does: a blank or 0 is none, and falls back to skillRating', () => {
+    expect(carriesSignal({ rating: 0 }, 'rating')).toBe(false);
+    expect(playerSignal({ rating: 0 }, 'rating')).toBe(1);
+    expect(carriesSignal({ rating: '', skillRating: 5 }, 'rating')).toBe(true);
+    expect(playerSignal({ rating: '', skillRating: 5 }, 'rating')).toBe(5);
+    expect(playerSignal({ rating: 4, skillRating: 2 }, 'rating')).toBe(4);
+    expect(carriesSignal({ years_played: 0 }, 'years')).toBe(true);
+    expect(carriesSignal({ years_played: '' }, 'years')).toBe(false);
+    expect(carriesSignal({ rating: 5 }, 'size')).toBe(false);
   });
 });
 

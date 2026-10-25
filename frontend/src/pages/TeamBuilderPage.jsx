@@ -171,7 +171,9 @@ export default function TeamBuilderPage() {
           signal: signalKind,
           // The league settings the deal used (Phase B6), so the row says which rule built it.
           buddy_requests: buddyRequestsOn,
-          buddy_rule: buddyRule,
+          ...(buddyRequestsOn ? { buddy_rule: buddyRule } : {}),
+          coaching_interest: coachingInterestOn,
+          spread_coaching_leads_setting: isEnabled(FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS),
           spread_coaching_leads: spreadLeadsOn,
         },
       });

@@ -465,7 +465,8 @@ function toGeneratorPlayer(
   const isCoachingLead =
     coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
   const yearsPlayed = parseYearsPlayed(firstNonEmpty(row, YEARS_PLAYED_KEYS));
-  // The admin's 1-5 rating, from the player record (`withDurableIdentity`); a blank is none.
+  // The admin's 1-5 rating, from the player record (`withDurableIdentity`; `rating` is not on
+  // the import allowlist, so an import row carries none); a blank is none.
   const ratingValue = firstNonEmpty(row, ['rating']);
   const rating = ratingValue === null ? NaN : Number(ratingValue);
   // Carry the DOB, else the natural age, and play-up signals so the play-up/play-down classifier

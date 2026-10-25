@@ -72,9 +72,12 @@ This document translates the roadmap's team formation phase into actionable plan
      other unit goes to the team with the lowest `signal total + c × leads`, where the signal is
      the league's (`player_rating`, else `years_played`; `balanceSignalKind` and `playerSignal`
      in `balanceSignals.js`), `c` is `LEAD_COMPENSATION_FACTOR` (1, tuned on
-     `fixtures/demo-2026/`) times the division's mean player signal, and 0 when the league uses
-     neither signal. A best-effort buddy (`BuddyEvaluator`) narrows the choice first; ties go to
-     the smallest roster, then the seeded draw. Without a lead, or with the setting off, the
+     `fixtures/demo-2026/`) times the division's mean player signal
+     (`divisionLeadCompensation`). A best-effort buddy (`BuddyEvaluator`) narrows the choice
+     first; ties go to the smallest roster, then the seeded draw. When the league uses neither
+     signal, or no player of the division carries it (Years Played on, but no years in the
+     file), `c` is 0 and the evaluators place what the lead spread leaves, among the teams with
+     the fewest leads for a unit holding one. Without a lead, or with the setting off, the
      evaluators place the units as before. On a rerun the same rule places late players only.
 4. **Skill or experience balancing** (optional phase)
    - When `players.skill_tier` exists, perform a serpentine draft per tier to distribute skill evenly before filling remaining slots randomly.

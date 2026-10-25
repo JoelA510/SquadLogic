@@ -41,7 +41,7 @@ export function balanceSignalKind(features = {}) {
  * rating is `rating`; a generator player without one reads its `skillRating` (Phase B6).
  */
 export function playerSignal(player, kind) {
-  if (kind === 'rating') return Number(player?.rating ?? player?.skillRating) || 1;
+  if (kind === 'rating') return ratingOf(player) ?? 1;
   if (kind === 'years') return (Number(player?.years_played) || 0) + 1;
   return 1;
 }
@@ -53,9 +53,42 @@ export function playerSignal(player, kind) {
  * leads with (Phase B6).
  */
 export function carriesSignal(player, kind) {
-  if (kind !== 'rating' && kind !== 'years') return false;
-  const value = kind === 'rating' ? (player?.rating ?? player?.skillRating) : player?.years_played;
-  return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value));
+  if (kind === 'rating') return ratingOf(player) !== undefined;
+  if (kind === 'years') {
+    const years = player?.years_played;
+    return years !== undefined && years !== null && years !== '' && Number.isFinite(Number(years));
+  }
+  return false;
+}
+
+/**
+ * A player's rating: `rating`, else a generator player's `skillRating`, the first that is a
+ * positive number (a blank or 0 is none).
+ */
+function ratingOf(player) {
+  for (const value of [player?.rating, player?.skillRating]) {
+    if (value === undefined || value === null || value === '') continue;
+    const rating = Number(value);
+    if (Number.isFinite(rating) && rating > 0) return rating;
+  }
+  return undefined;
+}
+
+/**
+ * `c` for one division or board (Phase B6, `coachingLeads.js`): what one lead adds to a team's
+ * load. The mean player signal times the factor, or 0 when nothing compensates: no player is
+ * a lead, the signal is roster size only, or no player carries the signal. The generator and
+ * TeamBuilder's auto-balance both call it.
+ * @param {any[]} players
+ * @param {string} kind - the signal kind (`balanceSignalKind`)
+ */
+export function divisionLeadCompensation(players, kind) {
+  if (countLeads(players) === 0) return 0;
+  if (!players.some((player) => carriesSignal(player, kind))) return 0;
+  return leadCompensation(
+    players.map((player) => playerSignal(player, kind)),
+    { signalKind: kind }
+  );
 }
 
 /** Live per-team metrics for a column of players. */
@@ -230,16 +263,8 @@ export function serpentineAssign({
     count: 0,
     leads: 0,
   }));
-  // What one lead adds to a team's load: 0 when no unit holds one, by roster size only, or when
-  // no player carries the signal (nothing to compensate with), as in the generator.
-  const c =
-    units.some((unit) => unit.leads > 0) &&
-    players.some((player) => carriesSignal(player, signalKind))
-      ? leadCompensation(
-          players.map((player) => playerSignal(player, signalKind)),
-          { signalKind }
-        )
-      : 0;
+  // What one lead adds to a team's load, by the generator's rule (0 with the setting off).
+  const c = respectCoach ? divisionLeadCompensation(players, signalKind) : 0;
   const loadOf = (bucket) => compensatedLoad(bucket.total, bucket.leads, c);
 
   /** @type {Map<string, any>} the team each dealt player went to */

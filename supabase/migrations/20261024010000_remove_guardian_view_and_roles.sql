@@ -310,7 +310,7 @@ BEGIN
   END IF;
 
   -- Role whitelist (matches the CHECK constraint).
-  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'staff') THEN
+  IF p_role NOT IN ('admin', 'coach', 'staff') THEN
     RAISE EXCEPTION 'Invalid role: %', p_role USING ERRCODE = '22023';
   END IF;
 

@@ -4294,13 +4294,27 @@ AS" \
 # R3: no guardian view, no parent or player role. The smoke RAISEs on each;
 # the migration's own refusals on a guardian read left standing; the revert
 # claim on a policy left out, a grant left in and a body that drifted.
-plant "M41 a coach reads players directly" "$M41" \
+# The migration's own end-state check refuses an admin read widened in place.
+plant "M41 the admin read on players admits any member" "$M41" \
   "CREATE POLICY players_select_admin ON public.players
     FOR SELECT TO authenticated
     USING (public.is_org_admin(organization_id));" \
   "CREATE POLICY players_select_admin ON public.players
     FOR SELECT TO authenticated
     USING (public.is_org_member(organization_id));" \
+  "applying 20261024010000_remove_guardian_view_and_roles.sql"
+
+# A member read added past that check (after it, before COMMIT): the smoke's
+# direct-read and read-policy checks are what refuse it.
+plant "M41 a coach reads players directly" "$M41" \
+  "
+COMMIT;" \
+  "
+CREATE POLICY planted_member_read ON public.players
+    FOR SELECT TO authenticated
+    USING (public.is_org_member(organization_id));
+
+COMMIT;" \
   "smoke 20261024010000"
 
 plant "M41 the admin-or-guardian read is left on team_players" "$M41" \
@@ -4347,9 +4361,9 @@ plant "M41 the member role check keeps parent" "$M41" \
   "smoke 20261024010000"
 
 plant "M41 create_org_invite accepts a parent" "$M41" \
-  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'staff') THEN
+  "  IF p_role NOT IN ('admin', 'coach', 'staff') THEN
     RAISE EXCEPTION 'Invalid role: %'" \
-  "  IF p_role IS NULL OR p_role NOT IN ('admin', 'coach', 'parent', 'staff') THEN
+  "  IF p_role NOT IN ('admin', 'coach', 'parent', 'staff') THEN
     RAISE EXCEPTION 'Invalid role: %'" \
   "smoke 20261024010000"
 

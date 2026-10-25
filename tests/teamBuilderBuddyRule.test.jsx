@@ -48,6 +48,11 @@ const DIVISIONS = [{ id: DIVISION_ID, name: 'U10' }];
 const ORGANIZATION = { id: ORG_ID };
 const updateFeatureFlags = vi.fn();
 const organization = { value: /** @type {any} */ (null) };
+const TEAMS = [
+  { id: 't1', name: 'Team One', division_id: DIVISION_ID, organization_id: ORG_ID },
+  { id: 't2', name: 'Team Two', division_id: DIVISION_ID, organization_id: ORG_ID },
+];
+const world = { teams: TEAMS };
 const playersData = {
   players: PLAYERS,
   divisions: DIVISIONS,
@@ -76,13 +81,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
       rpc: (...args) => mocks.rpc(...args),
       from: (table) =>
         createChainMock({
-          data:
-            table === 'teams'
-              ? [
-                  { id: 't1', name: 'Team One', division_id: DIVISION_ID, organization_id: ORG_ID },
-                  { id: 't2', name: 'Team Two', division_id: DIVISION_ID, organization_id: ORG_ID },
-                ]
-              : [],
+          data: table === 'teams' ? world.teams : [],
           error: null,
         }),
     },
@@ -109,7 +108,7 @@ async function balance(flags) {
   const tile = (await screen.findByText('buddies met')).closest('.metric-tile');
   const tileText = tile?.textContent?.replace(/\s+/g, ' ').trim();
   fireEvent.click(screen.getByRole('button', { name: /auto-balance/i }));
-  await waitFor(() => expect(mocks.updatePlayer).toHaveBeenCalledTimes(PLAYERS.length));
+  await waitFor(() => expect(mocks.updatePlayer).toHaveBeenCalledTimes(playersData.players.length));
   const teamOf = Object.fromEntries(
     mocks.updatePlayer.mock.calls.map(([playerId, patch]) => [playerId, patch.team_id])
   );
@@ -118,6 +117,8 @@ async function balance(flags) {
 
 describe('TeamBuilder applies the stored buddy rule', () => {
   beforeEach(() => {
+    Object.assign(playersData, { players: PLAYERS, divisions: DIVISIONS });
+    world.teams = TEAMS;
     mocks.updatePlayer.mockReset().mockResolvedValue({ success: true });
     mocks.rpc.mockReset().mockResolvedValue({ data: null, error: null });
   });
@@ -147,5 +148,30 @@ describe('TeamBuilder applies the stored buddy rule', () => {
       'record_audit_event',
       expect.objectContaining({ p_action: 'teams.auto_balanced' })
     );
+  });
+
+  it('a co-ed board of two divisions pairs nobody across them, as Team Analysis does', async () => {
+    // U10B and U10G fold into one "U10" board under the co-ed model. Ann and Bo name each
+    // other across the two divisions: Team Analysis teams each division on its own and calls
+    // the pair cross-division, so the board does not pair them either.
+    Object.assign(playersData, {
+      divisions: [
+        { id: 'd-u10b', name: 'U10B' },
+        { id: 'd-u10g', name: 'U10G' },
+      ],
+      players: [
+        player('ann', 'Ann', 'Ross', 5, { division_id: 'd-u10b', buddy_request: 'Bo Hale' }),
+        player('bo', 'Bo', 'Hale', 4, { division_id: 'd-u10g', buddy_request: 'Ann Ross' }),
+        player('kit', 'Kit', 'Lane', 3, { division_id: 'd-u10b' }),
+        player('max', 'Max', 'Dorn', 1, { division_id: 'd-u10g' }),
+      ],
+    });
+    world.teams = [
+      { id: 't1', name: 'Team One', division_id: 'd-u10b', organization_id: ORG_ID },
+      { id: 't2', name: 'Team Two', division_id: 'd-u10g', organization_id: ORG_ID },
+    ];
+    const { tileText, teamOf } = await balance({ ...BASE_FLAGS, gender_model: 'coed' });
+    expect(tileText).toBe('0/0 buddies met');
+    expect(teamOf.ann).not.toBe(teamOf.bo);
   });
 });

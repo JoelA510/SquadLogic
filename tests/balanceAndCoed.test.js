@@ -3,9 +3,11 @@ import {
   balanceSignalKind,
   playerSignal,
   teamBalanceMetrics,
+  boardBuddyLinks,
   buddyStats,
   serpentineAssign,
 } from '../packages/core/src/balanceSignals.js';
+import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import {
   normalizeGender,
   planCoedMerge,
@@ -252,6 +254,81 @@ describe('TeamBuilder buddies: the resolver and the league buddy rule', () => {
     // and `duplicate-buddy-code` in the pipeline), so the board does not pair it either.
     const roster = [...coded, player('far', { division: 'U12', mutual_buddy_code: 'K9' })];
     expect(buddyStats(coded, { roster })).toEqual({ requested: 0, satisfied: 0 });
+  });
+
+  it('one_way_best_effort: best effort never leaves a roster over one above the smallest', () => {
+    // Six players name Cal, who listed nobody: every request is honoured, but steering them
+    // all to Cal's team would make it 7 against 3.
+    const players = [
+      player('cal', { first_name: 'Cal', last_name: 'Three' }),
+      ...Array.from({ length: 6 }, (_, i) =>
+        player(`r${i}`, {
+          first_name: `Req${'abcdef'[i]}`,
+          last_name: 'Kid',
+          buddy_request: 'Cal Three',
+        })
+      ),
+      ...Array.from({ length: 3 }, (_, i) => player(`o${i}`)),
+    ];
+    const teamOf = assign(players, 'one_way_best_effort', { signalKind: 'size' });
+    const sizes = Object.values(teamOf).reduce(
+      (acc, team) => ({ ...acc, [team]: (acc[team] || 0) + 1 }),
+      {}
+    );
+    expect(Math.abs(sizes.t1 - sizes.t2)).toBeLessThanOrEqual(1);
+    // Still best effort: some requesters are with Cal.
+    const withCal = players.filter((p) => p.id.startsWith('r') && teamOf[p.id] === teamOf.cal);
+    expect(withCal.length).toBeGreaterThan(0);
+    expect(boardBuddyLinks(players, { buddyRule: 'one_way_best_effort' }).oneWay.size).toBe(6);
+  });
+
+  it('finds the same buddies as the Team Analysis pipeline', () => {
+    // Every board above, under both rules: the mutual pairs are the pipeline's reciprocal
+    // buddyIds, and the honoured one-way requests are its honoured one-way outcomes.
+    const boards = [
+      namesakes(),
+      namesakes({ sam1: { buddy_request: 'Ada One' } }),
+      oneWay(),
+      oneWay()
+        .map((p) => (p.id === 'cal' ? { ...p, buddy_request: 'Eve Four' } : p))
+        .map((p) => (p.id === 'eve' ? { ...p, first_name: 'Eve', last_name: 'Four' } : p)),
+      oneWay().map((p) =>
+        p.id === 'bea' || p.id === 'eve' ? { ...p, mutual_buddy_code: 'Q7' } : p
+      ),
+      oneWay().map((p) =>
+        p.id === 'dee'
+          ? { ...p, mutual_buddy_code: 'K9', buddy_request: 'Bea Two' }
+          : p.id === 'eve'
+            ? { ...p, mutual_buddy_code: 'k9' }
+            : p
+      ),
+    ].map((board) => board.map((p) => ({ ...p, division: 'U10' })));
+    const sorted = (map) => [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const compared = { mutual: 0, oneWay: 0 };
+    for (const board of boards) {
+      for (const buddyRule of RULES) {
+        const prepared = prepareTeamingInput({ players: board, buddyRule, seasonYear: 2026 });
+        const byId = new Map(prepared.players.map((p) => [String(p.id), p]));
+        const mutual = new Map();
+        for (const [id, p] of byId) {
+          const buddyId = p.buddyId === undefined ? undefined : String(p.buddyId);
+          if (buddyId && String(byId.get(buddyId)?.buddyId) === id) mutual.set(id, buddyId);
+        }
+        const oneWayLinks = new Map(
+          prepared.diagnostics.buddyRequests
+            .filter((outcome) => outcome.outcome === 'one-way' && outcome.honoured)
+            .map((outcome) => [outcome.playerId, String(outcome.targetId)])
+        );
+        const links = boardBuddyLinks(board, { buddyRule });
+        expect(sorted(links.mutual)).toEqual(sorted(mutual));
+        expect(sorted(links.oneWay)).toEqual(sorted(oneWayLinks));
+        compared.mutual += mutual.size;
+        compared.oneWay += oneWayLinks.size;
+      }
+    }
+    // The comparison examined links of both kinds, not only empty maps.
+    expect(compared.mutual).toBeGreaterThan(0);
+    expect(compared.oneWay).toBeGreaterThan(0);
   });
 
   it('one_way_best_effort: a requester a buddy code pairs keeps the code pair', () => {

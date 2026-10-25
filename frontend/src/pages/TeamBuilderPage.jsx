@@ -107,25 +107,24 @@ export default function TeamBuilderPage() {
 
   // Buddies are matched as Team Analysis matches them (Phase B5): the resolver, the
   // league's buddy rule, and every player as the roster, so a request or code naming someone
-  // outside this board is not paired. Each player's division is its board (the division
-  // filter), so one board is one division.
-  const buddyRoster = useMemo(() => {
-    const boardKeyByDivisionId = new Map();
-    filters.forEach((filter) =>
-      filter.divisionIds.forEach((id) => boardKeyByDivisionId.set(id, filter.key))
-    );
-    return players.map((player) => ({
-      ...player,
-      division: boardKeyByDivisionId.get(player.division_id) ?? String(player.division_id ?? ''),
-    }));
-  }, [players, filters]);
+  // off this board is not paired. A player's division is its division id, as the program is
+  // in Team Analysis, so a board that folds two divisions (co-ed) pairs nobody across them.
+  // With Buddy Requests off, nothing is matched (the tile and the toggle are hidden).
+  const buddyRequestsOn = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
+  const buddyRoster = useMemo(
+    () => players.map((player) => ({ ...player, division: String(player.division_id ?? '') })),
+    [players]
+  );
   const buddyBoard = useMemo(() => {
     const ids = new Set(divisionPlayers.map((player) => player.id));
     return buddyRoster.filter((player) => ids.has(player.id));
   }, [buddyRoster, divisionPlayers]);
   const buddies = useMemo(
-    () => buddyStats(buddyBoard, { roster: buddyRoster, buddyRule }),
-    [buddyBoard, buddyRoster, buddyRule]
+    () =>
+      buddyRequestsOn
+        ? buddyStats(buddyBoard, { roster: buddyRoster, buddyRule })
+        : { requested: 0, satisfied: 0 },
+    [buddyRequestsOn, buddyBoard, buddyRoster, buddyRule]
   );
 
   const handleMove = async (playerId, teamId) => {
@@ -144,7 +143,7 @@ export default function TeamBuilderPage() {
         players: buddyBoard,
         teams: divisionTeams,
         signalKind,
-        respectBuddies: respectBuddies && isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS),
+        respectBuddies: respectBuddies && buddyRequestsOn,
         respectCoach: respectCoach && isEnabled(FEATURE_FLAGS.COACHING_INTEREST),
         roster: buddyRoster,
         buddyRule,

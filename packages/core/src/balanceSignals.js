@@ -16,11 +16,11 @@
 
 import {
   BUDDY_RULES,
+  applyBuddyRule,
   getCanonicalBuddyId,
   normalizeBuddyLinks,
   resolveBuddyRequests,
 } from './buddyLinking.js';
-import { applyBuddyRule } from './teamingPipeline.js';
 
 /** @returns {'rating'|'years'|'size'} */
 export function balanceSignalKind(features = {}) {
@@ -59,16 +59,16 @@ export function teamBalanceMetrics(players = []) {
  * code paired the requester meanwhile (one buddy per player). A board has no head-coach
  * anchors, so the pipeline's coach-conflict break has nothing to break here.
  *
- * `players` is the board: one division's players, every one with the same `division`
- * (or none). `roster` is every player, each with its `division`, so a code or request
- * shared with another division is told apart; it defaults to the board.
+ * `players` is the board; `roster` is every player, so a code or request naming someone off
+ * the board is told apart; it defaults to the board. Each carries its `division` (the
+ * division id): as in Team Analysis, only two players of one division are ever linked.
  *
  * @param {any[]} players
  * @param {{ roster?: any[], buddyRule?: string }} [options]
  * @returns {{ mutual: Map<string, string>, oneWay: Map<string, string> }} partner ids by
  *   player id (both members of a mutual pair; the requester of an honoured one-way request)
  */
-function boardBuddyLinks(players, { roster, buddyRule = BUDDY_RULES.MUTUAL } = {}) {
+export function boardBuddyLinks(players, { roster, buddyRule = BUDDY_RULES.MUTUAL } = {}) {
   const { requests } = resolveBuddyRequests({ players, roster });
   const ruled = applyBuddyRule({ players, requests, buddyRule });
   const linked = normalizeBuddyLinks(ruled.players, { roster });
@@ -126,7 +126,9 @@ export function buddyStats(players = [], { roster, buddyRule } = {}) {
  * Buddies follow `boardBuddyLinks` (Team Analysis's rule): a mutual pair is one unit; an
  * honoured one-way request (`one_way_best_effort`) is best effort, never a unit. Whichever of
  * the two is dealt second goes to the other's team when that team is still a candidate (the
- * coach spread can rule it out), as `BuddyEvaluator` steers it in the generator.
+ * coach spread can rule it out) and is no larger than the smallest team, so best effort never
+ * leaves a roster more than one player above the smallest (as `BuddyEvaluator` scores the
+ * request in the generator, beside the roster limits, rather than obeying it).
  *
  * `roster` is every player (each with its `division`), so a request or code naming someone
  * outside the board is not paired; `buddyRule` is the league's `buddy_rule` (default mutual).
@@ -205,7 +207,9 @@ export function serpentineAssign({
       const minCoach = Math.min(...buckets.map((b) => b.coachUnits));
       candidates = buckets.filter((b) => b.coachUnits === minCoach);
     }
-    // best effort: a candidate team already holding a one-way partner of a member
+    // best effort: a candidate team already holding a one-way partner of a member, while it
+    // is no larger than the smallest team
+    const smallest = Math.min(...buckets.map((b) => b.count));
     const partnerTeams = new Set(
       unit.members.flatMap((member) =>
         (oneWayPartners.get(String(member.id)) ?? [])
@@ -213,7 +217,9 @@ export function serpentineAssign({
           .map((partnerId) => teamIdOf.get(partnerId))
       )
     );
-    const withPartner = candidates.filter((b) => partnerTeams.has(b.teamId));
+    const withPartner = candidates.filter(
+      (b) => partnerTeams.has(b.teamId) && b.count + unit.members.length <= smallest + 1
+    );
     if (withPartner.length > 0) candidates = withPartner;
     // lowest signal total, then smallest roster, then stable order
     return candidates.reduce((best, bucket) => {

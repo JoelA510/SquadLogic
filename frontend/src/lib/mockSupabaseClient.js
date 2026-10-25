@@ -5749,8 +5749,24 @@ export const mockSupabase = {
       let insertedFields = 0;
       let insertedSubunits = 0;
       let insertedPracticeSlots = 0;
+      let updatedPracticeSlots = 0;
       let insertedGameSlots = 0;
       let invalidRows = 0;
+      // The practice slot a row updates, as the SQL finds it: the same field,
+      // subunit (or none), weekday, start and valid-from (20261029010000 made
+      // the mock update it, where it inserted a duplicate).
+      const matchingPracticeSlot = (fieldId, subunitId, dayCode, startTime, from) =>
+        db.practice_slots.find(
+          (slot) =>
+            String(slot.organization_id) === String(job.organization_id) &&
+            String(slot.field_id) === String(fieldId) &&
+            (subunitId
+              ? String(slot.field_subunit_id) === String(subunitId)
+              : !slot.field_subunit_id) &&
+            String(slot.day_of_week).slice(0, 3) === dayCode &&
+            String(slot.start_time).slice(0, 5) === String(startTime).slice(0, 5) &&
+            String(slot.valid_from) === String(from)
+        ) ?? null;
 
       const makeId = () => mockId();
       const boolFromText = (value, fallback = false) => {
@@ -5893,6 +5909,14 @@ export const mockSupabase = {
               end,
               validFrom,
               validUntil,
+              excludeSlotId:
+                matchingPracticeSlot(
+                  existingField.id,
+                  existingSubunit?.id ?? null,
+                  day.slice(0, 3),
+                  start,
+                  validFrom
+                )?.id ?? null,
             });
             if (clash) {
               failRow(row, {
@@ -5974,7 +5998,24 @@ export const mockSupabase = {
           }
         }
 
-        if (slotType === 'practice') {
+        const updatable =
+          slotType === 'practice'
+            ? matchingPracticeSlot(field.id, subunit?.id ?? null, day.slice(0, 3), start, validFrom)
+            : null;
+        if (updatable) {
+          const previousSlot = { ...updatable };
+          Object.assign(updatable, {
+            end_time: end,
+            capacity: Number.parseInt(String(payload.capacity || '1'), 10) || 1,
+            valid_until: validUntil,
+            label: payload.label || updatable.label || null,
+            // A blank Division keeps the reservation, as the SQL's COALESCE.
+            division_id: practiceDivisionId ?? updatable.division_id ?? null,
+            updated_at: now,
+          });
+          ledger('practice_slots', updatable, 'updated', previousSlot);
+          updatedPracticeSlots += 1;
+        } else if (slotType === 'practice') {
           const slot = {
             id: makeId(),
             organization_id: job.organization_id,
@@ -6031,7 +6072,7 @@ export const mockSupabase = {
         updated_fields: 0,
         inserted_field_subunits: insertedSubunits,
         inserted_practice_slots: insertedPracticeSlots,
-        updated_practice_slots: 0,
+        updated_practice_slots: updatedPracticeSlots,
         inserted_game_slots: insertedGameSlots,
         updated_game_slots: 0,
         invalid_rows: invalidRows,
@@ -6724,6 +6765,19 @@ export const mockSupabase = {
           if (target) {
             for (const [column, fallback] of Object.entries(columns)) {
               target[column] = restored(previous[column], fallback);
+            }
+            // 20261029010000: the reservation the import replaced comes back; a
+            // snapshot without the key keeps the slot's, and a division deleted
+            // since restores none.
+            if (record.target_table === 'practice_slots' && 'division_id' in previous) {
+              target.division_id =
+                (db.divisions || []).some(
+                  (d) =>
+                    String(d.id) === String(previous.division_id) &&
+                    String(d.organization_id) === String(rollbackOrg)
+                ) && previous.division_id
+                  ? previous.division_id
+                  : null;
             }
             target.updated_at = now;
           }

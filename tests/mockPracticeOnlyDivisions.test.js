@@ -134,6 +134,37 @@ describe('mock finalize_field_import_job :: reservations and clashes (D2)', () =
   });
 });
 
+describe('mock finalize_field_import_job :: a re-import updates its slot (D2)', () => {
+  it('keeps the reservation without a Division, moves it with one, and its rollback puts it back', async () => {
+    const reserved = row({ Subunit: 'A', Start: '09:00', End: '09:30', Division: 'U8 Coed' });
+    await importFields('d2-mock-first', [reserved]);
+    const slotOf = () =>
+      getMockData('practice_slots').filter(
+        (s) => s.start_time === '09:00' && s.valid_from === '2026-09-05'
+      );
+    expect(slotOf()).toHaveLength(1);
+
+    const keep = await importFields('d2-mock-keep', [
+      row({ Subunit: 'A', Start: '09:00', End: '09:30', 'Valid Until': '2026-11-21' }),
+    ]);
+    expect(keep.outcomes).toEqual(['applied']);
+    expect(keep.result.updated_practice_slots).toBe(1);
+    expect(slotOf()).toHaveLength(1);
+    expect(slotOf()[0]).toMatchObject({ division_id: 'u8-div-id', valid_until: '2026-11-21' });
+
+    const move = await importFields('d2-mock-move', [
+      row({ Subunit: 'A', Start: '09:00', End: '09:30', Division: 'U10 Girls' }),
+    ]);
+    expect(move.outcomes).toEqual(['applied']);
+    expect(slotOf()[0].division_id).toBe('u10-div-id');
+    const { error } = await supabase.rpc('rollback_field_import_job', {
+      p_import_job_id: 'd2-mock-move',
+    });
+    expect(error).toBeNull();
+    expect(slotOf()[0].division_id).toBe('u8-div-id');
+  });
+});
+
 describe('mock admin_set_practice_slot_division (D2)', () => {
   const slotId = () => getMockData('practice_slots')[0].id;
 

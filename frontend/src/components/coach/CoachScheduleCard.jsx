@@ -5,6 +5,7 @@ import { Calendar } from 'lucide-react';
 import { seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 import Badge from '../ui/Badge.jsx';
 import DataErrorBanner from '../ui/DataErrorBanner.jsx';
+import ScheduleExports from '../ScheduleExports.jsx';
 import {
   compareTeamEvents,
   fetchTeamEvents,
@@ -228,6 +229,19 @@ export default function CoachScheduleCard({ teams }) {
             .
           </p>
         )}
+        {/* R7: every team's whole season, not only what is listed above. */}
+        <div style={{ marginTop: 14 }}>
+          <ScheduleExports
+            teams={teams}
+            fileName={teams.length === 1 ? teams[0].name || 'team' : 'My_teams'}
+            label={
+              teams.length === 1
+                ? "Download your team's full season"
+                : "Download your teams' full season"
+            }
+            idPrefix="coach"
+          />
+        </div>
       </div>
     </section>
   );

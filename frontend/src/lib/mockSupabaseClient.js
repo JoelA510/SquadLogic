@@ -1710,8 +1710,21 @@ const createMockQuery = (table, data = null) => {
         if (table === 'practice_assignments' && (slotEmbed || queryContent.includes('teams'))) {
           const slots = getMockData('practice_slots');
           const fields = getMockData('fields');
+          const locations = getMockData('locations');
           const teams = getMockData('teams');
           const divisions = getMockData('divisions');
+          // The slot's ground under the aliases the select names, as PostgREST
+          // returns it (`field:fields(name, location:locations(name))` on the
+          // team page, `fields(name, locations(name))` in the feed), as the
+          // exceptions embed above does (admin focus R7: the schedule exports
+          // and the calendar name the ground). Only under the key the select
+          // names: a reader reading `fields` after selecting `field:fields`
+          // gets nothing from PostgREST, so it gets nothing here either.
+          const aliasOf = (name) =>
+            new RegExp(`(\\w+)\\s*:\\s*${name}\\s*\\(`).exec(queryContent)?.[1] || name;
+          const fieldKey = aliasOf('fields');
+          const locationKey = aliasOf('locations');
+          const embedsLocation = /\blocations\s*\(/.test(queryContent);
 
           results = results.map((item) => {
             const slot = slots.find((s) => String(s.id) === String(item[slotEmbed?.column]));
@@ -1719,8 +1732,13 @@ const createMockQuery = (table, data = null) => {
 
             let enrichedSlot = slot ? { ...slot } : null;
             if (enrichedSlot) {
-              enrichedSlot.fields =
-                fields.find((f) => String(f.id) === String(slot.field_id)) || null;
+              const field = fields.find((f) => String(f.id) === String(slot.field_id)) || null;
+              const location =
+                field && embedsLocation
+                  ? locations.find((l) => String(l.id) === String(field.location_id)) || null
+                  : undefined;
+              enrichedSlot[fieldKey] =
+                field && embedsLocation ? { ...field, [locationKey]: location } : field;
             }
 
             let enrichedTeam = team ? { ...team } : null;

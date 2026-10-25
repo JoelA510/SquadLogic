@@ -4,6 +4,7 @@ import PropTypes from 'prop-types';
 import { PRACTICE_CHANGES_UNREAD_TEXT, useTeamPortal } from '../hooks/useTeamPortal.js';
 import { Calendar, MapPin, Clock, RefreshCw, Shield, Target, UserRoundCheck } from 'lucide-react';
 import LoadingScreen from '../components/LoadingScreen.jsx';
+import ScheduleExports from '../components/ScheduleExports.jsx';
 import Button from '../components/ui/Button.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
@@ -197,6 +198,18 @@ export default function TeamRecordPage() {
               <Calendar className="text-color-primary" />
               Team Schedule
             </h2>
+
+            {/* R7: the whole season as CSV, XLSX and the team's calendar, for
+                an admin and for the team's coach alike (the files carry no
+                contact column). */}
+            {team?.id && (
+              <ScheduleExports
+                teams={[team]}
+                fileName={team.name || 'team'}
+                label="Download this team's schedule"
+                idPrefix="team"
+              />
+            )}
 
             {practiceChangesUnread && (
               // Q5: the practices below are the bare series; say so, never silently.

@@ -67,9 +67,11 @@
 --   9. An end-state check: no `public` function body, view or policy names a
 --      dropped object (comments and string literals stripped, so an audit
 --      metadata key is not a reference), and no function `authenticated` may
---      execute returns a column named like an email, a phone, a contact or a
---      guardian, other than the admin-only reads that refuse a coach
---      (`get_organization_members`, `get_settings_audit_log`).
+--      execute returns a column, or rows of a table with a column, named like
+--      an email, a phone, a contact or a guardian, other than the admin-only
+--      reads that refuse a coach (`get_organization_members`,
+--      `get_settings_audit_log`). A function returning `jsonb` or a bare
+--      `record` is not seen by this check (declared blind spot).
 --
 -- Every drop names its object, with no CASCADE, so anything still depending
 -- on one fails the migration.
@@ -1262,13 +1264,19 @@ BEGIN
     END IF;
 
     -- What a coach could be handed: every function a signed-in caller may
-    -- execute, by the names of its result columns.
+    -- execute, by the names of its result columns, or of the columns of the
+    -- table it returns rows of.
     SELECT string_agg(p.oid::regprocedure::text, ', ' ORDER BY p.oid::regprocedure::text) INTO v_bad
       FROM pg_proc p
+      JOIN pg_type rt ON rt.oid = p.prorettype
      WHERE p.pronamespace = 'public'::regnamespace
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
-       AND EXISTS (SELECT 1 FROM unnest(p.proargnames, p.proargmodes) AS a(n, m)
-                    WHERE a.m IN ('o', 'b', 't') AND a.n ~* '(mail|phone|contact|guardian)')
+       AND (EXISTS (SELECT 1 FROM unnest(p.proargnames, p.proargmodes) AS a(n, m)
+                     WHERE a.m IN ('o', 'b', 't') AND a.n ~* '(mail|phone|contact|guardian)')
+            OR EXISTS (SELECT 1 FROM pg_attribute ra
+                        WHERE ra.attrelid = rt.typrelid AND rt.typrelid <> 0
+                          AND ra.attnum > 0 AND NOT ra.attisdropped
+                          AND ra.attname ~* '(mail|phone|contact|guardian)'))
        AND p.oid NOT IN ('public.get_organization_members(uuid)'::regprocedure,
                          'public.get_settings_audit_log(uuid)'::regprocedure);
     IF v_bad IS NOT NULL THEN

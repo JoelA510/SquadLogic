@@ -130,6 +130,11 @@ R40="$REPO/docs/sql/20261023010000_revert.sql"
 # checks and the two role RPCs replaced), and the revert.
 M41="$REPO/supabase/migrations/20261024010000_remove_guardian_view_and_roles.sql"
 R41="$REPO/docs/sql/20261024010000_revert.sql"
+# R4: the contact surfaces removed (the staff, roster and member reads, the
+# player writers and the purge replaced; the directory, the card, the player
+# contact columns and the coach leads dropped), and the revert.
+M42="$REPO/supabase/migrations/20261025010000_remove_contact_surfaces.sql"
+R42="$REPO/docs/sql/20261025010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3720,9 +3725,10 @@ END;
 # No medical data. The smoke RAISEs on each; the revert claim on a column left
 # out and on a body that drifted.
 # Re-aimed at 20261022010000, whose finalize_import_job replaces this file's,
-# and again at 20261022020000, which replaces that one: the staged payload
-# stored whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M38" \
+# again at 20261022020000, which replaces that one, and again at
+# 20261025010000 ($M42), the live body: the staged payload stored whole as
+# custom_attributes again.
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M42" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -3834,25 +3840,20 @@ plant "R32 the revert does not restore the profiles grant" "$R32" \
 # card on a guardian contact, the unverified link, the card helper's grant and
 # the sign-in email change) went with get_team_roster's guardian arm,
 # guardian_contacts_view and link_my_guardian_records, and the roster plant is
-# aimed at $M41, the live get_team_roster.
+# aimed at the live get_team_roster, $M42 since 20261025010000 (R4). R4 also
+# dropped get_coach_directory and the coach_directory setting, so the
+# directory plant ("the directory ignores its setting") retired with them.
 plant "M33 a former coach still reads the roster" "$M33" \
   "           AND (a.effective_to IS NULL OR a.effective_to >= d.today)
            AND public.is_org_member(a.organization_id)" \
   "           AND public.is_org_member(a.organization_id)" \
   "smoke 20261021010000"
 
-plant "M33 an unrelated member reads the roster" "$M41" \
+plant "M33 an unrelated member reads the roster" "$M42" \
   "    IF NOT (v_admin OR v_coach) THEN
         RAISE EXCEPTION 'not permitted to read this team''s roster' USING ERRCODE = '42501';" \
   "    IF v_org IS NULL THEN
         RAISE EXCEPTION 'not permitted to read this team''s roster' USING ERRCODE = '42501';" \
-  "smoke 20261021010000"
-
-plant "M33 the directory ignores its setting" "$M33" \
-  "            OR (public.org_flag(p_organization_id, 'coach_directory', true)
-                AND EXISTS" \
-  "            OR (true
-                AND EXISTS" \
   "smoke 20261021010000"
 
 plant "M33 the preview read admits a non-admin" "$M33" \
@@ -4061,7 +4062,9 @@ plant "R36 the revert leaves the column defaults on now()" "$R36" \
   "FAIL revert 20261021040000"
 
 # R0: the import allowlist. The smoke RAISEs on each; the revert claim on a
-# body that drifted and on a new function left behind.
+# body that drifted and on a new function left behind. The purge plants are
+# aimed at $M42, whose minimise_import_people_data (R4: no player contact
+# columns) replaces this file's.
 plant "M37 the coach finalizer stores the payload minus a denylist again" "$M37" \
   "        v_custom_attributes := public.import_declared_attributes(v_declared, v_row.normalized_payload);" \
   "        v_custom_attributes := v_row.normalized_payload - 'full_name' - 'email';" \
@@ -4072,7 +4075,7 @@ plant "M37 the coach finalizer keeps a phone in contact_info" "$M37" \
   "                contact_info = COALESCE(v_existing.contact_info, '{}'::jsonb) || v_contact_info," \
   "smoke 20261022010000"
 
-plant "M37 the purge keeps a completed job's staged rows" "$M37" \
+plant "M37 the purge keeps a completed job's staged rows" "$M42" \
   "    DELETE FROM public.staging_import_rows sr
     USING public.import_jobs j
     WHERE j.id = sr.import_job_id
@@ -4085,12 +4088,12 @@ plant "M37 the purge keeps a completed job's staged rows" "$M37" \
       AND j.status = 'failed';" \
   "smoke 20261022010000"
 
-plant "M37 the purge stops redacting a player patch" "$M37" \
+plant "M37 the purge stops redacting a player patch" "$M42" \
   "                        WHEN (a.resource_type = 'players' OR a.action LIKE 'player.%')" \
   "                        WHEN (a.resource_type = 'nobody')" \
   "smoke 20261022010000"
 
-plant "M37 the purge deletes a finished job's field rows too" "$M37" \
+plant "M37 the purge deletes a finished job's field rows too" "$M42" \
   "      AND sr.import_type = 'coaches'
       AND j.status = ANY (v_finished);" \
   "      AND j.status = ANY (v_finished);" \
@@ -4101,7 +4104,7 @@ plant "M37 the coach retention ignores the job's state" "$M37" \
   "WHERE j.id = s.import_job_id AND s.import_type = 'coaches' AND s.created_at" \
   "smoke 20261022010000"
 
-plant "M37 the purge leaves an unfinished job's guardian columns" "$M37" \
+plant "M37 the purge leaves an unfinished job's guardian columns" "$M42" \
   "        raw_payload = public.import_allowed_payload('coaches', d.coach, sr.raw_payload)," \
   "        raw_payload = sr.raw_payload," \
   "smoke 20261022010000"
@@ -4116,7 +4119,7 @@ plant "M37 the date check accepts a date not on the calendar" "$M37" \
   "                            v_date_ok := true;" \
   "smoke 20261022010000"
 
-plant "M37 the audit purge redacts only the listed email keys" "$M37" \
+plant "M37 the audit purge redacts only the listed email keys" "$M42" \
   "                        WHEN ((strpos(lower(e.key), v_email_key) > 0" \
   "                        WHEN ((e.key IN ('matched_email', 'coach_email')" \
   "smoke 20261022010000"
@@ -4150,8 +4153,10 @@ plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" 
 
 # R1: no registration, compliance or payment flag. The smoke RAISEs on each;
 # the revert claim on a grant left out, a policy left out and a body that
-# drifted.
-plant "M38 the patch sanitizer still takes paid" "$M38" \
+# drifted. The patch helper plants are aimed at $M42, whose
+# sanitize_player_patch and apply_player_patch (R4: no guardian contacts)
+# replace this file's.
+plant "M38 the patch sanitizer still takes paid" "$M42" \
   "            WHEN 'willing_to_coach' THEN" \
   "            WHEN 'paid', 'willing_to_coach' THEN" \
   "smoke 20261022020000"
@@ -4162,7 +4167,7 @@ plant "M38 coach_update_player_compliance is left behind" "$M38" \
   "" \
   "smoke 20261022020000"
 
-plant "M38 apply_player_patch loses its UTC pin" "$M38" \
+plant "M38 apply_player_patch loses its UTC pin" "$M42" \
   "LANGUAGE plpgsql
 SET search_path = public
 SET timezone = 'UTC'
@@ -4323,31 +4328,20 @@ plant "M41 the admin-or-guardian read is left on team_players" "$M41" \
   "" \
   "applying 20261024010000_remove_guardian_view_and_roles.sql"
 
-plant "M41 a coach's roster carries guardian contacts" "$M41" \
-  "           CASE
-               WHEN v_admin THEN (" \
-  "           CASE
-               WHEN v_admin OR v_coach THEN (" \
-  "smoke 20261024010000"
-
-plant "M41 a coach's roster carries the rating" "$M41" \
+# The roster and staff reads are R4's since 20261025010000 ($M42): the
+# rating and staff plants are aimed there. The roster's guardian contacts and
+# the contact card are gone (R4), so the two plants that mutated them retired.
+plant "M41 a coach's roster carries the rating" "$M42" \
   "           CASE WHEN v_admin THEN p.rating END," \
   "           p.rating," \
   "smoke 20261024010000"
 
-plant "M41 the staff read admits any member" "$M41" \
+plant "M41 the staff read admits any member" "$M42" \
   "    IF NOT (v_admin
             OR (v_org IS NOT NULL AND public.is_current_team_coach(p_team_id))) THEN" \
   "    IF NOT (v_admin
             OR (v_org IS NOT NULL AND public.is_org_member(v_org))) THEN" \
   "smoke 20261024010000"
-
-plant "M41 an unshared card still shows a coach's phone" "$M41" \
-  "           CASE WHEN pr.share_contact IS NULL THEN c.phone
-                WHEN pr.share_contact THEN pr.contact_phone END," \
-  "           CASE WHEN pr.share_contact IS NULL THEN c.phone
-                WHEN pr.share_contact THEN pr.contact_phone ELSE c.phone END," \
-  "smoke 20261021010000"
 
 plant "M41 profile_players is left behind" "$M41" \
   "DROP TABLE public.profile_players;
@@ -4385,6 +4379,90 @@ plant "R41 the revert restores a drifted get_team_roster body" "$R41" \
   "    v_share := public.org_flag(v_org, 'guardian_contact_sharing', true);" \
   "    v_share := public.org_flag(v_org, 'guardian_contact_sharing', false);" \
   "revert 20261024010000"
+
+# R4: no contact surfaces. The migration's own end-state check refuses a
+# contact column handed back to a coach and a writer still naming a dropped
+# column; the smoke RAISEs on a refusal undone, a column or table left
+# behind, a key the sanitizer takes again and a contact read added past the
+# migration's check; the revert claim on a policy left out, a grant left in
+# and a body that drifted.
+plant "M42 the staff read returns an email again" "$M42" \
+  "    role text,
+    status text
+)" \
+  "    role text,
+    status text,
+    email text
+)" \
+  "applying 20261025010000_remove_contact_surfaces.sql"
+
+plant "M42 the purge still writes guardian_contacts" "$M42" \
+  "        custom_attributes = public.import_kept_player_attributes(d.player, p.custom_attributes)
+    FROM pg_temp.minimise_declared d" \
+  "        custom_attributes = public.import_kept_player_attributes(d.player, p.custom_attributes),
+        guardian_contacts = '[]'::jsonb
+    FROM pg_temp.minimise_declared d" \
+  "applying 20261025010000_remove_contact_surfaces.sql"
+
+# A coach-callable read returning an email, added after that check (before
+# COMMIT): the smoke's catalogue is what refuses it.
+plant "M42 a coach read returning an email is added" "$M42" \
+  "
+COMMIT;" \
+  "
+CREATE FUNCTION public.planted_coach_emails(p_organization_id uuid)
+RETURNS TABLE (full_name text, email text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS 'SELECT c.full_name, c.email FROM public.coaches c WHERE c.organization_id = p_organization_id';
+GRANT EXECUTE ON FUNCTION public.planted_coach_emails(uuid) TO authenticated;
+
+COMMIT;" \
+  "smoke 20261025010000"
+
+plant "M42 the member list admits any member" "$M42" \
+  "    IF NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: admin required for organization %', p_organization_id" \
+  "    IF NOT public.is_org_member(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: admin required for organization %', p_organization_id" \
+  "smoke 20261025010000"
+
+plant "M42 the sanitizer takes guardian_contacts again" "$M42" \
+  "            WHEN 'date_of_birth' THEN" \
+  "            WHEN 'date_of_birth', 'guardian_contacts' THEN" \
+  "smoke 20261025010000"
+
+plant "M42 players.contact_info is left behind" "$M42" \
+  "ALTER TABLE public.players
+    DROP COLUMN contact_info,
+    DROP COLUMN guardian_contacts;" \
+  "ALTER TABLE public.players
+    DROP COLUMN guardian_contacts;" \
+  "smoke 20261025010000"
+
+plant "M42 coach_interested_programs is left behind" "$M42" \
+  "DROP TABLE public.coach_interested_programs;
+" \
+  "" \
+  "smoke 20261025010000"
+
+plant "R42 the revert leaves the coach interest policy out" "$R42" \
+  "CREATE POLICY \"Coach Interested Programs: members access\" ON public.coach_interested_programs FOR SELECT TO authenticated USING (public.is_org_member(organization_id));
+" \
+  "" \
+  "revert 20261025010000"
+
+# A grant the default privileges give: without the revoke, PUBLIC keeps
+# EXECUTE on the card writer, which the fingerprint's sorted grants see.
+plant "R42 the revert leaves the card writer callable by PUBLIC" "$R42" \
+  "REVOKE ALL ON FUNCTION public.set_my_contact_card(p_phone text, p_email text, p_share boolean) FROM PUBLIC, anon, authenticated, service_role;
+" \
+  "" \
+  "revert 20261025010000"
+
+plant "R42 the revert restores a drifted get_team_staff body" "$R42" \
+  "        RAISE EXCEPTION 'not permitted to read this team''s staff' USING ERRCODE = '42501';" \
+  "        RAISE EXCEPTION 'not permitted to read this team''s staff (drifted)' USING ERRCODE = '42501';" \
+  "revert 20261025010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
@@ -4526,6 +4604,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the registration revert restores the seven functions, both tables, the view and the three players columns, and the three replaced functions' previous bodies, each with its grants, policies, triggers and posture as before"]="R38 the revert leaves submit_registration closed to anon|R38 the revert leaves a registrations policy out|R38 the revert restores a drifted apply_player_patch body"
   ["(checked) the reporting views revert leaves view_org_metrics and view_league_standings as a build at 20261022020000 has them: definition, columns, security_invoker and grants"]="R40 the revert drops both views|R40 the revert restates view_org_metrics without security_invoker"
   ["(checked) the guardian revert restores profile_players with its keys, policy and grants, the three guardian functions, the roster and staff reads' guardian arms, the people and calendar token read policies and the parent and player roles, each with its grants, comment and posture as at 20261023010000"]="R41 the revert leaves the guardian link policy out|R41 the revert leaves the contact helper callable|R41 the revert restores a drifted get_team_roster body"
+  ["(checked) the contact surfaces revert restores the players and contact card columns, the coach interest table with its keys, policy, trigger and grants, the directory, card and lead functions, the staff and roster reads' contact columns, the member list open to members and the player writers' previous bodies, each with its grants, comment and posture as at 20261024010000"]="R42 the revert leaves the coach interest policy out|R42 the revert leaves the card writer callable by PUBLIC|R42 the revert restores a drifted get_team_staff body"
   ["(checked) the allowlist revert restores both finalizers' previous bodies byte for byte and the custom-attributes trigger's bar trailing spaces, drops the six new functions and the new retention job, and restores the staging_players job"]="R37 the revert leaves import_declared_attributes|R37 the revert leaves the coach finalizer unpinned|R37 the revert restores a drifted finalize_coach_import_job body|R37 the revert leaves the fixed date check|R37 the revert leaves the staging_players job filtered"
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"

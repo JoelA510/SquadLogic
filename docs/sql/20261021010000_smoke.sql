@@ -1,17 +1,11 @@
 -- Smoke checks for 20261021010000_server_side_reads.sql
 --
 -- What it proves, with prelude.sql's `auth.uid()` stub, on the head build:
---   * get_team_roster: an admin gets every guardian contact and the rating;
---     the current coach gets names only (since 20261024010000: no contact, no
---     rating); a member with no tie to the team and a former coach are
---     refused;
---   * a saved contact card replaces a coach's imported email and phone in
---     get_team_staff, and an unshared card leaves neither; each save is
---     audited without the values;
+--   * get_team_roster: an admin gets the rating; the current coach gets
+--     names only (since 20261024010000: no rating); a member with no tie to
+--     the team and a former coach are refused;
 --   * get_team_staff admits the current coach and refuses the unrelated
 --     member; a coach whose assignment ended yesterday is no longer current;
---   * get_coach_directory admits a current coach and refuses them once
---     coach_directory is off;
 --   * the posture: every reader is SECURITY DEFINER with search_path=public,
 --     executable by authenticated and not anon; the three internal helpers
 --     (org_flag, team_local_today, coached_team_ids_of) by neither;
@@ -26,6 +20,14 @@
 -- docs/sql/20261024010000_smoke.sql checks they stay gone, and
 -- docs/sql/20261021010000_revert.sql is still checked on a build up to this
 -- migration. The member with no tie to the team is a coach who coaches none.
+--
+-- **Since 20261025010000 (R4)** there are no contact surfaces: guardian
+-- contacts, the contact card (`set_my_contact_card` and its `profiles`
+-- columns), `get_coach_directory` and the `coach_directory` setting are gone,
+-- and neither read returns a contact column. The guardian contact, contact
+-- card and directory cases went with them; docs/sql/20261025010000_smoke.sql
+-- checks they stay gone, and docs/sql/20261021010000_revert.sql is still
+-- checked on a build up to this migration.
 --
 -- Wrapped in BEGIN ... ROLLBACK. Every id is generated; every email is
 -- `@example.test`; there is no PII.
@@ -48,9 +50,7 @@ DECLARE
     v_old uuid;
     v_p1 uuid;
     v_p2 uuid;
-    v_r jsonb;
     v_n integer;
-    v_contacts jsonb;
     v_denied boolean;
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
@@ -73,8 +73,8 @@ BEGIN
         VALUES (v_org, v_s, 'SSR U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name)
         VALUES (v_org, v_d, 'SSR Team A') RETURNING id INTO v_ta;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, phone, status)
-        VALUES (v_org, v_coach_u, 'Coach Current', 'ssr-coach@example.test', '555-0100', 'active')
+    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
+        VALUES (v_org, v_coach_u, 'Coach Current', 'ssr-coach@example.test', 'active')
         RETURNING id INTO v_coach;
     INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
         VALUES (v_org, v_old_u, 'Coach Former', 'ssr-old@example.test', 'active')
@@ -84,59 +84,28 @@ BEGIN
     VALUES (v_org, v_ta, v_coach, 'lead', public.team_local_today(v_ta) - 30, NULL, 'smoke', NULL),
            (v_org, v_ta, v_old, 'assistant', public.team_local_today(v_ta) - 30,
             public.team_local_today(v_ta) - 1, 'smoke', 'smoke');
-    INSERT INTO public.players (organization_id, first_name, last_name, rating, guardian_contacts)
-        VALUES (v_org, 'Pat', 'One', 3, jsonb_build_array(
-            jsonb_build_object('name', 'Guardian One', 'email', 'g1-primary@example.test',
-                               'alternate_email', 'ssr-g1@example.test', 'phone', '555-0111'),
-            jsonb_build_object('name', 'Guardian One B', 'email', 'g1-second@example.test')))
+    INSERT INTO public.players (organization_id, first_name, last_name, rating)
+        VALUES (v_org, 'Pat', 'One', 3)
         RETURNING id INTO v_p1;
-    INSERT INTO public.players (organization_id, first_name, last_name, rating, guardian_contacts)
-        VALUES (v_org, 'Sam', 'Two', 4, jsonb_build_array(
-            jsonb_build_object('name', 'Guardian Two', 'email', 'g2@example.test',
-                               'alternate_email', 'g2-alt@example.test', 'phone', '555-0222'),
-            jsonb_build_object('name', 'Guardian Two B', 'email', 'g2-second@example.test')))
+    INSERT INTO public.players (organization_id, first_name, last_name, rating)
+        VALUES (v_org, 'Sam', 'Two', 4)
         RETURNING id INTO v_p2;
     INSERT INTO public.team_players (team_id, player_id, organization_id)
         VALUES (v_ta, v_p1, v_org), (v_ta, v_p2, v_org);
 
     -- Roster: admin and coach
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    SELECT count(*) INTO v_n FROM public.get_team_roster(v_ta) r
-     WHERE jsonb_array_length(r.guardian_contacts) = 2 AND r.rating IS NOT NULL
-       AND r.guardian_contacts->0 ? 'alternate_email';
+    SELECT count(*) INTO v_n FROM public.get_team_roster(v_ta) r WHERE r.rating IS NOT NULL;
     IF v_n <> 2 THEN
-        RAISE EXCEPTION 'an admin did not get every guardian contact and the rating: % of 2', v_n;
+        RAISE EXCEPTION 'an admin did not get the rating: % of 2', v_n;
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
     SELECT count(*) INTO v_n FROM public.get_team_roster(v_ta) r
-     WHERE r.guardian_contacts = '[]'::jsonb AND r.rating IS NULL AND r.first_name IS NOT NULL;
+     WHERE r.rating IS NULL AND r.first_name IS NOT NULL;
     IF v_n <> 2 THEN
-        RAISE EXCEPTION 'the current coach did not get names only (no contact, no rating): % of 2', v_n;
+        RAISE EXCEPTION 'the current coach did not get names only (no rating): % of 2', v_n;
     END IF;
-    RAISE NOTICE 'roster: an admin gets every contact and the rating; the current coach gets names only';
-
-    -- Contact card, on the coach
-    PERFORM public.set_my_contact_card('+1 555 0199', 'card-coach@example.test', true);
-    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    SELECT to_jsonb(s.*) INTO v_contacts FROM public.get_team_staff(v_ta) s WHERE s.coach_id = v_coach;
-    IF v_contacts->>'email' <> 'card-coach@example.test' OR v_contacts->>'phone' <> '+1 555 0199' THEN
-        RAISE EXCEPTION 'a shared card did not replace the imported details: %', v_contacts;
-    END IF;
-    PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
-    PERFORM public.set_my_contact_card('+1 555 0199', 'card-coach@example.test', false);
-    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    SELECT to_jsonb(s.*) INTO v_contacts FROM public.get_team_staff(v_ta) s WHERE s.coach_id = v_coach;
-    IF v_contacts->>'email' IS NOT NULL OR v_contacts->>'phone' IS NOT NULL
-       OR v_contacts->>'full_name' <> 'Coach Current' THEN
-        RAISE EXCEPTION 'an unshared card still showed contact details: %', v_contacts;
-    END IF;
-    IF (SELECT count(*) FROM public.audit_log
-         WHERE action = 'profile.contact_card_updated' AND resource_id = v_coach_u
-           AND organization_id = v_org AND metadata ? 'share_contact'
-           AND NOT metadata ? 'contact_phone' AND NOT (metadata::text LIKE '%0199%')) <> 2 THEN
-        RAISE EXCEPTION 'each card save was not audited once, without the phone number';
-    END IF;
-    RAISE NOTICE 'a shared card replaces a coach''s imported email and phone; an unshared card shows neither; each save audited once, without the values';
+    RAISE NOTICE 'roster: an admin gets the rating; the current coach gets names only';
 
     -- Staff
     PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
@@ -172,26 +141,8 @@ BEGIN
     IF NOT v_denied THEN RAISE EXCEPTION 'a coach whose assignment ended read the roster'; END IF;
     RAISE NOTICE 'an unrelated member and a former coach are refused the roster and staff';
 
-    -- Directory
-    PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
-    SELECT count(*) INTO v_n FROM public.get_coach_directory(v_org);
-    IF v_n <> 1 THEN
-        RAISE EXCEPTION 'the directory did not list exactly the one current coach: %', v_n;
-    END IF;
-    UPDATE public.organizations SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"coach_directory": false}' WHERE id = v_org;
-    BEGIN
-        PERFORM * FROM public.get_coach_directory(v_org);
-        v_denied := false;
-    EXCEPTION WHEN insufficient_privilege THEN
-        v_denied := true;
-    END;
-    IF NOT v_denied THEN RAISE EXCEPTION 'a coach read the directory with the league setting off'; END IF;
-    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    SELECT count(*) INTO v_n FROM public.get_coach_directory(v_org);
-    IF v_n <> 1 THEN RAISE EXCEPTION 'the admin was refused the directory with the setting off'; END IF;
-    RAISE NOTICE 'directory: a current coach reads it while on, not while off; an admin reads it either way';
-
     -- Role preview
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SELECT count(*) INTO v_n FROM public.admin_get_coached_team_ids(v_org, v_coach_u) t WHERE t = v_ta;
     IF v_n <> 1 THEN RAISE EXCEPTION 'an admin preview did not see the coach''s team'; END IF;
     PERFORM set_config('request.jwt.claim.sub', v_coach_u::text, true);
@@ -208,16 +159,14 @@ BEGIN
     SELECT count(*) INTO v_n
       FROM pg_proc p
      WHERE p.oid IN ('public.get_team_roster(uuid)'::regprocedure, 'public.get_team_staff(uuid)'::regprocedure,
-                     'public.get_coach_directory(uuid)'::regprocedure,
                      'public.get_my_coached_team_ids(uuid)'::regprocedure,
-                     'public.set_my_contact_card(text,text,boolean)'::regprocedure,
                      'public.is_current_team_coach(uuid)'::regprocedure,
                      'public.admin_get_coached_team_ids(uuid,uuid)'::regprocedure)
        AND p.prosecdef AND p.proconfig = ARRAY['search_path=public']
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
-    IF v_n <> 7 THEN
-        RAISE EXCEPTION 'posture: % of 7 callable functions are definer, pinned, authenticated-only', v_n;
+    IF v_n <> 5 THEN
+        RAISE EXCEPTION 'posture: % of 5 callable functions are definer, pinned, authenticated-only', v_n;
     END IF;
     IF has_function_privilege('authenticated', 'public.org_flag(uuid,text,boolean)', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.team_local_today(uuid)', 'EXECUTE')
@@ -225,7 +174,7 @@ BEGIN
        OR has_function_privilege('anon', 'public.org_flag(uuid,text,boolean)', 'EXECUTE') THEN
         RAISE EXCEPTION 'an internal helper is executable by a client role';
     END IF;
-    RAISE NOTICE 'posture: 7 of 7 callable functions definer, pinned, authenticated-only; the three internal helpers callable by no client role';
+    RAISE NOTICE 'posture: 5 of 5 callable functions definer, pinned, authenticated-only; the three internal helpers callable by no client role';
 END;
 $$;
 

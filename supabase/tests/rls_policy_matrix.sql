@@ -862,8 +862,10 @@ SELECT results_eq(pg_temp.matrix_rows('matrix_result', 'telemetry_log'), pg_temp
 -- A coach reads no player or roster row directly (the matrix above); they
 -- read their own team's players through get_team_roster, names and jersey
 -- number only. Charlie leads A-Team, the second coach leads A-Team Two; both
--- assignments are current. Ada (on A-Team) carries a rating, a gender and a
--- guardian contact, so an empty column is the read's doing, not the seed's.
+-- assignments are current. Ada (on A-Team) carries a rating, a gender, years
+-- played and a coaching interest, so an empty column is the read's doing, not
+-- the seed's. (The roster read has no guardian contact column since
+-- 20261025010000, R4.)
 INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
     ('e0000040-0000-0000-0000-00000000000a', 'a1111111-1111-1111-1111-111111111111',
      '33333333-3333-3333-3333-333333333333', 'Charlie Coach-A', 'charlie@test.local', 'active'),
@@ -879,27 +881,25 @@ VALUES
      'e0000040-0000-0000-0000-00000000002a', 'lead',
      public.team_local_today('e0000032-0000-0000-0000-00000000000a') - 5, NULL, 'pgtap', NULL);
 UPDATE public.players
-   SET rating = 3, gender = 'F', years_played = 2, willing_to_coach = true, jersey_number = 7,
-       guardian_contacts = '[{"name": "Matrix Guardian", "email": "guardian@test.local", "phone": "555-0100"}]'
+   SET rating = 3, gender = 'F', years_played = 2, willing_to_coach = true, jersey_number = 7
  WHERE id = 'e0000010-0000-0000-0000-00000000000a';
 
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(
     (SELECT string_agg(concat_ws(':', r.first_name, r.last_name, r.jersey_number, r.gender, r.years_played,
-                                 r.rating, r.willing_to_coach, r.guardian_contacts -> 0 ->> 'email'), ',')
+                                 r.rating, r.willing_to_coach), ',')
        FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
-    'Ada:Matrix:7:F:2:3:t:guardian@test.local',
+    'Ada:Matrix:7:F:2:3:t',
     'an admin reads every column of their team''s roster'
 );
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT is(
     (SELECT string_agg(concat_ws(':', r.first_name, r.last_name, r.jersey_number,
                                  coalesce(r.gender, '-'), coalesce(r.years_played::text, '-'),
-                                 coalesce(r.rating::text, '-'), coalesce(r.willing_to_coach::text, '-'),
-                                 r.guardian_contacts::text), ',')
+                                 coalesce(r.rating::text, '-'), coalesce(r.willing_to_coach::text, '-')), ',')
        FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
-    'Ada:Matrix:7:-:-:-:-:[]',
+    'Ada:Matrix:7:-:-:-:-',
     'a coach reads their own team''s players, names and jersey number only'
 );
 SET LOCAL "request.jwt.claims" TO '{"sub":"55555555-5555-5555-5555-555555555555"}';

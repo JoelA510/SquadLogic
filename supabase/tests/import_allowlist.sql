@@ -186,16 +186,15 @@ SELECT is(
 );
 
 SELECT is(
-    (SELECT jsonb_build_object('custom_attributes', custom_attributes,
-                               'contact_info', contact_info,
-                               'guardian_contacts', guardian_contacts)
+    (SELECT jsonb_build_object('custom_attributes', custom_attributes)
        FROM public.players WHERE external_registration_id = 'R0-EXT-1'),
-    -- No `paid` since 20261022020000 dropped the column; the payment value is
-    -- in the catalogue scan's needles below.
+    -- No `paid` since 20261022020000 dropped the column, and no
+    -- `contact_info` or `guardian_contacts` since 20261025010000 dropped
+    -- those; the payment, contact and guardian values are in the catalogue
+    -- scan's needles below.
     '{"custom_attributes": {"shirt_size": "YS", "joined_on": "2024-01-02", "skill": "advanced",
                             "team_name": "R0 Team", "team_age": "U10", "team_gender": "Girls",
-                            "play_up": "yes"},
-      "contact_info": {}, "guardian_contacts": []}'::jsonb,
+                            "play_up": "yes"}}'::jsonb,
     'the player keeps its declared field, team placement and play-up, and no contact, guardian or payment'
 );
 
@@ -300,12 +299,13 @@ INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_t
     source_row_number, raw_payload, normalized_payload)
 VALUES ('b2222222-2222-2222-2222-222222222222', 'b2222222-0000-4000-8000-0000000000cb', 'fields', 1,
         '{"name": "Field R0"}'::jsonb, '{"name": "Field R0"}'::jsonb);
-INSERT INTO public.players (id, organization_id, first_name, last_name, contact_info,
-                            guardian_contacts, custom_attributes)
+-- A legacy player whose undeclared attributes hold a guardian (the contact
+-- columns it once had were dropped by 20261025010000).
+INSERT INTO public.players (id, organization_id, first_name, last_name, custom_attributes)
 VALUES ('b2222222-0000-4000-8000-0000000000d1', 'b2222222-2222-2222-2222-222222222222',
-        'LegacyR0', 'Player', '{"phone": "555-0193"}'::jsonb,
-        '[{"name": "R0GuardianName", "email": "r0-guardian-one@example.test"}]'::jsonb,
-        '{"play_up": "yes", "guardian 1 address": "191 R0 Placeholder Way"}'::jsonb);
+        'LegacyR0', 'Player',
+        '{"play_up": "yes", "guardian 1 address": "191 R0 Placeholder Way",
+          "guardian 1 name": "R0GuardianName", "guardian 1 phone": "555-0193"}'::jsonb);
 
 -- A season timezone change made while acting for another user records the
 -- admin's email (20260917000000); a contact-card change records only whether
@@ -376,11 +376,10 @@ SELECT is(
 );
 
 SELECT is(
-    (SELECT count(*)::int FROM public.players
-      WHERE contact_info IS DISTINCT FROM '{}'::jsonb
-         OR guardian_contacts IS DISTINCT FROM '[]'::jsonb),
+    (SELECT count(*)::int FROM public.players p
+      WHERE strpos(to_jsonb(p)::text, 'R0GuardianName') > 0 OR strpos(to_jsonb(p)::text, '555-0193') > 0),
     0,
-    'after the purge, no player holds contact details or guardian contacts'
+    'after the purge, no player row holds the legacy guardian''s name or phone'
 );
 
 SELECT is(

@@ -12,9 +12,11 @@
 --     a current coach, a coach of another team and a member with no coaching
 --     role read none; each table has exactly one read policy, the admin one;
 --   * the roster read: an admin gets every column; the team's current coach
---     gets every player's name and jersey number and nothing else (no guardian
---     contact, gender, years played, rating or coaching interest); a coach of
---     another team and a member with no coaching role are refused 42501;
+--     gets every player's name and jersey number and nothing else (no gender,
+--     years played, rating or coaching interest; since 20261025010000 the read
+--     has no guardian contact column at all, and docs/sql/20261025010000_smoke.sql
+--     checks no read a coach can call returns one); a coach of another team
+--     and a member with no coaching role are refused 42501;
 --   * the staff read and the calendar token admit the admin and the team's
 --     current coach only;
 --   * the roles: `parent` and `player` are refused as a member's role and an
@@ -165,14 +167,12 @@ BEGIN
     VALUES (v_org, v_ta, v_c, 'lead', public.team_local_today(v_ta) - 10, NULL, 'smoke', NULL),
            (v_org, v_tb, v_o, 'lead', public.team_local_today(v_tb) - 10, NULL, 'smoke', NULL);
     INSERT INTO public.players (organization_id, first_name, last_name, jersey_number, gender, years_played,
-                                rating, willing_to_coach, guardian_contacts)
-        VALUES (v_org, 'Pia', 'One', 7, 'F', 2, 3, true,
-                '[{"name": "Guardian One", "email": "g1@example.test", "phone": "555-0101"}]')
+                                rating, willing_to_coach)
+        VALUES (v_org, 'Pia', 'One', 7, 'F', 2, 3, true)
         RETURNING id INTO v_p1;
     INSERT INTO public.players (organization_id, first_name, last_name, jersey_number, gender, years_played,
-                                rating, willing_to_coach, guardian_contacts)
-        VALUES (v_org, 'Rex', 'Two', 9, 'M', 1, 4, false,
-                '[{"name": "Guardian Two", "email": "g2@example.test"}, {"name": "Guardian Three"}]')
+                                rating, willing_to_coach)
+        VALUES (v_org, 'Rex', 'Two', 9, 'M', 1, 4, false)
         RETURNING id INTO v_p2;
     INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_ta, v_p1, v_org), (v_ta, v_p2, v_org);
 
@@ -184,17 +184,17 @@ BEGIN
         RESET ROLE; RAISE EXCEPTION 'an admin did not read both players and both roster rows';
     END IF;
     SELECT string_agg(r.first_name || ':' || r.jersey_number || ':' || r.gender || ':' || r.years_played || ':'
-                      || r.rating || ':' || r.willing_to_coach || ':' || jsonb_array_length(r.guardian_contacts),
+                      || r.rating || ':' || r.willing_to_coach,
                       ',' ORDER BY r.first_name)
       INTO v_t FROM public.get_team_roster(v_ta) r;
-    IF v_t IS DISTINCT FROM 'Pia:7:F:2:3:true:1,Rex:9:M:1:4:false:2' THEN
+    IF v_t IS DISTINCT FROM 'Pia:7:F:2:3:true,Rex:9:M:1:4:false' THEN
         RESET ROLE; RAISE EXCEPTION 'an admin''s roster read is not every column: %', coalesce(v_t, 'nothing');
     END IF;
     IF (SELECT count(*) FROM public.get_team_staff(v_ta)) <> 1 THEN
         RESET ROLE; RAISE EXCEPTION 'an admin did not read the team''s staff';
     END IF;
     RESET ROLE;
-    RAISE NOTICE 'admin: 2 of 2 players and roster rows read directly; the roster read returns every column, guardian contacts 1 and 2';
+    RAISE NOTICE 'admin: 2 of 2 players and roster rows read directly; the roster read returns every column';
 
     -- ── The team's current coach ───────────────────────────────────────────
     PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
@@ -205,7 +205,7 @@ BEGIN
     END IF;
     SELECT string_agg(r.first_name || ' ' || r.last_name || ':' || r.jersey_number, ',' ORDER BY r.first_name),
            count(*) FILTER (WHERE r.gender IS NOT NULL OR r.years_played IS NOT NULL OR r.rating IS NOT NULL
-                                  OR r.willing_to_coach IS NOT NULL OR r.guardian_contacts <> '[]'::jsonb)
+                                  OR r.willing_to_coach IS NOT NULL)
       INTO v_t, v_n FROM public.get_team_roster(v_ta) r;
     IF v_t IS DISTINCT FROM 'Pia One:7,Rex Two:9' OR v_n <> 0 THEN
         RESET ROLE; RAISE EXCEPTION 'the coach''s roster read is not names only: % (% row(s) with more)', coalesce(v_t, 'nothing'), v_n;
@@ -218,7 +218,7 @@ BEGIN
         RESET ROLE; RAISE EXCEPTION 'the coach did not read exactly their team''s calendar token';
     END IF;
     RESET ROLE;
-    RAISE NOTICE 'coach roster: 2 of 2 players with name and jersey number, and none with a guardian contact, gender, years played, rating or coaching interest; no direct player or roster read';
+    RAISE NOTICE 'coach roster: 2 of 2 players with name and jersey number, and none with a gender, years played, rating or coaching interest; no direct player or roster read';
 
     -- ── A coach of another team, and a member with no coaching role ────────
     FOREACH v_t IN ARRAY ARRAY[v_ou::text, v_m::text] LOOP

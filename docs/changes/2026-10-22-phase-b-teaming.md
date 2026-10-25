@@ -664,13 +664,18 @@ engine conventions), and the demo league is teamed end to end.
   needs no branch and refuses a non-boolean; it is audited through `update_org_feature_flags`
   and the page's `settings.flags_updated` row. **No migration:** the RPC stores the JSONB as
   given and no SQL reads the key (`org_flag` reads booleans by name for the server-side reads,
-  and nothing calls it with this key). TeamBuilder spreads leads when this and Coaching Interest
+  and nothing calls it with this key). Production (_executed_, a read-only catalogue query,
+  2026-10-25): one organization, none storing the key, no check constraint on `organizations`,
+  no function naming the key, no players. TeamBuilder spreads leads when this and Coaching Interest
   are both on, since a lead is read from that column; its two toggles ("Keep buddies together",
   "Spread coach parents") give way to a read-only line of the league's settings, and its
   `teams.auto_balanced` audit row records them.
 - **The Lead mark:** a "lead" badge on the player's card in the Teams page's roster editor (read
   from the run's rosters, `isCoachingLead`) and a "Lead" mark, in text, on the Team Builder chip
-  (it was an icon with a title only). Nothing about a lead's parent is stored or shown.
+  (it was an icon with a title only). Nothing about a lead's parent is stored or shown. The
+  badge's pair is computed from the tokens (`--text-secondary` on `--bg-hover`: 5.73:1 light,
+  6.83:1 dark); the chip's mark is the class the "2y" mark already uses, which the
+  `/teams/builder` axe scan covers. The roster editor is not in an axe scan (as in B3).
 - **Tuning `c`** (_executed_, a scratch script, not committed: the demo league's 21 divisions
   through `prepareTeamingInput` and `generateTeams` with the page's field mapping, one head coach
   per export team linked to their child, the README's team counts and roster sizes, ten seeds

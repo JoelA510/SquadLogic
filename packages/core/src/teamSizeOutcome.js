@@ -11,10 +11,10 @@ import { TEAM_GENERATION } from './constants.js';
  * that name the teams with a problem, and each size is counted from the roster (or from
  * `rosterSizeByTeamId`, the run's current rows, when a manual edit has moved players since). The
  * limits are the ones the generator recorded on each team (`rosterBalanceByDivision[div]
- * .teamStats`). A run that did not record them is not checked: its `underMin` is `null`, and so
- * is its `overMax` unless the run carries the generator's own over-maximum check
- * (`changeDiagnosticsByDivision[div].capacityViolations`, which only a rerun computes). `null`
- * means "not checked", never "none".
+ * .teamStats`). A run that did not record them, or whose teams carry no rosters, is not checked:
+ * its `underMin` is `null`, and so is its `overMax` unless the run carries the generator's own
+ * over-maximum check (`changeDiagnosticsByDivision[div].capacityViolations`, which only a rerun
+ * computes). `null` means "not checked", never "none".
  */
 
 /** Overflow reasons that mean "no room": the teams, the coach's team or the buddy's team was full. */
@@ -51,7 +51,9 @@ function recordedLimits(rosterBalance) {
     const min = positiveIntegerOrNull(entry?.minRosterSize);
     if (min !== null && (minRosterSize === null || min > minRosterSize)) minRosterSize = min;
   }
-  return { recorded: teamStats.length > 0, maxRosterSize, minRosterSize };
+  // The generator writes a maximum on every team's stats; stats without one (a seeded or
+  // hand-made run) say nothing about the limits, a missing minimum included.
+  return { recorded: maxRosterSize !== null, maxRosterSize, minRosterSize };
 }
 
 /**
@@ -60,7 +62,8 @@ function recordedLimits(rosterBalance) {
  * @typedef {{
  *   division: string,
  *   teamCount: number,
- *   playersPlaced: number,
+ *   playersPlaced: number | null,
+ *   rostersKnown: boolean,
  *   limitsRecorded: boolean,
  *   minRosterSize: number | null,
  *   maxRosterSize: number | null,
@@ -96,6 +99,10 @@ export function summarizeTeamSizeOutcome(result, { rosterSizeByTeamId = null } =
     // the first on a fresh team, the stored rosters the second.
     /** @type {Map<string, TeamSize>} */
     const sizeById = new Map();
+    // A size is known from the run's rows, or from a team's own roster; a team with neither (a
+    // team row with no players array) leaves the division's sizes unknown, not zero.
+    const rostersKnown =
+      rosterSizeByTeamId !== null || teams.every((team) => Array.isArray(team?.players));
     /** @type {TeamSize[]} */
     const sizes = teams.map((team) => {
       const teamId = String(team?.id);
@@ -122,10 +129,10 @@ export function summarizeTeamSizeOutcome(result, { rosterSizeByTeamId = null } =
     let overMax = null;
     if (sizes.length === 0) {
       overMax = [];
-    } else if (maxRosterSize !== null) {
+    } else if (rostersKnown && maxRosterSize !== null) {
       overMax = sizes.filter((size) => size.playerCount > maxRosterSize);
     } else if (Array.isArray(capacityViolations)) {
-      // The generator's own check, with no maximum to compare the current sizes against.
+      // The generator's own check, with no maximum or no rosters to compare against.
       overMax = capacityViolations.map((entry) => {
         const teamId = String(entry?.teamId);
         const known = sizeById.get(teamId);
@@ -141,7 +148,7 @@ export function summarizeTeamSizeOutcome(result, { rosterSizeByTeamId = null } =
     let underMin = null;
     if (sizes.length === 0) {
       underMin = [];
-    } else if (limits.recorded) {
+    } else if (rostersKnown && limits.recorded) {
       // No minimum recorded on any team means none was set: no team can be under it.
       underMin =
         minRosterSize === null ? [] : sizes.filter((size) => size.playerCount < minRosterSize);
@@ -164,7 +171,8 @@ export function summarizeTeamSizeOutcome(result, { rosterSizeByTeamId = null } =
     divisions.push({
       division,
       teamCount: sizes.length,
-      playersPlaced: sizes.reduce((sum, size) => sum + size.playerCount, 0),
+      playersPlaced: rostersKnown ? sizes.reduce((sum, size) => sum + size.playerCount, 0) : null,
+      rostersKnown,
       limitsRecorded: limits.recorded,
       minRosterSize,
       maxRosterSize,

@@ -146,6 +146,27 @@ describe('Team sizes on the Teams page', () => {
     );
   });
 
+  it("says a run that holds no rosters was not checked, as the mock seed's saved run", () => {
+    render(
+      <TeamSizeOutcomeList
+        results={{
+          teamsByDivision: { 'U8 Boys': [{ id: 't1', name: 'Team A' }] },
+          rosterBalanceByDivision: {
+            'U8 Boys': { teamStats: [{ teamId: 't1', slotsRemaining: 3 }] },
+          },
+        }}
+      />
+    );
+    expect(section()).toHaveTextContent('U8 Boys: 1 team.');
+    expect(section()).not.toHaveTextContent('placed');
+    expect(section()).not.toHaveTextContent('Every team is within');
+    expect(
+      within(section()).getByRole('list', { name: 'U8 Boys team-size warnings' })
+    ).toHaveTextContent(
+      'This run does not hold its rosters, so team sizes were not checked against the limits.'
+    );
+  });
+
   it('shows nothing for a run without rosters', () => {
     const { container } = render(<TeamSizeOutcomeList results={{ team_players: [] }} />);
     expect(container).toBeEmptyDOMElement();

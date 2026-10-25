@@ -50,7 +50,13 @@ function divisionWarnings(outcome) {
       `${count(outcome.notPlacedForCapacity.length, 'player', 'players')} not placed for lack of room (${why}). Each is listed under "Not placed" in Players to review.`
     );
   }
-  if (outcome.teamCount > 0 && outcome.underMin === null && outcome.overMax === null) {
+  if (outcome.teamCount > 0 && !outcome.rostersKnown && outcome.underMin === null) {
+    warnings.push(
+      outcome.overMax === null
+        ? 'This run does not hold its rosters, so team sizes were not checked against the limits.'
+        : 'This run does not hold its rosters, so short teams were not checked.'
+    );
+  } else if (outcome.teamCount > 0 && outcome.underMin === null && outcome.overMax === null) {
     warnings.push(
       'This run did not record its roster limits, so team sizes were not checked against them.'
     );
@@ -90,8 +96,10 @@ export default function TeamSizeOutcomeList({ results }) {
           return (
             <div key={outcome.division} className="space-y-2">
               <p className="text-sm text-text-secondary">
-                {outcome.division}: {count(outcome.teamCount, 'team', 'teams')},{' '}
-                {count(outcome.playersPlaced, 'player', 'players')} placed.
+                {outcome.division}: {count(outcome.teamCount, 'team', 'teams')}
+                {outcome.playersPlaced === null
+                  ? '.'
+                  : `, ${count(outcome.playersPlaced, 'player', 'players')} placed.`}
                 {limits ? ` ${limits}` : ''}
               </p>
               {warnings.length > 0 ? (

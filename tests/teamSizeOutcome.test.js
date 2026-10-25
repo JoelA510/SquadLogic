@@ -208,6 +208,37 @@ describe('summarizeTeamSizeOutcome', () => {
     expect(outcome.playersPlaced).toBe(3);
   });
 
+  it('checks nothing for a run whose teams carry no rosters and whose stats carry no limits', () => {
+    // The shape of the mock seed's saved run (`mockSupabaseClient.js`, run-1): team rows without
+    // players, and stats with fill counts but no maximum.
+    const seeded = {
+      teamsByDivision: {
+        U8: [
+          { id: 't1', name: 'Team A' },
+          { id: 't2', name: 'Team B' },
+        ],
+      },
+      rosterBalanceByDivision: {
+        U8: {
+          summary: { totalPlayers: 24, totalCapacity: 30 },
+          teamStats: [
+            { teamId: 't1', slotsRemaining: 3 },
+            { teamId: 't2', slotsRemaining: 3 },
+          ],
+        },
+      },
+    };
+    const [outcome] = summarizeTeamSizeOutcome(seeded).divisions;
+    expect(outcome).toMatchObject({
+      teamCount: 2,
+      playersPlaced: null,
+      rostersKnown: false,
+      limitsRecorded: false,
+      underMin: null,
+      overMax: null,
+    });
+  });
+
   it('says nothing about a result with no rosters', () => {
     expect(summarizeTeamSizeOutcome(null)).toBeNull();
     expect(summarizeTeamSizeOutcome({ overflowByDivision: {} })).toBeNull();

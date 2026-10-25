@@ -13,8 +13,10 @@
 --     teams.calendar_token is gone;
 --   * rotate_calendar_token: an unrelated member is refused and the token is
 --     unchanged; the current coach rotates it;
---   * update_game_score: the coach of the home team scores; a coach of
---     neither team is refused (42501); an admin scores;
+--   * update_game_score: since 20261028010000 (admin focus R6) an admin
+--     only, while the league's score entry setting is on: the coach of the
+--     home team and a coach of neither team are refused (42501); an admin
+--     scores;
 --   * reconcile_prod_rls_drift's spec names the new coaches policy; it drops
 --     a re-added member-wide coaches read and refuses any other;
 --   (The migration itself refuses to commit with any other read policy left on
@@ -155,13 +157,25 @@ BEGIN
     END IF;
     RAISE NOTICE 'the current coach rotates the team''s token';
 
-    -- Scores
-    PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
+    -- Scores: an admin function since 20261028010000, behind the setting.
+    UPDATE public.organizations
+       SET feature_flags = COALESCE(feature_flags, '{}'::jsonb) || '{"score_entry": true}'::jsonb
+     WHERE id = v_org;
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SET LOCAL ROLE authenticated;
     PERFORM public.update_game_score(v_org, v_game, 2::smallint, 1::smallint, '{}'::jsonb);
     RESET ROLE;
-    IF (SELECT score_home FROM public.games WHERE id = v_game) IS DISTINCT FROM 2 THEN
-        RAISE EXCEPTION 'the home team''s coach could not score the game';
+    PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
+    SET LOCAL ROLE authenticated;
+    BEGIN
+        PERFORM public.update_game_score(v_org, v_game, 7::smallint, 7::smallint, '{}'::jsonb);
+        v_denied := false;
+    EXCEPTION WHEN insufficient_privilege THEN
+        v_denied := true;
+    END;
+    RESET ROLE;
+    IF NOT v_denied OR (SELECT score_home FROM public.games WHERE id = v_game) IS DISTINCT FROM 2 THEN
+        RAISE EXCEPTION 'the home team''s coach scored the game';
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_ou::text, true);
     SET LOCAL ROLE authenticated;
@@ -188,7 +202,7 @@ BEGIN
     IF (SELECT score_home FROM public.games WHERE id = v_game) <> 3 THEN
         RAISE EXCEPTION 'an admin could not score the game';
     END IF;
-    RAISE NOTICE 'scores: the home coach and an admin score, a coach of neither team is refused; an admin reads every row';
+    RAISE NOTICE 'scores: an admin scores, the home coach and a coach of neither team are refused; an admin reads every row';
 
 
     -- A coach removed from the organization: the coaches.user_id link outlives

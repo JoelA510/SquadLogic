@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => ({
   toggleThemeMode: vi.fn(),
   impersonateUser: vi.fn().mockResolvedValue(undefined),
   toast: vi.fn(),
-  previewProfiles: [],
+  previewMembers: [],
+  readFails: /** @type {string | null} */ (null),
+  rpc: vi.fn(),
   auth: {},
   org: {},
   permission: {},
@@ -47,19 +49,55 @@ vi.mock('../frontend/src/hooks/useNavBadges.js', () => ({
   useNavBadges: () => ({ players: 42, coaches: 7, teams: 6 }),
 }));
 
+// The role preview's coach is a member whose membership role is `coach`
+// (admin focus R6; `profiles.role` is set by nothing), named from their coach
+// record. `previewMembers` holds the members and their coach names; each table
+// answers as its filters say, and a profile read answers nothing, so a preview
+// found by `profiles.role` would not show. `readFails` names a table whose read
+// fails.
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: () => ({
-      select: () => ({
-        in: () => Promise.resolve({ data: [], error: null }),
-        // Either filter answers with the seeded profiles, so a filter that
-        // let a parent through would show in the menu.
-        eq: () => ({
-          eq: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
-          in: () => Promise.resolve({ data: mocks.previewProfiles, error: null }),
-        }),
-      }),
-    }),
+    from: (table) => {
+      const filters = {};
+      const answer = () => {
+        if (mocks.readFails === table) {
+          return Promise.resolve({ data: null, error: { code: '500', message: 'boom' } });
+        }
+        if (table === 'organization_members') {
+          return Promise.resolve({
+            data: mocks.previewMembers
+              .filter((m) => !filters.role || m.role === filters.role)
+              .map((m) => ({ profile_id: m.profile_id, role: m.role })),
+            error: null,
+          });
+        }
+        if (table === 'coaches') {
+          return Promise.resolve({
+            data: mocks.previewMembers
+              .filter((m) => m.full_name && (filters.user_id || []).includes(m.profile_id))
+              .map((m) => ({ user_id: m.profile_id, full_name: m.full_name })),
+            error: null,
+          });
+        }
+        return Promise.resolve({ data: [], error: null });
+      };
+      const q = {
+        select: () => q,
+        eq: (column, value) => {
+          filters[column] = value;
+          return column === 'role' || table !== 'organization_members' ? answerOrQ(column) : q;
+        },
+        in: (column, values) => {
+          filters[column] = values;
+          return answer();
+        },
+      };
+      // organization_members ends on its second eq (role); coaches on in().
+      const answerOrQ = (column) =>
+        table === 'organization_members' && column === 'role' ? answer() : q;
+      return q;
+    },
+    rpc: (name, params) => mocks.rpc(name, params),
   },
 }));
 
@@ -79,7 +117,12 @@ function configureRole(role) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.previewProfiles = [];
+  mocks.previewMembers = [];
+  mocks.readFails = null;
+  mocks.rpc.mockImplementation(async (name) => ({
+    data: null,
+    error: { code: 'PGRST202', message: `no rpc ${name}` },
+  }));
   localStorage.clear();
   mocks.auth.signOut = mocks.signOut;
   mocks.auth.isAdmin = true;
@@ -157,7 +200,9 @@ describe('TopBar', () => {
   });
 
   it('toasts when starting a role preview fails, and not when it starts', async () => {
-    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
+    ];
     mocks.impersonateUser.mockRejectedValueOnce(new Error('rpc down'));
     render(
       <MemoryRouter>
@@ -178,7 +223,9 @@ describe('TopBar', () => {
   });
 
   it('offers role preview to a staff member (staff are admins), passing the org role', async () => {
-    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
+    ];
     mocks.auth.isAdmin = false;
     mocks.auth.user = {
       email: 'staff@example.com',
@@ -202,10 +249,55 @@ describe('TopBar', () => {
     );
   });
 
-  // No parent view to preview since 20261024010000 (R3): a profile still
+  // Admin focus R6: the preview looked for `profiles.role = 'coach'`, which
+  // nothing sets (every profile reads `user`), so it was never offered. The
+  // coach is found by membership role, and handed over shaped as a profile.
+  it('finds the previewed coach by membership role, and previews them as a coach', async () => {
+    mocks.previewMembers = [
+      { profile_id: 'admin-1', role: 'admin', full_name: 'Avery Admin' },
+      // A coach-role member with no coach record is a later choice.
+      { profile_id: 'coach-0', role: 'coach', full_name: null },
+      { profile_id: 'coach-2', role: 'coach', full_name: 'Zed Coach' },
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach' },
+    ];
+    render(
+      <MemoryRouter>
+        <TopBar />
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
+    await waitFor(() => expect(mocks.impersonateUser).toHaveBeenCalledTimes(1));
+    // No member list with every sign-in email is read for it.
+    expect(mocks.rpc).not.toHaveBeenCalledWith('get_organization_members', expect.anything());
+    expect(mocks.impersonateUser.mock.calls[0][0]).toEqual({
+      id: 'coach-1',
+      full_name: 'Cora Coach',
+      role: 'coach',
+      organization_id: MOCK_ORG_ID,
+    });
+  });
+
+  it.each(['organization_members', 'coaches'])(
+    'offers no preview when %s cannot be read',
+    async (table) => {
+      mocks.previewMembers = [{ profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach' }];
+      mocks.readFails = table;
+      render(
+        <MemoryRouter>
+          <TopBar />
+        </MemoryRouter>
+      );
+      fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+      await screen.findByRole('menuitem', { name: 'Sign out' });
+      expect(screen.queryByRole('menuitem', { name: /Preview as/ })).not.toBeInTheDocument();
+    }
+  );
+
+  // No parent view to preview since 20261024010000 (R3): a member still
   // carrying the old role is not offered, even if a read returns one.
   it('offers no parent preview', async () => {
-    mocks.previewProfiles = [{ id: 'parent-1', role: 'parent', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [{ profile_id: 'parent-1', role: 'parent', full_name: 'Pat Parent' }];
     render(
       <MemoryRouter>
         <TopBar />
@@ -217,7 +309,9 @@ describe('TopBar', () => {
   });
 
   it('offers no role preview to a coach', () => {
-    mocks.previewProfiles = [{ id: 'coach-1', role: 'coach', organization_id: MOCK_ORG_ID }];
+    mocks.previewMembers = [
+      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
+    ];
     mocks.auth.isAdmin = false;
     mocks.auth.user = {
       email: 'coach@example.com',

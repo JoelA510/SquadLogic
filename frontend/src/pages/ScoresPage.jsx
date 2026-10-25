@@ -18,7 +18,9 @@ import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 /**
  * Scores & Results — spreadsheet-style score entry over past games,
  * persisting through the audited update_game_score RPC (the same path
- * LeagueStandings uses; standings views refresh from it).
+ * LeagueStandings uses; standings views refresh from it). An admin page the
+ * league turns on (`score_entry`; the route checks it, and the RPC refuses
+ * every caller while it is off): since 20261028010000 (R6) no coach scores.
  */
 export default function ScoresPage() {
   const { currentOrganization } = useOrganization();
@@ -28,8 +30,9 @@ export default function ScoresPage() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  // An admin enters any game's score; a coach only their own team's games
-  // (update_game_score, 20261021020000), so the grid lists only those.
+  // An admin enters any game's score; nobody else enters one
+  // (update_game_score, 20261028010000). Under an admin's role preview of a
+  // coach the read is the coach's teams' games and none is offered.
   const {
     ready: scorableReady,
     error: scorableError,
@@ -61,8 +64,8 @@ export default function ScoresPage() {
           )
           .eq('organization_id', orgId)
           .lte('start_time', new Date().toISOString());
-        // A coach's games are found by the server, not cut out of the
-        // league's latest 200, where a busy league would leave none.
+        // A previewed coach's games are found by the server, not cut out of
+        // the league's latest 200, where a busy league would leave none.
         if (teamKey !== null) {
           query = query.or(`home_team_id.in.(${teamKey}),away_team_id.in.(${teamKey})`);
         }

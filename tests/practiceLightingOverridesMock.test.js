@@ -1,39 +1,30 @@
 /**
  * Mock parity for the portable-lighting override RPCs
- * (`frontend/src/lib/mockLightingOverrides.js` vs migration 20261003000000),
- * and the window conversion the UI shares with core.
+ * (`frontend/src/lib/mockLightingOverrides.js` vs migration 20261003000000,
+ * as 20261028010000 left them: no coach requests, and only an admin
+ * withdraws), and the window conversion the UI shares with core.
  *
- * Every expectation is enumerated from the SEED below (which slot each user
- * coaches is stated by construction), never from what the handler returns.
+ * Requested rows are stored as a request before R6 left them (`stored`), the
+ * way the SQL smoke does; every expectation is enumerated from the SEED below,
+ * never from what the handler returns.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { handleLightingOverrideRpc } from '../frontend/src/lib/mockLightingOverrides.js';
 import { mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
-import {
-  coachedPracticeSlotIds,
-  datesOfWindow,
-  windowOfDates,
-} from '../frontend/src/utils/lightingOverrides.js';
+import { datesOfWindow, windowOfDates } from '../frontend/src/utils/lightingOverrides.js';
 import { approvedLightingOverridesFromRows } from '../packages/core/src/practice/index.js';
 import { seedMockDb } from './helpers/seedMockDb.js';
 
 const ORG = 'org-l';
 const OTHER_ORG = 'org-x';
 const NOW = new Date('2026-09-29T12:00:00Z');
-const TODAY = '2026-09-29';
 
 /**
  * By construction: `coach-user` coaches T1 (on S1) currently and T3 (on S3)
  * only until 2026-02-01; `other-coach` coaches T2 (on S2). S4 is in another
- * organization, and `coach-user`'s coach row there must not count.
+ * organization.
  */
-const SEED_COACHED = Object.freeze({
-  'coach-user': ['S1'],
-  'other-coach': ['S2'],
-  'admin-a': [],
-});
-
 function freshDb() {
   return {
     organization_members: [
@@ -85,13 +76,25 @@ const call = (db, name, params, user) =>
     now: NOW,
     newId: () => `lo-${++seq}`,
   });
-const request = (db, slot, from, until, user) =>
-  call(
-    db,
-    'request_practice_lighting_override',
-    { p_practice_slot_id: slot, p_from: from, p_until: until },
-    user
-  );
+/** A row requested before 20261028010000, stored as that RPC stored it. */
+const stored = (db, slot, from, until, user) => {
+  const row = {
+    id: `lo-${++seq}`,
+    organization_id: db.practice_slots.find((s) => s.id === slot).organization_id,
+    practice_slot_id: slot,
+    window: windowOfDates(from, until),
+    kind: 'portable-lighting',
+    status: 'requested',
+    requested_by: user,
+    requested_at: NOW.toISOString(),
+    decided_by: null,
+    decided_at: null,
+    withdrawn_by: null,
+    withdrawn_at: null,
+  };
+  db.practice_lighting_overrides.push(row);
+  return { data: row, error: null };
+};
 const decide = (db, id, decision, user) =>
   call(
     db,
@@ -109,42 +112,33 @@ const set = (db, slot, from, until, user = 'admin-a') =>
     user
   );
 
-describe('coach scoping (caller_coaches_practice_slot)', () => {
-  it('a coach is offered, and may request on, exactly the slots the seed says they coach', () => {
+describe('no coach requests (20261028010000)', () => {
+  it('has no request RPC: the handler does not answer it, so it falls through', () => {
     const db = freshDb();
-    const orgSlots = db.practice_slots.filter((slot) => slot.organization_id === ORG);
-    // Meta: the seed holds both kinds of slot for coach-user, so neither half is vacuous.
-    expect(SEED_COACHED['coach-user'].length).toBeGreaterThan(0);
-    expect(orgSlots.length - SEED_COACHED['coach-user'].length).toBeGreaterThanOrEqual(2);
-    for (const [user, expected] of Object.entries(SEED_COACHED)) {
-      const offered = coachedPracticeSlotIds({
-        userId: user,
-        orgId: ORG,
-        today: TODAY,
-        coaches: db.coaches,
-        teamCoachAssignments: db.team_coach_assignments,
-        practiceAssignments: db.practice_assignments,
-        practiceSlots: db.practice_slots,
-      });
-      expect([...offered].sort()).toEqual([...expected].sort());
-    }
-    for (const slot of orgSlots) {
-      const coached = SEED_COACHED['coach-user'].includes(slot.id);
-      const result = request(db, slot.id, '2026-10-01', '2026-10-02', 'coach-user');
-      expect(result.error?.code ?? null).toBe(coached ? null : '42501');
-    }
-    // Another org's slot: refused (not a member, not coached there by this org's roster).
-    expect(request(db, 'S4', '2026-10-01', '2026-10-02', 'coach-user').error?.code).toBe('42501');
-    // An admin may request on any slot of the org.
-    expect(request(db, 'S2', '2026-10-01', '2026-10-02', 'admin-a').error).toBeNull();
+    expect(
+      call(
+        db,
+        'request_practice_lighting_override',
+        { p_practice_slot_id: 'S1', p_from: '2026-10-01', p_until: '2026-10-02' },
+        'coach-user'
+      )
+    ).toBeNull();
+    expect(db.practice_lighting_overrides).toHaveLength(0);
+  });
+
+  it('refuses a coach setting a window, their own slot included', () => {
+    const db = freshDb();
+    expect(set(db, 'S1', '2026-10-01', '2026-10-02', 'coach-user').error?.code).toBe('42501');
+    expect(set(db, 'S2', '2026-10-01', '2026-10-02', 'other-coach').error?.code).toBe('42501');
+    expect(db.practice_lighting_overrides).toHaveLength(0);
   });
 
   it('refuses missing arguments and an inverted window', () => {
     const db = freshDb();
-    expect(request(db, 'S1', null, '2026-10-02', 'coach-user').error?.code).toBe('23502');
-    expect(request(db, 'S1', '2026-10-05', '2026-10-01', 'coach-user').error?.code).toBe('22023');
+    expect(set(db, 'S1', null, '2026-10-02').error?.code).toBe('23502');
+    expect(set(db, 'S1', '2026-10-05', '2026-10-01').error?.code).toBe('22023');
     // A date Postgres cannot hold is refused, never rolled into March.
-    expect(request(db, 'S1', '2026-02-30', '2026-02-30', 'coach-user').error?.code).toBe('22008');
+    expect(set(db, 'S1', '2026-02-30', '2026-02-30').error?.code).toBe('22008');
     expect(db.practice_lighting_overrides).toHaveLength(0);
   });
 });
@@ -152,7 +146,7 @@ describe('coach scoping (caller_coaches_practice_slot)', () => {
 describe('decide', () => {
   it('never lets the requester decide their own request; another admin may', () => {
     const db = freshDb();
-    const { data } = request(db, 'S2', '2026-10-01', '2026-10-03', 'admin-a');
+    const { data } = stored(db, 'S2', '2026-10-01', '2026-10-03', 'admin-a');
     const own = decide(db, data.id, 'approve', 'admin-a');
     expect(own.error?.code).toBe('42501');
     expect(own.error?.message).toMatch(/requester .* may not decide it/);
@@ -170,7 +164,7 @@ describe('decide', () => {
 
   it('refuses a coach decision and an unknown decision', () => {
     const db = freshDb();
-    const { data } = request(db, 'S1', '2026-10-01', '2026-10-03', 'coach-user');
+    const { data } = stored(db, 'S1', '2026-10-01', '2026-10-03', 'coach-user');
     expect(decide(db, data.id, 'approve', 'coach-user').error?.code).toBe('42501');
     expect(decide(db, data.id, 'approve', 'other-coach').error?.code).toBe('42501');
     expect(decide(db, data.id, 'maybe', 'admin-a').error?.code).toBe('22023');
@@ -180,8 +174,8 @@ describe('decide', () => {
   it('refuses an approval or set overlapping an approved window on the same slot (23P01)', () => {
     const db = freshDb();
     expect(set(db, 'S1', '2026-10-01', '2026-10-05').error).toBeNull();
-    const overlapping = request(db, 'S1', '2026-10-05', '2026-10-07', 'coach-user').data;
-    const adjacent = request(db, 'S1', '2026-10-06', '2026-10-07', 'coach-user').data;
+    const overlapping = stored(db, 'S1', '2026-10-05', '2026-10-07', 'coach-user').data;
+    const adjacent = stored(db, 'S1', '2026-10-06', '2026-10-07', 'coach-user').data;
     const refused = decide(db, overlapping.id, 'approve', 'admin-a');
     expect(refused.error?.code).toBe('23P01');
     expect(refused.error?.message).toContain('practice_lighting_overrides_no_overlap');
@@ -204,33 +198,30 @@ describe('decide', () => {
 });
 
 describe('withdraw', () => {
-  it('is the requester (while coaching the slot) or an admin, on requested or approved rows only', () => {
+  it('is an admin only, on requested or approved rows only', () => {
     const db = freshDb();
-    const mineRequested = request(db, 'S1', '2026-10-01', '2026-10-01', 'coach-user').data;
-    const mineApproved = request(db, 'S1', '2026-10-03', '2026-10-03', 'coach-user').data;
-    const mineRejected = request(db, 'S1', '2026-10-05', '2026-10-05', 'coach-user').data;
-    const theirs = request(db, 'S2', '2026-10-01', '2026-10-01', 'other-coach').data;
+    const mineRequested = stored(db, 'S1', '2026-10-01', '2026-10-01', 'coach-user').data;
+    const mineApproved = stored(db, 'S1', '2026-10-03', '2026-10-03', 'coach-user').data;
+    const mineRejected = stored(db, 'S1', '2026-10-05', '2026-10-05', 'coach-user').data;
+    const theirs = stored(db, 'S2', '2026-10-01', '2026-10-01', 'other-coach').data;
     const adminSetOnMySlot = set(db, 'S1', '2026-11-01', '2026-11-02').data;
     decide(db, mineApproved.id, 'approve', 'admin-a');
     decide(db, mineRejected.id, 'reject', 'admin-a');
 
-    expect(withdraw(db, theirs.id, 'coach-user').error?.code).toBe('42501');
-    expect(withdraw(db, adminSetOnMySlot.id, 'coach-user').error?.code).toBe('42501');
-    expect(withdraw(db, mineRejected.id, 'coach-user').error?.code).toBe('22023');
-    expect(withdraw(db, mineRequested.id, 'coach-user').error).toBeNull();
-    const approved = withdraw(db, mineApproved.id, 'coach-user');
+    // The requester, who still coaches the slot, withdraws nothing any more.
+    for (const row of [mineRequested, mineApproved, theirs, adminSetOnMySlot]) {
+      expect(withdraw(db, row.id, 'coach-user').error?.code).toBe('42501');
+    }
+    expect(withdraw(db, theirs.id, 'other-coach').error?.code).toBe('42501');
+    expect(db.practice_lighting_overrides.filter((r) => r.status === 'withdrawn')).toHaveLength(0);
+
+    expect(withdraw(db, mineRejected.id, 'admin-a').error?.code).toBe('22023');
+    expect(withdraw(db, mineRequested.id, 'admin-a').error).toBeNull();
+    const approved = withdraw(db, mineApproved.id, 'admin-a');
     expect(approved.error).toBeNull();
     expect(approved.data.before_status).toBe('approved');
-    expect(withdraw(db, mineRequested.id, 'coach-user').error?.code).toBe('22023');
-    // An admin withdraws anyone's.
-    expect(withdraw(db, theirs.id, 'admin-a').error).toBeNull();
-  });
-
-  it('refuses the requester once they no longer coach the slot', () => {
-    const db = freshDb();
-    const mine = request(db, 'S1', '2026-10-01', '2026-10-01', 'coach-user').data;
-    db.team_coach_assignments[0].effective_to = '2026-09-01';
-    expect(withdraw(db, mine.id, 'coach-user').error?.code).toBe('42501');
+    expect(withdraw(db, mineRequested.id, 'admin-a').error?.code).toBe('22023');
+    expect(withdraw(db, theirs.id, 'admin-b').error).toBeNull();
   });
 });
 

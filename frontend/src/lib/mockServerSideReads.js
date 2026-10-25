@@ -2,7 +2,10 @@
  * Mock arms for the server-side reads of migration
  * `20261021010000_server_side_reads.sql` (Phase A3a), as
  * `20261025010000_remove_contact_surfaces.sql` (R4) left them: the roster and
- * staff reads that apply the access table, and the two coached-team reads.
+ * staff reads that apply the access table, and the two coached-team reads;
+ * and the two division reads of `20261028010000_coach_view.sql` (admin focus
+ * R6): the teams of each division where the user currently coaches a team,
+ * with their current coaches' names, no contacts.
  * There is no guardian (R3) and no contact surface (R4): neither read returns
  * a contact column, and the contact card writer and the coach directory are
  * gone, so a call to either falls through to the client's PGRST202 refusal,
@@ -20,7 +23,9 @@
  * **Not mirrored** (stated so nobody reads this as the database):
  *   - `record_audit_event`'s own checks (the row is appended directly);
  *   - the table policies: the mock's generic `.from()` still returns every row
- *     of the organization, as the database does until A3b restricts them.
+ *     of the organization, as the database does until A3b restricts them;
+ *   - the division reads' order: by division name, team name and id in plain
+ *     code-unit order here, the database's collation there.
  *
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js`
  * wires it into `rpc()` and persists `db` afterwards.
@@ -34,6 +39,8 @@ export const SERVER_SIDE_READ_RPCS = Object.freeze([
   'get_team_staff',
   'get_my_coached_team_ids',
   'admin_get_coached_team_ids',
+  'get_my_division_teams',
+  'admin_get_division_teams',
 ]);
 
 const denied = (message) => ({ data: null, error: { message, code: '42501' } });
@@ -159,6 +166,79 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
         ]
       : [];
 
+  // coached_team_ids_of(org, user): the teams `userId` currently coaches.
+  const coachedTeamIdsOf = (orgId, userId) => {
+    const theirCoachIds = new Set(
+      (db.coaches || [])
+        .filter((coach) => String(coach.user_id ?? '') === String(userId))
+        .map((coach) => String(coach.id))
+    );
+    const theyAreMember = (db.organization_members || []).some(
+      (m) => String(m.organization_id) === String(orgId) && String(m.profile_id) === String(userId)
+    );
+    return theyAreMember
+      ? [
+          ...new Set(
+            (db.team_coach_assignments || [])
+              .filter(
+                (row) =>
+                  String(row.organization_id) === String(orgId) &&
+                  theirCoachIds.has(String(row.coach_id)) &&
+                  isLive(row)
+              )
+              .map((row) => String(row.team_id))
+          ),
+        ]
+      : [];
+  };
+
+  // division_teams_of(org, user) (20261028010000): each team of a division
+  // where `userId` currently coaches a team; its current coaches' names, lead
+  // first; whether `userId` coaches it. No contact column.
+  const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const divisionTeamsOf = (orgId, userId) => {
+    const sameOrg = (row) => String(row.organization_id) === String(orgId);
+    const mine = new Set(coachedTeamIdsOf(orgId, userId));
+    const divisionIds = new Set(
+      (db.teams || [])
+        .filter((team) => sameOrg(team) && mine.has(String(team.id)) && team.division_id != null)
+        .map((team) => String(team.division_id))
+    );
+    const divisionById = new Map(
+      (db.divisions || []).filter(sameOrg).map((division) => [String(division.id), division])
+    );
+    return (db.teams || [])
+      .filter((team) => sameOrg(team) && divisionIds.has(String(team.division_id)))
+      .filter((team) => divisionById.has(String(team.division_id)))
+      .map((team) => {
+        const coachNames = (db.team_coach_assignments || [])
+          .filter((row) => String(row.team_id) === String(team.id) && sameOrg(row) && isLive(row))
+          .map((row) => ({ row, coach: coachById(row.coach_id) }))
+          .filter(({ coach }) => coach && coach.full_name != null)
+          .sort(
+            (a, b) =>
+              Number(b.row.role === 'lead') - Number(a.row.role === 'lead') ||
+              order(String(a.coach.full_name), String(b.coach.full_name)) ||
+              order(String(a.coach.id), String(b.coach.id))
+          )
+          .map(({ coach }) => coach.full_name);
+        return {
+          division_id: team.division_id,
+          division_name: divisionById.get(String(team.division_id)).name,
+          team_id: team.id,
+          team_name: team.name,
+          coach_names: coachNames,
+          is_mine: mine.has(String(team.id)),
+        };
+      })
+      .sort(
+        (a, b) =>
+          order(String(a.division_name), String(b.division_name)) ||
+          order(String(a.team_name), String(b.team_name)) ||
+          order(String(a.team_id), String(b.team_id))
+      );
+  };
+
   if (name === 'get_my_coached_team_ids') {
     return { data: myCoachedTeamIds(p.p_organization_id), error: null };
   }
@@ -167,31 +247,18 @@ export function handleServerSideReadRpc(db, name, params, ctx) {
     if (!isOrgAdmin(p.p_organization_id)) {
       return denied('admin_get_coached_team_ids requires an organization admin');
     }
-    const theirCoachIds = new Set(
-      (db.coaches || [])
-        .filter((coach) => String(coach.user_id ?? '') === String(p.p_user_id))
-        .map((coach) => String(coach.id))
-    );
-    const theyAreMember = (db.organization_members || []).some(
-      (m) =>
-        String(m.organization_id) === String(p.p_organization_id) &&
-        String(m.profile_id) === String(p.p_user_id)
-    );
-    const ids = theyAreMember
-      ? [
-          ...new Set(
-            (db.team_coach_assignments || [])
-              .filter(
-                (row) =>
-                  String(row.organization_id) === String(p.p_organization_id) &&
-                  theirCoachIds.has(String(row.coach_id)) &&
-                  isLive(row)
-              )
-              .map((row) => String(row.team_id))
-          ),
-        ]
-      : [];
-    return { data: ids, error: null };
+    return { data: coachedTeamIdsOf(p.p_organization_id, p.p_user_id), error: null };
+  }
+
+  if (name === 'get_my_division_teams') {
+    return { data: divisionTeamsOf(p.p_organization_id, currentUserId), error: null };
+  }
+
+  if (name === 'admin_get_division_teams') {
+    if (!isOrgAdmin(p.p_organization_id)) {
+      return denied('admin_get_division_teams requires an organization admin');
+    }
+    return { data: divisionTeamsOf(p.p_organization_id, p.p_user_id), error: null };
   }
 
   // get_team_roster, get_team_staff

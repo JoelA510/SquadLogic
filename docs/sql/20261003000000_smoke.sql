@@ -7,6 +7,13 @@
 -- trip runs the REAL RPCs as two real admins and real coaches; the RLS reads
 -- run under `SET LOCAL ROLE authenticated`, where the policy applies.
 --
+-- **Since 20261028010000 (admin focus R6) no coach requests lighting** (owner
+-- decision 4): `request_practice_lighting_override` is dropped and only an
+-- admin withdraws. This smoke runs at head, so the requested rows below are
+-- inserted as the table owner, as rows requested before then were stored,
+-- and it checks the request RPC stays gone and that their requester can no
+-- longer withdraw them.
+--
 -- Wrapped in BEGIN ... ROLLBACK: it leaves nothing behind for later stages.
 -- Every id is generated, every email is `@example.test`, and every name is
 -- synthetic; there is no PII and there are no coordinates.
@@ -73,8 +80,7 @@ BEGIN
     SELECT count(*) INTO v_definer
       FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace
-       AND p.proname IN ('request_practice_lighting_override',
-                         'admin_decide_practice_lighting_override',
+       AND p.proname IN ('admin_decide_practice_lighting_override',
                          'withdraw_practice_lighting_override',
                          'admin_set_practice_lighting_override',
                          'caller_coaches_practice_slot')
@@ -82,11 +88,14 @@ BEGIN
        AND 'search_path=public' = ANY (p.proconfig)
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
-    IF v_definer <> 5 THEN
-        RAISE EXCEPTION 'expected 5 definer functions with a pinned search_path, executable by authenticated and not anon; found %', v_definer;
+    IF v_definer <> 4 THEN
+        RAISE EXCEPTION 'expected 4 definer functions with a pinned search_path, executable by authenticated and not anon; found %', v_definer;
+    END IF;
+    IF to_regproc('public.request_practice_lighting_override') IS NOT NULL THEN
+        RAISE EXCEPTION 'request_practice_lighting_override is back: no coach requests lighting (20261028010000)';
     END IF;
 
-    RAISE NOTICE 'store: RLS on, 1 SELECT policy, 0 write policies, no client write grant; the approved-overlap exclusion constraint present; 5 audit actions; 5 definer functions, search_path pinned, authenticated yes, anon no';
+    RAISE NOTICE 'store: RLS on, 1 SELECT policy, 0 write policies, no client write grant; the approved-overlap exclusion constraint present; 5 audit actions; 4 definer functions, search_path pinned, authenticated yes, anon no; no request RPC';
 END;
 $$;
 
@@ -165,33 +174,18 @@ BEGIN
            (v_org, v_tb, v_cb, 'lead', current_date - 30, NULL, 'smoke', NULL),
            (v_org, v_ta, v_cc, 'assistant', current_date - 30, current_date - 1, 'smoke', 'smoke');
 
-    -- ---- (a) a coach of the slot requests; (b) nobody else but an admin ----
-    PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-    v_res := public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
-    v_r1 := (v_res->>'id')::uuid;
+    -- ---- (a) a request stored before 20261028010000 stays requested -------
+    -- Inserted as the table owner: no RPC requests lighting any more.
+    INSERT INTO public.practice_lighting_overrides
+        (organization_id, practice_slot_id, "window", status, requested_by)
+    VALUES (v_org, v_slot1, '[2026-10-01,2026-10-15]', 'requested', v_ua)
+    RETURNING id INTO v_r1;
     IF NOT EXISTS (SELECT 1 FROM public.practice_lighting_overrides
                     WHERE id = v_r1 AND status = 'requested' AND requested_by = v_ua
                       AND kind = 'portable-lighting' AND "window" = '[2026-10-01,2026-10-16)'::daterange) THEN
-        RAISE EXCEPTION '(a) coach A''s request was not stored as a requested [2026-10-01, 2026-10-15] window by them: %', v_res;
+        RAISE EXCEPTION '(a) coach A''s stored request is not a requested [2026-10-01, 2026-10-15] window by them';
     END IF;
-    v_refused := 0;
-    PERFORM set_config('request.jwt.claim.sub', v_ub::text, true);
-    BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
-    EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
-    PERFORM set_config('request.jwt.claim.sub', v_uc::text, true);
-    BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
-    EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
-    PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
-    BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
-    EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
-    PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
-    BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-10-01', '2026-10-15');
-    EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
-    SELECT count(*) INTO v_n FROM public.practice_lighting_overrides WHERE organization_id = v_org;
-    IF v_refused <> 4 OR v_n <> 1 THEN
-        RAISE EXCEPTION '(b) % of 4 non-coach requests were refused and % row(s) exist; expected 4 and 1', v_refused, v_n;
-    END IF;
-    RAISE NOTICE 'lighting overrides: coach A (coaches a team on the slot) requested; a coach of another slot''s team, a lapsed coach, a member who coaches no team and another organisation''s admin were each refused 42501, 4 of 4, and wrote nothing';
+    RAISE NOTICE 'lighting overrides: no request RPC; coach A''s request stored before 20261028010000 is a requested [2026-10-01, 2026-10-15] window';
 
     -- ---- (c) a coach approving is refused, their own request included ------
     -- Coach B did not request the row, so the self-approval refusal cannot be
@@ -209,8 +203,11 @@ BEGIN
     RAISE NOTICE 'lighting overrides: a coach approving was refused (42501), 2 of 2 (their own request and another coach''s), and the row is still requested';
 
     -- ---- (d) the admin who requested may not approve; another admin may ----
+    INSERT INTO public.practice_lighting_overrides
+        (organization_id, practice_slot_id, "window", status, requested_by)
+    VALUES (v_org, v_slot2, '[2026-10-01,2026-10-15]', 'requested', v_admin)
+    RETURNING id INTO v_self;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    v_self := (public.request_practice_lighting_override(v_slot2, '2026-10-01', '2026-10-15')->>'id')::uuid;
     v_refused := 0;
     BEGIN PERFORM public.admin_decide_practice_lighting_override(v_self, 'approve');
     EXCEPTION WHEN insufficient_privilege THEN v_refused := 1; END;
@@ -230,9 +227,10 @@ BEGIN
     -- ---- (e) two approved windows on one slot may not overlap ---------------
     PERFORM public.admin_decide_practice_lighting_override(v_r1, 'approve');
     -- Control: an overlapping REQUEST coexists with the approved window.
-    PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-    v_r2 := (public.request_practice_lighting_override(v_slot1, '2026-10-10', '2026-10-20')->>'id')::uuid;
-    PERFORM set_config('request.jwt.claim.sub', v_admin2::text, true);
+    INSERT INTO public.practice_lighting_overrides
+        (organization_id, practice_slot_id, "window", status, requested_by)
+    VALUES (v_org, v_slot1, '[2026-10-10,2026-10-20]', 'requested', v_ua)
+    RETURNING id INTO v_r2;
     v_refused := 0;
     BEGIN PERFORM public.admin_decide_practice_lighting_override(v_r2, 'approve');
     EXCEPTION WHEN exclusion_violation THEN v_refused := v_refused + 1; END;
@@ -253,41 +251,33 @@ BEGIN
     END IF;
     RAISE NOTICE 'lighting overrides: an approval over an approved window and an admin set sharing its last day were each refused 23P01, 2 of 2; the adjacent window and the same dates on another slot were accepted';
 
-    -- ---- (f) reject, withdraw ---------------------------------------------
+    -- ---- (f) reject, withdraw: an admin only (20261028010000) -------------
     PERFORM public.admin_decide_practice_lighting_override(v_r2, 'reject');
+    INSERT INTO public.practice_lighting_overrides
+        (organization_id, practice_slot_id, "window", status, requested_by)
+    VALUES (v_org, v_slot1, '[2026-11-02,2026-11-06]', 'requested', v_ua)
+    RETURNING id INTO v_r3;
+    INSERT INTO public.practice_lighting_overrides
+        (organization_id, practice_slot_id, "window", status, requested_by)
+    VALUES (v_org, v_slot1, '[2026-11-09,2026-11-13]', 'requested', v_ua)
+    RETURNING id INTO v_r4;
+    -- Neither its requester, who still coaches the slot, nor another coach
+    -- withdraws coach A's request any more.
+    v_refused := 0;
     PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-    v_r3 := (public.request_practice_lighting_override(v_slot1, '2026-11-02', '2026-11-06')->>'id')::uuid;
-    v_r4 := (public.request_practice_lighting_override(v_slot1, '2026-11-09', '2026-11-13')->>'id')::uuid;
-    PERFORM public.withdraw_practice_lighting_override(v_r3);
+    BEGIN PERFORM public.withdraw_practice_lighting_override(v_r4);
+    EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
+    PERFORM set_config('request.jwt.claim.sub', v_ub::text, true);
+    BEGIN PERFORM public.withdraw_practice_lighting_override(v_r4);
+    EXCEPTION WHEN insufficient_privilege THEN v_refused := v_refused + 1; END;
+    IF v_refused <> 2 OR (SELECT status FROM public.practice_lighting_overrides WHERE id = v_r4) <> 'requested' THEN
+        RAISE EXCEPTION '(f) % of 2 coach withdrawals (the requester''s and another coach''s) were refused, or the row moved', v_refused;
+    END IF;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.withdraw_practice_lighting_override(v_r3);
     v_set2 := (public.admin_set_practice_lighting_override(v_slot2, '2026-11-02', '2026-11-06')->>'id')::uuid;
     PERFORM public.withdraw_practice_lighting_override(v_set2);
-    -- Another coach may not withdraw coach A's request.
-    PERFORM set_config('request.jwt.claim.sub', v_ub::text, true);
-    v_refused := 0;
-    BEGIN PERFORM public.withdraw_practice_lighting_override(v_r4);
-    EXCEPTION WHEN insufficient_privilege THEN v_refused := 1; END;
-    IF v_refused <> 1 THEN
-        RAISE EXCEPTION '(f) coach B withdrew coach A''s lighting override request';
-    END IF;
-    -- Nor may coach A once their appointment has lapsed. The probe runs in a
-    -- sub-block that is rolled back, so no count below moves.
-    v_refused := 0;
-    BEGIN
-        UPDATE public.team_coach_assignments
-           SET effective_to = current_date - 1, ended_via = 'smoke'
-         WHERE coach_id = v_ca;
-        PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-        BEGIN PERFORM public.withdraw_practice_lighting_override(v_r4);
-        EXCEPTION WHEN insufficient_privilege THEN v_refused := 1; END;
-        RAISE EXCEPTION 'smoke: roll back the lapsed-requester probe';
-    EXCEPTION WHEN raise_exception THEN
-        NULL;
-    END;
-    IF v_refused <> 1 THEN
-        RAISE EXCEPTION '(f) coach A withdrew their request after their appointment lapsed';
-    END IF;
-    RAISE NOTICE 'lighting overrides: 1 rejection, 2 withdrawals (a requested row by its coach, an approved row by an admin); another coach, and the requester once lapsed, withdrawing were refused';
+    RAISE NOTICE 'lighting overrides: 1 rejection, 2 withdrawals by an admin (a requested row and an approved one); the requester and another coach withdrawing were refused 42501, 2 of 2';
 
     -- ---- (g) W24: a reader of approved overrides gets approved rows only ----
     -- The expected set is the list of calls above, not the table.
@@ -312,13 +302,9 @@ BEGIN
     RAISE NOTICE 'lighting overrides: a reader selecting approved overrides through RLS got exactly the 3 approved of 7 rows; 1 requested, 1 rejected and 2 withdrawn left out';
 
     -- ---- (h) every write produced its audit row ---------------------------
+    -- The stored requests were inserted directly, so carry none.
     SELECT count(*) INTO v_audited
-      FROM (VALUES (v_r1, 'practice_lighting_override.requested'),
-                   (v_self, 'practice_lighting_override.requested'),
-                   (v_r2, 'practice_lighting_override.requested'),
-                   (v_r3, 'practice_lighting_override.requested'),
-                   (v_r4, 'practice_lighting_override.requested'),
-                   (v_self, 'practice_lighting_override.approved'),
+      FROM (VALUES (v_self, 'practice_lighting_override.approved'),
                    (v_r1, 'practice_lighting_override.approved'),
                    (v_r2, 'practice_lighting_override.rejected'),
                    (v_r3, 'practice_lighting_override.withdrawn'),
@@ -327,8 +313,8 @@ BEGIN
                    (v_set2, 'practice_lighting_override.set')) AS w(id, action)
      WHERE (SELECT count(*) FROM public.audit_log l
              WHERE l.organization_id = v_org AND l.resource_id = w.id AND l.action = w.action) = 1;
-    IF v_audited <> 12 THEN
-        RAISE EXCEPTION '(h) only % of the 12 writes left exactly one audit row naming their row', v_audited;
+    IF v_audited <> 7 THEN
+        RAISE EXCEPTION '(h) only % of the 7 writes left exactly one audit row naming their row', v_audited;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM public.audit_log
                     WHERE resource_id = v_r1 AND action = 'practice_lighting_override.approved'
@@ -339,7 +325,7 @@ BEGIN
                       AND (metadata->>'requested_by')::uuid = v_ua) THEN
         RAISE EXCEPTION '(h) the approval''s audit row does not carry the slot, the inclusive window, the before-status and the requester';
     END IF;
-    RAISE NOTICE 'lighting overrides: every write audited -- 12 of 12 (5 requested, 2 approved, 1 rejected, 2 withdrawn, 2 set), each naming its row';
+    RAISE NOTICE 'lighting overrides: every write audited -- 7 of 7 (2 approved, 1 rejected, 2 withdrawn, 2 set), each naming its row';
 
     -- ---- (i) RLS: a coach reads the rows of their slots; admins read all ---
     SET LOCAL ROLE authenticated;
@@ -386,8 +372,6 @@ BEGIN
     -- ---- (j) malformed windows and kinds are refused ----------------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     v_refused := 0;
-    BEGIN PERFORM public.request_practice_lighting_override(v_slot1, '2026-11-20', '2026-11-19');
-    EXCEPTION WHEN invalid_parameter_value THEN v_refused := v_refused + 1; END;
     BEGIN PERFORM public.admin_set_practice_lighting_override(v_slot1, '2026-11-20', '2026-11-19');
     EXCEPTION WHEN invalid_parameter_value THEN v_refused := v_refused + 1; END;
     BEGIN
@@ -402,12 +386,12 @@ BEGIN
         INSERT INTO public.practice_lighting_overrides (organization_id, practice_slot_id, "window", status, requested_by)
         VALUES (v_org, v_slot1, '[2026-11-20,2026-11-21)', 'approved', v_admin);
     EXCEPTION WHEN check_violation THEN v_refused := v_refused + 1; END;
-    IF v_refused <> 5 THEN
-        RAISE EXCEPTION '(j) only % of 5 malformed writes were refused', v_refused;
+    IF v_refused <> 4 THEN
+        RAISE EXCEPTION '(j) only % of 4 malformed writes were refused', v_refused;
     END IF;
     -- The positive control: a one-day window is accepted.
-    PERFORM public.request_practice_lighting_override(v_slot1, '2026-11-20', '2026-11-20');
-    RAISE NOTICE 'lighting overrides: 5 of 5 malformed writes refused (until before from, twice; an unknown kind; an unbounded window; an approval with no decider); a one-day window accepted';
+    PERFORM public.admin_set_practice_lighting_override(v_slot1, '2026-11-20', '2026-11-20');
+    RAISE NOTICE 'lighting overrides: 4 of 4 malformed writes refused (until before from; an unknown kind; an unbounded window; an approval with no decider); a one-day window accepted';
 
     -- ---- (k) a slot holding overrides is not deleted out from under them --
     -- The practice_exceptions contract: NO ACTION, so a field delete, a

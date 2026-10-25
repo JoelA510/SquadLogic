@@ -1,23 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabaseClient.js';
+import { fetchCoachedTeamIds } from './useMyCoachedTeams.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { isAdminRole } from '../constants/permissions.js';
 import { logger } from '../lib/logger.js';
 
 /**
- * Which games the caller may score, as `update_game_score` decides it
- * (20261021020000): an admin or staff member any game in the organization,
- * anyone else only a game of a team they currently coach
- * (`get_my_coached_team_ids`, or `admin_get_coached_team_ids` for the coach an
- * admin is previewing). The pages offer score entry only where this says yes;
- * the server refuses the rest regardless.
+ * Which games the caller may score, as `update_game_score` decides it since
+ * 20261028010000 (plan docs/changes/2026-10-22-admin-focus.md, R6): an admin
+ * or staff member any game in the organization, and nobody else. (The
+ * league's `score_entry` setting is the page's to check; the server refuses
+ * every caller while it is off.) Under an admin's role preview of a coach,
+ * nothing is scorable, as for the coach. The pages offer score entry only
+ * where this says yes; the server refuses the rest regardless.
  *
- * `coachesTeam(teamId)` answers the same question for a team: whether the
- * caller may act as its coach (an admin may act for any team). `teamIds` is
- * the coached teams, sorted, for a query to filter on; `null` for an admin,
- * who is not limited to any. `error` is true when the coached teams could not
- * be read, so a page can say so rather than look like a coach with no games.
+ * `coachesTeam(teamId)` answers whether the caller may act as a team's coach
+ * (an admin may act for any team): the calendar token, which a coach still
+ * rotates, uses it. `teamIds` is the coached teams, sorted, for a query to
+ * filter on; `null` for an admin, who is not limited to any. `error` is true
+ * when the coached teams could not be read, so a page can say so rather than
+ * look like a coach with no teams.
  *
  * With `enabled: false` (a page that has nothing to score for this caller) it
  * asks the server nothing and allows nothing, except to an admin.
@@ -45,12 +47,7 @@ export function useScorableGames({ enabled = true } = {}) {
         setTeamIds(new Set());
         return;
       }
-      const { data, error: readError } = previewUserId
-        ? await supabase.rpc('admin_get_coached_team_ids', {
-            p_organization_id: orgId,
-            p_user_id: previewUserId,
-          })
-        : await supabase.rpc('get_my_coached_team_ids', { p_organization_id: orgId });
+      const { data, error: readError } = await fetchCoachedTeamIds(orgId, previewUserId);
       if (cancelled) return;
       if (readError) {
         logger.warn('[useScorableGames] coached teams not loaded', {
@@ -69,7 +66,6 @@ export function useScorableGames({ enabled = true } = {}) {
   }, [orgId, admin, previewUserId, enabled]);
 
   return useMemo(() => {
-    const teamOf = (side) => (side && typeof side === 'object' ? side.id : side);
     const coachesTeam = (teamId) =>
       admin || (!!teamIds && teamId != null && teamIds.has(String(teamId)));
     return {
@@ -77,13 +73,8 @@ export function useScorableGames({ enabled = true } = {}) {
       error: !admin && error,
       teamIds: admin ? null : [...(teamIds ?? [])].sort(),
       coachesTeam,
-      canScoreGame: (game) => {
-        if (admin) return true;
-        if (!teamIds || !game) return false;
-        const home = teamOf(game.home_team) ?? game.home_team_id;
-        const away = teamOf(game.away_team) ?? game.away_team_id;
-        return teamIds.has(String(home)) || teamIds.has(String(away));
-      },
+      // No coach scores, their own teams' games included (20261028010000).
+      canScoreGame: (game) => admin && !!game,
     };
   }, [admin, teamIds, error]);
 }

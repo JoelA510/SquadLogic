@@ -133,13 +133,22 @@ export const NAV = [
     id: 'competition',
     label: 'Competition',
     items: [
-      { id: 'standings', label: 'Standings', icon: Trophy, path: '/standings' },
+      // Both admin functions the league turns on in Settings (R6).
+      {
+        id: 'standings',
+        label: 'Standings',
+        icon: Trophy,
+        path: '/standings',
+        permission: PERMISSIONS.VIEW_SCHEDULE,
+        feature: FEATURE_FLAGS.STANDINGS,
+      },
       {
         id: 'scores',
         label: 'Scores & Results',
         icon: Flag,
         path: '/scores',
         permission: PERMISSIONS.MANAGE_SCHEDULE,
+        feature: FEATURE_FLAGS.SCORE_ENTRY,
       },
     ],
   },
@@ -215,25 +224,21 @@ export const NAV = [
   },
 ];
 
-/** Flat navigation for non-admin roles. */
+/**
+ * Flat navigation for non-admin roles. A coach's schedule is on their home
+ * (20261028010000, R6): the admin scheduling pages, score entry, standings
+ * and lighting are an admin's. "My Team" opens the team the coach coaches,
+ * or their home when they coach none or several (`/my-team`).
+ */
 export const ROLE_NAV = {
   coach: [
     { id: 'home', label: 'My Dashboard', icon: Home, path: '/' },
-    { id: 'teams', label: 'My Team', icon: Shield, path: '/teams' },
-    { id: 'practices', label: 'Practices', icon: Calendar, path: '/schedule/practice' },
-    { id: 'games', label: 'Game Schedule', icon: Flag, path: '/schedule/game' },
-    { id: 'standings', label: 'Standings', icon: Trophy, path: '/standings' },
+    { id: 'my-team', label: 'My Team', icon: Shield, path: '/my-team' },
     {
       id: 'practice-preferences',
       label: 'Practice Preferences',
       icon: UserRoundCheck,
       path: '/coaches/practice-preferences',
-    },
-    {
-      id: 'practice-lighting',
-      label: 'Practice Lighting',
-      icon: Lightbulb,
-      path: '/schedule/practice-lighting',
     },
   ],
 };
@@ -257,6 +262,7 @@ ROUTE_META['/account'] = { label: 'Account', groupLabel: null };
 ROUTE_META['/setup'] = { label: 'Season Setup', groupLabel: null };
 ROUTE_META['/setup/features'] = { label: 'Choose your tools', groupLabel: 'Season Setup' };
 ROUTE_META['/workflow'] = { label: 'Pipeline', groupLabel: 'Data' };
+ROUTE_META['/my-team'] = { label: 'My Team', groupLabel: null };
 
 /**
  * Routes whose pages use the full-bleed <Page> scaffold (pinned header +

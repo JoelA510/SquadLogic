@@ -268,26 +268,19 @@ describe('the game page and the admin-only save (docs/PLAN_AUDIT_IN_TRANSACTION.
     expect(gameRunReads).toBe(readsBefore);
   });
 
-  it('offers a coach no Apply that the server would refuse, and says why', async () => {
-    ROLE.name = 'coach';
-    SAVE.impl = vi.fn(async () => ({ result: { runId: 'never' } }));
-    seed();
-    render(
-      <MemoryRouter>
-        <GameSchedulingPage />
-      </MemoryRouter>
-    );
-    const run = await screen.findByRole('button', {
-      name: 'Auto-Generate: run auto-scheduler optimization',
-    });
-    await waitFor(() => expect(run).toBeEnabled());
-    fireEvent.click(run);
-    const apply = await screen.findByRole('button', { name: /apply schedule/i });
-    expect(apply).toBeDisabled();
-    const note = screen.getByText('Only an organization admin can apply a game schedule.');
-    expect(apply).toHaveAttribute('aria-describedby', note.id);
-    fireEvent.click(apply);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(SAVE.impl).not.toHaveBeenCalled();
+  // Admin focus R6 (20261028010000): a coach holds neither VIEW_SCHEDULE nor
+  // MANAGE_SCHEDULE, so never reaches this page (App.jsx's route), and the
+  // coach Apply state this test once rendered is one no role can reach. The
+  // disabled-Apply note stays in the page for a role with MANAGE_SCHEDULE and
+  // not MANAGE_ORGANIZATION, of which there is none (declared).
+  it('gives a coach no route to the game scheduling page', async () => {
+    const {
+      ROLE_PERMISSIONS: perms,
+      ROLES: roles,
+      PERMISSIONS: p,
+    } = await import('../frontend/src/constants/permissions.js');
+    expect(perms[roles.COACH]).not.toContain(p.VIEW_SCHEDULE);
+    expect(perms[roles.COACH]).not.toContain(p.MANAGE_SCHEDULE);
+    expect(perms[roles.ADMIN]).toContain(p.VIEW_SCHEDULE);
   });
 });

@@ -6,13 +6,14 @@ import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 const { Given, When, Then } = createBdd();
 
 /**
- * 8.9 D14 PR D: the lighting-override request form and approval queue.
+ * 8.9 D14 PR D: the lighting-override approval queue. No coach requests
+ * lighting since admin focus R6 (20261028010000): the coach request form and
+ * its steps are gone, and the seeded requests stand for rows requested before
+ * then.
  *
  * **Every assertion is a DOM assertion.** The seed step is the only place the
  * mock database is touched, through `window.__saveMockDB__`, and always with
- * `organization_id`. Which slot the coach coaches is fixed by the seed itself
- * (`SEED_SLOTS[].coachedByMockCoach`), so the picker check enumerates from the
- * seed and not from what the page rendered.
+ * `organization_id`.
  *
  * Synthetic names only. `mock-coach-id` coaches team `t1` and `c2` coaches `t2`
  * in the base mock seed (`team_coach_assignments`); the seed adds an ENDED
@@ -26,8 +27,6 @@ const SEED_SLOTS = [
     day: 'tue',
     start: '18:00:00',
     end: '19:30:00',
-    label: 'Tue 18:00–19:30 · Lantern Field',
-    coachedByMockCoach: true,
   },
   {
     id: 'ps-light-other',
@@ -35,8 +34,6 @@ const SEED_SLOTS = [
     day: 'wed',
     start: '17:00:00',
     end: '18:00:00',
-    label: 'Wed 17:00–18:00 · Lantern Field',
-    coachedByMockCoach: false,
   },
   {
     // mock-coach-id coached this team only until 2026-02-01 (seeded below), so
@@ -46,8 +43,6 @@ const SEED_SLOTS = [
     day: 'thu',
     start: '16:00:00',
     end: '17:00:00',
-    label: 'Thu 16:00\u201317:00 \u00b7 Lantern Field',
-    coachedByMockCoach: false,
   },
 ];
 
@@ -164,68 +159,14 @@ When('I open the Practice Lighting page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Practice lighting' })).toBeVisible();
 });
 
-Then('the slot picker offers exactly the seeded slots I coach', async ({ page }) => {
-  const picker = page.getByLabel('Practice slot');
-  await expect(picker).toBeVisible();
-  const coached = SEED_SLOTS.filter((slot) => slot.coachedByMockCoach);
-  const notCoached = SEED_SLOTS.filter((slot) => !slot.coachedByMockCoach);
-  // Meta: the seed holds both kinds, so neither half of the check is vacuous.
-  expect(coached.length).toBeGreaterThan(0);
-  expect(notCoached.length).toBeGreaterThan(0);
-  for (const slot of coached) {
-    await expect(picker.locator(`option[value="${slot.id}"]`)).toHaveCount(1);
-  }
-  for (const slot of notCoached) {
-    await expect(picker.locator(`option[value="${slot.id}"]`)).toHaveCount(0);
-  }
-});
-
-When(
-  'I request lighting on {string} from {string} to {string}',
-  async ({ page }, slotPrefix: string, from: string, until: string) => {
-    const slot = SEED_SLOTS.find((s) => s.label.startsWith(slotPrefix));
-    if (!slot) throw new Error(`No seeded slot starts with ${slotPrefix}`);
-    await page.getByLabel('Practice slot').selectOption(slot.id);
-    await page.getByLabel('First date').fill(from);
-    await page.getByLabel('Last date (inclusive)').fill(until);
-    await page.getByRole('button', { name: 'Request lighting override' }).click();
-    await expect(page.getByTestId('lighting-form-status')).toBeFocused();
-  }
-);
-
 const overrideRow = (page, from: string) =>
   page.getByRole('row').filter({ has: page.getByRole('cell', { name: from, exact: true }) });
 
-Then(
-  'my request from {string} shows as {string}',
-  async ({ page }, from: string, status: string) => {
-    const row = overrideRow(page, from).first();
-    await expect(row).toBeVisible();
-    await expect(row.getByText(status, { exact: true })).toBeVisible();
-  }
-);
-
-Then('my request from {string} can be withdrawn', async ({ page }, from: string) => {
-  await expect(overrideRow(page, from).getByRole('button', { name: /^Withdraw/ })).toHaveCount(1);
+When(/^I withdraw the approved override from "([^"]+)"$/, async ({ page }, from: string) => {
+  const button = overrideRow(page, from).getByRole('button', { name: /^Withdraw/ });
+  await expect(button).toBeEnabled();
+  await button.click();
 });
-
-Then(
-  'the request by another user from {string} cannot be withdrawn',
-  async ({ page }, from: string) => {
-    const row = overrideRow(page, from);
-    await expect(row).toHaveCount(1);
-    await expect(row.getByRole('button', { name: /^Withdraw/ })).toHaveCount(0);
-  }
-);
-
-When(
-  /^I withdraw (?:my request|the approved override) from "([^"]+)"$/,
-  async ({ page }, from: string) => {
-    const button = overrideRow(page, from).getByRole('button', { name: /^Withdraw/ });
-    await expect(button).toBeEnabled();
-    await button.click();
-  }
-);
 
 Then(
   'the pending request from {string} cannot be decided by me, with the reason shown',

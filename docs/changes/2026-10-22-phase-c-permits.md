@@ -177,6 +177,20 @@ the bucket. **Unchanged:** `privacy_server_reads.feature` (the coach directory i
    the organization sees every permit (the owner's "visible to admins and coaches"). Alternative:
    only permits for venues the coach's teams are booked at, which needs a bookings join in the
    policy and breaks for a coach sent to an unscheduled field.
+
+   > **Since R6 of `2026-10-22-admin-focus.md` (2026-10-25), the approved plan decides this:** its
+   > R6 row reads "permits for the fields of their scheduled events (Phase C's coach read narrowed
+   > to those fields)", and its "Effect on the other plans" says a coach sees permits for the
+   > fields their team plays or practises on, not every permit in the organization. So C1's coach
+   > read (`get_facility_permits`, the `facility_permits` and `facility_permit_scopes` SELECT
+   > policies and the storage SELECT policy) must be narrowed to permits scoped to a field, or to
+   > the venue of a field, where a team the caller currently coaches has a game (`games` on a
+   > `game_slots` field) or a practice (`practice_assignments` on a `practice_slots` field) in the
+   > season, not `is_current_org_coach`. R6 built no permit surface because no permit table exists
+   > yet; the coach home (`CoachDashboard`, `frontend/src/pages/DashboardPage.jsx`) is where C3's
+   > "Field permits" card goes, beside the schedule card, and the pgTAP matrix needs a coach of a
+   > team scheduled elsewhere who reads nothing.
+
 2. Guardians: recommend **no** access; a coach produces the permit.
 3. File types and size: recommend PDF, JPEG, PNG, 10 MiB; no HEIC.
 4. Warning lead time: recommend a fixed 30 days, not a league setting (add one if asked).

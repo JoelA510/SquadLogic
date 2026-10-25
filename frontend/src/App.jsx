@@ -12,6 +12,8 @@ import OrganizationFetchError from './components/OrganizationFetchError.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { PERMISSIONS } from './constants/permissions.js';
+import { FEATURE_FLAGS } from './constants/featureFlags.js';
+import { FeatureGuard } from './components/ui/FeatureGuard.jsx';
 
 // Layouts
 import DashboardLayout from './layouts/DashboardLayout.jsx';
@@ -48,6 +50,7 @@ const PlayerRecordPage = lazy(() => import('./pages/PlayerRecordPage.jsx'));
 const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx'));
 const PracticeLightingPage = lazy(() => import('./pages/PracticeLightingPage.jsx'));
 const HeatForecastPage = lazy(() => import('./pages/HeatForecastPage.jsx'));
+const MyTeamPage = lazy(() => import('./pages/MyTeamPage.jsx'));
 import OfflineGuard from './components/OfflineGuard.jsx';
 import ToastHost from './components/ui/ToastHost.jsx';
 
@@ -200,7 +203,13 @@ function AppContent() {
             path="/scores"
             element={
               <ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_SCHEDULE}>
-                <ScoresPage />
+                {/* Score entry is off until the league turns it on (R6). */}
+                <FeatureGuard
+                  flag={FEATURE_FLAGS.SCORE_ENTRY}
+                  fallback={<Navigate to="/" replace />}
+                >
+                  <ScoresPage />
+                </FeatureGuard>
               </ProtectedRoute>
             }
           />
@@ -239,7 +248,7 @@ function AppContent() {
           <Route
             path="/schedule/practice-lighting"
             element={
-              <ProtectedRoute requiredPermission={PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE}>
+              <ProtectedRoute requiredPermission={PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE}>
                 <PracticeLightingPage />
               </ProtectedRoute>
             }
@@ -310,7 +319,18 @@ function AppContent() {
           />
           <Route path="/account" element={<AccountSettingsPage />} />
           <Route path="/team/:teamId" element={<TeamRecordPage />} />
-          <Route path="/standings" element={<LeagueStandings />} />
+          <Route
+            path="/standings"
+            element={
+              <ProtectedRoute requiredPermission={PERMISSIONS.VIEW_SCHEDULE}>
+                {/* An admin function the league turns on (R6). */}
+                <FeatureGuard flag={FEATURE_FLAGS.STANDINGS} fallback={<Navigate to="/" replace />}>
+                  <LeagueStandings />
+                </FeatureGuard>
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/my-team" element={<MyTeamPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

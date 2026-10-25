@@ -1,22 +1,18 @@
 Feature: Portable-lighting overrides on practice slots
-  As a coach whose practice runs past sunset
-  I want to request portable lighting for a date window on my practice slot
-  So that an admin can approve it and the scheduler stops cutting the practice short
+  As a league admin whose practices run past sunset
+  I want to set portable lighting for a date window on a practice slot
+  So that the scheduler stops cutting the practice short
 
   8.9 D14 PR D, driven end to end against the mock RPCs. Every check is a DOM
   assertion; the seeded rows are the only place the mock database is touched.
+  Lighting is admin-only, with no coach requests, since admin focus R6
+  (20261028010000, owner decision 4): the seeded requests are rows coaches
+  requested before then, which an admin still decides.
 
-  Scenario: A coach requests lighting on a slot they coach, then withdraws it
+  Scenario: A coach has no lighting page
     Given I am logged into SquadLogic as a "coach"
-    And practice slots with lighting overrides are seeded
-    When I open the Practice Lighting page
-    Then the slot picker offers exactly the seeded slots I coach
-    When I request lighting on "Tue 18:00" from "2026-12-01" to "2026-12-04"
-    Then my request from "2026-12-01" shows as "Requested"
-    And my request from "2026-12-01" can be withdrawn
-    And the request by another user from "2026-11-20" cannot be withdrawn
-    When I withdraw my request from "2026-12-01"
-    Then my request from "2026-12-01" shows as "Withdrawn"
+    When I go to "/schedule/practice-lighting"
+    Then I should be redirected to the Dashboard
 
   Scenario: An admin cannot decide their own request, and an overlapping approval is explained
     Given I am logged into SquadLogic as an "admin"

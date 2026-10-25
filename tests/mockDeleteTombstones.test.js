@@ -373,7 +373,7 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/scheduling_and_overrides.ts': 4,
   'tests/e2e/steps/team_and_roster.ts': 7,
   'tests/e2e/steps/team_communication.ts': 1,
-  'tests/e2e/steps/visual_rbac_enforcement.ts': 1,
+  // visual_rbac_enforcement.ts's one went with the coach score-entry steps (R6).
 };
 
 describe('mock db writes :: nothing new may go past saveDB', () => {

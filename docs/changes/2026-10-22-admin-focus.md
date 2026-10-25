@@ -1,8 +1,8 @@
 # Admin focus: removals, data minimisation, coach view and exports
 
 Status: **approved by the owner 2026-10-22**, with the recommended decisions and the additions under
-"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles). R0 to R4 are merged;
-R5 is built (see "As built (R5)"), its calls for the owner recorded there. It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
+"Decisions" (AGENTS.md rule 14: persistence, the domain model and roles). R0 to R5 are merged;
+R6 is built (see "As built (R6)"), its calls for the owner recorded there. It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim
 about main (`c15c3b2`) is _statically reviewed_ unless marked _executed_; the inventories behind it
 cite file and line for each item and are summarised here, not repeated.
 
@@ -553,6 +553,155 @@ at once (AGENTS.md section 11).
   - Not mirrored in the mock: the season chosen for the age is the mock's active one, not
     `importSeason`'s order.
   - `finalize_import_job` has now been copied whole four times (R0, R1, R4, R5).
+
+## As built (R6)
+
+- **Migration `20261028010000`, in this order.** A NOTICE counts what changes (coach members,
+  lighting requests left for an admin, organizations with score entry on, scored games).
+  `update_game_score` is replaced from its latest body (`20261021020000`, md5 checked equal to the
+  build's before the edit; `20261021040000` had pinned its TimeZone by ALTER FUNCTION, restated
+  here) with the coach arm removed: admins and staff only (42501), and only while
+  `org_flag(org, 'score_entry', false)` is true (55000); `updated_at` is written `now()` (the UTC
+  idiom guard). The service role skips the setting as it skips the role checks.
+  `request_practice_lighting_override` is dropped and `withdraw_practice_lighting_override` is
+  replaced from its only body (`20261003000000`, md5 checked) without the requester arm; the
+  lighting table's comment, which named the request RPC, is restated. New:
+  `get_my_division_teams(org)` and `admin_get_division_teams(org, user)` (the role preview, as
+  `admin_get_coached_team_ids` is) over the internal `division_teams_of(org, user)` (no client
+  role may execute it): each team of a division where the user currently coaches a team
+  (`coached_team_ids_of`), with division id and name, team id and name, its current coaches' names
+  (a live assignment on `team_local_today`, lead first) and whether the user coaches it, ordered
+  by division and team. The end-state check refuses to commit while the request RPC exists, while
+  either replaced body names a coach arm in any spelling (a coach helper, `coaches` or
+  `team_coach_assignments`, a test of the member's role or of the requester; comments and string
+  literals stripped), while a division read returns a column named like an email, phone, contact
+  or guardian, or while the grants differ from the declared ones. No CASCADE anywhere.
+- **Every write a coach could make to schedule rows** (read off a build at `20261026010000`:
+  each volatile `public` function `authenticated` may execute that admits a non-admin, and every
+  write policy): `update_game_score` (closed), `request_practice_lighting_override` (dropped),
+  `withdraw_practice_lighting_override` (closed), `request_coach_practice_preference` (kept,
+  decision 4) and `rotate_calendar_token` (kept: the team's calendar feed token, not a schedule
+  row). Every write policy on the schedule tables already required `is_org_admin`;
+  `game_assignments`, `practice_slots`, `practice_lighting_overrides` and the field tables have
+  none; `persist_practice_schedule`, `persist_game_schedule` and `enact_practice_recommendation`
+  already refuse a non-admin. At head the only volatile function a member may call that names a
+  coach helper is `rotate_calendar_token`.
+- **Permits: not built, deferred to Phase C.** No permit table exists on main
+  (`facility_permit` appears only in the season fixture's parsers). The Phase C plan
+  (`2026-10-22-phase-c-permits.md`, owner decision 1) now records that its coach read must be
+  narrowed to the fields of the coach's scheduled events, and that C3's card goes on the coach
+  home beside the schedule.
+- **The UI.** `ROLES.coach` holds `VIEW_ORGANIZATION`, `MANAGE_OWN_TEAM` and
+  `REQUEST_PRACTICE_PREFERENCE`: no `MANAGE_SCHEDULE` or `VIEW_SCHEDULE` (the admin practice and
+  game pages, scores and standings), and the `REQUEST_PRACTICE_LIGHTING_OVERRIDE` permission is
+  gone with the request RPC (the lighting route needs `DECIDE_PRACTICE_LIGHTING_OVERRIDE`). The
+  coach nav is My Dashboard, My Team and Practice Preferences. **My Team** went to `/teams`, the
+  admin's league view, and bounced a coach home with "Unauthorized access"; it now goes to
+  `/my-team`, which opens the coach's one team, or their home when they coach none or several.
+  The coach home lists their teams; **Your schedule**, their games and practices from today across
+  every team, read through `fetchTeamEvents` (extracted from `useTeamPortal`, the team page's own
+  read; a game with no slot now shows "Location TBD" there instead of "undefined - undefined"),
+  the next ten dated events and every undated TIME TBD, a count and links for the rest, the
+  practice-changes warning, a game between two of their teams once, and a team whose read fails
+  named while the others show; and **Your division**, the division read: team, coaches (or "No
+  coach assigned"), the coach's own marked. No contact appears. Score entry and standings are
+  league settings (`score_entry`, `standings`, in the feature settings, off unless set): the
+  Scores page and the Standings page are an admin's (`MANAGE_SCHEDULE`, `VIEW_SCHEDULE`) and
+  redirect home while their setting is off; the Standings page offers score entry only to an
+  admin with `score_entry` on. The coach lighting request form (`CoachLightingRequests`) and its
+  hook paths are deleted. **The role preview** found its coach by `profiles.role`, which nothing
+  sets (production's four profiles read `user`), so it was never offered; it now reads the
+  coach-role members (`organization_members`) and their coach records' names, preferring a member
+  with a coach record, and reads no email. The mock twin follows the SQL: score entry admin-only
+  behind the stored setting (55000), no request RPC, admin-only withdraw, the division reads, and
+  `update_org_feature_flags` now stores the flags (it was a no-op, so a setting never reached an
+  RPC that reads it); its `games` read embeds `game_slot`.
+- **Calls for the owner.**
+  - **Lighting is admin-only, decision 4, built here.** The R6 row does not name it, but no other
+    row does, and the closing of coach schedule writes covers it. A request stored before the
+    migration stays for an admin to decide; its requester can no longer withdraw it.
+  - **Standings are an admin's even when turned on**, as decision 4 says ("admin functions").
+    Coaches lose the Standings link they had. Standings are computed from `games`, which every
+    member reads, so the setting hides a page, not data (declared).
+  - **Score entry is off by default, so production's admin enters no score until the league
+    turns it on** (production: 0 games).
+  - **The service role skips the setting.** It never could change a score anyway: the audit row
+    needs a uid (`audit_log.user_id` NOT NULL), pre-existing.
+  - **`get_my_division_teams` takes the organization** (the row writes it without arguments; every
+    coach read takes one), and the preview read is a second function, as for the coached teams.
+  - **A coach of several teams** gets their home from My Team, which lists the teams.
+  - **The preview picks one coach**: the first coach-role member with a coach record, by name.
+- **Production, read-only, 2026-10-25** (catalogue and counts only, through the SQL endpoint, once
+  the ledger read `20261026010000`): `update_game_score`, `request_practice_lighting_override`
+  and `withdraw_practice_lighting_override` equal a build at `20261026010000` in body md5,
+  security, volatility, SET clauses, result, `anon`/`authenticated` EXECUTE and comment, as do the
+  table comment and the helpers the new reads call (`coached_team_ids_of`, `team_local_today`,
+  `org_flag`, `is_org_admin`, `get_my_coached_team_ids`, `admin_get_coached_team_ids`,
+  `caller_coaches_practice_slot`, `update_org_feature_flags`); `is_org_member` differs, as R3
+  recorded, and is not touched. No function names `request_practice_lighting_override`; the
+  coach-admitting volatile functions are the same four as the build's; no schedule table has a
+  write policy that skips an admin check (`season_settings`'s admit admin and staff by role).
+  Counts: members 1 (admin), invites 0, teams 0, `team_coach_assignments` 0, coaches linked to an
+  account 1, profiles 4 (all `user`), games 0 (0 scored, 0 with a slot), game slots 0, practice
+  slots, assignments and exceptions 0, lighting overrides 0, coach practice preferences 0,
+  calendar tokens 0, organizations storing `score_entry` or `standings` 0, score and lighting
+  audit rows 0.
+- **Tests.**
+  - pgTAP: `coach_view.sql` (16; the plan's test): the division reads return no contact column
+    (with a control on the column count), anon cannot call them and no client the internal one,
+    the request RPC is gone; a coach reads every team of their division with its coaches and
+    nothing outside it or another organization; a coach in another division that division only;
+    a non-coach nothing; the preview is an admin's; a coach cannot score their team's game with
+    score entry on, an admin can; the requester cannot withdraw, an admin can. Run on `origin/main`
+    it dies on the missing function. `game_score_rpc.sql` (15): score entry off refuses an admin
+    55000; the home coach is refused. `contact_surfaces_removed.sql` (R4's catalogue) passes with
+    the new functions.
+  - Smoke `20261028010000` (the contact-column scan shown to fire on a probe first; posture; score
+    entry off three ways, on for admin and staff, refused for both coaches, a non-coach and an
+    outside admin; the service role not refused; withdraw; the division read for five callers
+    and the preview). At head the `20261003000000` smoke inserts the requests it used to make
+    through the RPC (as stored before R6), checks the request RPC stays gone and the requester
+    is refused a withdraw (a new claim, its plant M45), and counts 7 audited writes; the
+    `20261021020000` smoke turns score entry on and expects the home coach refused.
+  - Vitest: `coachHome.test.jsx` (13) through the real page, hooks and mock: the schedule from
+    today (not the past), slotless games last without an invalid date, the ten-event limit and
+    count, a failed read said (whole and per team), a two-team game once, the division names
+    only, its failed read said, the preview's division, no admin links; My Team for one, several
+    or no teams and a failed read. `coachViewRbac.test.jsx` (9): the coach's permissions and nav,
+    the settings off by default and gating their nav, score entry on Standings for admin, staff
+    and coach by setting. `mockServerSideReads.test.js` (division reads), `mockReadPolicies.test.js`
+    (score entry, flags stored by the RPC), `chrome.test.jsx` (the preview by membership role,
+    no email read, a failed read), `useScorableGames.test.jsx`, `scoresPageCoachGames.test.jsx`,
+    the lighting mock and UI tests (no request, admin-only withdraw). The two schedule-page tests
+    that rendered a coach's disabled Apply now check the coach has no route there (that state is
+    reachable by no role; declared). The tombstone ratchet drops one E2E write.
+  - E2E: `coach_view.feature` (the coach journey: team, schedule, division with no contact, My
+    Team, the nav); `rbac_multi_tenancy.feature`'s read-only scenario is back as the coach's
+    (team, practice and game scheduling, lighting, scores and standings each send them home);
+    `reporting.feature` turns score entry and standings on in Settings (the real path) and checks
+    they are off until then; the coach score-entry and lighting-request scenarios become
+    redirects; the accessibility scan covers `/scores` and `/standings` with their settings on,
+    the coach home with a schedule and division, and `/my-team`, in both themes.
+- **Harness.** The revert is checked by a fingerprint of the six functions and the table comment
+  against a build at `20261026010000` (4 rows). Retired: "M19 the request RPC stops checking the
+  caller coaches the slot" and "M34 any coach scores any game" (their targets are gone or
+  replaced); re-aimed at `$M45`: "M19 withdraw leaves the row as it was". New: ten M45 plants
+  (four refused by the migration itself: a coach arm put back by helper and by role test, the
+  request RPC left in place, an email column on a division read) and three R45 plants. The
+  catalogue snapshot gains the three functions and loses the request RPC.
+- **Found for later PRs, not done here.**
+  - **A coach can still run the auto-scheduler.** The `auto-scheduler` and `fairness-scoring`
+    Edge Functions check membership, not admin, and `persist_evaluation_run` admits any member:
+    a coach can compute a schedule and write an evaluation run (not a schedule row; nothing in
+    the UI offers it to a coach now).
+  - `record_audit_event` admits any member for any action but impersonation.
+  - The schedule pages' disabled-Apply note serves no role now.
+  - The lighting read policy still shows a slot's coaches its rows; nothing a coach opens reads
+    them.
+  - `useScorableGames` still reads the coached teams under a preview of the Standings page,
+    where nothing uses them.
+  - Not mirrored in the mock: `update_org_feature_flags`'s audit row; the division reads' order
+    is code-unit, the database's is its collation.
 
 ## Docs updated across the PRs
 

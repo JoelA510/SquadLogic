@@ -1,6 +1,7 @@
 // The mock client applies migration 20261021020000's SELECT policies to its
 // generic `.from(table)` reads, and its rotate_calendar_token and
-// update_game_score arms refuse whom the database refuses, so a page that still
+// update_game_score arms refuse whom the database refuses (update_game_score is
+// an admin's behind the score entry setting since 20261028010000, R6), so a page that still
 // reads a restricted table directly, or offers an action the server refuses,
 // fails in mock mode and in the E2E suite as it would against Postgres. Since
 // 20261024010000 (R3) there is no guardian: players and team_players are an
@@ -122,7 +123,9 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
     ).toHaveLength(1);
   });
 
-  it('scores a game for a current coach of either team, and refuses anyone else', async () => {
+  // Admin focus R6 (20261028010000): score entry is an admin's, behind the
+  // league's `score_entry` setting (off unless set; 55000 while it is off).
+  it('scores a game for an admin only, and only while score entry is on', async () => {
     const score = (gameId) =>
       supabase.rpc('update_game_score', {
         p_organization_id: ORG,
@@ -131,24 +134,33 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
         p_score_away: 0,
       });
 
+    setSession('mock-admin-id');
+    const off = await score('game-2');
+    expect(off.error?.code).toBe('55000');
+    expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBeNull();
+
+    // Turned on as the settings page does it, through the audited RPC.
+    const flags = await supabase.rpc('update_org_feature_flags', {
+      p_org_id: ORG,
+      p_flags: { score_entry: true },
+    });
+    expect(flags.error).toBeNull();
+
     setSession('mock-outsider-id');
     expect((await score('game-2')).error?.code).toBe('42501');
-
+    // The home team's own coach is refused too.
     setSession('mock-coach-id');
+    expect((await score('game-2')).error?.code).toBe('42501');
+    expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBeNull();
+    // Nor may a coach turn the setting on.
+    expect(
+      (await supabase.rpc('update_org_feature_flags', { p_org_id: ORG, p_flags: {} })).error
+    ).toBeTruthy();
+
+    setSession('mock-admin-id');
     const own = await score('game-2');
     expect(own.error).toBeNull();
     expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBe(3);
-
-    const db = /** @type {any} */ (window.__MOCK_DB__);
-    db.games.push({
-      id: 'game-other',
-      organization_id: ORG,
-      home_team_id: 't2',
-      away_team_id: TIGERS,
-      start_time: new Date().toISOString(),
-    });
-    window.__saveMockDB__(db);
-    expect((await score('game-other')).error?.code).toBe('42501');
   });
 });
 

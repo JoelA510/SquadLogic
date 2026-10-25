@@ -139,22 +139,21 @@ Then(
   }
 );
 
-// ─── Coach League Standings Steps ───────────────────────────────────
+// ─── Admin League Standings Steps (score entry is an admin's since R6) ─────
 
-Given('the coach views the league standings', async ({ page }) => {
-  // Pin to the mock seed's org so OrganizationContext resolves (coach is in initialMockData's org_members).
-  // All standings, teams, and games data is in initialMockData — no seeding needed.
+// The page ranks the selected season's teams only. initialMockData's standings
+// are its own season's, not the background's newer active season (which the
+// app would otherwise select), so that season is selected, as the season
+// switcher would, before the next page load.
+Given("the admin's season is the mock season", async ({ page }) => {
+  // Pin to the mock seed's org so OrganizationContext resolves (the admin is in initialMockData's org_members).
   await pinToMockOrg(page);
-  // The page ranks the selected season's teams only. initialMockData's standings
-  // are its own season's, not the background's newer active season (which the
-  // app would otherwise select), so select that season, as the season switcher
-  // would.
   await page.evaluate((seasonId) => {
     localStorage.setItem('squadlogic-current-season', seasonId);
   }, MOCK_SEASON_ID);
-  await page.goto('/standings');
-  await page.waitForLoadState('networkidle');
+});
 
+Then('the admin sees the league standings', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /League Standings/i }).first()).toBeVisible({
     timeout: 15000,
   });

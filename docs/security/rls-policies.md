@@ -1,5 +1,4 @@
-[← Back to Documentation Index](docs/README.md)
----
+## [← Back to Documentation Index](docs/README.md)
 
 # Row Level Security — Implementation Reference
 
@@ -10,11 +9,11 @@ This document describes the **implemented** Row Level Security (RLS) strategy fo
 SquadLogic uses Supabase Auth with the organization roles stored in the `organization_members`
 table (`organization_members_role_check`):
 
-| Role     | Description                                                                              |
-| -------- | ---------------------------------------------------------------------------------------- |
-| `admin`  | Full access to all organization data. Can manage users, import data, and run schedulers. |
-| `coach`  | View team data they are assigned to.                                                     |
-| `staff`  | An admin: `is_org_admin()` admits staff since `20261020030000`.                          |
+| Role    | Description                                                                                                                                                                                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin` | Full access to all organization data. Can manage users, import data, and run schedulers.                                                                                                          |
+| `coach` | Their own teams' schedule and roster names, their divisions' teams and coaches (names), and their practice preferences. No scheduling, score entry, standings or lighting since `20261028010000`. |
+| `staff` | An admin: `is_org_admin()` admits staff since `20261020030000`.                                                                                                                                   |
 
 `tenant_admin` is also an admin to `is_org_admin()`, and is never invited or assigned. There is no
 `parent` or `player` role since `20261024010000` (the guardian view was removed; plan
@@ -114,12 +113,14 @@ Who may read people's data is the access table in `docs/changes/2026-10-20-phase
 (A3). Admins and staff read the tables directly. Everyone else reads through definer functions
 that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_side_reads.sql`):
 
-| Function                       | Admits                                                         | Returns                                                                                                                                                                                                                                          |
-| ------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `get_team_roster(team)`        | admins, staff; a current coach of the team                     | names and jersey number; balance fields to admins and staff only (since `20261024010000`: a coach reads names only; since `20261025010000`: no guardian contacts) |
-| `get_team_staff(team)`         | the same                                                       | every current coach's name and role, and status to admins and staff (no phone or email since `20261025010000`)                                                                                                                                  |
-| `get_my_coached_team_ids(org)` | any member                                                     | the teams the caller currently coaches                                                                                                                                                                                                           |
-| `admin_get_coached_team_ids(org, user)` | admins, staff                                         | the teams another member currently coaches (an admin's role preview)                                                                                                                                                                             |
+| Function                                | Admits                                                  | Returns                                                                                                                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_team_roster(team)`                 | admins, staff; a current coach of the team              | names and jersey number; balance fields to admins and staff only (since `20261024010000`: a coach reads names only; since `20261025010000`: no guardian contacts)                                       |
+| `get_team_staff(team)`                  | the same                                                | every current coach's name and role, and status to admins and staff (no phone or email since `20261025010000`)                                                                                          |
+| `get_my_coached_team_ids(org)`          | any member                                              | the teams the caller currently coaches                                                                                                                                                                  |
+| `admin_get_coached_team_ids(org, user)` | admins, staff                                           | the teams another member currently coaches (an admin's role preview)                                                                                                                                    |
+| `get_my_division_teams(org)`            | any member (returns nothing to one who coaches no team) | every team of each division where the caller currently coaches a team: division, team, its current coaches' names (lead first), and whether the caller coaches it; no contact column (`20261028010000`) |
+| `admin_get_division_teams(org, user)`   | admins, staff                                           | the same for another member (an admin's role preview)                                                                                                                                                   |
 
 "Current coach" is a `team_coach_assignments` row of the caller's linked coach (`coaches.user_id`,
 set by `link_my_coach_record()`) whose inclusive window holds today in the team's season timezone
@@ -147,7 +148,13 @@ children): row security chooses rows, not columns, so a coach reads their team's
 names through `get_team_roster` instead. A team's calendar feed token lives in
 `team_calendar_tokens`, readable by admins and staff and the team's current coaches;
 `rotate_calendar_token` admits admins, staff and a current coach. `update_game_score` admits admins
-and staff for any game and anyone else only for a game of a team they currently coach. The
+and staff only, and only while the organization's `score_entry` setting is on (55000 while it is
+off; since `20261028010000`, R6 of `docs/changes/2026-10-22-admin-focus.md`: until then it
+admitted anyone for a game of a team they currently coach). No coach requests or withdraws a
+lighting override since then: `request_practice_lighting_override` is dropped and
+`withdraw_practice_lighting_override` admits admins and staff; the lighting read policy still
+shows a slot's coaches its rows. A coach's one remaining write is their practice preference
+(`request_coach_practice_preference`, kept by decision 4), besides their team's calendar token. The
 migration refuses to commit if any other `SELECT` or `ALL` policy is left on one of these tables,
 since Postgres would OR it with the narrowed one. Pinned by `supabase/tests/rls_policy_matrix.sql`
 and `supabase/tests/restricted_reads.sql`.
@@ -156,18 +163,18 @@ and `supabase/tests/restricted_reads.sql`.
 
 Every data table has a direct `organization_id` column (either native or backfilled via migration). This eliminates the need for multi-table JOINs in RLS policies and ensures consistent, performant access control:
 
-| Table Group         | Tables                                                                                                    | Scope Method                                        |
-| ------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Core Admin**      | `season_settings`, `divisions`, `import_jobs`                                                             | Direct `organization_id`                            |
-| **People**          | `players`, `coaches`, `profiles`                                                                          | Direct `organization_id` (profiles: self-only)      |
-| **Teams & Rosters** | `teams`, `team_players`                                                                                   | Direct `organization_id`                            |
-| **Facilities**      | `locations`, `fields`, `field_subunits`                                                                   | Direct `organization_id`                            |
-| **Scheduling**      | `practice_slots`, `game_slots`, `practice_assignments`, `games`                                           | Direct `organization_id`                            |
-| **Communication**   | none (`event_rsvps` and `team_messages` dropped by `20261022030000`, `profile_players` by `20261024010000`) | Direct `organization_id`                            |
-| **Evaluation**      | `scheduler_runs`, `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, `evaluation_run_events` | Direct `organization_id`                            |
-| **Exports & Logs**  | `export_jobs`, `email_log`, `audit_log`                                                                   | Direct `organization_id`                            |
-| **Staging**         | `staging_players`, `player_buddies`                                                                       | Direct `organization_id`                            |
-| **Heat forecast**   | `organization_heat_settings`                                                                              | Direct `organization_id` (PK); members SELECT, no write policy -- `admin_set_org_heat_settings` only |
+| Table Group         | Tables                                                                                                      | Scope Method                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Core Admin**      | `season_settings`, `divisions`, `import_jobs`                                                               | Direct `organization_id`                                                                             |
+| **People**          | `players`, `coaches`, `profiles`                                                                            | Direct `organization_id` (profiles: self-only)                                                       |
+| **Teams & Rosters** | `teams`, `team_players`                                                                                     | Direct `organization_id`                                                                             |
+| **Facilities**      | `locations`, `fields`, `field_subunits`                                                                     | Direct `organization_id`                                                                             |
+| **Scheduling**      | `practice_slots`, `game_slots`, `practice_assignments`, `games`                                             | Direct `organization_id`                                                                             |
+| **Communication**   | none (`event_rsvps` and `team_messages` dropped by `20261022030000`, `profile_players` by `20261024010000`) | Direct `organization_id`                                                                             |
+| **Evaluation**      | `scheduler_runs`, `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, `evaluation_run_events`   | Direct `organization_id`                                                                             |
+| **Exports & Logs**  | `export_jobs`, `email_log`, `audit_log`                                                                     | Direct `organization_id`                                                                             |
+| **Staging**         | `staging_players`, `player_buddies`                                                                         | Direct `organization_id`                                                                             |
+| **Heat forecast**   | `organization_heat_settings`                                                                                | Direct `organization_id` (PK); members SELECT, no write policy -- `admin_set_org_heat_settings` only |
 
 ## Storage buckets
 
@@ -213,15 +220,15 @@ Role allowlists per Edge Function:
 
 The RLS system evolved through multiple migrations, consolidated during a 4-phase security audit (March 2026):
 
-| Phase            | Migration        | What Changed                                                       |
-| ---------------- | ---------------- | ------------------------------------------------------------------ |
-| Original         | `20251208000000` | Admin-only role check policies (no org scope)                      |
-| Auth             | `20251214000004` | Core auth schema, profiles, organization_members                   |
-| Communication    | `20251217000000` | Team messages, RSVP tables with partial org scope (dropped, R2)    |
-| RLS Remediation  | `20260309000000` | `coach_team_map` security_invoker fix                              |
-| Unified RLS      | `20260310000002` | `organization_id` denormalization, `is_org_member()` on all tables |
-| Registration Fix | `20260310000003` | Fixed policies referencing non-existent `organization_roles` table |
-| Audit Logging    | `20260324000004` | Append-only `audit_log` table with admin-read-only RLS             |
+| Phase            | Migration        | What Changed                                                              |
+| ---------------- | ---------------- | ------------------------------------------------------------------------- |
+| Original         | `20251208000000` | Admin-only role check policies (no org scope)                             |
+| Auth             | `20251214000004` | Core auth schema, profiles, organization_members                          |
+| Communication    | `20251217000000` | Team messages, RSVP tables with partial org scope (dropped, R2)           |
+| RLS Remediation  | `20260309000000` | `coach_team_map` security_invoker fix                                     |
+| Unified RLS      | `20260310000002` | `organization_id` denormalization, `is_org_member()` on all tables        |
+| Registration Fix | `20260310000003` | Fixed policies referencing non-existent `organization_roles` table        |
+| Audit Logging    | `20260324000004` | Append-only `audit_log` table with admin-read-only RLS                    |
 | Advisor rewrite  | `20261018030000` | Admin `FOR ALL` split by command; `(select auth.uid())`; no access change |
 
 The pre-production security audit that produced these policies is closed; its remediations are reflected in the migration history (`20260602010000_consolidated_rls_security_hardening.sql` and earlier).

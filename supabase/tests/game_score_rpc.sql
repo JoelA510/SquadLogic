@@ -1,11 +1,14 @@
 -- pgTAP: game score updates are org-scoped, role-scoped, and audited.
+-- Since 20261028010000 (plan docs/changes/2026-10-22-admin-focus.md, R6)
+-- score entry is an admin function behind the league's `score_entry`
+-- setting: a coach scores nothing, and an admin only while it is on.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(14);
+SELECT plan(15);
 
 INSERT INTO public.teams (id, organization_id, division_id, name)
 VALUES
@@ -56,6 +59,26 @@ VALUES
     )
 ON CONFLICT (id) DO NOTHING;
 
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111","app_metadata":{"role":"admin"}}';
+
+SELECT throws_ok(
+    $$
+        SELECT public.update_game_score(
+            'a1111111-1111-1111-1111-111111111111',
+            'a1111111-1111-1111-1111-00000000aa01',
+            2::smallint,
+            1::smallint
+        )
+    $$,
+    '55000',
+    NULL,
+    'with score entry off (the default) an Org A admin is refused'
+);
+
+RESET ROLE;
+UPDATE public.organizations SET feature_flags = '{"score_entry": true}'::jsonb
+ WHERE id = 'a1111111-1111-1111-1111-111111111111';
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111","app_metadata":{"role":"admin"}}';
 
@@ -145,7 +168,7 @@ RESET ROLE;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333","app_metadata":{"role":"coach"}}';
 
--- 20261021020000: a coach scores only a game of a team they currently coach.
+-- 20261028010000: no coach scores; this one coaches neither team.
 SELECT throws_ok(
     $$
         SELECT public.update_game_score(
@@ -172,7 +195,7 @@ VALUES ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333","app_metadata":{"role":"coach"}}';
 
-SELECT lives_ok(
+SELECT throws_ok(
     $$
         SELECT public.update_game_score(
             'a1111111-1111-1111-1111-111111111111',
@@ -181,7 +204,9 @@ SELECT lives_ok(
             1::smallint
         )
     $$,
-    'the home team''s current coach can update the score'
+    '42501',
+    NULL,
+    'the home team''s current coach is refused: score entry is an admin''s'
 );
 
 SELECT is(
@@ -190,8 +215,8 @@ SELECT is(
         FROM public.games
         WHERE id = 'a1111111-1111-1111-1111-00000000aa01'
     )::int,
-    3,
-    'coach score update is persisted'
+    2,
+    'the coach''s attempt leaves the score as the admin entered it'
 );
 
 RESET ROLE;

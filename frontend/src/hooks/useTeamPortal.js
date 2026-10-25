@@ -51,6 +51,25 @@ export const PRACTICE_CHANGES_UNREAD_TEXT =
 const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
+ * The order a schedule is shown in, on the team page and the coach home: by
+ * wall date and time, a dated TIME TBD after that day's timed events, and an
+ * undated event last (a stable sort keeps those in row order). Wall dates and
+ * zero-padded wall times compare as strings: a `Date` built from a dated TIME
+ * TBD has no time, so it is Invalid and would unsort the list.
+ *
+ * @param {{ date?: string | null, startTime?: string | null }} a
+ * @param {{ date?: string | null, startTime?: string | null }} b
+ */
+export function compareTeamEvents(a, b) {
+  if (a.date == null || b.date == null) return Number(a.date == null) - Number(b.date == null);
+  return (
+    order(a.date, b.date) ||
+    Number(a.startTime == null) - Number(b.startTime == null) ||
+    order(String(a.startTime ?? ''), String(b.startTime ?? ''))
+  );
+}
+
+/**
  * useTeamPortal
  * Fetches the data for the Team Portal: the team, its roster, and its games and
  * practices. Handles practice expansion (season wall dates and saved practice
@@ -122,113 +141,13 @@ export function useTeamPortal(teamId) {
 
       setRoster(uniqueRoster);
 
-      // 3. Fetch Games
-      const { data: gamesData, error: gamesError } = await supabase
-        .from('games')
-        .select(
-          `
-          *,
-          game_slot:game_slots (
-            slot_date,
-            start_time,
-            end_time,
-            field:fields (
-              name,
-              location:locations (name)
-            )
-          ),
-          home_team:teams!home_team_id (name),
-          away_team:teams!away_team_id (name)
-        `
-        )
-        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
-
-      if (gamesError) throw gamesError;
-
-      const mappedGames = gamesData.map((g) => ({
-        id: g.id,
-        type: 'game',
-        date: g.game_slot?.slot_date,
-        startTime: g.game_slot?.start_time,
-        endTime: g.game_slot?.end_time,
-        location: `${g.game_slot?.field?.location?.name} - ${g.game_slot?.field?.name}`,
-        homeTeam: g.home_team?.name,
-        awayTeam: g.away_team?.name,
-        opponent: g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name,
-        description: `vs ${g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name}`,
-      }));
-
-      // 4. Fetch Practices and Expand
-      const { data: practiceAssignments, error: practiceError } = await supabase
-        .from('practice_assignments')
-        .select(
-          `
-          *,
-          slot:practice_slots!practice_slot_id (
-            day_of_week,
-            start_time,
-            end_time,
-            field:fields (
-              name,
-              location:locations (name)
-            )
-          )
-        `
-        )
-        .eq('team_id', teamId);
-
-      if (practiceError) throw practiceError;
-
-      // 4b. Saved practice exceptions (plan §4 R2). RLS gates the read by
-      // `is_org_member(organization_id)`, the predicate `practice_assignments`
-      // has. Live rows only, as the feed reads them (#521): withdrawn rows are
-      // kept forever. The helper filters withdrawn rows again itself (plan §3
-      // rule 2), so this filter is an economy, not the guarantee. Paged
-      // (`fetchAllPages`) rather than capped, so no read is silently truncated.
-      //
-      // A failure is never fatal and never silent (Q5): the practices still
-      // show, as the bare series, and the page says their changes are unread.
-      let practiceExceptions = [];
-      let changesUnread = false;
-      try {
-        practiceExceptions = await fetchAllPages(() =>
-          supabase
-            .from('practice_exceptions')
-            .select(PORTAL_PRACTICE_EXCEPTIONS_SELECT)
-            .eq('team_id', teamId)
-            .is('withdrawn_at', null)
-        );
-      } catch (exceptionsError) {
-        logger.error('[useTeamPortal] practice_exceptions read failed', {
-          teamId,
-          message: exceptionsError?.message,
-        });
-        changesUnread = true;
-      }
-      setPracticeChangesUnread(changesUnread);
-
-      // The team's own season clock, as the feed places on it. No default: a
-      // season with no timezone shows its practices as TIME TBD, as the feed does.
-      const expandedPractices = expandPractices(
-        practiceAssignments,
-        practiceExceptions,
+      // 3-5. The team's games and practices (with its saved practice
+      // exceptions), on the team's own season clock.
+      const { events: allEvents, practiceChangesUnread: changesUnread } = await fetchTeamEvents(
+        teamId,
         teamData?.division?.season?.timezone ?? null
       );
-
-      // 5. Combine and Sort Events. Wall dates and zero-padded wall times are
-      // compared as strings (a dated TIME TBD has no time, so a `Date` built
-      // from it is Invalid and would unsort the list).
-      const allEvents = [...mappedGames, ...expandedPractices].sort((a, b) => {
-        // Undated TIME TBD entries have no date to order by; they go last, in row order.
-        if (a.date == null || b.date == null)
-          return Number(a.date == null) - Number(b.date == null);
-        return (
-          order(a.date, b.date) ||
-          // A dated TIME TBD goes after that day's timed events.
-          Number(a.startTime == null) - Number(b.startTime == null) ||
-          order(String(a.startTime ?? ''), String(b.startTime ?? ''))
-        );
-      });
+      setPracticeChangesUnread(changesUnread);
       setEvents(allEvents);
     } catch (err) {
       logger.error('Error fetching Team Portal data:', err);
@@ -252,6 +171,119 @@ export function useTeamPortal(teamId) {
     practiceChangesUnread,
     refresh: fetchData,
   };
+}
+
+/**
+ * One team's schedule: its games and its practices expanded with its saved
+ * practice exceptions (`expandPractices`), sorted as the team page shows
+ * them. `timeZone` is the team's season clock (`PORTAL_TEAM_SELECT`'s
+ * `division.season.timezone`); null makes every timed practice TIME TBD.
+ *
+ * A failed games or practices read throws; a failed exceptions read does not
+ * (Q5): the practices still come back as the bare series, with
+ * `practiceChangesUnread` true. The team page (`useTeamPortal`) and the coach
+ * home (admin focus R6) both read a schedule through this one function.
+ *
+ * @param {string} teamId
+ * @param {string | null} timeZone
+ * @returns {Promise<{ events: Array<Record<string, any>>, practiceChangesUnread: boolean }>}
+ */
+export async function fetchTeamEvents(teamId, timeZone) {
+  // 3. Fetch Games
+  const { data: gamesData, error: gamesError } = await supabase
+    .from('games')
+    .select(
+      `
+      *,
+      game_slot:game_slots (
+        slot_date,
+        start_time,
+        end_time,
+        field:fields (
+          name,
+          location:locations (name)
+        )
+      ),
+      home_team:teams!home_team_id (name),
+      away_team:teams!away_team_id (name)
+    `
+    )
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
+
+  if (gamesError) throw gamesError;
+
+  const mappedGames = gamesData.map((g) => ({
+    id: g.id,
+    type: 'game',
+    date: g.game_slot?.slot_date,
+    startTime: g.game_slot?.start_time,
+    endTime: g.game_slot?.end_time,
+    // A game with no slot yet has no ground: null, which the pages show as
+    // "Location TBD" (it read "undefined - undefined" before R6).
+    location: g.game_slot ? locationOf(g.game_slot) : null,
+    homeTeam: g.home_team?.name,
+    awayTeam: g.away_team?.name,
+    opponent: g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name,
+    description: `vs ${g.home_team_id === teamId ? g.away_team?.name : g.home_team?.name}`,
+  }));
+
+  // 4. Fetch Practices and Expand
+  const { data: practiceAssignments, error: practiceError } = await supabase
+    .from('practice_assignments')
+    .select(
+      `
+      *,
+      slot:practice_slots!practice_slot_id (
+        day_of_week,
+        start_time,
+        end_time,
+        field:fields (
+          name,
+          location:locations (name)
+        )
+      )
+    `
+    )
+    .eq('team_id', teamId);
+
+  if (practiceError) throw practiceError;
+
+  // 4b. Saved practice exceptions (plan §4 R2). RLS gates the read by
+  // `is_org_member(organization_id)`, the predicate `practice_assignments`
+  // has. Live rows only, as the feed reads them (#521): withdrawn rows are
+  // kept forever. The helper filters withdrawn rows again itself (plan §3
+  // rule 2), so this filter is an economy, not the guarantee. Paged
+  // (`fetchAllPages`) rather than capped, so no read is silently truncated.
+  //
+  // A failure is never fatal and never silent (Q5): the practices still
+  // show, as the bare series, and the page says their changes are unread.
+  let practiceExceptions = [];
+  let changesUnread = false;
+  try {
+    practiceExceptions = await fetchAllPages(() =>
+      supabase
+        .from('practice_exceptions')
+        .select(PORTAL_PRACTICE_EXCEPTIONS_SELECT)
+        .eq('team_id', teamId)
+        .is('withdrawn_at', null)
+    );
+  } catch (exceptionsError) {
+    logger.error('[useTeamPortal] practice_exceptions read failed', {
+      teamId,
+      message: exceptionsError?.message,
+    });
+    changesUnread = true;
+  }
+
+  // The team's own season clock, as the feed places on it. No default: a
+  // season with no timezone shows its practices as TIME TBD, as the feed does.
+  const expandedPractices = expandPractices(practiceAssignments, practiceExceptions, timeZone);
+
+  // 5. Combine and Sort Events. Wall dates and zero-padded wall times are
+  // compared as strings (a dated TIME TBD has no time, so a `Date` built
+  // from it is Invalid and would unsort the list).
+  const allEvents = [...mappedGames, ...expandedPractices].sort(compareTeamEvents);
+  return { events: allEvents, practiceChangesUnread: changesUnread };
 }
 
 /** Same fallback as the feed's `locationOf`, never 'undefined - undefined'. */

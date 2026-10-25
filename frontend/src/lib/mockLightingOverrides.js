@@ -1,21 +1,21 @@
 /**
- * Mock arms for the four portable-lighting override RPCs of migration
- * `20261003000000_practice_lighting_overrides.sql` (8.9 D14 PR D).
+ * Mock arms for the portable-lighting override RPCs of migration
+ * `20261003000000_practice_lighting_overrides.sql` (8.9 D14 PR D), as
+ * `20261028010000_coach_view.sql` (admin focus R6) left them: no coach
+ * requests lighting, so `request_practice_lighting_override` is gone (a call
+ * falls through to the client's PGRST202 refusal, as the API answers a
+ * function that does not exist) and only an org admin withdraws.
  *
  * **Refusals included, not just the happy path** (LESSONS_LEARNED #13), with
  * the SQL's error codes and messages:
  *   - 23502 required arguments;
- *   - 42501 a request by anyone but a current coach of a team on the slot (org
- *     member) or an org admin; a decide or set by a non-admin or on an unknown
- *     row; a decision BY THE REQUESTER; a withdraw by anyone but the requester
- *     who still coaches the slot, or an org admin;
+ *   - 42501 a decide, set or withdraw by a non-admin or on an unknown row; a
+ *     decision BY THE REQUESTER (a row requested before R6);
  *   - 22023 a decision other than approve/reject, `p_until` before `p_from`,
  *     deciding a row that is not `requested`, withdrawing one that is not
  *     `requested` or `approved`;
  *   - 23P01 the EXCLUDE constraint: an approval or a set whose window overlaps
  *     an approved window on the same slot.
- * "Coaches the slot" is `coachedPracticeSlotIds`, the same enumerator the
- * request form offers slots from, mirroring `caller_coaches_practice_slot`.
  *
  * **Not mirrored** (stated so nobody reads this as the database):
  *   - the read policy: the mock's generic `.from()` returns every row of the
@@ -31,15 +31,10 @@
  * wires it into `rpc()` and persists `db` afterwards.
  */
 
-import {
-  coachedPracticeSlotIds,
-  windowOfDates,
-  windowsOverlap,
-} from '../utils/lightingOverrides.js';
+import { windowOfDates, windowsOverlap } from '../utils/lightingOverrides.js';
 import { ADMIN_ROLES } from '../constants/permissions.js';
 
 export const LIGHTING_OVERRIDE_RPCS = Object.freeze([
-  'request_practice_lighting_override',
   'admin_decide_practice_lighting_override',
   'withdraw_practice_lighting_override',
   'admin_set_practice_lighting_override',
@@ -66,7 +61,6 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
   if (!LIGHTING_OVERRIDE_RPCS.includes(name)) return null;
   const { currentUserId } = ctx;
   const now = ctx.now ?? new Date();
-  const today = now.toISOString().slice(0, 10);
   const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
   const p = params || {};
   db.practice_lighting_overrides = db.practice_lighting_overrides || [];
@@ -79,22 +73,8 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
         String(member.profile_id) === String(currentUserId)
     )?.role ?? null;
   const isOrgAdmin = (orgId) => ADMIN_ROLES.includes(String(roleIn(orgId) || ''));
-  const isOrgMember = (orgId) => roleIn(orgId) !== null;
   const slotById = (slotId) =>
     (db.practice_slots || []).find((slot) => String(slot.id) === String(slotId)) ?? null;
-  const coachesSlot = (slotId) => {
-    const slot = slotById(slotId);
-    if (!slot || !currentUserId) return false;
-    return coachedPracticeSlotIds({
-      userId: currentUserId,
-      orgId: String(slot.organization_id),
-      today,
-      coaches: db.coaches,
-      teamCoachAssignments: db.team_coach_assignments,
-      practiceAssignments: db.practice_assignments,
-      practiceSlots: db.practice_slots,
-    }).has(String(slotId));
-  };
   const overlapsApproved = (slotId, window, exceptId = null) =>
     table.some(
       (row) =>
@@ -123,32 +103,18 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
       : null;
   const findRow = (id) => table.find((row) => String(row.id) === String(id)) ?? null;
 
-  if (
-    name === 'request_practice_lighting_override' ||
-    name === 'admin_set_practice_lighting_override'
-  ) {
+  if (name === 'admin_set_practice_lighting_override') {
     if (!p.p_practice_slot_id || !p.p_from || !p.p_until) {
       return fail('23502', 'p_practice_slot_id, p_from and p_until are required');
     }
     const orgId = slotById(p.p_practice_slot_id)?.organization_id ?? null;
-    const isSet = name === 'admin_set_practice_lighting_override';
-    if (isSet) {
-      if (!currentUserId || !orgId || !isOrgAdmin(orgId)) {
-        return fail('42501', 'Access denied: only an organization admin sets a lighting override');
-      }
-    } else {
-      const byCoach = coachesSlot(p.p_practice_slot_id);
-      if (!currentUserId || !orgId || !((byCoach && isOrgMember(orgId)) || isOrgAdmin(orgId))) {
-        return fail(
-          '42501',
-          'Access denied: only a coach of a team on the slot or an admin of its organization requests a lighting override'
-        );
-      }
+    if (!currentUserId || !orgId || !isOrgAdmin(orgId)) {
+      return fail('42501', 'Access denied: only an organization admin sets a lighting override');
     }
     const refused = badDates() || inverted();
     if (refused) return refused;
     const window = windowOfDates(p.p_from, p.p_until);
-    if (isSet && overlapsApproved(p.p_practice_slot_id, window)) return overlapFailure();
+    if (overlapsApproved(p.p_practice_slot_id, window)) return overlapFailure();
     const stamp = now.toISOString();
     const row = {
       id: newId(),
@@ -156,11 +122,11 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
       practice_slot_id: String(p.p_practice_slot_id),
       window,
       kind: 'portable-lighting',
-      status: isSet ? 'approved' : 'requested',
+      status: 'approved',
       requested_by: currentUserId,
       requested_at: stamp,
-      decided_by: isSet ? currentUserId : null,
-      decided_at: isSet ? stamp : null,
+      decided_by: currentUserId,
+      decided_at: stamp,
       withdrawn_by: null,
       withdrawn_at: null,
     };
@@ -215,21 +181,11 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
     };
   }
 
-  // withdraw_practice_lighting_override
+  // withdraw_practice_lighting_override: an org admin only (20261028010000).
   if (!p.p_override_id) return fail('23502', 'p_override_id is required');
   const row = findRow(p.p_override_id);
-  const allowed =
-    row &&
-    currentUserId &&
-    ((String(currentUserId) === String(row.requested_by) &&
-      coachesSlot(row.practice_slot_id) &&
-      isOrgMember(row.organization_id)) ||
-      isOrgAdmin(row.organization_id));
-  if (!allowed) {
-    return fail(
-      '42501',
-      'Access denied: only the requester or an organization admin withdraws a lighting override'
-    );
+  if (!row || !currentUserId || !isOrgAdmin(row.organization_id)) {
+    return fail('42501', 'Access denied: only an organization admin withdraws a lighting override');
   }
   if (!['requested', 'approved'].includes(row.status)) {
     return fail(

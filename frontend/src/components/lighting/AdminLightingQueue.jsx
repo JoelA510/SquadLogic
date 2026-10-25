@@ -28,7 +28,7 @@ const SELF_REASON =
  * refuses it anyway.
  */
 export default function AdminLightingQueue({ orgId, userId, toast }) {
-  const context = useLightingSlotContext(orgId, { userId, coachScoped: false });
+  const context = useLightingSlotContext(orgId);
   const { rows, loading, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
     enabled: !context.loading && !context.error,
   });

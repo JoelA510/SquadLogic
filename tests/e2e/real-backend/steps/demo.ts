@@ -19,7 +19,13 @@ const BACKEND_TIMEOUT = 120_000;
 
 const scenario = new WeakMap<
   Page,
-  { organizationId?: string; userId?: string; u4DivisionId?: string; playerId?: string }
+  {
+    organizationId?: string;
+    userId?: string;
+    u4DivisionId?: string;
+    playerId?: string;
+    playerName?: string;
+  }
 >();
 const stateOf = (page: Page) => {
   const state = scenario.get(page) ?? {};
@@ -163,6 +169,13 @@ Then('the game page lists U4 as practice only', async ({ page }) => {
   await expect(page.getByRole('timer')).toBeVisible();
 });
 
+/** The one data row of the Players grid that names the chosen player. */
+const playerRow = (page: Page) =>
+  page
+    .getByRole('grid', { name: 'Players grid' })
+    .getByRole('row')
+    .filter({ has: page.getByText(stateOf(page).playerName ?? '', { exact: true }) });
+
 When("I change a demo player's status on the players page", async ({ page }) => {
   await page.goto('/players');
   const grid = page.getByRole('grid', { name: 'Players grid' });
@@ -174,19 +187,19 @@ When("I change a demo player's status on the players page", async ({ page }) => 
   );
   expect(first.rows, 'an active player to change').toHaveLength(1);
   const player = first.rows[0];
-  stateOf(page).playerId = String(player.id);
-  await page
-    .getByRole('searchbox')
-    .or(page.getByPlaceholder(/search/i))
-    .first()
-    .fill(`${player.first_name} ${player.last_name}`);
-  await grid.getByText('active', { exact: true }).first().dblclick();
-  const select = grid.getByRole('combobox', { name: 'Status' });
+  const state = stateOf(page);
+  state.playerId = String(player.id);
+  state.playerName = `${player.first_name} ${player.last_name}`;
+  // The grid's own box ("Search table"). The top bar's global search also matches a search
+  // placeholder and comes first in the page, so a looser locator fills that one instead.
+  await page.getByRole('textbox', { name: 'Search table' }).fill(state.playerName);
+  const row = playerRow(page);
+  await expect(row, 'the search narrows the grid to the chosen player').toHaveCount(1);
+  await row.getByText('active', { exact: true }).dblclick();
+  const select = row.getByRole('combobox', { name: 'Status' });
   await select.selectOption('inactive');
   await select.press('Enter');
-  await expect(
-    page.getByText('Saved').or(grid.getByText('inactive', { exact: true }).first())
-  ).toBeVisible({
+  await expect(row.getByText('inactive', { exact: true })).toBeVisible({
     timeout: BACKEND_TIMEOUT,
   });
 });
@@ -203,6 +216,8 @@ Then('the server has the new status', async ({ page }) => {
       }
     )
     .toBe('inactive');
+  // And the grid still shows it: a save the server refused is rolled back on screen.
+  await expect(playerRow(page).getByText('inactive', { exact: true })).toBeVisible();
 });
 
 Then('the server refuses to rename a demo player', async ({ page }) => {

@@ -38,7 +38,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(104);
+SELECT plan(106);
 
 -- ── 0. Setup (as the test's own superuser role) ─────────────────────────────
 -- Anonymous visitors V1-V6 and a real user, Dave. The password-length trigger asks every new auth user
@@ -297,6 +297,15 @@ SELECT is(
 SELECT lives_ok(
     $$SELECT public.admin_update_player((SELECT id FROM t_ids WHERE name = 'p1'), '{"rating": 3}')$$,
     'control: a rating changes'
+);
+SELECT lives_ok(
+    $$SELECT public.admin_update_player((SELECT id FROM t_ids WHERE name = 'p1'), '{"status": "inactive"}')$$,
+    'control: a status changes (the Players grid''s Status cell, which a demo visitor edits)'
+);
+SELECT is(
+    (SELECT status FROM public.players WHERE id = (SELECT id FROM t_ids WHERE name = 'p1')),
+    'inactive',
+    'and the player is inactive afterwards'
 );
 SELECT lives_ok(
     $$SELECT public.admin_delete_team((SELECT id FROM t_ids WHERE name = 'tDelete'))$$,

@@ -80,6 +80,51 @@ was checked on the date above; each item says how.
 - Publish the draft `v1.2.0` release with its target set to the merge commit of this release PR
   (publishing creates the tag there), using the `[1.2.0]` notes.
 
+## Demo launch (owner checklist)
+
+Demo mode (`docs/changes/2026-10-22-demo-mode.md`, D3 to D5) is merged dark: nothing shows until the
+steps below, in this order. The settings live in Supabase, Cloudflare and Vercel, outside the
+repository, so none of this is *executed* by the code's checks; each step names how to confirm it.
+
+1. **Migrations applied.** `deploy-migrations` has pushed `20261030010000` (the demo organization,
+   its fences and the purge job) and `20261031010000` (anonymous sign-ins skip the password-length
+   check). Confirm: `supabase migration list` shows both, and `select jobname from cron.job` lists
+   `purge-expired-demos`. **Do not enable anonymous sign-ins before this:** the fences are what keep
+   an anonymous visitor out of everything real.
+2. **Production's password-length trigger.** `20261031010000` replaces the one trigger on
+   `auth.users` that calls `public.check_password_length_on_auth_users()` with two, calling the same
+   function unchanged: one on INSERT, skipped for an anonymous user, and one on UPDATE, as before.
+   It deliberately does not rewrite the function. Read on 2026-10-26 (*executed*, read-only): the
+   trigger is enabled and the function body's md5 is `bfc595ef5b1716f20b70f5182f4d5bf4`, which equals
+   neither the repository's text (`be77982e229de6bf3d2c11da747ecbc0` with carriage returns removed;
+   `select md5(replace(prosrc, chr(13), '')) from pg_proc where proname = 'check_password_length_on_auth_users'`
+   in a build) nor any normalisation of it tried here. The repository's body refuses every insert
+   without a `password_length`, which the app's sign-up form never sends, yet a self sign-up was
+   confirmed in production on 2026-10-20: so production's text is probably not the repository's.
+   Worth reading before the migration deploys (`select prosrc from pg_proc where proname =
+   'check_password_length_on_auth_users'`), to learn what sign-up does today; the migration leaves it
+   as it is for everyone but an anonymous visitor. Confirm after it deploys:
+   `select tgname, pg_get_triggerdef(oid) from pg_trigger where tgrelid = 'auth.users'::regclass and not tgisinternal`
+   lists `check_password_length_insert_trigger` with `WHEN (new.is_anonymous IS NOT TRUE)` and
+   `check_password_length_trigger` as BEFORE UPDATE.
+3. **Turnstile.** Create a Cloudflare Turnstile widget that allows the official domain. Keep its
+   site key (public) and secret key.
+4. **Vercel Production variables:** `VITE_DEMO_ENABLED=true`, `VITE_OFFICIAL_SITE_URL` (the
+   official deployment's URL, on this project only) and `VITE_TURNSTILE_SITE_KEY` (the site key).
+   Redeploy: they are read at build time. Confirm the sign-in page shows **Try the demo**.
+5. **Supabase, Authentication:** enable **anonymous sign-ins**, then enable **CAPTCHA protection**
+   (provider Turnstile, the secret key). **Deploy step 4 first**: CAPTCHA covers sign-in, sign-up,
+   password reset and anonymous sign-in, and an app without the site key cannot send the token.
+6. **Try it:** from a private window, **Try the demo**; see the timer; try to import (the notice
+   opens); leave. Then confirm the purge: the demo's organization is gone within ten minutes of its
+   expiry, and `select * from demo_purge_log order by ran_at desc limit 3` shows runs.
+7. **Confirm the watch:** the `Demo purge health` workflow (`demo-health.yml`) has run green once
+   (Actions, run it by hand with `workflow_dispatch` if no scheduled run has happened yet).
+
+Rollback is `docs/changes/2026-10-22-demo-mode.md`, "Risks and rollback": unset
+`VITE_DEMO_ENABLED` and redeploy, disable anonymous sign-ins, then (only if wanted) revert the
+migrations with their `docs/sql/` scripts.
+
 ## Rollback
 
 This page and the changelog are docs only: revert the PR that changed them. Migrations from

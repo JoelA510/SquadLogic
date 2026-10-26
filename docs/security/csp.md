@@ -12,7 +12,7 @@
 
 ```
 default-src 'self';
-script-src  'self' https://vercel.live;
+script-src  'self' https://vercel.live https://challenges.cloudflare.com;
 style-src   'self' 'unsafe-inline';
 img-src     'self' data: blob: https://vercel.live https://vercel.com;
 font-src    'self' https://vercel.live https://assets.vercel.com;
@@ -22,7 +22,7 @@ connect-src 'self'
             https://vercel.live wss://ws-us3.pusher.com
             https://api.weather.gov;
 worker-src  'self' blob:;
-frame-src   'self' https://vercel.live;
+frame-src   'self' https://vercel.live https://challenges.cloudflare.com;
 frame-ancestors 'none';
 object-src  'none';
 base-uri    'self';
@@ -44,13 +44,13 @@ National Weather Service gridpoint forecast directly from the browser (see
 | Directive | Value | Why |
 | --- | --- | --- |
 | `default-src` | `'self'` | Deny-by-default; anything not explicitly allowed below falls through to this. |
-| `script-src` | `'self' https://vercel.live` | NO `'unsafe-inline'`. Bundled + hashed by Vite. `https://vercel.live` allows Vercel's preview Comments / feedback widget; the domain is Vercel-owned single-tenant with no guest content. A nonce- or `'strict-dynamic'`-based pattern is v1.1 work; `'self'` is a reasonable SPA baseline. |
+| `script-src` | `'self' https://vercel.live https://challenges.cloudflare.com` | NO `'unsafe-inline'`. Bundled + hashed by Vite. `https://vercel.live` allows Vercel's preview Comments / feedback widget; the domain is Vercel-owned single-tenant with no guest content. `https://challenges.cloudflare.com` serves Cloudflare Turnstile's one script (`/turnstile/v0/api.js`), which `frontend/src/components/auth/Turnstile.jsx` loads on demand, only on the sign-in, sign-up, password-reset and demo pages and only when `VITE_TURNSTILE_SITE_KEY` is set (demo mode, D4: the Supabase project's CAPTCHA setting asks for a token on each of those calls). A nonce- or `'strict-dynamic'`-based pattern is v1.1 work; `'self'` is a reasonable SPA baseline. |
 | `style-src` | `'self' 'unsafe-inline'` | **Waiver** — Tailwind 4 runtime injects classes via dynamic `<style>` tags and React's `style={{...}}` prop renders inline. Nonce migration requires Tailwind 4.x nonce-propagation (not yet stable) + audit of every inline style site. See §`Follow-ups`. |
 | `img-src` | `'self' data: blob: https://vercel.live https://vercel.com` | `data:` for small icons / placeholder SVGs in-bundle; `blob:` for the `OfflineGuard` Supabase-Storage-loaded brand assets. `vercel.live` + `vercel.com` for the preview feedback widget's avatars. No other third-party image CDNs. |
 | `font-src` | `'self' https://vercel.live https://assets.vercel.com` | All app fonts bundled via Vite (`index.css` imports). The Vercel domains serve the Inter webfont referenced by the preview feedback widget. No Google Fonts / other third-party font CDNs. |
 | `connect-src` | `'self' https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://vercel.live wss://ws-us3.pusher.com https://api.weather.gov` | Allows (1) same-origin XHR, (2) the SquadLogic-specific Supabase project over HTTPS + WSS for Realtime, (3) Sentry ingest, (4) Vercel Live + its Pusher realtime channel for the preview feedback widget, (5) the NWS API for the heat forecast (exact host, no wildcard; see §`api.weather.gov`). **Supabase host is pinned** to the specific project ref — an earlier draft used `*.supabase.co`; Gemini PR #175 review correctly flagged the wildcard as an XSS-exfiltration broadening. If the project ref ever changes, update this directive in the same PR that updates the Supabase env vars. **Sentry is wildcard-scoped** to `*.ingest.sentry.io` because the Sentry SDK dispatches to region/org-specific subdomains (`o<id>.ingest.sentry.io`) not known at deploy time; the apex `ingest.sentry.io` is Sentry-operated single-tenant and does not host guest content. **US-region projects need their own entry**: their DSN host is `o<id>.ingest.us.sentry.io`, and a CSP host wildcard matches only hosts ending in the text after `*.`, so `*.ingest.sentry.io` refuses it. `https://*.ingest.us.sentry.io` admits it; the original entry stays for any non-US project. `tests/cspPolicy.test.js` pins both. |
 | `worker-src` | `'self' blob:` | Sentry Session Replay (enabled in `frontend/src/main.jsx`, recording on error) compresses its payload in a Web Worker it starts from a `blob:` URL. Without `worker-src`, workers fall back to `script-src`, which does not admit `blob:`, so the worker was refused (`Refused to create a worker from 'blob:...'`) and Replay sent uncompressed. `'self'` keeps the same-origin workers the `script-src` fallback already admitted (the app starts none today); `blob:` admits Replay's. `blob:` is not added to `script-src`, so a blob URL still cannot load as a page script. `tests/cspPolicy.test.js` pins it, and that the policy without it refuses a `blob:` worker. |
-| `frame-src` | `'self' https://vercel.live` | The Vercel preview feedback widget mounts its UI inside an iframe that loads from `vercel.live`. Production traffic doesn't render the widget. No other embedded frames are permitted. |
+| `frame-src` | `'self' https://vercel.live https://challenges.cloudflare.com` | The Vercel preview feedback widget mounts its UI inside an iframe that loads from `vercel.live`. Production traffic doesn't render the widget. Turnstile renders its challenge in an iframe from `challenges.cloudflare.com` (see `script-src`). No other embedded frames are permitted. |
 | `frame-ancestors` | `'none'` | Clickjacking defense. SquadLogic is never embedded. |
 | `object-src` | `'none'` | Legacy `<object>` / Flash blocker — zero legitimate use. |
 | `base-uri` | `'self'` | Prevents `<base>` tag injection that would rewrite all relative URLs. |

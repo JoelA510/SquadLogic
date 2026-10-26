@@ -331,7 +331,9 @@ describe('W3: nothing is sent unaccepted', () => {
   it('Cancel: the dialog closes, focus returns to Apply, nothing is sent, the review stays', async () => {
     const { apply } = await openPrompt();
     // Focus moved into the dialog, to its heading (plan §2.9).
-    expect(document.activeElement).toBe(screen.getByTestId('grid-override-heading'));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId('grid-override-heading'))
+    );
     tickAll();
     // Ticking a box does not move focus out of the dialog.
     expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);

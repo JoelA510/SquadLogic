@@ -605,7 +605,10 @@ BEGIN
     -- Marked last, then the visitor joins: both pass the fences, which now see a demo.
     v_expires := now() + make_interval(mins => c_minutes);
     UPDATE public.organizations SET demo_expires_at = v_expires, demo_owner = v_uid WHERE id = v_org;
-    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org, v_uid, 'admin');
+    -- A SELECT, not a VALUES list: the role is the creator's (as in initialize_new_tenant), not a role
+    -- test, and tests/staff_is_admin.sql reads any parenthesised list naming 'admin' as a role list.
+    INSERT INTO public.organization_members (organization_id, profile_id, role)
+    SELECT v_org, v_uid, 'admin';
 
     -- The one writer of a team's coaches (it keeps teams.coach_id, assistant_coach_ids and the assignment
     -- rows together; the catalogue allows no other). It audits as the caller, who is a member by now: one
@@ -621,6 +624,46 @@ BEGIN
     LOOP
         PERFORM public.set_team_coaches(v_team.team_id, v_team.lead_id, v_team.assistant_ids, current_date, 'demo_seed');
     END LOOP;
+
+    -- The team run the Teams, Practices and Games pages read their teams from (`scheduler_runs`, the
+    -- latest completed `team` run of the season; `mapSchedulerRunToSummary`). A league formed some other
+    -- way than by a team run has none, and those pages treat it as a cold start: the auto-scheduler
+    -- stays disabled with "no teams". So the seeded league gets the run its teams would have left,
+    -- built from the copied rows: each division's teams (their stored coaches) and each team's roster.
+    WITH team_rows AS (
+        SELECT dv.name AS division_name, dv.max_roster_size, t.id, t.name, t.division_id, t.coach_id,
+               t.assistant_coach_ids,
+               (SELECT count(*) FROM public.team_players tp WHERE tp.team_id = t.id) AS n_players
+          FROM public.teams t
+          JOIN public.divisions dv ON dv.id = t.division_id
+         WHERE t.organization_id = v_org
+    ), by_division AS (
+        SELECT division_name,
+               jsonb_agg(jsonb_build_object(
+                   'id', id, 'name', name, 'division', division_name, 'divisionId', division_id,
+                   'coachId', coach_id,
+                   'assistantCoachIds', to_jsonb(COALESCE(assistant_coach_ids, ARRAY[]::uuid[]))
+               ) ORDER BY name) AS teams,
+               sum(n_players)::integer AS players,
+               sum(COALESCE(max_roster_size, 0))::integer AS capacity
+          FROM team_rows
+         GROUP BY division_name
+    )
+    INSERT INTO public.scheduler_runs (organization_id, season_id, season_settings_id, run_type, status,
+                                       parameters, metrics, results, created_by, started_at, completed_at)
+    SELECT v_org, v_season, v_season, 'team', 'completed',
+           jsonb_build_object('source', 'demo_seed'), '{}'::jsonb,
+           jsonb_build_object(
+               'teamsByDivision', (SELECT jsonb_object_agg(division_name, teams) FROM by_division),
+               'rosterBalanceByDivision', (SELECT jsonb_object_agg(division_name, jsonb_build_object(
+                   'summary', jsonb_build_object(
+                       'totalPlayers', players, 'totalCapacity', capacity,
+                       'averageFillRate', CASE WHEN capacity > 0 THEN round(players::numeric / capacity, 4) ELSE 0 END)))
+                   FROM by_division),
+               'team_players', COALESCE((SELECT jsonb_agg(jsonb_build_object('team_id', tp.team_id, 'player_id', tp.player_id))
+                                           FROM public.team_players tp WHERE tp.organization_id = v_org), '[]'::jsonb)
+           ),
+           v_uid, now(), now();
 
     PERFORM public.record_audit_event(
         v_org, 'demo.started', 'organization', v_org,

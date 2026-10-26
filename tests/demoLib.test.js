@@ -274,6 +274,21 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     ).toHaveLength(4);
   });
 
+  it('leaves the team run the pages read their teams from, holding every team and roster entry', () => {
+    const db = {};
+    const { data } = start(db, anonymous());
+    const runs = db.scheduler_runs.filter((run) => run.organization_id === data.organization_id);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ run_type: 'team', status: 'completed' });
+    const teams = Object.values(runs[0].results.teamsByDivision).flat();
+    expect(teams).toHaveLength(4);
+    expect(runs[0].results.team_players).toHaveLength(16);
+    const ids = new Set(
+      db.teams.filter((t) => t.organization_id === data.organization_id).map((t) => t.id)
+    );
+    expect(teams.every((team) => ids.has(team.id))).toBe(true);
+  });
+
   it("returns the visitor's live demo instead of making another", () => {
     const db = {};
     const ctx = anonymous();

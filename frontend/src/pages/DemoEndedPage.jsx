@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { DEMO_ENABLED } from '../env.js';
+import { logger } from '../lib/logger.js';
 import logo from '../assets/SL-Logo.png';
 
 /**
@@ -14,14 +15,20 @@ export default function DemoEndedPage() {
   const navigate = useNavigate();
   const { session, signOut } = useAuth();
 
-  // A leftover anonymous session has nothing left to open: close it, so "Start again" starts clean.
+  // A leftover anonymous session has nothing left to open: close it. "Start again" stays disabled
+  // while the session is still there (`isAnonymous` follows the auth state, so it clears only when the
+  // sign-out has landed): /demo/start reuses a session it finds, and the ending demo's would then be
+  // signed out from under the new one.
   const isAnonymous = session?.user?.is_anonymous === true;
   const signOutRef = useRef(signOut);
   useEffect(() => {
     signOutRef.current = signOut;
   });
   useEffect(() => {
-    if (isAnonymous) signOutRef.current();
+    if (!isAnonymous) return;
+    Promise.resolve(signOutRef.current()).catch((error) => {
+      logger.warn('[Demo] could not close the ended demo session', error);
+    });
   }, [isAnonymous]);
 
   return (
@@ -38,6 +45,7 @@ export default function DemoEndedPage() {
             <button
               type="button"
               className="btn btn-primary"
+              disabled={isAnonymous}
               onClick={() => navigate('/demo/start')}
             >
               Start again

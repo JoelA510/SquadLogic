@@ -38,7 +38,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(103);
+SELECT plan(104);
 
 -- ── 0. Setup (as the test's own superuser role) ─────────────────────────────
 -- Anonymous visitors V1-V6 and a real user, Dave. The password-length trigger asks every new auth user
@@ -114,6 +114,18 @@ SELECT is(
        FROM public.players WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'demoA')),
     ARRAY[1259, 128]::bigint[],
     'the demo league is 1,259 players on 128 teams'
+);
+-- The team run the Teams, Practices and Games pages read their teams from (the practice auto-scheduler
+-- is disabled without teams): one completed run of the season holding all 128 teams.
+SELECT is(
+    (SELECT array[count(*), (SELECT sum(jsonb_array_length(e.value))
+                               FROM jsonb_each(r.results -> 'teamsByDivision') e)]
+       FROM public.scheduler_runs r
+      WHERE r.organization_id = (SELECT id FROM t_ids WHERE name = 'demoA')
+        AND r.run_type = 'team' AND r.status = 'completed'
+      GROUP BY r.id),
+    ARRAY[1, 128]::bigint[],
+    'the demo has one completed team run holding its 128 teams'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.teams t

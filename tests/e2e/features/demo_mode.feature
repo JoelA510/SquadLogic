@@ -33,7 +33,8 @@ Feature: Try the demo
     Given I am in a demo league that lasts 8 seconds
     Then I land on the demo-ended page
     And I am signed out
-    When I choose "Start again" on the demo-ended page
+    When I open the demo-ended page
+    And I choose "Start again" on the demo-ended page
     Then the demo league is open
 
   Scenario: Leaving the demo signs the visitor out

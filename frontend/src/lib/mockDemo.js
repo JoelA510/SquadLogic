@@ -220,6 +220,42 @@ export function handleDemoRpc(
     }
   });
 
+  // The team run the Teams, Practices and Games pages read their teams from (the server's
+  // start_demo_session writes one: without it they treat the league as a cold start).
+  const teamsByDivision = {};
+  for (const team of db.teams.filter((entry) => entry.organization_id === orgId)) {
+    const division = db.divisions.find((entry) => entry.id === team.division_id);
+    (teamsByDivision[division.name] ??= []).push({
+      id: team.id,
+      name: team.name,
+      division: division.name,
+      divisionId: team.division_id,
+      coachId: team.coach_id,
+      assistantCoachIds: [],
+    });
+  }
+  db.scheduler_runs = db.scheduler_runs || [];
+  db.scheduler_runs.push({
+    id: mockId(),
+    organization_id: orgId,
+    season_id: seasonId,
+    season_settings_id: seasonId,
+    run_type: 'team',
+    status: 'completed',
+    parameters: { source: 'demo_seed' },
+    metrics: {},
+    results: {
+      teamsByDivision,
+      team_players: db.players
+        .filter((player) => player.organization_id === orgId)
+        .map((player) => ({ team_id: player.team_id, player_id: player.id })),
+    },
+    created_by: user.id,
+    started_at: created,
+    completed_at: created,
+    created_at: created,
+  });
+
   const locationId = mockId();
   const fieldId = mockId();
   db.locations.push({ id: locationId, organization_id: orgId, name: 'Orchard Park' });

@@ -184,21 +184,19 @@ Then('I land on the demo-ended page', async ({ page }) => {
 });
 
 Then('I am signed out', async ({ page }) => {
-  await expect
-    .poll(() => page.evaluate(() => sessionStorage.getItem('__MOCK_SESSION__')), {
-      timeout: 10_000,
-    })
-    .toBeNull();
+  // Read off the page, not the store: a signed-out visitor who opens the app gets the sign-in form.
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('timer')).toHaveCount(0);
 });
 
 Then('I am back on the sign-in page, signed out', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('timer')).toHaveCount(0);
-  await expect
-    .poll(() => page.evaluate(() => sessionStorage.getItem('__MOCK_SESSION__')), {
-      timeout: 10_000,
-    })
-    .toBeNull();
+  // And it holds on a reload: nothing keeps the visitor in.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('timer')).toHaveCount(0);
 });
 
 Then('I stay on the entry page and it says the demo is busy', async ({ page }) => {

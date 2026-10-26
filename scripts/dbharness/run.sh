@@ -3087,13 +3087,13 @@ NEEDLES
       fi
     fi
     if [ "$id" = "20261031010000" ]; then
-      # The password-length trigger back as 20240405180000 made it, read from the catalogue: exactly
-      # one trigger calls the check function, and its definition is the original combined one
-      # (BEFORE INSERT OR UPDATE, no condition); the function itself untouched (md5 of the build's
-      # text, carriage returns and all, at 20261030010000); and it behaves as it did: an anonymous
-      # insert with no password_length refused again, the anonymous user the seed planted kept with
-      # its profile, a real insert with 12 still accepted. The refusal is caught by its message, so
-      # any other failure is rethrown, not read as a refusal.
+      # The password-length check back as 20240405180000 made it, read from the catalogue: the
+      # function's text (md5 with carriage returns and trailing blanks removed, since the build's text
+      # has CRLF and two blank lines carrying spaces, the revert has neither), still a trigger-
+      # returning definer with search_path=public; the one original trigger over it, untouched; and
+      # it behaves as it did: an anonymous insert with no password_length refused again, the
+      # anonymous user the seed planted kept with its profile, a real insert with 12 still accepted.
+      # The refusal is caught by its message, so any other failure is rethrown, not read as a refusal.
       rm -f $SCRATCH/harness_pwd_probe.sql
       if ! cat >$SCRATCH/harness_pwd_probe.sql <<'PROBE'
 DO $probe$
@@ -3107,12 +3107,15 @@ BEGIN
      WHERE t.tgrelid = 'auth.users'::regclass AND NOT t.tgisinternal
        AND t.tgfoid = 'public.check_password_length_on_auth_users()'::regprocedure;
     IF v_defs IS DISTINCT FROM 'CREATE TRIGGER check_password_length_trigger BEFORE INSERT OR UPDATE ON auth.users FOR EACH ROW EXECUTE FUNCTION check_password_length_on_auth_users()' THEN
-        RAISE EXCEPTION 'UNRESOLVED: the password-length triggers are not the original single one: %', v_defs;
+        RAISE EXCEPTION 'UNRESOLVED: the password-length trigger is not the original single one: %', v_defs;
     END IF;
-    SELECT md5(p.prosrc) INTO v_md5
-      FROM pg_proc p WHERE p.oid = 'public.check_password_length_on_auth_users()'::regprocedure;
-    IF v_md5 IS DISTINCT FROM '57d76d793fc197f2eb30ed703f9484f5' THEN
-        RAISE EXCEPTION 'UNRESOLVED: the check function is not the 20240405180000 body (md5 %)', v_md5;
+    SELECT md5(regexp_replace(replace(p.prosrc, E'\r', ''), '[ \t]+$', '', 'gn')) INTO v_md5
+      FROM pg_proc p
+     WHERE p.oid = 'public.check_password_length_on_auth_users()'::regprocedure
+       AND p.prosecdef AND p.prorettype = 'trigger'::regtype
+       AND EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c = 'search_path=public');
+    IF v_md5 IS DISTINCT FROM '3a276b042eca8c7dab98bf46b26a55e2' THEN
+        RAISE EXCEPTION 'UNRESOLVED: the check function is not the 20240405180000 definer body with search_path=public (md5 %)', v_md5;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM auth.users u JOIN public.profiles pr ON pr.id = u.id
                     WHERE u.id = 'e3000000-0000-4000-8000-0000000000a1' AND u.is_anonymous) THEN
@@ -3138,7 +3141,7 @@ PROBE
         echo "FAIL revert ${id} probe: the probe script could not be staged"
         STATUS=1
       elif psql_file $SCRATCH/harness_pwd_probe.sql >$SCRATCH/harness_pwd_probe 2>&1; then
-        echo "  revert ${id}: the anonymous-sign-up revert restores the single 20240405180000 password-length trigger over the untouched function, refuses an anonymous insert again and keeps the anonymous user it let in"
+        echo "  revert ${id}: the anonymous-sign-up revert restores the 20240405180000 password-length function under its untouched trigger, refuses an anonymous insert again and keeps the anonymous user it let in"
       else
         echo "FAIL revert ${id}: the anonymous-sign-up revert did not restore the password-length trigger"
         dump 10 $SCRATCH/harness_pwd_probe; STATUS=1

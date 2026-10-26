@@ -97,7 +97,8 @@ unless you turn it on, and a deployment that does not shows nothing of it. To of
 1. **Make sure the demo migrations are applied** (step 3; `20261030010000_demo_sessions.sql` and
    `20261031010000_anonymous_signups_skip_password_check.sql` are part of the directory). The
    second keeps an anonymous sign-in from the password-length check on `auth.users` (an anonymous
-   user has no password); every other sign-up and every password change is still checked.
+   user has no password); every other sign-up and every password change is still checked. It replaces
+   the check function only if its text is one it knows, and aborts otherwise.
 2. **Enable anonymous sign-ins**: Supabase, Authentication, Sign In / Providers, "Allow anonymous
    sign-ins".
 3. **Protect it with CAPTCHA** (strongly advised: the endpoint is public). Create a Cloudflare

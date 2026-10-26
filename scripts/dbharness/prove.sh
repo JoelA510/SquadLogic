@@ -4845,23 +4845,20 @@ plant "M48 the purge deletes an organization that is not a demo" "$M48" \
         RETURNING demo_owner" \
   "smoke 20261030010000"
 
-# D4's password-length exemption, two plants (the smoke 20261031010000 is what must go red for the
-# first; the migration's own end-state check, which reads both triggers' definitions, for the
-# second): the insert trigger's condition never skips an anonymous user (so no visitor can sign in),
-# and the update trigger given the same condition (an anonymous visitor could set a short password).
+# D4's password-length exemption, two plants (the smoke 20261031010000 must go red for each): the
+# anonymous skip never firing (so no visitor can sign in), and the password-change test back to `<>`
+# (an anonymous user's NULL password then never differs, so their first password goes unchecked; the
+# smoke makes the column nullable, as Supabase's is, to see it).
 plant "M49 an anonymous sign-up is refused for want of a password_length" "$M49" \
-  "    WHEN (NEW.is_anonymous IS NOT TRUE)" \
-  "    WHEN (NEW.is_anonymous IS NOT TRUE OR true)" \
+  "    IF TG_OP = 'INSERT' AND NEW.is_anonymous IS TRUE THEN
+        RETURN NEW;" \
+  "    IF TG_OP = 'INSERT' AND NEW.is_anonymous IS TRUE AND false THEN
+        RETURN NEW;" \
   "smoke 20261031010000"
 
-plant "M49 an anonymous user may set a short password" "$M49" \
-  "    BEFORE UPDATE ON auth.users
-    FOR EACH ROW
-    EXECUTE FUNCTION" \
-  "    BEFORE UPDATE ON auth.users
-    FOR EACH ROW
-    WHEN (NEW.is_anonymous IS NOT TRUE)
-    EXECUTE FUNCTION" \
+plant "M49 an anonymous user's first password goes unchecked" "$M49" \
+  "NEW.encrypted_password IS DISTINCT FROM OLD.encrypted_password) OR" \
+  "NEW.encrypted_password <> OLD.encrypted_password) OR" \
   "applying 20261031010000_anonymous_signups_skip_password_check.sql"
 
 # ---------------------------------------------------------------------------

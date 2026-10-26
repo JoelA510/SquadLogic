@@ -132,6 +132,19 @@ BEGIN
        OR (SELECT count(*) FROM public.practice_slots WHERE organization_id = v_demo AND division_id IS NOT NULL) <> 4 THEN
         RAISE EXCEPTION 'the copy lost slots or coaches, or reserved a number of slots other than the four U4 sessions';
     END IF;
+    -- The team run the Teams, Practices and Games pages read their teams from: without it they treat the
+    -- league as a cold start and the practice auto-scheduler stays disabled (CI, real-backend E2E).
+    IF (SELECT count(*) FROM public.scheduler_runs WHERE organization_id = v_demo AND run_type = 'team'
+            AND status = 'completed' AND season_settings_id IS NOT NULL) <> 1
+       OR (SELECT sum(jsonb_array_length(e.value)) FROM public.scheduler_runs sr,
+                  jsonb_each(sr.results -> 'teamsByDivision') e
+            WHERE sr.organization_id = v_demo AND sr.run_type = 'team')
+          IS DISTINCT FROM (SELECT count(*) FROM demo_seed.teams)
+       OR (SELECT jsonb_array_length(sr.results -> 'team_players') FROM public.scheduler_runs sr
+            WHERE sr.organization_id = v_demo AND sr.run_type = 'team')
+          IS DISTINCT FROM (SELECT count(*) FROM demo_seed.players) THEN
+        RAISE EXCEPTION 'the copy has no completed team run holding every team and every roster entry';
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM public.organizations WHERE id = v_demo AND demo_owner = v_visitor
                     AND demo_expires_at BETWEEN now() + interval '29 minutes' AND now() + interval '31 minutes') THEN
         RAISE EXCEPTION 'the demo is not flagged for its visitor with a 30-minute expiry';

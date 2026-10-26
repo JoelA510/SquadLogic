@@ -148,6 +148,11 @@ R45="$REPO/docs/sql/20261028010000_revert.sql"
 # reservation writer and the clash rule added), and the revert.
 M46="$REPO/supabase/migrations/20261029010000_practice_only_divisions.sql"
 R46="$REPO/docs/sql/20261029010000_revert.sql"
+# The invite redemption audit action, registered (redeem_org_invite wrote it
+# for six months without a row in audit_actions, so every redemption rolled
+# back on the foreign key), and the revert.
+M47="$REPO/supabase/migrations/20261029020000_register_invite_redeemed_audit_action.sql"
+R47="$REPO/docs/sql/20261029020000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4779,6 +4784,31 @@ plant "R46 the revert counts every slot as reserved" "$R46" \
   "    SELECT count(*) INTO v_reserved FROM public.practice_slots WHERE division_id IS NOT NULL;" \
   "    SELECT count(*) INTO v_reserved FROM public.practice_slots;" \
   "revert 20261029010000"
+
+# The invite redemption audit action. The migration without its registration
+# and the end-state check that reads it back is the database as it was in
+# production: the smoke redeems an invite and must find the redemption failing
+# on the audit_log.action foreign key. (A plant that only broke the INSERT would
+# be caught by the migration's own end-state check first, which proves that
+# check and not the smoke.)
+plant "M47 the invite audit action is not registered" "$M47" \
+  "INSERT INTO public.audit_actions (action) VALUES ('members.invited_joined')
+    ON CONFLICT (action) DO NOTHING;
+
+DO \$check\$
+DECLARE
+    v_body text;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'members.invited_joined') THEN
+        RAISE EXCEPTION 'members.invited_joined is not registered in audit_actions';
+    END IF;
+" \
+  "DO \$check\$
+DECLARE
+    v_body text;
+BEGIN
+" \
+  "smoke 20261029020000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

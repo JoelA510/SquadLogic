@@ -24,6 +24,7 @@ import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
+import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { createAccessHelpers, handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
@@ -690,6 +691,9 @@ const getDB = () => {
       db[table] = db[table].filter((row) => !removed.has(tombstoneKey(table, row)));
     }
   }
+  // 20261101020000's two triggers: every season has its default program, every division is in a
+  // program of its own season.
+  normalizePrograms(db);
   return db;
 };
 
@@ -2487,6 +2491,16 @@ export const mockSupabase = {
     }
 
     if (MOCK_CAPABLE_BUILD) {
+      // Programs (migration 20261101020000): the four writers, refusals included.
+      const programs = handleProgramRpc(db, name, params, {
+        currentUserId,
+        isOrgAdmin,
+        markDeleted: markMockDeleted,
+      });
+      if (programs) {
+        if (!programs.error) saveDB(db);
+        return programs;
+      }
       // Coach practice preferences (migration 20260927000000): the three RPCs,
       // refusals included. Behind the DEV/mock guard like the other late arms,
       // so a production build eliminates the call and the module with it.
@@ -4342,7 +4356,7 @@ export const mockSupabase = {
     }
 
     if (name === 'create_import_job') {
-      const { p_organization_id, p_import_type, p_file_name } = params || {};
+      const { p_organization_id, p_import_type, p_file_name, p_season_settings_id } = params || {};
       const importType = String(p_import_type || '')
         .trim()
         .toLowerCase();
@@ -4364,6 +4378,42 @@ export const mockSupabase = {
       }
       if (!fileName) {
         return { data: null, error: { message: 'file_name is required' } };
+      }
+      // 20261101010000: the season the import adds to is fixed now: the one named (the
+      // organization's, not completed), else the organization's active season.
+      let jobSeasonId = null;
+      if (p_season_settings_id) {
+        const named = (db.season_settings || []).find(
+          (item) =>
+            String(item.id) === String(p_season_settings_id) &&
+            String(item.organization_id) === String(p_organization_id)
+        );
+        if (!named) {
+          return {
+            data: null,
+            error: {
+              code: '42501',
+              message: `season ${p_season_settings_id} does not belong to organization ${p_organization_id}`,
+            },
+          };
+        }
+        if (named.status === 'completed') {
+          return {
+            data: null,
+            error: {
+              code: '22023',
+              message: `season ${p_season_settings_id} is completed and takes no import`,
+              details: 'season_completed',
+            },
+          };
+        }
+        jobSeasonId = named.id;
+      } else {
+        jobSeasonId =
+          (db.season_settings || []).find(
+            (item) =>
+              String(item.organization_id) === String(p_organization_id) && item.status === 'active'
+          )?.id ?? null;
       }
 
       const now = new Date().toISOString();
@@ -4390,6 +4440,7 @@ export const mockSupabase = {
         created_at: now,
         completed_at: null,
         last_heartbeat_at: now,
+        season_settings_id: jobSeasonId,
       };
 
       db.import_jobs = db.import_jobs || [];
@@ -4892,6 +4943,20 @@ export const mockSupabase = {
 
     if (name === 'upsert_division_for_import') {
       const { p_organization_id, p_season_settings_id, p_name, p_gender } = params || {};
+      // 20261101010000: a completed season is history; no import adds to it.
+      const upsertSeason = (db.season_settings || []).find(
+        (item) => String(item.id) === String(p_season_settings_id)
+      );
+      if (upsertSeason?.status === 'completed') {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: `season ${p_season_settings_id} is completed and takes no division`,
+            details: 'season_completed',
+          },
+        };
+      }
       db.divisions = db.divisions || [];
       let division = db.divisions.find(
         (item) =>
@@ -4907,6 +4972,8 @@ export const mockSupabase = {
           season_settings_id: p_season_settings_id,
           name: p_name,
           gender_policy: p_gender || 'coed',
+          // The trigger on divisions (20261101020000): a new division joins its season's default program.
+          program_id: defaultProgramOf(db, p_season_settings_id)?.id ?? null,
           created_at: new Date().toISOString(),
         };
         db.divisions.push(division);
@@ -5104,10 +5171,25 @@ export const mockSupabase = {
       );
       const genderModel = orgRow?.feature_flags?.gender_model === 'coed' ? 'coed' : 'split';
       const waitlistEnabled = orgRow?.feature_flags?.waitlist !== false;
+      // 20261101010000: the job's own season, else (a job made before jobs carried one) the
+      // organization's active season; a completed season takes no import.
       const seasonRow = (db.season_settings || []).find(
         (item) =>
-          String(item.organization_id) === String(job.organization_id) && item.status === 'active'
+          String(item.organization_id) === String(job.organization_id) &&
+          (job.season_settings_id
+            ? String(item.id) === String(job.season_settings_id)
+            : item.status === 'active')
       );
+      if (seasonRow?.status === 'completed') {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: `Season ${seasonRow.id} is completed and takes no import`,
+            details: 'season_completed',
+          },
+        };
+      }
 
       const deriveDivision = (payload) => {
         const ageText = String(payload.age_group ?? payload['age group'] ?? payload.age ?? '');
@@ -5158,6 +5240,7 @@ export const mockSupabase = {
             season_settings_id: seasonRow.id,
             name: derived.name,
             gender_policy: derived.gender_policy,
+            program_id: defaultProgramOf(db, seasonRow.id)?.id ?? null,
           };
           db.divisions = db.divisions || [];
           db.divisions.push(division);
@@ -5836,17 +5919,27 @@ export const mockSupabase = {
         });
       };
 
-      // 20261029010000: the season a practice row's Division is named in, as
-      // the SQL chooses it (the active one first, then the latest start).
+      // 20261029010000: the season a practice row's Division is named in, as the SQL chooses
+      // it. As of 20261101010000 that is the job's own season, or, for a job made before jobs
+      // carried one, the organization's active season; a completed season takes no import.
       const importSeason =
-        [...(db.season_settings || [])]
-          .filter((s) => String(s.organization_id) === String(job.organization_id))
-          .sort(
-            (a, b) =>
-              Number(b.status === 'active') - Number(a.status === 'active') ||
-              String(b.season_start ?? '').localeCompare(String(a.season_start ?? '')) ||
-              String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))
-          )[0] ?? null;
+        (db.season_settings || []).find(
+          (s) =>
+            String(s.organization_id) === String(job.organization_id) &&
+            (job.season_settings_id
+              ? String(s.id) === String(job.season_settings_id)
+              : s.status === 'active')
+        ) ?? null;
+      if (importSeason?.status === 'completed') {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: `Season ${importSeason.id} is completed and takes no import`,
+            details: 'season_completed',
+          },
+        };
+      }
       const failRow = (row, error) => {
         invalidRows += 1;
         row.validation_errors = [{ ...error, source_row_number: row.source_row_number }];
@@ -7598,10 +7691,16 @@ export const mockSupabase = {
         const declaredFields = Object.keys(schemaRow?.schema_definition || {});
         // As the Edge Function does (R5): a player's natural age is counted in the season the
         // finalizer attaches divisions to (the mock's active one), and no birth key is staged.
+        // E1: the season the job adds to (its own, else the organization's active one).
+        const importJobRow = (getDB().import_jobs || []).find(
+          (item) => String(item.id) === String(body.import_job_id)
+        );
         const importSeasonRow = (getDB().season_settings || []).find(
           (item) =>
             String(item.organization_id) === String(body.organization_id) &&
-            item.status === 'active'
+            (importJobRow?.season_settings_id
+              ? String(item.id) === String(importJobRow.season_settings_id)
+              : item.status === 'active')
         );
         filterImportRows(
           body.import_type,

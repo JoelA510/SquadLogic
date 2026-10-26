@@ -244,21 +244,38 @@ function fakeReader(answer: {
   return { reader, calls };
 }
 
-Deno.test('readSeasonTimezone - newest season for the org, never .single()', () => {
-  // `.single()` errors when an organization has more than one season_settings
-  // row, and in calendar-feed that error was swallowed into `settings: null`
-  // and fell through to a hardcoded America/New_York. The query shape IS the
-  // fix, so the query shape is what is asserted.
-  const { reader, calls } = fakeReader({ data: { timezone: 'America/Chicago' }, error: null });
-  return readSeasonTimezone(reader, 'org-1').then((result) => {
-    assertEquals(result, { timezone: 'America/Chicago', errored: false, message: null });
-    assertEquals(calls.table, 'season_settings');
-    assertStringIncludes(calls.columns ?? '', 'timezone');
-    assertEquals(calls.eq, [['organization_id', 'org-1']]);
-    assertEquals(calls.order, [['created_at', { ascending: false }]]);
-    assertEquals(calls.limit, 1);
-  });
-});
+Deno.test(
+  'readSeasonTimezone - the active season for the org, never the newest, never .single()',
+  () => {
+    // `.single()` errors when an organization has more than one season_settings
+    // row, and in calendar-feed that error was swallowed into `settings: null`
+    // and fell through to a hardcoded America/New_York. And since Phase E1 a
+    // newer row may be a DRAFT: "no season named" must mean the active one, so
+    // the query shape (status = active, no created_at ordering) is what is asserted.
+    const { reader, calls } = fakeReader({ data: { timezone: 'America/Chicago' }, error: null });
+    return readSeasonTimezone(reader, 'org-1').then((result) => {
+      assertEquals(result, { timezone: 'America/Chicago', errored: false, message: null });
+      assertEquals(calls.table, 'season_settings');
+      assertStringIncludes(calls.columns ?? '', 'timezone');
+      assertEquals(calls.eq, [
+        ['organization_id', 'org-1'],
+        ['status', 'active'],
+      ]);
+      assertEquals(calls.order, []);
+      assertEquals(calls.limit, 1);
+    });
+  }
+);
+
+Deno.test(
+  "readSeasonTimezone - an organization with no active season has no clock, not a draft's",
+  () => {
+    const { reader } = fakeReader({ data: null, error: null });
+    return readSeasonTimezone(reader, 'org-1').then((result) => {
+      assertEquals(result, { timezone: null, errored: false, message: null });
+    });
+  }
+);
 
 Deno.test('readSeasonTimezone - a named season is STILL scoped by organization', () => {
   // An id arriving in a request body is not a capability, and this runs under

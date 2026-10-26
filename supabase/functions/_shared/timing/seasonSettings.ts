@@ -15,15 +15,16 @@
  * `contact_info->>'timezone'` fallback. A request that carried its own zone
  * would be a second answer to the same question.
  *
- * ## Why `.order(created_at desc).limit(1)` and not `.single()`
+ * ## Why `.limit(1).maybeSingle()` and not `.single()`
  *
- * An organization legitimately has several `season_settings` rows -- the
- * season switcher in `OrganizationContext` lists them and defaults to the
- * newest -- and `.single()` errors on more than one row. In `calendar-feed`
- * that error was swallowed into `settings: null` and fell through to a
- * hardcoded `America/New_York`. Newest-first is the contract the frontend
- * already uses for "the current season"; a caller that knows which season it
- * means passes `seasonSettingsId` and gets that one.
+ * An organization legitimately has several `season_settings` rows (a draft for
+ * next year beside the active season), and `.single()` errors on more than one
+ * row. In `calendar-feed` that error was swallowed into `settings: null` and
+ * fell through to a hardcoded `America/New_York`. "The current season" is the
+ * organization's one **active** season (migration 20261101010000 holds there
+ * to be at most one, Phase E1); it was the newest row until a draft could
+ * exist, and a draft must never become the answer. A caller that knows which
+ * season it means passes `seasonSettingsId` and gets that one, active or not.
  *
  * @module _shared/timing/seasonSettings
  */
@@ -87,7 +88,7 @@ export async function readSeasonTimezone(
 
   let query = supabase
     .from('season_settings')
-    .select('id, timezone, created_at')
+    .select('id, timezone')
     .eq('organization_id', organizationId);
 
   if (seasonSettingsId) {
@@ -95,7 +96,11 @@ export async function readSeasonTimezone(
     // capability, and this runs under the service role.
     query = query.eq('id', seasonSettingsId);
   } else {
-    query = query.order('created_at', { ascending: false });
+    // The organization's active season, never the newest row: the unique
+    // index `season_settings_one_active` makes this at most one, and an
+    // organization with none reads as "no clock" (a refusal for the caller),
+    // not as a draft's.
+    query = query.eq('status', 'active');
   }
 
   const { data, error } = await query.limit(1).maybeSingle();

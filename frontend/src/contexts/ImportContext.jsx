@@ -173,7 +173,7 @@ const materializeBuddyPairsForImport = async ({ importJobId, addLog }) => {
 };
 
 export function ImportProvider({ children }) {
-  const { currentOrganization, orgMember } = useOrganization();
+  const { currentOrganization, orgMember, currentSeasonSetting } = useOrganization();
   const [isImporting, setIsImporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [importStatus, setImportStatus] = useState(() => {
@@ -486,11 +486,17 @@ export function ImportProvider({ children }) {
 
         const [{ default: Papa }, { createImportJob, failImportJob, persistImportJobProgress }] =
           await Promise.all([import('papaparse'), import('../utils/importJobLifecycleActions.js')]);
+        // E1: the import adds to the season being viewed. The active season is what the job
+        // would get anyway, so only another season (a draft) is named.
         const job = await createImportJob({
           supabase,
           organizationId: currentOrganization.id,
           type,
           fileName: file.name,
+          seasonSettingsId:
+            currentSeasonSetting?.id && currentSeasonSetting.status !== 'active'
+              ? currentSeasonSetting.id
+              : null,
         });
         setActiveJobId(job.id);
         setActiveJob(job);
@@ -974,6 +980,8 @@ export function ImportProvider({ children }) {
       telemetryLogs,
       completeImport,
       currentOrganization?.id,
+      currentSeasonSetting?.id,
+      currentSeasonSetting?.status,
       updateJobProgress,
       organizationSchemas,
       setImportDataForType,

@@ -1,8 +1,20 @@
-export async function createImportJob({ supabase, organizationId, type, fileName }) {
+/**
+ * Creates an import job. `seasonSettingsId` names the season the import adds to when it is not
+ * the organization's active one (a draft); left out, the server uses the active season. It is
+ * sent only when given, so a call for the active season has the shape it always had.
+ */
+export async function createImportJob({
+  supabase,
+  organizationId,
+  type,
+  fileName,
+  seasonSettingsId = null,
+}) {
   const { data, error } = await supabase.rpc('create_import_job', {
     p_organization_id: organizationId,
     p_import_type: type,
     p_file_name: fileName,
+    ...(seasonSettingsId ? { p_season_settings_id: seasonSettingsId } : {}),
   });
 
   if (error) {

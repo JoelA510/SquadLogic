@@ -21,7 +21,7 @@ SELECT ok(
   'anon cannot execute admin_select_field_availability_scenario'
 );
 SELECT ok(
-  NOT has_function_privilege('anon', 'public.create_import_job(uuid,text,text)', 'EXECUTE'),
+  NOT has_function_privilege('anon', 'public.create_import_job(uuid,text,text,uuid)', 'EXECUTE'),
   'anon cannot execute create_import_job'
 );
 SELECT ok(

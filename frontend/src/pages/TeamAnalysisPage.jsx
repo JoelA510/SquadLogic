@@ -9,6 +9,7 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TeamOverviewPanel from '../components/TeamOverviewPanel.jsx';
 import ProgramOverview from '../components/teaming/ProgramOverview.jsx';
+import { groupByProgram } from '../utils/programGroups.js';
 import TeamingConfiguration from '../components/teaming/TeamingConfiguration.jsx';
 import RosterManager from '../components/teaming/RosterManager.jsx';
 import TeamPersistencePanel from '../components/TeamPersistencePanel.jsx';
@@ -20,6 +21,7 @@ import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
@@ -225,7 +227,8 @@ function findDivisionRowForProgram(program, divisionRows) {
   );
 }
 
-/** The division columns the teaming rules read (`plays_games` is added when it exists, D2). */
+/** The division columns the teaming rules read (`plays_games` is added when it exists, D2;
+ *  `program_id` when it exists, E2). */
 const DIVISION_SETTING_COLUMNS =
   'id, organization_id, season_settings_id, name, max_roster_size, min_roster_size, ' +
   'target_team_size, team_count_override, min_teams, max_teams';
@@ -573,7 +576,7 @@ function noTeamsMessage(programName, preparedPlayers, result) {
     blocked.length > 0
       ? ` ${blocked.length} of its ${preparedPlayers.length} players are not eligible for the division: ${names(blocked)}.`
       : '';
-  return `No teams could be generated for ${programName}. Check that players are imported for this program and that the roster settings allow at least one team.${notEligible}`;
+  return `No teams could be generated for ${programName}. Check that players are imported for this division and that the roster settings allow at least one team.${notEligible}`;
 }
 
 export default function TeamAnalysisPage() {
@@ -628,6 +631,9 @@ export default function TeamAnalysisPage() {
   const [placementAnnouncement, setPlacementAnnouncement] = useState('');
   const [stagedReview, setStagedReview] = useState(null);
   const [divisionRows, setDivisionRows] = useState(null);
+  // The season's programs (E2), read to group the overview. Empty before the migration, when the
+  // read fails, or for a league that never made one: the overview is then a flat list.
+  const [seasonPrograms, setSeasonPrograms] = useState([]);
   const [divisionSettingsError, setDivisionSettingsError] = useState(null);
   const [savingConfigId, setSavingConfigId] = useState(null);
   const [configSaveMessage, setConfigSaveMessage] = useState('');
@@ -697,6 +703,19 @@ export default function TeamAnalysisPage() {
     }
   }, [reviewStorageKey, stagedReview]);
 
+  // E2: the divisions under the program each is in, only when the league has a program of its
+  // own with one of them in it; otherwise null and the overview is a flat list, no heading.
+  const overviewGroups = useMemo(
+    () =>
+      groupByProgram({
+        items: programs,
+        programIdOf: (program) =>
+          findDivisionRowForProgram(program, divisionRows ?? [])?.program_id,
+        programs: seasonPrograms,
+      }),
+    [programs, divisionRows, seasonPrograms]
+  );
+
   const selectedProgram = useMemo(
     () => programs.find((p) => p.id === selectedProgramId) || programs[0],
     [selectedProgramId, programs]
@@ -746,10 +765,16 @@ export default function TeamAnalysisPage() {
           .eq('organization_id', currentOrganization.id)
           .eq('season_settings_id', currentSeasonSetting.id)
           .order('name', { ascending: true });
-      let { data, error } = await readDivisions(`${DIVISION_SETTING_COLUMNS}, plays_games`);
-      // D2: before migration 20261029010000 `plays_games` does not exist
-      // (42703); the rules are read without it and no division offers the
-      // games setting. Every other error stays an error.
+      let { data, error } = await readDivisions(
+        `${DIVISION_SETTING_COLUMNS}, plays_games, program_id`
+      );
+      // D2 and E2: before migration 20261029010000 `plays_games` does not exist, and before
+      // 20261101020000 `program_id` does not (42703). The rules are read without them: no
+      // division offers the games setting, and none is grouped under a program. Every other
+      // error stays an error.
+      if (!cancelled && error?.code === '42703') {
+        ({ data, error } = await readDivisions(`${DIVISION_SETTING_COLUMNS}, plays_games`));
+      }
       if (!cancelled && error?.code === '42703') {
         ({ data, error } = await readDivisions(DIVISION_SETTING_COLUMNS));
       }
@@ -772,6 +797,34 @@ export default function TeamAnalysisPage() {
     };
   }, [currentOrganization?.id, currentSeasonSetting?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentSeasonSetting?.id) {
+      setSeasonPrograms([]);
+      return undefined;
+    }
+    (async () => {
+      const { data, error } = await supabase
+        .from('programs')
+        .select('id, name, is_default')
+        .eq('season_settings_id', currentSeasonSetting.id);
+      if (cancelled) return;
+      if (error) {
+        // Not shown: grouping is a convenience, and before the migration there is no table.
+        logger.warn('[TeamAnalysis] programs not read; the overview is not grouped', {
+          code: error.code,
+          message: error.message,
+        });
+        setSeasonPrograms([]);
+        return;
+      }
+      setSeasonPrograms(data || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSeasonSetting?.id]);
+
   const updateConfig = (programId, patch) => {
     setConfigSaveMessage('');
     setConfigs((prev) => ({
@@ -785,7 +838,7 @@ export default function TeamAnalysisPage() {
 
   const saveDivisionConfig = useCallback(
     async (program, config, { silent = false } = {}) => {
-      if (!program) throw new Error('Select a program before saving rules.');
+      if (!program) throw new Error('Select a division before saving rules.');
       if (!currentOrganization?.id) throw new Error('Select an active organization.');
       if (!currentSeasonSetting?.id) throw new Error('Select an active season.');
       if (!canManageTeams) throw new Error('Admin team-management permission is required.');
@@ -886,7 +939,7 @@ export default function TeamAnalysisPage() {
       errors.push({ type: 'division-settings', message: divisionSettingsError });
     }
     if (!selectedProgram) {
-      errors.push({ type: 'division', message: 'Select a program before generating teams.' });
+      errors.push({ type: 'division', message: 'Select a division before generating teams.' });
     }
     if (
       selectedConfig?.minRosterSize &&
@@ -1010,7 +1063,7 @@ export default function TeamAnalysisPage() {
       if (!user?.id) throw new Error('Sign in before generating teams.');
       if (!currentOrganization?.id) throw new Error('Select an active organization.');
       if (!canManageTeams) throw new Error('Admin team-management permission is required.');
-      if (!selectedProgram) throw new Error('Select a program before generating teams.');
+      if (!selectedProgram) throw new Error('Select a division before generating teams.');
       // Guard the initial-load race: until the persisted history has loaded, persistenceSnapshot is
       // empty and a re-run would look like a first run (draft) and silently regenerate fresh —
       // discarding the saved team UUIDs and manual moves. Make the admin wait the brief load window.
@@ -1641,7 +1694,7 @@ export default function TeamAnalysisPage() {
               </h3>
               <p className="text-sm text-text-secondary">
                 {reviewMessage ||
-                  `${stagedReview.programName || 'Selected program'} is ready for Supabase sync.`}
+                  `${stagedReview.programName || 'Selected division'} is ready for Supabase sync.`}
               </p>
             </div>
             {stagedReview && (
@@ -1681,6 +1734,7 @@ export default function TeamAnalysisPage() {
             <div className="lg:col-span-2">
               <ProgramOverview
                 programs={programs}
+                groups={overviewGroups}
                 onSelectProgram={setSelectedProgramId}
                 selectedProgramId={selectedProgramId}
               />

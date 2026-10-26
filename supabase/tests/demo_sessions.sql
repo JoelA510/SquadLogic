@@ -38,7 +38,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(106);
+SELECT plan(107);
 
 -- ── 0. Setup (as the test's own superuser role) ─────────────────────────────
 -- Anonymous visitors V1-V6 and a real user, Dave. The password-length trigger asks every new auth user
@@ -147,6 +147,18 @@ SELECT is(
       WHERE p.organization_id = (SELECT id FROM t_ids WHERE name = 'demoA') AND p.division_id <> t.division_id),
     0,
     'every player is in their team''s division'
+);
+-- 20261101020000: the league's programs span divisions, from the fixture's Payment Plan column;
+-- U9, U10 and U12 are in no program of their own, so in the season's default.
+SELECT is(
+    (SELECT array_agg(x ORDER BY x COLLATE "C") FROM (
+        SELECT p.name || ':' || string_agg(d.name, ',' ORDER BY d.name) AS x
+          FROM public.programs p JOIN public.divisions d ON d.program_id = p.id
+         WHERE p.organization_id = (SELECT id FROM t_ids WHERE name = 'demoA')
+         GROUP BY p.id, p.name) s),
+    ARRAY['Junior:U7B,U7G,U8B,U8G', 'Micro:U5B,U5G,U6B,U6G', 'Minis:U4',
+          'No program:U10B,U10G,U12B,U12G,U9B,U9G', 'Select:U14B,U14G,U16B,U16G,U19B,U19G'],
+    'the demo league has its four programs and its default, every division in one'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.coaches c JOIN demo_seed.coaches s ON s.email = c.email),
@@ -553,13 +565,13 @@ SELECT is(
         'admin_assign_team_coach', 'admin_bulk_update_players', 'admin_cancel_game_assignment', 'admin_cancel_practice_assignment',
         'admin_change_member_role', 'admin_create_field', 'admin_create_field_blackout', 'admin_create_location',
         'admin_create_player', 'admin_decide_coach_practice_preference', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
-        'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_team',
-        'admin_get_coached_team_ids', 'admin_get_division_teams', 'admin_publish_schedule_baseline', 'admin_remove_member',
+        'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_program', 'admin_delete_team',
+        'admin_get_coached_team_ids', 'admin_get_division_teams', 'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
         'admin_retire_field', 'admin_retire_field_subunit', 'admin_retire_location', 'admin_select_field_availability_scenario',
-        'admin_set_coach_practice_preference', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
+        'admin_set_coach_practice_preference', 'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
         'admin_set_practice_slot_division', 'admin_set_season_timezone', 'admin_unretire_field', 'admin_unretire_field_subunit',
         'admin_unretire_location', 'admin_update_coach_status', 'admin_update_field', 'admin_update_field_blackout',
-        'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema',
+        'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
         'apply_player_patch', 'caller_coaches_practice_slot', 'cancel_ready_import_job', 'create_import_job',
         'enact_lock_cause_row', 'enact_practice_recommendation', 'enforce_field_retirement_deactivates', 'fail_import_job',
         'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_field_availability_import_job',
@@ -588,13 +600,13 @@ SELECT is(
         'admin_assign_team_coach', 'admin_bulk_update_players', 'admin_cancel_game_assignment', 'admin_cancel_practice_assignment',
         'admin_change_member_role', 'admin_create_field', 'admin_create_field_blackout', 'admin_create_location',
         'admin_create_player', 'admin_decide_coach_practice_preference', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
-        'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_team',
-        'admin_get_coached_team_ids', 'admin_get_division_teams', 'admin_publish_schedule_baseline', 'admin_remove_member',
+        'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_program', 'admin_delete_team',
+        'admin_get_coached_team_ids', 'admin_get_division_teams', 'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
         'admin_retire_field', 'admin_retire_field_subunit', 'admin_retire_location', 'admin_select_field_availability_scenario',
-        'admin_set_coach_practice_preference', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
+        'admin_set_coach_practice_preference', 'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
         'admin_set_practice_slot_division', 'admin_set_season_timezone', 'admin_unretire_field', 'admin_unretire_field_subunit',
         'admin_unretire_location', 'admin_update_coach_status', 'admin_update_field', 'admin_update_field_blackout',
-        'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema',
+        'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
         'apply_player_patch', 'caller_coaches_practice_slot', 'cancel_ready_import_job', 'create_import_job',
         'enact_lock_cause_row', 'enact_practice_recommendation', 'enforce_field_retirement_deactivates', 'fail_import_job',
         'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_field_availability_import_job',

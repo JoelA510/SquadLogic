@@ -25,11 +25,11 @@ Feature: Sidebar Context Switching
     Then the season selector should display the selected season
     And the dashboard data should refresh to show data for the selected season
 
-  Scenario: Invalid localStorage season falls back to most recent
+  Scenario: A stored season that is not the organization's falls back to its active season
     Given the localStorage contains a season ID that does not exist for "Metro City United"
     When I switch the active organization to "Metro City United"
-    Then the active season should automatically select the most recent season for "Metro City United"
-    And localStorage should be updated with the valid season
+    Then the active season should automatically select the active season for "Metro City United"
+    And the stored season that names none of its seasons is not adopted
 
   Scenario: Context persists across navigation
     Given I have selected "Metro City United" as the active organization

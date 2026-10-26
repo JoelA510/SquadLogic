@@ -17,8 +17,8 @@ SELECT ok(
 );
 
 SELECT ok(
-    to_regprocedure('public.create_import_job(uuid,text,text)') IS NOT NULL,
-    'create_import_job(uuid, text, text) exists'
+    to_regprocedure('public.create_import_job(uuid,text,text,uuid)') IS NOT NULL,
+    'create_import_job(uuid, text, text, uuid) exists (20261101010000 added the season)'
 );
 
 SELECT ok(

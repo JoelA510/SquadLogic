@@ -159,6 +159,15 @@ M48="$REPO/supabase/migrations/20261030010000_demo_sessions.sql"
 # D4: an anonymous sign-in carries no password, so the password-length trigger's
 # function skips an anonymous INSERT (and nothing else), and the revert.
 M49="$REPO/supabase/migrations/20261031010000_anonymous_signups_skip_password_check.sql"
+# E1: one active season per organization, imports that carry their season (the two finalizers,
+# the two division writers and create_import_job replaced), and the revert. The plants that aimed
+# at the bodies it replaces are re-aimed here.
+M50="$REPO/supabase/migrations/20261101010000_one_active_season.sql"
+R50="$REPO/docs/sql/20261101010000_revert.sql"
+# E2: programs (the table, the default-program triggers, the four writers, the demo start
+# replaced), and the revert.
+M51="$REPO/supabase/migrations/20261101020000_programs.sql"
+R51="$REPO/docs/sql/20261101020000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3575,7 +3584,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M26 create_import_job still audits the file name" "$M26" \
+plant "M26 create_import_job still audits the file name" "$M50" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
@@ -3759,7 +3768,7 @@ END;
 # again at 20261022020000, which replaces that one, again at 20261025010000,
 # and again at 20261026010000 ($M43), the live body: the staged payload stored
 # whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M43" \
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M50" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4525,7 +4534,7 @@ plant "M43 apply_player_patch still writes the birth date" "$M43" \
         updated_at      = now()" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 the finalizer promotes only a row with a natural age" "$M43" \
+plant "M43 the finalizer promotes only a row with a natural age" "$M50" \
   "        WHERE p.first_name IS NOT NULL
           AND p.last_name IS NOT NULL
     )," \
@@ -4535,7 +4544,7 @@ plant "M43 the finalizer promotes only a row with a natural age" "$M43" \
     )," \
   "smoke 20261026010000"
 
-plant "M43 the finalizer prefers the age group to the staged natural age" "$M43" \
+plant "M43 the finalizer prefers the age group to the staged natural age" "$M50" \
   "                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
                     THEN p.natural_age_text::smallint
                 WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
@@ -4546,7 +4555,7 @@ plant "M43 the finalizer prefers the age group to the staged natural age" "$M43"
                     THEN p.natural_age_text::smallint" \
   "smoke 20261026010000"
 
-plant "M43 a re-import keeps the old natural age" "$M43" \
+plant "M43 a re-import keeps the old natural age" "$M50" \
   "            natural_age = de.natural_age," \
   "            natural_age = COALESCE(de.natural_age, p.natural_age)," \
   "smoke 20261026010000"
@@ -4704,11 +4713,11 @@ plant "R45 the revert restores a drifted update_game_score body" "$R45" \
 # division, and a settings save that resets or ignores plays_games; the
 # revert claims on the reservation writer left behind, a drifted finalizer
 # body and a destruction count over every slot.
-plant "M46 a practice division is named organization-wide" "$M46" \
+plant "M46 a practice division is named organization-wide" "$M50" \
   "              AND d.season_settings_id = v_import_season_id
 " \
   "" \
-  "applying 20261029010000_practice_only_divisions.sql"
+  "applying 20261101010000_one_active_season.sql"
 
 plant "M46 back-to-back slots clash" "$M46" \
   "       AND extract(epoch FROM ps.start_time) < probe.e + probe.turnover" \
@@ -4725,12 +4734,12 @@ plant "M46 windows that share no weekday clash" "$M46" \
   "            OR true)" \
   "smoke 20261029010000"
 
-plant "M46 an unknown practice division leaves the slot open" "$M46" \
+plant "M46 an unknown practice division leaves the slot open" "$M50" \
   "            IF v_division_id IS NULL THEN" \
   "            IF false THEN" \
   "smoke 20261029010000"
 
-plant "M46 a re-import without a Division clears the reservation" "$M46" \
+plant "M46 a re-import without a Division clears the reservation" "$M50" \
   "                    division_id = COALESCE(v_division_id, division_id)," \
   "                    division_id = v_division_id," \
   "smoke 20261029010000"
@@ -4750,12 +4759,12 @@ plant "M46 the reservation writer takes another organization's division" "$M46" 
   "           AND true;" \
   "smoke 20261029010000"
 
-plant "M46 a settings save by id without plays_games resets it" "$M46" \
+plant "M46 a settings save by id without plays_games resets it" "$M50" \
   "                   plays_games = COALESCE(p_plays_games, plays_games)," \
   "                   plays_games = COALESCE(p_plays_games, true)," \
   "smoke 20261029010000"
 
-plant "M46 a settings save by name ignores a changed plays_games" "$M46" \
+plant "M46 a settings save by name ignores a changed plays_games" "$M50" \
   "                   OR (p_plays_games IS NOT NULL
                        AND public.divisions.plays_games IS DISTINCT FROM p_plays_games)
 " \
@@ -4860,6 +4869,35 @@ plant "M49 an anonymous user's first password goes unchecked" "$M49" \
   "NEW.encrypted_password IS DISTINCT FROM OLD.encrypted_password) OR" \
   "NEW.encrypted_password <> OLD.encrypted_password) OR" \
   "applying 20261031010000_anonymous_signups_skip_password_check.sql"
+
+# Phase E1 and E2: three plants (the smokes 20261101010000 and 20261101020000 must go red for each,
+# each also applied by hand in a scratch cluster and caught by the smoke and by the pgTAP files
+# supabase/tests/one_active_season.sql and programs.sql). The guarantee that matters most in each:
+# an import goes into the season its job names (the old "active first, then the latest start" order
+# put a draft's import in the active season); a program is judged by its own season, not the one the
+# caller names (a completed season's program edited through the active season's id); and a season
+# made after the migration still gets its default program (the trigger, which no migration-time
+# check can see, since the harness's migration build has no season to give one to).
+plant "M50 the finalizer ignores the job's season" "$M50" \
+  "                ELSE s.id = v_job.season_settings_id END);
+
+    IF v_season_status = 'completed' THEN" \
+  "                ELSE s.status = 'active' END);
+
+    IF v_season_status = 'completed' THEN" \
+  "smoke 20261101010000"
+
+plant "M51 admin_upsert_program judges only the season it is given" "$M51" \
+  "        IF NOT FOUND OR v_prog.season_settings_id <> p_season_id THEN" \
+  "        IF NOT FOUND THEN" \
+  "smoke 20261101020000"
+
+plant "M51 a new season gets no default program" "$M51" \
+  "    AFTER INSERT ON public.season_settings
+    FOR EACH ROW EXECUTE FUNCTION public.season_settings_default_program();" \
+  "    AFTER INSERT ON public.season_settings
+    FOR EACH ROW WHEN (false) EXECUTE FUNCTION public.season_settings_default_program();" \
+  "smoke 20261101020000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

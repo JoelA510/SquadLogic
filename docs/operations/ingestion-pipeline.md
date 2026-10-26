@@ -103,7 +103,7 @@ lifecycle RPC signature is present (each row should report `present = true`):
 select fn, to_regprocedure('public.' || fn) is not null as present
 from unnest(array[
   'fail_stale_import_jobs(uuid,timestamptz)',
-  'create_import_job(uuid,text,text)',
+  'create_import_job(uuid,text,text,uuid)',
   'update_import_job_progress(uuid,integer,integer,integer,jsonb)',
   'mark_import_job_ready_to_apply(uuid,text,jsonb)',
   'cancel_ready_import_job(uuid,text)',

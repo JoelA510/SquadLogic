@@ -21,11 +21,17 @@ Given('an organization and season are active', async ({ page }) => {
       },
     ];
     db.season_settings = [
-      { id: 's1', name: 'Fall 2024', organization_id: orgId, timezone: 'America/Los_Angeles' },
+      {
+        id: 's1',
+        name: 'Fall 2024',
+        status: 'active',
+        organization_id: orgId,
+        timezone: 'America/Los_Angeles',
+      },
     ];
     window.__saveMockDB__(db);
     localStorage.setItem('squadlogic_active_org', orgId);
-    localStorage.setItem('squadlogic-current-season', 'Fall 2024');
+    localStorage.setItem('squadlogic-current-season-id', 's1');
   }, MOCK_ORG_ID);
 });
 
@@ -353,16 +359,24 @@ Given(
           { id: org2Id, name: o2, status: 'active', is_onboarded: true },
         ];
         db.season_settings = [
-          { id: 's1', name: 'Fall 2024', organization_id: org1Id, timezone: 'America/Los_Angeles' },
+          {
+            id: 's1',
+            name: 'Fall 2024',
+            status: 'active',
+            organization_id: org1Id,
+            timezone: 'America/Los_Angeles',
+          },
           {
             id: 's2',
             name: 'Spring 2024',
+            status: 'completed',
             organization_id: org1Id,
             timezone: 'America/Los_Angeles',
           },
           {
             id: 's3',
             name: 'Winter 2024',
+            status: 'active',
             organization_id: org2Id,
             timezone: 'America/Los_Angeles',
           },
@@ -402,7 +416,7 @@ Given(
           (s: Record<string, unknown>) => s.organization_id === (org as { id: string }).id
         );
         if (seasons.length > 0) {
-          localStorage.setItem('squadlogic-current-season', seasons[0].name);
+          localStorage.setItem('squadlogic-current-season-id', seasons[0].id);
         }
       }
     }, orgName);
@@ -476,7 +490,7 @@ Then('the dashboard data should refresh to show data for the selected season', a
 Given(
   'the localStorage contains a season ID that does not exist for {string}',
   async ({ page }, _orgName: string) => {
-    await page.evaluate(() => localStorage.setItem('squadlogic-current-season', 'invalid-id'));
+    await page.evaluate(() => localStorage.setItem('squadlogic-current-season-id', 'invalid-id'));
   }
 );
 
@@ -488,10 +502,12 @@ When('I switch the active organization to {string}', async ({ page }, orgName: s
 });
 
 Then(
-  'the active season should automatically select the most recent season for {string}',
+  'the active season should automatically select the active season for {string}',
   async ({ page }, orgName: string) => {
     const seasonButton = page.getByRole('button', { name: 'Active Season' });
     await expect(seasonButton).not.toContainText('No seasons');
+    // Metro City United's one active season (the stored id names none of its seasons).
+    await expect(seasonButton).toContainText('Winter 2024');
 
     await expect(page.getByRole('button', { name: orgName }).first()).toBeVisible({
       timeout: 15000,
@@ -499,15 +515,12 @@ Then(
   }
 );
 
-Then('localStorage should be updated with the valid season', async ({ page }) => {
-  // Verify the UI reflects the valid season instead of just checking localStorage
+Then('the stored season that names none of its seasons is not adopted', async ({ page }) => {
+  // The UI shows the valid season; the stale id is neither shown nor turned into a season.
   const seasonButton = page.getByRole('button', { name: 'Active Season' });
   await expect(seasonButton).not.toContainText('invalid-id');
   await expect(seasonButton).not.toContainText('No seasons');
-
-  // Secondary check for localStorage
-  const season = await page.evaluate(() => localStorage.getItem('squadlogic-current-season'));
-  expect(season).not.toBe('invalid-id');
+  await expect(seasonButton).toContainText('Winter 2024');
 });
 
 Given('I have selected {string} as the active organization', async ({ page }, orgName: string) => {
@@ -528,7 +541,7 @@ Given('a valid season is selected', async ({ page }) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const seasons = db.season_settings || [];
     if (seasons.length > 0) {
-      localStorage.setItem('squadlogic-current-season', seasons[0].name || seasons[0].id);
+      localStorage.setItem('squadlogic-current-season-id', seasons[0].id);
     }
   });
 });

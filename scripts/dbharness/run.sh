@@ -1305,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1911,6 +1911,54 @@ for id in "${REVERT_CHECKS[@]}"; do
                 VALUES ('e3000000-0000-4000-8000-0000000000a1', NULL, true);" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the anonymous user the revert check requires was never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261101010000's revert DESTROYS every import job's season**, so its warning is the check.
+  # FOUR jobs of one organization: ONE for the active season, TWO for a draft season, ONE with no
+  # season (made before the migration): every figure distinct, so counting every job (4), the jobs
+  # naming a season (3) or the ones naming the draft (2) prints a different number. Inserted as the
+  # table owner; every name is synthetic.
+  if [ "$id" = "20261101010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e5000000-0000-4000-8000-00000000000a','Season Revert Org','season-revert-org');
+              INSERT INTO public.season_settings (id, organization_id, name, status) VALUES
+                ('e5000000-0000-4000-8000-0000000000a1','e5000000-0000-4000-8000-00000000000a','Revert Active','active'),
+                ('e5000000-0000-4000-8000-0000000000a2','e5000000-0000-4000-8000-00000000000a','Revert Draft','draft');
+              INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, season_settings_id) VALUES
+                ('e5000000-0000-4000-8000-000000000b01','e5000000-0000-4000-8000-00000000000a','registration','revert/active.csv','importing','e5000000-0000-4000-8000-0000000000a1'),
+                ('e5000000-0000-4000-8000-000000000b02','e5000000-0000-4000-8000-00000000000a','registration','revert/draft-1.csv','importing','e5000000-0000-4000-8000-0000000000a2'),
+                ('e5000000-0000-4000-8000-000000000b03','e5000000-0000-4000-8000-00000000000a','registration','revert/draft-2.csv','importing','e5000000-0000-4000-8000-0000000000a2'),
+                ('e5000000-0000-4000-8000-000000000b04','e5000000-0000-4000-8000-00000000000a','registration','revert/legacy.csv','importing',NULL);" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the four import jobs the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261101020000's revert DESTROYS every program and every division's membership of one**, so
+  # its warning is the check. TWO programs beyond the default, THREE divisions in them (two in one,
+  # one in the other), and ONE division left in the default: every figure distinct, so counting
+  # every program (3), every division (4) or the programs holding divisions per division prints a
+  # different number. The default program is the trigger's, not seeded here. Inserted as the table
+  # owner; every name is synthetic.
+  if [ "$id" = "20261101020000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e6000000-0000-4000-8000-00000000000a','Program Revert Org','program-revert-org');
+              INSERT INTO public.season_settings (id, organization_id, name, status) VALUES
+                ('e6000000-0000-4000-8000-0000000000a1','e6000000-0000-4000-8000-00000000000a','Program Active','active');
+              INSERT INTO public.programs (id, organization_id, season_settings_id, name) VALUES
+                ('e6000000-0000-4000-8000-0000000000b1','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Junior'),
+                ('e6000000-0000-4000-8000-0000000000b2','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Micro');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name, program_id) VALUES
+                ('e6000000-0000-4000-8000-0000000000d1','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Revert U7B','e6000000-0000-4000-8000-0000000000b1'),
+                ('e6000000-0000-4000-8000-0000000000d2','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Revert U7G','e6000000-0000-4000-8000-0000000000b1'),
+                ('e6000000-0000-4000-8000-0000000000d3','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Revert U5B','e6000000-0000-4000-8000-0000000000b2');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('e6000000-0000-4000-8000-0000000000d4','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Revert U9B');" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the programs and divisions the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3145,6 +3193,110 @@ PROBE
       else
         echo "FAIL revert ${id}: the anonymous-sign-up revert did not restore the password-length trigger"
         dump 10 $SCRATCH/harness_pwd_probe; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261101010000" ]; then
+      # The seed planted 4 jobs: 1 for the active season, 2 for the draft, 1 with none.
+      if ! grep -q 'this revert DESTROYS the season of 3 import job(s), 2 of them for a season that is not the active one' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 4 import jobs (3 naming a season, 2 of them a draft) and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # One fingerprint of everything the migration replaced or added, read off the catalogue: the
+      # five functions (signature, security, volatility, SET clauses, result, arguments, sorted
+      # grants, md5 of the body, comment), the policies, columns, constraints and indexes of
+      # season_settings and import_jobs. The expected md5 and row count were read 2026-10-26 off a
+      # build at 20261031010000 with the same query; the count is part of the verdict, so a lookup
+      # that finds nothing cannot pass. The seed also required: the four jobs and two seasons survive.
+      if psql_cmd "SELECT 'SEASONS-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.import_jobs WHERE organization_id = 'e5000000-0000-4000-8000-00000000000a') <> 4
+                 OR (SELECT count(*) FROM public.season_settings WHERE organization_id = 'e5000000-0000-4000-8000-00000000000a') <> 2 THEN 'seed-lost'
+               WHEN (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('create_import_job', 'finalize_import_job', 'finalize_field_import_job',
+                           'upsert_division_for_import', 'admin_upsert_division_settings')
+      UNION ALL
+      SELECT 'p|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')
+        FROM pg_policies WHERE schemaname = 'public' AND tablename = 'season_settings'
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+         AND c.relname IN ('season_settings', 'import_jobs')
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint WHERE conrelid IN (to_regclass('public.season_settings'), to_regclass('public.import_jobs'))
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid IN (to_regclass('public.season_settings'), to_regclass('public.import_jobs'))
+             ) s) = '0c4a3ecc409c170985d13be99910048e:55' THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_seasons 2>&1 && grep -q 'SEASONS-VERDICT:restored' $SCRATCH/harness_seasons; then
+        echo "  revert ${id}: the one-active-season revert restores the five replaced functions, the three write policies and the nullable status as at 20261031010000, drops the job season column, the 4-argument create_import_job and both unique indexes, and keeps the jobs and seasons"
+      else
+        echo "FAIL revert ${id}: the one-active-season revert did not restore every replaced object and drop every added one as at 20261031010000"
+        dump 10 $SCRATCH/harness_seasons; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261101020000" ]; then
+      # The seed planted 2 programs beyond the default holding 3 divisions, and 1 division in the default.
+      if ! grep -q 'this revert DESTROYS 2 program(s) beyond the default, and the program of 3 division(s)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 2 programs holding 3 divisions (and 1 division in the default) and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # One fingerprint of everything the migration replaced or added: the demo start, the four
+      # writers and both trigger functions, the columns, constraints, indexes and triggers of
+      # divisions and season_settings, and the absence of the programs table, the demo seed table
+      # and the four audit actions. The expected md5 and row count were read 2026-10-26 off a build
+      # at 20261101010000 with the same query. The seed also required: the four divisions survive.
+      if psql_cmd "SELECT 'PROGRAMS-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.divisions WHERE organization_id = 'e6000000-0000-4000-8000-00000000000a') <> 4 THEN 'seed-lost'
+               WHEN (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('start_demo_session', 'admin_upsert_program', 'admin_set_division_program',
+                           'admin_delete_program', 'admin_merge_programs', 'season_settings_default_program',
+                           'divisions_default_program')
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+         AND c.relname IN ('divisions', 'season_settings')
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint WHERE conrelid IN (to_regclass('public.divisions'), to_regclass('public.season_settings'))
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid IN (to_regclass('public.divisions'), to_regclass('public.season_settings'))
+      UNION ALL
+      SELECT 't|' || tgrelid::regclass::text || '|' || tgname
+        FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (to_regclass('public.divisions'), to_regclass('public.season_settings'))
+      UNION ALL
+      SELECT 'x|' || x FROM (
+          SELECT 'table ' || relname AS x FROM pg_class WHERE relnamespace IN ('public'::regnamespace, 'demo_seed'::regnamespace)
+             AND relname IN ('programs', 'division_programs')
+          UNION ALL SELECT 'action ' || action FROM public.audit_actions
+           WHERE action IN ('program.upserted', 'program.deleted', 'program.merged', 'division.program_changed')
+      ) absent
+             ) s) = '2a4210295156ac3c95b186db33ab9835:70' THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_programs 2>&1 && grep -q 'PROGRAMS-VERDICT:restored' $SCRATCH/harness_programs; then
+        echo "  revert ${id}: the programs revert restores the demo start as at 20261101010000, drops the programs, their writers, triggers and the division column, and keeps the divisions"
+      else
+        echo "FAIL revert ${id}: the programs revert did not restore every replaced object and drop every added one as at 20261101010000"
+        dump 10 $SCRATCH/harness_programs; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

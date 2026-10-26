@@ -33,9 +33,10 @@ SELECT cmp_ok(
       WHERE schemaname = 'public'
         AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%''admin''::text%'),
     -- Nine when 20261020030000 was written; 20261022020000 dropped the three
-    -- registration_forms admin policies with the table.
-    '>=', 6::bigint,
-    'at least the six policies that test a role by name are found'
+    -- registration_forms admin policies with the table, and 20261101010000 the three
+    -- season_settings admin policies (the season RPCs are its writers).
+    '>=', 3::bigint,
+    'at least the three policies that test a role by name are found'
 );
 -- Each expression on its own (USING, then WITH CHECK): a USING that admits
 -- staff must not hide a WITH CHECK that does not.

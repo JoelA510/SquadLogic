@@ -223,9 +223,13 @@ export default function TopBar({ onToggleNav = undefined }) {
         ]),
   ];
 
+  // The organization's one active season is first and carries no tag; any other shows its status
+  // (a draft is listed for admins and staff only: the context withholds it from everyone else).
   const seasonItems = availableSeasons.map((season) => ({
     id: String(season.id),
-    label: season.name || String(season.id),
+    label:
+      (season.name || String(season.id)) +
+      (season.status && season.status !== 'active' ? ` (${season.status})` : ''),
     icon: Calendar,
     checked: currentSeasonSetting?.id === season.id,
     onSelect: () => switchSeason(season),

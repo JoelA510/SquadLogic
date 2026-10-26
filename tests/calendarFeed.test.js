@@ -739,28 +739,37 @@ describe('calendar feed applies saved practice exceptions (8.6 3b PR 12b)', () =
     return { ...result, logged };
   };
 
-  it("reads the team's own season clock, not the organization's newest season (Codex, #613)", async () => {
+  it("reads the team's own season clock; with none named, the ACTIVE season's, never a newer draft's (Codex, #613; E1)", async () => {
     // The portal reads the team's division's season (PORTAL_TEAM_SELECT); the
     // feed must read the same one. A newer season elsewhere in the organization
-    // in another zone is what an unscoped read would return.
+    // in another zone, a draft for next year since Phase E1, is what a read for
+    // "the newest season" would return.
     const newerSeasons = [
       {
         id: 'season-newer',
         organization_id: SEED.team.organization_id,
         timezone: 'America/Phoenix',
+        status: 'draft',
       },
     ];
     const own = await seeded(SEED, { newerSeasons });
     expect(own.ics).toMatch(/X-WR-TIMEZONE:America\/Los_Angeles/);
-    // Control: without the team's season id the newest season's zone wins,
-    // so the assertion above can fail.
+    // With no season named, the active season's zone is used and the newer
+    // draft's is not.
     const unscoped = await seeded(
       { ...SEED, team: { ...SEED.team, season_settings_id: null } },
-      {
-        newerSeasons,
-      }
+      { newerSeasons }
     );
-    expect(unscoped.ics).toMatch(/X-WR-TIMEZONE:America\/Phoenix/);
+    expect(unscoped.ics).toMatch(/X-WR-TIMEZONE:America\/Los_Angeles/);
+    expect(unscoped.ics).not.toMatch(/Phoenix/);
+    // Control: an organization whose only established season is not active has no clock for an
+    // unscoped read (not the draft's), so the assertions above can fail.
+    const noActive = await seeded(
+      { ...SEED, team: { ...SEED.team, season_settings_id: null } },
+      { newerSeasons, seasonStatus: 'completed' }
+    );
+    expect(noActive.ics).not.toMatch(/X-WR-TIMEZONE:America\/Phoenix/);
+    expect(noActive.ics).toMatch(/has no timezone set/);
 
     const client = fakeClient(SEED, { newerSeasons });
     await composeTeamFeed({
@@ -775,6 +784,22 @@ describe('calendar feed applies saved practice exceptions (8.6 3b PR 12b)', () =
     expect(seasonReads[0].eq).toEqual([
       ['organization_id', SEED.team.organization_id],
       ['id', 'season-1'],
+    ]);
+    const unscopedClient = fakeClient(
+      { ...SEED, team: { ...SEED.team, season_settings_id: null } },
+      { newerSeasons }
+    );
+    await composeTeamFeed({
+      client: unscopedClient,
+      team: { ...SEED.team, season_settings_id: null },
+      orgName: 'Test Org',
+      now: NOW,
+      log: () => {},
+    });
+    const unscopedReads = unscopedClient.calls.filter((c) => c.table === 'season_settings');
+    expect(unscopedReads[0].eq).toEqual([
+      ['organization_id', SEED.team.organization_id],
+      ['status', 'active'],
     ]);
   });
 

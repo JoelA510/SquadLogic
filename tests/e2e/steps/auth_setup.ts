@@ -30,7 +30,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
     await page.evaluate(
       ({ orgId, roleName, uId, mockSeasonId }) => {
         localStorage.setItem('squadlogic_active_org', orgId);
-        localStorage.setItem('squadlogic-current-season', 'Fall 2026');
+        localStorage.setItem('squadlogic-current-season-id', mockSeasonId);
 
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
 

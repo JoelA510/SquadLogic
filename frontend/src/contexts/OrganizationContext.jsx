@@ -9,7 +9,14 @@ import React, {
 } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from './AuthContext.jsx';
-import { ROLE_PERMISSIONS } from '../constants/permissions.js';
+import { ROLE_PERMISSIONS, isAdminRole } from '../constants/permissions.js';
+import {
+  chooseCurrentSeason,
+  orderSeasons,
+  readStoredSeasonId,
+  visibleSeasons,
+  writeStoredSeasonId,
+} from '../utils/seasonSelection.js';
 import { logger } from '../lib/logger.js';
 import { FeatureFlagSchema } from '../constants/featureFlags.js';
 
@@ -18,8 +25,10 @@ import { FeatureFlagSchema } from '../constants/featureFlags.js';
  * @property {any[]} organizations
  * @property {any} currentOrganization
  * @property {any} orgMember
- * @property {any[]} availableSeasons - season_settings rows for the current org
- * @property {any} currentSeasonSetting - the active season_settings row
+ * @property {any[]} availableSeasons - season_settings rows for the current org, active
+ *   first; drafts are listed for admins and staff only
+ * @property {any} currentSeasonSetting - the season the pages show: the organization's one
+ *   active season, or a draft an admin chose (E1; never "the newest")
  * @property {boolean} loading
  * @property {boolean} seasonSettingsLoading - true while the season_settings
  *   read for the CURRENT organization is in flight. Distinct from `loading`,
@@ -108,8 +117,8 @@ export const OrganizationProvider = ({ children }) => {
   // caller can propagate its own lifecycle signal — see the useEffect below.
   // Every setState after the await is guarded, so a stale response (from a
   // prior user / prior refetch / unmount) cannot clobber fresh state.
-  /** @type {(orgId: string, isCancelled?: () => boolean) => Promise<void>} */
-  const fetchSeasonsForOrg = useCallback(async (orgId, isCancelled = () => false) => {
+  /** @type {(orgId: string, isCancelled?: () => boolean, role?: string | null) => Promise<void>} */
+  const fetchSeasonsForOrg = useCallback(async (orgId, isCancelled = () => false, role = null) => {
     setSeasonSettingsLoading(true);
     try {
       const { data, error } = await supabase
@@ -121,23 +130,13 @@ export const OrganizationProvider = ({ children }) => {
       if (isCancelled()) return;
       if (error) throw error;
 
-      setAvailableSeasons(data || []);
-
-      // Check if the previously stored season belongs to this org
-      const storedSeason = localStorage.getItem('squadlogic-current-season');
-      const matchStored = (data || []).find(
-        (s) => s.id === storedSeason || s.name === storedSeason
-      );
-
-      if (matchStored) {
-        setCurrentSeasonSetting(matchStored);
-      } else if (data && data.length > 0) {
-        // Fall back to the most recent season for this org
-        setCurrentSeasonSetting(data[0]);
-        localStorage.setItem('squadlogic-current-season', data[0].name || data[0].id);
-      } else {
-        setCurrentSeasonSetting(null);
-      }
+      // Phase E1: the current season is the organization's one active season. A stored choice
+      // (an id, in its own key) is honoured when it is that season, or a draft an admin or
+      // staff member chose; a draft is nobody else's to open. Never the newest season.
+      const canSeeDrafts = isAdminRole(role);
+      const rows = visibleSeasons(data, canSeeDrafts);
+      setAvailableSeasons(orderSeasons(rows));
+      setCurrentSeasonSetting(chooseCurrentSeason(rows, readStoredSeasonId(), canSeeDrafts));
     } catch (err) {
       if (isCancelled()) return;
       logger.error('Error fetching season_settings:', err);
@@ -215,14 +214,18 @@ export const OrganizationProvider = ({ children }) => {
             setCurrentOrganization(matchedMember.organizations);
             setOrgMember({ role: matchedMember.role, ...matchedMember });
             reportActiveOrganization(user.id, matchedMember);
-            await fetchSeasonsForOrg(matchedMember.organization_id, isCancelled);
+            await fetchSeasonsForOrg(
+              matchedMember.organization_id,
+              isCancelled,
+              matchedMember.role
+            );
           } else {
             const first = data[0];
             setCurrentOrganization(first.organizations);
             setOrgMember({ role: first.role, ...first });
             reportActiveOrganization(user.id, first);
             localStorage.setItem('squadlogic_active_org', first.organization_id);
-            await fetchSeasonsForOrg(first.organization_id, isCancelled);
+            await fetchSeasonsForOrg(first.organization_id, isCancelled, first.role);
           }
         }
       } catch (err) {
@@ -249,7 +252,7 @@ export const OrganizationProvider = ({ children }) => {
         setOrgMember({ role: match.role, ...match });
         if (user?.id) reportActiveOrganization(user.id, match);
         localStorage.setItem('squadlogic_active_org', orgId);
-        await fetchSeasonsForOrg(orgId);
+        await fetchSeasonsForOrg(orgId, undefined, match.role);
       }
     },
     [organizations, fetchSeasonsForOrg, user?.id]
@@ -257,10 +260,8 @@ export const OrganizationProvider = ({ children }) => {
 
   const switchSeason = useCallback((seasonSetting) => {
     setCurrentSeasonSetting(seasonSetting);
-    localStorage.setItem(
-      'squadlogic-current-season',
-      seasonSetting?.name || seasonSetting?.id || ''
-    );
+    // The id, never the name (E1): a name is free text and not the season's identity.
+    writeStoredSeasonId(seasonSetting?.id ?? null);
   }, []);
 
   /**

@@ -14,7 +14,7 @@ export default function TeamingConfiguration({
   if (!program)
     return (
       <div className="bg-bg-surface border border-border-subtle rounded-xl p-8 text-center text-text-muted h-full flex items-center justify-center">
-        Select a program to configure
+        Select a division to configure
       </div>
     );
 

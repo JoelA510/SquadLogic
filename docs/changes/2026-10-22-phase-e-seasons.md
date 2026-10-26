@@ -1,12 +1,15 @@
 # Phase E: seasons and programs
 
-Status: **draft for owner approval** (AGENTS.md rule 14: persistence and the domain model). It
+Status: **E1 and E2 built (one PR; see "As built (E1)" and "As built (E2)"); E3 not started.**
+Owner rules of 2026-10-26 are in Decisions 9 and 10. It
 applies decisions 5.1, 5.2 and 5.3 of `2026-10-20-core-roadmap.md` to research item 5
 (`2026-10-20-research-defects.md`). The roadmap's "Registration" row (per-program registration
 windows) is withdrawn: registration runs on the league's own platform (GotSport, Byga) and
 SquadLogic takes its export; the in-app registration flow is removed (owner, 2026-10-22), so nothing
 here reads or writes registration forms. Three PRs, in the order below, each reviewed once before it
-opens. Every claim about main (6a22d29) is _statically reviewed_ unless marked _executed_.
+opens. Every claim about main (6a22d29) is _statically reviewed_ unless marked _executed_; the
+corrections found against main at f70340d (Phase B, admin-focus R0-R7 and demo D2-D5 had merged) are
+under "Step 0 corrections", and the text above them is left as it was written.
 
 ## What is true today (re-verified against main)
 
@@ -191,6 +194,10 @@ program, move it to another, or remove it from one. A division is in at most one
 
 ## PR split (nothing can create a draft until every reader ignores drafts)
 
+- [x] E1 (see "As built (E1)")
+- [x] E2 (see "As built (E2)")
+- [ ] E3
+
 | PR  | Contents                                                                                                              | Live effect                                 |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | E1  | status backfill and indexes, name uniqueness, policies dropped, readers to active, stored id, import season           | none for one active season; guards in place |
@@ -230,6 +237,119 @@ uses for its lock races), plus the pgTAP index case.
    nullable `program_id`: NULL would need its own branch in every per-program read, and the
    composite FK could no longer keep a division in its own season's program. The cost: the
    default is a row the UI must never show as an ordinary program.
+
+9. **(answered: owner, 2026-10-26)** **Programs are optional.** A club that only uses divisions
+   (U12B, U10G, ...) is never blocked, nagged or cluttered: no flow, page, import or RPC requires
+   creating a program; the season's default program is the "No program" of Decision 8; a club with
+   no programs of its own sees no program grouping heading and no empty program UI on its ordinary
+   pages (the Programs section of Settings > Season is where programs live). Tests prove it: a
+   programs-free organization's import, teaming and scheduling paths work unchanged, and the pages
+   that group by program render no "No program" heading when the default is the only program.
+10. **(answered: owner, 2026-10-26)** Phase order is E, then C, then D.
+
+## Step 0 corrections (against main f70340d, 2026-10-26)
+
+Re-verified before any code; none needed a design call. Each is recorded here and the section it
+corrects is left as written.
+
+- **Versions.** Main's latest migration is `20261031010000`; E1 is `20261101010000`, E2
+  `20261101020000`. The Phase B and demo "As built" sections were read.
+- **Phase B reads and creates nothing program-shaped in the database.** Its "program" is still the
+  division (`TeamAnalysisPage.derivePrograms`, `ProgramOverview`, B4's overview and B6's counts all
+  key on the generator's division key and a division name). E2's rename of that copy to "division"
+  is therefore a copy change on the page; names, files and props are unchanged.
+- **More division writers than the two the plan names.** `finalize_import_job` auto-creates
+  divisions (`INSERT INTO public.divisions`), `start_demo_session` (D3) creates a demo's, and
+  `divisions` has an admin insert policy. Replacing every body to supply a program was the plan's
+  wording; E2 instead fills `program_id` with the season's default in a `BEFORE INSERT` trigger on
+  `divisions`, and makes each season's default program in an `AFTER INSERT` trigger on
+  `season_settings`, so no writer, present or future, has to know programs exist and a missed one
+  cannot leave a NOT NULL violation in a flow the owner said must work unchanged. The migration's
+  end-state still refuses a NULL, and pgTAP creates a division through each writer and finds it in
+  the default.
+- **More current-season readers than the table lists.** `import-validation` counts a player's
+  natural age in "the season the finalizer attaches divisions to" (R5, `importSeason` in
+  `_shared/natural-age.ts`, which copied the old active-then-start-then-newest order), and
+  `finalize_field_import_job` (D2) resolves a practice row's Division in the same season. Both read
+  the job's season now, as does the mock twin (`finalize_import_job`, `finalize_field_import_job`,
+  `import-validation`). The seven other readers of the table hold.
+- **`create_import_job` fixes the season when the job is made** (none named: the active season),
+  rather than leaving NULL to mean "the active season at finalize time": a job then keeps the season
+  it was started for even if another season is activated before it is finalized. Only a job made
+  before E1 has none, and its finalizer uses the active season, as the plan says.
+- **`finalize_*` and the two writers also refuse a completed season** (22023, detail
+  `season_completed`), and `create_import_job` refuses to name one; E3's activation completes seasons.
+- **"Zero orgs with none active" is the migration's check, not the smoke's.** The smoke runs on a head
+  database that earlier smokes have seeded with draft-only organizations (a season inserted with no
+  status is a draft now), so only "none with two active, none with a NULL status" holds there; the
+  migration's end-state check, run when it applies, asserts every organization with seasons has one
+  active.
+- **Plants aimed at replaced bodies were re-aimed** (ten: M26, M30, M43 x3, M46 x5 now point at
+  `20261101010000`), as the harness's pre-flight demanded.
+- **Existing tests that assumed the old rules were updated, not loosened:** the 20261018030000 smoke
+  (76 policies, 17 split tables, and an admin's direct update of `season_settings` reaches nothing),
+  `rls_policy_matrix.sql`, `staff_is_admin.sql` (the count of policies naming a role), the
+  `create_import_job` signature in `definer_function_grants.sql`, `import_rpc_readiness_contract.sql`
+  and the 20260603120000 and 20261018050000 smokes, `demo_sessions.sql` (the four program writers on
+  its list of what a demo's admin may call), the calendar feed test's fake season (it asserted the
+  newest-season read), and the E2E steps that seeded seasons with no status or selected one by name.
+
+## As built (E1)
+
+- **Migration `20261101010000_one_active_season`** (revert and smoke under `docs/sql/`). It stops
+  with a RAISE if an organization has two active seasons or two names that match ignoring case and
+  padding (production had neither: _executed_ 2026-10-22), activates the newest season of an
+  organization with none active, makes `status` NOT NULL DEFAULT `draft`, adds the partial unique
+  index `season_settings_one_active` and `season_settings_org_name_key`, and drops the three direct
+  write policies on `season_settings` (every write goes through an RPC). `import_jobs` gains
+  `season_settings_id` (FK, ON DELETE CASCADE).
+- **Replaced bodies** (`create_import_job` as a 4-argument function, `finalize_import_job`,
+  `finalize_field_import_job`, `upsert_division_for_import`, `admin_upsert_division_settings`) are
+  rebuilt from the latest body, each behind an md5 `prosrc` guard. The guard compares against the
+  body this repo's migrations produce; a production body edited by hand would stop the migration,
+  which is the intent.
+- **The job's season is fixed at creation** and a finalizer uses it (NULL, only a pre-E1 job: the
+  active season). A completed season is refused (22023, `season_completed`). A frontend sends
+  `p_season_settings_id` only for a season that is not the active one, so it works against a database
+  that has not taken the migration (deploy window below).
+- **Frontend:** `utils/seasonSelection.js` holds the "which season am I looking at" rule (a stored
+  id, else the active season; never a draft or completed season by default); the top bar shows
+  `(status)` after a season that is not active. The mock twin mirrors each refusal.
+- **Verification:** `supabase/tests/one_active_season.sql` (30 assertions). Plants: M50 "the
+  finalizer ignores the job's season" was caught by the smoke and by pgTAP.
+
+## As built (E2)
+
+- **Migration `20261101020000_programs`.** `programs` (per season, unique name ignoring case and
+  padding, one default per season named "No program", member SELECT only), `divisions.program_id`
+  NOT NULL with a composite FK `(program_id, season_settings_id)` so a division cannot point at
+  another season's program, a BEFORE INSERT trigger that fills the default, and an AFTER INSERT
+  trigger on `season_settings` that creates the default. Four audited RPCs: `admin_upsert_program`,
+  `admin_set_division_program`, `admin_delete_program` (its divisions return to the default),
+  `admin_merge_programs`. Each takes the organization's advisory lock.
+- **Optional by construction.** No existing writer changed to know about programs; a club that never
+  creates one has one default and every page behaves as before. Tests: `tests/programs.test.js`
+  (grouping returns nothing while the default is the only program), the pgTAP file (a division made
+  by each existing writer lands in the default), and the Settings > Season E2E.
+- **Demo:** `demo_seed.division_programs` gives the 15 demo divisions four programs; `start_demo_session`
+  is rebuilt behind an md5 guard.
+- **Frontend:** the Programs section lives in Settings > Season (`ProgramsSection.jsx`); confirmations
+  name the divisions a delete or merge moves. Pages that listed divisions as "programs" now say
+  "division" (the word belongs to the new level). `ProgramOverview` groups under a heading only when a
+  non-default program holds a listed division.
+- **Axe:** the new Season & Calendar scan found two contrast failures already in `SeasonModule`
+  (the format hints at `opacity-70`, the selected season pill); both now use the tokens the sibling
+  controls use, and the scan passes in both themes.
+- **Verification:** `supabase/tests/programs.sql` (71 assertions). Plants: M51 "admin_upsert_program
+  judges only the season it is given" and M51 "a new season gets no default program", each caught by
+  the smoke and by pgTAP.
+- **For E3:** rollover must map the new season's trigger-made default program to the source's, not
+  create a second one.
+- **pgTAP is not installed here:** both files ran under a local stand-in for its assertion functions;
+  CI runs the real extension.
+- **Deploy window:** the frontend may ship before the migrations (it sends the new argument only for a
+  non-active season and tolerates a missing `program_id`). The frontend only reads `season_settings` (statically
+  reviewed: no insert, update or delete of it remains), so dropping the direct-write policies breaks nothing it does.
 
 ## Investigation notes
 

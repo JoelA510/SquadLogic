@@ -186,7 +186,8 @@ export const OrganizationProvider = ({ children }) => {
       if (linkCall.current?.key !== linkKey) {
         linkCall.current = {
           key: linkKey,
-          done: linkCoachRecord(),
+          // An anonymous visitor (a demo's) has no verified email to link by.
+          done: user.is_anonymous === true ? Promise.resolve() : linkCoachRecord(),
         };
       }
       await linkCall.current.done;
@@ -300,6 +301,13 @@ export const OrganizationProvider = ({ children }) => {
     },
     [currentOrganization]
   );
+
+  // Tag error reports from a demo (D4): set while the active organization is a demo, cleared when
+  // it changes to a real one or to none (sign-out is cleared in AuthContext too).
+  const activeIsDemo = Boolean(currentOrganization?.demo_expires_at);
+  useEffect(() => {
+    logger.setDemoContext(activeIsDemo);
+  }, [activeIsDemo, currentOrganization?.id]);
 
   // Memoize validated feature flags based on the current organization's data.
   // Using Option B: Selective Ignore via Zod transform.

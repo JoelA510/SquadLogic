@@ -9,7 +9,7 @@ import { isAdminRole } from '../constants/permissions.js';
  * @property {any} user
  * @property {boolean} loading
  * @property {() => Promise<any>} signOut
- * @property {(email: string) => Promise<{error: any}>} resetPasswordForEmail
+ * @property {(email: string, options?: { captchaToken?: string }) => Promise<{error: any}>} resetPasswordForEmail
  * @property {(password: string) => Promise<{error: any}>} updatePassword
  * @property {boolean} isConfigured
  * @property {boolean} isAdmin
@@ -114,6 +114,8 @@ export const AuthProvider = ({ children }) => {
             reportedUserId = null;
             logger.setUser(null);
           }
+          // Sign-out leaves any demo: the tag must not outlive the visitor's session (D4).
+          logger.setDemoContext(false);
         }
       } finally {
         if (!cancelled && myVersion === currentVersion) {
@@ -155,10 +157,17 @@ export const AuthProvider = ({ children }) => {
     // races between old and new handlers on the old version of this effect.
   }, []);
 
-  const resetPasswordForEmail = async (email) => {
+  // `captchaToken` is the Turnstile token the project's CAPTCHA setting requires on this call
+  // (D4); omitted, none is sent.
+  /**
+   * @param {string} email
+   * @param {{ captchaToken?: string }} [options]
+   */
+  const resetPasswordForEmail = async (email, { captchaToken } = {}) => {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/auth/reset-password`,
+        ...(captchaToken ? { captchaToken } : {}),
       });
       if (error) throw error;
       return { error: null };

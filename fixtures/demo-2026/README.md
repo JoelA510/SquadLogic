@@ -7,13 +7,16 @@ data is in these files**; keep it that way (AGENTS.md section 2).
 
 ## Files
 
-| File          | Rows  | Contents                                                                                                 |
-| ------------- | ----- | -------------------------------------------------------------------------------------------------------- |
-| `players.csv` | 1,259 | One player registration per row, the export's 37 columns verbatim.                                       |
-| `coaches.csv` | 251   | One coach registration per row, the export's 34 columns verbatim (two headers repeat, as in the export). |
+| File          | Rows  | Contents                                                                                                                                                                                            |
+| ------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `players.csv` | 1,259 | One player registration per row, the export's 37 columns verbatim.                                                                                                                                  |
+| `coaches.csv` | 251   | One coach registration per row, the export's 34 columns verbatim (two headers repeat, as in the export).                                                                                            |
+| `fields.csv`  | 196   | The league's practice grid, in the fields import's own columns: 6 grounds of two halves, 45-minute slots Monday to Thursday, and U4's four Saturday sessions (not an export: written for the demo). |
 
-The CSVs are the export's two sheets. `tests/demoFixture.test.js` holds the league shape, the
-placeholder shapes and the cross-references below.
+The two registration CSVs are the export's two sheets. `tests/demoFixture.test.js` holds the league shape, the
+placeholder shapes and the cross-references below. `scripts/build-demo-seed.mjs` turns all three into the
+`demo_seed` rows of migration `20261030010000` (what an import would store, plus the teams and rosters as
+formed here), and `tests/demoSeed.test.js` holds them equal.
 
 ## The league
 

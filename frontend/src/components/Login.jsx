@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { DEMO_ENABLED } from '../env.js';
+import Turnstile, { useCaptcha } from './auth/Turnstile.jsx';
 import logo from '../assets/SL-Logo.png';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
+  // `/?signup=1` (the demo's "Create an account") opens the sign-up form.
+  const [isSignUp, setIsSignUp] = useState(
+    () => new URLSearchParams(window.location.search).get('signup') === '1'
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
 
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const { isConfigured, resetPasswordForEmail } = useAuth();
+  const navigate = useNavigate();
+  // Turnstile: the project's CAPTCHA setting covers sign-in, sign-up and password reset alike, so
+  // each waits for a token, sends it, and gets a fresh one (a token is good for one call).
+  const captcha = useCaptcha();
+  const captchaOptions = captcha.token ? { captchaToken: captcha.token } : undefined;
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -25,7 +36,7 @@ export default function Login() {
     setMessage(null);
 
     if (isForgotPassword) {
-      const { error: resetError } = await resetPasswordForEmail(email);
+      const { error: resetError } = await resetPasswordForEmail(email, captchaOptions);
       if (resetError) {
         setError(resetError.message);
       } else {
@@ -36,6 +47,7 @@ export default function Login() {
       const { error, data } = await supabase.auth.signUp({
         email,
         password,
+        ...(captchaOptions ? { options: captchaOptions } : {}),
       });
       if (error) {
         setError(error.message);
@@ -46,11 +58,13 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
+        ...(captchaOptions ? { options: captchaOptions } : {}),
       });
       if (error) {
         setError(error.message);
       }
     }
+    captcha.reset();
     setLoading(false);
   };
 
@@ -236,9 +250,15 @@ export default function Login() {
             </div>
           )}
 
+          <Turnstile
+            resetKey={captcha.resetKey}
+            onToken={captcha.onToken}
+            onFailure={captcha.onFailure}
+          />
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !captcha.ready}
             className="btn btn-primary lg"
             style={{
               marginTop: '1.5rem',
@@ -258,6 +278,23 @@ export default function Login() {
                   : 'Sign In'}
           </button>
         </form>
+
+        {DEMO_ENABLED && (
+          <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-default"
+              onClick={() => navigate('/demo/start')}
+            >
+              Try the demo
+            </button>
+            <p
+              style={{ margin: '0.5rem 0 0', fontSize: '0.875rem', color: 'var(--text-secondary)' }}
+            >
+              No account needed: a private copy of a ready-made league for 30 minutes.
+            </p>
+          </div>
+        )}
 
         <div
           style={{

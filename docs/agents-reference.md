@@ -109,6 +109,9 @@ surface in both themes. New colors go into `index.css` (light **and** dark block
 - `VITE_USE_MOCK_SUPABASE` — force the mock client (`true`): `.env.local` or CI.
 - `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional.
 - `VITE_SENTRY_DSN` — the frontend Sentry DSN, optional: Vercel.
+- `VITE_DEMO_ENABLED`, `VITE_OFFICIAL_SITE_URL`, `VITE_TURNSTILE_SITE_KEY` — demo mode, all optional:
+  `true` shows the demo's entry point; the official deployment's URL (set on that project only);
+  the public Turnstile site key. `docs/operations/ENVIRONMENT.md`, `self-hosting.md`.
 - `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PASSWORD` — E2E test
   accounts: `.env.test`.
 

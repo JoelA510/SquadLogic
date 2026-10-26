@@ -153,6 +153,12 @@ R46="$REPO/docs/sql/20261029010000_revert.sql"
 # back on the foreign key), and the revert.
 M47="$REPO/supabase/migrations/20261029020000_register_invite_redeemed_audit_action.sql"
 R47="$REPO/docs/sql/20261029020000_revert.sql"
+# D3: the demo organization (the fences, the expiry in the membership helpers,
+# the start and purge RPCs, the cron job), and the revert.
+M48="$REPO/supabase/migrations/20261030010000_demo_sessions.sql"
+# D4: an anonymous sign-in carries no password, so the password-length trigger's
+# function skips an anonymous INSERT (and nothing else), and the revert.
+M49="$REPO/supabase/migrations/20261031010000_anonymous_signups_skip_password_check.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3782,11 +3788,12 @@ END;
 
 # Staff are admins. The smoke RAISEs on each; the revert claim on a policy left
 # naming staff and on a body that drifted.
-plant "M31 is_org_admin still refuses staff" "$M31" \
+# Aimed at $M48 (D3), which replaces is_org_admin with the expiry join.
+plant "M31 is_org_admin still refuses staff" "$M48" \
   "          AND role IN ('admin', 'tenant_admin', 'staff')
-    );" \
+          AND (o.demo_expires_at IS NULL OR o.demo_expires_at > now())" \
   "          AND role IN ('admin', 'tenant_admin')
-    );" \
+          AND (o.demo_expires_at IS NULL OR o.demo_expires_at > now())" \
   "smoke 20261020030000"
 
 # Aimed at $M41: 20261024010000 replaces admin_change_member_role (R3: no
@@ -4809,6 +4816,50 @@ DECLARE
 BEGIN
 " \
   "smoke 20261029020000"
+
+# D3's three security fences, one plant each (the smoke 20261030010000 is what
+# must go red; each was also applied by hand in a scratch cluster and caught by
+# the smoke and by supabase/tests/demo_sessions.sql): an anonymous session
+# joining a real organization, a member of an expired demo still being a member,
+# and the purge deleting an organization that is not a demo.
+plant "M48 an anonymous session joins a real organization" "$M48" \
+  "    IF public.caller_is_anonymous()
+       AND (NEW.profile_id IS DISTINCT FROM auth.uid()" \
+  "    IF false AND public.caller_is_anonymous()
+       AND (NEW.profile_id IS DISTINCT FROM auth.uid()" \
+  "smoke 20261030010000"
+
+plant "M48 a member of an expired demo is still a member" "$M48" \
+  "        WHERE organization_id = org_id
+          AND profile_id = auth.uid()
+          AND (o.demo_expires_at IS NULL OR o.demo_expires_at > now())" \
+  "        WHERE organization_id = org_id
+          AND profile_id = auth.uid()
+          AND true" \
+  "smoke 20261030010000"
+
+plant "M48 the purge deletes an organization that is not a demo" "$M48" \
+  "         WHERE demo_expires_at IS NOT NULL AND demo_expires_at <= now()
+        RETURNING demo_owner" \
+  "         WHERE demo_expires_at IS NULL OR demo_expires_at <= now()
+        RETURNING demo_owner" \
+  "smoke 20261030010000"
+
+# D4's password-length exemption, two plants (the smoke 20261031010000 must go red for each): the
+# anonymous skip never firing (so no visitor can sign in), and the password-change test back to `<>`
+# (an anonymous user's NULL password then never differs, so their first password goes unchecked; the
+# smoke makes the column nullable, as Supabase's is, to see it).
+plant "M49 an anonymous sign-up is refused for want of a password_length" "$M49" \
+  "    IF TG_OP = 'INSERT' AND NEW.is_anonymous IS TRUE THEN
+        RETURN NEW;" \
+  "    IF TG_OP = 'INSERT' AND NEW.is_anonymous IS TRUE AND false THEN
+        RETURN NEW;" \
+  "smoke 20261031010000"
+
+plant "M49 an anonymous user's first password goes unchecked" "$M49" \
+  "NEW.encrypted_password IS DISTINCT FROM OLD.encrypted_password) OR" \
+  "NEW.encrypted_password <> OLD.encrypted_password) OR" \
+  "applying 20261031010000_anonymous_signups_skip_password_check.sql"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

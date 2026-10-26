@@ -47,6 +47,9 @@ const { env, problems } = validateClientEnv(
     VITE_USE_MOCK_SUPABASE: import.meta.env.VITE_USE_MOCK_SUPABASE,
     VITE_SUPABASE_PERSISTENCE_URL: import.meta.env.VITE_SUPABASE_PERSISTENCE_URL,
     VITE_SENTRY_DSN: import.meta.env.VITE_SENTRY_DSN,
+    VITE_DEMO_ENABLED: import.meta.env.VITE_DEMO_ENABLED,
+    VITE_OFFICIAL_SITE_URL: import.meta.env.VITE_OFFICIAL_SITE_URL,
+    VITE_TURNSTILE_SITE_KEY: import.meta.env.VITE_TURNSTILE_SITE_KEY,
   },
   { production: IS_PRODUCTION_BUILD }
 );
@@ -56,7 +59,7 @@ const { env, problems } = validateClientEnv(
  * A production build without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
  * refuses to start on every host: it never falls back to the mock. The host
  * plays no part. It once exempted `localhost` and every `*.vercel.app` host,
- * and the production host is `squadlogic.vercel.app`, so a build missing its
+ * and the production host was one of those `*.vercel.app` names, so a build missing its
  * variables served the mock there (audit finding 5.1). The only way a
  * production build runs the mock is the explicit opt-in,
  * `VITE_USE_MOCK_SUPABASE=true` at build time (Playwright and CI set it).
@@ -141,3 +144,23 @@ export const APP_VERSION = import.meta.env.VITE_APP_VERSION;
  * Sentry's `environment` (`lib/sentryOptions.js`).
  */
 export const DEPLOY_ENV = import.meta.env.VITE_VERCEL_ENV;
+
+/**
+ * Does this deployment offer the demo (docs/changes/2026-10-22-demo-mode.md, D4)? `true` shows
+ * "Try the demo" on the sign-in page. Unset on a self-hosted deployment, whose backend may not allow
+ * anonymous sign-in.
+ */
+export const DEMO_ENABLED = env.demoEnabled;
+
+/**
+ * The official hosted deployment's URL, or `undefined`. Set only on that deployment's own Vercel
+ * project: the demo's import notice then adds "SquadLogic is also hosted at ..." on any other origin.
+ */
+export const OFFICIAL_SITE_URL = env.officialSiteUrl;
+
+/**
+ * The public Cloudflare Turnstile site key, or `undefined`: no widget renders and no captcha token
+ * is sent (a self-hosted project with CAPTCHA off). The secret key lives only in the Supabase
+ * project's CAPTCHA settings.
+ */
+export const TURNSTILE_SITE_KEY = env.turnstileSiteKey;

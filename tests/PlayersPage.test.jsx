@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => ({
   createPlayer: vi.fn().mockResolvedValue({ success: true, player: { id: 'new' } }),
   deletePlayers: vi.fn().mockResolvedValue({ success: true }),
   features: {},
+  isDemo: false,
+}));
+
+vi.mock('../frontend/src/hooks/useDemo.js', () => ({
+  useDemo: () => ({ isDemo: mocks.isDemo, expiresAtMs: null }),
 }));
 
 vi.mock('../frontend/src/hooks/usePlayersData.js', () => ({
@@ -83,6 +88,7 @@ describe('PlayersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.features = {};
+    mocks.isDemo = false;
     mocks.updatePlayer.mockResolvedValue({ success: true });
     mocks.bulkUpdatePlayers.mockResolvedValue({ success: true });
   });
@@ -156,5 +162,44 @@ describe('PlayersPage', () => {
     // both the header action and the grid add-row carry this label
     fireEvent.click(screen.getAllByRole('button', { name: /Add player/ })[0]);
     await vi.waitFor(() => expect(mocks.createPlayer).toHaveBeenCalled());
+  });
+
+  // Demo mode (docs/changes/2026-10-22-demo-mode.md, D3/D4): a demo's people are read-only except
+  // where they play and how they are rated. The server refuses the rest; the page does not offer it.
+  describe('in a demo', () => {
+    beforeEach(() => {
+      mocks.isDemo = true;
+    });
+
+    it('does not let a name, gender or buddy request be edited', () => {
+      renderPage();
+      fireEvent.doubleClick(screen.getByText('Alex Smith'));
+      expect(screen.queryByRole('textbox', { name: 'Player' })).not.toBeInTheDocument();
+      fireEvent.doubleClick(screen.getByText('Jamie Jones'));
+      expect(screen.queryByRole('textbox', { name: 'Buddy request' })).not.toBeInTheDocument();
+      expect(mocks.updatePlayer).not.toHaveBeenCalled();
+    });
+
+    it('still lets a status be changed (control: the grid is not simply frozen)', async () => {
+      renderPage();
+      fireEvent.doubleClick(screen.getAllByText('active')[0]);
+      const select = await screen.findByRole('combobox', { name: 'Status' });
+      fireEvent.change(select, { target: { value: 'inactive' } });
+      fireEvent.keyDown(select, { key: 'Enter' });
+      await vi.waitFor(() =>
+        expect(mocks.updatePlayer).toHaveBeenCalledWith('p1', { status: 'inactive' })
+      );
+    });
+
+    it('offers no way to add or delete a player', () => {
+      renderPage();
+      expect(screen.queryByRole('button', { name: /Add player/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select row' })[0]);
+      expect(screen.getByRole('button', { name: /^Waitlist$/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Delete$/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getAllByRole('button', { name: /Row actions|actions/i })[0]);
+      expect(screen.queryByRole('menuitem', { name: /Delete player/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /Open record/ })).toBeInTheDocument();
+    });
   });
 });

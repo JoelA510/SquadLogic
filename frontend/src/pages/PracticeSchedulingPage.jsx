@@ -26,6 +26,7 @@ import { describeLockReport } from '../utils/lockReport.js';
 import { overrideSlotLoad } from '../utils/overrideSlotLoad.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { autoSchedulerConfig, isDemoOrganization } from '../lib/demo.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
 import { useSeasonPracticeAssignments } from '../hooks/useSeasonPracticeAssignments.js';
@@ -1036,15 +1037,12 @@ export default function PracticeSchedulingPage() {
       lockedAssignments,
       scoringWeights: {},
       seasonSettingsId: currentSeasonSetting?.id,
-      config: {
-        timeBudgetMs: 8000,
-        maxIterations: 1000,
-        seed: 42,
-      },
+      config: autoSchedulerConfig(isDemoOrganization(currentOrganization)),
     });
   }, [
     autoScheduler,
     canManageSchedule,
+    currentOrganization,
     currentSeasonSetting?.id,
     lockedAssignments,
     schedulerDisabled,

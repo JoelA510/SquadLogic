@@ -8,6 +8,7 @@ import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   tables: {},
+  demoExpiresAt: null,
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
@@ -30,7 +31,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: MOCK_ORG_ID },
+    currentOrganization: { id: MOCK_ORG_ID, demo_expires_at: mocks.demoExpiresAt },
     featureFlags: {},
     loading: false,
   }),
@@ -55,6 +56,7 @@ function renderPage() {
 describe('PlayerRecordPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.demoExpiresAt = null;
     mocks.rpc.mockResolvedValue({ data: null, error: null });
     mocks.tables = {
       players: [
@@ -146,5 +148,29 @@ describe('PlayerRecordPage', () => {
       'Overview',
       'Team & Schedule',
     ]);
+  });
+
+  // Demo mode (docs/changes/2026-10-22-demo-mode.md, D3/D4): a demo's players are read-only except
+  // where they play and how they are rated.
+  describe('in a demo', () => {
+    beforeEach(() => {
+      mocks.demoExpiresAt = new Date(Date.now() + 20 * 60_000).toISOString();
+    });
+
+    it('shows the names, gender and buddy request but offers no edit on them', async () => {
+      renderPage();
+      await screen.findByRole('heading', { name: 'Alex Smith' });
+      for (const label of ['First name', 'Last name', 'Gender', 'Buddy request']) {
+        expect(screen.queryByRole('button', { name: new RegExp(`^Edit ${label}:`) })).toBeNull();
+      }
+      expect(screen.getByText('Alex')).toBeInTheDocument();
+    });
+
+    it('still offers an edit on where the player plays (control)', async () => {
+      renderPage();
+      await screen.findByRole('heading', { name: 'Alex Smith' });
+      expect(screen.getByRole('button', { name: /^Edit Status:/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Edit Jersey #:/ })).toBeInTheDocument();
+    });
   });
 });

@@ -94,6 +94,13 @@ Raw import retention is handled by
 It requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, validates
 `dry_run`, and fails fast when either secret is missing.
 
+The demo purge (`pg_cron`, every ten minutes) is watched from outside by
+[`.github/workflows/demo-health.yml`](../../.github/workflows/demo-health.yml), hourly: it reads
+`demo_health()` with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, fails when an expired demo is
+over 30 minutes past expiry, the newest `demo_purge_log` row is over 30 minutes old, or the answer
+cannot be read, and a failed scheduled run opens (once) or comments on a "Demo purge is failing"
+issue (`scripts/ci/demoHealth.mjs`, `tests/demoHealth.test.js`).
+
 ## Dependency audit
 
 [`.github/workflows/audit.yml`](../../.github/workflows/audit.yml) runs
@@ -557,7 +564,16 @@ other environment.
   the files it did upload;
   and every `verify_jwt` function refusing a request with
   only the anon key (read from `supabase/config.toml`, each refusing on its own,
-  not only at the gateway), and `calendar-feed` answering without one. One
+  not only at the gateway), and `calendar-feed` answering without one.
+  `real_backend_demo.feature` (demo mode, D4) starts a demo as an anonymous visitor on this
+  stack (anonymous sign-ins are on in `supabase/config.toml`, CAPTCHA off), reads its 128 teams, 1,259 players and
+  251 coaches with the visitor's own session, schedules practices and checks U4 sits only in its
+  four reserved sessions and plays no games, changes a player's status, is refused a rename
+  (`demo_read_only`), meets the import notice, then expires the demo and runs
+  `purge_expired_demos()` and finds the organization, its rows and the visitor gone. That last step
+  stands in for time and the cron job, so the job also exports the stack's own service key
+  (`E2E_REAL_BACKEND_SERVICE_KEY`, from `supabase status`, this run's and no other's) to it;
+  no other step uses it. One
   worker, in file order, against one database. (A CORS preflight check was
   tried and dropped: the local stack allowed the headers even with a
   function's own CORS headers stripped, so it could not fail.)
@@ -723,6 +739,8 @@ Free). The limits that bit, and the levers:
 | Vercel Hobby: 100 deployments a day (error `api-deployments-free-per-day`, 2026-10-14) | Every push to any branch with automatic deployments on | `git.deploymentEnabled` (above); previews on request. On 2026-10-13/14, 100 deployments in 12.8 h: 13 `main`, about 61 agent branches, 14 from a notes branch with no app, 11 Dependabot |
 | GitHub Actions | Each push runs every workflow (about 17 min for `Build & Test`); the strict ruleset makes every merge re-run CI on each open pull request once it is brought up to date | Minutes are free on standard runners for a public repository; the cost is wall time. At most two pull requests in flight; push once per pull request after local gates pass |
 | Dependabot | Each pull request and each rebase is a push | `.github/dependabot.yml`: monthly, minors and patches grouped, majors grouped as one inventory PR (not merged as such), rebasing off, a small open-PR limit |
+| Supabase Free: database size | 500 MB read-only threshold (28 MB used when the plan read production on 2026-10-22, quoted from `docs/changes/2026-10-22-demo-mode.md`, not re-read here). A demo league takes **1.4 MiB** with indexes (D3's measurement, local PostgreSQL 16, one demo) and is deleted within ten minutes of its 30 minutes | The demo cap: at most 10 live demos, so at most about 14 MiB at that measurement. `purge_expired_demos()` runs every ten minutes under `pg_cron`, and `demo-health.yml` opens an issue when it stops (above). Not measured under load: the footprint is one demo's, times the cap |
+| Supabase Free: monthly active users | 50,000 included (Supabase docs, "Manage Monthly Active Users usage"); every demo visitor is an anonymous user and counts | The cap of 10 concurrent demos and Turnstile on the anonymous sign-in. Anonymous sign-ins are rate-limited at 30 an hour per IP by default (Supabase docs). `purge_expired_demos()` deletes each visitor with their demo |
 | Supabase Free | Hosted project resources; Pro-only features | CI runs pgTAP and the real-backend E2E against a local `supabase start`, never the hosted project. Leaked-password protection is Pro-only (Supabase docs, 2026-10-14): set a minimum length and required character classes instead. Keep the Supabase GitHub integration's "Deploy to production" and "Automatic branching" off (`deploy-migrations` is the only migration writer; branching also redeploys Vercel previews) |
 
 ## Rollback

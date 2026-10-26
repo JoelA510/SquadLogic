@@ -84,6 +84,36 @@ Feature: Every top-level route passes an automated accessibility scan
       | /organizations/new            | Welcome to SquadLogic    | Establish Organization                  |
       | /auth/reset-password          | Reset Your Password      | Confirm Password                        |
 
+  # Demo mode (docs/changes/2026-10-22-demo-mode.md, D4). The entry page is scanned in its failed
+  # state (the demo is full), the one it rests in; the ended page and the demo's own dashboard,
+  # with its timer in the header, are scanned as a visitor sees them.
+
+  Scenario: The demo entry page passes axe in the light and dark themes
+    Given the demo is full
+    When I open the demo entry page
+    Then I stay on the entry page and it says the demo is busy
+    And axe finds no serious or critical violations on "/demo/start" in the "light" theme
+    When I switch the demo entry page to the dark theme
+    Then I stay on the entry page and it says the demo is busy
+    And axe finds no serious or critical violations on "/demo/start" in the "dark" theme
+
+  Scenario: The demo-ended page passes axe in the light and dark themes
+    Given I am signed out on the sign-in page
+    When I open the demo-ended page
+    Then the scan sees "Your demo has ended" on the page
+    And axe finds no serious or critical violations on "/demo/ended" in the "light" theme
+    When I switch the demo-ended page to the dark theme
+    Then the scan sees "Your demo has ended" on the page
+    And axe finds no serious or critical violations on "/demo/ended" in the "dark" theme
+
+  Scenario: The demo league's dashboard, with its timer in the header, passes axe in both themes
+    Given I am in the demo league
+    Then the scan sees "left" on the page
+    And axe finds no serious or critical violations on "/" in the "light" theme
+    When I switch to the dark theme on this page
+    Then the scan sees "left" on the page
+    And axe finds no serious or critical violations on "/" in the "dark" theme
+
   Scenario: An invite link opened while signed out passes axe in the light and dark themes
     Given I am signed out and open the invite link "SPRING2026"
     Then the scan sees "You've been invited to join an organization" on the page

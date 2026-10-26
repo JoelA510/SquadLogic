@@ -21,6 +21,9 @@ export const CLIENT_ENV_NAMES = /** @type {const} */ ([
   'VITE_USE_MOCK_SUPABASE',
   'VITE_SUPABASE_PERSISTENCE_URL',
   'VITE_SENTRY_DSN',
+  'VITE_DEMO_ENABLED',
+  'VITE_OFFICIAL_SITE_URL',
+  'VITE_TURNSTILE_SITE_KEY',
 ]);
 
 /** Where the persistence Edge Functions live when nothing else says (`supabase start`). */
@@ -58,6 +61,17 @@ function isSentryDsn(value) {
     // Not a URL, so not a DSN (see isHttpUrl).
     return false;
   }
+}
+
+/**
+ * A Cloudflare Turnstile site key (the public half; the secret half lives only in the Supabase
+ * project's CAPTCHA settings): letters, digits, `-` and `_`, no spaces or URL syntax. Cloudflare
+ * publishes no stricter shape (real keys start `0x4`, its test keys `1x`, `2x` and `3x`), so this
+ * refuses a pasted URL, a key with a space or a quote in it, and anything too short to be one.
+ * @param {string} value
+ */
+function isTurnstileSiteKey(value) {
+  return /^[A-Za-z0-9_-]{8,64}$/.test(value);
 }
 
 /**
@@ -107,6 +121,18 @@ const schema = z.object({
     (value) => value === undefined || isSentryDsn(value),
     'must be a Sentry DSN, https://<public key>@<host>/<project id>; leave it unset to turn Sentry off'
   ),
+  VITE_DEMO_ENABLED: optionalText.refine(
+    (value) => value === undefined || value === 'true' || value === 'false',
+    "must be 'true' or 'false' (or unset)"
+  ),
+  VITE_OFFICIAL_SITE_URL: optionalText.refine(
+    (value) => value === undefined || isHttpUrl(value),
+    'must be an http(s) URL (the official hosted deployment); leave it unset anywhere else'
+  ),
+  VITE_TURNSTILE_SITE_KEY: optionalText.refine(
+    (value) => value === undefined || isTurnstileSiteKey(value),
+    'must be a Cloudflare Turnstile site key (letters, digits, - and _); the secret key belongs only in the Supabase CAPTCHA settings'
+  ),
 });
 
 /**
@@ -117,6 +143,11 @@ const schema = z.object({
  * @property {boolean} isMockMode The mock runs: the opt-in, or a dev server without both Supabase variables.
  * @property {string} apiBaseUrl The persistence Edge Functions base, without a trailing slash.
  * @property {string | undefined} sentryDsn Unset: Sentry is off.
+ * @property {boolean} demoEnabled `VITE_DEMO_ENABLED=true`: the sign-in page offers the demo.
+ * @property {string | undefined} officialSiteUrl The official hosted deployment, named by the demo's
+ *   import notice on any other origin. Unset anywhere that is not that deployment's own project.
+ * @property {string | undefined} turnstileSiteKey Unset: no Turnstile widget renders and no
+ *   captcha token is sent.
  */
 
 /**
@@ -199,6 +230,9 @@ export function validateClientEnv(raw, { production }) {
       isMockMode,
       apiBaseUrl: persistenceUrl.replace(/\/+$/, ''),
       sentryDsn: values.VITE_SENTRY_DSN,
+      demoEnabled: values.VITE_DEMO_ENABLED === 'true',
+      officialSiteUrl: values.VITE_OFFICIAL_SITE_URL,
+      turnstileSiteKey: values.VITE_TURNSTILE_SITE_KEY,
     },
     problems,
   };

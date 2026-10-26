@@ -104,6 +104,22 @@ headroom at the time.
 40.19 to 40.30 KB; total first-paint 276.85 to 282.25 KB of 289.06 KB. No
 budget was raised.
 
+Demo mode's app side (D4 of `docs/changes/2026-10-22-demo-mode.md`, 2026-10-26), measured on the
+build CI makes (stand-in Supabase and Sentry variables), the base `8d7571c` against this change, gzip as
+`check:bundle` prints it:
+
+| File | Before | After |
+| --- | --- | --- |
+| main entry | 174.14 KB | 175.83 KB (+1.69 KB) |
+| main css | 19.77 KB | 20.05 KB (+0.28 KB) |
+| total first paint (6 files) | 274.30 KB | 276.27 KB (+1.97 KB) |
+
+The main-entry cap (190,000 B, 185.55 KB) leaves **about 9.7 KB of headroom**; first paint is 12.8 KB
+under its 289.06 KB cap. What grew the entry: the header timer (in `TopBar`), the demo helpers
+(`lib/demo.js`), the Turnstile component and the sign-in page's demo button, and the routing in
+`App.jsx`. `DemoStartPage`, `DemoEndedPage` and the import notice are lazy chunks, loaded only by a
+demo visitor; Cloudflare's script is fetched on demand, never bundled. No budget was raised.
+
 Vite 7 to 8 (Rolldown and Oxc replace Rollup and esbuild, 2026-10-19), same build,
 gzip as `check:bundle` prints it:
 

@@ -13,6 +13,8 @@ import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName, divisionFilters } from '../utils/divisions.js';
 import { STATUS_TONE } from '../constants/playerStatus.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
+import { useDemo } from '../hooks/useDemo.js';
+import { canEditPlayerField } from '../lib/demo.js';
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -50,6 +52,10 @@ export default function PlayersPage() {
     deletePlayers,
   } = usePlayersData();
   const { isEnabled, genderModel } = useFeatures();
+  // A demo's people are read-only except where they play and how they are rated (D3 fences them on
+  // the server; this hides the controls the server would refuse): no names, gender or buddy
+  // request edits, no new players, no deletes.
+  const { isDemo } = useDemo();
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -142,7 +148,8 @@ export default function PlayersPage() {
         label: 'Player',
         width: 190,
         sticky: true,
-        editable: true,
+        editable:
+          canEditPlayerField(isDemo, 'first_name') && canEditPlayerField(isDemo, 'last_name'),
         render: (row) => (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
             <span className="linklike" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -155,7 +162,7 @@ export default function PlayersPage() {
         key: 'gender',
         label: 'Gender',
         width: 80,
-        editable: true,
+        editable: canEditPlayerField(isDemo, 'gender'),
         type: 'select',
         options: [
           { value: 'm', label: 'M' },
@@ -225,7 +232,7 @@ export default function PlayersPage() {
         key: 'buddy_request',
         label: 'Buddy request',
         width: 160,
-        editable: true,
+        editable: canEditPlayerField(isDemo, 'buddy_request'),
         placeholder: 'None',
       });
     }
@@ -242,7 +249,7 @@ export default function PlayersPage() {
       });
     }
     return cols;
-  }, [divisions, genderModel, divisionNameById, statusOptions, isEnabled]);
+  }, [divisions, genderModel, divisionNameById, statusOptions, isEnabled, isDemo]);
 
   if (loading) return <LoadingScreen />;
 
@@ -268,17 +275,19 @@ export default function PlayersPage() {
             </span>
           }
           actions={
-            <Button
-              variant="primary"
-              size="sm"
-              icon={UserPlus}
-              onClick={async () => {
-                const result = await createPlayer({ status: 'pending' });
-                report(result, result.success ? 'Player added — name them in the grid' : null);
-              }}
-            >
-              Add player
-            </Button>
+            isDemo ? undefined : (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={UserPlus}
+                onClick={async () => {
+                  const result = await createPlayer({ status: 'pending' });
+                  report(result, result.success ? 'Player added — name them in the grid' : null);
+                }}
+              >
+                Add player
+              </Button>
+            )
           }
         />
       }
@@ -298,14 +307,18 @@ export default function PlayersPage() {
         setSearch={setSearch}
         searchKeys={['_name', '_division', 'buddy_request', 'status']}
         onCellChange={handleCellChange}
-        onAddRow={async () => {
-          const result = await createPlayer({ status: 'pending' });
-          report(result, result.success ? 'Player added — name them in the grid' : null);
-        }}
+        onAddRow={
+          isDemo
+            ? undefined
+            : async () => {
+                const result = await createPlayer({ status: 'pending' });
+                report(result, result.success ? 'Player added — name them in the grid' : null);
+              }
+        }
         addLabel="Add player"
         rowActions={[
           { id: 'open', label: 'Open record', icon: ExternalLink },
-          { id: 'delete', label: 'Delete player', icon: Trash2, danger: true },
+          ...(isDemo ? [] : [{ id: 'delete', label: 'Delete player', icon: Trash2, danger: true }]),
         ]}
         onRowAction={async (action, row) => {
           if (action === 'open') {
@@ -358,21 +371,23 @@ export default function PlayersPage() {
                 Waitlist
               </Button>
             )}
-            <Button
-              variant="ghost-danger"
-              size="sm"
-              icon={Trash2}
-              onClick={async () => {
-                if (
-                  window.confirm(`Delete ${selectedIds.length} players? This cannot be undone.`)
-                ) {
-                  report(await deletePlayers(selectedIds), 'Players deleted');
-                  setSelected(new Set());
-                }
-              }}
-            >
-              Delete
-            </Button>
+            {!isDemo && (
+              <Button
+                variant="ghost-danger"
+                size="sm"
+                icon={Trash2}
+                onClick={async () => {
+                  if (
+                    window.confirm(`Delete ${selectedIds.length} players? This cannot be undone.`)
+                  ) {
+                    report(await deletePlayers(selectedIds), 'Players deleted');
+                    setSelected(new Set());
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            )}
           </>
         }
         emptyText="No players yet — import registrations or add players manually"

@@ -94,6 +94,26 @@ describe('RosterManager view', () => {
     expect(onTeamsChange).not.toHaveBeenCalled();
   });
 
+  it('a move to a team the division filter hides shows that division and keeps focus on the player', () => {
+    render(<RosterManager initialTeams={makeTeams()} onTeamsChange={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Show division'), { target: { value: 'U4' } });
+    expect(screen.queryByTestId('team-column-t3')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Casey Cedar to another team' }));
+    const dialog = screen.getByRole('dialog', { name: 'Move Casey Cedar' });
+    fireEvent.change(within(dialog).getByLabelText('Destination team'), {
+      target: { value: 't3' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move player' }));
+
+    // The destination is on screen, and focus is on the moved player's Move button, not the page.
+    expect(screen.getByLabelText('Show division')).toHaveValue('U5 Girls');
+    const moved = within(screen.getByTestId('team-column-t3')).getByTestId('player-card-p3');
+    expect(within(moved).getByRole('button', { name: /^Move Casey Cedar/ })).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+    expect(screen.getByText(/Now showing U5 Girls/)).toBeInTheDocument();
+  });
+
   it('filters the cards by division without losing the others from the Move choices', () => {
     render(<RosterManager initialTeams={makeTeams()} onTeamsChange={() => {}} />);
     fireEvent.change(screen.getByLabelText('Show division'), { target: { value: 'U5 Girls' } });

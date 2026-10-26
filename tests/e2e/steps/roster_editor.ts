@@ -169,3 +169,21 @@ Then('no export file is offered', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Download Master CSV' })).toHaveCount(0);
   await expect(page.getByText('Generated Files')).toHaveCount(0);
 });
+
+Then('every control in the header is on screen', async ({ page }) => {
+  // The theme toggle, the notifications bell, the account menu and the demo timer were past the
+  // right edge at 400px (WCAG 1.4.10): each must now sit inside the window.
+  const controls = [
+    page.getByRole('button', { name: /^Switch to (dark|light) mode$/ }),
+    page.getByRole('button', { name: 'Notifications' }),
+    page.getByRole('button', { name: /^Account menu/ }),
+    page.getByRole('timer'),
+  ];
+  const width = page.viewportSize()?.width ?? 0;
+  for (const control of controls) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box, 'a header control has no box').not.toBeNull();
+    expect((box?.x ?? -1) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= width + 1).toBe(true);
+  }
+});

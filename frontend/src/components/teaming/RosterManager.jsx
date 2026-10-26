@@ -247,7 +247,19 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
     if (!player || !source || !dest) return;
     focusAfterMove.current = player.id;
     commitTeams(movePlayerToTeam(current, player.id, destTeamId));
-    setAnnouncement(`Moved ${playerNameOf(player)} from ${source.name} to ${dest.name}`);
+    // A destination the division filter hides would unmount the player's row with nothing to
+    // take focus (WCAG 2.4.3): show the destination's division, so the row is there to focus.
+    const destDivision = dest.division ? String(dest.division) : ALL_DIVISIONS;
+    const filterChanged = division !== ALL_DIVISIONS && division !== destDivision;
+    if (filterChanged) setDivision(destDivision);
+    setAnnouncement(
+      `Moved ${playerNameOf(player)} from ${source.name} to ${dest.name}` +
+        (filterChanged
+          ? destDivision === ALL_DIVISIONS
+            ? '. Showing all divisions.'
+            : `. Now showing ${destDivision}.`
+          : '')
+    );
   };
 
   const handleDragStart = (event) => {

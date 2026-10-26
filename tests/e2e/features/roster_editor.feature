@@ -45,3 +45,10 @@ Feature: Manual roster editor
     And the Exports page says no practices or games have been applied
     When I press "Generate CSVs"
     Then no export file is offered
+
+  Scenario: The header's controls reflow at phone width instead of running off the edge
+    Given I am in a demo league of 40 players
+    When the window is 400 pixels wide
+    And I open the Exports page
+    Then every control in the header is on screen
+    And the page does not scroll sideways

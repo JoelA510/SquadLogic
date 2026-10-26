@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
+import { fetchAllPages } from '../lib/pagedFetch.js';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useEnterpriseMetrics } from '../contexts/AnalyticsContext.jsx';
 import {
@@ -56,6 +58,7 @@ export default function EnterpriseDashboard() {
     users: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [exporting, _setExporting] = useState(false);
   const [selectedMapping, setSelectedMapping] = useState('');
 
@@ -67,14 +70,20 @@ export default function EnterpriseDashboard() {
       try {
         // Independent reads, sent together rather than one after another.
         const orgId = currentOrganization.id;
-        const [{ data: pData }, { data: orgData }] = await Promise.all([
-          supabase
-            .from('players')
-            .select('id, custom_attributes, team_id, division')
-            .eq('organization_id', orgId),
+        // Players are paged: an unranged select is cut at the server's row cap (1000), and the
+        // distributions below would describe the first thousand as the whole league. A page
+        // that fails throws, so the charts never draw from part of the players.
+        const [pData, { data: orgData }] = await Promise.all([
+          fetchAllPages(() =>
+            supabase
+              .from('players')
+              .select('id, custom_attributes, team_id, division')
+              .eq('organization_id', orgId)
+          ),
           supabase.from('view_org_metrics').select('*').eq('organization_id', orgId).single(),
         ]);
-        if (pData) setPlayers(pData);
+        setLoadError(null);
+        setPlayers(pData);
 
         if (orgData) {
           setMetrics({
@@ -84,6 +93,8 @@ export default function EnterpriseDashboard() {
         }
       } catch (err) {
         logger.error(err);
+        setPlayers([]);
+        setLoadError(err?.message || 'Players could not be loaded.');
       } finally {
         setLoading(false);
       }
@@ -131,6 +142,11 @@ export default function EnterpriseDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-fadeIn">
+      <DataErrorBanner
+        message={
+          loadError && `Players could not be loaded, so nothing below is shown: ${loadError}`
+        }
+      />
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>

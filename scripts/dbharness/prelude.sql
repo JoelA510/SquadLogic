@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS auth.users (
 -- (20261020040000) reads it. Added rather than declared above so a harness
 -- database built before this line existed gains it too.
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
+-- Supabase's auth.users carries is_anonymous (NOT NULL DEFAULT false); the demo purge
+-- (20261030010000) reads it to find the visitors it signed in.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_anonymous boolean NOT NULL DEFAULT false;
 
 -- `auth.uid()` reads a session GUC so a harness script can act as a user:
 --   SET LOCAL request.jwt.claim.sub = '<uuid>';

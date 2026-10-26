@@ -1305,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261030010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1870,6 +1870,34 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('d2000000-0000-4000-8000-000000000004','d2000000-0000-4000-8000-00000000000a','d2000000-0000-4000-8000-00000000000c','mon','17:00','18:00',NULL);" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the reserved slots and practice-only divisions the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261030010000's revert DESTROYS every demo organization and removes the
+  # anonymous visitors who own them**, so its warning is the check. FOUR demo
+  # organizations, TWO live, THREE owners (one demo has none) and one anonymous
+  # user who owns nothing, beside a real organization and a real user: every
+  # figure distinct, so counting every organization, every owner or only the live
+  # ones prints a different number, and the orphan must survive. Inserted as the table owner (the RPC is
+  # the smoke's); every name is synthetic.
+  if [ "$id" = "20261030010000" ]; then
+    if ! psql_cmd "INSERT INTO auth.users (id, email, raw_user_meta_data, is_anonymous) VALUES
+                ('d3000000-0000-4000-8000-0000000000a1', NULL, jsonb_build_object('password_length', 12), true),
+                ('d3000000-0000-4000-8000-0000000000a2', NULL, jsonb_build_object('password_length', 12), true),
+                ('d3000000-0000-4000-8000-0000000000a3', NULL, jsonb_build_object('password_length', 12), true),
+                ('d3000000-0000-4000-8000-0000000000a4', NULL, jsonb_build_object('password_length', 12), true),
+                ('d3000000-0000-4000-8000-0000000000f1', 'revert-demo-real@example.test', jsonb_build_object('password_length', 12), false);
+              INSERT INTO public.organizations (id, name, slug, demo_expires_at, demo_owner) VALUES
+                ('d3000000-0000-4000-8000-00000000000a','Demo A','revert-demo-a', now() + interval '10 minutes', 'd3000000-0000-4000-8000-0000000000a1'),
+                ('d3000000-0000-4000-8000-00000000000b','Demo B','revert-demo-b', now() + interval '20 minutes', 'd3000000-0000-4000-8000-0000000000a2'),
+                ('d3000000-0000-4000-8000-00000000000c','Demo C','revert-demo-c', now() - interval '5 minutes', 'd3000000-0000-4000-8000-0000000000a3'),
+                ('d3000000-0000-4000-8000-0000000000e1','Demo D','revert-demo-d', now() - interval '45 minutes', NULL),
+                ('d3000000-0000-4000-8000-00000000000d','Real Org','revert-demo-real', NULL, NULL);
+              INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+                ('d3000000-0000-4000-8000-00000000000d','d3000000-0000-4000-8000-0000000000f1','admin');" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the demo organizations and anonymous users the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -2972,6 +3000,77 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the practice-only revert did not restore every replaced object and drop every added one as at 20261028010000"
         dump 10 $SCRATCH/harness_practiceonly; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261030010000" ]; then
+      # The seed planted 4 demo organizations (2 live) with 3 owners.
+      if ! grep -q 'this revert DESTROYS 4 demo organization(s), 2 of them live, and removes the 3 anonymous visitor(s) who own them' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 4 demo organizations (2 live) with 3 owners and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # One fingerprint of everything the migration replaced or added, read off
+      # the catalogue: the four functions it replaced or re-granted (signature,
+      # security, volatility, SET clauses, result, arguments, sorted grants, md5
+      # of the body with carriage returns removed, comment: is_org_member's is
+      # production's text, which has none), the storage policies, the columns,
+      # constraints and indexes of organizations, the triggers on the eight
+      # tables it fenced, and the absence of every demo object (schema, functions,
+      # table, cron job, audit action). The expected md5 and row count were read
+      # 2026-10-26 off a build at 20261029010000 with the same query; the count is
+      # part of the verdict, so a lookup that finds nothing cannot pass. The seed
+      # also required: the real organization and its admin survive, no demo owner
+      # does and the anonymous user who owned nothing does.
+      if psql_cmd "SELECT 'DEMO-SESSIONS-VERDICT:' || CASE
+               WHEN NOT EXISTS (SELECT 1 FROM public.organizations WHERE id = 'd3000000-0000-4000-8000-00000000000d')
+                 OR NOT EXISTS (SELECT 1 FROM auth.users WHERE id = 'd3000000-0000-4000-8000-0000000000f1') THEN 'real-lost'
+               WHEN (SELECT array_agg(id::text) FROM auth.users WHERE is_anonymous)
+                    IS DISTINCT FROM ARRAY['d3000000-0000-4000-8000-0000000000a4'] THEN 'anonymous-wrong'
+               WHEN (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
+      SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+             || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+             || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(replace(p.prosrc, E'\\r', ''))
+             || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('is_org_member', 'is_org_admin', 'prune_old_audit_logs', 'prune_old_evaluation_runs')
+      UNION ALL
+      SELECT 'p|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')
+        FROM pg_policies WHERE schemaname = 'storage'
+      UNION ALL
+      SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+             || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped AND c.relname = 'organizations'
+      UNION ALL
+      SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+        FROM pg_constraint WHERE conrelid = to_regclass('public.organizations')
+      UNION ALL
+      SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid)
+        FROM pg_index WHERE indrelid = to_regclass('public.organizations')
+      UNION ALL
+      SELECT 't|' || tgrelid::regclass::text || '|' || tgname
+        FROM pg_trigger WHERE NOT tgisinternal
+         AND tgrelid::regclass::text IN ('organizations', 'players', 'coaches', 'import_jobs', 'staging_players',
+                                         'staging_import_rows', 'organization_members', 'organization_invites')
+      UNION ALL
+      SELECT 'x|' || x FROM (
+          SELECT 'schema ' || nspname AS x FROM pg_namespace WHERE nspname = 'demo_seed'
+          UNION ALL SELECT 'function ' || p.oid::regprocedure::text FROM pg_proc p
+           WHERE p.pronamespace = 'public'::regnamespace
+             AND (p.proname LIKE 'demo\\_%' OR p.proname IN ('start_demo_session', 'purge_expired_demos', 'is_demo_org',
+                                                            'caller_is_anonymous', 'organizations_guard_demo_columns'))
+          UNION ALL SELECT 'table ' || relname FROM pg_class WHERE relname = 'demo_purge_log'
+          UNION ALL SELECT 'job ' || jobname FROM cron.job WHERE jobname = 'purge-expired-demos'
+          UNION ALL SELECT 'action ' || action FROM public.audit_actions WHERE action = 'demo.started'
+      ) absent
+             ) s) = 'f2fa576428fa08162274b75766fd9d42:27' THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_demo_sessions 2>&1 && grep -q 'DEMO-SESSIONS-VERDICT:restored' $SCRATCH/harness_demo_sessions; then
+        echo "  revert ${id}: the demo organizations and their anonymous owners are gone, the real organization and user are not, and every replaced object is back as at 20261029010000 and every added one gone"
+      else
+        echo "FAIL revert ${id}: the demo sessions revert did not remove the demos and restore every replaced object as at 20261029010000"
+        dump 10 $SCRATCH/harness_demo_sessions; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

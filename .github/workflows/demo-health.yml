@@ -1,0 +1,74 @@
+name: Demo purge health
+
+# Demo mode (plan docs/changes/2026-10-22-demo-mode.md, D3). A demo organization takes about 1.4 MB and
+# expires in 30 minutes; `pg_cron` deletes the expired ones every ten minutes. If that job stops, demos
+# pile up toward the free tier's 500 MB read-only threshold, and nothing inside the database would say
+# so. This reads `demo_health()` (service role only) every hour from outside, and fails when an expired
+# demo is more than 30 minutes past expiry or the newest purge log row is more than 30 minutes old (or
+# the answer cannot be read). The verdict is scripts/ci/demoHealth.mjs, proved against planted stale
+# answers by tests/demoHealth.test.js. A failed scheduled run opens (once) or updates an issue.
+#
+# Budget impact: one run an hour at about 20 seconds is about 10 minutes a month.
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+
+# Nothing by default; each job asks for what it uses.
+permissions: {}
+
+concurrency:
+  group: demo-health-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  health:
+    name: Demo purge is running
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # Nothing is installed: the script uses only Node.
+          package-manager-cache: false
+
+      - name: Read demo_health()
+        run: node scripts/ci/demoHealth.mjs
+
+  # A red scheduled run notifies only whoever last edited the cron line, so a failure also opens (once)
+  # an issue the repository can see, and adds a comment to it on every later failing run. Its own job,
+  # so the token that can write issues exists only on a failed scheduled run.
+  report-scheduled-failure:
+    name: Report a failing demo purge
+    needs: [health]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # opens (once) and comments on the issue that reports a failing demo purge
+    steps:
+      - name: Open an issue (once), or comment on it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Demo purge is failing"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body "The hourly demo purge health check failed: $run_url. Expired demo organizations may be piling up. Run \`select public.purge_expired_demos();\` through the service role, then fix the pg_cron job (docs/changes/2026-10-22-demo-mode.md, D3). Close this issue when the check is green."
+          else
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Still failing: $run_url"
+          fi

@@ -9,6 +9,7 @@ import {
   type SupabaseClient,
   type User,
 } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
+import { asDemoClient, liveOrganizationIds, readDemoState } from './demo.ts';
 import { type FailureContext, logFailure } from './logtail.ts';
 
 /**
@@ -104,8 +105,11 @@ export async function verifyOrgMembership(
     console.error('Org membership check failed:', error.message);
     return false;
   }
+  if (data === null) return false;
 
-  return data !== null;
+  // An expired demo has no members: the database's helpers say so, and so does this check.
+  const demo = await readDemoState(asDemoClient(serviceClient), organizationId);
+  return demo !== null && !demo.expired;
 }
 
 /**
@@ -138,8 +142,10 @@ export async function verifyOrgAdmin(
     console.error('Org admin check failed:', error.message);
     return false;
   }
+  if (data === null) return false;
 
-  return data !== null;
+  const demo = await readDemoState(asDemoClient(serviceClient), organizationId);
+  return demo !== null && !demo.expired;
 }
 
 /**
@@ -159,7 +165,9 @@ export async function getUserOrgIds(
     return [];
   }
 
-  return (data ?? []).map((row: { organization_id: string }) => row.organization_id);
+  const ids = (data ?? []).map((row: { organization_id: string }) => row.organization_id);
+  // Not an expired demo's: it has no members from expiry (see verifyOrgMembership).
+  return await liveOrganizationIds(asDemoClient(serviceClient), ids);
 }
 
 /**

@@ -22,6 +22,7 @@ import {
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
+import { asDemoClient, readDemoState } from '../_shared/demo.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 import { SENSITIVE_IMPORT_TYPES, stripSensitiveColumns } from '../_shared/sensitive-headers.ts';
@@ -553,6 +554,20 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     );
   }
   logCtx.organizationId = body.organization_id;
+
+  // The demo league imports nothing (D3): no file is validated or staged for it. The database
+  // refuses its import jobs and staged rows too; this is the early answer.
+  const demo = await readDemoState(asDemoClient(serviceClient), body.organization_id);
+  if (demo === null || demo.isDemo) {
+    return jsonResponse(
+      {
+        status: 'error',
+        code: 'demo_import_refused',
+        message: 'The demo league cannot import files. Create an account to import your own.',
+      },
+      403
+    );
+  }
 
   if (body.import_job_id) {
     const { data: job, error: jobError } = await serviceClient

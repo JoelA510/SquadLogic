@@ -94,6 +94,13 @@ Raw import retention is handled by
 It requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, validates
 `dry_run`, and fails fast when either secret is missing.
 
+The demo purge (`pg_cron`, every ten minutes) is watched from outside by
+[`.github/workflows/demo-health.yml`](../../.github/workflows/demo-health.yml), hourly: it reads
+`demo_health()` with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, fails when an expired demo is
+over 30 minutes past expiry, the newest `demo_purge_log` row is over 30 minutes old, or the answer
+cannot be read, and a failed scheduled run opens (once) or comments on a "Demo purge is failing"
+issue (`scripts/ci/demoHealth.mjs`, `tests/demoHealth.test.js`).
+
 ## Dependency audit
 
 [`.github/workflows/audit.yml`](../../.github/workflows/audit.yml) runs

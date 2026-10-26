@@ -11,6 +11,8 @@ import TeamOverviewPanel from '../components/TeamOverviewPanel.jsx';
 import ProgramOverview from '../components/teaming/ProgramOverview.jsx';
 import TeamingConfiguration from '../components/teaming/TeamingConfiguration.jsx';
 import RosterManager from '../components/teaming/RosterManager.jsx';
+import { useRosterDirectory } from '../hooks/useRosterDirectory.js';
+import { applyRosterDirectory, countUnnamedPlayers } from '../utils/rosterPeople.js';
 import TeamPersistencePanel from '../components/TeamPersistencePanel.jsx';
 import DataValidationPanel from '../components/teaming/DataValidationPanel.jsx';
 import BuddyRequestsList from '../components/teaming/BuddyRequestsList.jsx';
@@ -1472,11 +1474,9 @@ export default function TeamAnalysisPage() {
               ? `${playerDetails['First Name'] || playerDetails['first_name'] || ''} ${playerDetails['Last Name'] || playerDetails['last_name'] || ''}`.trim() ||
                 'Unnamed Player'
               : tp.player_name || 'Unknown Player',
-            skill:
-              playerDetails?.['Skill Level'] ||
-              playerDetails?.['skill_tier'] ||
-              tp.skill ||
-              'developing',
+            // No default: a player with no skill on file reads "Unrated" in the editor, not an
+            // invented tier (the durable rating fills it in, `applyRosterDirectory`).
+            skill: playerDetails?.['Skill Level'] || playerDetails?.['skill_tier'] || tp.skill,
             buddyId: playerDetails?.buddyId || playerDetails?.buddy_id,
             gender: playerDetails?.gender || playerDetails?.Gender,
             age: playerDetails?.age || playerDetails?.Age || 10,
@@ -1521,11 +1521,9 @@ export default function TeamAnalysisPage() {
               ? `${playerDetails['First Name'] || playerDetails['first_name'] || ''} ${playerDetails['Last Name'] || playerDetails['last_name'] || ''}`.trim() ||
                 'Unnamed Player'
               : tp.player_name || 'Unknown Player',
-            skill:
-              playerDetails?.['Skill Level'] ||
-              playerDetails?.['skill_tier'] ||
-              tp.skill ||
-              'developing',
+            // No default: a player with no skill on file reads "Unrated" in the editor, not an
+            // invented tier (the durable rating fills it in, `applyRosterDirectory`).
+            skill: playerDetails?.['Skill Level'] || playerDetails?.['skill_tier'] || tp.skill,
             buddyId: playerDetails?.buddyId || playerDetails?.buddy_id,
             gender: playerDetails?.gender || playerDetails?.Gender,
             age: playerDetails?.age || playerDetails?.Age || 10,
@@ -1547,6 +1545,18 @@ export default function TeamAnalysisPage() {
     setManualSaveMessage('');
     setIsEditMode(true);
   }, [activeTeams, handleSaveRosterChanges, isEditMode]);
+
+  // The editor's names come from the durable `players` and `coaches` tables, read in full while
+  // the editor is open. The team run holds ids only; the import is one user's staging copy.
+  const rosterDirectory = useRosterDirectory({ enabled: canEditTeams });
+  const rosterTeams = useMemo(
+    () => applyRosterDirectory(manualTeams || activeTeams, rosterDirectory),
+    [manualTeams, activeTeams, rosterDirectory]
+  );
+  const unnamedRosterPlayers = useMemo(
+    () => (rosterDirectory.status === 'ready' ? countUnnamedPlayers(rosterTeams) : 0),
+    [rosterDirectory.status, rosterTeams]
+  );
 
   const visibleTeams = useMemo(
     () => activeTeams.filter((t) => !deletedTeamIds.has(t.id)),
@@ -1597,7 +1607,9 @@ export default function TeamAnalysisPage() {
   );
 
   return (
-    <div className="animate-fadeIn space-y-8 max-w-[65ch] mx-auto w-full">
+    <div
+      className={`animate-fadeIn space-y-8 w-full ${canEditTeams ? '' : 'max-w-[65ch] mx-auto'}`}
+    >
       <DataErrorBanner message={dataError} />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {stagedReview ? placementAnnouncement : ''}
@@ -1731,25 +1743,47 @@ export default function TeamAnalysisPage() {
           </div>
         </div>
       ) : canEditTeams ? (
-        <div className="space-y-6">
-          <div className="bg-bg-surface border border-border-subtle rounded-xl p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-text-primary">Manual Roster Management</h3>
-              <p className="text-sm text-text-secondary">
-                Drag and drop players between teams to manually override automated assignments.
-              </p>
-            </div>
-            {manualSaveMessage && (
-              <div className="mb-4 rounded-lg border border-border-subtle bg-bg-surface px-4 py-3 text-sm text-text-secondary">
-                {manualSaveMessage}
-              </div>
-            )}
-            <RosterManager
-              initialTeams={manualTeams || activeTeams}
-              onTeamsChange={handleRosterTeamsChange}
-            />
+        <section className="card" aria-labelledby="manual-roster-heading">
+          <div className="card-head" style={{ flexWrap: 'wrap' }}>
+            <h2 id="manual-roster-heading" style={{ fontSize: 16 }}>
+              Manual Roster Management
+            </h2>
+            <p className="secondary" style={{ margin: 0, fontSize: 13 }}>
+              Drag a player by the handle, or use that player&apos;s Move button, to override
+              automated assignments.
+            </p>
           </div>
-        </div>
+          <div className="card-body">
+            {manualSaveMessage && (
+              <p role="status" className="secondary" style={{ margin: '0 0 12px' }}>
+                {manualSaveMessage}
+              </p>
+            )}
+            {rosterDirectory.status === 'error' ? (
+              <div className="space-y-4">
+                <DataErrorBanner
+                  message={`Player and coach names could not be loaded, so the roster editor is not shown (it would name only some of the people): ${rosterDirectory.error}`}
+                />
+                <Button variant="secondary" size="sm" onClick={rosterDirectory.retry}>
+                  Try again
+                </Button>
+              </div>
+            ) : rosterDirectory.status !== 'ready' ? (
+              <div role="status" className="secondary">
+                Loading player and coach names...
+              </div>
+            ) : (
+              <>
+                {unnamedRosterPlayers > 0 && (
+                  <p role="status" className="secondary" style={{ margin: '0 0 12px' }}>
+                    {`${unnamedRosterPlayers} roster ${unnamedRosterPlayers === 1 ? 'entry has' : 'entries have'} no matching player record, so ${unnamedRosterPlayers === 1 ? 'it is' : 'they are'} shown as Unknown Player.`}
+                  </p>
+                )}
+                <RosterManager initialTeams={rosterTeams} onTeamsChange={handleRosterTeamsChange} />
+              </>
+            )}
+          </div>
+        </section>
       ) : (
         <>
           <TeamOverviewPanel

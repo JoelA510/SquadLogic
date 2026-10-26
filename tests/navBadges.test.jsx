@@ -10,9 +10,20 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
+    // PostgREST as hosted: a list read stops at `max_rows` (1000); an exact count does not.
     from: (table) => ({
-      select: () => ({
-        eq: () => Promise.resolve({ data: mocks.rowsByTable[table] || [], error: null }),
+      select: (_columns, options) => ({
+        eq: () => {
+          const rows = mocks.rowsByTable[table] || [];
+          if (options?.count === 'exact') {
+            return Promise.resolve({
+              data: options.head ? null : rows.slice(0, 1000),
+              count: rows.length,
+              error: null,
+            });
+          }
+          return Promise.resolve({ data: rows.slice(0, 1000), error: null });
+        },
       }),
     }),
   },
@@ -52,6 +63,12 @@ describe('useNavBadges', () => {
     await waitFor(() => expect(result.current.players).toBe(2));
     expect(result.current.coaches).toBe(1);
     expect(result.current.teams).toBe(null);
+  });
+
+  it('counts past the server row cap (a league of 1,259 players is not 1000)', async () => {
+    mocks.rowsByTable.players = Array.from({ length: 1259 }, (_, i) => ({ id: `p${i}` }));
+    const { result } = renderHook(() => useNavBadges());
+    await waitFor(() => expect(result.current.players).toBe(1259));
   });
 
   it('re-fetches when the NAV_BADGES refresh topic is emitted', async () => {

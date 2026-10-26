@@ -1,204 +1,210 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
   closestCorners,
   KeyboardSensor,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
 import {
   SortableContext,
-  arrayMove,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, User, ShieldAlert, ArrowRight } from 'lucide-react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { GripVertical, ShieldAlert, ArrowRight, ArrowRightLeft } from 'lucide-react';
+import Badge from '../ui/Badge.jsx';
+import Button from '../ui/Button.jsx';
+import MovePlayerDialog from './MovePlayerDialog.jsx';
 import { useConflicts } from '../../hooks/useConflicts.js';
 import { coachLabel } from '../../utils/teamCoaches.js';
+import { findTeamOfPlayer, movePlayerToTeam, reorderWithinTeam } from '../../utils/rosterMoves.js';
+
+const playerNameOf = (player) =>
+  player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || 'Unknown Player';
 
 /**
- * @param {{ player: any }} props
+ * One player's row: the full name and skill (they wrap, never clip), the marks, a drag handle
+ * and a Move button. The handle is its own button, so the row holds no nested control and a
+ * keyboard reaches both: Space on the handle lifts the player, and Move opens the dialog that
+ * is the non-drag way to do the same (AGENTS.md section 9).
+ *
+ * @param {{ player: any, onRequestMove?: (player: any) => void }} props
  */
-const PlayerCard = ({ player }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+const PlayerCard = ({ player, onRequestMove }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
     id: player.id,
     data: player,
   });
 
+  // A dynamic drag offset: the one inline style the row carries.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.4 : 1,
   };
 
-  const playerName =
-    player.name ||
-    `${player.first_name || ''} ${player.last_name || ''}`.trim() ||
-    'Unknown Player';
+  const playerName = playerNameOf(player);
   const playerSkill = player.skill || player.skillRating || player.skill_tier || 'Unrated';
 
   return (
-    <div
+    <li
       ref={setNodeRef}
       style={style}
       data-testid={`player-card-${player.id}`}
-      role="listitem"
       aria-label={`${playerName}, Skill: ${playerSkill}${player.assignment_source === 'manual' ? ', manually assigned' : ''}${player.isCoachingLead ? ', coaching lead' : ''}${player.eligibilityNotChecked ? ', eligibility not checked' : ''}`}
-      aria-roledescription="draggable item"
-      className={`p-3 bg-bg-surface border border-border-subtle rounded-md flex items-center justify-between shadow-sm cursor-grab active:cursor-grabbing ${isDragging ? 'shadow-lg border-blue-500/50' : 'hover:border-border-highlight'}`}
-      {...attributes}
-      {...listeners}
+      className={`roster-row${isDragging ? ' dragging' : ''}`}
     >
-      <div className="flex items-center gap-3">
-        <div
-          className="text-text-muted hover:text-text-primary transition-colors"
-          aria-hidden="true"
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        className="roster-handle"
+        aria-label={`Drag ${playerName}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={16} aria-hidden="true" />
+      </button>
+      <div className="roster-who">
+        <span className="roster-name">{playerName}</span>
+        <span className="roster-detail">
+          <span>Skill: {playerSkill}</span>
+          {player.assignment_source === 'manual' && <Badge tone="warning">manual</Badge>}
+          {/* Phase B6: a parent volunteers to coach. A mark only: a lead is not a coach. */}
+          {player.isCoachingLead && (
+            <Badge tone="neutral" title="Coaching lead: a parent volunteers to coach">
+              lead
+            </Badge>
+          )}
+          {/* Phase B3: placed with no age to check; a flag, never a hold. */}
+          {player.eligibilityNotChecked && <Badge tone="warning">eligibility not checked</Badge>}
+        </span>
+      </div>
+      {onRequestMove && (
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={ArrowRightLeft}
+          data-roster-move={player.id}
+          aria-label={`Move ${playerName} to another team`}
+          onClick={() => onRequestMove(player)}
         >
-          <GripVertical size={16} />
-        </div>
-        <div className="flex flex-col">
-          <span className="font-medium text-sm text-text-primary">{playerName}</span>
-          <span className="text-xs text-text-muted flex items-center gap-2">
-            Skill: {playerSkill}
-            {player.assignment_source === 'manual' && (
-              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-status-warning-text border border-amber-500/30">
-                manual
-              </span>
-            )}
-            {/* Phase B6: a parent volunteers to coach. A mark only: a lead is not a coach. */}
-            {player.isCoachingLead && (
-              <span
-                className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-bg-surface-hover text-text-secondary border border-border-subtle"
-                title="Coaching lead: a parent volunteers to coach"
-              >
-                lead
-              </span>
-            )}
-            {/* Phase B3: placed with no age to check; a flag, never a hold. */}
-            {player.eligibilityNotChecked && (
-              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-status-warning-bg text-status-warning-text border border-status-warning/30">
-                eligibility not checked
-              </span>
-            )}
-          </span>
-        </div>
-      </div>
-      <div className="bg-bg-surface-hover p-1.5 rounded-full text-text-muted" aria-hidden="true">
-        <User size={14} />
-      </div>
-    </div>
+          Move
+        </Button>
+      )}
+    </li>
   );
 };
 
 // Governance: Memoize individual player rows to prevent unnecessary re-renders during drag transitions
 export const SortablePlayer = React.memo(PlayerCard);
 
-export function TeamColumn({ team, players }) {
-  const parentRef = useRef(null);
+/**
+ * One team's card. It grows with its roster (no scroll box of its own: a nested scroller is
+ * what clipped the old cards), and takes the width the grid gives it.
+ *
+ * @param {{ team: any, players: any[], onRequestMove?: (player: any) => void }} props
+ */
+export function TeamColumn({ team, players, onRequestMove }) {
   // 8.2: every coach, none of them labelled head — from the one producer the
   // override picker uses, reconciled once per team rather than on every render.
   const coachText = useMemo(() => coachLabel(team, 'Coach: Vacant'), [team]);
 
-  // CRITICAL: Virtualizer mapping for 60FPS roster interaction
-  const rowVirtualizer = useVirtualizer({
-    count: players.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 68,
-    overscan: 10,
-  });
-
-  const { setNodeRef } = useSortable({
+  // The whole list is the drop target, so a team with no players can still be dropped on.
+  const { setNodeRef, isOver } = useDroppable({
     id: team.id,
     data: { type: 'Column', team },
   });
 
-  return (
-    <div
-      className="bg-bg-surface/50 border border-border-subtle rounded-xl flex flex-col h-[650px]"
-      data-testid={`team-column-${team.id}`}
-    >
-      <div className="p-4 border-b border-border-subtle bg-bg-surface rounded-t-xl shrink-0">
-        <div className="flex justify-between items-center mb-1">
-          <div className="flex flex-col">
-            <h3 className="font-bold text-text-primary">{team.name}</h3>
-            <a
-              href={`/team/${team.id}`}
-              className="text-[10px] text-text-accent hover:underline uppercase tracking-widest font-bold flex items-center gap-1 mt-0.5"
-            >
-              View Team Portal <ArrowRight size={10} />
-            </a>
-          </div>
-          <span
-            className={`text-xs px-2 py-1 rounded-full font-bold ${players.length > 14 ? 'bg-amber-500/20 text-status-warning-text' : 'bg-blue-500/20 text-text-accent'}`}
-          >
-            {players.length} Players
-          </span>
-        </div>
-        <p className="text-xs text-text-muted">{team.division}</p>
-        <div className="text-xs mt-2 text-text-secondary">{coachText}</div>
-      </div>
+  const headingId = `roster-team-${team.id}`;
+  const over = players.length > 14;
 
-      <div className="flex-1 overflow-y-auto p-3 relative h-full" ref={parentRef} role="list">
-        <div
-          ref={setNodeRef}
-          style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
-            width: '100%',
-            position: 'relative',
-          }}
-        >
-          <SortableContext items={players.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-            {rowVirtualizer.getVirtualItems().map((virtualItem) => (
-              <div
-                key={virtualItem.key}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: `${virtualItem.size}px`,
-                  transform: `translateY(${virtualItem.start}px)`,
-                }}
-              >
-                <SortablePlayer player={players[virtualItem.index]} />
-              </div>
-            ))}
-            {players.length === 0 && (
-              <div className="h-24 border-2 border-dashed border-border-subtle rounded-lg flex items-center justify-center text-text-muted text-sm italic">
-                Drop players here
-              </div>
-            )}
-          </SortableContext>
+  return (
+    <section
+      className={`card roster-card${isOver ? ' drop-target' : ''}`}
+      data-testid={`team-column-${team.id}`}
+      aria-labelledby={headingId}
+    >
+      <header className="roster-card-head">
+        <div className="roster-card-title-row">
+          <h3 id={headingId} className="roster-card-title">
+            {team.name}
+          </h3>
+          <Badge tone={over ? 'warning' : 'info'}>
+            {players.length} {players.length === 1 ? 'Player' : 'Players'}
+          </Badge>
         </div>
-      </div>
-    </div>
+        {team.division && <p className="roster-card-meta">{team.division}</p>}
+        <p className="roster-card-meta">{coachText}</p>
+        <a href={`/team/${team.id}`} className="text-link roster-card-link">
+          View team portal <ArrowRight size={12} aria-hidden="true" />
+        </a>
+      </header>
+
+      <ul ref={setNodeRef} className="roster-list" aria-labelledby={headingId}>
+        <SortableContext items={players.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+          {players.map((player) => (
+            <SortablePlayer key={player.id} player={player} onRequestMove={onRequestMove} />
+          ))}
+        </SortableContext>
+        {players.length === 0 && (
+          <li className="roster-empty">No players yet. Drop a player here, or use Move.</li>
+        )}
+      </ul>
+    </section>
   );
 }
 
+const ALL_DIVISIONS = '';
+
 export default function RosterManager({ initialTeams, onTeamsChange }) {
   const [teams, setTeams] = useState(initialTeams);
+  const [syncedFrom, setSyncedFrom] = useState(initialTeams);
   const [activePlayer, setActivePlayer] = useState(null);
-  const [dragOriginTeamId, setDragOriginTeamId] = useState(null);
   const [announcement, setAnnouncement] = useState('');
+  const [moving, setMoving] = useState(null);
+  const [division, setDivision] = useState(ALL_DIVISIONS);
+  const focusAfterMove = useRef(null);
   const { conflicts, hasConflicts } = useConflicts(teams);
 
-  // CRITICAL FIX: Sync state when async mock data finishes loading
-  useEffect(() => {
+  // CRITICAL FIX: Sync state when async mock data finishes loading (adjusted while rendering,
+  // the pattern React documents for state that follows a prop).
+  if (initialTeams !== syncedFrom) {
+    setSyncedFrom(initialTeams);
     setTeams(initialTeams);
-  }, [initialTeams]);
+  }
 
-  const commitTeams = (updater) => {
-    setTeams((prevTeams) => {
-      const nextTeams = typeof updater === 'function' ? updater(prevTeams) : updater;
-      onTeamsChange?.(nextTeams);
-      return nextTeams;
-    });
+  const commitTeams = (next) => {
+    if (next === teams) return;
+    setTeams(next);
+    onTeamsChange?.(next);
   };
+
+  // After a keyboard move the player's row is on another card: put focus on its Move button, so
+  // the keyboard user keeps their place instead of landing on the page.
+  useEffect(() => {
+    const id = focusAfterMove.current;
+    if (id === null) return;
+    focusAfterMove.current = null;
+    const buttons = document.querySelectorAll('[data-roster-move]');
+    for (const button of buttons) {
+      if (button instanceof HTMLElement && button.dataset.rosterMove === String(id)) {
+        button.focus();
+        break;
+      }
+    }
+  }, [teams]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -211,123 +217,134 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
     })
   );
 
-  const findTeamOfPlayer = (playerId) => {
-    return teams.find((t) => t.players.find((p) => p.id === playerId));
+  const divisions = useMemo(
+    () => [
+      ...new Set(
+        teams
+          .map((team) => team.division)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ],
+    [teams]
+  );
+  const shownTeams = useMemo(
+    () =>
+      division === ALL_DIVISIONS
+        ? teams
+        : teams.filter((team) => String(team.division) === division),
+    [teams, division]
+  );
+
+  const requestMove = useCallback((player) => setMoving(player), []);
+
+  const handleMove = (destTeamId) => {
+    const current = teams;
+    const player = moving;
+    const source = player ? findTeamOfPlayer(current, player.id) : null;
+    const dest = current.find((team) => team.id === destTeamId);
+    setMoving(null);
+    if (!player || !source || !dest) return;
+    focusAfterMove.current = player.id;
+    commitTeams(movePlayerToTeam(current, player.id, destTeamId));
+    setAnnouncement(`Moved ${playerNameOf(player)} from ${source.name} to ${dest.name}`);
   };
 
   const handleDragStart = (event) => {
-    const { active } = event;
-    const team = findTeamOfPlayer(active.id);
-    if (team) {
-      const player = team.players.find((p) => p.id === active.id);
-      setActivePlayer(player);
-      setDragOriginTeamId(team.id);
-    }
+    const team = findTeamOfPlayer(teams, event.active.id);
+    if (team) setActivePlayer(team.players.find((p) => p.id === event.active.id));
   };
 
   const handleDragOver = (event) => {
     const { active, over } = event;
-    if (!over) return;
+    if (!over || active.id === over.id) return;
 
-    const activeId = active.id;
-    const overId = over.id;
-
-    if (activeId === overId) return;
-
-    const sourceTeam = findTeamOfPlayer(activeId);
-    let destTeam = findTeamOfPlayer(overId);
-
-    if (!destTeam) {
-      destTeam = teams.find((t) => t.id === overId);
-    }
-
+    const current = teams;
+    const sourceTeam = findTeamOfPlayer(current, active.id);
+    const destTeam = findTeamOfPlayer(current, over.id) || current.find((t) => t.id === over.id);
     if (!sourceTeam || !destTeam || sourceTeam.id === destTeam.id) return;
 
-    commitTeams((prevTeams) => {
-      const newTeams = JSON.parse(JSON.stringify(prevTeams));
-      const sTeam = newTeams.find((t) => t.id === sourceTeam.id);
-      const dTeam = newTeams.find((t) => t.id === destTeam.id);
-
-      const pIndex = sTeam.players.findIndex((p) => p.id === activeId);
-      const player = sTeam.players[pIndex];
-
-      sTeam.players.splice(pIndex, 1);
-
-      let dIndex = dTeam.players.findIndex((p) => p.id === overId);
-      if (dIndex < 0) dIndex = dTeam.players.length;
-
-      const updatedPlayer = { ...player, assignment_source: 'manual' };
-      dTeam.players.splice(dIndex, 0, updatedPlayer);
-
-      return newTeams;
-    });
+    const overIndex = destTeam.players.findIndex((p) => p.id === over.id);
+    commitTeams(
+      movePlayerToTeam(current, active.id, destTeam.id, overIndex < 0 ? undefined : overIndex)
+    );
   };
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
+    const player = activePlayer;
     setActivePlayer(null);
-
     if (!over) return;
 
-    const activeId = active.id;
-    const overId = over.id;
-
-    const sourceTeam = findTeamOfPlayer(activeId);
-    let destTeam = findTeamOfPlayer(overId);
-    if (!destTeam) destTeam = teams.find((t) => t.id === overId);
-
-    if (!sourceTeam || !destTeam) return;
-
-    if (sourceTeam.id === destTeam.id) {
-      commitTeams((prevTeams) => {
-        const newTeams = [...prevTeams];
-        const tIdx = newTeams.findIndex((t) => t.id === sourceTeam.id);
-        const oldIndex = newTeams[tIdx].players.findIndex((p) => p.id === activeId);
-        const newIndex = newTeams[tIdx].players.findIndex((p) => p.id === overId);
-
-        newTeams[tIdx].players = arrayMove(newTeams[tIdx].players, oldIndex, newIndex);
-        return newTeams;
-      });
-      setAnnouncement(`Moved ${activePlayer?.name || 'player'} within ${destTeam.name}`);
-    } else if (dragOriginTeamId && dragOriginTeamId !== destTeam.id) {
-      setAnnouncement(`Assigned ${activePlayer?.name || 'player'} to ${destTeam.name}`);
+    const current = teams;
+    const team = findTeamOfPlayer(current, active.id);
+    if (!team) return;
+    const name = player ? playerNameOf(player) : 'player';
+    const overTeam = findTeamOfPlayer(current, over.id) || current.find((t) => t.id === over.id);
+    if (overTeam && overTeam.id === team.id && active.id !== over.id) {
+      const from = team.players.findIndex((p) => p.id === active.id);
+      const to = team.players.findIndex((p) => p.id === over.id);
+      if (to >= 0) {
+        commitTeams(reorderWithinTeam(current, team.id, from, to));
+        setAnnouncement(`Moved ${name} within ${team.name}`);
+        return;
+      }
     }
-    setDragOriginTeamId(null);
+    // The player now sits on the team the drag ended over (handleDragOver moved them there).
+    if (player && team.players.some((p) => p.id === active.id)) {
+      setAnnouncement(`${name} is on ${team.name}`);
+    }
   };
+
+  const movingTeam = moving ? findTeamOfPlayer(teams, moving.id) : null;
 
   return (
     <div className="w-full">
       {hasConflicts && (
-        <div className="bg-status-error-bg text-text-primary p-4 border border-status-error rounded-xl mb-6 flex flex-col gap-2 shadow-[0_0_30px_rgba(239,68,68,0.3)] animate-fadeIn">
+        <section
+          aria-label="Roster conflicts"
+          className="bg-status-error-bg text-text-primary p-4 border border-status-error rounded-xl mb-6 flex flex-col gap-2 shadow-md"
+        >
           <div className="flex items-center gap-2 font-bold uppercase tracking-widest text-status-error">
-            <ShieldAlert size={20} />
+            <ShieldAlert size={20} aria-hidden="true" />
             Conflict Detected
           </div>
-          <div className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
             {conflicts.map((c, i) => (
-              <div
+              <li
                 key={i}
-                className="font-mono text-sm bg-bg-glass p-3 rounded-lg border border-status-error/30 flex items-center justify-between"
+                className="text-sm bg-bg-glass p-3 rounded-lg border border-status-error/30 flex flex-wrap items-center justify-between gap-2"
               >
                 <span className="text-text-secondary">{c.message}</span>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                    c.severity === 'error'
-                      ? 'bg-status-error/20 text-status-error'
-                      : 'bg-status-warning/10 text-status-warning-text'
-                  }`}
-                >
-                  {c.type}
-                </span>
-              </div>
+                <Badge tone={c.severity === 'error' ? 'danger' : 'warning'}>{c.type}</Badge>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </section>
       )}
 
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </div>
+
+      {divisions.length > 1 && (
+        <div className="field roster-filter">
+          <label htmlFor="roster-division-filter">Show division</label>
+          <select
+            id="roster-division-filter"
+            className="select"
+            value={division}
+            onChange={(event) => setDivision(event.target.value)}
+          >
+            <option value={ALL_DIVISIONS}>{`All divisions (${teams.length} teams)`}</option>
+            {divisions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <DndContext
         sensors={sensors}
@@ -335,33 +352,47 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
         accessibility={{
           screenReaderInstructions: {
             draggable:
-              'Press space to start dragging. Use arrow keys to move between teams, enter to drop, escape to cancel.',
+              'Press space to lift a player. Use arrow keys to move, enter to drop, escape to cancel. Or use the Move button to choose a team.',
           },
         }}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {teams.map((team) => (
-            <TeamColumn key={team.id} team={team} players={team.players} />
+        <div className="roster-grid">
+          {shownTeams.map((team) => (
+            <TeamColumn
+              key={team.id}
+              team={team}
+              players={team.players}
+              onRequestMove={requestMove}
+            />
           ))}
         </div>
 
         <DragOverlay>
           {activePlayer ? (
-            <div className="p-3 bg-bg-surface border border-blue-500 rounded-md shadow-md flex items-center justify-between opacity-90 scale-105 transform rotate-2">
-              <div className="flex items-center gap-3">
-                <GripVertical size={16} className="text-text-accent" />
-                <div className="flex flex-col">
-                  <span className="font-medium text-sm text-text-primary">{activePlayer.name}</span>
-                  <span className="text-xs text-text-muted">Moving player...</span>
-                </div>
+            <div className="roster-row roster-overlay">
+              <span className="roster-handle" aria-hidden="true">
+                <GripVertical size={16} />
+              </span>
+              <div className="roster-who">
+                <span className="roster-name">{playerNameOf(activePlayer)}</span>
+                <span className="roster-detail">Moving player...</span>
               </div>
             </div>
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      <MovePlayerDialog
+        key={moving ? String(moving.id) : 'closed'}
+        player={moving ? { id: moving.id, name: playerNameOf(moving) } : null}
+        teams={teams}
+        currentTeamId={movingTeam?.id ?? null}
+        onClose={() => setMoving(null)}
+        onMove={handleMove}
+      />
     </div>
   );
 }

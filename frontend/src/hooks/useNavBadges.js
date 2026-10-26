@@ -6,10 +6,12 @@ import { REFRESH_TOPICS, subscribeRefresh } from '../lib/refreshBus.js';
 const EMPTY = { players: null, coaches: null, teams: null };
 
 /**
- * Lightweight per-org counts for the side-nav badges. Selects ids only and
- * counts client-side (the mock client does not support head/count queries).
- * Null means "no badge" (loading, error, or zero). Re-fetches when a mutation
- * elsewhere emits the NAV_BADGES refresh topic (e.g. player add/delete).
+ * Lightweight per-org counts for the side-nav badges. Asks the server to count
+ * (`{ count: 'exact', head: true }`: no rows come back), because counting the
+ * rows returned is capped by the server's row limit (`max_rows = 1000`) and a
+ * league of 1,259 players read "1000". Null means "no badge" (loading, error,
+ * or zero). Re-fetches when a mutation elsewhere emits the NAV_BADGES refresh
+ * topic (e.g. player add/delete).
  */
 export function useNavBadges() {
   const { currentOrganization } = useOrganization();
@@ -29,12 +31,13 @@ export function useNavBadges() {
 
     const countRows = async (table) => {
       try {
-        const { data, error } = await supabase
+        const { count, error } = await supabase
           .from(table)
-          .select('id')
+          .select('id', { count: 'exact', head: true })
           .eq('organization_id', orgId);
-        if (error) return null;
-        return data?.length || null;
+        // An unanswered count is no badge, never a wrong number.
+        if (error || typeof count !== 'number') return null;
+        return count || null;
       } catch {
         return null;
       }

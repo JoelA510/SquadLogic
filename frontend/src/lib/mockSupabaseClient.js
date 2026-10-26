@@ -823,6 +823,19 @@ const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
  *   start: string, end: string, validFrom: string|null, validUntil: string|null,
  *   excludeSlotId?: string|null }} probe
  */
+/**
+ * 20261101010000: an import goes only to the organization's active season (players are
+ * organization-level and divisions season-level, so a draft import would move a live player
+ * into the draft's divisions until enrolment is season-scoped). Mirrors the SQL refusal.
+ */
+function seasonNotActiveError(seasonId, status, noun) {
+  return {
+    code: '22023',
+    message: `${noun} ${seasonId} is ${status} and takes no import: only the active season does`,
+    details: 'season_not_active',
+  };
+}
+
 function mockPracticeSlotConflict(slots, probe) {
   const turnover = 0;
   const s = mockWallSeconds(probe.start);
@@ -4407,6 +4420,11 @@ export const mockSupabase = {
             },
           };
         }
+        // Players are organization-level and a division season-level: an import into another
+        // season would move a live player into its divisions, so only the active season takes one.
+        if (named.status !== 'active') {
+          return { data: null, error: seasonNotActiveError(named.id, named.status, 'season') };
+        }
         jobSeasonId = named.id;
       } else {
         jobSeasonId =
@@ -5190,6 +5208,12 @@ export const mockSupabase = {
           },
         };
       }
+      if (seasonRow && seasonRow.status !== 'active') {
+        return {
+          data: null,
+          error: seasonNotActiveError(seasonRow.id, seasonRow.status, 'Season'),
+        };
+      }
 
       const deriveDivision = (payload) => {
         const ageText = String(payload.age_group ?? payload['age group'] ?? payload.age ?? '');
@@ -5938,6 +5962,12 @@ export const mockSupabase = {
             message: `Season ${importSeason.id} is completed and takes no import`,
             details: 'season_completed',
           },
+        };
+      }
+      if (importSeason && importSeason.status !== 'active') {
+        return {
+          data: null,
+          error: seasonNotActiveError(importSeason.id, importSeason.status, 'Season'),
         };
       }
       const failRow = (row, error) => {

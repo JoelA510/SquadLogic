@@ -8,13 +8,14 @@
 --     name in another organization is fine;
 --   * no client writes `season_settings` directly (an admin's insert is refused, update and
 --     delete reach no row) and members still read it;
---   * `create_import_job` fixes the job's season: none named is the active season, a named draft is
---     that draft, another organization's season is refused (42501) and a completed one (22023),
---     each refusal creating no job;
---   * `finalize_import_job` reads the job's season: a job for a draft finalizes its divisions and
---     players into the draft and not the active season (this fails on the old active-then-newest
---     rule), a legacy job with no season lands in the active season, a completed season is refused;
---   * `finalize_field_import_job` resolves a practice row's Division in the job's season;
+--   * `create_import_job` fixes the job's season: none named is the active season, another
+--     organization's season is refused (42501) and so is a draft or completed one (22023: an import
+--     into another season would move a live player into its divisions), each refusal creating no job;
+--   * `finalize_import_job` reads the job's season: a job whose season is a draft or completed is
+--     refused and promotes nobody, a job made for a season that has since stopped being the active
+--     one is refused rather than poured into the new active season (this fails on the old
+--     active-then-newest rule), a legacy job with no season lands in the active season;
+--   * `finalize_field_import_job` refuses a draft season and writes no slot;
 --   * `upsert_division_for_import` and `admin_upsert_division_settings` refuse a completed season.
 -- Run as `authenticated` with a JWT sub where a caller matters.
 
@@ -23,7 +24,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(30);
+SELECT plan(31);
 
 -- Org A has its active season (fixtures); a draft for next year and a completed one for last year.
 INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
@@ -106,9 +107,16 @@ SELECT is(
 );
 SELECT is(
     (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'players', 'b.csv',
-                              'a1111111-1111-1111-1111-1111111111d1')).season_settings_id,
-    'a1111111-1111-1111-1111-1111111111d1'::uuid,
-    'a named draft season is the job''s season'
+                              'a1111111-1111-1111-1111-111111111aaa')).season_settings_id,
+    'a1111111-1111-1111-1111-111111111aaa'::uuid,
+    'naming the active season is the job''s season'
+);
+SELECT throws_ok(
+    $$SELECT public.create_import_job('a1111111-1111-1111-1111-111111111111', 'players', 'f.csv',
+                                      'a1111111-1111-1111-1111-1111111111d1')$$,
+    '22023',
+    'season a1111111-1111-1111-1111-1111111111d1 is draft and takes no import: only the active season does',
+    'a draft season is refused: an import would move a live player into its divisions'
 );
 SELECT is(
     (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'players', 'c.csv',
@@ -132,7 +140,8 @@ SELECT is(
     (SELECT count(*)::int FROM public.import_jobs
       WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
         AND storage_path IN ('imports/11111111-1111-1111-1111-111111111111/d.csv',
-                             'imports/11111111-1111-1111-1111-111111111111/e.csv')),
+                             'imports/11111111-1111-1111-1111-111111111111/e.csv',
+                             'imports/11111111-1111-1111-1111-111111111111/f.csv')),
     0,
     'a refused call creates no job'
 );
@@ -158,28 +167,17 @@ INSERT INTO public.staging_players
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
-SELECT is(
-    (public.finalize_import_job('a1111111-0000-4000-8000-0000000e1001') ->> 'promoted_rows')::int,
-    1,
-    'a job made for a draft season finalizes'
+SELECT throws_ok(
+    $$SELECT public.finalize_import_job('a1111111-0000-4000-8000-0000000e1001')$$,
+    '22023',
+    'Season a1111111-1111-1111-1111-1111111111d1 is draft and takes no import: only the active season does',
+    'a job whose season is a draft is refused (it would move a live player into the draft''s divisions)'
 );
 SELECT is(
-    (SELECT array_agg(name ORDER BY name) FROM public.divisions
-      WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1'),
-    ARRAY['U10B'],
-    'the division it derives is created in the draft season'
-);
-SELECT is(
-    (SELECT array_agg(name ORDER BY name) FROM public.divisions
-      WHERE season_settings_id = 'a1111111-1111-1111-1111-111111111aaa'),
-    ARRAY['Org A U10'],
-    'and none is created in the active season'
-);
-SELECT is(
-    (SELECT d.season_settings_id FROM public.players p JOIN public.divisions d ON d.id = p.division_id
-      WHERE p.external_registration_id = 'E1-D'),
-    'a1111111-1111-1111-1111-1111111111d1'::uuid,
-    'the player is placed in the draft season''s division'
+    (SELECT count(*)::int FROM public.players WHERE external_registration_id = 'E1-D')
+    + (SELECT count(*)::int FROM public.divisions WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1'),
+    0,
+    'the refused finalize promoted nobody and created no division'
 );
 SELECT is(
     (public.finalize_import_job('a1111111-0000-4000-8000-0000000e1002') ->> 'promoted_rows')::int,
@@ -203,7 +201,35 @@ SELECT is(
     'the refused finalize promoted nobody'
 );
 
--- ── 5. finalize_field_import_job resolves a practice Division in the job's season ──
+-- A job made for the active season stays on it: when another season becomes the active one
+-- the job is refused, not poured into the new active season.
+RESET role;
+INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by, season_settings_id) VALUES
+    ('a1111111-0000-4000-8000-0000000e1004', 'a1111111-1111-1111-1111-111111111111', 'registration',
+     'orga/e1-moved.csv', 'importing', '11111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa');
+INSERT INTO public.staging_players
+    (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload) VALUES
+    ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000e1004', 1, '{}'::jsonb,
+     '{"first_name": "Moe", "last_name": "Eone", "external_registration_id": "E1-M", "age group": "13", "gender": "M"}'::jsonb);
+UPDATE public.season_settings SET status = 'draft' WHERE id = 'a1111111-1111-1111-1111-111111111aaa';
+UPDATE public.season_settings SET status = 'active' WHERE id = 'a1111111-1111-1111-1111-1111111111d1';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT throws_ok(
+    $$SELECT public.finalize_import_job('a1111111-0000-4000-8000-0000000e1004')$$,
+    '22023', NULL,
+    'a job made for a season that has stopped being the active one is refused'
+);
+RESET role;
+SELECT is(
+    (SELECT count(*)::int FROM public.players WHERE external_registration_id = 'E1-M'),
+    0,
+    'and it promoted nobody into the new active season'
+);
+UPDATE public.season_settings SET status = 'draft' WHERE id = 'a1111111-1111-1111-1111-1111111111d1';
+UPDATE public.season_settings SET status = 'active' WHERE id = 'a1111111-1111-1111-1111-111111111aaa';
+
+-- ── 5. finalize_field_import_job refuses a season that is not the active one ──
 RESET role;
 INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
     ('a1111111-1111-1111-1111-11111111d101', 'a1111111-1111-1111-1111-111111111111',
@@ -221,16 +247,18 @@ INSERT INTO public.staging_import_rows
        "capacity": "1", "valid_from": "2027-09-04", "valid_until": "2027-11-27", "division_name": "Org A U10"}'::jsonb, '[]'::jsonb);
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT public.finalize_field_import_job('a1111111-0000-4000-8000-0000000e1011')$$,
-    'a fields job for a draft season finalizes'
+    '22023',
+    'Season a1111111-1111-1111-1111-1111111111d1 is draft and takes no import: only the active season does',
+    'a fields job for a draft season is refused'
 );
 SELECT is(
-    (SELECT array_agg(coalesce(ps.division_id::text, '-') ORDER BY ps.start_time) FROM public.practice_slots ps
+    (SELECT count(*)::int FROM public.practice_slots ps
       WHERE ps.organization_id = 'a1111111-1111-1111-1111-111111111111'
         AND ps.valid_from = DATE '2027-09-04'),
-    ARRAY['a1111111-1111-1111-1111-11111111d101']::text[],
-    'a Division of the draft season reserves its slot; the active season''s division name finds nothing there'
+    0,
+    'and it wrote no practice slot'
 );
 
 -- ── 6. The two division writers refuse a completed season ──────────────────

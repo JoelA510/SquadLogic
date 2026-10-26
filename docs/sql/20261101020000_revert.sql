@@ -1,7 +1,7 @@
 -- Revert for 20261101020000_programs.sql
 --
 -- Restores `start_demo_session()` to its 20261030010000 body (checked by md5 at the end), drops
--- the four program writers, both triggers and their functions, `divisions.program_id` with its
+-- the four program writers, its triggers and their functions, `divisions.program_id` with its
 -- reference and index, `demo_seed.division_programs`, the `programs` table and the
 -- `season_settings (id, organization_id)` key. The four audit actions are unregistered only while
 -- no audit row uses them (an audit row's action is a foreign key; history is not this revert's
@@ -246,6 +246,8 @@ DROP FUNCTION public.admin_merge_programs(uuid, uuid);
 -- 3. The columns, triggers and table.
 -- ---------------------------------------------------------------------------
 
+DROP TRIGGER divisions_program_guard ON public.divisions;
+DROP FUNCTION public.divisions_program_guard();
 DROP TRIGGER divisions_default_program ON public.divisions;
 DROP FUNCTION public.divisions_default_program();
 DROP INDEX public.idx_divisions_program_id;
@@ -298,7 +300,7 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
                 AND proname IN ('admin_upsert_program', 'admin_set_division_program', 'admin_delete_program',
-                                'admin_merge_programs', 'season_settings_default_program', 'divisions_default_program')) THEN
+                                'admin_merge_programs', 'season_settings_default_program', 'divisions_default_program', 'divisions_program_guard')) THEN
         RAISE EXCEPTION 'a program function survived its own revert';
     END IF;
     RAISE NOTICE 'revert verified: the demo start is back as at 20261030010000, and the programs, their writers, triggers and column are gone';

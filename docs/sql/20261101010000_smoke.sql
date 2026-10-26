@@ -11,12 +11,14 @@
 --   2. The database refuses what the readers no longer have to: a second active season (23505), a
 --      season name that differs only in case or padding (23505), a NULL status (23502), and a
 --      client's direct write (insert refused, update and delete reach nothing).
---   3. `create_import_job` fixes the season: none named is the active one, a named draft is that
---      draft, another organization's season is refused (42501) and a completed one (22023).
---   4. `finalize_import_job` finalizes a job made for a draft season INTO that draft (and not into
---      the active season: the old rule would have), a legacy job with no season into the active
---      one, and refuses a completed season. `finalize_field_import_job` resolves a practice row's
---      Division in the job's season.
+--   3. `create_import_job` fixes the season: none named is the active one, the active one named is
+--      that, another organization's season is refused (42501), and a completed (`season_completed`)
+--      or draft (`season_not_active`) one (22023): players are organization-level, so an import
+--      into another season would move a live player into its divisions.
+--   4. `finalize_import_job` refuses a job whose season is a draft (`season_not_active`) or completed
+--      and promotes nobody; refuses a job made for the active season once another season is the
+--      active one (the old rule would have poured it into the new active season); and puts a legacy
+--      job with no season into the active one. `finalize_field_import_job` refuses a draft season.
 --   5. The two division writers refuse a completed season.
 --
 -- Every id is generated and every email is `@example.test`; there is no PII.
@@ -120,9 +122,18 @@ BEGIN
     IF v_job.season_settings_id IS DISTINCT FROM v_active THEN
         RAISE EXCEPTION 'a job with no season named was made for % instead of the active season', v_job.season_settings_id;
     END IF;
-    SELECT * INTO v_job FROM public.create_import_job(v_org, 'players', 'b.csv', v_draft);
-    IF v_job.season_settings_id IS DISTINCT FROM v_draft THEN
-        RAISE EXCEPTION 'a job for the draft season was made for %', v_job.season_settings_id;
+    SELECT * INTO v_job FROM public.create_import_job(v_org, 'players', 'b.csv', v_active);
+    IF v_job.season_settings_id IS DISTINCT FROM v_active THEN
+        RAISE EXCEPTION 'a job naming the active season was made for %', v_job.season_settings_id;
+    END IF;
+    BEGIN
+        PERFORM public.create_import_job(v_org, 'players', 'f.csv', v_draft);
+        RAISE EXCEPTION 'a draft season was accepted';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_state = PG_EXCEPTION_DETAIL;
+    END;
+    IF v_state IS DISTINCT FROM 'season_not_active' THEN
+        RAISE EXCEPTION 'the draft-season refusal carried detail [%]', v_state;
     END IF;
     BEGIN
         PERFORM public.create_import_job(v_org, 'players', 'c.csv', v_other_season);
@@ -135,29 +146,58 @@ BEGIN
     EXCEPTION WHEN SQLSTATE '22023' THEN NULL;
     END;
     SELECT count(*) INTO v_n FROM public.import_jobs
-     WHERE organization_id = v_org AND storage_path IN (format('imports/%s/c.csv', v_admin), format('imports/%s/d.csv', v_admin));
+     WHERE organization_id = v_org AND storage_path IN (format('imports/%s/c.csv', v_admin), format('imports/%s/d.csv', v_admin), format('imports/%s/f.csv', v_admin));
     IF v_n <> 0 THEN RAISE EXCEPTION 'a refused create_import_job left % job(s)', v_n; END IF;
-    RAISE NOTICE 'create_import_job: no season named is the active season, a named draft is that draft, another organization''s season (42501) and a completed one (22023) are refused and leave no job';
+    RAISE NOTICE 'create_import_job: no season named is the active season, another organization''s season (42501), a completed one and a draft one (22023) are refused and leave no job';
 
     -- ---- 4. the finalizers read the job's season --------------------------------
     RESET ROLE;
-    SELECT * INTO v_job FROM public.create_import_job(v_org, 'players', 'draft-import.csv', v_draft);
+    INSERT INTO public.import_jobs (organization_id, job_type, storage_path, status, created_by, season_settings_id)
+    VALUES (v_org, 'registration', 'orga/draft.csv', 'importing', v_admin, v_draft) RETURNING * INTO v_job;
     INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
     VALUES (v_org, v_job.id, 1, '{}'::jsonb,
             '{"first_name": "Dee", "last_name": "Smoke", "external_registration_id": "SM-D", "age group": "9", "gender": "M"}'::jsonb);
-    PERFORM public.finalize_import_job(v_job.id);
-    SELECT string_agg(d.name, ',' ORDER BY d.name) INTO v_list FROM public.divisions d WHERE d.season_settings_id = v_draft;
-    IF v_list IS DISTINCT FROM 'U10B' THEN
-        RAISE EXCEPTION 'a job made for the draft season created divisions [%] there, expected U10B', v_list;
+    v_state := NULL;
+    BEGIN
+        PERFORM public.finalize_import_job(v_job.id);
+        RAISE EXCEPTION 'a draft season took an import';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_state = PG_EXCEPTION_DETAIL;
+    END;
+    IF v_state IS DISTINCT FROM 'season_not_active' THEN
+        RAISE EXCEPTION 'the draft-season refusal carried detail [%]', v_state;
     END IF;
-    IF EXISTS (SELECT 1 FROM public.divisions WHERE season_settings_id = v_active) THEN
-        RAISE EXCEPTION 'a job made for the draft season created a division in the active season';
+    IF EXISTS (SELECT 1 FROM public.players WHERE external_registration_id = 'SM-D')
+       OR EXISTS (SELECT 1 FROM public.divisions WHERE season_settings_id = v_draft AND name = 'U10B') THEN
+        RAISE EXCEPTION 'the refused draft import promoted a player or made a division';
     END IF;
-    IF (SELECT d.season_settings_id FROM public.players p JOIN public.divisions d ON d.id = p.division_id
-         WHERE p.organization_id = v_org AND p.external_registration_id = 'SM-D') IS DISTINCT FROM v_draft THEN
-        RAISE EXCEPTION 'the draft import''s player is not in the draft season';
+    RAISE NOTICE 'a job whose season is a draft is refused (22023, season_not_active) and promotes nobody';
+
+    -- A job made for the active season stays on it: when another season becomes the active one
+    -- the job is refused, not poured into the new active season.
+    INSERT INTO public.import_jobs (organization_id, job_type, storage_path, status, created_by, season_settings_id)
+    VALUES (v_org, 'registration', 'orga/moved.csv', 'importing', v_admin, v_active) RETURNING * INTO v_job;
+    INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
+    VALUES (v_org, v_job.id, 1, '{}'::jsonb,
+            '{"first_name": "Moe", "last_name": "Smoke", "external_registration_id": "SM-M", "age group": "13", "gender": "M"}'::jsonb);
+    UPDATE public.season_settings SET status = 'draft' WHERE id = v_active;
+    UPDATE public.season_settings SET status = 'active' WHERE id = v_draft;
+    v_state := NULL;
+    BEGIN
+        PERFORM public.finalize_import_job(v_job.id);
+        RAISE EXCEPTION 'a job was finalized into the season that became active after it was made';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_state = PG_EXCEPTION_DETAIL;
+    END;
+    UPDATE public.season_settings SET status = 'draft' WHERE id = v_draft;
+    UPDATE public.season_settings SET status = 'active' WHERE id = v_active;
+    IF v_state IS DISTINCT FROM 'season_not_active' THEN
+        RAISE EXCEPTION 'the moved-season refusal carried detail [%]', v_state;
     END IF;
-    RAISE NOTICE 'a job made for a draft season finalizes into the draft: its division U10B is there and the active season has none';
+    IF EXISTS (SELECT 1 FROM public.players WHERE external_registration_id = 'SM-M') THEN
+        RAISE EXCEPTION 'the refused finalize promoted a player into the new active season';
+    END IF;
+    RAISE NOTICE 'a job made for a season that has stopped being the active one is refused (season_not_active) and promotes nobody';
 
     INSERT INTO public.import_jobs (organization_id, job_type, storage_path, status, created_by)
     VALUES (v_org, 'registration', 'orga/legacy.csv', 'importing', v_admin) RETURNING * INTO v_job;
@@ -198,12 +238,20 @@ BEGIN
             '{"location": "Smoke Park", "name": "Smoke Pitch", "type": "practice", "day": "Sat", "start": "09:00", "end": "09:30",
               "capacity": "1", "valid_from": "2027-09-04", "valid_until": "2027-11-27", "division_name": "smoke draft only u8"}'::jsonb,
             '[]'::jsonb);
-    PERFORM public.finalize_field_import_job(v_job.id);
-    IF (SELECT ps.division_id FROM public.practice_slots ps WHERE ps.organization_id = v_org AND ps.valid_from = DATE '2027-09-04')
-       IS DISTINCT FROM (SELECT id FROM public.divisions WHERE season_settings_id = v_draft AND name = 'Smoke Draft Only U8') THEN
-        RAISE EXCEPTION 'a fields job for the draft season did not reserve its slot to the draft''s division';
+    v_state := NULL;
+    BEGIN
+        PERFORM public.finalize_field_import_job(v_job.id);
+        RAISE EXCEPTION 'a fields job for a draft season was finalized';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_state = PG_EXCEPTION_DETAIL;
+    END;
+    IF v_state IS DISTINCT FROM 'season_not_active' THEN
+        RAISE EXCEPTION 'the fields refusal carried detail [%]', v_state;
     END IF;
-    RAISE NOTICE 'a fields job for a draft season resolves a practice row''s Division in that season';
+    IF EXISTS (SELECT 1 FROM public.practice_slots ps WHERE ps.organization_id = v_org AND ps.valid_from = DATE '2027-09-04') THEN
+        RAISE EXCEPTION 'the refused fields job wrote a practice slot';
+    END IF;
+    RAISE NOTICE 'a fields job for a draft season is refused (22023, season_not_active) and writes no slot';
 
     -- ---- 5. the two division writers refuse a completed season ----------------------
     SET LOCAL ROLE authenticated;

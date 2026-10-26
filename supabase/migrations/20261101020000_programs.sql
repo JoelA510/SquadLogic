@@ -37,6 +37,12 @@
 --      writer that forgot would fail on NOT NULL, this fails closed in a
 --      different place: a season with no default program (which nothing can
 --      make) leaves the column NULL and the insert fails on NOT NULL.
+--      A BEFORE UPDATE trigger (`divisions_program_guard`, SECURITY INVOKER) refuses a
+--      change of `program_id` made as `authenticated` or `anon`: the divisions
+--      UPDATE policy and grant would otherwise let an admin move a division past
+--      the writers' completed-season refusal, lock and audit row. The writers
+--      (and the definer demo seed) run as their owner and pass; any other column
+--      of a division is updated as before.
 --   5. The four writers, SECURITY DEFINER, `is_org_admin` of the organization
 --      the *rows* belong to, refusing a completed season, serialized per
 --      organization on the advisory lock Phase E3's rollover and activation will
@@ -216,6 +222,37 @@ COMMENT ON FUNCTION public.divisions_default_program() IS
 CREATE TRIGGER divisions_default_program
     BEFORE INSERT ON public.divisions
     FOR EACH ROW EXECUTE FUNCTION public.divisions_default_program();
+
+-- A client cannot change a division's program with a plain UPDATE: the existing "Divisions: org
+-- admins update" policy and UPDATE grant would let it past the program writers' completed-season
+-- refusal, their organization lock and their audit row. The guard is SECURITY INVOKER on purpose:
+-- a client's statement runs as `authenticated` (or `anon`), while the same UPDATE inside one of the
+-- definer writers runs as the function's owner, so no flag can be set by a caller to get past it.
+-- Every other column of a division is updated exactly as before.
+CREATE FUNCTION public.divisions_program_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+BEGIN
+    IF current_user IN ('authenticated', 'anon') THEN
+        RAISE EXCEPTION 'a division''s program is changed with admin_set_division_program, not by updating the division'
+            USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.divisions_program_guard() FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.divisions_program_guard() IS
+    'Trigger function: refuses a change of divisions.program_id made as a client role (authenticated, anon); the program RPCs run as their owner and pass. 20261101020000.';
+
+CREATE TRIGGER divisions_program_guard
+    BEFORE UPDATE OF program_id ON public.divisions
+    FOR EACH ROW
+    WHEN (OLD.program_id IS DISTINCT FROM NEW.program_id)
+    EXECUTE FUNCTION public.divisions_program_guard();
 
 -- ---------------------------------------------------------------------------
 -- 5. The four writers.
@@ -879,9 +916,9 @@ BEGIN
 
     -- The triggers.
     SELECT count(*) INTO v_n FROM pg_trigger
-     WHERE NOT tgisinternal AND tgname IN ('season_settings_default_program', 'divisions_default_program', 'programs_set_timestamp');
-    IF v_n <> 3 THEN RAISE EXCEPTION 'expected 3 program triggers, found %', v_n; END IF;
-    FOREACH v_sig IN ARRAY ARRAY['public.season_settings_default_program()', 'public.divisions_default_program()'] LOOP
+     WHERE NOT tgisinternal AND tgname IN ('season_settings_default_program', 'divisions_default_program', 'divisions_program_guard', 'programs_set_timestamp');
+    IF v_n <> 4 THEN RAISE EXCEPTION 'expected 4 program triggers, found %', v_n; END IF;
+    FOREACH v_sig IN ARRAY ARRAY['public.season_settings_default_program()', 'public.divisions_default_program()', 'public.divisions_program_guard()'] LOOP
         IF has_function_privilege('authenticated', v_sig, 'EXECUTE') OR has_function_privilege('anon', v_sig, 'EXECUTE') THEN
             RAISE EXCEPTION '% is callable by a client role', v_sig;
         END IF;

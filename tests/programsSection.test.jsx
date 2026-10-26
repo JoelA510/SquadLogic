@@ -145,6 +145,28 @@ describe('the Programs section', () => {
     );
   });
 
+  it('forgets a merge target that was deleted: Merge is disabled and nothing opens', async () => {
+    await ready();
+    const select = /** @type {HTMLSelectElement} */ (screen.getByLabelText('Merge Junior into'));
+    fireEvent.change(select, { target: { value: 'p-mini' } });
+    expect(
+      screen.getByRole('button', { name: 'Merge the program Junior' }).hasAttribute('disabled')
+    ).toBe(false);
+
+    // Mini goes (here, or in another session) and the section reads the programs again.
+    mocks.tables.programs = [DEFAULT, JUNIOR];
+    fireEvent.click(screen.getByRole('button', { name: 'Delete the program Mini' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Mini' })).toBeNull());
+
+    expect(select.value).toBe('');
+    const merge = screen.getByRole('button', { name: 'Merge the program Junior' });
+    expect(merge.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(merge);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('renames a program through the same writer', async () => {
     await ready();
     fireEvent.click(screen.getByRole('button', { name: 'Rename the program Mini' }));

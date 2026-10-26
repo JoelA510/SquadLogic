@@ -32,15 +32,18 @@
 --   5. `import_jobs.season_settings_id` (FK, ON DELETE CASCADE, indexed; NULL for
 --      jobs made before this). `create_import_job` takes a trailing
 --      `p_season_settings_id uuid DEFAULT NULL`: it must be the organization's
---      and not completed (42501, 22023); none named means the organization's
+--      and its active season (42501; 22023 `season_completed` or `season_not_active`); none named means the organization's
 --      active season, fixed now rather than at finalize time. The 3-argument
 --      signature is dropped by its exact name and signature (no CASCADE) and the
 --      4-argument one created, so every call by name (the app, the Edge
 --      tests, a cached browser mid-deploy) still resolves.
 --   6. `finalize_import_job` and `finalize_field_import_job` read the job's
 --      season (a job without one: the active season) instead of the active-
---      then-latest-start-then-newest order, and refuse a completed one (22023,
---      detail `season_completed`). `upsert_division_for_import` and
+--      then-latest-start-then-newest order, and refuse one that is not the active
+--      season (22023, detail `season_completed` or `season_not_active`): players
+--      are organization-level and divisions season-level, so an import into
+--      another season would move a live player into its divisions, and enrolment
+--      is not season-scoped until E3's owner decision. `upsert_division_for_import` and
 --      `admin_upsert_division_settings` refuse a completed season the same way.
 --      Each replaced body is the latest one (20261026010000, 20261029010000,
 --      20261021040000, 20261029010000, 20261021040000) with this change only;
@@ -245,6 +248,10 @@ BEGIN
         RAISE EXCEPTION 'season % is completed and takes no import', p_season_settings_id
           USING ERRCODE='22023', DETAIL='season_completed';
       END IF;
+      IF v_season_status <> 'active' THEN
+        RAISE EXCEPTION 'season % is % and takes no import: only the active season does', p_season_settings_id, v_season_status
+          USING ERRCODE='22023', DETAIL='season_not_active';
+      END IF;
     END IF;
 
     INSERT INTO public.import_jobs (organization_id,job_type,storage_path,status,total_rows,processed_rows,progress_percent,last_heartbeat_at,created_by,started_at,season_settings_id)
@@ -353,6 +360,14 @@ BEGIN
     IF v_season_status = 'completed' THEN
         RAISE EXCEPTION 'Season % is completed and takes no import', v_season_settings_id
             USING ERRCODE = '22023', DETAIL = 'season_completed';
+    END IF;
+    -- Players are organization-level and their division is season-level, so an import
+    -- that matches an existing player by external id would move a live-season player
+    -- into another season's division. Until enrollment is season-scoped (E3 decision), an
+    -- import goes only to the active season.
+    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
+        RAISE EXCEPTION 'Season % is % and takes no import: only the active season does', v_season_settings_id, v_season_status
+            USING ERRCODE = '22023', DETAIL = 'season_not_active';
     END IF;
 
     -- Auto-create derived divisions that don't exist yet for that season.
@@ -880,6 +895,12 @@ BEGIN
     IF v_import_season_status = 'completed' THEN
         RAISE EXCEPTION 'Season % is completed and takes no import', v_import_season_id
             USING ERRCODE = '22023', DETAIL = 'season_completed';
+    END IF;
+    -- A field import creates and updates organization-level locations and fields; only the
+    -- active season takes an import (see finalize_import_job).
+    IF v_import_season_status IS NOT NULL AND v_import_season_status <> 'active' THEN
+        RAISE EXCEPTION 'Season % is % and takes no import: only the active season does', v_import_season_id, v_import_season_status
+            USING ERRCODE = '22023', DETAIL = 'season_not_active';
     END IF;
 
     FOR v_row IN
@@ -2096,7 +2117,7 @@ BEGIN
         'public.finalize_field_import_job(uuid,jsonb)'
     ] LOOP
         SELECT prosrc INTO v_def FROM pg_proc WHERE oid = v_sig::regprocedure;
-        IF v_def !~ 'v_job\.season_settings_id IS NULL' OR v_def !~ 'season_completed'
+        IF v_def !~ 'v_job\.season_settings_id IS NULL' OR v_def !~ 'season_completed' OR v_def !~ 'season_not_active'
            OR v_def ~ 'ORDER BY \(s\.status = ''active''\) DESC' THEN
             RAISE EXCEPTION '% does not read the job''s season', v_sig;
         END IF;

@@ -60,6 +60,7 @@ This document expands on the roadmap tasks for importing GotSport registrations 
 1. If rows fail validation, keep row errors in `import_jobs.error_summary` and finish as `completed_with_warnings` when at least one valid player row is promoted.
 2. When validation completes:
    - Call `finalize_import_job(import_job_id, validation_errors)` to promote staged player rows into `players` in one transaction.
+   - An import goes to the organization's active season (`import_jobs.season_settings_id`, fixed when the job is made; `create_import_job` and the finalizers refuse a draft or completed season, 22023, because a player belongs to the organization and an import elsewhere would move a live-season player; per-season enrolment is Phase E3).
    - Use GotSport/external registration id as the preferred player match key. Rows without an external id are still promoted once per import job.
    - Mark promoted staging rows with `promoted_at` / `promoted_by` so re-running finalization for the same job does not duplicate players.
    - Store promotion counts in `import_jobs.warning_summary.finalize` and mark the import job `completed` or `completed_with_warnings`.

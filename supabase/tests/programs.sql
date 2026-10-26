@@ -18,6 +18,8 @@
 --   * `admin_merge_programs`: every source division moves to the target, which keeps its name; the
 --     source goes; a program cannot be merged into itself, the default cannot be merged away, and
 --     programs of two seasons cannot be merged;
+--   * a division's program is not changed by a plain UPDATE of the division (an admin's is refused,
+--     42501, even in a completed season), while its other columns update as before;
 --   * a refused call writes no audit row and changes nothing;
 --   * an organization that never makes a program works as before: its import, its division
 --     writers and its listings need no program.
@@ -28,7 +30,12 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(71);
+SELECT plan(77);
+
+-- The rows a statement touched, for the writes that must still reach their row.
+CREATE FUNCTION pg_temp.rows_of(p_sql text) RETURNS integer LANGUAGE plpgsql AS $f$
+DECLARE n integer;
+BEGIN EXECUTE p_sql; GET DIAGNOSTICS n = ROW_COUNT; RETURN n; END $f$;
 
 -- Org A: its active season (fixtures), a draft and a completed one, each with a division; Org B only
 -- its active season (never makes a program).
@@ -469,6 +476,49 @@ SELECT throws_ok(
         (SELECT id FROM public.programs WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1' AND is_default))$$,
     '22023', NULL,
     'nor merged'
+);
+
+-- A client cannot change a division's program with a plain UPDATE (the divisions UPDATE policy
+-- would let an admin past the writers' completed-season refusal, lock and audit row); the writers
+-- still can, and every other column is updated as before.
+SELECT lives_ok(
+    $$SELECT public.admin_upsert_program('a1111111-1111-1111-1111-111111111aaa', NULL, 'Guard Probe')$$,
+    'a program to try the direct update with'
+);
+SELECT throws_ok(
+    $$UPDATE public.divisions SET program_id = (SELECT id FROM public.programs
+                                                 WHERE season_settings_id = 'a1111111-1111-1111-1111-111111111aaa' AND name = 'Guard Probe')
+       WHERE id = 'a1111111-1111-1111-1111-11111111d701'$$,
+    '42501', 'a division''s program is changed with admin_set_division_program, not by updating the division',
+    'an admin''s direct update of a division''s program is refused (a program of the active season)'
+);
+SELECT throws_ok(
+    $$UPDATE public.divisions SET program_id = (SELECT p.id FROM public.programs p
+                                                 WHERE p.season_settings_id = 'a1111111-1111-1111-1111-1111111111d1'
+                                                   AND p.id <> (SELECT program_id FROM public.divisions
+                                                                 WHERE id = 'a1111111-1111-1111-1111-11111111d704')
+                                                 LIMIT 1)
+       WHERE id = 'a1111111-1111-1111-1111-11111111d704'$$,
+    '42501', NULL,
+    'and of a completed season''s program'
+);
+SELECT isnt(
+    (SELECT p.name FROM public.programs p JOIN public.divisions d ON d.program_id = p.id
+      WHERE d.id = 'a1111111-1111-1111-1111-11111111d701'),
+    'Guard Probe',
+    'the refused update changed nothing'
+);
+SELECT is(
+    pg_temp.rows_of($$UPDATE public.divisions SET name = 'P U7B (renamed)'
+                       WHERE id = 'a1111111-1111-1111-1111-11111111d701'$$),
+    1,
+    'an admin''s direct update of another column of a division still works'
+);
+SELECT is(
+    pg_temp.rows_of($$UPDATE public.divisions SET name = name, program_id = program_id
+                       WHERE id = 'a1111111-1111-1111-1111-11111111d701'$$),
+    1,
+    'an update that leaves program_id as it is is not refused'
 );
 
 -- ── 9. Every division writer puts a new division in the default; programs stay optional ──

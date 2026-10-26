@@ -12,6 +12,7 @@
 --      moves them to the target; each success leaves one audit row and each refusal none; another
 --      season's program is 23503; a completed season, a coach and another organization's admin
 --      are refused.
+--   3b. A client's plain UPDATE of a division's program is refused (42501); the writer still moves it.
 --   4. The season lock: while another session holds the organization's season lock, a program
 --      write waits for it (it is the lock Phase E3's rollover and activation take).
 --   5. The demo league has its programs: Minis, Micro, Junior and Select span divisions, and U9, U10
@@ -224,6 +225,33 @@ BEGIN
     EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
     END;
     RAISE NOTICE 'a coach and another organization''s admin are refused (42501)';
+
+    -- ---- 3b. a plain UPDATE does not change a division's program ------------------
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    v_res := public.admin_upsert_program(v_active, NULL, 'Guard Probe');
+    SET LOCAL ROLE authenticated;
+    BEGIN
+        UPDATE public.divisions SET program_id = (v_res ->> 'id')::uuid WHERE id = v_div1;
+        RESET ROLE;
+        RAISE EXCEPTION 'an admin''s direct UPDATE changed a division''s program';
+    EXCEPTION WHEN SQLSTATE '42501' THEN
+        RESET ROLE;
+    END;
+    SET LOCAL ROLE authenticated;
+    UPDATE public.divisions SET name = name WHERE id = v_div1;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RESET ROLE;
+    IF v_n <> 1 THEN RAISE EXCEPTION 'an admin''s direct UPDATE of another column reached % row(s)', v_n; END IF;
+    IF (SELECT program_id FROM public.divisions WHERE id = v_div1) IS DISTINCT FROM v_default THEN
+        RAISE EXCEPTION 'the refused UPDATE left the division in another program';
+    END IF;
+    PERFORM public.admin_set_division_program(v_div1, (v_res ->> 'id')::uuid);
+    IF (SELECT program_id FROM public.divisions WHERE id = v_div1) IS DISTINCT FROM (v_res ->> 'id')::uuid THEN
+        RAISE EXCEPTION 'admin_set_division_program no longer moves a division';
+    END IF;
+    PERFORM public.admin_set_division_program(v_div1, NULL);
+    RAISE NOTICE 'a client''s direct UPDATE of a division''s program is refused (42501), another column updates, and the writer still moves it';
 
     -- ---- 4. the season lock ------------------------------------------------------
     -- Another organization's lock, which this session has not taken (the writers above hold

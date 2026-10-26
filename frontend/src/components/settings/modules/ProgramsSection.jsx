@@ -101,13 +101,22 @@ export default function ProgramsSection() {
   const onConfirm = async () => {
     if (!confirm) return;
     const { kind, program, target } = confirm;
+    if (kind === 'merge' && !target) return;
     const ok = await run(
       () => (kind === 'delete' ? deleteProgram(program.id) : mergePrograms(program.id, target.id)),
       kind === 'delete'
         ? `Program "${program.name}" deleted.`
         : `Program "${program.name}" merged into "${target.name}".`
     );
-    if (ok) setConfirm(null);
+    if (ok) {
+      setConfirm(null);
+      // A choice that named the program just removed (as the source or the target) is stale.
+      setMergeTargets((t) =>
+        Object.fromEntries(
+          Object.entries(t).filter(([key, value]) => key !== program.id && value !== program.id)
+        )
+      );
+    }
   };
 
   const targetsFor = (program) => [
@@ -180,7 +189,11 @@ export default function ProgramsSection() {
             const inProgram = divisionsOf.get(String(program.id)) ?? [];
             const isRenaming = renaming?.id === program.id;
             const targets = targetsFor(program);
-            const targetId = mergeTargets[program.id] ?? '';
+            // A remembered choice counts only while that program is still a target: one that was
+            // deleted or merged away (here or since the last read) reads as no choice, so Merge
+            // stays disabled and never opens a confirmation with nothing to merge into.
+            const chosen = targets.find((t) => t.id === mergeTargets[program.id]);
+            const targetId = chosen ? chosen.id : '';
             return (
               <li
                 key={program.id}
@@ -260,12 +273,12 @@ export default function ProgramsSection() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy || targetId === ''}
+                      disabled={busy || !chosen}
                       onClick={() =>
                         setConfirm({
                           kind: 'merge',
                           program,
-                          target: targets.find((t) => t.id === targetId),
+                          target: chosen,
                         })
                       }
                       aria-label={`Merge the program ${program.name}`}

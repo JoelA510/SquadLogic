@@ -248,6 +248,110 @@
   flex: none;
 }
 
+/* ---------- Demo timer (D4): fixed in the header for the whole demo ---------- */
+.demo-timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  background: var(--warning-weak);
+  color: var(--warning-text);
+  border: 1px solid var(--warning);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.demo-timer .demo-timer-clock {
+  font-variant-numeric: tabular-nums;
+}
+.demo-timer button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-sm, 6px);
+  border: 1px solid var(--warning);
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+.demo-timer button:hover {
+  background: var(--bg-hover);
+}
+.demo-timer-floating {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 70;
+  box-shadow: var(--shadow-xs);
+}
+@media (max-width: 900px) {
+  .demo-timer .demo-timer-label {
+    display: none;
+  }
+}
+
+/* ---------- Turnstile (D4) ---------- */
+.turnstile {
+  min-height: 65px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.turnstile-failed {
+  color: var(--danger-text);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---------- Demo entry and ending pages (D4) ---------- */
+.demo-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5%;
+  background: var(--bg-app-gradient);
+}
+.demo-page-card {
+  max-width: 480px;
+  width: 100%;
+  padding: 2.5rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+.demo-page-card h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+.demo-page-card p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+.demo-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+.demo-error {
+  color: var(--danger-text);
+  background: var(--danger-weak);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  padding: 0.75rem;
+  width: 100%;
+}
+
 /* ---------- Nested navigation ---------- */
 .nav {
   width: 100%;

@@ -148,6 +148,45 @@ describe('Content-Security-Policy', () => {
     expect(workerAllowsBlob(old)).toBe(false);
   });
 
+  it("admits Cloudflare Turnstile's script and challenge frame (demo mode, D4), and nothing broader", () => {
+    const policy = headerPolicy();
+    const scriptSrc = directive(policy, 'script-src');
+    const frameSrc = directive(policy, 'frame-src');
+    expect(scriptSrc).toContain('https://challenges.cloudflare.com');
+    expect(frameSrc).toContain('https://challenges.cloudflare.com');
+    expect(allows(scriptSrc, 'https://challenges.cloudflare.com/turnstile/v0/api.js')).toBe(true);
+    expect(
+      allows(frameSrc, 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/')
+    ).toBe(true);
+    // The exact host: a sibling or look-alike is not admitted, and the origin is in neither
+    // connect-src nor img-src (Turnstile needs only the script and the frame).
+    expect(allows(scriptSrc, 'https://evil.cloudflare.com/turnstile/v0/api.js')).toBe(false);
+    expect(allows(scriptSrc, 'https://challenges.cloudflare.com.evil.example/api.js')).toBe(false);
+    expect(directive(policy, 'connect-src')).not.toContain('https://challenges.cloudflare.com');
+  });
+
+  it('script-src and frame-src in vercel.json and docs/security/csp.md name the same sources', () => {
+    for (const name of ['script-src', 'frame-src']) {
+      const header = directive(headerPolicy(), name);
+      const documented = directive(documentedPolicy(), name);
+      expect(header, name).not.toBeNull();
+      expect(new Set(documented), name).toEqual(new Set(header));
+    }
+  });
+
+  it('the old policy, without the Turnstile origin, refuses its script and frame', () => {
+    const policy = headerPolicy().replaceAll(' https://challenges.cloudflare.com', '');
+    expect(
+      allows(
+        directive(policy, 'script-src'),
+        'https://challenges.cloudflare.com/turnstile/v0/api.js'
+      )
+    ).toBe(false);
+    expect(allows(directive(policy, 'frame-src'), 'https://challenges.cloudflare.com/')).toBe(
+      false
+    );
+  });
+
   it('never allows a bare wildcard', () => {
     for (const name of ['default-src', 'connect-src', 'script-src', 'img-src', 'worker-src']) {
       const values = directive(headerPolicy(), name) ?? [];

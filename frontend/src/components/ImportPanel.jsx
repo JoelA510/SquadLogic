@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import Papa from 'papaparse';
 import {
   UploadCloud,
@@ -28,6 +28,10 @@ import {
   normalizeImportHeader,
 } from '../utils/importHeaders.js';
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
+import { useDemo } from '../hooks/useDemo.js';
+
+// A demo opens this instead of the file picker (D4). Lazy: only a demo visitor ever needs it.
+const DemoImportNotice = lazy(() => import('./DemoImportNotice.jsx'));
 
 /** @typedef {'players' | 'coaches' | 'fields' | 'field_availability'} ImportType */
 /** @type {readonly ImportType[]} */
@@ -152,6 +156,9 @@ export default function ImportPanel({ onImport }) {
   } = useImport();
 
   const { currentOrganization } = useOrganization();
+  // In a demo no file is read: the picker, the drop zone and the file check all open the notice.
+  const { isDemo } = useDemo();
+  const [demoNoticeOpen, setDemoNoticeOpen] = useState(false);
 
   const theme = PERSISTENCE_THEMES.green;
   const isComplete = COMPLETED_IMPORT_STATUSES.has(importStatus);
@@ -185,11 +192,19 @@ export default function ImportPanel({ onImport }) {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
+    if (isDemo) {
+      setDemoNoticeOpen(true);
+      return;
+    }
     const droppedFile = e.dataTransfer.files[0];
     validateAndReadFile(droppedFile);
   };
 
   const handleFileSelect = (e) => {
+    if (isDemo) {
+      setDemoNoticeOpen(true);
+      return;
+    }
     const selectedFile = e.target.files[0];
     validateAndReadFile(selectedFile);
   };
@@ -198,6 +213,10 @@ export default function ImportPanel({ onImport }) {
 
   const validateAndReadFile = (file) => {
     if (!file) return;
+    if (isDemo) {
+      setDemoNoticeOpen(true);
+      return;
+    }
     if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
       setError('Please upload a valid CSV file.');
       return;
@@ -839,6 +858,14 @@ export default function ImportPanel({ onImport }) {
                       className="sr-only"
                       accept=".csv"
                       onChange={handleFileSelect}
+                      onClick={(event) => {
+                        // Before the picker opens, so a demo visitor never sees it (keyboard
+                        // activation fires this click too).
+                        if (isDemo) {
+                          event.preventDefault();
+                          setDemoNoticeOpen(true);
+                        }
+                      }}
                     />
                   </label>
                 </p>
@@ -1045,6 +1072,11 @@ export default function ImportPanel({ onImport }) {
           </div>
         )}
       </div>
+      {demoNoticeOpen && (
+        <Suspense fallback={null}>
+          <DemoImportNotice open onClose={() => setDemoNoticeOpen(false)} />
+        </Suspense>
+      )}
     </section>
   );
 }

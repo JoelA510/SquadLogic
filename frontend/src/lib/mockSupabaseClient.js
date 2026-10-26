@@ -29,6 +29,7 @@ import { createAccessHelpers, handleServerSideReadRpc } from './mockServerSideRe
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
+import { handleDemoRpc, makeAnonymousSession } from './mockDemo.js';
 import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
 import { ADMIN_ROLES, ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
@@ -579,7 +580,11 @@ const initialMockData = {
 };
 
 // ── Realtime & Auth Event Plumbing ──────────────────────────────────────────
-let mockSubscriptionCallback = null;
+// Every `onAuthStateChange` subscriber, as in supabase-js (AuthProvider and ImportProvider both
+// subscribe). It was ONE slot, so the last subscriber to (re)subscribe took every event: once the
+// organization loaded and ImportProvider resubscribed, a sign-out never reached AuthProvider and
+// the signed-out app stayed on screen (found writing the demo timer's tests, D4).
+const mockSubscriptionCallbacks = new Set();
 const realtimeCallbacks = [];
 let pendingAuthEvents = [];
 
@@ -593,8 +598,8 @@ const triggerRealtimeEvent = (table, event, payload) => {
 };
 
 const triggerAuthEvent = (event, session) => {
-  if (mockSubscriptionCallback) {
-    mockSubscriptionCallback(event, session);
+  if (mockSubscriptionCallbacks.size > 0) {
+    [...mockSubscriptionCallbacks].forEach((callback) => callback(event, session));
   } else {
     pendingAuthEvents.push({ event, session });
   }
@@ -2071,6 +2076,21 @@ export const mockSupabase = {
       }
       return { data: { session: null, user: null }, error: { message: 'Invalid credentials' } };
     },
+    // An anonymous session, as GoTrue's signInAnonymously gives one (D4). The captcha token, when
+    // the caller sends one, is accepted and ignored: the mock has no CAPTCHA to pass.
+    signInAnonymously: async (_credentials) => {
+      const session = makeAnonymousSession(mockId);
+      const db = (typeof window !== 'undefined' && window.__MOCK_DB__) || initialMockData;
+      const typedDb = /** @type {any} */ (db);
+      typedDb.profiles = typedDb.profiles || [];
+      typedDb.profiles.push({ id: session.user.id, email: null, full_name: null, role: 'user' });
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
+        saveDB(db);
+      }
+      setTimeout(() => triggerAuthEvent('SIGNED_IN', session), 50);
+      return { data: { session, user: session.user }, error: null };
+    },
     signOut: async () => {
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('__MOCK_SESSION__');
@@ -2079,7 +2099,7 @@ export const mockSupabase = {
       return { error: null };
     },
     onAuthStateChange: (callback) => {
-      mockSubscriptionCallback = callback;
+      mockSubscriptionCallbacks.add(callback);
       let session = null;
       if (typeof window !== 'undefined') {
         const stored = sessionStorage.getItem('__MOCK_SESSION__');
@@ -2090,7 +2110,7 @@ export const mockSupabase = {
         data: {
           subscription: {
             unsubscribe: () => {
-              mockSubscriptionCallback = null;
+              mockSubscriptionCallbacks.delete(callback);
             },
           },
         },
@@ -2622,6 +2642,22 @@ export const mockSupabase = {
         },
         error: null,
       };
+    }
+
+    // The demo's twin (D4): start_demo_session. The mock never expires it by itself; the client's
+    // own timer does, as the real one must (the row is invisible to its visitor after expiry).
+    const demoResult = handleDemoRpc(db, name, {
+      session: storedSession ? JSON.parse(storedSession) : null,
+      mockId,
+      lifespanMs:
+        typeof window !== 'undefined'
+          ? Number(sessionStorage.getItem('__MOCK_DEMO_MS__')) || undefined
+          : undefined,
+      failure: typeof window !== 'undefined' ? sessionStorage.getItem('__MOCK_DEMO_FAIL__') : null,
+    });
+    if (demoResult) {
+      if (!demoResult.error) saveDB(db);
+      return demoResult;
     }
 
     if (name === 'initialize_new_tenant') {

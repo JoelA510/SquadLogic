@@ -25,6 +25,7 @@ import { usePermission } from '../hooks/usePermission.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
+import { useDemo } from '../hooks/useDemo.js';
 import { coachChangeConsequence } from '@squadlogic/core/people/assignmentHistory.js';
 import { repairNotComputed } from '@squadlogic/core/fieldAdmin/index.js';
 
@@ -240,6 +241,10 @@ export default function CoachesPage() {
   const [assignmentRows, setAssignmentRows] = useState(null);
   const [pendingChange, setPendingChange] = useState(null);
   const canManageCoaches = can(PERMISSIONS.MANAGE_ORGANIZATION);
+  // A demo's coach records are read-only (the server refuses every write, D3): no status edits and
+  // no deletes. Assigning a coach to a team is a team write, and stays.
+  const { isDemo } = useDemo();
+  const canEditCoachRecords = canManageCoaches && !isDemo;
 
   const loadCoaches = useCallback(async () => {
     const requestId = latestRequestRef.current + 1;
@@ -579,7 +584,7 @@ export default function CoachesPage() {
         key: 'status',
         label: 'Status',
         width: 120,
-        editable: canManageCoaches,
+        editable: canEditCoachRecords,
         type: 'select',
         options: STATUS_OPTIONS,
         render: (row) => (
@@ -608,7 +613,7 @@ export default function CoachesPage() {
       },
     ];
     return cols;
-  }, [canManageCoaches]);
+  }, [canEditCoachRecords]);
 
   if (loading) return <LoadingScreen />;
 
@@ -636,18 +641,20 @@ export default function CoachesPage() {
         label="Coaches grid"
         columns={columns}
         rows={rows}
-        selectable={canManageCoaches}
+        selectable={canEditCoachRecords}
         selected={selected}
         setSelected={setSelected}
         search={search}
         setSearch={setSearch}
         searchKeys={['fullName', 'email', 'phone', 'statusLabel', '_programs', '_teams']}
-        onCellChange={canManageCoaches ? handleCellChange : undefined}
+        onCellChange={canEditCoachRecords ? handleCellChange : undefined}
         rowActions={
           canManageCoaches
             ? [
                 { id: 'teams', label: 'Manage teams', icon: Users },
-                { id: 'delete', label: 'Delete coach', icon: Trash2, danger: true },
+                ...(isDemo
+                  ? []
+                  : [{ id: 'delete', label: 'Delete coach', icon: Trash2, danger: true }]),
               ]
             : []
         }

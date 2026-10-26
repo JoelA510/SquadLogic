@@ -51,6 +51,9 @@ const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx
 const PracticeLightingPage = lazy(() => import('./pages/PracticeLightingPage.jsx'));
 const HeatForecastPage = lazy(() => import('./pages/HeatForecastPage.jsx'));
 const MyTeamPage = lazy(() => import('./pages/MyTeamPage.jsx'));
+const DemoStartPage = lazy(() => import('./pages/DemoStartPage.jsx'));
+const DemoEndedPage = lazy(() => import('./pages/DemoEndedPage.jsx'));
+import DemoTimer from './components/auth/DemoTimer.jsx';
 import OfflineGuard from './components/OfflineGuard.jsx';
 import ToastHost from './components/ui/ToastHost.jsx';
 
@@ -87,6 +90,20 @@ function AppContent() {
     );
   }
 
+  // /demo/start and /demo/ended (plan docs/changes/2026-10-22-demo-mode.md, D4) are reachable
+  // signed out, anonymous or signed in, and sit outside every redirect below: a visitor with no
+  // account has no organization on the way in, which must not send them to /organizations/new.
+  if (/^\/demo\/(start|ended)\/?$/.test(location.pathname)) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes>
+          <Route path="/demo/start" element={<DemoStartPage />} />
+          <Route path="/demo/ended" element={<DemoEndedPage />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
   if (!session && location.pathname !== '/auth/reset-password') {
     return (
       <Suspense fallback={<LoadingScreen />}>
@@ -103,18 +120,31 @@ function AppContent() {
     return <OrganizationFetchError error={orgFetchError} onRetry={refetchOrgs} />;
   }
 
+  // An anonymous session is a demo visitor's. It is never routed to /organizations/new (the server
+  // refuses it a tenant): with no organization its demo is gone, and it goes to /demo/ended, where
+  // "Start again" begins a new one.
+  const isAnonymous = session?.user?.is_anonymous === true;
   const hasNoOrgs = !orgLoading && organizations.length === 0;
+  if (isAnonymous && hasNoOrgs) {
+    return <Navigate to="/demo/ended" replace />;
+  }
   const shouldRedirectToOrgCreation =
     hasNoOrgs && !location.pathname.startsWith('/organizations/new') && location.pathname === '/';
+  // The setup pages have no header; the demo's clock floats over them instead.
+  const showFloatingDemoTimer = /^\/setup(\/|$)/.test(location.pathname);
 
   const isOnboarded = currentOrganization?.is_onboarded;
   const isTenantAdmin = permissions.includes(PERMISSIONS.MANAGE_GLOBAL_SETTINGS);
 
   return (
     <Suspense fallback={<LoadingScreen />}>
+      {showFloatingDemoTimer && <DemoTimer floating />}
       <Routes>
         <Route path="/auth/reset-password" element={<ResetPassword />} />
-        <Route path="/organizations/new" element={<OrganizationCreation />} />
+        <Route
+          path="/organizations/new"
+          element={isAnonymous ? <Navigate to="/" replace /> : <OrganizationCreation />}
+        />
         <Route
           path="/setup"
           element={

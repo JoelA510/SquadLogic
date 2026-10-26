@@ -6,6 +6,9 @@
  * - logger.captureException — explicit Sentry error capture with optional context.
  * - logger.setUser — attach the user, organization and role IDs to future
  *   Sentry events (never a name or an email).
+ * - logger.setDemoContext — tag future Sentry events `demo` while the active
+ *   organization is a demo, so a visitor's errors can be filtered out of (or
+ *   into) the real ones.
  *
  * Sentry integration uses the @sentry/react SDK (installed as a dependency).
  * When VITE_SENTRY_DSN is absent, the SDK is imported but init() was never
@@ -94,6 +97,17 @@ export const logger = {
     const sentryUser = sentryUserOf(user);
     Sentry.setUser(sentryUser);
     Sentry.setTag('organization_id', sentryUser?.organization_id);
+  },
+
+  /**
+   * Tag future Sentry events `demo: true` while the active organization is a demo (D4), and clear
+   * the tag otherwise. OrganizationContext calls it when the active organization changes (and for
+   * none), AuthContext with false on sign-out; the tag never carries anything but `true`.
+   * `setUser`'s allowlist is unchanged.
+   * @param {boolean} isDemo
+   */
+  setDemoContext: (isDemo) => {
+    Sentry.setTag('demo', isDemo === true ? 'true' : undefined);
   },
 };
 

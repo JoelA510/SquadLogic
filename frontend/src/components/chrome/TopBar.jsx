@@ -29,6 +29,8 @@ import Badge from '../ui/Badge.jsx';
 import { initialsOf } from '../ui/Avatar.jsx';
 import logo from '../../assets/SL-Logo.png';
 import { isAdminRole } from '../../constants/permissions.js';
+import { isDemoOrganization } from '../../lib/demo.js';
+import DemoTimer from '../auth/DemoTimer.jsx';
 
 function CtxSwitcher({ label, icon: Icon, value, items }) {
   return (
@@ -197,6 +199,9 @@ export default function TopBar({ onToggleNav = undefined }) {
   const displayEmail = user?.email || user?.profile?.email || '';
   const initials = initialsOf(displayName) || '?';
 
+  // A demo visitor is anonymous and the server refuses them a tenant of their own (D3), so the
+  // demo's switcher offers no way to create one.
+  const inDemo = isDemoOrganization(currentOrganization);
   const orgItems = [
     ...organizations.map((member) => ({
       id: member.organization_id,
@@ -205,13 +210,17 @@ export default function TopBar({ onToggleNav = undefined }) {
       checked: currentOrganization?.id === member.organizations?.id,
       onSelect: () => switchOrganization(member.organization_id),
     })),
-    {
-      id: 'new-org',
-      label: 'New organization…',
-      icon: Plus,
-      separatorAbove: true,
-      onSelect: () => navigate('/organizations/new'),
-    },
+    ...(inDemo
+      ? []
+      : [
+          {
+            id: 'new-org',
+            label: 'New organization…',
+            icon: Plus,
+            separatorAbove: true,
+            onSelect: () => navigate('/organizations/new'),
+          },
+        ]),
   ];
 
   const seasonItems = availableSeasons.map((season) => ({
@@ -312,6 +321,8 @@ export default function TopBar({ onToggleNav = undefined }) {
       </div>
 
       <div className="topbar-spacer" />
+
+      <DemoTimer />
 
       {can(PERMISSIONS.MANAGE_GLOBAL_SETTINGS) && (
         <button type="button" className="btn btn-default sm" onClick={() => navigate('/setup')}>

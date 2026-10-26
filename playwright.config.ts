@@ -37,6 +37,8 @@ const config = defineConfig({
     timeout: 120 * 1000,
     env: {
       VITE_USE_MOCK_SUPABASE: 'true',
+      // The demo's entry point (docs/changes/2026-10-22-demo-mode.md, D4), for demo_mode.feature.
+      VITE_DEMO_ENABLED: 'true',
     },
   },
   projects: [
@@ -74,6 +76,9 @@ if (realBackendUrl) {
       VITE_SUPABASE_URL: realBackendUrl,
       VITE_SUPABASE_ANON_KEY: process.env.E2E_REAL_BACKEND_ANON_KEY ?? '',
       VITE_SUPABASE_PERSISTENCE_URL: `${realBackendUrl}/functions/v1`,
+      // real_backend_demo.feature starts a demo (D4). No VITE_TURNSTILE_SITE_KEY: the local stack
+      // runs with CAPTCHA off, so no widget renders and no token is sent.
+      VITE_DEMO_ENABLED: 'true',
     },
   };
   config.projects = [

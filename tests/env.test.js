@@ -97,6 +97,58 @@ describe('envRules: required in a production build', () => {
   });
 });
 
+describe('envRules: the demo variables (D4)', () => {
+  it('are all unset by default: no demo, no hosted line, no widget', () => {
+    const { env, problems } = validateClientEnv(PROD_OK, { production: true });
+    expect(problems).toEqual([]);
+    expect(env).toMatchObject({
+      demoEnabled: false,
+      officialSiteUrl: undefined,
+      turnstileSiteKey: undefined,
+    });
+  });
+
+  it('are read when well-formed', () => {
+    const { env, problems } = validateClientEnv(
+      {
+        ...PROD_OK,
+        VITE_DEMO_ENABLED: 'true',
+        VITE_OFFICIAL_SITE_URL: ' https://squadlogic.example/ ',
+        VITE_TURNSTILE_SITE_KEY: '0x4AAAAAAAexample_key-1',
+      },
+      { production: true }
+    );
+    expect(problems).toEqual([]);
+    expect(env).toMatchObject({
+      demoEnabled: true,
+      officialSiteUrl: 'https://squadlogic.example/',
+      turnstileSiteKey: '0x4AAAAAAAexample_key-1',
+    });
+  });
+
+  it("'false' and a blank value both leave the demo off", () => {
+    for (const value of ['false', '', '  ']) {
+      const { env, problems } = validateClientEnv(
+        { ...PROD_OK, VITE_DEMO_ENABLED: value },
+        { production: true }
+      );
+      expect(problems).toEqual([]);
+      expect(env.demoEnabled).toBe(false);
+    }
+  });
+
+  it('a malformed one is named without printing its value', () => {
+    const secretLooking = 'not a key: sb_secret_do-not-print-me';
+    const result = validateClientEnv(
+      { ...PROD_OK, VITE_TURNSTILE_SITE_KEY: secretLooking },
+      { production: true }
+    );
+    const text = formatEnvProblems(result.problems);
+    expect(text).toContain('VITE_TURNSTILE_SITE_KEY');
+    expect(text).not.toContain('do-not-print-me');
+  });
+});
+
 describe('envRules: malformed values are refused, in any build', () => {
   it.each([
     ['VITE_SUPABASE_URL', 'your_supabase_project_url'],
@@ -109,6 +161,13 @@ describe('envRules: malformed values are refused, in any build', () => {
     ['VITE_SENTRY_DSN', 'not-a-dsn'],
     ['VITE_SENTRY_DSN', 'https://o12345.ingest.us.sentry.io/67890'],
     ['VITE_SENTRY_DSN', 'https://0123abcd@o12345.ingest.us.sentry.io/'],
+    ['VITE_DEMO_ENABLED', '1'],
+    ['VITE_DEMO_ENABLED', 'yes'],
+    ['VITE_OFFICIAL_SITE_URL', 'squadlogic.example'],
+    ['VITE_OFFICIAL_SITE_URL', 'ftp://squadlogic.example'],
+    ['VITE_TURNSTILE_SITE_KEY', 'https://challenges.example/key'],
+    ['VITE_TURNSTILE_SITE_KEY', 'has a space'],
+    ['VITE_TURNSTILE_SITE_KEY', 'short'],
   ])('%s = %s', (name, value) => {
     for (const production of [true, false]) {
       const result = validateClientEnv({ ...PROD_OK, [name]: value }, { production });
@@ -244,6 +303,31 @@ describe('env.js: what the app sees', () => {
     expect((await loadEnvModule({ prod: true, vars: PROD_OK })).SENTRY_DSN).toBeUndefined();
     const on = await loadEnvModule({ prod: true, vars: { ...PROD_OK, VITE_SENTRY_DSN: DSN_OK } });
     expect(on.SENTRY_DSN).toBe(DSN_OK);
+  });
+
+  it('the demo variables reach the app by name: off by default, on with a well-formed value', async () => {
+    const off = await loadEnvModule({ prod: true, vars: PROD_OK });
+    expect(off.DEMO_ENABLED).toBe(false);
+    expect(off.OFFICIAL_SITE_URL).toBeUndefined();
+    expect(off.TURNSTILE_SITE_KEY).toBeUndefined();
+    const on = await loadEnvModule({
+      prod: true,
+      vars: {
+        ...PROD_OK,
+        VITE_DEMO_ENABLED: 'true',
+        VITE_OFFICIAL_SITE_URL: 'https://squadlogic.example',
+        VITE_TURNSTILE_SITE_KEY: '0x4AAAAAAAexample',
+      },
+    });
+    expect(on.DEMO_ENABLED).toBe(true);
+    expect(on.OFFICIAL_SITE_URL).toBe('https://squadlogic.example');
+    expect(on.TURNSTILE_SITE_KEY).toBe('0x4AAAAAAAexample');
+  });
+
+  it('a malformed demo variable stops a production bundle, naming it', async () => {
+    await expect(
+      loadEnvModule({ prod: true, vars: { ...PROD_OK, VITE_DEMO_ENABLED: 'maybe' } })
+    ).rejects.toThrow(/VITE_DEMO_ENABLED must be 'true' or 'false'/);
   });
 
   it('a production bundle without Supabase variables still refuses (M1.7, second line)', async () => {
@@ -444,6 +528,23 @@ describe('env.js is the only reader of import.meta.env, by name', () => {
     );
     expect(unvalidated).toEqual([]);
   });
+
+  it('the official domain appears in no frontend or core source file (D4)', () => {
+    // The official deployment is named only through VITE_OFFICIAL_SITE_URL, set in its own Vercel
+    // project: a source file that names it would show it on every self-hosted copy.
+    const OFFICIAL_HOSTS = /squadlogic\.vercel\.app|squadlogic\.secureyour\.tech/i;
+    // The scan can see one: a planted line is found, so its silence below means something.
+    expect(OFFICIAL_HOSTS.test('see https://squadlogic.vercel.app/ for the hosted copy')).toBe(
+      true
+    );
+    expect(OFFICIAL_HOSTS.test('https://squadlogic.example')).toBe(false);
+    const files = [...listSources(SRC), ...listSources(CORE)];
+    expect(files.length).toBeGreaterThan(200);
+    const offenders = files
+      .filter((file) => OFFICIAL_HOSTS.test(readFileSync(file, 'utf8')))
+      .map((file) => path.relative(ROOT, file));
+    expect(offenders).toEqual([]);
+  }, 25_000);
 
   it('no frontend or core module reads process.env', () => {
     // Rule 3 (AGENTS.md): a frontend module asks env.js, never process.env.

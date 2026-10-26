@@ -15,6 +15,7 @@ import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { STATUS_TONE } from '../constants/playerStatus.js';
 import { logger } from '../lib/logger.js';
+import { canEditPlayerField, isDemoOrganization } from '../lib/demo.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 
 function Stars({ n = 0 }) {
@@ -39,6 +40,10 @@ export default function PlayerRecordPage() {
   const navigate = useNavigate();
   const { currentOrganization } = useOrganization();
   const { isEnabled, genderModel } = useFeatures();
+  // A demo's people are read-only except where they play and how they are rated (D3 fences, D4
+  // hides the controls the server would refuse): names, gender and the buddy request are shown, not
+  // editable.
+  const inDemo = isDemoOrganization(currentOrganization);
   const toast = useToast();
   const [player, setPlayer] = useState(null);
   const [divisions, setDivisions] = useState([]);
@@ -227,11 +232,13 @@ export default function PlayerRecordPage() {
                 <InlineField
                   label="First name"
                   value={player.first_name}
+                  editable={canEditPlayerField(inDemo, 'first_name')}
                   onSave={(v) => save({ first_name: v })}
                 />
                 <InlineField
                   label="Last name"
                   value={player.last_name}
+                  editable={canEditPlayerField(inDemo, 'last_name')}
                   onSave={(v) => save({ last_name: v })}
                 />
                 <InlineField
@@ -242,6 +249,7 @@ export default function PlayerRecordPage() {
                     { value: 'm', label: 'Male' },
                     { value: 'f', label: 'Female' },
                   ]}
+                  editable={canEditPlayerField(inDemo, 'gender')}
                   onSave={(v) => save({ gender: v })}
                   render={(v) => (v === 'm' ? 'Male' : v === 'f' ? 'Female' : null)}
                 />
@@ -309,6 +317,7 @@ export default function PlayerRecordPage() {
                   <InlineField
                     label="Buddy request"
                     value={player.buddy_request}
+                    editable={canEditPlayerField(inDemo, 'buddy_request')}
                     onSave={(v) => save({ buddy_request: v })}
                     placeholder="None"
                   />

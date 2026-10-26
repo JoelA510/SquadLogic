@@ -94,6 +94,13 @@ const flush = () =>
 /** Every argument Sentry.setUser was called with, in order. */
 const setUserCalls = () => vi.mocked(Sentry.setUser).mock.calls.map((c) => c[0]);
 
+/** The last value the tag `name` was given (the demo tag, D4, is set beside `organization_id`). */
+const lastTag = (name) =>
+  vi
+    .mocked(Sentry.setTag)
+    .mock.calls.filter((c) => c[0] === name)
+    .at(-1);
+
 /** No value anywhere in what reached Sentry is an email or a name. */
 function expectNoPii() {
   const sent = JSON.stringify([
@@ -200,7 +207,7 @@ describe('AuthContext reports the signed-in user to Sentry', () => {
     await act(async () => emitAuthChange('SIGNED_OUT', null));
     await flush();
     expect(setUserCalls().at(-1)).toBeNull();
-    expect(vi.mocked(Sentry.setTag).mock.calls.at(-1)).toEqual(['organization_id', undefined]);
+    expect(lastTag('organization_id')).toEqual(['organization_id', undefined]);
   });
 
   it('a profile that cannot be read still reports the user ID', async () => {
@@ -263,8 +270,114 @@ describe('OrganizationContext reports the active organization to Sentry', () => 
     await flush();
     expect(screen.getByTestId('org').textContent).toBe(ORG_B);
     expect(setUserCalls().at(-1)).toEqual({ id: USER_ID, organization_id: ORG_B, role: 'coach' });
-    expect(vi.mocked(Sentry.setTag).mock.calls.at(-1)).toEqual(['organization_id', ORG_B]);
+    expect(lastTag('organization_id')).toEqual(['organization_id', ORG_B]);
     expectNoPii();
+  });
+});
+
+describe('the demo tag (D4)', () => {
+  const DEMO_ORG = '00000000-0000-4000-8000-0000000000d1';
+  const demoMembers = [
+    {
+      profile_id: USER_ID,
+      organization_id: DEMO_ORG,
+      role: 'admin',
+      organizations: {
+        id: DEMO_ORG,
+        name: 'Demo league',
+        demo_expires_at: new Date(Date.now() + 20 * 60_000).toISOString(),
+      },
+    },
+    members[1],
+  ];
+
+  function useMembers(rows) {
+    vi.mocked(supabase.from).mockImplementation(
+      /** @type {any} */ (
+        (table) => {
+          if (table === 'profiles') {
+            return {
+              select: () => ({
+                eq: () => ({ single: () => Promise.resolve({ data: profile, error: null }) }),
+              }),
+            };
+          }
+          if (table === 'organization_members') {
+            return { select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }) };
+          }
+          return {
+            select: () => ({
+              eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }),
+            }),
+          };
+        }
+      )
+    );
+  }
+
+  it('is set while the active organization is a demo, and cleared when it changes to a real one', async () => {
+    useMembers(demoMembers);
+    localStorage.setItem('squadlogic_active_org', DEMO_ORG);
+    render(
+      <AuthProvider>
+        <OrganizationProvider>
+          <OrgSwitcher />
+        </OrganizationProvider>
+      </AuthProvider>
+    );
+    await flush();
+    await flush();
+    expect(screen.getByTestId('org').textContent).toBe(DEMO_ORG);
+    expect(lastTag('demo')).toEqual(['demo', 'true']);
+
+    await act(async () => screen.getByRole('button', { name: 'switch' }).click());
+    await flush();
+    expect(screen.getByTestId('org').textContent).toBe(ORG_B);
+    expect(lastTag('demo')).toEqual(['demo', undefined]);
+  });
+
+  it('is never set for a real organization', async () => {
+    localStorage.setItem('squadlogic_active_org', ORG_A);
+    render(
+      <AuthProvider>
+        <OrganizationProvider>
+          <OrgSwitcher />
+        </OrganizationProvider>
+      </AuthProvider>
+    );
+    await flush();
+    await flush();
+    expect(vi.mocked(Sentry.setTag).mock.calls.filter((c) => c[0] === 'demo' && c[1])).toEqual([]);
+  });
+
+  it('is cleared on sign-out', async () => {
+    useMembers(demoMembers);
+    localStorage.setItem('squadlogic_active_org', DEMO_ORG);
+    render(
+      <AuthProvider>
+        <OrganizationProvider>
+          <OrgSwitcher />
+        </OrganizationProvider>
+      </AuthProvider>
+    );
+    await flush();
+    await flush();
+    expect(lastTag('demo')).toEqual(['demo', 'true']);
+
+    await act(async () => emitAuthChange('SIGNED_OUT', null));
+    await flush();
+    expect(lastTag('demo')).toEqual(['demo', undefined]);
+  });
+
+  it('adds only the tag: setUser still passes ids alone', () => {
+    logger.setDemoContext(true);
+    expect(vi.mocked(Sentry.setTag).mock.calls).toEqual([['demo', 'true']]);
+    expect(setUserCalls()).toEqual([]);
+    logger.setDemoContext(false);
+    expect(lastTag('demo')).toEqual(['demo', undefined]);
+    // Anything but the boolean true clears it.
+    logger.setDemoContext(/** @type {any} */ ('true'));
+    expect(lastTag('demo')).toEqual(['demo', undefined]);
   });
 });
 

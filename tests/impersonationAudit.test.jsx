@@ -11,7 +11,14 @@ import { render, act } from '@testing-library/react';
 import React, { useEffect } from 'react';
 
 vi.mock('../frontend/src/lib/logger.js', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), setUser: vi.fn() },
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    setUser: vi.fn(),
+    setDemoContext: vi.fn(),
+  },
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({

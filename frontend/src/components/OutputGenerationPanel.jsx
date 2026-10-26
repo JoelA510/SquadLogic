@@ -14,6 +14,7 @@ import {
   baselineParitySoundness,
 } from '@squadlogic/core/publication/index.js';
 import { IS_MOCK_MODE } from '../config.js';
+import { isDemoOrganization } from '../lib/demo.js';
 import { csvBlob, saveFile, xlsxBlob } from '../utils/scheduleDownloads.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -506,6 +507,8 @@ export default function OutputGenerationPanel({
   };
   const { user } = useAuth() || {};
   const { currentOrganization } = useOrganization() || {};
+  // A demo uploads nothing (the server refuses the folder, D3); downloads still work.
+  const inDemo = isDemoOrganization(currentOrganization);
   const {
     baselines,
     loading: baselinesLoading,
@@ -909,7 +912,7 @@ export default function OutputGenerationPanel({
                 rows this panel can no longer vouch for, so it is not offered
                 until they can be read again. The same for the drafts list
                 below, whose mailto links are live. */}
-            {generated && !csvBlocked && (
+            {generated && !csvBlocked && !inDemo && (
               <button
                 type="button"
                 onClick={handleUpload}

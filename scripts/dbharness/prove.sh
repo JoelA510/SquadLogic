@@ -148,12 +148,17 @@ R45="$REPO/docs/sql/20261028010000_revert.sql"
 # reservation writer and the clash rule added), and the revert.
 M46="$REPO/supabase/migrations/20261029010000_practice_only_divisions.sql"
 R46="$REPO/docs/sql/20261029010000_revert.sql"
+# The invite redemption audit action, registered (redeem_org_invite wrote it
+# for six months without a row in audit_actions, so every redemption rolled
+# back on the foreign key), and the revert.
+M47="$REPO/supabase/migrations/20261029020000_register_invite_redeemed_audit_action.sql"
+R47="$REPO/docs/sql/20261029020000_revert.sql"
 # D3: the demo organization (the fences, the expiry in the membership helpers,
 # the start and purge RPCs, the cron job), and the revert.
-M47="$REPO/supabase/migrations/20261030010000_demo_sessions.sql"
+M48="$REPO/supabase/migrations/20261030010000_demo_sessions.sql"
 # D4: an anonymous sign-in carries no password, so the password-length trigger's
 # function skips an anonymous INSERT (and nothing else), and the revert.
-M48="$REPO/supabase/migrations/20261031010000_anonymous_signups_skip_password_check.sql"
+M49="$REPO/supabase/migrations/20261031010000_anonymous_signups_skip_password_check.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3783,8 +3788,8 @@ END;
 
 # Staff are admins. The smoke RAISEs on each; the revert claim on a policy left
 # naming staff and on a body that drifted.
-# Aimed at $M47 (D3), which replaces is_org_admin with the expiry join.
-plant "M31 is_org_admin still refuses staff" "$M47" \
+# Aimed at $M48 (D3), which replaces is_org_admin with the expiry join.
+plant "M31 is_org_admin still refuses staff" "$M48" \
   "          AND role IN ('admin', 'tenant_admin', 'staff')
           AND (o.demo_expires_at IS NULL OR o.demo_expires_at > now())" \
   "          AND role IN ('admin', 'tenant_admin')
@@ -4787,19 +4792,44 @@ plant "R46 the revert counts every slot as reserved" "$R46" \
   "    SELECT count(*) INTO v_reserved FROM public.practice_slots;" \
   "revert 20261029010000"
 
+# The invite redemption audit action. The migration without its registration
+# and the end-state check that reads it back is the database as it was in
+# production: the smoke redeems an invite and must find the redemption failing
+# on the audit_log.action foreign key. (A plant that only broke the INSERT would
+# be caught by the migration's own end-state check first, which proves that
+# check and not the smoke.)
+plant "M47 the invite audit action is not registered" "$M47" \
+  "INSERT INTO public.audit_actions (action) VALUES ('members.invited_joined')
+    ON CONFLICT (action) DO NOTHING;
+
+DO \$check\$
+DECLARE
+    v_body text;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'members.invited_joined') THEN
+        RAISE EXCEPTION 'members.invited_joined is not registered in audit_actions';
+    END IF;
+" \
+  "DO \$check\$
+DECLARE
+    v_body text;
+BEGIN
+" \
+  "smoke 20261029020000"
+
 # D3's three security fences, one plant each (the smoke 20261030010000 is what
 # must go red; each was also applied by hand in a scratch cluster and caught by
 # the smoke and by supabase/tests/demo_sessions.sql): an anonymous session
 # joining a real organization, a member of an expired demo still being a member,
 # and the purge deleting an organization that is not a demo.
-plant "M47 an anonymous session joins a real organization" "$M47" \
+plant "M48 an anonymous session joins a real organization" "$M48" \
   "    IF public.caller_is_anonymous()
        AND (NEW.profile_id IS DISTINCT FROM auth.uid()" \
   "    IF false AND public.caller_is_anonymous()
        AND (NEW.profile_id IS DISTINCT FROM auth.uid()" \
   "smoke 20261030010000"
 
-plant "M47 a member of an expired demo is still a member" "$M47" \
+plant "M48 a member of an expired demo is still a member" "$M48" \
   "        WHERE organization_id = org_id
           AND profile_id = auth.uid()
           AND (o.demo_expires_at IS NULL OR o.demo_expires_at > now())" \
@@ -4808,7 +4838,7 @@ plant "M47 a member of an expired demo is still a member" "$M47" \
           AND true" \
   "smoke 20261030010000"
 
-plant "M47 the purge deletes an organization that is not a demo" "$M47" \
+plant "M48 the purge deletes an organization that is not a demo" "$M48" \
   "         WHERE demo_expires_at IS NOT NULL AND demo_expires_at <= now()
         RETURNING demo_owner" \
   "         WHERE demo_expires_at IS NULL OR demo_expires_at <= now()
@@ -4819,12 +4849,12 @@ plant "M47 the purge deletes an organization that is not a demo" "$M47" \
 # first; the migration's own end-state check, which reads both triggers' definitions, for the
 # second): the insert trigger's condition never skips an anonymous user (so no visitor can sign in),
 # and the update trigger given the same condition (an anonymous visitor could set a short password).
-plant "M48 an anonymous sign-up is refused for want of a password_length" "$M48" \
+plant "M49 an anonymous sign-up is refused for want of a password_length" "$M49" \
   "    WHEN (NEW.is_anonymous IS NOT TRUE)" \
   "    WHEN (NEW.is_anonymous IS NOT TRUE OR true)" \
   "smoke 20261031010000"
 
-plant "M48 an anonymous user may set a short password" "$M48" \
+plant "M49 an anonymous user may set a short password" "$M49" \
   "    BEFORE UPDATE ON auth.users
     FOR EACH ROW
     EXECUTE FUNCTION" \

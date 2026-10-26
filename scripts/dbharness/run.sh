@@ -1305,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261030010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261030010000 20261031010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1898,6 +1898,19 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('d3000000-0000-4000-8000-00000000000d','d3000000-0000-4000-8000-0000000000f1','admin');" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the demo organizations and anonymous users the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261031010000's revert keeps the anonymous users the migration let in**, so
+  # one is planted before it runs (inserted while the exemption stands: with the
+  # revert applied the same insert is refused, which is the point), and the probe
+  # below requires it, and its profile, to survive.
+  if [ "$id" = "20261031010000" ]; then
+    if ! psql_cmd "INSERT INTO auth.users (id, email, is_anonymous)
+                VALUES ('e3000000-0000-4000-8000-0000000000a1', NULL, true);" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the anonymous user the revert check requires was never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3071,6 +3084,64 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the demo sessions revert did not remove the demos and restore every replaced object as at 20261029010000"
         dump 10 $SCRATCH/harness_demo_sessions; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261031010000" ]; then
+      # The password-length trigger back as 20240405180000 made it, read from the catalogue: exactly
+      # one trigger calls the check function, and its definition is the original combined one
+      # (BEFORE INSERT OR UPDATE, no condition); the function itself untouched (md5 of the build's
+      # text, carriage returns and all, at 20261030010000); and it behaves as it did: an anonymous
+      # insert with no password_length refused again, the anonymous user the seed planted kept with
+      # its profile, a real insert with 12 still accepted. The refusal is caught by its message, so
+      # any other failure is rethrown, not read as a refusal.
+      rm -f $SCRATCH/harness_pwd_probe.sql
+      if ! cat >$SCRATCH/harness_pwd_probe.sql <<'PROBE'
+DO $probe$
+DECLARE
+    v_defs text;
+    v_md5 text;
+    v_accepted boolean := false;
+BEGIN
+    SELECT string_agg(pg_get_triggerdef(t.oid), E'\n' ORDER BY t.tgname) INTO v_defs
+      FROM pg_trigger t
+     WHERE t.tgrelid = 'auth.users'::regclass AND NOT t.tgisinternal
+       AND t.tgfoid = 'public.check_password_length_on_auth_users()'::regprocedure;
+    IF v_defs IS DISTINCT FROM 'CREATE TRIGGER check_password_length_trigger BEFORE INSERT OR UPDATE ON auth.users FOR EACH ROW EXECUTE FUNCTION check_password_length_on_auth_users()' THEN
+        RAISE EXCEPTION 'UNRESOLVED: the password-length triggers are not the original single one: %', v_defs;
+    END IF;
+    SELECT md5(p.prosrc) INTO v_md5
+      FROM pg_proc p WHERE p.oid = 'public.check_password_length_on_auth_users()'::regprocedure;
+    IF v_md5 IS DISTINCT FROM '57d76d793fc197f2eb30ed703f9484f5' THEN
+        RAISE EXCEPTION 'UNRESOLVED: the check function is not the 20240405180000 body (md5 %)', v_md5;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM auth.users u JOIN public.profiles pr ON pr.id = u.id
+                    WHERE u.id = 'e3000000-0000-4000-8000-0000000000a1' AND u.is_anonymous) THEN
+        RAISE EXCEPTION 'UNRESOLVED: the revert lost the anonymous user and profile it keeps';
+    END IF;
+    BEGIN
+        INSERT INTO auth.users (id, email, is_anonymous)
+        VALUES ('e3000000-0000-4000-8000-0000000000a2', NULL, true);
+        v_accepted := true;
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE '%Password must be at least 12 characters%' THEN RAISE; END IF;
+    END;
+    IF v_accepted THEN
+        RAISE EXCEPTION 'UNRESOLVED: an anonymous insert with no password_length is still accepted after the revert';
+    END IF;
+    INSERT INTO auth.users (id, email, raw_user_meta_data)
+    VALUES ('e3000000-0000-4000-8000-0000000000a3', 'revert-pwd@example.test', '{"password_length": 12}');
+    RAISE NOTICE 'RESOLVED: the password-length trigger is as 20240405180000 made it';
+END
+$probe$;
+PROBE
+      then
+        echo "FAIL revert ${id} probe: the probe script could not be staged"
+        STATUS=1
+      elif psql_file $SCRATCH/harness_pwd_probe.sql >$SCRATCH/harness_pwd_probe 2>&1; then
+        echo "  revert ${id}: the anonymous-sign-up revert restores the single 20240405180000 password-length trigger over the untouched function, refuses an anonymous insert again and keeps the anonymous user it let in"
+      else
+        echo "FAIL revert ${id}: the anonymous-sign-up revert did not restore the password-length trigger"
+        dump 10 $SCRATCH/harness_pwd_probe; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

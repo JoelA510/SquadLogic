@@ -151,6 +151,9 @@ R46="$REPO/docs/sql/20261029010000_revert.sql"
 # D3: the demo organization (the fences, the expiry in the membership helpers,
 # the start and purge RPCs, the cron job), and the revert.
 M47="$REPO/supabase/migrations/20261030010000_demo_sessions.sql"
+# D4: an anonymous sign-in carries no password, so the password-length trigger's
+# function skips an anonymous INSERT (and nothing else), and the revert.
+M48="$REPO/supabase/migrations/20261031010000_anonymous_signups_skip_password_check.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4811,6 +4814,25 @@ plant "M47 the purge deletes an organization that is not a demo" "$M47" \
   "         WHERE demo_expires_at IS NULL OR demo_expires_at <= now()
         RETURNING demo_owner" \
   "smoke 20261030010000"
+
+# D4's password-length exemption, two plants (the smoke 20261031010000 is what must go red for the
+# first; the migration's own end-state check, which reads both triggers' definitions, for the
+# second): the insert trigger's condition never skips an anonymous user (so no visitor can sign in),
+# and the update trigger given the same condition (an anonymous visitor could set a short password).
+plant "M48 an anonymous sign-up is refused for want of a password_length" "$M48" \
+  "    WHEN (NEW.is_anonymous IS NOT TRUE)" \
+  "    WHEN (NEW.is_anonymous IS NOT TRUE OR true)" \
+  "smoke 20261031010000"
+
+plant "M48 an anonymous user may set a short password" "$M48" \
+  "    BEFORE UPDATE ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION" \
+  "    BEFORE UPDATE ON auth.users
+    FOR EACH ROW
+    WHEN (NEW.is_anonymous IS NOT TRUE)
+    EXECUTE FUNCTION" \
+  "applying 20261031010000_anonymous_signups_skip_password_check.sql"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

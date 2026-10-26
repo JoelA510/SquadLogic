@@ -15,6 +15,32 @@ import { supabase } from './supabaseClient.js';
 export const DEMO_ANNOUNCE_AT_MS = Object.freeze([5 * 60_000, 60_000]);
 
 /**
+ * The auto-scheduler's search budget. A run's CPU is its iterations, not its time budget (the time
+ * budget only caps wall clock), and the Edge Function has a 2 s CPU ceiling per request
+ * (`auto-scheduler-solver.ts`, YIELD_EVERY). Measured on the seeded demo league (128 teams, 196
+ * slots): 1000 iterations cost 2.06-2.41 s of CPU, over the ceiling; 100 iterations cost about
+ * 0.45 s, and the greedy seed alone already places all 128 teams. So a demo asks for 150
+ * iterations and the schema's smallest time budget. Real leagues keep 1000 and 8 s: a league of
+ * about 128 teams exceeds the CPU limit at 1000 iterations too, and that is an owner call, not
+ * changed here.
+ */
+const DEMO_AUTO_SCHEDULER_CONFIG = Object.freeze({
+  timeBudgetMs: 1000,
+  maxIterations: 150,
+  seed: 42,
+});
+const AUTO_SCHEDULER_CONFIG = Object.freeze({ timeBudgetMs: 8000, maxIterations: 1000, seed: 42 });
+
+/**
+ * The `config` an auto-scheduler request carries.
+ * @param {boolean} inDemo - is the active organization a demo?
+ * @returns {{ timeBudgetMs: number, maxIterations: number, seed: number }}
+ */
+export function autoSchedulerConfig(inDemo) {
+  return { ...(inDemo ? DEMO_AUTO_SCHEDULER_CONFIG : AUTO_SCHEDULER_CONFIG) };
+}
+
+/**
  * What a demo's players may still change (the server's `demo_fence_player_write`, D3): where they
  * play and how they are rated. Names, gender, grade, notes and the buddy request are read-only, so
  * no visitor can type a child's details into a demo; coach records are read-only entirely.

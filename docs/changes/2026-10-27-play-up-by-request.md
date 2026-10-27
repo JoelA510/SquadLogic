@@ -1,6 +1,7 @@
 # Play-up by request, flagged for admins; the waitlist exception
 
-Status: **draft for owner approval** (AGENTS.md rule 14: team generation and persistence). Owner,
+Status: **approved by the owner 2026-10-27**, all three decisions as recommended (AGENTS.md rule
+14: team generation and persistence). Owner,
 2026-10-27: "The play-up behavior should have a flag for admin(s) to ensure admins are aware of
 all players requesting to play up. Many clubs have different rules, such as play-up only with a
 parent of the play-up player(s) coaching the team, etc. So rather than restrict this outright,
@@ -74,7 +75,7 @@ revert, smoke, pgTAP, harness plant, snapshot, as usual. Production has 0 player
 - E2E (mock): import with a play-up column, generate, the Play-up section lists the requested
   player in the older division and an unrequested one in their own.
 
-## Owner decisions (recommendation in each)
+## Owner decisions (approved 2026-10-27: the first option in each)
 
 1. **Unrequested play-up**: place in their own division and list it (recommended), or keep them
    in the registered division and list it.

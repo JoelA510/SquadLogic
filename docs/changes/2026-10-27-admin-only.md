@@ -1,8 +1,9 @@
 # Admin only: no coach sign-in, admins across organizations, permits for admins
 
 Kind: REFACTOR (removal) and FEATURE (multi-organization admins) · Drawn up: 2026-10-27 · Owner:
-the product owner · Status: **APPROVED by the owner 2026-10-27** (all six decisions as recommended; decision 5 amended, see the end), waiting for the owner (AGENTS.md rule 14: roles,
-persistence and the domain model).
+the product owner · Status: **APPROVED by the owner 2026-10-27** (AGENTS.md rule 14: roles,
+persistence and the domain model); all six decisions as recommended, decision 5 amended (see the
+end).
 
 Every claim about the code is _statically reviewed_ at `origin/main` `9128db9` unless marked
 _executed_. Production figures are _executed (read-only)_, catalogue and counts only, 2026-10-27,

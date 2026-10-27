@@ -1,38 +1,46 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
-import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
 Given('an organization and season are active', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate((mockOrgId) => {
-    const db = window.__MOCK_DB__ as Record<string, unknown>;
-    const orgId = mockOrgId;
-    db.organizations = [{ id: orgId, name: 'SquadLogic FC', status: 'active', is_onboarded: true }];
-    db.organization_members = [
-      {
-        organization_id: orgId,
-        profile_id: 'mock-admin-id',
-        role: 'admin',
-        organizations: { id: orgId, name: 'SquadLogic FC', is_onboarded: true },
-      },
-    ];
-    db.season_settings = [
-      {
-        id: 's1',
-        name: 'Fall 2024',
-        status: 'active',
-        organization_id: orgId,
-        timezone: 'America/Los_Angeles',
-      },
-    ];
-    window.__saveMockDB__(db);
-    localStorage.setItem('squadlogic_active_org', orgId);
-    localStorage.setItem('squadlogic-current-season-id', 's1');
-  }, MOCK_ORG_ID);
+  await page.evaluate(
+    ({ mockOrgId, mockSeasonId }) => {
+      const db = window.__MOCK_DB__ as Record<string, unknown>;
+      const orgId = mockOrgId;
+      db.organizations = [
+        { id: orgId, name: 'SquadLogic FC', status: 'active', is_onboarded: true },
+      ];
+      db.organization_members = [
+        {
+          organization_id: orgId,
+          profile_id: 'mock-admin-id',
+          role: 'admin',
+          organizations: { id: orgId, name: 'SquadLogic FC', is_onboarded: true },
+        },
+      ];
+      db.season_settings = [
+        {
+          // The seed's own season, which the runs, divisions and teams belong to: the store keeps
+          // its seed rows, so a second season here would be a second active one (the database
+          // refuses that) and the page would show an empty season.
+          id: mockSeasonId,
+          name: 'Fall 2024',
+          status: 'active',
+          organization_id: orgId,
+          timezone: 'America/Los_Angeles',
+        },
+      ];
+      window.__saveMockDB__(db);
+      localStorage.setItem('squadlogic_active_org', orgId);
+      localStorage.setItem('squadlogic-current-season-id', mockSeasonId);
+    },
+    { mockOrgId: MOCK_ORG_ID, mockSeasonId: MOCK_SEASON_ID }
+  );
 });
 
 Then('I should see a {int}-step workflow on the left side', async ({ page }, steps: number) => {

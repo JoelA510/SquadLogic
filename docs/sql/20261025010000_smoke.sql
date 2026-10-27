@@ -14,12 +14,12 @@
 --   * the catalogue of what a coach could be handed: no function
 --     `authenticated` may execute returns a column, or rows of a table with a
 --     column, named like an email, a phone, a contact or a guardian, but the
---     two admin-only reads (shown to see a planted one first); and a coach is
---     refused both of those;
---   * the reads: the staff read gives an admin and the team's current coach
---     name and role (status to the admin only) and no contact column; the
---     roster read has no contact column; the member list gives an admin every
---     member with their email and refuses a coach 42501;
+--     two admin-only reads (shown to see a planted one first); and a signed-in
+--     user who is not a member (a coach, before 20261104010000) is refused both
+--     of those;
+--   * the reads: the staff read gives an admin name, role and status and no
+--     contact column; the roster read has no contact column; the member list
+--     gives an admin every member with their email and refuses a non-member 42501;
 --   * the player writers: a player is created, patched and bulk-patched
 --     without the dropped columns, and a patch naming `guardian_contacts` is
 --     refused 22023 (the import finalizer and the purge are executed at head
@@ -172,7 +172,8 @@ $$;
 DO $$
 DECLARE
     v_admin uuid := gen_random_uuid();
-    v_cu uuid := gen_random_uuid();      -- current coach of team A
+    v_cu uuid := gen_random_uuid();      -- signed in, a member of no organization
+    v_staff uuid := gen_random_uuid();   -- a staff member
     v_org uuid;
     v_s uuid;
     v_d uuid;
@@ -186,19 +187,20 @@ DECLARE
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
         (v_admin, 'r4-admin@example.test', '{"password_length": 16}', now()),
-        (v_cu, 'r4-coach@example.test', '{"password_length": 16}', now());
+        (v_cu, 'r4-nonmember@example.test', '{"password_length": 16}', now()),
+        (v_staff, 'r4-staff@example.test', '{"password_length": 16}', now());
     INSERT INTO public.profiles (id, email) VALUES
-        (v_admin, 'r4-admin@example.test'), (v_cu, 'r4-coach@example.test')
+        (v_admin, 'r4-admin@example.test'), (v_cu, 'r4-nonmember@example.test'), (v_staff, 'r4-staff@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org R4', 'smoke-org-r4')
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_cu, 'coach');
+        (v_org, v_admin, 'admin'), (v_org, v_staff, 'staff');
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'R4 Fall') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'R4 U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'R4 A') RETURNING id INTO v_ta;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
-        VALUES (v_org, v_cu, 'Coach A', 'r4-coach@example.test', 'active') RETURNING id INTO v_c;
+    INSERT INTO public.coaches (organization_id, full_name, email, status)
+        VALUES (v_org, 'Coach A', 'r4-coach@example.test', 'active') RETURNING id INTO v_c;
     INSERT INTO public.team_coach_assignments
         (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
     VALUES (v_org, v_ta, v_c, 'lead', public.team_local_today(v_ta) - 10, NULL, 'smoke', NULL);
@@ -213,7 +215,7 @@ BEGIN
     END IF;
     SELECT string_agg(m.role || ':' || m.email, ',' ORDER BY m.role) INTO v_t
       FROM public.get_organization_members(v_org) m;
-    IF v_t IS DISTINCT FROM 'admin:r4-admin@example.test,coach:r4-coach@example.test' THEN
+    IF v_t IS DISTINCT FROM 'admin:r4-admin@example.test,staff:r4-staff@example.test' THEN
         RESET ROLE; RAISE EXCEPTION 'the admin did not read every member with their email: %', coalesce(v_t, 'nothing');
     END IF;
 
@@ -242,13 +244,18 @@ BEGIN
     INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES (v_ta, v_p, v_org), (v_ta, v_p2, v_org);
     RAISE NOTICE 'admin: the staff read is name, role and status; the member list carries both emails; a player is created, patched and bulk-patched, and both patches naming guardian_contacts are refused 22023';
 
-    -- ── The team's current coach ───────────────────────────────────────────
+    -- ── A signed-in user who is not a member ────────────────────────────────
     v_denied := 0;
     PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
     SET LOCAL ROLE authenticated;
-    SELECT string_agg(s.full_name || ':' || s.role || ':' || coalesce(s.status, '-'), ',')
-      INTO v_t FROM public.get_team_staff(v_ta) s;
-    SELECT count(*) INTO v_n FROM public.get_team_roster(v_ta) r WHERE r.first_name IN ('Pia', 'Rex');
+    BEGIN
+        PERFORM * FROM public.get_team_staff(v_ta);
+    EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
+    END;
+    BEGIN
+        PERFORM * FROM public.get_team_roster(v_ta);
+    EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
+    END;
     BEGIN
         PERFORM * FROM public.get_organization_members(v_org);
     EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
@@ -258,14 +265,10 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN v_denied := v_denied + 1;
     END;
     RESET ROLE;
-    IF v_t IS DISTINCT FROM 'Coach A:lead:-' OR v_n <> 2 THEN
-        RAISE EXCEPTION 'the coach''s staff read is not name and role (%) or the roster lost a player (% of 2)',
-            coalesce(v_t, 'nothing'), v_n;
+    IF v_denied <> 4 THEN
+        RAISE EXCEPTION 'only % of the 4 admin reads (staff, roster, member list, settings audit log) were refused to a non-member', v_denied;
     END IF;
-    IF v_denied <> 2 THEN
-        RAISE EXCEPTION 'only % of the 2 admin reads returning an email were refused to a coach', v_denied;
-    END IF;
-    RAISE NOTICE 'coach: the staff read is name and role, the roster 2 of 2 names; the member list (42501) and the settings audit log are refused';
+    RAISE NOTICE 'non-member: the staff read, the roster, the member list (42501) and the settings audit log are refused';
 END;
 $$;
 

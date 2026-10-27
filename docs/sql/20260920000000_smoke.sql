@@ -339,8 +339,7 @@ BEGIN
       VALUES ('Smoke Org GAP-29 other', 'smoke-org-gap29-other') RETURNING id INTO v_other;
     INSERT INTO public.organization_members (organization_id, profile_id, role)
       VALUES (v_org, v_admin, 'admin');
-    INSERT INTO public.organization_members (organization_id, profile_id, role)
-      VALUES (v_org, v_member, 'coach');
+    -- v_member is a signed-in user with no membership (the coach role is gone, 20261104010000).
 
     v_doc := jsonb_build_object(
         'version', 1,
@@ -369,7 +368,7 @@ BEGIN
         RAISE EXCEPTION 'an unauthenticated caller published a baseline';
     END IF;
 
-    -- ---- 5b. a member who is not an admin: refused ------------------------
+    -- ---- 5b. a signed-in user who is not a member: refused -----------------
     PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
     v_refused := false;
     BEGIN
@@ -378,7 +377,7 @@ BEGIN
         v_refused := true;
     END;
     IF NOT v_refused THEN
-        RAISE EXCEPTION 'a non-admin member published a baseline';
+        RAISE EXCEPTION 'a non-member published a baseline';
     END IF;
 
     -- ---- 5c. an admin of a DIFFERENT organisation: refused ----------------
@@ -461,7 +460,7 @@ BEGIN
         RAISE EXCEPTION 'the RPC accepted a document with an invalid digest';
     END IF;
 
-    RAISE NOTICE 'admin_publish_schedule_baseline: refused for anon, for a non-admin member and for an admin of another organisation; accepted for the org admin; versions 1 then 2; duplicate snapshotId refused; invalid digest refused; 2 audit rows (before, after)';
+    RAISE NOTICE 'admin_publish_schedule_baseline: refused for anon, for a non-member and for an admin of another organisation; accepted for the org admin; versions 1 then 2; duplicate snapshotId refused; invalid digest refused; 2 audit rows (before, after)';
 
     -- ---- 5h. immutability: UPDATE always, DELETE unless the org is going ---
     v_refused := false;

@@ -63,7 +63,7 @@ DECLARE
                                    'import_jobs','imports','organization_schemas',
                                    'schedule_evaluations'];
     c_prod_missing text[][] := ARRAY[
-        ['coaches', 'coaches_select_admin_or_self'],  -- since 20261021020000
+        ['coaches', 'coaches_select_admin'],  -- coaches_select_admin_or_self from 20261021020000, renamed by 20261104010000
         ['teams', 'Teams: members access'],
         ['game_assignments', 'Game Assignments: members access'],
         ['imports', 'Imports: members access'],
@@ -207,6 +207,12 @@ BEGIN
       ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('RLS Drift Org A', 'rls-drift-org-a') RETURNING id INTO v_org_a;
     INSERT INTO public.organizations (name, slug) VALUES ('RLS Drift Org B', 'rls-drift-org-b') RETURNING id INTO v_org_b;
+    -- **A plain, non-admin member cannot exist any more**: organization_members_role_check admits only
+    -- admin, staff and tenant_admin since 20261104010000, and all three are admins. What this smoke
+    -- proves is about POLICIES -- that after the reconcile no policy lets a member who is not an admin
+    -- write, whatever the role check says -- so the persona is built by lifting the check for this
+    -- transaction, which is rolled back. (A hypothetical, stated: it is the policies' defence in depth.)
+    ALTER TABLE public.organization_members DROP CONSTRAINT organization_members_role_check;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org_a, v_member, 'coach');
     INSERT INTO auth.users (id, email, raw_user_meta_data)
       VALUES (v_admin, 'rls-drift-admin@example.test', jsonb_build_object('password_length', 16));

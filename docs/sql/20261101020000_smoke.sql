@@ -89,7 +89,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Program Org', 'smoke-program-org') RETURNING id INTO v_org;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Program Other', 'smoke-program-other') RETURNING id INTO v_other_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach'), (v_other_org, v_other, 'admin');
+        (v_org, v_admin, 'admin'), (v_other_org, v_other, 'admin');   -- v_coach: signed in, no membership (no coach role since 20261104010000)
 
     -- ---- 2. a season made now gets its default; a division joins it ---------------------
     INSERT INTO public.season_settings (organization_id, name, status) VALUES (v_org, 'Prog 2026', 'active') RETURNING id INTO v_active;
@@ -209,12 +209,12 @@ BEGIN
     END IF;
     RAISE NOTICE 'a merge moved 2 divisions into the target (which kept its name) and a delete moved them back to the default; each left one audit row';
 
-    -- A coach and another organization's admin.
+    -- A signed-in non-member and another organization's admin.
     PERFORM set_config('request.jwt.claim.sub', v_coach::text, true);
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_coach, 'role', 'authenticated')::text, true);
     BEGIN
         PERFORM public.admin_upsert_program(v_active, NULL, 'Coach made');
-        RAISE EXCEPTION 'a coach made a program';
+        RAISE EXCEPTION 'a non-member made a program';
     EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
     END;
     PERFORM set_config('request.jwt.claim.sub', v_other::text, true);
@@ -224,7 +224,7 @@ BEGIN
         RAISE EXCEPTION 'another organization''s admin moved a division';
     EXCEPTION WHEN SQLSTATE '42501' THEN NULL;
     END;
-    RAISE NOTICE 'a coach and another organization''s admin are refused (42501)';
+    RAISE NOTICE 'a signed-in non-member and another organization''s admin are refused (42501)';
 
     -- ---- 3b. a plain UPDATE does not change a division's program ------------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);

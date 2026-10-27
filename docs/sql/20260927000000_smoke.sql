@@ -1,11 +1,16 @@
 -- Smoke checks for 20260927000000_coach_practice_preferences.sql
 --
 -- Assertions RAISE; the NOTICEs are evidence of how much each one examined,
--- and `scripts/dbharness/run.sh` turns five of them into (checked) claims,
+-- and `scripts/dbharness/run.sh` turns four of them into (checked) claims,
 -- each proven by a plant in `scripts/dbharness/prove.sh`. `prelude.sql` stubs
 -- `auth.uid()` from `request.jwt.claim.sub`, so the round trip runs the REAL
--- RPCs as a real admin and two real coaches; the RLS reads run under
--- `SET LOCAL ROLE authenticated`, where the policy applies.
+-- RPCs as a real admin; the RLS reads run under `SET LOCAL ROLE authenticated`,
+-- where the policy applies.
+--
+-- Since 20261104010000 no coach signs in and `request_coach_practice_preference`
+-- is gone: a 'requested' row is inserted here as the owner (the admins import
+-- requests later, Phase D), and the persona that used to be a coach member is a
+-- signed-in user with no membership.
 --
 -- Wrapped in BEGIN ... ROLLBACK: it leaves nothing behind for later stages.
 -- Every id is generated and every email is `@example.test`; there is no PII.
@@ -68,18 +73,20 @@ BEGIN
     SELECT count(*) INTO v_definer
       FROM pg_proc p
      WHERE p.pronamespace = 'public'::regnamespace
-       AND p.proname IN ('request_coach_practice_preference',
-                         'admin_decide_coach_practice_preference',
+       AND p.proname IN ('admin_decide_coach_practice_preference',
                          'admin_set_coach_practice_preference')
        AND p.prosecdef
        AND 'search_path=public' = ANY (p.proconfig)
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
-    IF v_definer <> 3 THEN
-        RAISE EXCEPTION 'expected 3 definer RPCs with a pinned search_path, executable by authenticated and not anon; found %', v_definer;
+    IF v_definer <> 2 THEN
+        RAISE EXCEPTION 'expected 2 definer RPCs with a pinned search_path, executable by authenticated and not anon; found %', v_definer;
+    END IF;
+    IF to_regprocedure('public.request_coach_practice_preference(uuid, text, text, jsonb)') IS NOT NULL THEN
+        RAISE EXCEPTION 'request_coach_practice_preference is back: no coach requests a practice preference (20261104010000)';
     END IF;
 
-    RAISE NOTICE 'store: RLS on, 1 SELECT policy, 0 write policies, no client write grant; one-approved index unique and partial; 4 audit actions; 3 definer RPCs, search_path pinned, authenticated yes, anon no';
+    RAISE NOTICE 'store: RLS on, 1 SELECT policy, 0 write policies, no client write grant; one-approved index unique and partial; 4 audit actions; 2 definer RPCs, search_path pinned, authenticated yes, anon no, and no request RPC';
 END;
 $$;
 
@@ -89,8 +96,7 @@ $$;
 DO $$
 DECLARE
     v_admin uuid := gen_random_uuid();
-    v_ua uuid := gen_random_uuid();
-    v_ub uuid := gen_random_uuid();
+    v_ua uuid := gen_random_uuid();   -- signed in, no membership
     v_outsider uuid := gen_random_uuid();
     v_org uuid;
     v_other_org uuid;
@@ -102,8 +108,6 @@ DECLARE
     v_res jsonb;
     v_refused boolean;
     v_n int;
-    v_own int;
-    v_theirs int;
     v_total int;
     v_audited int;
     v_bad int := 0;
@@ -111,49 +115,32 @@ BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin, 'cpp-admin@example.test', '{"password_length": 16}'),
         (v_ua, 'cpp-a@example.test', '{"password_length": 16}'),
-        (v_ub, 'cpp-b@example.test', '{"password_length": 16}'),
         (v_outsider, 'cpp-outsider@example.test', '{"password_length": 16}');
     INSERT INTO public.profiles (id, email) VALUES
         (v_admin, 'cpp-admin@example.test'), (v_ua, 'cpp-a@example.test'),
-        (v_ub, 'cpp-b@example.test'), (v_outsider, 'cpp-outsider@example.test')
+        (v_outsider, 'cpp-outsider@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 8.6 PR1', 'smoke-org-86-pr1')
         RETURNING id INTO v_org;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 8.6 PR1 other', 'smoke-org-86-pr1-other')
         RETURNING id INTO v_other_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_ua, 'coach'), (v_org, v_ub, 'coach'),
-        (v_other_org, v_outsider, 'admin');
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
-        VALUES (v_org, v_ua, 'Coach A', 'cpp-a@example.test', 'active') RETURNING id INTO v_a;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
-        VALUES (v_org, v_ub, 'Coach B', 'cpp-b@example.test', 'active') RETURNING id INTO v_b;
+        (v_org, v_admin, 'admin'), (v_other_org, v_outsider, 'admin');
+    INSERT INTO public.coaches (organization_id, full_name, email, status)
+        VALUES (v_org, 'Coach A', 'cpp-a@example.test', 'active') RETURNING id INTO v_a;
+    INSERT INTO public.coaches (organization_id, full_name, email, status)
+        VALUES (v_org, 'Coach B', 'cpp-b@example.test', 'active') RETURNING id INTO v_b;
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'Preference Park')
         RETURNING id INTO v_loc;
     INSERT INTO public.locations (organization_id, name) VALUES (v_other_org, 'Elsewhere Park')
         RETURNING id INTO v_foreign_loc;
 
-    -- ---- (a) a coach requests for themself; (b) never for another coach ----
-    PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-    v_res := public.request_coach_practice_preference(v_a, 'weekday', 'must_keep', '"TUE"');
-    v_r1 := (v_res->>'id')::uuid;
-    IF NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences
-                    WHERE id = v_r1 AND status = 'requested' AND requested_by = v_ua
-                      AND value = '"TUE"'::jsonb) THEN
-        RAISE EXCEPTION '(a) coach A''s own request was not stored as requested by them: %', v_res;
-    END IF;
-    v_refused := false;
-    BEGIN
-        PERFORM public.request_coach_practice_preference(v_b, 'weekday', 'prefer_keep', '"WED"');
-    EXCEPTION WHEN insufficient_privilege THEN
-        v_refused := true;
-    END;
-    IF NOT v_refused THEN
-        RAISE EXCEPTION '(b) coach A requested a practice preference for coach B';
-    END IF;
-    RAISE NOTICE 'coach preferences: coach A requested for themself; coach A requesting for coach B was refused (42501)';
+    -- ---- (a) a requested row (inserted as the owner; the admins import requests later) ----
+    INSERT INTO public.coach_practice_preferences (organization_id, coach_id, dimension, level, value, requested_by)
+        VALUES (v_org, v_a, 'weekday', 'must_keep', '"TUE"', v_admin) RETURNING id INTO v_r1;
 
-    -- ---- (c) a coach approving is refused, their own request included ------
+    -- ---- (c) a signed-in non-member deciding is refused --------------------
+    PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
     v_refused := false;
     BEGIN
         PERFORM public.admin_decide_coach_practice_preference(v_r1, 'approve');
@@ -161,9 +148,9 @@ BEGIN
         v_refused := true;
     END;
     IF NOT v_refused OR (SELECT status FROM public.coach_practice_preferences WHERE id = v_r1) <> 'requested' THEN
-        RAISE EXCEPTION '(c) a coach approved their own practice preference request';
+        RAISE EXCEPTION '(c) a non-member approved a practice preference request';
     END IF;
-    RAISE NOTICE 'coach preferences: a coach approving their own request was refused (42501) and the row is still requested';
+    RAISE NOTICE 'coach preferences: a signed-in non-member approving was refused (42501) and the row is still requested';
 
     -- ---- (d) the admin approves; a later approval supersedes it -----------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -171,12 +158,12 @@ BEGIN
     IF v_res->>'status' <> 'approved' OR v_res->>'superseded_id' IS NOT NULL THEN
         RAISE EXCEPTION '(d) the first approval came back %', v_res;
     END IF;
-    PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-    v_r2 := (public.request_coach_practice_preference(v_a, 'weekday', 'prefer_keep', '"THU"')->>'id')::uuid;
-    v_r3 := (public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '1020')->>'id')::uuid;
-    PERFORM set_config('request.jwt.claim.sub', v_ub::text, true);
-    v_rb := (public.request_coach_practice_preference(v_b, 'weekday', 'dont_care')->>'id')::uuid;
-    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    INSERT INTO public.coach_practice_preferences (organization_id, coach_id, dimension, level, value, requested_by)
+        VALUES (v_org, v_a, 'weekday', 'prefer_keep', '"THU"', v_admin) RETURNING id INTO v_r2;
+    INSERT INTO public.coach_practice_preferences (organization_id, coach_id, dimension, level, value, requested_by)
+        VALUES (v_org, v_a, 'start_time', 'prefer_keep', '1020', v_admin) RETURNING id INTO v_r3;
+    INSERT INTO public.coach_practice_preferences (organization_id, coach_id, dimension, level, requested_by)
+        VALUES (v_org, v_b, 'weekday', 'dont_care', v_admin) RETURNING id INTO v_rb;
     -- Approved with the level CHANGED (the approved-option step).
     v_res := public.admin_decide_coach_practice_preference(v_r2, 'approve', 'must_keep');
     IF (v_res->>'superseded_id')::uuid IS DISTINCT FROM v_r1 OR v_res->>'level' <> 'must_keep' THEN
@@ -202,9 +189,8 @@ BEGIN
     -- probe runs in a sub-block that is rolled back, so no count below moves.
     v_refused := false;
     BEGIN
-        PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-        v_stale := (public.request_coach_practice_preference(v_a, 'weekday', 'prefer_keep', '"FRI"')->>'id')::uuid;
-        PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+        INSERT INTO public.coach_practice_preferences (organization_id, coach_id, dimension, level, value, requested_by)
+            VALUES (v_org, v_a, 'weekday', 'prefer_keep', '"FRI"', v_admin) RETURNING id INTO v_stale;
         PERFORM public.admin_set_coach_practice_preference(v_a, 'weekday', 'must_keep', '"SAT"');
         BEGIN
             PERFORM public.admin_decide_coach_practice_preference(v_stale, 'approve');
@@ -244,40 +230,31 @@ BEGIN
     -- ---- (f) every write produced its audit row ---------------------------
     -- The subject set is the list of calls made above, not the audit log.
     SELECT count(*) INTO v_audited
-      FROM (VALUES (v_r1, 'coach_preference.requested'), (v_r2, 'coach_preference.requested'),
-                   (v_r3, 'coach_preference.requested'), (v_rb, 'coach_preference.requested'),
-                   (v_r1, 'coach_preference.approved'), (v_r2, 'coach_preference.approved'),
+      FROM (VALUES (v_r1, 'coach_preference.approved'), (v_r2, 'coach_preference.approved'),
                    (v_r3, 'coach_preference.rejected'),
                    (v_s1, 'coach_preference.changed'), (v_s2, 'coach_preference.changed')) AS w(id, action)
      WHERE (SELECT count(*) FROM public.audit_log l
              WHERE l.organization_id = v_org AND l.resource_id = w.id AND l.action = w.action) = 1;
-    IF v_audited <> 9 THEN
-        RAISE EXCEPTION '(f) only % of the 9 writes left exactly one audit row naming their row', v_audited;
+    IF v_audited <> 5 THEN
+        RAISE EXCEPTION '(f) only % of the 5 writes left exactly one audit row naming their row', v_audited;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM public.audit_log
                     WHERE resource_id = v_r2 AND action = 'coach_preference.approved'
                       AND (metadata->>'superseded_id')::uuid = v_r1 AND user_id = v_admin) THEN
         RAISE EXCEPTION '(f) the second approval''s audit row does not name the row it superseded';
     END IF;
-    RAISE NOTICE 'coach preferences: every write audited -- 9 of 9 (4 requested, 2 approved, 1 rejected, 2 changed), each naming its row';
+    RAISE NOTICE 'coach preferences: every write audited -- 5 of 5 (2 approved, 1 rejected, 2 changed), each naming its row';
 
-    -- ---- (g) RLS: a coach reads their own rows; the admin reads all -------
+    -- ---- (g) RLS: only an admin of the organisation reads ------------------
     SELECT count(*) INTO v_total FROM public.coach_practice_preferences WHERE organization_id = v_org;
     IF v_total <> 6 THEN
         RAISE EXCEPTION '(g) expected 6 rows in the organisation as the owner, found %', v_total;
     END IF;
     SET LOCAL ROLE authenticated;
-    PERFORM set_config('request.jwt.claim.sub', v_ub::text, true);
-    SELECT count(*) FILTER (WHERE coach_id = v_b), count(*) FILTER (WHERE coach_id <> v_b)
-      INTO v_own, v_theirs FROM public.coach_practice_preferences;
-    IF v_own <> 3 OR v_theirs <> 0 THEN
-        RAISE EXCEPTION '(g) coach B read % own and % other row(s); expected 3 and 0', v_own, v_theirs;
-    END IF;
     PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
-    SELECT count(*) FILTER (WHERE coach_id = v_a), count(*) FILTER (WHERE coach_id <> v_a)
-      INTO v_own, v_theirs FROM public.coach_practice_preferences;
-    IF v_own <> 3 OR v_theirs <> 0 THEN
-        RAISE EXCEPTION '(g) coach A read % own and % other row(s); expected 3 and 0', v_own, v_theirs;
+    SELECT count(*) INTO v_n FROM public.coach_practice_preferences;
+    IF v_n <> 0 THEN
+        RAISE EXCEPTION '(g) a signed-in non-member read % row(s)', v_n;
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SELECT count(*) INTO v_n FROM public.coach_practice_preferences;
@@ -290,35 +267,35 @@ BEGIN
         RAISE EXCEPTION '(g) an admin of another organisation read % row(s)', v_n;
     END IF;
     RESET ROLE;
-    RAISE NOTICE 'coach preferences: coach B read its 3 rows and none of coach A''s; coach A read its 3 and none of coach B''s; the admin read 6 of 6; another organisation''s admin read 0';
+    RAISE NOTICE 'coach preferences: the admin read 6 of 6; a signed-in non-member read 0; another organisation''s admin read 0';
 
     -- ---- (h) free text and out-of-range values are refused ----------------
     -- As the admin, so no refusal below is an access refusal.
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'note', 'prefer_keep', '"call after 6"');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'note', 'prefer_keep', '"call after 6"');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'weekday', 'prefer_keep', '"Tuesdays after school"');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'weekday', 'prefer_keep', '"Tuesdays after school"');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '{"note": "late"}');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '{"note": "late"}');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '1440');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '1440');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '-1');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '-1');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '540.5');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '540.5');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'weekday', 'maybe', '"TUE"');
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'weekday', 'maybe', '"TUE"');
     EXCEPTION WHEN check_violation THEN v_bad := v_bad + 1; END;
-    BEGIN PERFORM public.request_coach_practice_preference(v_a, 'venue', 'must_keep', to_jsonb(v_foreign_loc::text));
+    BEGIN PERFORM public.admin_set_coach_practice_preference(v_a, 'venue', 'must_keep', to_jsonb(v_foreign_loc::text));
     EXCEPTION WHEN foreign_key_violation THEN v_bad := v_bad + 1; END;
     IF v_bad <> 8 THEN
         RAISE EXCEPTION '(h) only % of 8 malformed writes were refused', v_bad;
     END IF;
     -- The positive control: the boundaries are accepted, so the refusals above
     -- are not a CHECK that refuses everything.
-    PERFORM public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '0');
-    PERFORM public.request_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '1439');
-    PERFORM public.request_coach_practice_preference(v_a, 'venue', 'prefer_keep', to_jsonb(v_loc::text));
+    PERFORM public.admin_set_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '0');
+    PERFORM public.admin_set_coach_practice_preference(v_a, 'start_time', 'prefer_keep', '1439');
+    PERFORM public.admin_set_coach_practice_preference(v_a, 'venue', 'prefer_keep', to_jsonb(v_loc::text));
     RAISE NOTICE 'coach preferences: 8 of 8 malformed writes refused (a free-text dimension, free-text weekday, an object value, minutes 1440, -1 and 540.5, an unknown level, another organisation''s location); minutes 0 and 1439 and an own location accepted';
 END;
 $$;

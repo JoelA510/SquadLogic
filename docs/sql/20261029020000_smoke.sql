@@ -43,10 +43,10 @@ BEGIN
     INSERT INTO public.organization_members (organization_id, profile_id, role)
         VALUES (v_org, v_admin, 'admin');
 
-    -- The admin mints a single-use coach invite.
+    -- The admin mints a single-use staff invite.
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-    SELECT i.code INTO v_code FROM public.create_org_invite(v_org, 'coach') i;
+    SELECT i.code INTO v_code FROM public.create_org_invite(v_org, 'staff') i;
     IF v_code IS NULL THEN
         RAISE EXCEPTION 'create_org_invite returned no code';
     END IF;
@@ -60,8 +60,8 @@ BEGIN
 
     SELECT role INTO v_role FROM public.organization_members
      WHERE organization_id = v_org AND profile_id = v_joiner;
-    IF v_role IS DISTINCT FROM 'coach' THEN
-        RAISE EXCEPTION 'the redeemer was not added as a coach (found %)', v_role;
+    IF v_role IS DISTINCT FROM 'staff' THEN
+        RAISE EXCEPTION 'the redeemer was not added as staff (found %)', v_role;
     END IF;
 
     SELECT * INTO v_invite FROM public.organization_invites WHERE code = v_code;
@@ -82,7 +82,7 @@ BEGIN
     IF v_row.user_id IS DISTINCT FROM v_joiner
        OR v_row.resource_type IS DISTINCT FROM 'organization_member'
        OR v_row.resource_id IS DISTINCT FROM v_joiner
-       OR v_row.metadata->>'role' IS DISTINCT FROM 'coach'
+       OR v_row.metadata->>'role' IS DISTINCT FROM 'staff'
        OR (v_row.metadata->>'invite_id')::uuid IS DISTINCT FROM v_invite.id THEN
         RAISE EXCEPTION 'the members.invited_joined row is not as redeem_org_invite writes it: %', row_to_json(v_row);
     END IF;

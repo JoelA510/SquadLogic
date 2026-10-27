@@ -173,7 +173,7 @@ BEGIN
         END IF;
     END;
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_visitor)::text, true);
-    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_real, v_visitor, 'coach');
+    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_real, v_visitor, 'staff');
     DELETE FROM public.organization_members WHERE organization_id = v_real AND profile_id = v_visitor;
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_visitor, 'is_anonymous', true)::text, true);
     RAISE NOTICE 'the anonymous fence: a visitor''s membership of a real organization is refused 42501, and the same insert passes without the anonymous claim';

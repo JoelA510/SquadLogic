@@ -210,6 +210,8 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 2-9. One season, driven through the real RPC
 -- ---------------------------------------------------------------------------
+-- In a transaction that is rolled back: it lifts organization_members_role_check (below).
+BEGIN;
 DO $$
 DECLARE
     v_admin  uuid := '66660000-0000-4000-8000-0000000000a1';
@@ -243,6 +245,11 @@ BEGIN
       ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 66', 'smoke-org-66')
       RETURNING id INTO v_org;
+    -- **A member who is not an admin cannot exist any more**: organization_members_role_check admits
+    -- only admin, staff and tenant_admin since 20261104010000, and all three are admins. The unlock
+    -- gate below is defence in depth for exactly that state (a membership check comes first), so the
+    -- persona is built by lifting the check for this transaction, which is rolled back.
+    ALTER TABLE public.organization_members DROP CONSTRAINT organization_members_role_check;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
       (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach');
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'P66 Park') RETURNING id INTO v_loc;
@@ -591,3 +598,4 @@ BEGIN
     DELETE FROM auth.users WHERE id IN (v_admin, v_coach);
 END;
 $$;
+ROLLBACK;

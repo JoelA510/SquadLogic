@@ -512,7 +512,10 @@ function, policy and trigger matches, and two views are `only_in_snapshot`,
 `coach_team_map` and `view_facility_usage`, which every fresh build creates and
 production never had. Nothing in the app reads either (schema-drift-2026-10.md,
 section 7); until a migration settles them, expect those two rows besides the
-four `count` rows.
+four `count` rows. `20261103020000` drops both views from the build (production never had them, so
+there it is a no-op), and the snapshot loses their rows: at that version the operator query expects
+no `only_in_snapshot` row for either, and a `present` view of either name in production would be
+new drift.
 
 ## Real-backend E2E (`e2e-real-backend.yml`)
 
@@ -567,8 +570,10 @@ other environment.
   not only at the gateway), and `calendar-feed` answering without one.
   `real_backend_demo.feature` (demo mode, D4) starts a demo as an anonymous visitor on this
   stack (anonymous sign-ins are on in `supabase/config.toml`, CAPTCHA off), reads its 128 teams, 1,259 players and
-  251 coaches with the visitor's own session, schedules practices and checks U4 sits only in its
-  four reserved sessions and plays no games, changes a player's status, is refused a rename
+  251 coaches with the visitor's own session, checks the practice schedule it starts with (migration
+  `20261103010000`: every team once or twice a week, U4 once in each of its four reserved Saturday
+  sessions, 30 minutes and 15 apart, a practice row for all 128 teams in the master CSV), that U4 plays no
+  games, changes a player's status, is refused a rename
   (`demo_read_only`), meets the import notice, then expires the demo and runs
   `purge_expired_demos()` and finds the organization, its rows and the visitor gone. That last step
   stands in for time and the cron job, so the job also exports the stack's own service key

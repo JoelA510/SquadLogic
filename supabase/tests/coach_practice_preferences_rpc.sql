@@ -26,8 +26,8 @@ INSERT INTO public.coach_practice_preferences (id, organization_id, coach_id, di
 VALUES ('c0000000-0000-4000-8000-0000000000a1', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001',
         'weekday', 'must_keep', '"TUE"', '11111111-1111-1111-1111-111111111111');
 
-SELECT has_function('public', 'admin_decide_coach_practice_preference', 'the decide RPC exists');
-SELECT hasnt_function('public', 'request_coach_practice_preference', 'no request RPC: no coach requests a practice preference');
+SELECT ok(EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'admin_decide_coach_practice_preference'), 'the decide RPC exists');
+SELECT ok(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'request_coach_practice_preference'), 'no request RPC: no coach requests a practice preference');
 
 SET LOCAL role = 'authenticated';
 

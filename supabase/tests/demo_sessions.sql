@@ -375,7 +375,7 @@ SELECT throws_ok(
     '42501', NULL, 'no coach is deleted'
 );
 RESET role;
-SELECT hasnt_function('public', 'no function links a sign-in to a coach record (20261104010000)');
+SELECT ok(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'link_my_coach_record'), 'no function links a sign-in to a coach record (20261104010000)');
 SELECT throws_ok(
     $$UPDATE public.coaches SET full_name = 'Typed' WHERE id = (SELECT id FROM t_ids WHERE name = 'coach1')$$,
     '42501', NULL, 'the fence holds for the table''s owner too: a coach''s name is read-only whoever writes'

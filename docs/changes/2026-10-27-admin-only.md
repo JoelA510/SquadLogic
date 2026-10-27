@@ -341,3 +341,37 @@ requested as a must in the file, but it counts as a must only after an admin acc
 an **Accept all** action covers a file an admin already reviewed before importing. The preference
 plan (`2026-10-26-coach-preference-rules.md`) records the details. The coach-to-child link comes in
 through the coach import (S7).
+
+## As built (PR 2, server: S1 to S8)
+
+Migrations `20261104010000_admin_only.sql` and `20261104020000_drop_coach_user_link.sql` (the plan
+named `20261103010000` and `20261103020000`; the ledger's head moved to `20261103020000` first),
+each with `docs/sql/<id>_revert.sql` and `_smoke.sql`. Differences from the design, stated:
+
+- **`coaches.profile_id` is in the repository's build, not only in production.** The plan called it
+  production-only drift; `20260331000000` creates it, so the second migration's `DROP COLUMN IF EXISTS`
+  drops a real column in both. Before dropping `coaches.user_id` the migrations were checked for
+  every reader (the end-state check scans every function body and every policy on the affected
+  tables for it), and `reconcile_prod_rls_drift()` was replaced first because its probe
+  `CREATE POLICY` named `user_id`. The foreign key to `auth.users` is on the table `postgres` owns;
+  no statement touches `auth.*` or `storage.*` apart from `ALTER POLICY` on `storage.objects`
+  (`20261030010000` ran the same statement in production).
+- **`admin_change_member_role` lost its last-admin guard.** With roles `admin` and `staff` (both
+  admins) a change of role cannot remove the last admin, so the guard could not fire; `admin_remove_member`
+  keeps its guard.
+- **S7 `Player ID` is not an alias.** `Child Registration ID` and `Child ID` are (in the browser and
+  `import-validation`, with the SQL key `child_registration_id`); a bare `Player ID` is a player
+  file's registration-id column (`player_id`, read by `finalize_import_job`), and a global alias
+  would have broken the player import. A coach file can rename the column or use the mapping step.
+- **S8 and the overview.** The Teams overview's recommended team count no longer counts head coaches
+  (the links are read at generation); generation still makes a team for each linked coach.
+- **S5 plants.** Retired where the coach function they aimed at is dropped (22: the request RPC, the
+  link, the coach reads, the division reads, the permit helpers, the demotion guard, the roster
+  rating, the staff email and four more whose coach arm is gone); re-aimed at the new migration where
+  a body or policy is replaced (the reconcile spec, the roster and staff reads, the token rotation,
+  the finalizer, the allowlist, the permit writer, the preference and lighting read policies); the
+  "member instead of admin" plants, which can no longer fail because every member is an admin, now
+  remove the check entirely. New: a coach arm back in `get_facility_permits`, `coach` left in the
+  member role check, the finalizer's lookup unscoped by organization (each run against the real
+  harness), `create_org_invite` accepting `coach` and `profile_id` left in place (anchors resolved,
+  not run). The full prove sweep was not run.

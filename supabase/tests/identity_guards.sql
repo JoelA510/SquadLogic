@@ -12,7 +12,7 @@ BEGIN;
 
 SELECT plan(7);
 
-SELECT hasnt_function('public', 'link_my_coach_record', 'no function links a sign-in to a coach record (20261104010000)');
+SELECT ok(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'link_my_coach_record'), 'no function links a sign-in to a coach record (20261104010000)');
 
 INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
     ('d1000000-0000-4000-8000-000000000001', 'Lee@Test.local',  '{"password_length": 12}', now())

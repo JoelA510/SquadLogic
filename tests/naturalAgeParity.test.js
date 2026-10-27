@@ -97,29 +97,21 @@ describe('the natural age, core and Edge copies', () => {
 });
 
 describe("the season an import's ages are counted in", () => {
-  it('is the one finalize_import_job attaches divisions to: active first, then the latest start', () => {
+  it("is the one finalize_import_job attaches divisions to: the job's season, else the active one", () => {
     const seasons = [
-      { id: 'old-active', status: 'active', season_start: '2024-08-01', created_at: '2024-01-01' },
-      { id: 'new-draft', status: 'draft', season_start: '2026-08-01', created_at: '2026-01-01' },
-      { id: 'new-active', status: 'active', season_start: '2025-08-01', created_at: '2025-01-01' },
-      { id: 'undated-active', status: 'active', season_start: null, created_at: '2027-01-01' },
+      { id: 'old-completed', status: 'completed', season_year: 2025 },
+      { id: 'next-draft', status: 'draft', season_year: 2027 },
+      { id: 'current', status: 'active', season_year: 2026 },
     ];
-    expect(edge.importSeason(seasons)?.id).toBe('new-active');
-    expect(edge.importSeason(seasons.filter((s) => s.status !== 'active'))?.id).toBe('new-draft');
-    expect(
-      edge.importSeason([
-        { id: 'a', status: 'active', season_start: '2025-08-01', created_at: '2025-01-01' },
-        { id: 'b', status: 'active', season_start: '2025-08-01', created_at: '2025-02-01' },
-      ])?.id
-    ).toBe('b');
-    // PostgreSQL's DESC puts NULLs first: a season with no status ranks before an active one.
-    expect(
-      edge.importSeason([
-        { id: 'active', status: 'active', season_start: '2025-08-01', created_at: '2025-01-01' },
-        { id: 'no-status', status: null, season_start: '2020-08-01', created_at: '2020-01-01' },
-      ])?.id
-    ).toBe('no-status');
-    expect(edge.importSeason([])).toBeNull();
+    // A job for a draft is counted with the draft's year; one with no season, with the active one's.
+    expect(edge.importSeason(seasons, 'next-draft')?.season_year).toBe(2027);
+    expect(edge.importSeason(seasons, null)?.season_year).toBe(2026);
+    expect(edge.importSeason(seasons)?.id).toBe('current');
+    // A draft is never borrowed: with no active season and no job season there is none.
+    expect(edge.importSeason(seasons.filter((s) => s.status !== 'active'))).toBeNull();
+    // A job naming a season that is not among the organization's has none, whatever is active.
+    expect(edge.importSeason(seasons, 'gone')).toBeNull();
+    expect(edge.importSeason([], null)).toBeNull();
     expect(edge.importSeason(null)).toBeNull();
   });
 });

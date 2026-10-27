@@ -594,10 +594,14 @@ export default function CoachesPage() {
       },
       {
         key: '_programs',
-        label: 'Programs',
+        label: 'Divisions',
         width: 200,
         render: (row) =>
-          row._programs ? <span>{row._programs}</span> : <span className="muted">No programs</span>,
+          row._programs ? (
+            <span>{row._programs}</span>
+          ) : (
+            <span className="muted">No divisions</span>
+          ),
       },
       {
         key: '_teams',
@@ -690,11 +694,11 @@ export default function CoachesPage() {
             <select
               className="select"
               style={{ width: 160, height: 32 }}
-              aria-label="Filter by program"
+              aria-label="Filter by division"
               value={divisionFilter}
               onChange={(event) => setDivisionFilter(event.target.value)}
             >
-              <option value="all">All programs</option>
+              <option value="all">All divisions</option>
               {divisions.map((division) => (
                 <option key={division.id} value={division.id}>
                   {divisionDisplayName(division.name, genderModel)}

@@ -176,3 +176,82 @@ describe('what the seed holds, counted from the fixture', () => {
     for (const f of fields) expect(f.Type).toBe('practice');
   });
 });
+
+describe("the demo league's programs (migration 20261101020000)", () => {
+  const programsMigration = readFileSync(
+    path.join(path.dirname(DEMO_MIGRATION), '20261101020000_programs.sql'),
+    'utf8'
+  );
+
+  /** `division_key -> program` rows of the INSERT into demo_seed.division_programs. */
+  function storedPrograms() {
+    const m =
+      /INSERT INTO demo_seed\.division_programs \(division_key, program_name\) VALUES\n([\s\S]*?);\n/.exec(
+        programsMigration
+      );
+    if (!m) throw new Error('no INSERT for demo_seed.division_programs');
+    return Object.fromEntries(
+      [...m[1].matchAll(/\('([^']+)', '([^']+)'\)/g)].map(([, key, name]) => [key, name])
+    );
+  }
+
+  /**
+   * The program each division belongs to, read from the fixture's `Payment Plan` column
+   * (`2026 U07B Junior Registration`: division U7B, program Junior; `2026 Minis Registration`:
+   * the U4 division, program Minis; `2026 U09B Registration`: no program name).
+   */
+  function programsFrom(rows) {
+    const out = {};
+    const divisions = new Set(
+      tableRowsOf('divisions').map((row) => row[0]) // the key column
+    );
+    for (const plan of new Set(rows.map((p) => p['Payment Plan']))) {
+      const minis = /^2026 (Minis) Registration$/.exec(plan);
+      if (minis) {
+        out.U4 = 'Minis';
+        continue;
+      }
+      const m = /^2026 U0?(\d+)([BG]) (?:(\w+) )?Registration$/.exec(plan);
+      if (!m) throw new Error(`unreadable Payment Plan "${plan}"`);
+      const [, age, gender, program] = m;
+      if (program) out[`U${age}${gender}`] = program;
+      else if (!divisions.has(`U${age}${gender}`)) throw new Error(`no division for "${plan}"`);
+    }
+    return out;
+  }
+
+  /** The key of each demo_seed.divisions row, from the generated region. */
+  function tableRowsOf(table) {
+    const m = new RegExp(
+      `INSERT INTO demo_seed\\.${table} \\([^)]*\\) VALUES\n([\\s\\S]*?);\n`
+    ).exec(region);
+    return m[1].split('\n').map((line) => [...line.matchAll(/'([^']*)'/g)].map((x) => x[1]));
+  }
+
+  it("stores the programs the fixture's Payment Plan names, for every division it names one for", () => {
+    expect(storedPrograms()).toEqual(programsFrom(players));
+  });
+
+  it('puts only seeded divisions in a program, and leaves U9, U10 and U12 in the default', () => {
+    const keys = new Set(tableRowsOf('divisions').map((row) => row[0]));
+    for (const key of Object.keys(storedPrograms())) expect(keys.has(key), key).toBe(true);
+    for (const key of ['U9B', 'U9G', 'U10B', 'U10G', 'U12B', 'U12G']) {
+      expect(storedPrograms()[key], key).toBeUndefined();
+    }
+    expect(new Set(Object.values(storedPrograms()))).toEqual(
+      new Set(['Minis', 'Micro', 'Junior', 'Select'])
+    );
+  });
+
+  it('can fail: a fixture whose U7B plans name another program no longer equals the stored rows', () => {
+    const planted = plantedCopy('programs', 'players.csv', (text) =>
+      text.replaceAll('2026 U07B Junior Registration', '2026 U07B Select Registration')
+    );
+    const changed = Papa.parse(readFileSync(path.join(planted, 'players.csv'), 'utf8'), {
+      header: true,
+      skipEmptyLines: true,
+    }).data;
+    expect(programsFrom(changed).U7B).toBe('Select');
+    expect(storedPrograms()).not.toEqual(programsFrom(changed));
+  });
+});

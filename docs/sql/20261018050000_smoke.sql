@@ -95,11 +95,11 @@ BEGIN
     -- (d) The posture is unchanged.
     IF NOT (SELECT p.prosecdef AND COALESCE(p.proconfig, '{}') <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (COALESCE(p.proconfig, '{}'))
               FROM pg_proc p
-             WHERE p.oid = 'public.create_import_job(uuid, text, text)'::regprocedure) THEN
+             WHERE p.oid = 'public.create_import_job(uuid, text, text, uuid)'::regprocedure) THEN
         RAISE EXCEPTION 'create_import_job lost SECURITY DEFINER or search_path=public';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.create_import_job(uuid, text, text)', 'EXECUTE')
-       OR has_function_privilege('anon', 'public.create_import_job(uuid, text, text)', 'EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', 'public.create_import_job(uuid, text, text, uuid)', 'EXECUTE')
+       OR has_function_privilege('anon', 'public.create_import_job(uuid, text, text, uuid)', 'EXECUTE') THEN
         RAISE EXCEPTION 'create_import_job''s grants changed: authenticated must execute it and anon must not';
     END IF;
     RAISE NOTICE 'create_import_job is SECURITY DEFINER with search_path=public, executable by authenticated and not by anon';

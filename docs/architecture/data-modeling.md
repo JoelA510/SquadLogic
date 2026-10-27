@@ -180,14 +180,15 @@
 
 ### Configuration & Metadata
 
-- `season_settings`: Single-row table for league-wide parameters (roster formulas, daylight change dates, export templates).
+- `season_settings`: One row per season of an organization: league-wide parameters (roster formulas, daylight change dates, export templates). Since `20261101010000` `status` is NOT NULL (`draft` | `active` | `completed`, default `draft`), at most one season per organization is `active` (`season_settings_one_active`), names are unique per organization ignoring case and padding, and the table has no client write policy: the season RPCs and the definers that create a season are its writers. "The current season" is the active one, never the newest row.
+- `programs` (`20261101020000`): an optional named group of divisions within a season, with one default program per season (`is_default`, shown as "No program") that holds every division in none of its own. `divisions.program_id` is NOT NULL with a composite reference `(program_id, season_settings_id)` to `programs`, so a division is in exactly one program of its own season; a trigger on `divisions` fills a new division's program with the season's default and a trigger on `season_settings` makes each season's default, so no writer has to know programs exist. Members read their organization's programs; `admin_upsert_program`, `admin_set_division_program`, `admin_delete_program` and `admin_merge_programs` are the only writers.
 - `organization_heat_settings` (`20261006000000`): one row per organization for the heat forecast
   -- `threshold_category` (smallint 1-3, U.S. Soccer Recognize to Recover region category, CHECK)
   and `guidance_links` (jsonb array of up to 10 `{label, url}` https links, CHECK on shape), plus
   `updated_at`/`updated_by`. No row means Category 1, which the forecast labels as the default.
   Members read their own organization's row; `admin_set_org_heat_settings` is the only writer and
   audits `settings.heat_updated`. See [`heat-forecast.md`](heat-forecast.md).
-- `import_jobs`: Tracks CSV uploads with status, source file references (Supabase Storage path), error logs, finalize summaries, and user id.
+- `import_jobs`: Tracks CSV uploads with status, source file references (Supabase Storage path), error logs, finalize summaries, and user id. `season_settings_id` (since `20261101010000`; NULL for a job made before it) is the season the import adds to, fixed when the job is created; the finalizers read it, and a job without one uses the organization's active season.
 - `staging_players`: Durable buffer for validated GotSport player rows. Rows include source row numbers and promotion metadata (`promoted_at`, `promoted_by`) so `finalize_import_job` can safely retry without duplicating players.
 
 ### Scheduler Run History

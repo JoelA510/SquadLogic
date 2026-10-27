@@ -21,15 +21,18 @@
 --    tables, and both dropped tables are checked to be gone. Since
 --    20261024010000 dropped `profile_players` (and its one policy) with the
 --    guardian view, it is 23 tables and 79 policies, and that table is checked
---    to be gone too.
+--    to be gone too. Since 20261101010000 dropped the three direct-write policies
+--    of `season_settings` (every season writer is a definer RPC), it is 76
+--    policies and 17 split tables.
 -- 3. A member and an admin of one organization, on `players` (a split
 --    admin table): the member reads no row (since 20261021020000 a non-admin
 --    reads a player only through the roster read; until 20261024010000 a
 --    guardian read their own child), and its
 --    INSERT is refused by RLS and its UPDATE and DELETE reach no row; the admin
---    reads, inserts, updates and deletes. And on `season_settings`, the
---    narrower one (plan Q5): a tenant_admin reads but writes nothing, while an
---    admin updates. Each write is undone by raising inside its own block.
+--    reads, inserts, updates and deletes. And on `season_settings`: a tenant_admin
+--    reads, and neither a tenant_admin nor an admin updates anything directly
+--    (20261101010000: the season RPCs are the writers). Each write is undone by
+--    raising inside its own block.
 --
 -- The full behaviour, seven personas on all 26 tables, is the pgTAP suite's
 -- supabase/tests/rls_policy_matrix.sql, which needs Supabase's own auth and
@@ -101,8 +104,7 @@ DECLARE
         ['team_players', 'team_players_', '_admin'],
         ['practice_exceptions', 'Practice exceptions: admins ', ''],
         ['organization_members', 'Org Members: admins ', ''],
-        ['organizations', 'Organizations: admins ', ''],
-        ['season_settings', 'Season Settings: admins ', '']
+        ['organizations', 'Organizations: admins ', '']
     ];
     v_member uuid := 'a0a0a0a0-0000-4000-8000-000000001018';
     v_admin uuid := 'a0a0a0a0-0000-4000-8000-000000001019';
@@ -174,8 +176,8 @@ BEGIN
         RAISE EXCEPTION 'profile_players is back; 20261024010000 dropped it';
     END IF;
     SELECT count(*) INTO v_n FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY (c_tables);
-    IF v_n <> 79 THEN
-        RAISE EXCEPTION 'the 23 tables carry % policies; the rewrite leaves 85, 20261019010000 adds 3, 20261022020000 drops 8 with two tables and 20261024010000 1 with one: 79', v_n;
+    IF v_n <> 76 THEN
+        RAISE EXCEPTION 'the 23 tables carry % policies; the rewrite leaves 85, 20261019010000 adds 3, 20261022020000 drops 8 with two tables and 20261024010000 1 with one, 20261101010000 drops season_settings'' 3: 76', v_n;
     END IF;
     v_bad := NULL;
     FOR i IN 1 .. array_length(c_split, 1) LOOP
@@ -199,7 +201,7 @@ BEGIN
                 AND policyname = 'Users can view their organization''s import jobs') THEN
         RAISE EXCEPTION 'the legacy import_jobs SELECT survived the rewrite';
     END IF;
-    RAISE NOTICE 'the 23 tables carry 79 policies (85 from the rewrite, 3 from 20261019010000, less the 8 of the two tables 20261022020000 dropped and the 1 of the table 20261024010000 dropped): on each of the 18 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
+    RAISE NOTICE 'the 23 tables carry 76 policies (85 from the rewrite, 3 from 20261019010000, less the 8 of the two tables 20261022020000 dropped, the 1 of the table 20261024010000 dropped and the 3 20261101010000 dropped from season_settings): on each of the 17 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
 
     -- ---- seed: one organization, a member, an admin and a tenant_admin ------
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -297,12 +299,12 @@ BEGIN
     EXCEPTION WHEN SQLSTATE 'P1018' THEN NULL;
     END;
     RESET ROLE;
-    IF v_rows IS DISTINCT FROM 1 THEN
-        RAISE EXCEPTION 'season_settings as an admin: updated % (want 1)', v_rows;
+    IF v_rows IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION 'season_settings as an admin: updated % (want 0: the season RPCs are the writers)', v_rows;
     END IF;
 
     RAISE NOTICE 'players: a member reads nothing and cannot insert, update or delete; an admin reads, inserts, updates and deletes';
-    RAISE NOTICE 'season_settings: a tenant_admin reads and updates nothing; an admin updates (role = ''admin'', kept)';
+    RAISE NOTICE 'season_settings: a tenant_admin reads and updates nothing; an admin updates nothing either (no write policy)';
 END;
 $smoke$;
 

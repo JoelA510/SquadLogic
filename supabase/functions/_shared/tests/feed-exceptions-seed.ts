@@ -464,13 +464,23 @@ export function feedProblems(ics: string, seed: FeedSeed): string[] {
  * The builder surface `teamFeed.ts` and `readSeasonTimezone` call, over the
  * seed. `fail` names tables whose read returns an error.
  */
-export function fakeClient(seed: FeedSeed, opts: { fail?: string[]; newerSeasons?: Rec[] } = {}) {
+export function fakeClient(
+  seed: FeedSeed,
+  opts: { fail?: string[]; newerSeasons?: Rec[]; seasonStatus?: string } = {}
+) {
   const tables: Record<string, Rec[]> = {
-    // `order()` is a no-op here, so the array is already newest first: a newer
-    // season (`newerSeasons`) is what an unfiltered read would return.
+    // A newer row (`newerSeasons`: a draft for next year) is what an unfiltered
+    // "newest first" read would have returned. Since Phase E1 "no season named"
+    // means the ACTIVE season, so `season-1` is `active` unless `seasonStatus`
+    // says otherwise.
     season_settings: [
       ...(opts.newerSeasons ?? []),
-      { id: 'season-1', organization_id: seed.team.organization_id, timezone: seed.timezone },
+      {
+        id: 'season-1',
+        organization_id: seed.team.organization_id,
+        timezone: seed.timezone,
+        status: opts.seasonStatus ?? 'active',
+      },
     ],
     games: [],
     practice_assignments: seed.practices,

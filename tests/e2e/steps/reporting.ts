@@ -149,7 +149,7 @@ Given("the admin's season is the mock season", async ({ page }) => {
   // Pin to the mock seed's org so OrganizationContext resolves (the admin is in initialMockData's org_members).
   await pinToMockOrg(page);
   await page.evaluate((seasonId) => {
-    localStorage.setItem('squadlogic-current-season', seasonId);
+    localStorage.setItem('squadlogic-current-season-id', seasonId);
   }, MOCK_SEASON_ID);
 });
 

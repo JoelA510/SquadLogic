@@ -720,12 +720,13 @@ INSERT INTO matrix_expected VALUES
     ('scheduler_runs',              'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('scheduler_runs',              'anon',     '-',  'rls',   '0',   '0',     '0'),
 
-    -- season_settings: member SELECT; writes need role = 'admin' (not tenant_admin, plan Q5).
-    ('season_settings',             'admin_a',  'A',  'ok',    '1',   'rls',   '1'),
+    -- season_settings: member SELECT, and no write policy at all (20261101010000: the season RPCs
+    -- are the writers), so an admin's direct insert and update are refused like anyone's.
+    ('season_settings',             'admin_a',  'A',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'tenant_a', 'A',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'coach_a',  'A',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'coach2_a', 'A',  'rls',   '0',   '0',     '0'),
-    ('season_settings',             'admin_b',  'B',  'rls',   '0',   'rls',   '0'),
+    ('season_settings',             'admin_b',  'B',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'outsider', '-',  'rls',   '0',   '0',     '0'),
     ('season_settings',             'anon',     '-',  'rls',   '0',   '0',     '0'),
 

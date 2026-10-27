@@ -28,4 +28,4 @@ select 'trigger fn not client-executable' as check,
 -- 4. service_role is unaffected, so server-side / Edge Function paths keep
 --    working (sample: create_import_job). Expect true.
 select 'service_role retained' as check,
-       has_function_privilege('service_role', 'public.create_import_job(uuid, text, text)', 'EXECUTE') as create_import_job;
+       has_function_privilege('service_role', 'public.create_import_job(uuid, text, text, uuid)', 'EXECUTE') as create_import_job;

@@ -117,10 +117,23 @@ Deno.test('no birth key is staged, and the natural age replaces it (R5)', () => 
   assertEquals(importNaturalAge({ ageGroup: '11' }), 11);
   assertEquals(importNaturalAge({}), null);
   assertEquals(
-    importSeason([
-      { status: 'draft', season_start: '2026-08-01', season_year: 2027 },
-      { status: 'active', season_start: '2025-08-01', season_year: 2026 },
-    ])?.season_year,
+    importSeason(
+      [
+        { id: 'draft', status: 'draft', season_year: 2027 },
+        { id: 'active', status: 'active', season_year: 2026 },
+      ],
+      null
+    )?.season_year,
     2026
+  );
+  assertEquals(
+    importSeason(
+      [
+        { id: 'draft', status: 'draft', season_year: 2027 },
+        { id: 'active', status: 'active', season_year: 2026 },
+      ],
+      'draft'
+    )?.season_year,
+    2027
   );
 });

@@ -12,7 +12,8 @@
  *   org/season/name; 42501 season not the org's, no uid, not an org admin, or a
  *   division of another org/season; upsert by (season, name) or update by id;
  *   returns the row plus `changed`. `p_plays_games` (20261029010000): NULL
- *   keeps the stored value, a new division plays games.
+ *   keeps the stored value, a new division plays games. 22023 a completed
+ *   season (20261101010000).
  * - `admin_set_practice_slot_division` (20261029010000): 23502 no slot;
  *   42501 no uid, no such slot, or not an admin of its organization; 22023 a
  *   division of another organization; a repeat returns `changed: false`.
@@ -31,6 +32,7 @@
  */
 
 import { ASSIGNABLE_ROLES } from '../constants/permissions.js';
+import { defaultProgramOf } from './mockPrograms.js';
 
 export const ADMIN_WRITE_RPCS = Object.freeze([
   'admin_upsert_division_settings',
@@ -110,6 +112,17 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
     if (!ctx.isOrgAdmin(orgId)) {
       return fail('42501', `Access denied: caller is not an admin of organization ${orgId}`);
     }
+    // 20261101010000: a completed season is history; its rules are not edited.
+    if (season.status === 'completed') {
+      return {
+        data: null,
+        error: {
+          code: '22023',
+          message: `Season ${seasonId} is completed and its division rules cannot be changed`,
+          details: 'season_completed',
+        },
+      };
+    }
     db.divisions = db.divisions || [];
     let nameText = String(p.p_name ?? '').trim();
     let existing = null;
@@ -147,6 +160,8 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
         season_settings_id: seasonId,
         name: nameText,
         ...next,
+        // The trigger on divisions (20261101020000): a new division joins its season's default program.
+        program_id: defaultProgramOf(db, seasonId)?.id ?? null,
         plays_games: playsGames,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),

@@ -247,14 +247,14 @@ Then(
 /** The program overview's row for a program, found by the button that chooses it (Phase B4). */
 const programRow = (page: Page, program: string) =>
   page
-    .getByRole('table', { name: 'Program Overview' })
+    .getByRole('table', { name: 'Division Overview' })
     .getByRole('row')
     .filter({ has: page.getByRole('button', { name: program, exact: true }) });
 
 /** A cell of that row, by its column header's position. */
 async function programCell(page: Page, program: string, header: string) {
   const headers = await page
-    .getByRole('table', { name: 'Program Overview' })
+    .getByRole('table', { name: 'Division Overview' })
     .getByRole('columnheader')
     .allTextContents();
   const index = headers.findIndex((text) => text.trim() === header);
@@ -276,7 +276,7 @@ Then(
   "the program overview's status for {string} is {string}",
   async ({ page }, program: string, status: string) => {
     await expect(await programCell(page, program, 'Status')).toHaveText(status);
-    await expect(page.getByRole('table', { name: 'Program Overview' })).not.toContainText('Ready');
+    await expect(page.getByRole('table', { name: 'Division Overview' })).not.toContainText('Ready');
   }
 );
 
@@ -284,7 +284,7 @@ Then(
   '{string} is chosen in the program overview with the Enter key',
   async ({ page }, program: string) => {
     const choose = page
-      .getByRole('table', { name: 'Program Overview' })
+      .getByRole('table', { name: 'Division Overview' })
       .getByRole('button', { name: program, exact: true });
     // Another program is the one being configured first, so the key press is what changes it.
     await expect(choose).not.toHaveAttribute('aria-current', 'true');
@@ -584,7 +584,7 @@ Given('a club whose organization id is a UUID, as in production', async ({ page 
       ];
       window.__saveMockDB__(db);
       localStorage.setItem('squadlogic_active_org', club.orgId);
-      localStorage.setItem('squadlogic-current-season', 'Fall 2026');
+      localStorage.setItem('squadlogic-current-season-id', club.seasonId);
     },
     { club: PILLAR1_CLUB, adminId: MOCK_ADMIN_ID }
   );
@@ -874,10 +874,11 @@ Given('the automated schedule has been generated', async ({ page }) => {
       // The grid's read is a SEASON read (org + season through teams ->
       // divisions), so Team A's division belongs to the active season, as in
       // 'a practice schedule has been generated'.
-      const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
+      const storedSeason = localStorage.getItem('squadlogic-current-season-id');
       const activeSeason = (db.season_settings || []).find(
         (s: Record<string, unknown>) =>
-          s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
+          s.organization_id === orgId &&
+          (storedSeason ? s.id === storedSeason : s.status === 'active')
       );
       db.divisions = [
         ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
@@ -1244,10 +1245,11 @@ Given('a practice schedule has been generated', async ({ page }) => {
     ({ mockOrgId, mockSeasonId }) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-      const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
+      const storedSeason = localStorage.getItem('squadlogic-current-season-id');
       const activeSeason = (db.season_settings || []).find(
         (s: Record<string, unknown>) =>
-          s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
+          s.organization_id === orgId &&
+          (storedSeason ? s.id === storedSeason : s.status === 'active')
       );
       const seasonId = activeSeason?.id || mockSeasonId;
 

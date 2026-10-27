@@ -50,6 +50,12 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 
+// The Programs section (Phase E2) reads and writes through its own hook and has its own tests
+// (tests/programsSection.test.jsx); this suite is about the season's format, label and clock.
+vi.mock('../frontend/src/components/settings/modules/ProgramsSection.jsx', () => ({
+  default: () => null,
+}));
+
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     rpc: mocks.rpc,

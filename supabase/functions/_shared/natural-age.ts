@@ -73,45 +73,27 @@ export function importNaturalAge(params: {
 
 /** A season row as import-validation reads it. */
 export interface ImportSeason {
+  id?: string | null;
   status?: string | null;
-  season_start?: string | null;
-  created_at?: string | null;
   season_year?: number | null;
   age_cutoff_mode?: string | null;
 }
 
 /**
  * The season an import's ages are counted in: the one `finalize_import_job`
- * attaches the import's divisions to (`ORDER BY (status = 'active') DESC,
- * season_start DESC NULLS LAST, created_at DESC LIMIT 1`), ordered as
- * PostgreSQL orders it: `DESC` puts NULLs first unless told otherwise, so a
- * season with no status ranks before an active one, as it does there.
+ * attaches the import's divisions to. As of 20261101010000 (Phase E1) that is
+ * the import job's own season (`import_jobs.season_settings_id`), or, for a job
+ * made before jobs carried one, the organization's active season; nothing
+ * picks a season by its dates or its age any more, so a draft is counted
+ * with its own year and an active season never borrows a draft's. A job whose
+ * season is not among `seasons` (it was deleted, or is another
+ * organization's) has none, and the age group the file states is used.
  */
 export function importSeason<T extends ImportSeason>(
-  seasons: readonly T[] | null | undefined
+  seasons: readonly T[] | null | undefined,
+  jobSeasonId?: string | null
 ): T | null {
-  const list = [...(seasons ?? [])];
-  // (status = 'active') DESC: NULL, then true, then false.
-  const statusRank = (status: string | null | undefined) =>
-    status === null || status === undefined ? 2 : status === 'active' ? 1 : 0;
-  // A date or timestamp, DESC, with NULLs where `nullsFirst` says.
-  const desc = (
-    a: string | null | undefined,
-    b: string | null | undefined,
-    nullsFirst: boolean
-  ) => {
-    const ta = a === null || a === undefined ? null : Date.parse(a);
-    const tb = b === null || b === undefined ? null : Date.parse(b);
-    if (ta === tb) return 0;
-    if (ta === null) return nullsFirst ? -1 : 1;
-    if (tb === null) return nullsFirst ? 1 : -1;
-    return tb - ta;
-  };
-  list.sort(
-    (a, b) =>
-      statusRank(b.status) - statusRank(a.status) ||
-      desc(a.season_start, b.season_start, false) ||
-      desc(a.created_at, b.created_at, true)
-  );
-  return list[0] ?? null;
+  const list = seasons ?? [];
+  if (jobSeasonId) return list.find((season) => season.id === jobSeasonId) ?? null;
+  return list.find((season) => season.status === 'active') ?? null;
 }

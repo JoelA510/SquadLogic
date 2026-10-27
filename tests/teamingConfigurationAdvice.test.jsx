@@ -185,7 +185,7 @@ async function renderPage() {
       <TeamAnalysisPage />
     </MemoryRouter>
   );
-  await screen.findByRole('heading', { name: 'Program Overview' });
+  await screen.findByRole('heading', { name: 'Division Overview' });
   // The rules load from `divisions` (saved, or the defaults) before the panel shows them.
   await waitFor(() => expect(screen.getByLabelText('Max Roster')).not.toHaveValue(null));
 }

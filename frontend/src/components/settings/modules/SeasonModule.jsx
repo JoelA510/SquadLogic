@@ -3,6 +3,7 @@ import { useTheme } from '../../../contexts/ThemeContext.jsx';
 import { useAuth } from '../../../contexts/AuthContext.jsx';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 import { supabase } from '../../../lib/supabaseClient.js';
+import ProgramsSection from './ProgramsSection.jsx';
 
 /**
  * The zones this control offers by name.
@@ -85,7 +86,7 @@ export default function SeasonModule() {
             }`}
           >
             <div className="font-medium mb-1">Single Year</div>
-            <div className="text-xs opacity-70">e.g., &quot;2025&quot;, &quot;2026&quot;</div>
+            <div className="text-xs">e.g., &quot;2025&quot;, &quot;2026&quot;</div>
           </button>
           <button
             type="button"
@@ -115,7 +116,7 @@ export default function SeasonModule() {
             }`}
           >
             <div className="font-medium mb-1">Dual Year</div>
-            <div className="text-xs opacity-70">e.g., &quot;2025-2026&quot;</div>
+            <div className="text-xs">e.g., &quot;2025-2026&quot;</div>
           </button>
         </div>
       </div>
@@ -169,7 +170,7 @@ export default function SeasonModule() {
                     }}
                     className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                       localCurrentSeason === season
-                        ? 'bg-brand-500/20 text-text-accent border-brand-500/30'
+                        ? 'bg-brand-glow border-brand-400 text-text-primary'
                         : 'bg-bg-surface text-text-muted border-border-subtle hover:bg-bg-surface-hover'
                     }`}
                   >
@@ -277,6 +278,8 @@ export default function SeasonModule() {
           />
         </div>
       </div>
+
+      <ProgramsSection />
     </div>
   );
 }

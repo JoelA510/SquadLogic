@@ -35,7 +35,7 @@ Given('a fresh organization is active for the practice repair', async ({ page })
   await waitForMockClient(page);
   await page.evaluate((orgId) => {
     localStorage.setItem('squadlogic_active_org', orgId);
-    localStorage.removeItem('squadlogic-current-season');
+    localStorage.removeItem('squadlogic-current-season-id');
   }, uuid(1));
 });
 

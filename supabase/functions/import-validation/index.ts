@@ -569,10 +569,12 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     );
   }
 
+  // The season the job adds to (E1), read with the job: its ages are counted in that season.
+  let jobSeasonId: string | null = null;
   if (body.import_job_id) {
     const { data: job, error: jobError } = await serviceClient
       .from('import_jobs')
-      .select('id, organization_id, job_type, status')
+      .select('id, organization_id, job_type, status, season_settings_id')
       .eq('id', body.import_job_id)
       .eq('organization_id', body.organization_id)
       .maybeSingle();
@@ -611,6 +613,7 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         409
       );
     }
+    jobSeasonId = (job as { season_settings_id?: string | null }).season_settings_id ?? null;
   }
 
   // 5. Normalize headers and sanitize all rows
@@ -649,20 +652,21 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   }
 
   // A player's natural age (admin-focus plan R5) is counted in the season the
-  // finalizer attaches the import's divisions to, with that season's cutoff.
+  // finalizer attaches the import's divisions to (the job's own, else the
+  // active one: Phase E1), with that season's cutoff.
   // The file's birth date is read for it here and never staged: the staged
   // row carries the age, and the browser keeps the date for the session.
   let season: { season_year?: number | null; age_cutoff_mode?: string | null } | null = null;
   if (body.import_type === 'players') {
     const { data: seasons, error: seasonError } = await serviceClient
       .from('season_settings')
-      .select('status, season_start, created_at, season_year, age_cutoff_mode')
+      .select('id, status, season_year, age_cutoff_mode')
       .eq('organization_id', body.organization_id);
     if (seasonError) {
       await logFailure(logCtx, 'Season lookup failed', seasonError);
       return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);
     }
-    season = importSeason(seasons ?? []);
+    season = importSeason(seasons ?? [], jobSeasonId);
   }
 
   for (let i = 0; i < body.rows.length; i++) {

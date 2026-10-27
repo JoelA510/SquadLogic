@@ -6,9 +6,9 @@ import { notPlacedById } from '../../utils/placementReview.js';
 
 /** Why a request linked nobody, in words (codes from `resolveBuddyRequests` and the pipeline). */
 const UNRESOLVED_REASONS = {
-  ambiguous: 'More than one player in this program has that name.',
+  ambiguous: 'More than one player in this division has that name.',
   'cross-division': 'The name matches a player in another division.',
-  'not-found': 'No player in this program has that name or registration ID.',
+  'not-found': 'No player in this division has that name or registration ID.',
   unparsed: "The request could not be read as one player's first and last name.",
   self: 'The request names the player themself.',
   'buddy-coach-conflict': "The two buddies each anchor a different head coach's team.",

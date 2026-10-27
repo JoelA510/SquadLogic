@@ -3487,11 +3487,11 @@ PROBE
     fi
     if [ "$id" = "20261104020000" ]; then
       # The columns come back empty with their three constraints; the whole catalogue must equal a
-      # build at 20261104010000 (read 2026-10-27 with the same query: f3a80c39...:1549), and the
+      # build at 20261104010000 (read 2026-10-27 with the same query: 8229c664...:1549), and the
       # coach survives.
       if psql_cmd "SELECT 'DROPLINK-VERDICT:' || CASE
                WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'eb100000-0000-4000-8000-00000000000a' AND user_id IS NULL AND profile_id IS NULL) <> 1 THEN 'seed-lost'
-               WHEN fp = 'f3a80c397765ed495f247f0d2a3fd3ae:1549' THEN 'restored'
+               WHEN fp = '8229c664b4395e44e09c22b191115783:1549' THEN 'restored'
                ELSE 'wrong ' || fp END
              FROM (SELECT (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
   SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'

@@ -229,8 +229,9 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
     // silent drift past a >= with a margin of one.
     // 22 since R1 removed the registration form delete and its two sites; 21
     // since R4 removed coach_interested_programs and the coach delete's site
-    // for it.
-    expect(sites).toHaveLength(21);
+    // for it; 22 since S7 added the one helper (`dropCoachLinks`) the coach import
+    // and its rollback replace a coach's links through.
+    expect(sites).toHaveLength(22);
     const tables = new Set(sites.map((site) => site.table));
     for (const table of ['field_subunits', 'team_players', 'practice_assignments', 'teams']) {
       expect(tables).toContain(table);

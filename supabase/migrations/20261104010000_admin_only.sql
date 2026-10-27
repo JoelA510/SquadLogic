@@ -1286,7 +1286,7 @@ DECLARE
     v_job public.import_jobs%ROWTYPE;
     v_record public.import_application_records%ROWTYPE;
     v_previous jsonb;
-    v_now timestamptz := timezone('utc', now());
+    v_now timestamptz := now();
     v_deleted_count integer := 0;
     v_restored_count integer := 0;
     v_blocked_count integer := 0;

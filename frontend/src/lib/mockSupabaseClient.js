@@ -729,6 +729,18 @@ const markMockDeleted = (db, table, keys) => {
   db.__deleted__[table] = Array.from(new Set([...existing, ...usable]));
 };
 
+// Removes the coach links `matches` picks (S7: the coach import replaces a coach's links, and a
+// rollback puts the old ones back), with their tombstones so the seed re-merge cannot restore them.
+const dropCoachLinks = (db, matches) => {
+  const doomed = (db.coach_team_requests || []).filter(matches);
+  markMockDeleted(
+    db,
+    'coach_team_requests',
+    doomed.map((row) => tombstoneKey('coach_team_requests', row))
+  );
+  db.coach_team_requests = (db.coach_team_requests || []).filter((row) => !matches(row));
+};
+
 /**
  * Is this row's key already tombstoned?
  *
@@ -5741,12 +5753,11 @@ export const mockSupabase = {
         // player of THIS organization, in the order listed; an id that matches none is reported
         // and writes nothing; a file without the column leaves the links alone.
         if (hasChildColumn && appliedCoach) {
-          db.coach_team_requests = db.coach_team_requests.filter(
+          dropCoachLinks(
+            db,
             (link) =>
-              !(
-                String(link.organization_id) === String(job.organization_id) &&
-                String(link.coach_id) === String(appliedCoach.id)
-              )
+              String(link.organization_id) === String(job.organization_id) &&
+              String(link.coach_id) === String(appliedCoach.id)
           );
           const listed = [];
           for (const part of String(payload.child_registration_id ?? '').split(/[;,]/)) {
@@ -5868,9 +5879,7 @@ export const mockSupabase = {
               (coach) => String(coach.id) !== String(record.target_id)
             );
             // ON DELETE CASCADE: an inserted coach's links go with it.
-            db.coach_team_requests = (db.coach_team_requests || []).filter(
-              (link) => String(link.coach_id) !== String(record.target_id)
-            );
+            dropCoachLinks(db, (link) => String(link.coach_id) === String(record.target_id));
             deletedCoaches += 1;
           } else if (record.operation === 'updated') {
             const coach = (db.coaches || []).find(
@@ -5881,9 +5890,7 @@ export const mockSupabase = {
               Object.assign(coach, previousCoach, { updated_at: now });
               if (previousLinks) {
                 // The links the import replaced: put back those whose player is still here.
-                db.coach_team_requests = (db.coach_team_requests || []).filter(
-                  (link) => String(link.coach_id) !== String(record.target_id)
-                );
+                dropCoachLinks(db, (link) => String(link.coach_id) === String(record.target_id));
                 previousLinks.forEach((link) => {
                   const player = (db.players || []).find(
                     (item) =>

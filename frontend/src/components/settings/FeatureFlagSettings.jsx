@@ -238,6 +238,16 @@ export default function FeatureFlagSettings({
             {FEATURE_CATALOG.map((feature, index) => {
               const Icon = feature.icon;
               const enabled = !!(features[feature.key] ?? FEATURE_DEFAULTS[feature.key]);
+              // A feature that reads another one's answers is shown, disabled, while that one
+              // is off; its stored value is not touched.
+              const needed = feature.requires
+                ? FEATURE_CATALOG.find((entry) => entry.key === feature.requires)
+                : null;
+              const needsOff =
+                needed !== null &&
+                needed !== undefined &&
+                !(features[needed.key] ?? FEATURE_DEFAULTS[needed.key]);
+              const needsId = `feature-needs-${feature.key}`;
               return (
                 <div
                   key={feature.key}
@@ -273,12 +283,23 @@ export default function FeatureFlagSettings({
                     <div className="muted" style={{ fontSize: 12.5 }}>
                       {feature.description}
                     </div>
+                    {needsOff && (
+                      <div
+                        className="muted"
+                        id={needsId}
+                        style={{ fontSize: 12.5, fontWeight: 600 }}
+                      >
+                        Needs {needed.label} turned on, so it has no effect now. Your setting here
+                        is kept.
+                      </div>
+                    )}
                   </div>
                   <Toggle
                     checked={enabled}
                     onChange={(next) => handleToggle(feature.key, next)}
                     label={feature.label}
-                    disabled={saving}
+                    disabled={saving || needsOff}
+                    describedBy={needsOff ? needsId : undefined}
                   />
                 </div>
               );

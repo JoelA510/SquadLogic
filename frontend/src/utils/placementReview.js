@@ -1,6 +1,7 @@
 import { PLACEMENT, isEligibilityBlocked } from '@squadlogic/core/playUp.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
-import { isRosterPlayerRow } from './teamReviewPersistence.js';
+import { getCanonicalBuddyId } from '@squadlogic/core/buddyLinking.js';
+import { isRosterPlayerRow, isUuid } from './teamReviewPersistence.js';
 
 /**
  * The Teams page's placement review (Phase B3, docs/changes/2026-10-22-phase-b-teaming.md):
@@ -12,6 +13,12 @@ import { isRosterPlayerRow } from './teamReviewPersistence.js';
 
 /** Placements that are a completed check the player passed. */
 const CHECKED_PLACEMENTS = new Set([PLACEMENT.IN_BAND, PLACEMENT.PLAY_UP_SANCTIONED]);
+
+/** The reasons a player is held out of every team, so a coach whose only child it is has none. */
+const HELD_OUT_REASONS = new Set([
+  TEAM_GENERATION.REASON_EligibilityBlocked,
+  TEAM_GENERATION.REASON_Waitlisted,
+]);
 
 const finiteOrNull = (value) => (Number.isFinite(value) ? value : null);
 
@@ -38,6 +45,10 @@ function indexRun(results) {
   const divisionByTeamId = new Map();
   /** @type {Map<string, { player: any, division: string, teamId: string }>} */
   const generatedById = new Map();
+  // Each division's generated teams, and the coaches who anchor one. A run without a division's
+  // `teamsByDivision` cannot say whether a coach has a team there.
+  /** @type {Map<string, Set<string>>} */
+  const coachesWithTeamByDivision = new Map();
   const noteName = (id, name) => {
     if (id != null && name && !nameById.has(String(id))) nameById.set(String(id), String(name));
   };
@@ -51,8 +62,10 @@ function indexRun(results) {
   for (const [division, teams] of Object.entries(
     teamsByDivision && typeof teamsByDivision === 'object' ? teamsByDivision : {}
   )) {
+    if (Array.isArray(teams)) coachesWithTeamByDivision.set(division, new Set());
     for (const team of Array.isArray(teams) ? teams : []) {
       const teamId = String(team?.id);
+      if (team?.coachId) coachesWithTeamByDivision.get(division)?.add(String(team.coachId));
       if (team?.name) teamNameById.set(teamId, String(team.name));
       divisionByTeamId.set(teamId, division);
       for (const player of Array.isArray(team?.players) ? team.players : []) {
@@ -94,18 +107,23 @@ function indexRun(results) {
     generatedById,
     divisionsWithRosters,
     currentTeamOf,
+    coachesWithTeamByDivision,
   };
 }
 
 /**
  * @typedef {{ playerId: string, name: string, reason: string, placement: string | null,
- *   reviewReason: string | null, naturalAge: number | null }} NotPlacedEntry
+ *   reviewReason: string | null, naturalAge: number | null, coachId: string | null,
+ *   coachWithoutTeam: { coachId: string, name: string | null } | null }} NotPlacedEntry
  * @typedef {{ playerId: string, name: string, teamName: string | null, placement: string | null,
  *   reviewReason: string | null }} NeedsReviewEntry
  * @typedef {{ playerId: string, name: string, teamName: string | null,
  *   placement: string | null }} UncheckedEntry
+ * @typedef {{ coachId: string, name: string | null, together: boolean, children: Array<{
+ *   playerId: string, name: string, teamName: string | null, notPlacedReason: string | null }> }} SiblingGroup
  * @typedef {{ division: string, notPlaced: NotPlacedEntry[], needsReview: NeedsReviewEntry[],
- *   unchecked: UncheckedEntry[], placedCount: number, rostersKnown: boolean }} DivisionReview
+ *   unchecked: UncheckedEntry[], siblings: SiblingGroup[], placedCount: number,
+ *   rostersKnown: boolean }} DivisionReview
  */
 
 /**
@@ -121,10 +139,21 @@ function indexRun(results) {
  * - **Eligibility not checked:** each placed player whose placement is not a passed check
  *   (`unknown`, an unrecognised value, or none recorded). Only said for a division whose
  *   generated rosters (`teamsByDivision`) hold player records; a run without them cannot tell.
+ * - **Coach with no team to anchor:** a not-placed player the generator held out (not eligible,
+ *   or waitlisted) whose coach (`metadata.coachId`, from a `coach_team_requests` link) anchors no
+ *   team of the division: the coach's only child there. Said on the player's entry, with the
+ *   coach's name from `results.coachNamesById`. Only for a division whose `teamsByDivision` is in
+ *   the run, since a run without it cannot say who has a team.
+ * - **Coach with more than one child:** `siblings`, per division: each coach with two or more
+ *   children (placed or not) in it, the team each is on now, and whether they are together. Not
+ *   said for two children who name each other as buddies, who are one unit. The admin decides
+ *   whether to keep siblings together; nothing pairs them.
  *
  * @param {any} results
  * @returns {{ divisions: DivisionReview[], totals: { notPlaced: number, notEligible: number,
- *   needsReview: number, unchecked: number } } | null}
+ *   needsReview: number, unchecked: number, waitlisted: number, coachesWithoutTeam: number,
+ *   siblingGroups: number,
+ *   siblingGroupsApart: number } } | null}
  */
 export function summarizePlacementReview(results) {
   if (!results || typeof results !== 'object') return null;
@@ -132,6 +161,19 @@ export function summarizePlacementReview(results) {
   const overflowByDivision = results.overflowByDivision || {};
   const changesByDivision = results.changeDiagnosticsByDivision || {};
   const nameOf = (id) => run.nameById.get(String(id)) ?? String(id);
+  const coachNames =
+    results.coachNamesById && typeof results.coachNamesById === 'object'
+      ? results.coachNamesById
+      : {};
+  // A coach linked through `coach_team_requests` is a `coaches` row (a UUID) with a name on file.
+  // A coach the import row names (`coach_email`) is only that text, which is how the admin
+  // knows them, so it labels itself.
+  const coachNameOf = (coachId) => {
+    if (typeof coachNames[coachId] === 'string' && coachNames[coachId].trim()) {
+      return coachNames[coachId].trim();
+    }
+    return isUuid(coachId) ? null : coachId;
+  };
   const teamNameOf = (teamId) =>
     teamId == null ? null : (run.teamNameById.get(String(teamId)) ?? String(teamId));
 
@@ -145,6 +187,7 @@ export function summarizePlacementReview(results) {
         notPlaced: [],
         needsReview: [],
         unchecked: [],
+        siblings: [],
         placedCount: 0,
         rostersKnown: run.divisionsWithRosters.has(division),
       });
@@ -160,6 +203,8 @@ export function summarizePlacementReview(results) {
       const metadata = entry?.metadata || {};
       for (const player of Array.isArray(entry?.players) ? entry.players : []) {
         const id = String(player?.id);
+        const coachId = metadata.coachId ?? player?.coachId ?? null;
+        const coachesWithTeam = run.coachesWithTeamByDivision.get(String(division));
         review.notPlaced.push({
           playerId: id,
           name: displayName(player) ?? nameOf(id),
@@ -167,6 +212,14 @@ export function summarizePlacementReview(results) {
           placement: metadata.placement ?? player?.placement ?? null,
           reviewReason: metadata.reviewReason ?? player?.reviewReason ?? null,
           naturalAge: finiteOrNull(metadata.naturalAge) ?? finiteOrNull(player?.naturalAge),
+          coachId: coachId === null ? null : String(coachId),
+          coachWithoutTeam:
+            coachId !== null &&
+            HELD_OUT_REASONS.has(reason) &&
+            coachesWithTeam !== undefined &&
+            !coachesWithTeam.has(String(coachId))
+              ? { coachId: String(coachId), name: coachNameOf(String(coachId)) }
+              : null,
         });
       }
     }
@@ -224,10 +277,82 @@ export function summarizePlacementReview(results) {
     });
   }
 
+  // Coaches with more than one child in a division: placed children from the generated rosters
+  // (the team each is on now), the rest from the overflow. Enumerated from both, never from the
+  // coach links alone.
+  /** @type {Map<string, Map<string, Map<string, { player: any, teamId: string | null, notPlacedReason: string | null }>>>} */
+  const childrenByDivision = new Map();
+  const noteChild = (division, player, teamId, notPlacedReason) => {
+    if (player?.coachId == null || player.coachId === '') return;
+    const byCoach = childrenByDivision.get(division) ?? new Map();
+    childrenByDivision.set(division, byCoach);
+    const children = byCoach.get(String(player.coachId)) ?? new Map();
+    byCoach.set(String(player.coachId), children);
+    if (!children.has(String(player.id))) {
+      children.set(String(player.id), { player, teamId, notPlacedReason });
+    }
+  };
+  for (const [id, generated] of run.generatedById) {
+    noteChild(generated.division, generated.player, run.currentTeamOf.get(id) ?? null, null);
+  }
+  for (const [division, entries] of Object.entries(overflowByDivision)) {
+    if (!Array.isArray(entries) || !run.coachesWithTeamByDivision.has(String(division))) continue;
+    for (const entry of entries) {
+      const reason = entry?.reason ? String(entry.reason) : TEAM_GENERATION.REASON_Unknown;
+      for (const player of Array.isArray(entry?.players) ? entry.players : []) {
+        noteChild(String(division), player, null, reason);
+      }
+    }
+  }
+  for (const [division, byCoach] of childrenByDivision) {
+    for (const [coachId, children] of byCoach) {
+      if (children.size < 2) continue;
+      const [first, second] = [...children.values()].map((child) => child.player);
+      // Two children who name each other are one unit: placed together, nothing to decide.
+      if (
+        children.size === 2 &&
+        getCanonicalBuddyId(first) === String(second.id) &&
+        getCanonicalBuddyId(second) === String(first.id)
+      ) {
+        continue;
+      }
+      const placed = [...children.values()].filter((child) => child.notPlacedReason === null);
+      const teamIds = new Set(placed.map((child) => child.teamId));
+      divisionOf(division).siblings.push({
+        coachId,
+        name: coachNameOf(coachId),
+        together: placed.length === children.size && teamIds.size === 1 && !teamIds.has(null),
+        children: [...children.values()].map((child) => ({
+          playerId: String(child.player.id),
+          name: displayName(child.player) ?? nameOf(child.player.id),
+          teamName: teamNameOf(child.teamId),
+          notPlacedReason: child.notPlacedReason,
+        })),
+      });
+    }
+  }
+
   const divisions = [...byDivision.values()];
   if (divisions.length === 0) return null;
-  const totals = { notPlaced: 0, notEligible: 0, needsReview: 0, unchecked: 0 };
+  const totals = {
+    notPlaced: 0,
+    notEligible: 0,
+    needsReview: 0,
+    unchecked: 0,
+    waitlisted: 0,
+    coachesWithoutTeam: 0,
+    siblingGroups: 0,
+    siblingGroupsApart: 0,
+  };
   for (const review of divisions) {
+    totals.coachesWithoutTeam += new Set(
+      review.notPlaced.filter((entry) => entry.coachWithoutTeam).map((entry) => entry.coachId)
+    ).size;
+    totals.siblingGroups += review.siblings.length;
+    totals.siblingGroupsApart += review.siblings.filter((group) => !group.together).length;
+    totals.waitlisted += review.notPlaced.filter(
+      (entry) => entry.reason === TEAM_GENERATION.REASON_Waitlisted
+    ).length;
     totals.notPlaced += review.notPlaced.length;
     totals.notEligible += review.notPlaced.filter(
       (entry) => entry.reason === TEAM_GENERATION.REASON_EligibilityBlocked
@@ -246,12 +371,22 @@ const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
  */
 export function placementReviewAnnouncement(summary) {
   if (!summary) return '';
-  const { notPlaced, notEligible, needsReview, unchecked } = summary.totals;
+  const {
+    notPlaced,
+    notEligible,
+    waitlisted,
+    needsReview,
+    unchecked,
+    coachesWithoutTeam,
+    siblingGroups,
+    siblingGroupsApart,
+  } = summary.totals;
   const parts = [];
   if (notPlaced > 0) {
-    const forRoom = notPlaced - notEligible;
+    const forRoom = notPlaced - notEligible - waitlisted;
     const why = [
       notEligible > 0 ? `${notEligible} not eligible for the division` : null,
+      waitlisted > 0 ? `${waitlisted} on the waitlist` : null,
       forRoom > 0 ? `${forRoom} for another reason` : null,
     ].filter(Boolean);
     parts.push(`${count(notPlaced, 'player', 'players')} not placed (${why.join(', ')})`);
@@ -261,6 +396,15 @@ export function placementReviewAnnouncement(summary) {
   }
   if (unchecked > 0) {
     parts.push(`${count(unchecked, 'placed player', 'placed players')}: eligibility not checked`);
+  }
+  if (coachesWithoutTeam > 0) {
+    parts.push(`${count(coachesWithoutTeam, 'coach has', 'coaches have')} no team to anchor`);
+  }
+  if (siblingGroups > 0) {
+    const apart = siblingGroupsApart > 0 ? ` (${siblingGroupsApart} not together)` : '';
+    parts.push(
+      `${count(siblingGroups, 'coach has', 'coaches have')} more than one child in a division${apart}`
+    );
   }
   return parts.length > 0 ? `Players to review: ${parts.join('; ')}.` : '';
 }
@@ -288,4 +432,23 @@ export function notPlacedById(results) {
     }
   }
   return byId;
+}
+
+/**
+ * The `coaches` rows the review names (a coach with no team to anchor, a coach with more than
+ * one child), whose names the run keeps in `coachNamesById`. The team run holds ids only.
+ * @param {ReturnType<typeof summarizePlacementReview>} summary
+ * @returns {string[]}
+ */
+export function coachIdsNamedByReview(summary) {
+  /** @type {Set<string>} */
+  const ids = new Set();
+  for (const review of summary?.divisions ?? []) {
+    for (const entry of review.notPlaced) {
+      if (entry.coachWithoutTeam) ids.add(entry.coachWithoutTeam.coachId);
+    }
+    for (const group of review.siblings) ids.add(group.coachId);
+  }
+  // Only `coaches` rows have a name to read; a coach the import row names is its own label.
+  return [...ids].filter((id) => isUuid(id));
 }

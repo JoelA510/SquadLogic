@@ -58,6 +58,30 @@ export function isEligibilityBlocked(player) {
   );
 }
 
+/**
+ * Is a player on the waitlist (`players.status` of `waitlist`)? A waitlisted registrant has no
+ * place in the league yet: the generator seats nobody on the waitlist, and the league-wide
+ * averages a team-balancing score compares each player to leave them out. The Teams page sets
+ * `status: 'waitlist'` on a generator player only while the Waitlist feature is on.
+ *
+ * @param {any} player - a generator player
+ * @returns {boolean}
+ */
+export function isWaitlisted(player) {
+  return player?.status === 'waitlist';
+}
+
+/**
+ * Can the generator not seat this player: blocked by eligibility (`isEligibilityBlocked`) or
+ * waitlisted? Such a player is left out of the league-wide averages too (owner, 2026-10-27).
+ *
+ * @param {any} player - a generator player
+ * @returns {boolean}
+ */
+export function cannotBePlaced(player) {
+  return isEligibilityBlocked(player) || isWaitlisted(player);
+}
+
 const TRUTHY = new Set(['true', 'yes', 'y', '1', 't']);
 
 function isTruthy(value) {
@@ -243,7 +267,11 @@ export function applyPlayUpEligibility({
           buddyInfo &&
           String(buddy.division).toLowerCase() === String(player.division).toLowerCase() &&
           buddyInfo.isCoachChild &&
-          buddyInfo.rawPlacement !== 'down'
+          buddyInfo.rawPlacement !== 'down' &&
+          // Route B needs the two placed together. A waitlisted buddy is seated nowhere
+          // (`isWaitlisted`), so cannot sanction; a blocked one (a coach's child who would play
+          // down) is already refused above (owner, 2026-10-27; review finding).
+          !isWaitlisted(buddy)
         ) {
           buddySanction = true;
         }

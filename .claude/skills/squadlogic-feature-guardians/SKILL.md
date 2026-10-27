@@ -29,6 +29,10 @@ How to add, gate, and retire an organization-level feature flag safely.
    A string-valued setting (like `gender_model`) needs its own branch in `FeatureFlagSchema`.
 2. Give it a default in `FEATURE_DEFAULTS` if it should not start off.
 3. Add it to `FEATURE_CATALOG` if an admin should be able to toggle it.
+   A feature that reads another one's answers carries `requires: FEATURE_FLAGS.OTHER`: the page
+   then shows its switch disabled, with the reason tied to it by `aria-describedby`, while the
+   other is off, and leaves the stored value alone (`teaming_spread_coaching_leads` requires
+   `coaching_interest`).
 4. Wrap the UI in `<FeatureGuard flag={FEATURE_FLAGS.MY_FLAG} fallback={…}>`.
 5. Test both states through the real component path (the schema parse, then the guard), not a
    hand-built context the app can't produce (AGENTS.md §3).

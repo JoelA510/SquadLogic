@@ -14,6 +14,7 @@ import { BUDDY_RULE_CHOICES, FEATURE_FLAGS } from '../constants/featureFlags.js'
 import { divisionFilters } from '../utils/divisions.js';
 import {
   balanceSignalKind,
+  boardBuddyLinks,
   buddyStats,
   serpentineAssign,
 } from '@squadlogic/core/balanceSignals.js';
@@ -106,9 +107,13 @@ export default function TeamBuilderPage() {
 
   // Buddies are matched as Team Analysis matches them (Phase B5): the resolver, the
   // league's buddy rule, and every player as the roster, so a request or code naming someone
-  // off this board is not paired. A player's division is its division id, as the program is
-  // in Team Analysis, so a board that folds two divisions (co-ed) pairs nobody across them.
-  // With Buddy Requests off, nothing is matched (the tile is hidden).
+  // off this board is not paired. A player's buddy division is its stored division id, as the
+  // program is in Team Analysis, because a team belongs to one stored division and the audited
+  // `admin_update_player` refuses a team outside the player's own. So a single co-ed division
+  // (U4) pairs a boy and a girl, and two gender-specific divisions never pair across each
+  // other, even when a co-ed board folds them into one view; such a pair is shown, not paired
+  // (`splitPairs`; owner, 2026-10-27). With Buddy Requests off, nothing is matched (the tile is
+  // hidden).
   const buddyRequestsOn = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
   // A lead is read from the Coaching Interest column, so both must be on to spread leads.
   const coachingInterestOn = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
@@ -129,6 +134,38 @@ export default function TeamBuilderPage() {
         : { requested: 0, satisfied: 0 },
     [buddyRequestsOn, buddyBoard, buddyRoster, buddyRule]
   );
+  // On a board that folds two stored divisions, the mutual pairs the league's rule would make if
+  // they were one division, which are not paired because the two are in different divisions.
+  const splitPairs = useMemo(() => {
+    if (!buddyRequestsOn || (active?.divisionIds.length ?? 0) < 2) return [];
+    const folded = new Set(active.divisionIds.map(String));
+    const asOne = (player) => ({
+      ...player,
+      division: folded.has(player.division) ? 'board' : player.division,
+    });
+    const together = boardBuddyLinks(buddyBoard.map(asOne), {
+      roster: buddyRoster.map(asOne),
+      buddyRule,
+    }).mutual;
+    const apart = boardBuddyLinks(buddyBoard, { roster: buddyRoster, buddyRule }).mutual;
+    const byId = new Map(buddyBoard.map((player) => [String(player.id), player]));
+    const divisionName = (player) =>
+      divisions.find((division) => String(division.id) === player.division)?.name ?? '';
+    const label = (player) =>
+      `${`${player.first_name ?? ''} ${player.last_name ?? ''}`.trim() || 'Unnamed player'}${
+        divisionName(player) ? ` (${divisionName(player)})` : ''
+      }`;
+    const seen = new Set();
+    const pairs = [];
+    for (const [id, partnerId] of together) {
+      if (apart.get(id) === partnerId || seen.has(partnerId)) continue;
+      seen.add(id);
+      const a = byId.get(id);
+      const b = byId.get(partnerId);
+      if (a && b) pairs.push(`${label(a)} and ${label(b)}`);
+    }
+    return pairs;
+  }, [buddyRequestsOn, active, buddyBoard, buddyRoster, buddyRule, divisions]);
 
   const handleMove = async (playerId, teamId) => {
     const result = await updatePlayer(playerId, { team_id: teamId });
@@ -142,15 +179,19 @@ export default function TeamBuilderPage() {
     }
     setWorking(true);
     try {
-      const assignments = serpentineAssign({
-        players: buddyBoard,
-        teams: divisionTeams,
-        signalKind,
-        respectBuddies: buddyRequestsOn,
-        respectCoach: spreadLeadsOn,
-        roster: buddyRoster,
-        buddyRule,
-      });
+      // A team belongs to one stored division and a player can only join a team of their own
+      // (`admin_update_player`), so each stored division on the board is dealt to its own teams.
+      const assignments = (active?.divisionIds ?? []).flatMap((divisionId) =>
+        serpentineAssign({
+          players: buddyBoard.filter((player) => player.division === String(divisionId)),
+          teams: divisionTeams.filter((team) => String(team.division_id) === String(divisionId)),
+          signalKind,
+          respectBuddies: buddyRequestsOn,
+          respectCoach: spreadLeadsOn,
+          roster: buddyRoster,
+          buddyRule,
+        })
+      );
       // The bulk RPC disallows team_id, so each placement is a per-player
       // audited update; run them in bounded-concurrency chunks.
       const moves = assignments.filter(({ playerId, teamId }) => {
@@ -296,6 +337,13 @@ export default function TeamBuilderPage() {
             </div>
           )}
         </div>
+
+        {splitPairs.length > 0 && (
+          <div className="secondary" style={{ fontSize: 12.5 }}>
+            Buddies in different divisions, so not paired: {splitPairs.join('; ')}. A team belongs
+            to one division; merge them into a co-ed division to pair them.
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <div className="metric-tile" style={{ padding: '8px 14px' }}>

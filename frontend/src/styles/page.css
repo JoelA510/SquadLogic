@@ -1026,3 +1026,105 @@
 .permit-hint {
   margin-left: var(--space-2);
 }
+
+/* ---------- Coach permits (the coach home's card and the /permits page; Phase C3) ----------
+   Used at the field, on a phone: every control is at least 44 px square. */
+.btn.permit-touch {
+  min-height: 44px;
+  min-width: 44px;
+  font-size: 14px;
+  text-decoration: none;
+}
+.permit-card-icon {
+  color: var(--primary);
+}
+.permit-page-icon {
+  background: var(--primary);
+}
+.permit-page {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.permit-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.permit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.permit-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.permit-facts {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+.permit-facts dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.permit-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.permit-file-name {
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.permit-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.permit-no-file {
+  margin: var(--space-3) 0 0;
+  color: var(--text-secondary);
+}
+.permit-attention {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.permit-attention-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.permit-card-actions {
+  margin-top: var(--space-3);
+}
+
+.permit-read-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--danger-text);
+  overflow-wrap: anywhere;
+}
+.permit-read-error svg {
+  flex: none;
+  margin-top: 2px;
+}

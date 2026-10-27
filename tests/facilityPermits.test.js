@@ -17,6 +17,8 @@ import {
   permitObjectPath,
   permitStatus,
   permitWarnings,
+  coachPermitSummary,
+  sortPermitsForCoach,
 } from '@squadlogic/core/facility/permits.js';
 
 const ORG = 'a1111111-1111-4111-8111-111111111111';
@@ -295,5 +297,77 @@ describe('the warnings', () => {
     expect(warnings.expired.map((p) => p.id)).toEqual(['c']);
     expect(warnings.fieldsWithout.map((f) => f.id)).toEqual(['f2']);
     expect(warnings.count).toBe(4);
+  });
+});
+
+describe('what a coach is told (Phase C3)', () => {
+  const file = { path: 'x', name: 'x.pdf', mime: 'application/pdf', size: 1 };
+  const p = (id, status, over = {}) => ({
+    id,
+    issuer: `Issuer ${id}`,
+    status,
+    valid_to: '2026-12-01',
+    file,
+    ...over,
+  });
+
+  it('sorts what can be produced first, soonest to end first, and the expired last', () => {
+    const permits = [
+      p('exp', 'expired', { valid_to: '2026-10-01' }),
+      p('yet', 'not_yet_valid', { valid_to: '2027-05-01' }),
+      p('none', 'valid', { file: null }),
+      p('late', 'valid', { valid_to: '2027-03-01' }),
+      p('soon', 'expiring', { valid_to: '2026-11-05' }),
+    ];
+    const before = permits.map((permit) => permit.id);
+    expect(sortPermitsForCoach(permits).map((permit) => permit.id)).toEqual([
+      'soon',
+      'late',
+      'none',
+      'yet',
+      'exp',
+    ]);
+    // A copy: the answer the server gave is not reordered under the caller.
+    expect(permits.map((permit) => permit.id)).toEqual(before);
+  });
+
+  it('breaks a tie by issuer, then id, so the order never depends on arrival order', () => {
+    const a = p('a', 'valid', { issuer: 'Same' });
+    const b = p('b', 'valid', { issuer: 'Same' });
+    expect(sortPermitsForCoach([b, a]).map((permit) => permit.id)).toEqual(['a', 'b']);
+    expect(sortPermitsForCoach([a, b]).map((permit) => permit.id)).toEqual(['a', 'b']);
+  });
+
+  it('is clear when every permit is in date with a file, and says nothing for no permits', () => {
+    expect(coachPermitSummary([p('a', 'valid'), p('b', 'valid')])).toMatchObject({
+      total: 2,
+      clear: true,
+      attention: [],
+    });
+    expect(coachPermitSummary([])).toMatchObject({ total: 0, clear: true, attention: [] });
+  });
+
+  it('flags each concern once, and a permit with two concerns is listed once', () => {
+    const summary = coachPermitSummary([
+      p('ok', 'valid'),
+      p('exp', 'expired', { file: null }),
+      p('soon', 'expiring', { file: null }),
+      p('yet', 'not_yet_valid'),
+      p('none', 'valid', { file: null }),
+    ]);
+    // An expired permit with no file is expired, not "no file" as well: there is nothing to add.
+    expect(summary.expired.map((x) => x.id)).toEqual(['exp']);
+    expect(summary.noFile.map((x) => x.id)).toEqual(['soon', 'none']);
+    expect(summary.expiring.map((x) => x.id)).toEqual(['soon']);
+    expect(summary.notYetValid.map((x) => x.id)).toEqual(['yet']);
+    // Most urgent first: expired, no file, expiring, not yet valid; "soon" once, among no-file ones.
+    expect(summary.attention.map((x) => x.id)).toEqual(['exp', 'none', 'soon', 'yet']);
+    expect(summary.clear).toBe(false);
+  });
+
+  it('never refuses: an expired permit is still returned for display', () => {
+    const only = p('exp', 'expired');
+    expect(coachPermitSummary([only]).attention).toEqual([only]);
+    expect(sortPermitsForCoach([only])).toEqual([only]);
   });
 });

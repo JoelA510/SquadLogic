@@ -51,6 +51,7 @@ const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx
 const PracticeLightingPage = lazy(() => import('./pages/PracticeLightingPage.jsx'));
 const HeatForecastPage = lazy(() => import('./pages/HeatForecastPage.jsx'));
 const MyTeamPage = lazy(() => import('./pages/MyTeamPage.jsx'));
+const PermitsPage = lazy(() => import('./pages/PermitsPage.jsx'));
 const DemoStartPage = lazy(() => import('./pages/DemoStartPage.jsx'));
 const DemoEndedPage = lazy(() => import('./pages/DemoEndedPage.jsx'));
 import DemoTimer from './components/auth/DemoTimer.jsx';
@@ -361,6 +362,14 @@ function AppContent() {
             }
           />
           <Route path="/my-team" element={<MyTeamPage />} />
+          <Route
+            path="/permits"
+            element={
+              <ProtectedRoute requiredPermission={PERMISSIONS.VIEW_FIELD_PERMITS}>
+                <PermitsPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

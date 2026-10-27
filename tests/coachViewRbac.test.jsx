@@ -52,12 +52,14 @@ const flatNav = NAV.flatMap((/** @type {any} */ node) =>
 );
 
 describe('the coach role', () => {
-  it('holds no scheduling, score entry, standings or lighting permission', () => {
+  it('holds no scheduling, score entry, standings or lighting permission, and the field-permit one', () => {
     expect([...ROLE_PERMISSIONS[ROLES.COACH]].sort()).toEqual(
       [
         PERMISSIONS.VIEW_ORGANIZATION,
         PERMISSIONS.MANAGE_OWN_TEAM,
         PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
+        // Phase C3: the permits of the fields their teams use.
+        PERMISSIONS.VIEW_FIELD_PERMITS,
       ].sort()
     );
     for (const permission of [
@@ -71,10 +73,11 @@ describe('the coach role', () => {
     }
   });
 
-  it('has a nav of home, My Team (the coach’s team, not the league’s) and practice preferences', () => {
+  it('has a nav of home, My Team (the coach’s team, not the league’s), field permits and practice preferences', () => {
     expect(ROLE_NAV.coach.map((item) => [item.label, item.path])).toEqual([
       ['My Dashboard', '/'],
       ['My Team', '/my-team'],
+      ['Field Permits', '/permits'],
       ['Practice Preferences', '/coaches/practice-preferences'],
     ]);
     // "My Team" pointed at /teams, the admin's league view a coach may not open.

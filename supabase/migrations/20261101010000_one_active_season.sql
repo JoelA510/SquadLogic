@@ -185,7 +185,11 @@ DECLARE
     v_md5 text;
 BEGIN
     FOR v_sig IN SELECT jsonb_object_keys(v_expected) LOOP
-        SELECT md5(p.prosrc) INTO v_md5 FROM pg_proc p WHERE p.oid = to_regprocedure('public.' || v_sig);
+        -- Carriage returns stripped: production stores upsert_division_for_import's text with
+        -- CRLF line ends (md5 5929e628... raw, b8b43437... without CR, read 2026-10-27), and
+        -- the first deploy of this migration stopped here on that alone.
+        SELECT md5(replace(p.prosrc, E'\r', '')) INTO v_md5
+          FROM pg_proc p WHERE p.oid = to_regprocedure('public.' || v_sig);
         IF v_md5 IS DISTINCT FROM v_expected ->> v_sig THEN
             RAISE EXCEPTION 'public.% has a body this migration has not seen (md5 %, expected %): not replacing it',
                 v_sig, v_md5, v_expected ->> v_sig;

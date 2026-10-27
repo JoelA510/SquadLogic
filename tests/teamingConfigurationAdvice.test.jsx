@@ -208,23 +208,25 @@ describe('Team counts per program on the Teams page (Phase B4)', () => {
   });
   afterEach(() => cleanup());
 
-  it('raises the recommendation for the head coaches the import names, counted once each', async () => {
-    // Twenty-four players, recommended ceil(24 / 12) = 2 teams; four rows name a coach by email,
-    // two of them the same coach: three distinct head coaches, so three teams. A fifth row is a
-    // coaching lead (a parent willing to coach), which is not a coach and adds no team
-    // (Phase B6; before it, the lead made a fourth).
+  it('does not raise the recommendation for a coach an import row names: only links anchor', async () => {
+    // Twenty-four players, recommended ceil(24 / 12) = 2 teams. Four rows name a coach by email
+    // (three distinct) and a fifth is a coaching lead: none adds a team. Before owner decision 8a
+    // (2026-10-27) the three coaches made it three teams; now a coach anchors a team only through
+    // a `coach_team_requests` link, which is read at generation, not with the import's rows.
     const coachOf = ['a@coaches.test', 'b@coaches.test', 'c@coaches.test', 'c@coaches.test'];
     page.rows = importRows('U10', 24, (i) =>
       i < coachOf.length ? { coach_email: coachOf[i] } : i === 4 ? { willing_to_coach: 'yes' } : {}
     );
-    const coaches = new Set(coachOf).size;
-    const expected = Math.max(Math.ceil(24 / 12), coaches);
-    expect(expected).toBe(3);
     page.divisions = [savedDivision('U10')];
     await renderPage();
 
+    const expected = Math.ceil(24 / 12);
+    expect(expected).toBe(2);
     expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
-      `Recommended: ${expected} teams for 24 players and ${coaches} head coaches`
+      `Recommended: ${expected} teams for 24 players`
+    );
+    expect(screen.getByTestId('team-count-recommendation')).not.toHaveTextContent(
+      /and \d+ head coach/
     );
     expect(overviewCell('U10', 'Recommended')).toHaveTextContent(String(expected));
     expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(String(expected));

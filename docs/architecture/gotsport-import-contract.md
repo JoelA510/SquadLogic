@@ -108,21 +108,51 @@ source) went with it, so every payment column is stripped before upload.
 
 ## Coach import — kept fields
 
-| Canonical key(s)                                           | Stored as                           | Used for                   |
-| ---------------------------------------------------------- | ----------------------------------- | -------------------------- |
-| `full_name`                                                | `full_name`                         | Coach identity             |
-| `email`                                                    | `email`, `contact_info.email`       | Dedupe key, admin contact  |
-| `status`, `coach_status`                                   | `status`                            | Active / inactive          |
-| `can_coach_multiple_teams`, `multiple_teams`, `multi_team` | `can_coach_multiple_teams`          | Multi-team assignment      |
-| `certifications`, `certification`                          | `certifications`                    | Certifications             |
-| a declared coach field                                     | `custom_attributes.<declared name>` | The organization's own use |
+| Canonical key(s)                                              | Stored as                                | Used for                     |
+| ------------------------------------------------------------- | ---------------------------------------- | ---------------------------- |
+| `full_name`                                                   | `full_name`                              | Coach identity               |
+| `email`                                                       | `email`, `contact_info.email`            | Dedupe key, admin contact    |
+| `status`, `coach_status`                                      | `status`                                 | Active / inactive            |
+| `can_coach_multiple_teams`, `multiple_teams`, `multi_team`    | `can_coach_multiple_teams`               | Multi-team assignment        |
+| `certifications`, `certification`                             | `certifications`                         | Certifications               |
+| `child_registration_id` (`Child Registration ID`, `Child ID`) | `coach_team_requests` rows, not a column | The coach's children (below) |
+| a declared coach field                                        | `custom_attributes.<declared name>`      | The organization's own use   |
 
 No phone is stored (`coaches.phone` is not written and a re-import removes
 `phone` from `contact_info`). First and last name are kept only to compose the
-full name (`import-rows`, below); the finalizer reads no registration id,
-requested division, years coached or child columns, so those are dropped; a
-later feature that needs one adds it to the finalizer and the allowlist
-together.
+full name (`import-rows`, below); the finalizer reads no requested division,
+years coached or child name, gender or birth date, so those are dropped; the one
+child column it reads is the registration id, below. A later feature that needs
+another adds it to the finalizer and the allowlist together.
+
+### A coach's children (`child_registration_id`)
+
+An optional column names the coach's children by **player registration id**,
+one or more, separated by `;` or `,` (`GS-1001; GS-1003`). Import the players
+first: the finalizer matches each id to a player of the **same organization**
+by `players.external_registration_id`, and writes one `coach_team_requests` row
+per match (`coach_id`, `player_id`, `slot` in the order the file lists them; a
+repeated id counts once). Rules:
+
+- A file **with** the column replaces that coach's links with exactly the
+  matches (a re-import corrects them); a file **without** it leaves the coach's
+  links alone. Nothing else writes `coach_team_requests`.
+- An id that matches no player here (not imported yet, mistyped, or another
+  organization's) writes nothing and is **never fatal**: the result lists it
+  (`unmatched_child_ids`, at most 200, with their count in
+  `unmatched_child_id_count`), the job completes with warnings, and the import
+  screen names the first ten and says to import players first.
+- `linked_children` counts the links written. Rolling the import back puts back
+  the links an update replaced (those whose player is still there); a coach the
+  import inserted takes its links with it.
+- The key is on the allowlist in all three places (the browser's
+  `importAllowlist.js`, `import-validation`'s `_shared/import-allowlist.ts` and
+  `import_allowed_keys('coaches')`), with the aliases `child registration id`
+  and `child id` (`Player ID` is **not** aliased: a player file uses it as a
+  registration-id column).
+- A coach is one row per organization and email (`UNIQUE (organization_id,
+email)`, stored lower-case and trimmed): the same address in another
+  organization is another coach, never a conflict.
 
 > **Duplicate headers:** the coach export repeats `Playing Up` and
 > `Preferred Co-Coach` once per coached player. A PapaParse `transformHeader`
@@ -222,9 +252,10 @@ unassigned when no division name matches.
 
 `coach_team_requests` links each coach to their child player(s). The teaming
 pipeline (`packages/core/src/teamingPipeline.js`) projects those links onto the
-roster so the generator anchors a team per coaching family. The coach import
-does not create those links: its finalizer reads no child columns, and the
-allowlist drops them.
+roster so the generator anchors a team per coaching family. **Only these links
+anchor a team** (owner decision 8a, 2026-10-27): a coach an import row names
+(`coach_id`, `coach_email`) anchors nothing. The coach import writes the links
+from its `child_registration_id` column (above).
 
 ## Operational note — pilot DB migration divergence
 
@@ -233,5 +264,6 @@ missing the import-finalize pipeline (`finalize_import_job`,
 `staging_import_rows`, import helper functions). The additive schema and the
 `upsert_division_for_import` RPC were applied directly and verified. Folding
 division auto-create and the new canonical fields **into** the finalize RPCs
-(and resolving coach→child / co-coach into `coach_team_requests` during coach
-finalize) should be applied once the import pipeline is deployed to that project.
+should be applied once the import pipeline is deployed to that project. (The
+coach→child links are written by the coach finalizer since 20261104010000; a
+co-coach is not resolved.)

@@ -268,6 +268,71 @@ Then('the imported coach should be removed from the coach database', async ({ pa
   await expectCoachListed(page, false);
 });
 
+Given(
+  'I upload a GotSport player CSV file of four children with registration ids',
+  async ({ page }) => {
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'players-s7.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        [
+          'First Name,Last Name,Date of Birth,Registration ID,Division',
+          'Ivy,Linked,2016-04-02,S7-E2E-1,U8 Coed',
+          'Jo,Linked,2016-05-03,S7-E2E-2,U8 Coed',
+          'Kai,Linked,2016-06-04,S7-E2E-3,U8 Coed',
+          'Lee,Linked,2016-07-05,S7-E2E-4,U8 Coed',
+        ].join('\n')
+      ),
+    });
+    await expect(page.getByRole('button', { name: 'Start Import' })).toBeVisible();
+  }
+);
+
+When(
+  'I upload a coach CSV file that names one of those children and one unknown id',
+  async ({ page }) => {
+    // The panel offers "Upload Another File" once an import is applied.
+    await page.getByRole('button', { name: 'Upload Another File' }).first().click();
+    await page.locator('button').filter({ hasText: 'coaches' }).first().click();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'coaches-s7.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        [
+          'Full Name,Email,Child Registration ID',
+          'Sam Linked,sam.linked@example.com,S7-E2E-1; S7-E2E-NOPE',
+        ].join('\n')
+      ),
+    });
+    await expect(page.getByRole('button', { name: 'Start Import' })).toBeVisible();
+  }
+);
+
+Then(
+  'the import log reports 1 child link written and the unknown registration id',
+  async ({ page }) => {
+    const log = page.getByTestId('import-log');
+    await expect(log).toContainText('1 child link(s) written', { timeout: 15000 });
+    await expect(log).toContainText('1 child registration id(s) match no player');
+    await expect(log).toContainText('S7-E2E-NOPE');
+  }
+);
+
+Then('the Teams page reports that the one team has a coach', async ({ page }) => {
+  // The staged review's own words: a team with a coach is covered. With no link the same run says
+  // "0/1 teams have a coach", since a coach an import row names no longer anchors a team.
+  await expect(page.getByText('Team review staged: 1 team.')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('All 1 teams have a coach.', { exact: false })).toBeVisible();
+});
+
+When('I choose the coach import', async ({ page }) => {
+  await page.locator('button').filter({ hasText: 'coaches' }).first().click();
+});
+
+Then('the page says to import players first', async ({ page }) => {
+  await expect(page.getByText('Import players first.', { exact: false }).first()).toBeVisible();
+});
+
 Given('I upload a valid field slot CSV file', async ({ page }) => {
   await page.locator('button').filter({ hasText: 'fields' }).first().click();
   await page.locator('input[type="file"]').setInputFiles({

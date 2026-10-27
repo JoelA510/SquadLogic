@@ -84,7 +84,11 @@ const BIRTH_LIKE = /birth|(^|_)dob(_|$)/i;
  */
 export const COACH_NAME_PARTS = Object.freeze(['first_name', 'last_name']);
 
-/** Keys `finalize_coach_import_job` reads, less the phone, and the name parts. */
+/**
+ * Keys `finalize_coach_import_job` reads, less the phone, and the name parts.
+ * `child_registration_id` (S7) names the coach's children by player registration id, one or more
+ * separated by `;` or `,`; the finalizer links the ones that match a player of the organization.
+ */
 export const COACH_IMPORT_KEYS = Object.freeze([
   'full_name',
   'email',
@@ -95,6 +99,7 @@ export const COACH_IMPORT_KEYS = Object.freeze([
   'multi_team',
   'certifications',
   'certification',
+  'child_registration_id',
   ...COACH_NAME_PARTS,
 ]);
 

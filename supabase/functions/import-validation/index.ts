@@ -161,6 +161,11 @@ const HEADER_ALIASES: Record<string, string> = {
   'registration id': 'external_registration_id',
   registration_id: 'external_registration_id',
   external_registration_id: 'external_registration_id',
+  // The coach import's optional link to a coach's children: player registration ids (S7). A bare
+  // `player id` is not aliased: a player file uses it as a registration-id column (player_id).
+  'child registration id': 'child_registration_id',
+  'child id': 'child_registration_id',
+  child_registration_id: 'child_registration_id',
   group: 'division_name',
   division: 'division_name',
   division_name: 'division_name',

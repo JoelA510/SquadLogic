@@ -81,6 +81,27 @@ export function describeFinalizeOutcome(result, importType) {
   const invalid = Number(result?.invalid_rows) || 0;
   const unresolved = Number(result?.unresolved_field_rows) || 0;
   const replayable = REPLAYS_REFUSED_ROWS.has(importType);
+  if (importType === 'coaches') {
+    // S7: the coach's children, named by player registration id. An id that matches no player of
+    // the organization wrote no link and is never fatal; players are imported before coaches.
+    const linked = Number(result?.linked_children) || 0;
+    const unmatched = Number(result?.unmatched_child_id_count) || 0;
+    if (linked > 0) {
+      lines.push(
+        `${linked} child link(s) written; they anchor each coach's team when teams are generated.`
+      );
+    }
+    if (unmatched > 0) {
+      const listed = (Array.isArray(result?.unmatched_child_ids) ? result.unmatched_child_ids : [])
+        .map((item) => item?.registration_id)
+        .filter(Boolean);
+      const shown = listed.slice(0, 10).join(', ');
+      const more = unmatched - Math.min(listed.length, 10);
+      lines.push(
+        `${unmatched} child registration id(s) match no player in this organization, so no link was written for them${shown ? `: ${shown}${more > 0 ? `, and ${more} more` : ''}` : ''}. Import players first, then import the coaches again.`
+      );
+    }
+  }
   if (invalid > 0) {
     lines.push(
       replayable

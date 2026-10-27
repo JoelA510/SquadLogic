@@ -5601,7 +5601,11 @@ export const mockSupabase = {
       let insertedCoaches = 0;
       let updatedCoaches = 0;
       let invalidRows = 0;
-      let crossOrgConflictRows = 0;
+      // As the SQL (20261104010000, S7): a coach's children, named by player registration id.
+      let linkedChildren = 0;
+      let unmatchedChildIdCount = 0;
+      const unmatchedChildIds = [];
+      db.coach_team_requests = db.coach_team_requests || [];
 
       // As the SQL (20261022010000): no phone is stored, contact_info carries
       // the sign-in email, and custom_attributes is the declared fields only.
@@ -5635,22 +5639,30 @@ export const mockSupabase = {
           return;
         }
 
+        // One coach per organization and email (20261104010000): the same address in another
+        // organization is another coach, never a conflict.
         const existing = db.coaches.find(
-          (coach) => String(coach.email || '').toLowerCase() === email
+          (coach) =>
+            String(coach.organization_id) === String(job.organization_id) &&
+            String(coach.email || '').toLowerCase() === email
         );
-        if (existing && String(existing.organization_id) !== String(job.organization_id)) {
-          crossOrgConflictRows += 1;
-          row.validation_errors = [
-            {
-              message: 'Coach email already belongs to another organization',
-              source_row_number: row.source_row_number,
-            },
-          ];
-          return;
-        }
+        const hasChildColumn = Object.hasOwn(payload, 'child_registration_id');
+        let appliedCoach = null;
 
         if (existing) {
           const previous = { ...existing };
+          if (hasChildColumn) {
+            // The links this row is about to replace, kept for the rollback.
+            previous.child_links = db.coach_team_requests
+              .filter(
+                (link) =>
+                  String(link.organization_id) === String(job.organization_id) &&
+                  String(link.coach_id) === String(existing.id) &&
+                  link.player_id
+              )
+              .sort((a, b) => a.slot - b.slot)
+              .map((link) => ({ player_id: link.player_id, slot: link.slot }));
+          }
           const canCoachMultipleTeams =
             payload.can_coach_multiple_teams === undefined
               ? Boolean(existing.can_coach_multiple_teams)
@@ -5686,6 +5698,7 @@ export const mockSupabase = {
             applied_by: 'mock-admin-id',
             rolled_back_at: null,
           });
+          appliedCoach = existing;
           updatedCoaches += 1;
         } else {
           const coach = {
@@ -5706,6 +5719,7 @@ export const mockSupabase = {
             updated_at: now,
           };
           db.coaches.push(coach);
+          appliedCoach = coach;
           db.import_application_records.push({
             id: mockId(),
             organization_id: job.organization_id,
@@ -5723,12 +5737,62 @@ export const mockSupabase = {
           insertedCoaches += 1;
         }
 
+        // S7: a file with the column makes the coach's links exactly the children that match a
+        // player of THIS organization, in the order listed; an id that matches none is reported
+        // and writes nothing; a file without the column leaves the links alone.
+        if (hasChildColumn && appliedCoach) {
+          db.coach_team_requests = db.coach_team_requests.filter(
+            (link) =>
+              !(
+                String(link.organization_id) === String(job.organization_id) &&
+                String(link.coach_id) === String(appliedCoach.id)
+              )
+          );
+          const listed = [];
+          for (const part of String(payload.child_registration_id ?? '').split(/[;,]/)) {
+            const registrationId = part.trim();
+            if (registrationId && !listed.includes(registrationId)) listed.push(registrationId);
+          }
+          let slot = 0;
+          listed.forEach((registrationId) => {
+            const player = (db.players || [])
+              .filter(
+                (item) =>
+                  String(item.organization_id) === String(job.organization_id) &&
+                  String(item.external_registration_id) === registrationId
+              )
+              .sort((a, b) =>
+                String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+              )[0];
+            if (!player) {
+              unmatchedChildIdCount += 1;
+              if (unmatchedChildIds.length < 200) {
+                unmatchedChildIds.push({
+                  coach_id: appliedCoach.id,
+                  registration_id: registrationId.slice(0, 100),
+                });
+              }
+              return;
+            }
+            slot += 1;
+            db.coach_team_requests.push({
+              id: mockId(),
+              organization_id: job.organization_id,
+              coach_id: appliedCoach.id,
+              player_id: player.id,
+              slot,
+              created_at: now,
+            });
+            linkedChildren += 1;
+          });
+        }
+
         row.applied_at = now;
         row.applied_by = 'mock-admin-id';
       });
 
       const status =
-        validationErrors.length > 0 || invalidRows > 0 || crossOrgConflictRows > 0
+        validationErrors.length > 0 || invalidRows > 0 || unmatchedChildIdCount > 0
           ? 'completed_with_warnings'
           : 'completed';
       const result = {
@@ -5740,8 +5804,10 @@ export const mockSupabase = {
         inserted_coaches: insertedCoaches,
         updated_coaches: updatedCoaches,
         invalid_rows: invalidRows,
-        cross_org_conflict_rows: crossOrgConflictRows,
         blocked_assignment_rows: 0,
+        linked_children: linkedChildren,
+        unmatched_child_id_count: unmatchedChildIdCount,
+        unmatched_child_ids: unmatchedChildIds,
         validation_error_rows: validationErrors.length,
         total_applied_rows: (db.import_application_records || []).filter(
           (record) =>
@@ -5801,13 +5867,41 @@ export const mockSupabase = {
             db.coaches = (db.coaches || []).filter(
               (coach) => String(coach.id) !== String(record.target_id)
             );
+            // ON DELETE CASCADE: an inserted coach's links go with it.
+            db.coach_team_requests = (db.coach_team_requests || []).filter(
+              (link) => String(link.coach_id) !== String(record.target_id)
+            );
             deletedCoaches += 1;
           } else if (record.operation === 'updated') {
             const coach = (db.coaches || []).find(
               (item) => String(item.id) === String(record.target_id)
             );
             if (coach && record.previous_payload) {
-              Object.assign(coach, record.previous_payload, { updated_at: now });
+              const { child_links: previousLinks, ...previousCoach } = record.previous_payload;
+              Object.assign(coach, previousCoach, { updated_at: now });
+              if (previousLinks) {
+                // The links the import replaced: put back those whose player is still here.
+                db.coach_team_requests = (db.coach_team_requests || []).filter(
+                  (link) => String(link.coach_id) !== String(record.target_id)
+                );
+                previousLinks.forEach((link) => {
+                  const player = (db.players || []).find(
+                    (item) =>
+                      String(item.id) === String(link.player_id) &&
+                      String(item.organization_id) === String(job.organization_id)
+                  );
+                  if (player) {
+                    db.coach_team_requests.push({
+                      id: mockId(),
+                      organization_id: job.organization_id,
+                      coach_id: record.target_id,
+                      player_id: link.player_id,
+                      slot: link.slot,
+                      created_at: now,
+                    });
+                  }
+                });
+              }
               restoredCoaches += 1;
             }
           }

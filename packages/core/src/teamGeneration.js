@@ -2,8 +2,10 @@
  * Generate balanced teams for each division while honoring mutual buddy requests and coach assignments.
  *
  * Players can optionally provide a `buddyId` that references another player. When two players reference each
- * other they are treated as a single unit assignment. Players can also specify a `coachId` to indicate
- * that their household is volunteering to coach and the player must appear on that coach's roster.
+ * other they are treated as a single unit assignment. A player with a `coachId` must appear on that
+ * coach's roster. The id comes from a `coach_team_requests` link (the coach import writes one for each
+ * child it names: `linkCoachesToPlayers`, `prepareTeamingInput`), never from a coach an import row
+ * names (owner decision 8a, 2026-10-27): the Teams page sets no `coachId` from a row.
  */
 
 import { TEAM_GENERATION } from './constants.js';

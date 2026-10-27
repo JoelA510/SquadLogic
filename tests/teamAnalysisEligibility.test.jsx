@@ -620,34 +620,46 @@ describe('TeamAnalysisPage :: the waitlist (owner, 2026-10-27)', () => {
   });
 });
 
-describe('TeamAnalysisPage :: a coach the import row names (kept as it was)', () => {
-  // Owner, 2026-10-27, item 8a: whether only `coach_team_requests` links should anchor a team
-  // was NOT built, because nothing in production writes that table. The row's coach still
-  // anchors, and the review labels such a coach by the text the row holds.
+describe('TeamAnalysisPage :: a coach the import row names (owner decision 8a, 2026-10-27)', () => {
+  // Only a `coach_team_requests` link anchors a team: the coach import writes one for each child
+  // it names (20261104010000). A coach an import row names (`coach_email`, `coach_id`) anchors
+  // nothing, and the page reads no such column.
   beforeEach(resetOwnerDecisionState);
   afterEach(resetOwnerDecisionState);
 
-  it('still anchors a team, as before', async () => {
+  it('anchors no team, and its child is placed like any other', async () => {
     state.rows = state.rows.map((r) =>
-      r.external_registration_id === 'REG-10' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
+      r.external_registration_id === 'REG-10'
+        ? { ...r, coach_email: 'row.coach@coaches.test', coach_id: 'row-coach-id' }
+        : r
     );
     await generate();
     const results = stagedResults();
-    expect(teamOfPlayer(results, 10).coachId).toBe('row.coach@coaches.test');
+    const coachIds = teamsOf(results).map((team) => team.coachId);
+    expect(coachIds).not.toContain('row.coach@coaches.test');
+    expect(coachIds).not.toContain('row-coach-id');
+    expect(teamOfPlayer(results, 10)).toBeTruthy();
   });
 
-  it('is flagged by that text when their only child is held out, with no coaches read', async () => {
+  it('leaves a linked coach anchoring beside a row that names another', async () => {
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-11' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
+    );
+    state.coachLinks = [link(COACH_A, 10)];
+    await generate();
+    const results = stagedResults();
+    const coachIds = teamsOf(results).map((team) => team.coachId);
+    expect(coachIds).toContain(COACH_A);
+    expect(coachIds).not.toContain('row.coach@coaches.test');
+    expect(teamOfPlayer(results, 10).coachId).toBe(COACH_A);
+  });
+
+  it('is not flagged: a row that names a coach whose child is held out says nothing', async () => {
     state.rows = state.rows.map((r) =>
       r.external_registration_id === 'REG-1' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
     );
-    state.coaches = [{ id: COACH_A, full_name: 'Not This One' }];
     await generate();
-    const results = stagedResults();
-    expect(teamsOf(results).map((team) => team.coachId)).not.toContain('row.coach@coaches.test');
-    expect(results.coachNamesById).toBeUndefined();
-    expect(screen.getByText(/has no team to anchor in this division/)).toHaveTextContent(
-      'Coach row.coach@coaches.test has no team to anchor in this division: Kid1 Placeholder1, their only child in it, is not eligible for the division.'
-    );
+    expect(screen.queryByText(/has no team to anchor in this division/)).toBeNull();
   });
 });
 

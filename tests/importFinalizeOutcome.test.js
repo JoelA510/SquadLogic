@@ -111,3 +111,53 @@ describe('describeFinalizeOutcome', () => {
     expect(describeFinalizeOutcome({ invalid_rows: -1 }, 'fields')).toEqual([]);
   });
 });
+
+describe("describeFinalizeOutcome, the coach import's child links (S7)", () => {
+  it('says how many links were written and nothing about ids when every id matched', () => {
+    const lines = describeFinalizeOutcome(
+      { linked_children: 3, unmatched_child_id_count: 0, unmatched_child_ids: [] },
+      'coaches'
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('3 child link(s) written');
+  });
+
+  it('lists the ids that matched no player, and tells the admin to import players first', () => {
+    const lines = describeFinalizeOutcome(
+      {
+        linked_children: 1,
+        unmatched_child_id_count: 2,
+        unmatched_child_ids: [
+          { coach_id: 'c1', registration_id: 'GS-404' },
+          { coach_id: 'c2', registration_id: 'GS-405' },
+        ],
+      },
+      'coaches'
+    );
+    expect(lines.join('\n')).toContain('2 child registration id(s) match no player');
+    expect(lines.join('\n')).toContain('GS-404, GS-405');
+    expect(lines.join('\n')).toContain('Import players first');
+  });
+
+  it('shows ten ids and counts the rest', () => {
+    const ids = Array.from({ length: 12 }, (_, i) => ({
+      coach_id: 'c',
+      registration_id: `X-${i}`,
+    }));
+    const line = describeFinalizeOutcome(
+      { unmatched_child_id_count: 12, unmatched_child_ids: ids },
+      'coaches'
+    )[0];
+    expect(line).toContain('X-0');
+    expect(line).toContain('X-9');
+    expect(line).not.toContain('X-10');
+    expect(line).toContain('and 2 more');
+  });
+
+  it('says nothing about child links for any other import, or when there were none', () => {
+    expect(describeFinalizeOutcome({ linked_children: 3 }, 'players')).toEqual([]);
+    expect(
+      describeFinalizeOutcome({ linked_children: 0, unmatched_child_id_count: 0 }, 'coaches')
+    ).toEqual([]);
+  });
+});

@@ -345,3 +345,16 @@ corrects is left as written.
   `tests/e2e/features/field_permits.feature` (4 scenarios). `FieldManagementPage.test.jsx` and
   `facility_management.feature` pass unedited.
 - **Not built (C3):** `VIEW_FIELD_PERMITS`, `/permits`, the coach home card, the real-backend scenario.
+
+### Review round (Codex, #669)
+
+- **An attach whose answer is lost** no longer deletes a live object. A refusal that carries a
+  Postgres or PostgREST `code` is confirmed and the upload is removed; a transport failure is
+  uncertain, so the permit is re-read and the upload is deleted only if its stored `file_path`
+  is not that upload. If the re-read also fails the upload is kept and the admin is told.
+- **A list read for an organization that is no longer active** is dropped (a generation counter and the
+  active org), and the list shown is always the active organization's.
+- **An older file check** that resolves last no longer replaces the newest selection or clears
+  `checking` (a selection counter in the dialog).
+- **Inline styles** in the permit dialog and section are token-based classes in `styles/page.css`.
+- Tests: `tests/facilityPermitsRaces.test.jsx` (8, each fails without its fix).

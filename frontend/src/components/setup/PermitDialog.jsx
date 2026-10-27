@@ -64,20 +64,32 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
       return next;
     });
 
+  // Each choice is numbered; only the newest choice's check may set the file, the message or
+  // `checking`, so an older check that resolves last cannot replace what the input now shows.
+  const selection = useRef(0);
+
   const chooseFile = async (event) => {
-    const chosen = event.target.files?.[0] ?? null;
+    const input = event.target;
+    const chosen = input.files?.[0] ?? null;
+    selection.current += 1;
+    const mine = selection.current;
     setFile(null);
     setFileError(null);
-    if (!chosen) return;
+    if (!chosen) {
+      setChecking(false);
+      return;
+    }
     setChecking(true);
     try {
       await checkFile(chosen);
-      setFile(chosen);
+      if (mine === selection.current) setFile(chosen);
     } catch (err) {
-      setFileError(err.message);
-      event.target.value = '';
+      if (mine === selection.current) {
+        setFileError(err.message);
+        input.value = '';
+      }
     } finally {
-      setChecking(false);
+      if (mine === selection.current) setChecking(false);
     }
   };
 
@@ -140,10 +152,10 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
         </>
       }
     >
-      <form id="permit-form" onSubmit={submit} noValidate>
-        <div role="alert" aria-live="assertive">
+      <form id="permit-form" className="permit-form" onSubmit={submit} noValidate>
+        <div role="alert" aria-live="assertive" className="permit-alert">
           {summary.length > 0 && (
-            <p className="badge danger" style={{ marginBottom: 12 }}>
+            <p className="badge danger">
               {summary.length === 1
                 ? summary[0]
                 : `${summary.length} things to fix: ${summary.join('. ')}`}
@@ -151,7 +163,7 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
           )}
         </div>
 
-        <div className="field" style={{ marginBottom: 12 }}>
+        <div className="field">
           <label htmlFor="permit-issuer">
             Issued by <span className="req">*</span>
           </label>
@@ -167,13 +179,13 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
             autoComplete="off"
           />
           {errors.issuer && (
-            <p id="permit-issuer-error" className="text-sm" style={{ color: 'var(--danger-text)' }}>
+            <p id="permit-issuer-error" className="text-sm field-error">
               {errors.issuer}
             </p>
           )}
         </div>
 
-        <div className="field" style={{ marginBottom: 12 }}>
+        <div className="field">
           <label htmlFor="permit-number">Permit number</label>
           <input
             id="permit-number"
@@ -188,21 +200,10 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
           <p id="permit-number-help" className="text-sm">
             Kept exactly as typed, leading zeros and all.
           </p>
-          {errors.permitNumber && (
-            <p className="text-sm" style={{ color: 'var(--danger-text)' }}>
-              {errors.permitNumber}
-            </p>
-          )}
+          {errors.permitNumber && <p className="text-sm field-error">{errors.permitNumber}</p>}
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: 12,
-            marginBottom: 12,
-          }}
-        >
+        <div className="permit-dates">
           <div className="field">
             <label htmlFor="permit-from">
               Valid from <span className="req">*</span>
@@ -217,7 +218,7 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
               aria-describedby={errors.validFrom ? 'permit-from-error' : undefined}
             />
             {errors.validFrom && (
-              <p id="permit-from-error" className="text-sm" style={{ color: 'var(--danger-text)' }}>
+              <p id="permit-from-error" className="text-sm field-error">
                 {errors.validFrom}
               </p>
             )}
@@ -239,33 +240,22 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
               The last day it is valid.
             </p>
             {errors.validTo && (
-              <p id="permit-to-error" className="text-sm" style={{ color: 'var(--danger-text)' }}>
+              <p id="permit-to-error" className="text-sm field-error">
                 {errors.validTo}
               </p>
             )}
           </div>
         </div>
 
-        <fieldset style={{ border: 0, padding: 0, margin: '0 0 12px' }}>
-          <legend style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-            Covers{' '}
-            <span className="req" style={{ color: 'var(--danger)' }}>
-              *
-            </span>
+        <fieldset className="permit-scopes">
+          <legend>
+            Covers <span className="req">*</span>
           </legend>
           {locations.length === 0 && <p className="text-sm">Add a venue and a field first.</p>}
-          <div
-            style={{
-              maxHeight: 220,
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
+          <div className="permit-scope-list">
             {locations.map((location) => (
               <div key={location.id}>
-                <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600 }}>
+                <label className="permit-check venue">
                   <input
                     type="checkbox"
                     checked={locationIds.has(location.id)}
@@ -273,9 +263,9 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
                   />
                   {location.name} (whole venue)
                 </label>
-                <div style={{ marginLeft: 24, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div className="permit-field-checks">
                   {(fieldsByLocation.get(location.id) ?? []).map((field) => (
-                    <label key={field.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <label key={field.id} className="permit-check">
                       <input
                         type="checkbox"
                         checked={fieldIds.has(field.id)}
@@ -289,14 +279,10 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
               </div>
             ))}
           </div>
-          {errors.fieldIds && (
-            <p className="text-sm" style={{ color: 'var(--danger-text)' }}>
-              {errors.fieldIds}
-            </p>
-          )}
+          {errors.fieldIds && <p className="text-sm field-error">{errors.fieldIds}</p>}
         </fieldset>
 
-        <div className="field" style={{ marginBottom: 12 }}>
+        <div className="field">
           <label htmlFor="permit-notes">Notes</label>
           <textarea
             id="permit-notes"
@@ -305,11 +291,7 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
             onChange={(e) => setNotes(e.target.value)}
             aria-invalid={Boolean(errors.notes)}
           />
-          {errors.notes && (
-            <p className="text-sm" style={{ color: 'var(--danger-text)' }}>
-              {errors.notes}
-            </p>
-          )}
+          {errors.notes && <p className="text-sm field-error">{errors.notes}</p>}
         </div>
 
         {!editing && (
@@ -317,12 +299,11 @@ export default function PermitDialog({ permit, locations, fields, checkFile, onS
             <label htmlFor="permit-file">The permit document (optional)</label>
             <input
               id="permit-file"
-              className="input"
+              className="input permit-file-input"
               type="file"
               accept={ACCEPT}
               onChange={chooseFile}
               aria-describedby="permit-file-help"
-              style={{ height: 'auto', padding: 8 }}
             />
             <p id="permit-file-help" className="text-sm">
               A PDF, JPEG or PNG up to 10 MB. You can add or replace it later.

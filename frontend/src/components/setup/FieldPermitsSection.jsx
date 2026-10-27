@@ -199,7 +199,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
       {error && (
         // A failed read is said politely, not as an alert: a permit blocks nothing and the page
         // beside it works; an action the person took that fails is the alert.
-        <p className="badge danger" role="status" style={{ marginBottom: 12 }}>
+        <p className="badge danger permit-notice" role="status">
           {error}
         </p>
       )}
@@ -208,22 +208,14 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
         <div data-testid="permit-warnings" className="mb-4" role="status">
           {!hasWarnings ? (
             <p className="text-sm text-text-secondary">
-              <CheckCircle2
-                size={14}
-                aria-hidden="true"
-                style={{ display: 'inline', marginRight: 6 }}
-              />
+              <CheckCircle2 size={14} aria-hidden="true" className="permit-inline-icon" />
               Every live field has a current permit, and none is expiring or expired.
             </p>
           ) : (
             <ul className="space-y-1 text-sm">
               {warnings.fieldsWithout.length > 0 && (
                 <li data-testid="permit-warning-missing">
-                  <AlertTriangle
-                    size={14}
-                    aria-hidden="true"
-                    style={{ display: 'inline', marginRight: 6 }}
-                  />
+                  <AlertTriangle size={14} aria-hidden="true" className="permit-inline-icon" />
                   {warnings.fieldsWithout.length}{' '}
                   {warnings.fieldsWithout.length === 1 ? 'field has' : 'fields have'} no current
                   permit:{' '}
@@ -234,11 +226,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
               )}
               {warnings.expiring.length > 0 && (
                 <li data-testid="permit-warning-expiring">
-                  <Clock
-                    size={14}
-                    aria-hidden="true"
-                    style={{ display: 'inline', marginRight: 6 }}
-                  />
+                  <Clock size={14} aria-hidden="true" className="permit-inline-icon" />
                   {warnings.expiring.length}{' '}
                   {warnings.expiring.length === 1 ? 'permit expires' : 'permits expire'} within 30
                   days:{' '}
@@ -249,11 +237,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
               )}
               {warnings.expired.length > 0 && (
                 <li data-testid="permit-warning-expired">
-                  <AlertTriangle
-                    size={14}
-                    aria-hidden="true"
-                    style={{ display: 'inline', marginRight: 6 }}
-                  />
+                  <AlertTriangle size={14} aria-hidden="true" className="permit-inline-icon" />
                   {warnings.expired.length}{' '}
                   {warnings.expired.length === 1 ? 'permit has' : 'permits have'} expired:{' '}
                   {warnings.expired
@@ -269,9 +253,8 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
       <div aria-live="polite">
         {notice && (
           <p
-            className={`badge ${notice.kind === 'error' ? 'danger' : 'success'}`}
+            className={`badge permit-notice ${notice.kind === 'error' ? 'danger' : 'success'}`}
             role={notice.kind === 'error' ? 'alert' : 'status'}
-            style={{ marginBottom: 12 }}
           >
             {notice.text}
           </p>
@@ -326,11 +309,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
                   {permit.file ? (
                     <>
                       <span className="text-sm text-text-primary">
-                        <FileText
-                          size={14}
-                          aria-hidden="true"
-                          style={{ display: 'inline', marginRight: 4 }}
-                        />
+                        <FileText size={14} aria-hidden="true" className="permit-inline-icon" />
                         {permit.file.name} ({sizeText(permit.file.size)})
                       </span>
                       <Button
@@ -375,7 +354,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
                   >
                     {permit.file ? 'Replace file' : 'Add file'}
                   </Button>
-                  <span style={{ marginLeft: 'auto' }} className="flex gap-1">
+                  <span className="flex gap-1 permit-actions-end">
                     <Button
                       variant="ghost"
                       size="sm"

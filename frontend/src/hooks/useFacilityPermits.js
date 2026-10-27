@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { logger } from '../lib/logger.js';
@@ -22,9 +22,17 @@ async function headBytesOf(file) {
   return new Uint8Array(await file.slice(0, PERMIT_MAGIC_BYTES).arrayBuffer());
 }
 
+/** Removes an object; a failure is logged with its path (an orphan only an admin could read). */
+async function removeQuietly(storage, path, what) {
+  const { error } = await storage.remove([path]);
+  if (error) {
+    logger.error(`[useFacilityPermits] could not remove ${what}`, { path, message: error.message });
+  }
+}
+
 /** One read of the permits, as the state the hook holds (never throws). */
 async function readPermits(orgId) {
-  const empty = { permits: [], today: null, loading: false };
+  const empty = { orgId, permits: [], today: null, loading: false };
   if (!orgId) return { ...empty, error: null };
   let result;
   try {
@@ -52,7 +60,7 @@ async function readPermits(orgId) {
   if (!data || !Array.isArray(data.permits) || typeof data.today !== 'string') {
     return { ...empty, error: 'Permits could not be read: the answer was unreadable.' };
   }
-  return { permits: data.permits, today: data.today, loading: false, error: null };
+  return { orgId, permits: data.permits, today: data.today, loading: false, error: null };
 }
 
 /**
@@ -70,20 +78,37 @@ async function readPermits(orgId) {
 export function useFacilityPermits() {
   const { currentOrganization } = useOrganization();
   const orgId = currentOrganization?.id ?? null;
-  const [state, setState] = useState({ permits: [], today: null, loading: true, error: null });
+  const [state, setState] = useState({
+    orgId: /** @type {string|null} */ (null),
+    permits: [],
+    today: null,
+    loading: true,
+    error: null,
+  });
+  // The newest read wins, and a read for an organization that is no longer the active one never
+  // lands: the page stays mounted across an organization switch, so an older read (or a mutation's
+  // refresh started for the previous organization) must not replace the new one's list.
+  const generation = useRef(0);
+  const activeOrg = useRef(orgId);
 
   const refresh = useCallback(async () => {
-    setState(await readPermits(orgId));
+    generation.current += 1;
+    const mine = generation.current;
+    const next = await readPermits(orgId);
+    if (mine === generation.current && activeOrg.current === orgId) setState(next);
   }, [orgId]);
 
   useEffect(() => {
-    let cancelled = false;
+    activeOrg.current = orgId;
+    generation.current += 1;
+    const mine = generation.current;
     (async () => {
       const next = await readPermits(orgId);
-      if (!cancelled) setState(next);
+      if (mine === generation.current) setState(next);
     })();
     return () => {
-      cancelled = true;
+      // A superseded or unmounted read is dropped.
+      generation.current += 1;
     };
   }, [orgId]);
 
@@ -134,34 +159,58 @@ export function useFacilityPermits() {
           : `The file could not be uploaded: ${uploadError.message}`
       );
     }
-    const { data, error } = await supabase.rpc('admin_set_facility_permit_file', {
-      p_organization_id: org,
-      p_permit_id: permit.id,
-      p_object_path: path,
-      p_file_name: checked.name,
-    });
-    if (error || !data?.permit) {
-      // The attach failed: take the upload back so no orphan stays.
-      const { error: removeError } = await storage.remove([path]);
-      if (removeError) {
-        logger.error('[useFacilityPermits] could not remove an upload after a failed attach', {
+    let result;
+    let thrown = null;
+    try {
+      result = await supabase.rpc('admin_set_facility_permit_file', {
+        p_organization_id: org,
+        p_permit_id: permit.id,
+        p_object_path: path,
+        p_file_name: checked.name,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    const { data, error } = result ?? {};
+    const attached = !thrown && !error && data?.permit ? data : null;
+
+    if (!attached) {
+      // A refusal the server confirmed (a Postgres or PostgREST error code) means nothing was
+      // attached: take the upload back so no orphan stays. Anything else (a fetch error, an unreadable
+      // answer) is UNCERTAIN: the attach may have committed with its response lost, and deleting the
+      // object then would leave the permit pointing at a file that is gone. Read the stored file
+      // path first, and delete only on proof that this object is not it.
+      const confirmedRefusal = !thrown && Boolean(error?.code);
+      if (confirmedRefusal) {
+        await removeQuietly(storage, path, 'an upload after a refused attach');
+        throw new Error(`The file could not be attached: ${error.message}`);
+      }
+      const stored = await readPermits(org);
+      const found = stored.error ? undefined : stored.permits.find((p) => p.id === permit.id);
+      if (!found) {
+        // Could not be determined: keep the upload (an unreferenced object is harmless; a dangling
+        // reference is not) and say what is known.
+        logger.error('[useFacilityPermits] an attach could not be confirmed; the upload was kept', {
           path,
-          message: removeError.message,
         });
+        throw new Error(
+          'The file was uploaded, but it could not be confirmed that it was attached to the permit (the connection failed). Reload the page and check the permit: if it shows no file, add it again.'
+        );
       }
-      if (error) throw new Error(`The file could not be attached: ${error.message}`);
-      throw unreadable('admin_set_facility_permit_file');
-    }
-    if (data.previous_path) {
-      const { error: removeError } = await storage.remove([data.previous_path]);
-      if (removeError) {
-        logger.error('[useFacilityPermits] could not remove the replaced file', {
-          path: data.previous_path,
-          message: removeError.message,
-        });
+      if (found.file?.path !== path) {
+        await removeQuietly(storage, path, 'an upload after a failed attach');
+        throw new Error(
+          `The file could not be attached: ${thrown?.message ?? error?.message ?? 'the answer was unreadable'}`
+        );
       }
+      // It did commit. The response is lost, so the replaced file is whatever the permit showed before.
+      const replaced = permit.file?.path ?? null;
+      if (replaced && replaced !== path)
+        await removeQuietly(storage, replaced, 'the replaced file');
+      return found;
     }
-    return data.permit;
+    if (data.previous_path) await removeQuietly(storage, data.previous_path, 'the replaced file');
+    return attached.permit;
   };
 
   /**
@@ -255,8 +304,12 @@ export function useFacilityPermits() {
     return data.signedUrl;
   };
 
+  // State read for another organization is not this one's: it reads as loading until its own arrives.
+  const current =
+    state.orgId === orgId ? state : { orgId, permits: [], today: null, loading: true, error: null };
+
   return {
-    ...state,
+    ...current,
     refresh,
     checkFile,
     createPermit,

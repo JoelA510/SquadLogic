@@ -23,7 +23,7 @@ export default function FieldPermitStatus({ fieldId, needsPermit, current, cover
           <AlertTriangle size={13} aria-hidden="true" /> No current permit
         </Badge>
         {coveringCount > 0 && (
-          <span className="text-xs text-text-secondary" style={{ marginLeft: 8 }}>
+          <span className="text-xs text-text-secondary permit-hint">
             {coveringCount === 1 ? 'The permit on record is' : 'The permits on record are'} expired,
             not yet valid, or have no file.
           </span>

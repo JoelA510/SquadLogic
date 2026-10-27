@@ -375,3 +375,10 @@ each with `docs/sql/<id>_revert.sql` and `_smoke.sql`. Differences from the desi
   member role check, the finalizer's lookup unscoped by organization (each run against the real
   harness), `create_org_invite` accepting `coach` and `profile_id` left in place (anchors resolved,
   not run). The full prove sweep was not run.
+- **S7 end-to-end.** `ingestion_hardening.feature` imports four players, then a coach file naming one of
+  them and one unknown id, and reads the import log (one link written, the unknown id listed), and a
+  second scenario reads the "import players first" text. The scenario's planned last step (generate
+  teams and see the coach's team anchored) is not an E2E: "Upload Another File", which switching from
+  players to coaches needs, clears the session's player import the Teams page builds from. The anchoring
+  on the page is held by `tests/teamAnalysisEligibility.test.jsx` instead.
+

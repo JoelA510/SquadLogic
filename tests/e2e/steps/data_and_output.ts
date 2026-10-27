@@ -318,13 +318,6 @@ Then(
   }
 );
 
-Then('the Teams page reports that the one team has a coach', async ({ page }) => {
-  // The staged review's own words: a team with a coach is covered. With no link the same run says
-  // "0/1 teams have a coach", since a coach an import row names no longer anchors a team.
-  await expect(page.getByText('Team review staged: 1 team.')).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText('All 1 teams have a coach.', { exact: false })).toBeVisible();
-});
-
 When('I choose the coach import', async ({ page }) => {
   await page.locator('button').filter({ hasText: 'coaches' }).first().click();
 });

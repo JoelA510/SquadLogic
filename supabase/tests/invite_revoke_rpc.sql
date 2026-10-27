@@ -20,15 +20,15 @@ VALUES
         'aaaaaaaa-1111-1111-1111-111111111111',
         'A-OPEN1',
         'a1111111-1111-1111-1111-111111111111',
-        'coach',
+        'staff',
         '11111111-1111-1111-1111-111111111111',
         now() + interval '7 days'
     ),
     (
         'aaaaaaaa-2222-2222-2222-222222222222',
-        'A-COACH',
+        'A-STAFF',
         'a1111111-1111-1111-1111-111111111111',
-        'coach',
+        'staff',
         '11111111-1111-1111-1111-111111111111',
         now() + interval '7 days'
     ),
@@ -36,7 +36,7 @@ VALUES
         'aaaaaaaa-3333-3333-3333-333333333333',
         'A-XORG1',
         'a1111111-1111-1111-1111-111111111111',
-        'coach',
+        'staff',
         '11111111-1111-1111-1111-111111111111',
         now() + interval '7 days'
     ),
@@ -44,7 +44,7 @@ VALUES
         'aaaaaaaa-4444-4444-4444-444444444444',
         'A-USED1',
         'a1111111-1111-1111-1111-111111111111',
-        'coach',
+        'staff',
         '11111111-1111-1111-1111-111111111111',
         now() + interval '7 days'
     );
@@ -136,7 +136,7 @@ SELECT throws_ok(
     $$,
     '42501',
     NULL,
-    'Org A coach cannot revoke invites'
+    'a signed-in non-member cannot revoke invites'
 );
 
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';

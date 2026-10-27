@@ -20,7 +20,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(25);
+SELECT plan(28);
 
 -- Every public column that can hold text, and which of them contain any
 -- needle. Tables in p_skip are not searched.
@@ -151,6 +151,24 @@ FROM (SELECT jsonb_build_object(
     'skill_tier', 'advanced', 'skill', 'advanced',
     'undeclared column', 'R0Undeclared') AS p) s;
 
+-- Coach identity is one row per organization and email (20261104010000): the same address in
+-- another organization, in another case, is another coach; a re-import in one organization
+-- updates that organization's row only.
+INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by)
+VALUES
+    ('b2222222-0000-4000-8000-0000000000d2', 'b2222222-2222-2222-2222-222222222222',
+     'registration', 'orgb/r0-coaches.csv', 'processing', '22222222-2222-2222-2222-222222222222'),
+    ('a1111111-0000-4000-8000-0000000000c2', 'a1111111-1111-1111-1111-111111111111',
+     'registration', 'orga/r0-coaches-2.csv', 'processing', '11111111-1111-1111-1111-111111111111');
+INSERT INTO public.staging_import_rows (
+    organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload
+)
+VALUES
+    ('b2222222-2222-2222-2222-222222222222', 'b2222222-0000-4000-8000-0000000000d2', 'coaches', 1,
+     '{}'::jsonb, '{"full_name": "Coach R0 Org B", "email": "  Coach-R0@Example.test "}'::jsonb),
+    ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000000c2', 'coaches', 1,
+     '{}'::jsonb, '{"full_name": "Coach R0 Renamed", "email": "COACH-R0@example.test"}'::jsonb);
+
 -- The same player again, for the re-import below.
 INSERT INTO public.staging_players (
     organization_id, import_job_id, source_row_number, raw_payload, normalized_payload
@@ -173,16 +191,40 @@ SELECT is(
     'the player import inserts its player'
 );
 
+-- One address, two organizations: Bob imports it into Org B (mixed case, padded), then Alice
+-- re-imports it into Org A.
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT is(
+    (public.finalize_coach_import_job('b2222222-0000-4000-8000-0000000000d2')->>'inserted_coaches')::int,
+    1,
+    'the same email imported into a second organization inserts a coach there'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(
+    (public.finalize_coach_import_job('a1111111-0000-4000-8000-0000000000c2')->>'updated_coaches')::int,
+    1,
+    'a re-import in the first organization updates its coach and inserts nothing'
+);
+
 RESET role;
+
+SELECT is(
+    (SELECT jsonb_agg(jsonb_build_array(organization_id, email, full_name) ORDER BY organization_id)
+       FROM public.coaches WHERE lower(email) = 'coach-r0@example.test'),
+    '[["a1111111-1111-1111-1111-111111111111", "coach-r0@example.test", "Coach R0 Renamed"],
+      ["b2222222-2222-2222-2222-222222222222", "coach-r0@example.test", "Coach R0 Org B"]]'::jsonb,
+    'one email, two organizations: two rows, each stored lower-case and trimmed, and the re-import changed only its own'
+);
 
 SELECT is(
     (SELECT jsonb_build_object('custom_attributes', custom_attributes, 'phone', phone,
                                'contact_info', contact_info)
-       FROM public.coaches WHERE email = 'coach-r0@example.test'),
+       FROM public.coaches WHERE email = 'coach-r0@example.test'
+        AND organization_id = 'a1111111-1111-1111-1111-111111111111'),
     '{"custom_attributes": {"shirt_size": "YM", "years_coached": 6, "cert_date": "2024-05-06"},
       "phone": null,
       "contact_info": {"email": "coach-r0@example.test"}}'::jsonb,
-    'the coach keeps its declared fields, typed as declared, its sign-in email, and no phone'
+    'the coach keeps its declared fields, typed as declared, its email, and no phone'
 );
 
 SELECT is(
@@ -286,7 +328,8 @@ SELECT 'b2222222-2222-2222-2222-222222222222', 'b2222222-0000-4000-8000-00000000
        p, p
 FROM (SELECT jsonb_build_object('full_name', 'Pending R0', 'email', 'pending-r0@example.test',
         'Guardian 1 Address', '191 R0 Placeholder Way',
-        'guardian 1 email address', 'r0-guardian-one@example.test') AS p) s;
+        'guardian 1 email address', 'r0-guardian-one@example.test',
+        'child_registration_id', 'R0-100') AS p) s;
 INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by,
                                 error_summary)
 VALUES ('b2222222-0000-4000-8000-0000000000cb', 'b2222222-2222-2222-2222-222222222222',
@@ -358,8 +401,8 @@ SELECT is(
 SELECT is(
     (SELECT normalized_payload FROM public.staging_import_rows
       WHERE import_job_id = 'b2222222-0000-4000-8000-0000000000ca'),
-    '{"full_name": "Pending R0", "email": "pending-r0@example.test"}'::jsonb,
-    'the ready job''s staged row is reduced to the allowlist'
+    '{"full_name": "Pending R0", "email": "pending-r0@example.test", "child_registration_id": "R0-100"}'::jsonb,
+    'the ready job''s staged row is reduced to the allowlist, the coach''s children column kept'
 );
 
 SELECT is(

@@ -66,8 +66,8 @@ SELECT is((SELECT organization_id FROM public.view_org_metrics),
     'and it is Org A''s');
 SELECT is((SELECT ARRAY[total_teams, total_users]::int[] FROM public.view_org_metrics
             WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'),
-    ARRAY[1, 2],
-    'Org A''s row counts its one team (Active Teams) and its two members');
+    ARRAY[1, 1],
+    'Org A''s row counts its one team (Active Teams) and its one member (Alice: Charlie is no member)');
 SELECT is((SELECT count(*)::int FROM public.view_org_metrics
             WHERE organization_id = 'b2222222-2222-2222-2222-222222222222'), 0,
     'Org A''s admin cannot see Org B''s metrics row');

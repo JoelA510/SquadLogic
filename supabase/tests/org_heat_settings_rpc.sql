@@ -82,14 +82,14 @@ SELECT throws_ok(
     $$ SELECT public.admin_set_org_heat_settings('a1111111-1111-1111-1111-111111111111', 3, '[]'::jsonb) $$,
     '42501',
     NULL,
-    'Org A coach cannot set heat settings'
+    'a signed-in non-member cannot set heat settings'
 );
 
 SELECT is(
-    (SELECT threshold_category::int FROM public.organization_heat_settings
+    (SELECT count(*)::int FROM public.organization_heat_settings
       WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'),
-    2,
-    'Org A coach reads Org A''s settings'
+    0,
+    'a signed-in non-member reads no organization''s settings'
 );
 
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';

@@ -1,62 +1,59 @@
 -- pgTAP: the coach practice preference RPCs (20260927000000; 8.6 PR 3b PR 1).
 --
--- The coach/admin boundary of plan §4 under the real `authenticated` role and
--- real RLS: a coach requests for themself only and never decides; an admin
--- approves, and a later admin write supersedes the approved row; a coach reads
--- only their own rows; another organisation's admin reads none.
--- `docs/sql/20260927000000_smoke.sql` covers the same ground in the local
--- harness, plus the audit rows, the one-approved index and the value CHECKs.
+-- The boundary under the real `authenticated` role and real RLS: only an org admin decides a
+-- requested preference or sets one; a later admin write supersedes the approved row; only an
+-- admin of the organization reads the rows; a signed-in user with no membership (a coach,
+-- before 20261104010000) and another organisation's admin read none.
+-- Since 20261104010000 no coach signs in and `request_coach_practice_preference` is dropped:
+-- the 'requested' row below is inserted as the owner (the admins import requests later).
+-- `docs/sql/20260927000000_smoke.sql` covers the same ground in the local harness, plus the
+-- audit rows, the one-approved index and the value CHECKs.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(8);
+SELECT plan(7);
 
--- Two coaches of Org A: Charlie's own record, and one with no login.
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
+-- Two coaches of Org A (data: neither signs in).
+INSERT INTO public.coaches (id, organization_id, full_name, email, status) VALUES
     ('c0000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111',
-     '33333333-3333-3333-3333-333333333333', 'Charlie Coach-A', 'charlie@test.local', 'active'),
+     'Charlie Coach-A', 'charlie@test.local', 'active'),
     ('c0000000-0000-4000-8000-000000000002', 'a1111111-1111-1111-1111-111111111111',
-     NULL, 'Other Coach-A', 'other-coach@test.local', 'active');
+     'Other Coach-A', 'other-coach@test.local', 'active');
+INSERT INTO public.coach_practice_preferences (id, organization_id, coach_id, dimension, level, value, requested_by)
+VALUES ('c0000000-0000-4000-8000-0000000000a1', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001',
+        'weekday', 'must_keep', '"TUE"', '11111111-1111-1111-1111-111111111111');
+
+SELECT has_function('public', 'admin_decide_coach_practice_preference', 'the decide RPC exists');
+SELECT hasnt_function('public', 'request_coach_practice_preference', 'no request RPC: no coach requests a practice preference');
 
 SET LOCAL role = 'authenticated';
 
--- Charlie, a coach of Org A.
+-- Charlie, signed in with no membership.
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-
-SELECT lives_ok(
-    $$SELECT public.request_coach_practice_preference(
-        'c0000000-0000-4000-8000-000000000001', 'weekday', 'must_keep', '"TUE"')$$,
-    'a coach requests a practice preference for themself'
-);
-
-SELECT throws_ok(
-    $$SELECT public.request_coach_practice_preference(
-        'c0000000-0000-4000-8000-000000000002', 'weekday', 'must_keep', '"WED"')$$,
-    '42501', NULL,
-    'a coach cannot request a practice preference for another coach'
-);
 
 SELECT throws_ok(
     $$SELECT public.admin_decide_coach_practice_preference(
-        (SELECT id FROM public.coach_practice_preferences
-          WHERE coach_id = 'c0000000-0000-4000-8000-000000000001' AND status = 'requested'),
-        'approve')$$,
+        'c0000000-0000-4000-8000-0000000000a1', 'approve')$$,
     '42501', NULL,
-    'a coach cannot approve, their own request included'
+    'a signed-in non-member cannot approve'
 );
 
--- Alice, an admin of Org A.
+SELECT is(
+    (SELECT count(*)::int FROM public.coach_practice_preferences),
+    0,
+    'a signed-in non-member reads no coach practice preferences'
+);
+
+-- Alice, an admin of Org A. The requested row is hers to read: the select below runs under RLS.
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
 SELECT lives_ok(
     $$SELECT public.admin_decide_coach_practice_preference(
-        (SELECT id FROM public.coach_practice_preferences
-          WHERE coach_id = 'c0000000-0000-4000-8000-000000000001' AND status = 'requested'),
-        'approve')$$,
-    'an org admin approves a coach''s request'
+        'c0000000-0000-4000-8000-0000000000a1', 'approve')$$,
+    'an org admin approves a requested preference'
 );
 
 SELECT public.admin_set_coach_practice_preference(
@@ -69,23 +66,6 @@ SELECT is(
       WHERE coach_id = 'c0000000-0000-4000-8000-000000000001'),
     ARRAY['approved', 'superseded']::text[],
     'a later admin write supersedes the approved row: one approved, one superseded'
-);
-
--- Charlie again: his own two rows, none of the other coach's.
-SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-
-SELECT is(
-    (SELECT count(*)::int FROM public.coach_practice_preferences
-      WHERE coach_id = 'c0000000-0000-4000-8000-000000000001'),
-    2,
-    'a coach reads their own rows'
-);
-
-SELECT is(
-    (SELECT count(*)::int FROM public.coach_practice_preferences
-      WHERE coach_id <> 'c0000000-0000-4000-8000-000000000001'),
-    0,
-    'a coach reads none of another coach''s rows'
 );
 
 -- Bob, an admin of Org B.

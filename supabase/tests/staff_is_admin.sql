@@ -14,7 +14,8 @@ BEGIN;
 
 SELECT plan(9);
 
--- Sam: staff of Org A only. Org A also has Alice (admin) and Charlie (coach).
+-- Sam: staff of Org A only. Org A also has Alice (admin) and Tess (staff). Charlie is a
+-- signed-in non-member (20261104010000 removed the coach role).
 INSERT INTO auth.users (id, email, raw_user_meta_data)
 VALUES ('88888888-8888-8888-8888-888888888888', 'sam@test.local',
         jsonb_build_object('full_name', 'Sam Staff-A', 'password_length', 12))
@@ -24,6 +25,16 @@ VALUES ('88888888-8888-8888-8888-888888888888', 'sam@test.local', 'Sam Staff-A')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.organization_members (organization_id, profile_id, role)
 VALUES ('a1111111-1111-1111-1111-111111111111', '88888888-8888-8888-8888-888888888888', 'staff')
+ON CONFLICT (organization_id, profile_id) DO UPDATE SET role = 'staff';
+INSERT INTO auth.users (id, email, raw_user_meta_data)
+VALUES ('99999999-9999-9999-9999-999999999999', 'tess@test.local',
+        jsonb_build_object('full_name', 'Tess Staff-A', 'password_length', 12))
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.profiles (id, email, full_name)
+VALUES ('99999999-9999-9999-9999-999999999999', 'tess@test.local', 'Tess Staff-A')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.organization_members (organization_id, profile_id, role)
+VALUES ('a1111111-1111-1111-1111-111111111111', '99999999-9999-9999-9999-999999999999', 'staff')
 ON CONFLICT (organization_id, profile_id) DO UPDATE SET role = 'staff';
 
 -- ── The catalogue: no role test names 'admin' without 'staff' ─────────────
@@ -83,28 +94,28 @@ SELECT is(
 
 -- The member RPCs: staff pass the admin gate.
 SELECT lives_ok(
-    -- To admin and back (until 20261024010000 this made Charlie a parent, a
-    -- role that no longer exists), so Sam is again the only admin-equivalent
-    -- member once Alice is removed below.
+    -- Tess to admin and back to staff, so Sam and Tess are both staff again
+    -- once Alice is removed below.
     $$SELECT public.admin_change_member_role('a1111111-1111-1111-1111-111111111111',
-                                              '33333333-3333-3333-3333-333333333333', 'admin'),
+                                              '99999999-9999-9999-9999-999999999999', 'admin'),
              public.admin_change_member_role('a1111111-1111-1111-1111-111111111111',
-                                              '33333333-3333-3333-3333-333333333333', 'coach')$$,
+                                              '99999999-9999-9999-9999-999999999999', 'staff')$$,
     'a staff member changes another member''s role'
 );
 
--- The last-admin guards count staff. Sam removes Alice, leaving Sam the only
--- admin-equivalent member of Org A; Sam may then not demote himself.
+-- admin_remove_member's last-admin guard counts staff. Sam removes Alice,
+-- leaving Sam and Tess; the role given to a member is 'admin' or 'staff', both
+-- admins, so a change of role has no last-admin guard to count them for.
 SELECT lives_ok(
     $$SELECT public.admin_remove_member('a1111111-1111-1111-1111-111111111111',
                                          '11111111-1111-1111-1111-111111111111')$$,
-    'a staff member removes the admin while another admin-equivalent member (themself) remains'
+    'a staff member removes the admin while other admin-equivalent members remain'
 );
 SELECT throws_ok(
     $$SELECT public.admin_change_member_role('a1111111-1111-1111-1111-111111111111',
                                               '88888888-8888-8888-8888-888888888888', 'coach')$$,
-    '22023', 'Cannot demote the last admin of the organization',
-    'the last admin-equivalent member, a staff member, cannot be demoted'
+    '22023', 'invalid role: coach',
+    'no member can be given the retired coach role'
 );
 
 RESET role;
@@ -113,7 +124,7 @@ SELECT is(
       WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
         AND profile_id = '88888888-8888-8888-8888-888888888888'),
     'staff',
-    'the refused demotion left the staff member''s role as it was'
+    'the refused role change left the staff member''s role as it was'
 );
 
 SELECT * FROM finish();

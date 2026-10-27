@@ -21,14 +21,14 @@ SELECT ok(
     'members.invited_joined is a registered audit action'
 );
 
--- Alice mints a coach invite for Org A. The code is kept in a table the test
+-- Alice mints a staff invite for Org A. The code is kept in a table the test
 -- role may write, because the `authenticated` role cannot create one.
 CREATE TEMP TABLE minted (code text);
 GRANT ALL ON minted TO authenticated;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 INSERT INTO minted
-    SELECT code FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'coach');
+    SELECT code FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'staff');
 
 -- Bob redeems it.
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
@@ -43,7 +43,7 @@ SELECT is(
     (SELECT role FROM public.organization_members
       WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
         AND profile_id = '22222222-2222-2222-2222-222222222222'),
-    'coach',
+    'staff',
     'the redeemer joined Org A with the invited role'
 );
 
@@ -73,7 +73,7 @@ SELECT is(
     (SELECT metadata->>'role' FROM public.audit_log
       WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
         AND action = 'members.invited_joined'),
-    'coach',
+    'staff',
     'the audit row records the invited role'
 );
 

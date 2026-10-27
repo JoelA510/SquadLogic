@@ -31,20 +31,22 @@ SELECT throws_ok(
 );
 RESET role;
 
--- 3. Charlie (coach, non-admin, Org A) can write a normal audit event for
---    his own org -- membership, not admin status, is the bar for ordinary
---    actions.
+-- 3. Charlie (signed in, no membership since 20261104010000 removed the coach
+--    role) cannot write even a normal audit event for Org A: membership is the
+--    bar for ordinary actions, and every member is an admin now.
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-SELECT lives_ok(
+SELECT throws_ok(
     $$ SELECT public.record_audit_event(
         'a1111111-1111-1111-1111-111111111111', 'settings.updated', NULL, NULL, '{}'::jsonb
     ) $$,
-    'non-admin org member can write a normal audit event for their own org'
+    '42501',
+    NULL,
+    'a signed-in non-member cannot write a normal audit event for the organization'
 );
 RESET role;
 
--- 4. Charlie (non-admin) cannot write an impersonation.started audit event.
+-- 4. Charlie (non-member) cannot write an impersonation.started audit event.
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok(
@@ -53,7 +55,7 @@ SELECT throws_ok(
     ) $$,
     '42501',
     NULL,
-    'non-admin org member cannot record an impersonation.started event'
+    'a non-member cannot record an impersonation.started event'
 );
 RESET role;
 

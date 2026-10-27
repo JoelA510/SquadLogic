@@ -625,6 +625,16 @@ SELECT throws_like(
 -- and it is the unlock gate (:280-284) that refuses: the writer's general
 -- admin check raises 42501 too, with another message, so the message is what
 -- tells the two apart.
+-- A member who is not an admin cannot exist any more: organization_members_role_check admits only
+-- admin, staff and tenant_admin since 20261104010000, and all three are admins. The unlock gate is
+-- defence in depth for exactly that state (the membership check comes first), so Charlie is made a
+-- 'coach' member by lifting the check for this transaction, which is rolled back.
+RESET ROLE;
+ALTER TABLE public.organization_members DROP CONSTRAINT organization_members_role_check;
+INSERT INTO public.organization_members (organization_id, profile_id, role)
+VALUES ('a1111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', 'coach')
+ON CONFLICT (organization_id, profile_id) DO UPDATE SET role = 'coach';
+SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_like(
     $$ SELECT public.persist_practice_schedule(

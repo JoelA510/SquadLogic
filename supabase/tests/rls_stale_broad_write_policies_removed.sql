@@ -1,9 +1,10 @@
 -- Behavioral verification for 20260726000000_drop_stale_broad_write_policies.sql
 --
--- Charlie is a coach (non-admin) member of Org A. Before this migration, the
--- stale "Unified org access on teams/coaches/locations" policy let any org
--- member -- Charlie included -- write to these tables directly. After the
--- migration, only the narrow SELECT policies remain for `authenticated`.
+-- Charlie was a coach (non-admin) member of Org A; since 20261104010000 removed
+-- the coach role he is a signed-in non-member. Before 20260726000000, the stale
+-- "Unified org access on teams/coaches/locations" policy let any org member
+-- write to these tables directly. After it, only the narrow SELECT policies
+-- remain for `authenticated`; and a non-member reads nothing either.
 --
 -- Note the two different RLS failure modes:
 --   * UPDATE/DELETE affect zero rows silently -- the surviving SELECT
@@ -28,22 +29,28 @@ ON CONFLICT (id) DO NOTHING;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 
--- 1. Charlie (coach, Org A) cannot rename A-Team directly.
+-- 1. Charlie (non-member) cannot rename A-Team directly.
 UPDATE public.teams SET name = 'Hijacked Team Name'
 WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+RESET role;
 SELECT is(
   (SELECT name FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   'A-Team',
-  'coach cannot rename a team via direct UPDATE'
+  'a non-member cannot rename a team via direct UPDATE'
 );
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 
 -- 2. Charlie cannot delete A-Team directly.
 DELETE FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+RESET role;
 SELECT is(
   (SELECT count(*)::int FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'),
   1,
-  'coach cannot delete a team via direct DELETE'
+  'a non-member cannot delete a team via direct DELETE'
 );
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 
 -- 3. Charlie cannot insert a new coach row directly. INSERT raises rather
 --    than no-opping (see the failure-mode note in the header).
@@ -54,30 +61,34 @@ SELECT throws_ok(
   $$,
   '42501',
   NULL,
-  'coach cannot insert a new coach row via direct INSERT'
+  'a non-member cannot insert a new coach row via direct INSERT'
 );
 
 -- 4. Charlie cannot rename the Org A location directly.
 UPDATE public.locations SET name = 'Hijacked Location'
 WHERE id = 'c0c0c0c0-0000-0000-0000-000000000001';
+RESET role;
 SELECT is(
   (SELECT name FROM public.locations WHERE id = 'c0c0c0c0-0000-0000-0000-000000000001'),
   'Org A Field House',
-  'coach cannot rename a location via direct UPDATE'
+  'a non-member cannot rename a location via direct UPDATE'
 );
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 
--- 5. Charlie can still SELECT the team (narrow read policy is untouched).
+-- 5. A non-member reads neither the team nor the location: the narrow read
+--    policies are member-only, and every member is an admin.
 SELECT is(
-  (SELECT name FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'),
-  'A-Team',
-  'coach retains SELECT access to their org''s team'
+  (SELECT count(*)::int FROM public.teams WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+  0,
+  'a non-member reads no team of the organization'
 );
 
--- 6. Charlie can still SELECT the location (narrow read policy is untouched).
+-- 6.
 SELECT is(
   (SELECT count(*)::int FROM public.locations WHERE id = 'c0c0c0c0-0000-0000-0000-000000000001'),
-  1,
-  'coach retains SELECT access to their org''s location'
+  0,
+  'a non-member reads no location of the organization'
 );
 
 SELECT * FROM finish();

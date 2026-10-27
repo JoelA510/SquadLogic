@@ -31,8 +31,34 @@ function notPlacedText(entry) {
   if (entry.reason === TEAM_GENERATION.REASON_EligibilityBlocked) {
     return eligibilityText(entry.placement, entry.reviewReason);
   }
+  if (entry.reason === TEAM_GENERATION.REASON_Waitlisted) {
+    return 'On the waitlist: not placed on any team.';
+  }
   // A reason this list has no words for is still shown, as the generator recorded it.
   return NOT_PLACED_REASONS[entry.reason] || `Not placed (reason recorded: “${entry.reason}”).`;
+}
+
+const coachLabel = (name) => (name ? `Coach ${name}` : 'A coach (name not loaded)');
+
+/** Why a coach has no team to anchor: the held-out child is their only child in the division. */
+function coachWithoutTeamText(entry) {
+  const why =
+    entry.reason === TEAM_GENERATION.REASON_Waitlisted
+      ? 'is on the waitlist'
+      : 'is not eligible for the division';
+  return `${coachLabel(entry.coachWithoutTeam.name)} has no team to anchor in this division: ${entry.name}, their only child in it, ${why}.`;
+}
+
+/** Where a coach's child landed, in words. */
+function childLandingText(child) {
+  if (child.notPlacedReason === null) {
+    return child.teamName ? `on ${child.teamName}` : 'not on a team now';
+  }
+  return child.notPlacedReason === TEAM_GENERATION.REASON_EligibilityBlocked
+    ? 'not placed (not eligible for the division)'
+    : child.notPlacedReason === TEAM_GENERATION.REASON_Waitlisted
+      ? 'not placed (on the waitlist)'
+      : 'not placed';
 }
 
 const ageText = (naturalAge) =>
@@ -56,7 +82,10 @@ export default function PlacementReviewList({ results }) {
   if (!summary) return null;
   const { totals } = summary;
   const nothingToReview =
-    totals.notPlaced === 0 && totals.needsReview === 0 && totals.unchecked === 0;
+    totals.notPlaced === 0 &&
+    totals.needsReview === 0 &&
+    totals.unchecked === 0 &&
+    totals.siblingGroups === 0;
   // Said only when the run carries its rosters and someone is on them: a run that cannot tell
   // says nothing rather than a falsely perfect result.
   const allChecked =
@@ -78,20 +107,41 @@ export default function PlacementReviewList({ results }) {
         </p>
       )}
       {summary.divisions.map((review) => {
-        const { division, notPlaced, needsReview, unchecked } = review;
-        if (notPlaced.length === 0 && needsReview.length === 0 && unchecked.length === 0) {
+        const { division, notPlaced, needsReview, unchecked, siblings } = review;
+        if (
+          notPlaced.length === 0 &&
+          needsReview.length === 0 &&
+          unchecked.length === 0 &&
+          siblings.length === 0
+        ) {
           return null;
         }
         const notEligible = notPlaced.filter(
           (e) => e.reason === TEAM_GENERATION.REASON_EligibilityBlocked
         ).length;
-        const otherReason = notPlaced.length - notEligible;
+        const waitlisted = notPlaced.filter(
+          (e) => e.reason === TEAM_GENERATION.REASON_Waitlisted
+        ).length;
+        const otherReason = notPlaced.length - notEligible - waitlisted;
+        const coachesWithoutTeam = new Set(
+          notPlaced.filter((e) => e.coachWithoutTeam).map((e) => e.coachId)
+        ).size;
         return (
           <div key={division} className="space-y-4">
             <p className="text-sm text-text-secondary">
-              {division}: {notPlaced.length} not placed ({notEligible} not eligible for the
-              division, {otherReason} for another reason), {needsReview.length} needing review,{' '}
-              {unchecked.length} with eligibility not checked.
+              {`${division}: ${notPlaced.length} not placed (${notEligible} not eligible for the division, ${
+                waitlisted > 0 ? `${waitlisted} on the waitlist, ` : ''
+              }${otherReason} for another reason), ${needsReview.length} needing review, ${
+                unchecked.length
+              } with eligibility not checked${
+                coachesWithoutTeam > 0
+                  ? `, ${coachesWithoutTeam} ${coachesWithoutTeam === 1 ? 'coach' : 'coaches'} with no team to anchor`
+                  : ''
+              }${
+                siblings.length > 0
+                  ? `, ${siblings.length} ${siblings.length === 1 ? 'coach' : 'coaches'} with more than one child in the division`
+                  : ''
+              }.`}
             </p>
             {notPlaced.length > 0 && (
               <section aria-labelledby={anchorId(division, 'not-placed')}>
@@ -106,6 +156,14 @@ export default function PlacementReviewList({ results }) {
                     <li key={`${entry.playerId}:${index}`}>
                       <span className="font-medium text-text-primary">{entry.name}</span>.{' '}
                       {notPlacedText(entry)} {ageText(entry.naturalAge)}
+                      {entry.coachWithoutTeam && (
+                        <>
+                          {' '}
+                          <span className="font-medium text-text-primary">
+                            {coachWithoutTeamText(entry)}
+                          </span>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -126,6 +184,37 @@ export default function PlacementReviewList({ results }) {
                       {entry.teamName ?? 'no team'}.{' '}
                       {eligibilityText(entry.placement, entry.reviewReason)} Kept on the reviewed
                       roster; move them by hand if you agree.
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {siblings.length > 0 && (
+              <section aria-labelledby={anchorId(division, 'siblings')}>
+                <h4 id={anchorId(division, 'siblings')} className="font-semibold text-text-primary">
+                  Coaches with more than one child
+                </h4>
+                <p className="text-sm text-text-secondary">
+                  The children do not name each other as buddies. Nothing pairs them: decide whether
+                  to keep them together, and move one in the roster editor if you do.
+                </p>
+                <ul className="text-sm text-text-secondary list-disc pl-5">
+                  {siblings.map((group) => (
+                    <li key={group.coachId}>
+                      <span className="font-medium text-text-primary">
+                        {coachLabel(group.name)}
+                      </span>
+                      :{' '}
+                      {group.children.map((child, index) => (
+                        <React.Fragment key={child.playerId}>
+                          {index > 0 && '; '}
+                          {child.name}, {childLandingText(child)}
+                        </React.Fragment>
+                      ))}
+                      .{' '}
+                      {group.together
+                        ? 'They are on the same team.'
+                        : 'They are not on the same team.'}
                     </li>
                   ))}
                 </ul>
@@ -167,6 +256,7 @@ PlacementReviewList.propTypes = {
   results: PropTypes.shape({
     teamsByDivision: PropTypes.object,
     overflowByDivision: PropTypes.object,
+    coachNamesById: PropTypes.objectOf(PropTypes.string),
     changeDiagnosticsByDivision: PropTypes.object,
     team_players: PropTypes.arrayOf(PropTypes.object),
     teams: PropTypes.arrayOf(PropTypes.object),

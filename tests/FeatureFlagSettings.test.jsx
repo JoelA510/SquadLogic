@@ -130,6 +130,63 @@ describe('FeatureFlagSettings (FeatureControls)', () => {
     );
   });
 
+  // Owner, 2026-10-27: Spread Coaching Leads is shown but disabled, with the reason, while
+  // Coaching Interest is off; its stored value is left as it was.
+  describe('Spread Coaching Leads needs Coaching Interest', () => {
+    const spreadSwitch = () => screen.getByRole('switch', { name: 'Spread Coaching Leads' });
+
+    it('is disabled, shown (not hidden), with the reason visible and associated, while Coaching Interest is off', () => {
+      mocks.featureFlags = FeatureFlagSchema.parse({ coaching_interest: false });
+      render(<FeatureFlagSettings />);
+      const spread = spreadSwitch();
+      expect(spread).toBeDisabled();
+      const reason = document.getElementById(spread.getAttribute('aria-describedby') ?? 'none');
+      expect(reason).not.toBeNull();
+      expect(reason).toBeVisible();
+      expect(reason).toHaveTextContent(
+        'Needs Coaching Interest turned on, so it has no effect now. Your setting here is kept.'
+      );
+      // Coaching Interest itself stays usable, and nothing else is described as needing it.
+      expect(screen.getByRole('switch', { name: 'Coaching Interest' })).not.toBeDisabled();
+      expect(screen.getByRole('switch', { name: 'Buddy Requests' })).not.toHaveAttribute(
+        'aria-describedby'
+      );
+    });
+
+    it('does not change the stored value: a click does nothing, and a stored on stays shown on', () => {
+      mocks.featureFlags = FeatureFlagSchema.parse({
+        coaching_interest: false,
+        teaming_spread_coaching_leads: true,
+      });
+      render(<FeatureFlagSettings />);
+      const spread = spreadSwitch();
+      expect(spread).toHaveAttribute('aria-checked', 'true');
+      fireEvent.click(spread);
+      expect(mocks.updateFeatureFlags).not.toHaveBeenCalled();
+    });
+
+    it('turning Coaching Interest off writes that one flag only, and leaves the setting alone', async () => {
+      mocks.featureFlags = FeatureFlagSchema.parse({ teaming_spread_coaching_leads: true });
+      render(<FeatureFlagSettings />);
+      expect(spreadSwitch()).not.toBeDisabled();
+      expect(spreadSwitch()).not.toHaveAttribute('aria-describedby');
+      fireEvent.click(screen.getByRole('switch', { name: 'Coaching Interest' }));
+      await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
+      expect(mocks.updateFeatureFlags.mock.calls[0][0]).toEqual({
+        teaming_spread_coaching_leads: true,
+        coaching_interest: false,
+      });
+    });
+
+    it('is enabled again, and described no more, once Coaching Interest is on', () => {
+      mocks.featureFlags = FeatureFlagSchema.parse({ coaching_interest: true });
+      render(<FeatureFlagSettings />);
+      expect(spreadSwitch()).not.toBeDisabled();
+      expect(spreadSwitch()).not.toHaveAttribute('aria-describedby');
+      expect(screen.queryByText(/Needs Coaching Interest turned on/)).not.toBeInTheDocument();
+    });
+  });
+
   it('keeps legacy advanced flags togglable', async () => {
     mocks.featureFlags = { advanced_fairness: true };
     render(<FeatureFlagSettings />);

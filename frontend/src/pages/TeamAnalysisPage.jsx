@@ -37,7 +37,11 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { canonicalImportKey } from '../utils/importAllowlist.js';
-import { placementReviewAnnouncement, summarizePlacementReview } from '../utils/placementReview.js';
+import {
+  coachIdsNamedByReview,
+  placementReviewAnnouncement,
+  summarizePlacementReview,
+} from '../utils/placementReview.js';
 import { summarizeTeamSizeReview, teamSizeAnnouncement } from '../utils/teamSizeReview.js';
 import { getPersistenceEndpoint, triggerTeamPersistence } from '../utils/teamPersistenceClient.js';
 import {
@@ -130,8 +134,8 @@ function createDefaultConfig() {
  * counted by the rule generation uses (`toGeneratorPlayer`'s `coachId`), once per distinct
  * coach, as the generator counts them. It is the import's count, not the run's: coaches the
  * `coach_team_requests` links add at generation are not known here, and a coach whose child is
- * not eligible for the division anchors no team (Phase B2), as the registered players are
- * counted here and the eligible ones by the generator.
+ * not eligible for the division, or is waitlisted, anchors no team (Phase B2), as the registered
+ * players are counted here and the eligible ones by the generator.
  */
 function derivePrograms(rows) {
   const grouped = new Map();
@@ -334,12 +338,14 @@ function buddyFieldsOf(row) {
 // rows, which keep what the file said. The stored natural age (admin-focus plan R5) is what
 // eligibility reads when a row carries no birth date: no birth date is stored.
 const DURABLE_PLAYER_FIELDS =
-  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, rating';
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, rating, status';
 const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
 // The headers a coaching answer and years played are read from (`toGeneratorPlayer`), as
 // `canonicalImportKey` stages them and as older mock rows spell them.
 const COACHING_ANSWER_KEYS = ['willing_to_coach', 'coach_volunteer', 'Willing to Coach'];
 const YEARS_PLAYED_KEYS = ['years_played', 'Years Played', 'yearsPlayed'];
+// The import columns a waitlisted registrant is marked by (`finalize_import_job` reads both).
+const WAITLIST_KEYS = ['waitlist', 'waitlisted'];
 const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
 const LOOKUP_CHUNK = 200;
 const LOOKUP_CONCURRENCY = 8;
@@ -349,10 +355,13 @@ const LOOKUP_CONCURRENCY = 8;
  * the import reads as a name or a request is replaced, so a request the admin cleared on the
  * record is cleared here too. The code stays the import's unless the player row holds one.
  * The teaming signals the record holds win too (Phase B6): `willing_to_coach` (what makes a
- * coaching lead, as the import stored it), `years_played` and the admin's `rating`.
+ * coaching lead, as the import stored it), `years_played` and the admin's `rating`; and the
+ * waitlist: the record's `status` (an admin may have moved the player on or off the waitlist
+ * since the file was read) replaces the file's waitlist column.
  */
 function withDurableIdentity(row, durable) {
   if (!durable) return row;
+  const storedWaitlist = typeof durable.status === 'string';
   const storedLead = typeof durable.willing_to_coach === 'boolean';
   const storedYears = Number.isInteger(durable.years_played);
   const next = {};
@@ -360,12 +369,14 @@ function withDurableIdentity(row, durable) {
     const key = canonicalImportKey(header);
     if (BUDDY_REQUEST_KEYS.includes(key) || IDENTITY_KEYS.includes(key)) continue;
     if (IDENTITY_CAMEL_KEYS.includes(header)) continue;
+    if (storedWaitlist && WAITLIST_KEYS.includes(key)) continue;
     if (storedLead && (COACHING_ANSWER_KEYS.includes(key) || COACHING_ANSWER_KEYS.includes(header)))
       continue;
     if (storedYears && (YEARS_PLAYED_KEYS.includes(key) || YEARS_PLAYED_KEYS.includes(header)))
       continue;
     next[header] = value;
   }
+  if (storedWaitlist) next.waitlist = durable.status === 'waitlist';
   if (storedLead) next.willing_to_coach = durable.willing_to_coach;
   if (storedYears) next.years_played = durable.years_played;
   if (Number.isFinite(durable.rating)) next.rating = durable.rating;
@@ -429,6 +440,35 @@ async function fetchDurablePlayers(
   return players;
 }
 
+/**
+ * The names of the coaches a review flags, by id. A read that fails is logged and the review
+ * says "name not loaded": the flag stands without the name, and a name is not worth stopping
+ * a run for.
+ * @param {string} organizationId
+ * @param {string[]} coachIds
+ * @returns {Promise<Record<string, string>>}
+ */
+async function readCoachNames(organizationId, coachIds) {
+  /** @type {Record<string, string>} */
+  const names = {};
+  for (let start = 0; start < coachIds.length; start += LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from('coaches')
+      .select('id, full_name')
+      .eq('organization_id', organizationId)
+      .in('id', coachIds.slice(start, start + LOOKUP_CHUNK));
+    if (error) {
+      logger.error('[TeamAnalysis] coach names could not be read:', error);
+      return names;
+    }
+    for (const row of data || []) {
+      const name = String(row.full_name ?? '').trim();
+      if (name) names[String(row.id)] = name;
+    }
+  }
+  return names;
+}
+
 /** A roster entry buddy requests are matched against: identity only. */
 function toBuddyRosterEntry(row, id, division) {
   return {
@@ -456,13 +496,15 @@ function parseYearsPlayed(value) {
  * `coachingLeads` (the Coaching Interest flag) a player whose parent volunteers to coach is a
  * coaching lead, `isCoachingLead` (Phase B6). A lead is not a coach: only a coach linked to a
  * child through `coach_team_requests` anchors a team (`prepareTeamingInput`), or a coach the
- * row names.
+ * row names. With `waitlist` (the
+ * Waitlist flag) a player the row marks as waitlisted carries `status: 'waitlist'`, which the
+ * generator seats nowhere and leaves out of the league-wide averages.
  */
 function toGeneratorPlayer(
   row,
   sourceIndex,
   division,
-  { buddyRequests = false, coachingLeads = false } = {}
+  { buddyRequests = false, coachingLeads = false, waitlist = false } = {}
 ) {
   const id = String(
     firstNonEmpty(row, [
@@ -480,6 +522,7 @@ function toGeneratorPlayer(
     firstNonEmpty(row, ['skillRating', 'skill_rating', 'Skill Rating', 'skill_tier', 'Skill Tier'])
   );
   const coachId = firstNonEmpty(row, ['coach_id', 'coachId', 'coach_email', 'Coach Email']);
+  const isWaitlisted = waitlist && WAITLIST_KEYS.some((key) => parseBooleanLike(row?.[key]));
   const isCoachingLead =
     coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
   const yearsPlayed = parseYearsPlayed(firstNonEmpty(row, YEARS_PLAYED_KEYS));
@@ -512,6 +555,7 @@ function toGeneratorPlayer(
     ...(Number.isFinite(rating) ? { rating } : {}),
     ...(yearsPlayed !== undefined ? { years_played: yearsPlayed } : {}),
     ...(coachId ? { coachId: String(coachId) } : {}),
+    ...(isWaitlisted ? { status: 'waitlist' } : {}),
     ...(isCoachingLead ? { isCoachingLead: true } : {}),
     ...(buddyRequests ? buddyFieldsOf(row) : {}),
   };
@@ -578,7 +622,15 @@ function noTeamsMessage(programName, preparedPlayers, result) {
     blocked.length > 0
       ? ` ${blocked.length} of its ${preparedPlayers.length} players are not eligible for the division: ${names(blocked)}.`
       : '';
-  return `No teams could be generated for ${programName}. Check that players are imported for this division and that the roster settings allow at least one team.${notEligible}`;
+  const waitlisted = Object.values(result.overflowByDivision || {})
+    .flat()
+    .filter((entry) => entry?.reason === TEAM_GENERATION.REASON_Waitlisted)
+    .flatMap((entry) => entry.players || []);
+  const onWaitlist =
+    waitlisted.length > 0
+      ? ` ${waitlisted.length} of its ${preparedPlayers.length} players are on the waitlist, which no team seats: ${names(waitlisted)}.`
+      : '';
+  return `No teams could be generated for ${programName}. Check that players are imported for this division and that the roster settings allow at least one team.${notEligible}${onWaitlist}`;
 }
 
 export default function TeamAnalysisPage() {
@@ -619,6 +671,7 @@ export default function TeamAnalysisPage() {
   const { features, isEnabled, buddyRule } = useFeatures();
   const buddyRequestsEnabled = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
   const coachingInterestEnabled = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
+  const waitlistEnabled = isEnabled(FEATURE_FLAGS.WAITLIST);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
@@ -1041,6 +1094,7 @@ export default function TeamAnalysisPage() {
         return toGeneratorPlayer(rowForGeneration, sourceIndex, selectedProgramKey, {
           buddyRequests: buddyRequestsEnabled,
           coachingLeads: coachingInterestEnabled,
+          waitlist: waitlistEnabled,
         });
       });
 
@@ -1053,7 +1107,7 @@ export default function TeamAnalysisPage() {
 
       return { generatorPlayers, generationRows };
     },
-    [buddyRequestsEnabled, coachingInterestEnabled, currentOrganization?.id]
+    [buddyRequestsEnabled, coachingInterestEnabled, waitlistEnabled, currentOrganization?.id]
   );
 
   const handleGenerateTeams = useCallback(async () => {
@@ -1236,9 +1290,16 @@ export default function TeamAnalysisPage() {
         throw new Error(noTeamsMessage(selectedProgram.name, preparedPlayers, result));
       }
       const coverage = result.coachCoverageByDivision?.[selectedProgramKey] ?? null;
+      // The review names the coaches it flags (no team to anchor, more than one child); the run
+      // holds ids only, so their names are kept with it.
+      const coachNamesById = await readCoachNames(
+        currentOrganization.id,
+        coachIdsNamedByReview(summarizePlacementReview(result))
+      );
       const now = new Date().toISOString();
       const snapshot = buildTeamReviewSnapshot({
-        generatedResult: result,
+        generatedResult:
+          Object.keys(coachNamesById).length > 0 ? { ...result, coachNamesById } : result,
         divisionKey: selectedProgramKey,
         divisionId: savedDivision.id,
         organizationId: currentOrganization.id,

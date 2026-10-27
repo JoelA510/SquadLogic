@@ -168,6 +168,9 @@ export const FEATURE_CATALOG = [
       'Spread players whose parent volunteers to coach evenly across teams, and give teams with fewer of them more of the experienced or rated players. A lead is not a coach: only a linked coach anchors a team. Reads the Coaching Interest answers, so it needs Coaching Interest on.',
     icon: Scale,
     column: false,
+    // The switch is shown but disabled, with the reason, while this flag is off (owner,
+    // 2026-10-27). The stored value is left as set.
+    requires: FEATURE_FLAGS.COACHING_INTEREST,
   },
   {
     key: FEATURE_FLAGS.WAITLIST,

@@ -11,6 +11,7 @@ import { render, screen, within } from '@testing-library/react';
 import PlacementReviewList from '../frontend/src/components/teaming/PlacementReviewList.jsx';
 import BuddyRequestsList from '../frontend/src/components/teaming/BuddyRequestsList.jsx';
 import {
+  coachIdsNamedByReview,
   notPlacedById,
   placementReviewAnnouncement,
   summarizePlacementReview,
@@ -271,5 +272,147 @@ describe('Buddy requests :: why a pair is apart', () => {
       'Player A and Player B. Not placed together: Player A is not eligible for this division and is not placed.',
       'Player C and Player B. Not placed together: Player C is not placed.',
     ]);
+  });
+});
+
+// Owner decisions of 2026-10-27: a coach with no team to anchor, and a coach with more than one
+// child in a division (docs/changes/2026-10-22-phase-b-teaming.md, "Owner decisions").
+describe('placement review :: coaches', () => {
+  const child = (id, coachId, extra = {}) =>
+    player(id, { coachId, placement: 'in_band', naturalAge: 10, ...extra });
+  const NAMES = { coachNamesById: { k1: 'Casey Coach' } };
+
+  it('a waitlisted only child leaves the coach with no team, and the list says why', () => {
+    const results = {
+      ...run({
+        teamA: [inBand('a')],
+        overflow: [
+          {
+            players: [child('w', 'k1', { status: 'waitlist' })],
+            reason: 'waitlisted',
+            metadata: { coachId: 'k1' },
+          },
+        ],
+      }),
+      ...NAMES,
+    };
+    render(<PlacementReviewList results={results} />);
+    expect(itemsOf('Not placed').map((item) => item.textContent)).toEqual([
+      'Player W. On the waitlist: not placed on any team. Natural age 10. Coach Casey Coach has no team to anchor in this division: Player W, their only child in it, is on the waitlist.',
+    ]);
+    expect(screen.getByText(/^U10: 1 not placed/)).toHaveTextContent(
+      '1 not placed (0 not eligible for the division, 1 on the waitlist, 0 for another reason), 0 needing review, 0 with eligibility not checked, 1 coach with no team to anchor.'
+    );
+  });
+
+  it('a coach who anchors a team is not "without a team" for a held-out child', () => {
+    const results = run({
+      teamA: [player('a', { coachId: 'k1', placement: 'in_band' })],
+      overflow: [
+        {
+          players: [child('w', 'k1', { status: 'waitlist' })],
+          reason: 'waitlisted',
+          metadata: { coachId: 'k1' },
+        },
+      ],
+    });
+    results.teamsByDivision.U10[0].coachId = 'k1';
+    const summary = summarizePlacementReview(results);
+    expect(summary?.divisions[0].notPlaced[0].coachWithoutTeam).toBeNull();
+    expect(summary?.totals.coachesWithoutTeam).toBe(0);
+  });
+
+  it('a run without its teams cannot say who has a team, so it flags no coach', () => {
+    const results = {
+      overflowByDivision: {
+        U10: [{ players: [child('w', 'k1')], reason: 'waitlisted', metadata: { coachId: 'k1' } }],
+      },
+    };
+    const summary = summarizePlacementReview(results);
+    expect(summary?.divisions[0].notPlaced).toHaveLength(1);
+    expect(summary?.divisions[0].notPlaced[0].coachWithoutTeam).toBeNull();
+  });
+
+  it('a coach row with no name on file is still flagged, and counted; a row-named coach labels itself', () => {
+    const UUID = '5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c91';
+    const overflowFor = (coachId) => [
+      {
+        players: [child('w', coachId)],
+        reason: 'eligibility-blocked',
+        metadata: { coachId },
+      },
+    ];
+    const results = run({ teamA: [inBand('a')], overflow: overflowFor(UUID) });
+    const summary = summarizePlacementReview(results);
+    expect(summary?.divisions[0].notPlaced[0].coachWithoutTeam).toEqual({
+      coachId: UUID,
+      name: null,
+    });
+    expect(coachIdsNamedByReview(summary)).toEqual([UUID]);
+    const { unmount } = render(<PlacementReviewList results={results} />);
+    expect(
+      screen.getByText(/A coach \(name not loaded\) has no team to anchor/)
+    ).toBeInTheDocument();
+    unmount();
+
+    // The import row's own text is the label, and nothing is read for it.
+    const rowCoach = run({ teamA: [inBand('a')], overflow: overflowFor('ann@coaches.test') });
+    const rowSummary = summarizePlacementReview(rowCoach);
+    expect(rowSummary?.divisions[0].notPlaced[0].coachWithoutTeam).toEqual({
+      coachId: 'ann@coaches.test',
+      name: 'ann@coaches.test',
+    });
+    expect(coachIdsNamedByReview(rowSummary)).toEqual([]);
+    render(<PlacementReviewList results={rowCoach} />);
+    expect(screen.getByText(/Coach ann@coaches.test has no team to anchor/)).toBeInTheDocument();
+  });
+
+  it('children of one coach on different teams (a manual move) are flagged apart, where they are now', () => {
+    const results = {
+      ...run({
+        teamA: [child('s1', 'k1'), child('s2', 'k1')],
+        // The admin moved s2 to Team B in the roster editor: the run's rows say so.
+        rows: [
+          { team_id: 'team-a', player_id: 's1', role: 'player', player_name: 'Player S1' },
+          { team_id: 'team-b', player_id: 's2', role: 'player', player_name: 'Player S2' },
+        ],
+      }),
+      ...NAMES,
+    };
+    const summary = summarizePlacementReview(results);
+    expect(summary?.divisions[0].siblings).toEqual([
+      {
+        coachId: 'k1',
+        name: 'Casey Coach',
+        together: false,
+        children: [
+          { playerId: 's1', name: 'Player S1', teamName: 'Team A', notPlacedReason: null },
+          { playerId: 's2', name: 'Player S2', teamName: 'Team B', notPlacedReason: null },
+        ],
+      },
+    ]);
+    expect(placementReviewAnnouncement(summary)).toBe(
+      'Players to review: 1 coach has more than one child in a division (1 not together).'
+    );
+    render(<PlacementReviewList results={results} />);
+    expect(itemsOf('Coaches with more than one child').map((item) => item.textContent)).toEqual([
+      'Coach Casey Coach: Player S1, on Team A; Player S2, on Team B. They are not on the same team.',
+    ]);
+  });
+
+  it('three children, two of them buddies, are still flagged; two buddies are not', () => {
+    const buddies = (a, b) => [child(a, 'k1', { buddyId: b }), child(b, 'k1', { buddyId: a })];
+    const two = summarizePlacementReview(run({ teamA: buddies('s1', 's2') }));
+    expect(two?.divisions[0].siblings).toEqual([]);
+    const three = summarizePlacementReview(
+      run({ teamA: [...buddies('s1', 's2'), child('s3', 'k1')] })
+    );
+    expect(three?.divisions[0].siblings).toHaveLength(1);
+    expect(three?.divisions[0].siblings[0].together).toBe(true);
+  });
+
+  it('a coach with one child per division is not flagged', () => {
+    const results = run({ teamA: [child('s1', 'k1')], teamB: [child('s2', 'k2')] });
+    expect(summarizePlacementReview(results)?.divisions[0].siblings).toEqual([]);
   });
 });

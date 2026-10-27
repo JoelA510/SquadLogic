@@ -13,7 +13,7 @@ import { buildAssignmentUnits, calculateUnitSkill } from './assignmentUnits.js';
 import { reconcileTeamDeltas } from './teamDelta.js';
 import { getCanonicalBuddyId } from './buddyLinking.js';
 import { applyCoachContinuity } from './coachContinuity.js';
-import { isEligibilityBlocked } from './playUp.js';
+import { cannotBePlaced, isEligibilityBlocked, isWaitlisted } from './playUp.js';
 import { balanceSignalKind, divisionLeadCompensation, playerSignal } from './balanceSignals.js';
 import {
   compensatedLoad,
@@ -56,6 +56,11 @@ import {
  * `eligibility-blocked`, one entry per player, metadata `{ placement, reviewReason, naturalAge,
  * coachId }`; a mutual buddy is placed alone (`buddy-not-placed`). A blocked player already on a
  * preserved roster stays there and is listed in `changeDiagnosticsByDivision[div].eligibilityHolds`.
+ *
+ * Waitlist (owner, 2026-10-27): a player with `status: 'waitlist'` (`isWaitlisted`) is not seated
+ * either; each is in overflow with reason `waitlisted`, metadata `{ coachId }`. The league-wide
+ * averages (`globalStats`: org means and ranges) leave out every player who cannot be placed,
+ * blocked or waitlisted.
  *
  * Coaching leads (Phase B6, `coachingLeads.js`): a player with `isCoachingLead` is not a coach
  * and anchors no team. Once coaches' children are placed, units holding a lead are dealt to a
@@ -224,6 +229,9 @@ export function generateTeams({
   const minMaxMap = {};
 
   for (const player of players) {
+    // A player the generator cannot seat (blocked by eligibility, or waitlisted) is not part of
+    // the league the averages describe (owner, 2026-10-27).
+    if (cannotBePlaced(player)) continue;
     globalStatsCount++;
 
     // Base skill
@@ -749,8 +757,8 @@ function buildTeamsForDivision({
     });
   }
 
-  // Blocked players leave the pool before anything is counted or anchored: they add no team,
-  // a blocked coach's child anchors none, and each is in overflow with the reason.
+  // Blocked and waitlisted players leave the pool before anything is counted or anchored: they add
+  // no team, a coach's child among them anchors none, and each is in overflow with the reason.
   const blocked = separateEligibilityBlocked(players);
   players = blocked.eligible;
   if (players.length === 0 && blocked.blockedPlayers.length > 0) {
@@ -1266,32 +1274,43 @@ function buildTeamsForDivisionIncremental({
 }
 
 /**
- * Split a division's unplaced players into those the generator may seat and those whose
- * eligibility is blocked (Phase B2), each blocked one an overflow entry of its own, in input
- * order. With nobody blocked, `eligible` holds the same players in the same order.
+ * Split a division's unplaced players into those the generator may seat and those it may not:
+ * blocked by eligibility (Phase B2) or waitlisted (owner decision, 2026-10-27). Each is an
+ * overflow entry of its own, in input order, with its reason. A player both blocked and
+ * waitlisted is reported as blocked. With nobody held out, `eligible` holds the same players in
+ * the same order.
  * @param {Array<Player>} players
  */
 function separateEligibilityBlocked(players) {
   const eligible = [];
   const blockedPlayers = [];
+  const overflow = [];
   for (const player of players) {
-    (isEligibilityBlocked(player) ? blockedPlayers : eligible).push(player);
-  }
-  const overflow = blockedPlayers.map((player) => {
+    const blocked = isEligibilityBlocked(player);
+    if (!blocked && !isWaitlisted(player)) {
+      eligible.push(player);
+      continue;
+    }
+    blockedPlayers.push(player);
     const annotated = /** @type {any} */ (player);
-    return {
+    // An assistant whose child is held out is not attached anywhere; say who, when there is one.
+    const assistant = player.assistantCoachId ? { assistantCoachId: player.assistantCoachId } : {};
+    overflow.push({
       players: [player],
-      reason: TEAM_GENERATION.REASON_EligibilityBlocked,
-      metadata: {
-        placement: annotated.placement,
-        reviewReason: annotated.reviewReason ?? null,
-        naturalAge: Number.isFinite(annotated.naturalAge) ? annotated.naturalAge : null,
-        coachId: player.coachId ?? null,
-        // An assistant whose child is blocked is not attached anywhere; say who, when there is one.
-        ...(player.assistantCoachId ? { assistantCoachId: player.assistantCoachId } : {}),
-      },
-    };
-  });
+      reason: blocked
+        ? TEAM_GENERATION.REASON_EligibilityBlocked
+        : TEAM_GENERATION.REASON_Waitlisted,
+      metadata: blocked
+        ? {
+            placement: annotated.placement,
+            reviewReason: annotated.reviewReason ?? null,
+            naturalAge: Number.isFinite(annotated.naturalAge) ? annotated.naturalAge : null,
+            coachId: player.coachId ?? null,
+            ...assistant,
+          }
+        : { coachId: player.coachId ?? null, ...assistant },
+    });
+  }
   return { eligible, blockedPlayers, overflow };
 }
 

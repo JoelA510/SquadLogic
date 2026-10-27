@@ -11,6 +11,10 @@
  * `external_registration_id`, `age_group`). The natural age comes from the birthdate the import
  * row holds or, for a row with none, from the stored natural age on the durable player (R5,
  * docs/changes/2026-10-22-admin-focus.md).
+ *
+ * The last two groups are the owner's decisions of 2026-10-27
+ * (docs/changes/2026-10-22-phase-b-teaming.md, "Owner decisions"): the waitlist, the coach
+ * links, and what the review says about a coach.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -35,6 +39,12 @@ const state = vi.hoisted(() => ({
   persistenceSnapshot: null,
   /** @type {any} the error the `coach_team_requests` read returns */
   coachLinksError: null,
+  /** @type {any[]} the `coach_team_requests` rows */
+  coachLinks: [],
+  /** @type {any[]} the `coaches` rows */
+  coaches: [],
+  /** @type {any} the organization's stored feature flags, parsed by the schema */
+  storedFlags: {},
   pipelineThrows: false,
 }));
 
@@ -66,7 +76,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
     currentOrganization: { id: IDS.organization, name: 'Test FC' },
     currentSeasonSetting: { id: IDS.season, season_year: 2026, age_cutoff_mode: 'birth_year' },
     permissions: ['manage_organization'],
-    featureFlags: FeatureFlagSchema.parse({}),
+    featureFlags: FeatureFlagSchema.parse(state.storedFlags),
   }),
 }));
 vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
@@ -87,10 +97,18 @@ vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: (table) =>
-      table === 'coach_team_requests' && state.coachLinksError
-        ? createChainMock({ data: null, error: state.coachLinksError })
-        : createChainMock({ data: table === 'players' ? state.durablePlayers : [], error: null }),
+    from: (table) => {
+      if (table === 'coach_team_requests') {
+        return createChainMock(
+          state.coachLinksError
+            ? { data: null, error: state.coachLinksError }
+            : { data: state.coachLinks, error: null }
+        );
+      }
+      const rows =
+        table === 'players' ? state.durablePlayers : table === 'coaches' ? state.coaches : [];
+      return createChainMock({ data: rows, error: null });
+    },
     rpc: async (name, params) =>
       name === 'admin_upsert_division_settings'
         ? {
@@ -497,5 +515,274 @@ describe('TeamAnalysisPage :: not placed and flagged, on the review (B3)', () =>
     expect(paired[0]).toHaveTextContent(
       'Ada Blocked and Bea Placed. Not placed together: Ada Blocked is not eligible for this division and is not placed.'
     );
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Owner decisions of 2026-10-27: the waitlist, the coach links, and what the review says about a
+// coach. Real page, pipeline and generator; every expectation is worked out from the seeds.
+// ---------------------------------------------------------------------------------------------
+
+const COACH_A = '5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c91';
+const COACH_B = '5d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c92';
+const link = (coachId, n) => ({
+  coach_id: coachId,
+  player_id: durableIdOf(n),
+  preferred_co_coach_id: null,
+});
+
+function resetOwnerDecisionState() {
+  sessionStorage.clear();
+  state.persistenceSnapshot = null;
+  state.coachLinksError = null;
+  state.pipelineThrows = false;
+  state.coachLinks = [];
+  state.coaches = [];
+  state.storedFlags = {};
+  seedImport();
+}
+
+const teamsOf = (results) => results.teamsByDivision.U10;
+const teamOfPlayer = (results, n) =>
+  teamsOf(results).find((team) => team.players.some((p) => p.id === durableIdOf(n)));
+
+describe('TeamAnalysisPage :: the waitlist (owner, 2026-10-27)', () => {
+  beforeEach(resetOwnerDecisionState);
+  afterEach(resetOwnerDecisionState);
+
+  it('seats no waitlisted player: the import column and the stored status both hold them out', async () => {
+    // REG-10 is marked on the import row; REG-11 only on the stored player (the row says
+    // nothing); REG-12's row says waitlist but an admin has since moved the stored player to
+    // active, which wins.
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-10'
+        ? { ...r, waitlist: 'Yes' }
+        : r.external_registration_id === 'REG-12'
+          ? { ...r, waitlist: 'Yes' }
+          : r
+    );
+    // The stored status where the player has one; REG-10's row is the only word on them.
+    state.durablePlayers = state.durablePlayers.map((p) => {
+      if (p.external_registration_id === 'REG-11') return { ...p, status: 'waitlist' };
+      if (p.external_registration_id === 'REG-12') return { ...p, status: 'active' };
+      return p;
+    });
+    await generate();
+
+    const results = stagedResults();
+    const seated = results.team_players.map((tp) => tp.player_id);
+    expect(seated).not.toContain(durableIdOf(10));
+    expect(seated).not.toContain(durableIdOf(11));
+    expect(seated).toContain(durableIdOf(12));
+    const waitlisted = results.overflowByDivision.U10.filter((e) => e.reason === 'waitlisted');
+    expect(waitlisted.map((e) => e.players[0].id).sort()).toEqual(
+      [durableIdOf(10), durableIdOf(11)].sort()
+    );
+    // Conservation, enumerated from the import: seated or not placed, once.
+    expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
+
+    const items = within(reviewList('Not placed')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent).join('\n')).toMatch(
+      /Kid10 Placeholder10\. On the waitlist: not placed on any team\./
+    );
+    expect(screen.getByText(/^U10: 3 not placed \(1 not eligible/)).toHaveTextContent(
+      '3 not placed (1 not eligible for the division, 2 on the waitlist, 0 for another reason)'
+    );
+  });
+
+  it('stages nothing when every player is waitlisted, and says so', async () => {
+    state.rows = state.rows.map((r) => ({ ...r, waitlist: 'yes', date_of_birth: IN_BAND }));
+    const button = await clickGenerate();
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText('Team Review Pending')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(REVIEW_KEY)).toBeNull();
+    expect(
+      await screen.findByText(/12 of its 12 players are on the waitlist, which no team seats/)
+    ).toHaveTextContent('Kid1 Placeholder1, Kid2 Placeholder2, Kid10 Placeholder10 and 9 more.');
+  });
+
+  it('with the Waitlist feature off, a waitlist column holds nobody out', async () => {
+    state.storedFlags = { waitlist: false };
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-10' ? { ...r, waitlist: 'Yes' } : r
+    );
+    state.durablePlayers = state.durablePlayers.map((p) => ({
+      ...p,
+      status: p.external_registration_id === 'REG-11' ? 'waitlist' : 'active',
+    }));
+    await generate();
+
+    const results = stagedResults();
+    const seated = results.team_players.map((tp) => tp.player_id);
+    expect(seated).toContain(durableIdOf(10));
+    expect(seated).toContain(durableIdOf(11));
+    expect(results.overflowByDivision.U10.map((e) => e.reason)).not.toContain('waitlisted');
+  });
+});
+
+describe('TeamAnalysisPage :: a coach the import row names (kept as it was)', () => {
+  // Owner, 2026-10-27, item 8a: whether only `coach_team_requests` links should anchor a team
+  // was NOT built, because nothing in production writes that table. The row's coach still
+  // anchors, and the review labels such a coach by the text the row holds.
+  beforeEach(resetOwnerDecisionState);
+  afterEach(resetOwnerDecisionState);
+
+  it('still anchors a team, as before', async () => {
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-10' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
+    );
+    await generate();
+    const results = stagedResults();
+    expect(teamOfPlayer(results, 10).coachId).toBe('row.coach@coaches.test');
+  });
+
+  it('is flagged by that text when their only child is held out, with no coaches read', async () => {
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-1' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
+    );
+    state.coaches = [{ id: COACH_A, full_name: 'Not This One' }];
+    await generate();
+    const results = stagedResults();
+    expect(teamsOf(results).map((team) => team.coachId)).not.toContain('row.coach@coaches.test');
+    expect(results.coachNamesById).toBeUndefined();
+    expect(screen.getByText(/has no team to anchor in this division/)).toHaveTextContent(
+      'Coach row.coach@coaches.test has no team to anchor in this division: Kid1 Placeholder1, their only child in it, is not eligible for the division.'
+    );
+  });
+});
+
+describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 2026-10-27)', () => {
+  beforeEach(resetOwnerDecisionState);
+  afterEach(resetOwnerDecisionState);
+
+  it('shows a coach whose only child is blocked, flagged, with the reason', async () => {
+    // Kid1 is the seed's play-down (blocked); their coach has no other child, so no team.
+    state.coachLinks = [link(COACH_A, 1)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    await generate();
+
+    const results = stagedResults();
+    expect(teamsOf(results).map((team) => team.coachId)).not.toContain(COACH_A);
+    expect(results.coachNamesById).toEqual({ [COACH_A]: 'Casey Coach' });
+    const items = within(reviewList('Not placed')).getAllByRole('listitem');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent(
+      'Kid1 Placeholder1. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 13. Coach Casey Coach has no team to anchor in this division: Kid1 Placeholder1, their only child in it, is not eligible for the division.'
+    );
+    expect(screen.getByText(/^U10: 1 not placed/)).toHaveTextContent(
+      '1 coach with no team to anchor'
+    );
+    // A lone child is no sibling group.
+    expect(
+      screen.queryByRole('region', { name: 'Coaches with more than one child' })
+    ).not.toBeInTheDocument();
+    // Still there after a reload of the page, from the stored run.
+    cleanup();
+    render(
+      <MemoryRouter>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    expect(
+      await within(await screen.findByRole('region', { name: 'Not placed' })).findByText(
+        /Coach Casey Coach has no team to anchor/
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('a waitlisted only child leaves the coach with no team too, and says why', async () => {
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-10' ? { ...r, waitlist: 'yes' } : r
+    );
+    state.coachLinks = [link(COACH_A, 10)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    await generate();
+
+    expect(teamsOf(stagedResults()).map((team) => team.coachId)).not.toContain(COACH_A);
+    expect(screen.getByText(/Coach Casey Coach has no team to anchor/)).toHaveTextContent(
+      'Kid10 Placeholder10, their only child in it, is on the waitlist.'
+    );
+  });
+
+  it('says "name not loaded" rather than leave the coach out when the name is not found', async () => {
+    state.coachLinks = [link(COACH_A, 1)];
+    state.coaches = [];
+    await generate();
+    expect(
+      screen.getByText(/A coach \(name not loaded\) has no team to anchor/)
+    ).toBeInTheDocument();
+  });
+
+  it('a coach with a blocked child and a placed one anchors a team: not "no team", but a sibling flag, apart', async () => {
+    state.coachLinks = [link(COACH_A, 1), link(COACH_A, 10)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    await generate();
+
+    const results = stagedResults();
+    expect(teamOfPlayer(results, 10).coachId).toBe(COACH_A);
+    expect(screen.queryByText(/has no team to anchor/)).not.toBeInTheDocument();
+    const group = within(reviewList('Coaches with more than one child')).getAllByRole('listitem');
+    expect(group).toHaveLength(1);
+    expect(group[0]).toHaveTextContent(
+      `Coach Casey Coach: Kid10 Placeholder10, on ${teamOfPlayer(results, 10).name}; Kid1 Placeholder1, not placed (not eligible for the division). They are not on the same team.`
+    );
+  });
+
+  it('two children of one coach in a division land on the coach team, and the flag says so', async () => {
+    // The generator's behaviour for a coach linked to two children of one division: both are
+    // coach-anchored units, so both are seated on the coach's one team.
+    state.coachLinks = [link(COACH_A, 10), link(COACH_A, 11)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    await generate();
+
+    const results = stagedResults();
+    const coachTeams = teamsOf(results).filter((team) => team.coachId === COACH_A);
+    expect(coachTeams).toHaveLength(1);
+    expect(teamOfPlayer(results, 10).id).toBe(coachTeams[0].id);
+    expect(teamOfPlayer(results, 11).id).toBe(coachTeams[0].id);
+    const group = within(reviewList('Coaches with more than one child')).getAllByRole('listitem');
+    expect(group).toHaveLength(1);
+    expect(group[0]).toHaveTextContent(
+      `Coach Casey Coach: Kid10 Placeholder10, on ${coachTeams[0].name}; Kid11 Placeholder11, on ${coachTeams[0].name}. They are on the same team.`
+    );
+    expect(screen.getByText(/^U10: 1 not placed/)).toHaveTextContent(
+      '1 coach with more than one child in the division'
+    );
+  });
+
+  it('no flag for two children who name each other as buddies (one unit)', async () => {
+    // Real names: the resolver matches letters, and "Kid10" and "Kid11" read alike.
+    const NAMES = { 'REG-10': ['Ana', 'Reyes'], 'REG-11': ['Ben', 'Reyes'] };
+    const request = { 'REG-10': 'Ben Reyes', 'REG-11': 'Ana Reyes' };
+    for (const list of [state.rows, state.durablePlayers]) {
+      for (const entry of list) {
+        const key = entry.external_registration_id;
+        if (!NAMES[key]) continue;
+        [entry.first_name, entry.last_name] = NAMES[key];
+        entry.buddy_request = request[key];
+      }
+    }
+    state.coachLinks = [link(COACH_A, 10), link(COACH_A, 11)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    await generate();
+
+    expect(
+      screen.queryByRole('region', { name: 'Coaches with more than one child' })
+    ).not.toBeInTheDocument();
+    const results = stagedResults();
+    expect(teamOfPlayer(results, 10).id).toBe(teamOfPlayer(results, 11).id);
+    expect(teamOfPlayer(results, 10).coachId).toBe(COACH_A);
+  });
+
+  it('flags each coach on their own: two coaches with two children each', async () => {
+    state.coachLinks = [link(COACH_A, 10), link(COACH_A, 11), link(COACH_B, 12), link(COACH_B, 13)];
+    state.coaches = [
+      { id: COACH_A, full_name: 'Casey Coach' },
+      { id: COACH_B, full_name: 'Robin Coach' },
+    ];
+    await generate();
+    const group = within(reviewList('Coaches with more than one child')).getAllByRole('listitem');
+    expect(group).toHaveLength(2);
+    expect(group.map((li) => li.textContent).join('\n')).toMatch(/Casey Coach.*\n.*Robin Coach/);
   });
 });

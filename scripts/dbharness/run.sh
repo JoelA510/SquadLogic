@@ -620,29 +620,28 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         STATUS=1
       fi
     fi
-    # **8.6 PR 3b PR 1: coach practice preferences.** Five guarantees, each a
+    # **8.6 PR 3b PR 1: coach practice preferences.** Four guarantees, each a
     # claim of its own because each has a plant in prove.sh that must turn it
-    # red: request is self-or-admin, decide is admin-only, the read policy is
-    # admin-or-self, every write is audited, one approved row per (coach,
-    # dimension). The smoke RAISEs on each; these fail if its evidence stops.
+    # red: decide is admin-only, the read policy is admin-only (20261104010000;
+    # it was admin-or-self), every write is audited, one approved row per
+    # (coach, dimension). The request guarantee went with the request RPC. The
+    # smoke RAISEs on each; these fail if its evidence stops.
     if [ "$id" = "20260927000000" ]; then
-      if grep -qF 'coach A requested for themself; coach A requesting for coach B was refused (42501)' $SCRATCH/harness_smoke; then
-        echo "  | (checked) a coach requests a practice preference for themself only, never for another coach"
+      # Since 20261104010000 no coach requests a preference (the request RPC is dropped; the
+      # smoke checks it stays gone) and the read is an admin's, so the first claim went and the
+      # others are about an admin and a signed-in non-member.
+      if grep -qF 'a signed-in non-member approving was refused (42501) and the row is still requested' $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin decides a coach practice preference; a signed-in non-member approving is refused"
       else
-        echo "FAIL smoke ${id}: it passed without proving a coach cannot request for another coach"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a non-member cannot approve"; STATUS=1
       fi
-      if grep -qF 'a coach approving their own request was refused (42501) and the row is still requested' $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin decides a coach practice preference; a coach approving their own request is refused"
+      if grep -qF "the admin read 6 of 6; a signed-in non-member read 0; another organisation's admin read 0" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin of the organisation reads its coach practice preferences: a signed-in non-member and another organisation's admin read none"
       else
-        echo "FAIL smoke ${id}: it passed without proving a coach cannot approve"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving the preference read policy is admin-only"; STATUS=1
       fi
-      if grep -qF "coach B read its 3 rows and none of coach A's; coach A read its 3 and none of coach B's; the admin read 6 of 6" $SCRATCH/harness_smoke; then
-        echo "  | (checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"
-      else
-        echo "FAIL smoke ${id}: it passed without proving the preference read policy is admin-or-self"; STATUS=1
-      fi
-      if grep -qF 'every write audited -- 9 of 9 (4 requested, 2 approved, 1 rejected, 2 changed), each naming its row' $SCRATCH/harness_smoke; then
-        echo "  | (checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"
+      if grep -qF 'every write audited -- 5 of 5 (2 approved, 1 rejected, 2 changed), each naming its row' $SCRATCH/harness_smoke; then
+        echo "  | (checked) every coach practice preference write leaves its audit row, 5 of 5, each naming the row it wrote"
       else
         echo "FAIL smoke ${id}: it passed without proving every preference write is audited"; STATUS=1
       fi
@@ -720,10 +719,10 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # the same smoke and print as NOTICEs above; they carry no plant, so they
     # are not claims.)
     if [ "$id" = "20260930000000" ]; then
-      if grep -qF "a coach and another organisation's admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an admin of the venue's own organisation sets its coordinates: a coach and another organisation's admin are refused"
+      if grep -qF "a signed-in non-member and another organisation's admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin of the venue's own organisation sets its coordinates: a signed-in non-member and another organisation's admin are refused"
       else
-        echo "FAIL smoke ${id}: it passed without proving a coach and another organisation's admin cannot set a venue's coordinates"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a non-member and another organisation's admin cannot set a venue's coordinates"; STATUS=1
       fi
       if grep -qF "the RPC refused both half pairs 22023, 2 of 2" $SCRATCH/harness_smoke; then
         echo "  | (checked) the coordinates RPC refuses a half pair (22023)"
@@ -801,15 +800,15 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     if [ "$id" = "20261003000000" ]; then
       # No coach requests lighting since 20261028010000 (admin focus R6): the
       # request RPC is gone, and only an admin withdraws.
-      if grep -qF "2 withdrawals by an admin (a requested row and an approved one); the requester and another coach withdrawing were refused 42501, 2 of 2" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin withdraws a lighting override; its requester and another coach are refused"
+      if grep -qF "2 withdrawals by an admin (a requested row and an approved one); the requester and another signed-in user withdrawing were refused 42501, 2 of 2" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin withdraws a lighting override; its requester and another signed-in user are refused"
       else
-        echo "FAIL smoke ${id}: it passed without proving a coach cannot withdraw a lighting override"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a non-admin cannot withdraw a lighting override"; STATUS=1
       fi
-      if grep -qF "a coach approving was refused (42501), 2 of 2 (their own request and another coach's), and the row is still requested" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin decides a lighting override; a coach approving is refused, their own request or another's"
+      if grep -qF "a signed-in non-member approving was refused (42501), 2 of 2 (their own request and another user's), and the row is still requested" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin decides a lighting override; a signed-in non-member approving is refused, their own request or another's"
       else
-        echo "FAIL smoke ${id}: it passed without proving a coach cannot approve a lighting override"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a non-admin cannot approve a lighting override"; STATUS=1
       fi
       if grep -qF "self-approval by the requesting admin was refused (42501) and the row stayed requested; a second admin approved it" $SCRATCH/harness_smoke; then
         echo "  | (checked) the admin who requested a lighting override may not approve it; another admin may"
@@ -831,10 +830,10 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving every lighting override write is audited"; STATUS=1
       fi
-      if grep -qF "coach A read the 5 rows of slot 1 and none of slot 2; coach B the 2 of slot 2 and none of slot 1; a lapsed coach and a member who coaches no team 0; the admin 7 of 7; another organisation's admin 0" $SCRATCH/harness_smoke; then
-        echo "  | (checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"
+      if grep -qF "only an admin reads -- two signed-in users with no membership read 0; the admin 7 of 7; another organisation's admin 0" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin of the organisation reads its lighting overrides: signed-in users with no membership and another organisation's admin read none"
       else
-        echo "FAIL smoke ${id}: it passed without proving the lighting override read policy is admin-or-slot-coach"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving the lighting override read policy is admin-only"; STATUS=1
       fi
       if grep -qF "deleting a slot holding 6 override(s) was refused 23503 and all of them survived" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice slot holding lighting overrides cannot be deleted out from under them (23503); none is destroyed unreported"
@@ -848,8 +847,8 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # TBD enact and the grant posture RAISE in the same smoke and print as
     # NOTICEs above; they carry no plant, so they are not claims.)
     if [ "$id" = "20261004000000" ]; then
-      if grep -qF "enact access: a coach, a member who coaches no team and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin with a uid enacts a practice recommendation: a coach, a member who coaches no team and a no-uid caller are refused by the wrapper itself"
+      if grep -qF "enact access: two signed-in non-members and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin with a uid enacts a practice recommendation: two signed-in non-members and a no-uid caller are refused by the wrapper itself"
       else
         echo "FAIL smoke ${id}: it passed without proving a non-admin cannot enact a practice recommendation"; STATUS=1
       fi
@@ -907,19 +906,19 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # table, the head build has no RSVP to make: the smoke checks that both stay
     # gone, and the two RSVP claims went with their plants.
     if [ "$id" = "20261005000000" ]; then
-      if grep -qF "exception reads: a member who coaches no team read 7 of 7 seeded rows, the same set as the admin; a non-member read 0" $SCRATCH/harness_smoke; then
-        echo "  | (checked) a member who is not an admin reads the same practice_exceptions rows as an admin, and a non-member reads none"
+      if grep -qF "exception reads: a staff member read 7 of 7 seeded rows, the same set as the admin; a non-member read 0" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a staff member reads the same practice_exceptions rows as an admin, and a signed-in non-member reads none"
       else
-        echo "FAIL smoke ${id}: it passed without proving a non-admin member reads practice exceptions as admins do"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a staff member reads practice exceptions as admins do and a non-member reads none"; STATUS=1
       fi
     fi
     # **Heat forecast: org heat settings.** One claim per plant in prove.sh.
     # The smoke RAISEs on each; these fail if its evidence stops printing.
     if [ "$id" = "20261006000000" ]; then
-      if grep -qF "a coach and another organisation's admin were each refused 42501, 2 of 2, and the settings are unchanged" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an admin of the organisation sets its heat settings: a coach and another organisation's admin are refused"
+      if grep -qF "a signed-in non-member and another organisation's admin were each refused 42501, 2 of 2, and the settings are unchanged" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin of the organisation sets its heat settings: a signed-in non-member and another organisation's admin are refused"
       else
-        echo "FAIL smoke ${id}: it passed without proving a coach and another organisation's admin cannot set heat settings"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving a non-member and another organisation's admin cannot set heat settings"; STATUS=1
       fi
       if grep -qF "the RPC refused 4 of 4 invalid categories 22023 (0, 4, -1, NULL)" $SCRATCH/harness_smoke; then
         echo "  | (checked) the heat settings RPC refuses a threshold category outside 1-3 (22023)"
@@ -941,10 +940,30 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving every heat settings write is audited with before and after"; STATUS=1
       fi
-      if grep -qF "a coach reads their own organisation's heat settings and not the other organisation's (1 of 2 rows visible)" $SCRATCH/harness_smoke; then
-        echo "  | (checked) a member reads only their own organisation's heat settings"
+      if grep -qF "an admin reads their own organisation's heat settings and not the other organisation's (1 of 2 rows visible)" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an admin reads only their own organisation's heat settings"
       else
-        echo "FAIL smoke ${id}: it passed without proving heat settings reads are scoped to the member's organisation"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without proving heat settings reads are scoped to the admin's organisation"; STATUS=1
+      fi
+    fi
+    # **Admin only (20261104010000; plan docs/changes/2026-10-27-admin-only.md).** Three
+    # claims, each with a plant in prove.sh. The smoke RAISEs on each; these fail if its
+    # evidence stops printing.
+    if [ "$id" = "20261104010000" ]; then
+      if grep -qF "as a user: an admin reads and writes; a non-member and another organization's admin are refused with 42501" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin reads the coach data, the permits and the roster: a signed-in non-member and another organization's admin read none and are refused each RPC (42501)"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a non-member and another organization's admin are refused the admin reads"; STATUS=1
+      fi
+      if grep -qF "posture: roles, dropped functions, policies, pins, the coach key and the reconcile spec are as designed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) no role admits a coach: the member and invite role checks lose it, create_org_invite and admin_change_member_role refuse it (22023), and the coach-only functions are gone"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the coach role is gone from the checks and the RPCs"; STATUS=1
+      fi
+      if grep -qF "coach import: one email in two organizations imported as two coaches; 2 of 4 child ids linked in file order, the unknown one and another organization's reported, nothing written for them" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the coach import scopes a coach to its organization, links only this organization's players named by registration id, in file order, and reports the ids that match none"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the coach import scopes by organization and links the named children"; STATUS=1
       fi
     fi
     # **8.6 3b PR 11d-2: enacting a blackout recommendation (plan §5, B8-B11,
@@ -1305,7 +1324,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1993,6 +2012,53 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('facility-permits','e7000000-0000-4000-8000-00000000000a/e7000000-0000-4000-8000-0000000000b1/e7000000-0000-4000-8000-0000000000d1.pdf',jsonb_build_object('size',1000,'mimetype','application/pdf'));" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the permits, scopes and object the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261104010000's revert RESTORES the global unique on coaches.email**, so it REFUSES (55000) while
+  # one address is held in two organizations, and it KEEPS every coach_team_requests row (a link an
+  # import wrote cannot be put back, and nothing deletes it). Seeded: two organizations holding the
+  # same coach address, which the revert must refuse; then the twin removed, leaving one coach with
+  # two players and TWO links, the figure the revert's NOTICE must carry.
+  if [ "$id" = "20261104010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('ea000000-0000-4000-8000-00000000000a','Admin Only Revert A','ao-revert-a'),
+                ('ea000000-0000-4000-8000-00000000000b','Admin Only Revert B','ao-revert-b');
+              INSERT INTO public.coaches (id, organization_id, full_name, email, status) VALUES
+                ('ea000000-0000-4000-8000-0000000000c1','ea000000-0000-4000-8000-00000000000a','Revert Coach','revert-coach@example.test','active'),
+                ('ea000000-0000-4000-8000-0000000000c2','ea000000-0000-4000-8000-00000000000b','Revert Coach Twin','revert-coach@example.test','active');
+              INSERT INTO public.players (id, organization_id, first_name, last_name, external_registration_id) VALUES
+                ('ea000000-0000-4000-8000-0000000000d1','ea000000-0000-4000-8000-00000000000a','Revert','One','REV-1'),
+                ('ea000000-0000-4000-8000-0000000000d2','ea000000-0000-4000-8000-00000000000a','Revert','Two','REV-2');
+              INSERT INTO public.coach_team_requests (organization_id, coach_id, player_id, slot) VALUES
+                ('ea000000-0000-4000-8000-00000000000a','ea000000-0000-4000-8000-0000000000c1','ea000000-0000-4000-8000-0000000000d1',1),
+                ('ea000000-0000-4000-8000-00000000000a','ea000000-0000-4000-8000-0000000000c1','ea000000-0000-4000-8000-0000000000d2',2);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the organizations, coaches, players and links the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refuse 2>&1; then
+      echo "FAIL revert ${id}: it restored the global coach email unique while one address was held in two organizations"
+      STATUS=1; continue
+    elif ! grep -q 'refusing to restore the global unique on coaches.email: 1 address(es) belong to coaches in more than one organization' $SCRATCH/harness_rev_refuse; then
+      echo "FAIL revert ${id}: it failed without the shared-address refusal"
+      dump 10 $SCRATCH/harness_rev_refuse; STATUS=1; continue
+    fi
+    if ! psql_cmd "DELETE FROM public.coaches WHERE id = 'ea000000-0000-4000-8000-0000000000c2';" >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: could not remove the twin coach"; dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261104020000's revert adds two EMPTY columns back**, so the data it must keep is the check:
+  # one organization with one coach.
+  if [ "$id" = "20261104020000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('eb100000-0000-4000-8000-00000000000a','Drop Link Revert','dl-revert');
+              INSERT INTO public.coaches (id, organization_id, full_name, email, status) VALUES
+                ('eb100000-0000-4000-8000-0000000000c1','eb100000-0000-4000-8000-00000000000a','Drop Link Coach','dl-revert@example.test','active');" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the coach the revert check requires was never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3369,6 +3435,95 @@ PROBE
       else
         echo "FAIL revert ${id}: the permits revert did not restore every replaced object and drop every added one"
         dump 10 $SCRATCH/harness_permits; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261104010000" ]; then
+      # The seed kept one coach with two links; the revert counts them and deletes none. The whole
+      # public catalogue (every function with its posture, grants, comment and body md5, every
+      # policy in public and storage, constraint, column, index, trigger and table comment) must
+      # equal a build at 20261103020000, read 2026-10-27 with the same query: 87060e9a...:1562. The
+      # count is part of the verdict, so a lookup that finds nothing cannot pass.
+      if ! grep -q 'this revert restores the coach arms and the global coach email key; 2 coach_team_requests row(s) stay as data' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 2 coach links and the revert did not count them"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'ADMINONLY-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'ea000000-0000-4000-8000-00000000000a') <> 1
+                 OR (SELECT count(*) FROM public.coach_team_requests WHERE organization_id = 'ea000000-0000-4000-8000-00000000000a') <> 2 THEN 'seed-lost'
+               WHEN fp = '87060e9a2305e59b3ec68eca858d0bec:1562' THEN 'restored'
+               ELSE 'wrong ' || fp END
+             FROM (SELECT (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
+  SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+         || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+         || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+         || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+    FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 'p|' || schemaname || '|' || tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')
+    FROM pg_policies WHERE schemaname IN ('public', 'storage')
+  UNION ALL
+  SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+    FROM pg_constraint WHERE connamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+         || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+  UNION ALL
+  SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid) FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 't|' || tgrelid::regclass::text || '|' || tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)
+  UNION ALL
+  SELECT 'c|' || c.relname || '|' || coalesce(obj_description(c.oid, 'pg_class'), '') FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+
+) s) AS fp) t;" \
+         >$SCRATCH/harness_adminonly 2>&1 && grep -q 'ADMINONLY-VERDICT:restored' $SCRATCH/harness_adminonly; then
+        echo "  revert ${id}: the admin-only revert restores the fourteen coach functions, the replaced bodies, the eight read policies, both role checks and the global coach email key as at 20261103020000, and keeps the coaches and their links"
+      else
+        echo "FAIL revert ${id}: the admin-only revert did not restore the catalogue as at 20261103020000"
+        dump 10 $SCRATCH/harness_adminonly; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261104020000" ]; then
+      # The columns come back empty with their three constraints; the whole catalogue must equal a
+      # build at 20261104010000 (read 2026-10-27 with the same query: f3a80c39...:1549), and the
+      # coach survives.
+      if psql_cmd "SELECT 'DROPLINK-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'eb100000-0000-4000-8000-00000000000a' AND user_id IS NULL AND profile_id IS NULL) <> 1 THEN 'seed-lost'
+               WHEN fp = 'f3a80c397765ed495f247f0d2a3fd3ae:1549' THEN 'restored'
+               ELSE 'wrong ' || fp END
+             FROM (SELECT (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
+  SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+         || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+         || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+         || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+    FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 'p|' || schemaname || '|' || tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')
+    FROM pg_policies WHERE schemaname IN ('public', 'storage')
+  UNION ALL
+  SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+    FROM pg_constraint WHERE connamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+         || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+  UNION ALL
+  SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid) FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 't|' || tgrelid::regclass::text || '|' || tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)
+  UNION ALL
+  SELECT 'c|' || c.relname || '|' || coalesce(obj_description(c.oid, 'pg_class'), '') FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+
+) s) AS fp) t;" \
+         >$SCRATCH/harness_droplink 2>&1 && grep -q 'DROPLINK-VERDICT:restored' $SCRATCH/harness_droplink; then
+        echo "  revert ${id}: the drop-link revert adds coaches.user_id and profile_id back empty with their foreign keys and unique, as at 20261104010000, and keeps the coach"
+      else
+        echo "FAIL revert ${id}: the drop-link revert did not restore the catalogue as at 20261104010000"
+        dump 10 $SCRATCH/harness_droplink; STATUS=1
       fi
     fi
     if [ "$id" = "20261103020000" ]; then

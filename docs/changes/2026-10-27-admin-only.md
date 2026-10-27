@@ -381,4 +381,3 @@ each with `docs/sql/<id>_revert.sql` and `_smoke.sql`. Differences from the desi
   teams and see the coach's team anchored) is not an E2E: "Upload Another File", which switching from
   players to coaches needs, clears the session's player import the Teams page builds from. The anchoring
   on the page is held by `tests/teamAnalysisEligibility.test.jsx` instead.
-

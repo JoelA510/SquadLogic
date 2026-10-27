@@ -1,7 +1,6 @@
 # Per-season enrollment (Phase E3)
 
-Status: **revised with the owner's decisions of 2026-10-27; three new design points (C1-C3) need
-the owner's approval before E3a starts** (AGENTS.md rule 14: the domain model and persistence). The
+Status: **revised twice on 2026-10-27 with the owner's decisions; C1-C3 settled by the owner** (AGENTS.md rule 14: the domain model and persistence). The
 owner decided on 2026-10-26 (Phase E plan, Decision 11) that a player is enrolled per season, so a
 draft season can take registration imports. On 2026-10-27 the owner added: **a new season starts
 from its own import data, and no player or coach is assumed to be returning.** Code read at
@@ -20,6 +19,15 @@ re-checked in task 0). Production counts are _executed_ (read-only, 2026-10-27):
 3. **A completed season's players are kept until an admin deletes that season's data.**
 4. **Age cutoff is a club option per season**: two presets and a custom date (C3 below). The
    season year is the year the season starts.
+5. **Only league admins sign in** (owner, 2026-10-27, second answer). Coaches are imported data
+   that admins manage, with no sign-in or screen of their own; admins may belong to several
+   organizations, and a coach may appear in several. Removing coach access is its own plan
+   (`2026-10-27-admin-only.md`) and lands before E3a.
+6. **Years of experience and skill level are separate fields**, each optional at import and
+   editable afterwards.
+7. **Custom cutoff** is one cutoff day per season year by default; a division can also carry its
+   own birth-date range when it needs one (e.g. a U4 program that takes older 2-year-olds, or all
+   3-and-unders).
 
 ## Today
 
@@ -35,8 +43,8 @@ re-checked in task 0). Production counts are _executed_ (read-only, 2026-10-27):
   directory, sidebar count, setup progress, `view_org_metrics`, both dashboards). The header
   already has a season switcher (`TopBar.jsx`, `OrganizationContext.jsx`).
 - **Coaches are one row per person, not per organization or season**: `coaches.email` is unique
-  across all organizations and `coaches.user_id` is unique (`20261020040000:19-20`). A coach signs
-  in and is linked to that row (`link_my_coach_record`). Six frontend readers list coaches.
+  across all organizations and `coaches.user_id` is unique (`20261020040000:19-20`). Six frontend
+  readers list coaches. The admin-only plan removes the sign-in link.
 - **The age cutoff** is `season_settings.age_cutoff_mode`, `birth_year` (Jan-Dec) or
   `school_year_aug_jul` (the default), with no screen to change it.
 
@@ -61,77 +69,73 @@ re-checked in task 0). Production counts are _executed_ (read-only, 2026-10-27):
 - **Readers** filter by the season the header's switcher shows (the current season by default).
   RLS stays organization-scoped: a season filter is not an authorization boundary.
 
-### C1. Coaches: enrolled per season, identity kept (needs approval)
+### C1. Coaches: a row per season, like players (settled)
 
-A coach signs in, so the person cannot be re-created each season the way a player row is: the
-account link and the global email uniqueness would collide. Proposed: keep one `coaches` row per
-person and add **`coach_seasons (coach_id, season_settings_id, organization_id)`**, written by a
-season's coach import (and by an admin adding a coach to a season).
+With no coach sign-in (decision 5), a coach row is data and is handled exactly as a player row:
+`coaches.season_settings_id`, a season's coach import creates that season's rows, nothing is
+carried over, and the unique key becomes `(organization, season, lower(email))`. That depends on
+the admin-only plan dropping `coaches.user_id` and the global email uniqueness, which it covers.
+`coach_team_requests` and team assignments already hang off teams, which are per season; a link is
+refused across seasons.
 
-- A coach is listed, assignable and linked to children **only in seasons they are enrolled in**.
-  A coach imported last season and not this season is not offered this season (decision: no coach
-  assumed returning); their account and past seasons are untouched.
-- Season facts the coach import carries today move with the enrollment only if they are
-  season-specific (e.g. the volunteer answers); identity fields stay on `coaches`.
-- `coach_team_requests` and team assignments already hang off teams, which are per season.
+### C2. Years of experience and skill level (settled)
 
-Alternative: one coach row per season. Rejected because `coaches.user_id` and `coaches.email` are
-unique and a signed-in coach links to exactly one row; dropping those guarantees reopens the
-identity holes A2 closed.
+Two separate player fields, both optional: `years_played` (a whole number of years, from the
+registration question for clubs that ask it) and the skill level (`skill_tier`, or the numeric
+rating where a club rates). Either may be absent from the registration import, and an admin can
+set or change either afterwards (the Players grid and the player patch, audited, as today).
+**E3c** adds an evaluations import into an existing season: a file with the registration id and
+either or both fields **only updates** matching players in that season; an unmatched row is
+listed and never created; a blank cell leaves the stored value alone. It reuses the import
+pipeline (allowlist, staging, audited finalize). Teaming uses whichever fields are present, as it
+does today.
 
-Noted, not in E3: `coaches.email` unique **across organizations** means one person cannot coach in
-two clubs on this deployment. That is a separate decision.
-
-### C2. Evaluations import (needs approval)
-
-The owner expects clubs to import skill levels from their own evaluations after the general
-imports. Proposed **E3c**: an "evaluations" import into an existing season that **only updates**
-rating / skill tier (and, if present, years played) on that season's players, matched by
-registration id; unmatched rows are listed and nothing is created. It reuses the import pipeline
-(allowlist, staging, audited finalize). Ask: confirm the columns (rating and skill tier; years
-played too?) and that unmatched rows are reported, never created.
-
-### C3. Age cutoff per season (needs approval of "custom")
+### C3. Age cutoff per season (settled)
 
 On the season's settings (E3b's Seasons page):
 
 - **School year, Aug 1 - Jul 31** (the default). AYSO, US Club Soccer and US Youth Soccer use it
   from the 2026-27 registration year; US Soccer let each member set its own rules from 2026-27.
 - **Calendar year, Jan 1 - Dec 31** (the 2016-2026 birth-year rule; US Soccer's ODP keeps Jan 1).
-- **Custom**: a cutoff month and day the club picks. A division's own birth-date window
-  (`divisions.birthdate_start/end`) still overrides for a single division.
+- **Custom**: a cutoff month and day the club picks, applied every season year.
+- **Per-division range**, optional on any division: its own birth-date window
+  (`divisions.birthdate_start/end`, which core already treats as authoritative,
+  `ageGroups.js:17-18,277`). Because the server stores no birth date (R5), the window is applied
+  at import, where the birth date is read, and the stored natural age and division follow from it.
+  Rollover shifts a division's window by one year.
 
 `age_cutoff_mode` gains `custom` with `age_cutoff_month` / `age_cutoff_day`; the import's natural
 age (`import-validation`, `_shared/natural-age.ts` and core's twin, held equal by
-`naturalAgeParity.test.js`) honours it. The season year is the year the season starts. Changing
-the cutoff of a season that already has players is refused (their stored ages were computed with
-the old one); a draft season can change it freely. Ask: is "custom" a single cutoff date (this
-proposal), or do you need full per-age-group date ranges beyond the per-division windows?
+`naturalAgeParity.test.js`) honours the mode and the division windows. The season year is the year
+the season starts. Changing the cutoff or a division's window once the season has players is
+refused (their stored ages were computed with the old rule); a draft season can change them
+freely.
 
 ### Rollover and completed seasons (decisions 2, 3)
 
-`admin_create_season_from` copies divisions and programs, and no players or coach enrollments.
-Completed seasons are read-only, players and enrollments included, until an admin deletes that
-season's data.
+`admin_create_season_from` copies divisions (windows shifted one year) and programs, and no
+players or coaches. Completed seasons are read-only, players and coaches included, until an admin
+deletes that season's data.
 
 ## Tests
 
 - pgTAP: the season column and its division-season trigger; the unique (season, external id); an
   import into a draft season leaves the active season's row untouched (the case Codex found on
   #666); no row of another season is read or written; an import into a completed season is
-  refused; a roster or buddy pair across seasons is refused; a coach not enrolled in a season
-  cannot be assigned there; the evaluations import updates only matched rows; the cutoff cannot
-  change once a season has players.
-- Unit: each reader asks for the selected season only; natural age under each cutoff mode,
-  parity between core and the Edge twin; the mock mirrors per-season matching and enrollment.
+  refused; a roster or buddy pair across seasons is refused; a coach row of another season cannot
+  be assigned or linked; the evaluations import updates only matched rows and leaves blanks
+  alone; the cutoff and a division's window cannot change once a season has players.
+- Unit: each reader asks for the selected season only; natural age under each cutoff mode and a
+  division window (a U4 taking older 2-year-olds), parity between core and the Edge twin; the mock
+  mirrors per-season matching for players and coaches.
 - E2E (mock): import into the active season, create a draft, import a file where one child
   reappears in an older division; the active season's Players page is unchanged and the draft's
-  shows a separate row; a coach imported only into the active season is not offered in the draft.
+  shows a separate row; a coach imported only into the active season is not listed in the draft.
 
 ## PR split
 
 | PR | Contents | Live effect |
 | --- | --- | --- |
-| E3a | player season column, unique index, per-season import matching, writers and readers filtered by season, `coach_seasons` and coach readers filtered, demo seed; the E1 guard still allows only the active season | none visible for one active season |
-| E3b | season rollover, draft season edit and activation, the Seasons page with the age cutoff (C3), the guard widened to drafts | admins prepare next season and import into it |
-| E3c | the evaluations import (C2) | clubs add ratings after registration |
+| E3a | season column on players and coaches, per-season unique keys and import matching, writers and readers filtered by season, demo seed; the E1 guard still allows only the active season (after the admin-only PR) | none visible for one active season |
+| E3b | season rollover, draft season edit and activation, the Seasons page with the age cutoff and division windows (C3), the guard widened to drafts | admins prepare next season and import into it |
+| E3c | the evaluations import (C2) | clubs add experience or skill after registration |

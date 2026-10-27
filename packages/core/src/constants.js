@@ -28,6 +28,9 @@ export const TEAM_GENERATION = {
   // A player whose play-up or play-down is blocked (`isEligibilityBlocked`, playUp.js) is
   // never seated by the generator; a rostered one stays and is listed instead (Phase B2).
   REASON_EligibilityBlocked: 'eligibility-blocked',
+  // A waitlisted player (`isWaitlisted`, playUp.js) is not seated either; nobody is dropped
+  // silently, so each is in overflow with this reason (owner decision, 2026-10-27).
+  REASON_Waitlisted: 'waitlisted',
   REASON_Unknown: 'unknown',
 
   // Limits

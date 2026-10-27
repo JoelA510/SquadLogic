@@ -106,18 +106,28 @@ export default function TeamBuilderPage() {
 
   // Buddies are matched as Team Analysis matches them (Phase B5): the resolver, the
   // league's buddy rule, and every player as the roster, so a request or code naming someone
-  // off this board is not paired. A player's division is its division id, as the program is
-  // in Team Analysis, so a board that folds two divisions (co-ed) pairs nobody across them.
-  // With Buddy Requests off, nothing is matched (the tile is hidden).
+  // off this board is not paired. A player's buddy division is its division id, as the program
+  // is in Team Analysis, with one exception (owner, 2026-10-27): a co-ed board, which folds the
+  // boys' and girls' divisions of one age group together (`divisionFilters`), is one division
+  // for buddies, so a boy and a girl who name each other are paired. Separate gender-specific
+  // divisions never pair across each other. With Buddy Requests off, nothing is matched (the
+  // tile is hidden).
   const buddyRequestsOn = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
   // A lead is read from the Coaching Interest column, so both must be on to spread leads.
   const coachingInterestOn = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
   const spreadLeadsOn =
     coachingInterestOn && isEnabled(FEATURE_FLAGS.TEAMING_SPREAD_COACHING_LEADS);
-  const buddyRoster = useMemo(
-    () => players.map((player) => ({ ...player, division: String(player.division_id ?? '') })),
-    [players]
-  );
+  const buddyRoster = useMemo(() => {
+    const coedBoardOf = new Map();
+    for (const filter of filters) {
+      if (filter.divisionIds.length < 2) continue;
+      for (const id of filter.divisionIds) coedBoardOf.set(String(id), filter.key);
+    }
+    return players.map((player) => {
+      const divisionId = String(player.division_id ?? '');
+      return { ...player, division: coedBoardOf.get(divisionId) ?? divisionId };
+    });
+  }, [players, filters]);
   const buddyBoard = useMemo(() => {
     const ids = new Set(divisionPlayers.map((player) => player.id));
     return buddyRoster.filter((player) => ids.has(player.id));

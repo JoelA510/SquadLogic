@@ -92,8 +92,11 @@ const { default: TeamBuilderPage } = await import('../frontend/src/pages/TeamBui
 
 const BASE_FLAGS = { buddy_requests: true, player_rating: true, coaching_interest: false };
 
-/** Render, read the tile, run auto-balance, and return the team each player was moved to. */
-async function balance(flags) {
+/**
+ * Render, read the tile, run auto-balance, and return the team each player was moved to (`moves`
+ * players are placed: the board's, which is every player unless the league shows divisions apart).
+ */
+async function balance(flags, moves = playersData.players.length) {
   organization.value = {
     currentOrganization: ORGANIZATION,
     featureFlags: flags,
@@ -108,7 +111,7 @@ async function balance(flags) {
   const tile = (await screen.findByText('buddies met')).closest('.metric-tile');
   const tileText = tile?.textContent?.replace(/\s+/g, ' ').trim();
   fireEvent.click(screen.getByRole('button', { name: /auto-balance/i }));
-  await waitFor(() => expect(mocks.updatePlayer).toHaveBeenCalledTimes(playersData.players.length));
+  await waitFor(() => expect(mocks.updatePlayer).toHaveBeenCalledTimes(moves));
   const teamOf = Object.fromEntries(
     mocks.updatePlayer.mock.calls.map(([playerId, patch]) => [playerId, patch.team_id])
   );
@@ -150,28 +153,73 @@ describe('TeamBuilder applies the stored buddy rule', () => {
     );
   });
 
-  it('a co-ed board of two divisions pairs nobody across them, as Team Analysis does', async () => {
-    // U10B and U10G fold into one "U10" board under the co-ed model. Ann and Bo name each
-    // other across the two divisions: Team Analysis teams each division on its own and calls
-    // the pair cross-division, so the board does not pair them either.
+  // Co-ed buddies (owner, 2026-10-27): "In a division that is co-ed, buddies can be boy/girl
+  // (such as U4 in the sample set), but buddies aren't accepted for other gender-specific
+  // divisions."
+  const U10_BOYS_AND_GIRLS = {
+    divisions: [
+      { id: 'd-u10b', name: 'U10B' },
+      { id: 'd-u10g', name: 'U10G' },
+    ],
+    // Ann (a boy, U10B) and Bo (a girl, U10G) name each other. Rated so that, dealt without
+    // the pair, they land on different teams (ann 5, bo 4: a serpentine deal).
+    players: [
+      player('ann', 'Ann', 'Ross', 5, { division_id: 'd-u10b', buddy_request: 'Bo Hale' }),
+      player('bo', 'Bo', 'Hale', 4, { division_id: 'd-u10g', buddy_request: 'Ann Ross' }),
+      player('kit', 'Kit', 'Lane', 3, { division_id: 'd-u10b' }),
+      player('max', 'Max', 'Dorn', 1, { division_id: 'd-u10g' }),
+    ],
+  };
+  const U10_TEAMS = [
+    { id: 't1', name: 'Team One', division_id: 'd-u10b', organization_id: ORG_ID },
+    { id: 't2', name: 'Team Two', division_id: 'd-u10g', organization_id: ORG_ID },
+  ];
+
+  it('a co-ed board folding two divisions pairs a boy and a girl who name each other', async () => {
+    Object.assign(playersData, U10_BOYS_AND_GIRLS);
+    world.teams = U10_TEAMS;
+    const { tileText, teamOf } = await balance({ ...BASE_FLAGS, gender_model: 'coed' });
+    expect(tileText).toBe('0/2 buddies met');
+    expect(teamOf.ann).toBe(teamOf.bo);
+    // The pair is one unit: the other two are not dealt with them.
+    expect(teamOf.kit).toBe(teamOf.max);
+    expect(teamOf.kit).not.toBe(teamOf.ann);
+  });
+
+  it('two gender-specific divisions shown separately pair nobody across them', async () => {
+    // The same league under the Boys / Girls model: U10B is its own board, so Ann's request
+    // names someone on another board and nothing is paired or counted.
+    Object.assign(playersData, U10_BOYS_AND_GIRLS);
+    world.teams = U10_TEAMS;
+    const { tileText, teamOf } = await balance({ ...BASE_FLAGS, gender_model: 'split' }, 2);
+    expect(tileText).toBe('0/0 buddies met');
+    expect(Object.keys(teamOf).sort()).toEqual(['ann', 'kit']);
+  });
+
+  it('a single co-ed division (U4) pairs a boy and a girl who name each other', async () => {
     Object.assign(playersData, {
-      divisions: [
-        { id: 'd-u10b', name: 'U10B' },
-        { id: 'd-u10g', name: 'U10G' },
-      ],
+      divisions: [{ id: 'd-u4', name: 'U4' }],
       players: [
-        player('ann', 'Ann', 'Ross', 5, { division_id: 'd-u10b', buddy_request: 'Bo Hale' }),
-        player('bo', 'Bo', 'Hale', 4, { division_id: 'd-u10g', buddy_request: 'Ann Ross' }),
-        player('kit', 'Kit', 'Lane', 3, { division_id: 'd-u10b' }),
-        player('max', 'Max', 'Dorn', 1, { division_id: 'd-u10g' }),
+        player('ann', 'Ann', 'Ross', 5, {
+          division_id: 'd-u4',
+          gender: 'm',
+          buddy_request: 'Bo Hale',
+        }),
+        player('bo', 'Bo', 'Hale', 4, {
+          division_id: 'd-u4',
+          gender: 'f',
+          buddy_request: 'Ann Ross',
+        }),
+        player('kit', 'Kit', 'Lane', 3, { division_id: 'd-u4', gender: 'm' }),
+        player('max', 'Max', 'Dorn', 1, { division_id: 'd-u4', gender: 'f' }),
       ],
     });
     world.teams = [
-      { id: 't1', name: 'Team One', division_id: 'd-u10b', organization_id: ORG_ID },
-      { id: 't2', name: 'Team Two', division_id: 'd-u10g', organization_id: ORG_ID },
+      { id: 't1', name: 'Team One', division_id: 'd-u4', organization_id: ORG_ID },
+      { id: 't2', name: 'Team Two', division_id: 'd-u4', organization_id: ORG_ID },
     ];
-    const { tileText, teamOf } = await balance({ ...BASE_FLAGS, gender_model: 'coed' });
-    expect(tileText).toBe('0/0 buddies met');
-    expect(teamOf.ann).not.toBe(teamOf.bo);
+    const { tileText, teamOf } = await balance({ ...BASE_FLAGS });
+    expect(tileText).toBe('0/2 buddies met');
+    expect(teamOf.ann).toBe(teamOf.bo);
   });
 });

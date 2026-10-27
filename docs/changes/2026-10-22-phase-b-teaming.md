@@ -722,6 +722,96 @@ engine conventions), and the demo league is teamed end to end.
   the evaluators use; should Spread Coaching Leads be hidden or disabled while Coaching Interest
   is off (today its description says it needs it).
 
+## Owner decisions (2026-10-27)
+
+The owner answered the open questions of B2, B3, B5 and B6. They are approved decisions, so this
+plan is the rule-14 plan for them. No migration, no new persistence, no dependency.
+
+1. **League-wide averages leave out players who cannot be placed** (B2 and B3's question).
+   `generateTeams` computes `globalStats` (the org means a `WeightedAttributeEvaluator` score
+   fills a missing value from, and the ranges it normalises with) over every player except one for
+   whom `cannotBePlaced` (`playUp.js`) holds: blocked by eligibility (`isEligibilityBlocked`) or
+   waitlisted (`isWaitlisted`, `status === 'waitlist'`). The ranges are left out too, since a
+   blocked or waitlisted outlier would stretch the scale every placed player is normalised on.
+   **Waitlisted players did reach the pool** (_statically reviewed_: `git grep -i waitlist` at
+   `9128db9` matches nothing in `TeamAnalysisPage.jsx` or `packages/core/src`, and matches
+   TeamBuilder's `status !== 'waitlist'` filter): the Teams page generates from the import rows,
+   and nothing read `players.status` or the file's `waitlist` column. So
+   the change is more than the means: the page now reads the stored status (`DURABLE_PLAYER_FIELDS`
+   selects `status`; the record wins over the file's `waitlist`/`waitlisted` column, as it wins
+   for names and coaching answers), and `toGeneratorPlayer` emits `status: 'waitlist'` only while
+   the Waitlist feature is on. The generator seats a waitlisted player nowhere, with the same
+   step that holds the blocked out: they add no team, a coach's waitlisted child anchors none, and
+   each is an overflow entry of reason `waitlisted` (`TEAM_GENERATION.REASON_Waitlisted`, metadata
+   `{ coachId }`), so nobody is dropped silently; a mutual buddy of one is placed alone
+   (`buddy-not-placed`). A player both blocked and waitlisted is reported as blocked. The review
+   words it ("On the waitlist: not placed on any team."), counts it apart from "not eligible" and
+   "for another reason", and the "no teams" message says how many are waitlisted. **Without a
+   blocked or waitlisted player the output is unchanged** (_executed_): B2's golden, byte for
+   byte (`tests/teamGenerationEligibility.test.js`), and a test that holds the means over every
+   player. **Not built:** a preserved player later waitlisted stays on their reviewed roster and
+   is not listed as a hold (only a late player is held out), and the program overview's
+   recommended team count still counts the registered players, waitlisted included, as it already
+   counts the not-eligible.
+2. **A coach whose only child is held out is shown, flagged.** In "Players to review", "Not
+   placed" (B3's list, no parallel list), a held-out player's entry whose `metadata.coachId` (a
+   `coach_team_requests` link) names a coach with no team in the division's `teamsByDivision` gets
+   a sentence: "Coach Casey Coach has no team to anchor in this division: Kid, their only child in
+   it, is not eligible for the division" (or "is on the waitlist"). A coach with another child
+   placed anchors a team and is not flagged. A run without the division's `teamsByDivision` says
+   nothing (it cannot tell who has a team). The coach's name is read once at generation
+   (`coaches`, the flagged ids that are rows) and kept with the run as `results.coachNamesById`; a read that
+   fails is logged and the list says "A coach (name not loaded)". A coach a row names has no
+   `coaches` row; the row's text labels them. The division's summary line and the live region
+   count these coaches.
+3. **A coach with more than one child in a division is flagged for the admin to decide.**
+   **What the generator does today** (_executed_, `tests/teamingOwnerDecisions.test.js` and the
+   page test): `linkCoachesToPlayers` gives every linked child in the program the coach's id, so
+   both are coach-anchored units and both are seated on the coach's one team. When that team is
+   full the child that does not fit is not placed (`coach-capacity`), not put on another team; a
+   child who is blocked or waitlisted is held out and the other anchors the team. Nothing
+   consults whether the children name each other. The review gets a list, "Coaches with more than
+   one child", beside the others: the coach, each child, the team each is on **now** (a manual
+   move in the roster editor shows) or why they are not placed, and "They are on the same team." or
+   "They are not on the same team." Two children who name each other as buddies are one unit and are
+   not listed; three are always listed. Nothing is paired automatically.
+4. **(8a) Only a `coach_team_requests` link anchors a team: not built; an open question for the
+   owner.** The change would leave production with no way to anchor a team. Nothing writes
+   `coach_team_requests`: a search of the whole repository (`grep -rI coach_team_requests`, which
+   matches the table's migration, its policy, a cascade, a comment, the mock's delete when a
+   coach is dropped and the Teams page's read) finds no `INSERT`, in SQL, an Edge Function, the
+   frontend or the mock, and `2026-10-22-admin-focus.md` records the table as having "no writer
+   today" (_statically reviewed_). The coach import is described as resolving coach-to-child
+   links into it (`gotsport-import-contract.md`), but no code does. A coach named on the import
+   row (`coach_email`, `coach_id`) is therefore still the only anchor a league can have, and
+   stays as it was. If the owner wants only links to anchor, a writer comes first (the coach
+   import, or an admin screen to link a coach to a child). The flags of items 2 and 3 work for
+   either kind of coach: a coach a row names is labelled by the row's text, a linked coach by
+   their name on file.
+5. **(8b) No change:** lead compensation does not weigh the custom attribute weights.
+6. **(8c) Spread Coaching Leads is shown but disabled, with the reason, while Coaching Interest is
+   off.** `FEATURE_CATALOG` entries may carry `requires` (a flag key); the settings page disables
+   the switch (native `disabled`, as the page's other controls are while saving) while the
+   required flag is off, shows "Needs Coaching Interest turned on, so it has no effect now. Your
+   setting here is kept." under the description, and associates it with the switch through
+   `aria-describedby` (`Toggle` takes `describedBy`). The stored value is not touched and is shown
+   as stored; turning Coaching Interest off writes only that flag. A disabled button is not
+   focusable, so the text is reached in reading order, not by tabbing to the switch.
+7. **(8d) Co-ed buddies.** TeamBuilder's buddy division is the board's key when the board folds
+   two or more divisions (the Co-ed model: `divisionFilters` folds the boys' and girls' divisions
+   of one age group into one board), so a boy and a girl who name each other are paired; separate
+   gender-specific boards (the Boys / Girls model) never pair across each other, as before. The
+   Teams page needed no change: it runs one program at a time, `buddyLinking` reads no gender, and
+   a single co-ed division (U4) pairs a boy and a girl (`tests/teamingOwnerDecisions.test.js`, the
+   generator path). A co-ed league whose boys' and girls' divisions are not yet merged still runs
+   them as two programs on the Teams page, where a cross-division pair is `cross-division`
+   (unchanged); merge the divisions to team them together.
+
+Tests: `tests/teamingOwnerDecisions.test.js` (means, waitlist, the coach with two children,
+co-ed buddies in the generator), `tests/teamAnalysisEligibility.test.jsx` (the page: waitlist,
+links, coach flags, reload), `tests/placementReview.test.jsx`, `tests/FeatureFlagSettings.test.jsx`
+and `tests/teamBuilderBuddyRule.test.jsx`.
+
 ## Not in Phase B
 
 Remapping a blocked player to their natural division (the page generates one division at a time);

@@ -9,15 +9,24 @@ import PropTypes from 'prop-types';
  * @param {(next: boolean) => void} props.onChange
  * @param {string} props.label - Accessible name (visually hidden unless showLabel).
  * @param {boolean} [props.disabled]
+ * @param {string} [props.describedBy] - Id of the text that says why, or what, this switch is.
  * @param {string} [props.className]
  */
-export default function Toggle({ checked, onChange, label, disabled = false, className = '' }) {
+export default function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+  describedBy,
+  className = '',
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       disabled={disabled}
       className={`toggle ${checked ? 'on' : ''} ${className}`.trim()}
       onClick={() => onChange(!checked)}
@@ -33,5 +42,6 @@ Toggle.propTypes = {
   onChange: PropTypes.func.isRequired,
   label: PropTypes.string.isRequired,
   disabled: PropTypes.bool,
+  describedBy: PropTypes.string,
   className: PropTypes.string,
 };

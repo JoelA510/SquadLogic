@@ -7,6 +7,13 @@
       "reason": "First deploy failed at DROP VIEW public.view_compliance_stats (42P01) and rolled back: production never had the view (docs/operations/schema-drift-2026-10.md, section 7). Not applied in production on 2026-10-23. Applied with the edit by main's deploy of 0e9cda3 (ledger statements read 2026-10-23).",
       "base_blob": "9c8f2ec04eaa84ddeb6f19808997f86b1872dae1",
       "marker": "DROP VIEW IF EXISTS public.view_compliance_stats"
+    },
+    {
+      "version": "20261101010000",
+      "blob": "e78e4772c851ef0109f6636291b33664f0161f01",
+      "reason": "First deploy (main c74d7d3, run 40432565513) failed at statement 15, the body guard: production stores upsert_division_for_import with CRLF line endings (md5 5929e628... raw, b8b43437... without CR, the expected value) and the transaction rolled back. Not applied in production on 2026-10-27 (ledger head 20261031010000, read 2026-10-27). The guard now hashes prosrc with carriage returns removed.",
+      "base_blob": "a4360565f80b939aba581b09a62997840d00f665",
+      "marker": "SELECT md5(replace(p.prosrc,"
     }
   ]
 }

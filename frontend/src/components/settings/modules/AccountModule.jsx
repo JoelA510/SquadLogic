@@ -93,6 +93,7 @@ export default function AccountModule() {
             <input
               id="new-password"
               type="password"
+              autoComplete="new-password"
               required
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -110,6 +111,7 @@ export default function AccountModule() {
             <input
               id="confirm-password"
               type="password"
+              autoComplete="new-password"
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}

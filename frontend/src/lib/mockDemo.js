@@ -12,6 +12,8 @@
  * `window`-free: the caller passes the pieces it owns. A test or E2E step can shorten the demo by
  * setting `sessionStorage.__MOCK_DEMO_MS__` before it starts, or make the server refuse with its cap
  * (`sessionStorage.__MOCK_DEMO_FAIL__ = 'capacity'`), to put the entry page in its failed state.
+ * `sessionStorage.__MOCK_DEMO_PLAYERS__ = '1100'` makes the slice that many players on more teams
+ * (named uniquely), for the scenario that needs a league past the server's 1000-row cap.
  */
 
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
@@ -67,12 +69,13 @@ export function makeAnonymousSession(mockId) {
  *   now?: number,
  *   lifespanMs?: number,
  *   failure?: string | null,
+ *   playerCount?: number,
  * }} ctx
  */
 export function handleDemoRpc(
   db,
   name,
-  { session, mockId, now = Date.now(), lifespanMs, failure = null }
+  { session, mockId, now = Date.now(), lifespanMs, failure = null, playerCount }
 ) {
   if (name !== 'start_demo_session') return null;
 
@@ -156,6 +159,15 @@ export function handleDemoRpc(
   const divisionIds = new Map();
   let playerNumber = 0;
   let teamNumber = 0;
+  // A larger league on request: about 18 players a team, every name unique, so a test can find
+  // the last player (the one a read cut at 1000 rows never returns).
+  const scaled = Number.isInteger(playerCount) && playerCount > 16;
+  const teamsPerDivision = scaled
+    ? Math.ceil(playerCount / (SLICE.divisions.length * 18))
+    : SLICE.teamsPerDivision;
+  const playersPerTeam = scaled
+    ? Math.ceil(playerCount / (SLICE.divisions.length * teamsPerDivision))
+    : SLICE.playersPerTeam;
 
   SLICE.divisions.forEach((slice) => {
     const divisionId = mockId();
@@ -170,7 +182,7 @@ export function handleDemoRpc(
       max_roster_size: 8,
       target_team_size: 4,
     });
-    for (let t = 0; t < SLICE.teamsPerDivision; t += 1) {
+    for (let t = 0; t < teamsPerDivision; t += 1) {
       teamNumber += 1;
       const teamId = mockId();
       const coachId = mockId();
@@ -200,15 +212,20 @@ export function handleDemoRpc(
         effective_to: null,
         started_via: 'demo',
       });
-      for (let p = 0; p < SLICE.playersPerTeam; p += 1) {
+      for (let p = 0; p < playersPerTeam; p += 1) {
         playerNumber += 1;
+        if (scaled && playerNumber > playerCount) break;
         db.players.push({
           id: mockId(),
           organization_id: orgId,
           team_id: teamId,
           division_id: divisionId,
-          first_name: SLICE.firstNames[(playerNumber - 1) % SLICE.firstNames.length],
-          last_name: SLICE.lastNames[(playerNumber + 3) % SLICE.lastNames.length],
+          first_name: scaled
+            ? `Player${playerNumber}`
+            : SLICE.firstNames[(playerNumber - 1) % SLICE.firstNames.length],
+          last_name: scaled
+            ? `Demo${playerNumber}`
+            : SLICE.lastNames[(playerNumber + 3) % SLICE.lastNames.length],
           gender: playerNumber % 2 === 0 ? 'f' : 'm',
           status: 'active',
           years_played: playerNumber % 3,

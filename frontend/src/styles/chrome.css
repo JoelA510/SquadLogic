@@ -690,3 +690,37 @@
     transform: none;
   }
 }
+
+/* Phone width (WCAG 1.4.10 reflow): the top bar's controls wrap onto further rows instead of
+   running past the edge, where the timer, the theme toggle and the account menu were out of
+   reach at 400px. The mobile nav still opens below the first row. */
+@media (max-width: 600px) {
+  .app {
+    grid-template-rows: auto 1fr;
+  }
+  .app.has-banner {
+    grid-template-rows: 40px auto 1fr;
+  }
+  .topbar {
+    height: auto;
+    min-height: var(--topbar-h);
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 8px 12px;
+  }
+  .ctx-switch {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .topbar-spacer {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .demo-timer {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 34px;
+    min-width: 0;
+  }
+}

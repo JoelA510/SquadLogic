@@ -10,6 +10,7 @@ import PropTypes from 'prop-types';
  * @param {boolean} [props.dot] - Show a leading status dot.
  * @param {boolean} [props.square] - Square corners instead of pill.
  * @param {string} [props.className]
+ * @param {string} [props.title]
  */
 export default function Badge({
   children,
@@ -34,4 +35,5 @@ Badge.propTypes = {
   dot: PropTypes.bool,
   square: PropTypes.bool,
   className: PropTypes.string,
+  title: PropTypes.string,
 };

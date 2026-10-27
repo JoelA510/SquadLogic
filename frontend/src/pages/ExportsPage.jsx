@@ -6,6 +6,8 @@ import OutputGenerationPanel from '../components/OutputGenerationPanel.jsx';
 import { useDashboardData } from '../hooks/useDashboardData.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { supabase } from '../lib/supabaseClient.js';
+import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { isDemoOrganization } from '../lib/demo.js';
 
 /**
  * Exports — roster/schedule CSV generation and coach welcome emails,
@@ -28,6 +30,8 @@ export default function ExportsPage() {
   // `game_assignments` read is a reason not to export a schedule and not a
   // reason to stop writing coach emails, which never mention a game.
   const { team, practice, game, loading, error: dataError, errors } = useDashboardData();
+  const { currentOrganization } = useOrganization() || {};
+  const inDemo = isDemoOrganization(currentOrganization);
 
   return (
     <Page
@@ -45,6 +49,15 @@ export default function ExportsPage() {
     >
       <div style={{ maxWidth: 860 }}>
         <DataErrorBanner message={dataError} className="mb-4" />
+        {inDemo && (
+          <p
+            data-testid="demo-exports-note"
+            className="secondary mb-4"
+            style={{ margin: '0 0 16px' }}
+          >
+            The demo league holds placeholder data only, and it resets when the demo ends.
+          </p>
+        )}
         <OutputGenerationPanel
           teams={team?.teams || []}
           teamSummary={team?.summary || null}

@@ -423,6 +423,15 @@ function describeSources(keys) {
 }
 
 /**
+ * What an export with no schedule behind it says. The master and per-team files hold one row
+ * per practice or game and nothing for a team that has none, so a league that has applied no
+ * schedule yet (a demo visitor's first visit, a season just formed) used to download a file
+ * of headers. Nothing is faked: the page says what is missing and where to get it.
+ */
+const NOTHING_SCHEDULED_TEXT =
+  'Nothing to export yet: no practices or games have been applied. Generate and apply a schedule on Practices (and on Games), then come back here.';
+
+/**
  * The output panel, and what it refuses to generate from data it could not
  * read.
  *
@@ -531,6 +540,9 @@ export default function OutputGenerationPanel({
   const emailsBlockedBy = unreadableSources(sourceErrors, sourceLoading, EMAIL_SOURCES);
   const csvBlocked = csvBlockedBy.length > 0;
   const emailsBlocked = emailsBlockedBy.length > 0;
+  // Every source read cleanly (`csvBlocked` is false) and none holds a practice or a game.
+  const nothingScheduled =
+    !csvBlocked && (practiceAssignments?.length ?? 0) === 0 && (gameAssignments?.length ?? 0) === 0;
   // "Not read yet" and "could not be read" are different sentences, and
   // telling an operator a read failed while it is merely slow is the same
   // class of false statement this gate exists to stop.
@@ -608,6 +620,13 @@ export default function OutputGenerationPanel({
 
   const handleGenerate = () => {
     if (csvBlocked) return;
+    // The guard is the code path, not the attribute: a header-only file is not an export.
+    if (nothingScheduled) {
+      setGenerated(null);
+      setStatus('idle');
+      setMessage(NOTHING_SCHEDULED_TEXT);
+      return;
+    }
     // An XLSX failure from the previous files is not about the next ones.
     setXlsxError(null);
     setStatus('generating');
@@ -621,6 +640,25 @@ export default function OutputGenerationPanel({
           practiceAssignments,
           gameAssignments,
         });
+        if (
+          exportPayload.practiceAssignments.length === 0 &&
+          exportPayload.gameAssignments.length === 0
+        ) {
+          // Assignments exist but none can be written (no start or end time, or no team on
+          // the export): say which, rather than hand over a file of headers.
+          setGenerated(null);
+          clearPracticeChanges();
+          setStatus('idle');
+          setMessage(
+            [
+              'Nothing to export: none of the applied practices or games can be written to the files.',
+              untimedAssignmentsNote(exportPayload.untimed),
+            ]
+              .filter(Boolean)
+              .join(' ')
+          );
+          return;
+        }
         const exports = generateScheduleExports({
           teams: exportPayload.teams,
           practiceAssignments: exportPayload.practiceAssignments,
@@ -895,10 +933,16 @@ export default function OutputGenerationPanel({
               data-testid="generate-csvs-btn"
               onClick={handleGenerate}
               disabled={status === 'generating' || status === 'uploading'}
-              aria-disabled={csvBlocked || undefined}
-              aria-describedby={csvBlocked ? 'output-csv-blocked' : undefined}
+              aria-disabled={csvBlocked || nothingScheduled || undefined}
+              aria-describedby={
+                csvBlocked
+                  ? 'output-csv-blocked'
+                  : nothingScheduled
+                    ? 'output-csv-empty'
+                    : undefined
+              }
               className={`relative z-20 bg-bg-surface hover:bg-bg-surface-hover text-text-primary px-4 py-2 rounded-lg transition-colors${
-                csvBlocked ? ' opacity-50 cursor-not-allowed' : ''
+                csvBlocked || nothingScheduled ? ' opacity-50 cursor-not-allowed' : ''
               }`}
             >
               {status === 'generating' ? 'Generating...' : 'Generate CSVs'}
@@ -939,6 +983,16 @@ export default function OutputGenerationPanel({
               className="text-sm text-status-error m-0"
             >
               {csvReason}
+            </p>
+          )}
+
+          {nothingScheduled && (
+            <p
+              id="output-csv-empty"
+              data-testid="csv-empty-reason"
+              className="text-sm text-text-secondary m-0"
+            >
+              {NOTHING_SCHEDULED_TEXT}
             </p>
           )}
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
+import { fetchAllPages } from '../lib/pagedFetch.js';
 
 import { mapKeysToCamelCase } from '../utils/caseConverters.js';
 import { logger } from '../lib/logger.js';
@@ -25,15 +26,15 @@ export function useGameAssignments(runId) {
       setLoading(true);
       setError(null);
       try {
-        const { data, error: fetchError } = await supabase
-          .from('game_assignments')
-          .select('*')
-          .eq('run_id', runId);
-
-        if (fetchError) throw fetchError;
+        // Paged: an unranged select is cut at the server's row cap (1000), and a run of a
+        // large league holds more games than that. A page that fails throws, so a partial
+        // set is an error and never the schedule.
+        const data = await fetchAllPages(() =>
+          supabase.from('game_assignments').select('*').eq('run_id', runId)
+        );
 
         // Map snake_case to camelCase using utility
-        const mapped = (data || []).map(mapKeysToCamelCase);
+        const mapped = data.map(mapKeysToCamelCase);
 
         setAssignments(mapped);
       } catch (err) {

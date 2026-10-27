@@ -268,6 +268,10 @@ END $$;
 -- closure is not a booking, and removing a site cannot strand the statement
 -- that the site was already shut.
 --
+-- 20261102010000 added `facility_permit_scopes`, excluded too: a rollback removes only
+-- an EMPTY site (no field remains), and what it takes with it is the scope row, the
+-- link between a permit and that site; the permit, a document, stays.
+--
 -- **That edge did not exist when the arm was written.** 20260906000100 added
 -- it, and nothing noticed -- which is the whole reason this is a derivation
 -- rather than a sentence. A third table referencing `locations` fails here
@@ -285,12 +289,12 @@ BEGIN
   IF v_direct IS NULL OR array_length(v_direct, 1) IS NULL THEN
     RAISE EXCEPTION 'nothing references locations; this check is looking at nothing';
   END IF;
-  IF v_direct <> ARRAY['field_blackouts','fields'] THEN
+  IF v_direct <> ARRAY['facility_permit_scopes','field_blackouts','fields'] THEN
     RAISE EXCEPTION
       'locations is now referenced by %. The rollback''s locations arm refuses only while a FIELD remains, so decide whether the new referent is something a rollback may destroy.',
       v_direct;
   END IF;
-  RAISE NOTICE 'locations referents: %, one refused on and one excluded with a reason', v_direct;
+  RAISE NOTICE 'locations referents: %, one refused on and two excluded with a reason', v_direct;
 END $$;
 
 -- ---------------------------------------------------------------------------

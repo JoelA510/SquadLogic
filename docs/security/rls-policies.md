@@ -185,6 +185,7 @@ organization named by the first folder of its path (`<organization_id>/...`):
 | ------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `raw-imports` | Members read and upload under their organization's folder; no delete                                                    | `20260421001043`, `20260602010000` |
 | `exports`     | Members read (`is_org_member`); admins upload and remove (`is_org_admin`), under their organization's folder; no update | `20261017000000`                   |
+| `facility-permits` | Admins read, upload and remove, under `<organization>/<permit>/<uuid>.<ext>` for a permit that exists there (no upload for a demo organization); a coach reads only the live file of a permit for a field their team plays or practises on; no update | `20261102010000` |
 
 Only an administrator uploads or removes exports, as only an administrator reaches the Exports page
 and records the publication baseline beside the upload. The admin DELETE makes a publish all or
@@ -195,6 +196,14 @@ not a UUID. The Exports page's "Upload to Storage" builds its paths with `export
 (`packages/core/src/storageSupabase.js`) and uploads without upsert, since there is no UPDATE
 policy. Retention, if wanted, runs as the service role. pgTAP:
 `supabase/tests/storage_exports_bucket.sql`.
+
+`facility-permits` (private; 10 MiB; PDF, JPEG, PNG) holds permit documents. The coach SELECT asks
+`coach_reads_facility_permit_file`, which is true only for an object that is some permit's current
+`file_path` and whose permit concerns a field where a team the caller currently coaches has a game or
+practice, so a replaced or orphaned file is no coach's to read. The two tables (`facility_permits`,
+`facility_permit_scopes`) have one SELECT policy each and no write policy; the five permit RPCs write.
+Files open by a signed link made on tap (120 s). pgTAP: `supabase/tests/facility_permits.sql` and
+`supabase/tests/storage_facility_permits_bucket.sql`.
 
 ## Edge Function Security
 

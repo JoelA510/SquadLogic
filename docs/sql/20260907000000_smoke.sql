@@ -137,6 +137,7 @@ DECLARE
   -- eight; the walk below returned twelve and failed the run, which is what
   -- it exists for.
   v_declared text[] := ARRAY[
+    'facility_permit_scopes',
     'field_availability_profile_formats','field_availability_profiles',
     'field_availability_scenario_members','field_blackout_windows',
     'field_blackouts','field_equipment_requirements','field_subunits',
@@ -174,7 +175,13 @@ DECLARE
     -- practice_exceptions contract). A field delete cannot destroy an
     -- override -- it fails with 23503 -- and every override points at a
     -- practice_slots row, which is read as a booking above.
-    'practice_lighting_overrides'
+    'practice_lighting_overrides',
+    -- 20261102010000 (Phase C1): facility_permit_scopes joins by its field_id
+    -- (ON DELETE CASCADE). A scope is the link between a permit and the ground, not a
+    -- use of it: the permit, a document that outlives the ground, stays, so the
+    -- delete lists the permits it unlinks apart from the bookings (kind 'permit',
+    -- disposition 'unlinked') and field_bookings never reads the table.
+    'facility_permit_scopes'
   ];
   v_def text;
   t text;
@@ -250,14 +257,17 @@ BEGIN
      AND t2.table_type = 'BASE TABLE'
    WHERE c.table_schema = 'public' AND c.column_name = 'field_id';
 
-  IF v_actual IS NULL OR array_length(v_actual, 1) <> 7 THEN
-    RAISE EXCEPTION 'expected 7 tables carrying a field_id, found %', v_actual;
+  -- Eight as of 20261102010000: `facility_permit_scopes` carries a field_id too. It is excluded
+  -- from the bookings in section 4 (a scope is a link to a permit that stays), and every other
+  -- table of the family is as it was.
+  IF v_actual IS NULL OR array_length(v_actual, 1) <> 8 THEN
+    RAISE EXCEPTION 'expected 8 tables carrying a field_id, found %', v_actual;
   END IF;
-  IF v_actual <> ARRAY['field_availability_profiles','field_blackouts','field_subunits',
+  IF v_actual <> ARRAY['facility_permit_scopes','field_availability_profiles','field_blackouts','field_subunits',
                        'game_assignments','game_slots','practice_assignments','practice_slots'] THEN
     RAISE EXCEPTION 'the field_id family changed: %', v_actual;
   END IF;
-  RAISE NOTICE 'field_id family: 7 tables, a subset of the 14-table cascade closure';
+  RAISE NOTICE 'field_id family: 8 tables, a subset of the 15-table cascade closure';
 END $$;
 
 -- ---------------------------------------------------------------------------

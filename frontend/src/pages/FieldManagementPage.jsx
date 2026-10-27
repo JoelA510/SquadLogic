@@ -1,9 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Button from '../components/ui/Button.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import Toggle from '../components/ui/Toggle.jsx';
 import { MapPin, Plus, Edit2, Trash2, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
+import { useFacilityPermits } from '../hooks/useFacilityPermits.js';
+import FieldPermitsSection from '../components/setup/FieldPermitsSection.jsx';
+import FieldPermitStatus from '../components/setup/FieldPermitStatus.jsx';
+import { permitFieldIds, permitWarnings } from '@squadlogic/core/facility/permits.js';
 import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
 import SlotReservations from '../components/setup/SlotReservations.jsx';
 import PracticeRepairLauncher from '../components/scheduling/PracticeRepairLauncher.jsx';
@@ -67,6 +71,21 @@ export default function FieldManagementPage() {
     reservationsAvailable,
     setSlotDivision,
   } = useFields();
+  // Permits (Phase C2): a record and a file per venue or field, with warnings. A permit blocks
+  // nothing; nothing below depends on this read succeeding.
+  const permitState = useFacilityPermits();
+  const permitWarningSet = useMemo(
+    () =>
+      permitState.today
+        ? permitWarnings({
+            permits: permitState.permits,
+            today: permitState.today,
+            locations,
+            fields,
+          })
+        : null,
+    [permitState.permits, permitState.today, locations, fields]
+  );
   const { can } = usePermission();
   // The route is already admin-only; this is the same gate, held again at the
   // field so the coordinates form never renders for a caller the RPC refuses.
@@ -230,7 +249,11 @@ export default function FieldManagementPage() {
       //
       // `window.confirm`/`alert` match what the rest of this page already
       // uses. The proper consequence preview is 8.4 PR 3's surface.
-      const affected = attempt.affected ?? [];
+      const allAffected = /** @type {any[]} */ (attempt.affected ?? []);
+      // 20261102010000: the permits scoped to the field are listed beside the bookings, as
+      // 'unlinked': they stay, and no longer cover this field. They are not bookings.
+      const permitRows = allAffected.filter((row) => row.kind === 'permit');
+      const affected = allAffected.filter((row) => row.kind !== 'permit');
       const byOutcome = affected.reduce((acc, row) => {
         acc[row.disposition] = (acc[row.disposition] || 0) + 1;
         return acc;
@@ -243,17 +266,30 @@ export default function FieldManagementPage() {
       // database is not going to deliver.
       const destroyed = byOutcome.deleted ?? 0;
       const unassigned = byOutcome.unassigned ?? 0;
+      const permitNote =
+        permitRows.length > 0
+          ? `${permitRows.length} permit(s) cover it (${permitRows
+              .map((row) => row.issuer)
+              .join(', ')}). They stay on record but no longer cover this field.\n\n`
+          : '';
+      const bookingCount = (attempt.affected_count ?? allAffected.length) - permitRows.length;
       const proceed = window.confirm(
-        `${field.name} has ${attempt.affected_count ?? affected.length} booking(s).\n` +
-          `Deleting it permanently removes ${destroyed} of them` +
-          (unassigned > 0 ? ` and leaves ${unassigned} without a venue` : '') +
-          '.\n\nDelete anyway?'
+        (bookingCount > 0 || permitRows.length === 0
+          ? `${field.name} has ${bookingCount} booking(s).\n` +
+            `Deleting it permanently removes ${destroyed} of them` +
+            (unassigned > 0 ? ` and leaves ${unassigned} without a venue` : '') +
+            '.\n\n'
+          : `${field.name} has no bookings.\n`) +
+          permitNote +
+          'Delete anyway?'
       );
       if (!proceed) return;
 
       const confirmed = await deleteField(field.id, { confirm: true });
       if (!confirmed?.deleted) {
         alert('Failed to delete field: the request was refused.');
+      } else {
+        permitState.refresh();
       }
     } catch (err) {
       logger.error('Delete failed', err);
@@ -316,6 +352,25 @@ export default function FieldManagementPage() {
   const getLocationName = (locId) => {
     const loc = locations.find((l) => l.id === locId);
     return loc ? loc.name : 'Unknown Location';
+  };
+
+  // What each field's card says about its permit (only once the organization's day is known).
+  const withoutPermit = new Set((permitWarningSet?.fieldsWithout ?? []).map((f) => f.id));
+  const permitInfoFor = (field) => {
+    if (!permitState.today) return null;
+    const covering = permitState.permits.filter((permit) =>
+      permitFieldIds(permit, fields).has(String(field.id))
+    );
+    const current = covering
+      .filter(
+        (permit) => permit.file && (permit.status === 'valid' || permit.status === 'expiring')
+      )
+      .sort((a, b) => (a.valid_to < b.valid_to ? 1 : -1))[0];
+    return {
+      needsPermit: withoutPermit.has(String(field.id)),
+      current: current ?? null,
+      coveringCount: covering.length,
+    };
   };
 
   if (loading) {
@@ -567,6 +622,13 @@ export default function FieldManagementPage() {
         )}
       </section>
 
+      <FieldPermitsSection
+        permitState={permitState}
+        warnings={permitWarningSet}
+        locations={locations}
+        fields={fields}
+      />
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {fields.map((field) => (
           <div
@@ -640,6 +702,18 @@ export default function FieldManagementPage() {
               {getLocationName(field.location_id)}
             </div>
             <h2 className="text-xl font-bold text-text-primary mb-1">{field.name}</h2>
+
+            {(() => {
+              const info = permitInfoFor(field);
+              return info ? (
+                <FieldPermitStatus
+                  fieldId={String(field.id)}
+                  needsPermit={info.needsPermit}
+                  current={info.current}
+                  coveringCount={info.coveringCount}
+                />
+              ) : null;
+            })()}
 
             <div className="flex flex-wrap gap-2 text-sm text-text-secondary mt-2 mb-4">
               <span className="px-2 py-0.5 bg-bg-surface rounded-full border border-border-subtle">

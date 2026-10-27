@@ -1,10 +1,26 @@
 # Phase C: field and venue permits
 
-Status: **draft for owner approval** (AGENTS.md rule 14: persistence, authorization, a new Storage
-bucket). Drafted 2026-10-22 against `origin/main` at `6a22d29`. The roadmap orders C after B, and
-B's plan (`2026-10-22-phase-b-teaming.md`) ships in the same PR; building C waits for B unless the owner reorders. Owner's words:
+Status: **C1 and C2 built (one PR; see "As built (C1)" and "As built (C2)"); C3 not started.**
+Drafted 2026-10-22 against `origin/main` at `6a22d29`; re-verified 2026-10-27 against `c74d7d3`
+(see "Step 0 corrections"). The roadmap orders C after B, which has shipped. Owner's words:
 "managing fields, including storing permits so a coach can produce one when asked". Ships as three
-PRs (C1 database, C2 admin, C3 coach), each reviewed once before it opens.
+PRs (C1 database, C2 admin, C3 coach), each reviewed once before it opens; C1 and C2 went together.
+
+- [x] C1 (see "As built (C1)")
+- [x] C2 (see "As built (C2)")
+- [ ] C3
+
+**Owner rules for this phase (2026-10-26), answered.**
+
+- **Permits never block anything.** No import, scheduling run, publish or export is refused or gated
+  for a missing, expiring or expired permit. Held by `tests/permitsBlockNothing.test.js` (what can
+  read a permit, in the frontend, the core package and the Edge Functions) and by an assertion in
+  `supabase/tests/facility_permits.sql` (which database functions can).
+- **Warn when a field has no permit.** A field (or its venue) with no current permit that has a file
+  shows a warning on the admin's Fields page, in the field's card, and as a count on the admin home,
+  beside the expiring (30 days) and expired warnings. "Current" is a permit with a file whose status
+  is `valid` or `expiring`; a field that is retired, inactive or at a retired venue needs none.
+- Recommendations 2-6 below are taken as written and listed under "Calls for the owner" in the PR.
 
 ## What exists today (_statically reviewed_ unless marked)
 
@@ -173,7 +189,10 @@ the bucket. **Unchanged:** `privacy_server_reads.feature` (the coach directory i
 
 ## Owner decisions (recommendations)
 
-1. **Blocking (shapes C1's policies): which coaches see permits.** Recommend every current coach of
+1. **Answered by admin-focus R6 (2026-10-25), built in C1: which coaches see permits.** A coach
+   reads a permit only for a field where a team they currently coach has a game or a practice (or
+   for that field's venue). The original recommendation, below, is superseded.
+   _Original:_ **Blocking (shapes C1's policies): which coaches see permits.** Recommend every current coach of
    the organization sees every permit (the owner's "visible to admins and coaches"). Alternative:
    only permits for venues the coach's teams are booked at, which needs a bookings join in the
    policy and breaks for a coach sent to an unscheduled field.
@@ -199,6 +218,48 @@ the bucket. **Unchanged:** `privacy_server_reads.feature` (the coach directory i
 6. Offline: recommend no offline app in Phase C; "Download" saves the file to the phone, and the
    page shows number, issuer and dates as text.
 
+## Step 0 corrections (against main c74d7d3, 2026-10-27)
+
+Re-verified before any code; none needed a design call. Each is recorded here and the section it
+corrects is left as written.
+
+- **Versions.** Main's latest migration is `20261101020000` (E2); C1 is `20261102010000`. Phase B,
+  the admin-focus R0-R7, the demo D2-D5 and E1-E2 have all merged.
+- **Facilities are organization-level.** `locations` and `fields` carry no season column, so a
+  permit is an organization's, not a season's. "The season" in the R6 narrowing is the team's own:
+  `coached_team_ids_of` already judges a coach's assignment on the team's season date. A completed
+  season's team a coach still holds (an open-ended assignment) still counts; closing those is E3's.
+- **One active season (E1).** The plan's `org_local_today` tie-break among several active seasons
+  and its two-active-seasons pgTAP case are not needed: a partial unique index allows one. The helper
+  still orders by `created_at`, `id`, harmlessly.
+- **The `exports` pattern holds, with one addition: the demo fence.** D3 (`20261030010000`) altered
+  the `exports` and `raw-imports` insert policies to add `AND NOT is_demo_org(folder)`, because the
+  demo purge cannot clean a storage object. The `facility-permits` insert policy carries the same
+  fence, and `supabase/tests/storage_facility_permits_bucket.sql` holds a demo admin's upload refused.
+  `supabase/tests/demo_sessions.sql`'s two lists of client-callable functions name the new RPCs and
+  the three policy helpers.
+- **`admin_delete_field`'s latest body is `20260909000000:544`** (md5 `51c2d435...`), as the plan
+  said; nothing has replaced or altered it since, and the new migration refuses to run on any other.
+  The md5 ignores carriage returns, as #668 made `20261101010000`'s do: production has stored a
+  CRLF body before.
+- **Two older smokes encode closure lists and had to be told.** `20260907000000_smoke.sql` derives
+  the cascade closure from `fields` (14 tables, now 15) and the `field_id` family (7 tables, now 8),
+  and `20260909000000_smoke.sql` the tables referencing `locations`: `facility_permit_scopes` joins
+  each, declared **not a booking** (a scope is the link to a permit that stays), with the reason.
+  A field-import rollback that removes an empty venue also removes that venue's scope rows; the
+  permit stays.
+- **The harness's storage stand-in** (`scripts/dbharness/prelude.sql`) returns every segment from
+  `storage.foldername`, Supabase's only the folders; the policies match the whole name against the
+  full `<org>/<permit>/<uuid>.<ext>` shape and read only folder 1 and 2 inside a CASE that tested it.
+- **`get_facility_permits` returns an object** `{today, lead_days, permits}`, not an array: the
+  client needs the organization's own day to judge a field's coverage and does not guess it.
+- **The pgTAP "parent" persona** is the coach-role member with no assignment (R3 removed the role);
+  a "redirected from `/permits`" case waits for C3 and R6's permission set.
+- **Investigation notes closed.** `reconcile_prod_rls_drift()` is a one-off migration function, not
+  run against later policies. `get_settings_audit_log` returns every `settings.updated` row, so
+  `facility.permit` rows show on the Settings audit page without a filter change (statically
+  reviewed). The mock had no `storage` member; C2 adds one.
+
 ## Investigation notes (unverified)
 
 - Whether hosted Supabase's Storage enforces `allowed_mime_types` from the declared Content-Type
@@ -211,3 +272,89 @@ the bucket. **Unchanged:** `privacy_server_reads.feature` (the coach directory i
   remove permit files (an org cascade leaves objects behind; no in-app path deletes an org).
 - _Executed_: `npx vitest run tests/storageSupabase.test.js tests/mockReadPolicies.test.js` (31
   passed) on this checkout, as a baseline for the modules C2 extends.
+
+## As built (C1)
+
+- **Migration `20261102010000_facility_permits`** (revert and smoke under `docs/sql/`): `facility_permits`
+  (id, organization_id, issuer, `permit_number` text, inclusive `valid_from`/`valid_to`, notes, the
+  four file columns all-or-none with the path inside `<org>/<permit>/`, a 10 MiB and PDF/JPEG/PNG
+  CHECK, `created_by` without a foreign key to `auth.users`) and `facility_permit_scopes` (a permit's
+  venue or field, one target per row, unique per permit, composite reference to the permit's
+  organization). Both: row level security, one SELECT policy, no write policy or grant, nothing for
+  anon.
+- **The coach read, narrowed (owner decision 1 / R6).** Internal `coach_field_ids_of(org, user)` = the
+  fields of the games (through the slot) and practices (through the practice slot) of the teams the
+  user currently coaches. Three policy helpers `authenticated` must execute (a policy runs with the
+  caller's privileges) ask about the caller only: `coach_covers_permit_scope`,
+  `coach_reads_facility_permit`, `coach_reads_facility_permit_file`. A coach reads a permit if some
+  scope names one of those fields or their venue, sees only those scopes, and reads in storage only the
+  permit's live `file_path`. `get_facility_permits` gives an admin or staff member everything, a
+  current coach the narrowed set (an empty list, not an error, when their team is scheduled
+  elsewhere), anyone else 42501.
+- **Five definer RPCs**, `TimeZone=UTC`, one audit row each (`settings.updated` / `facility_permit` /
+  `setting: 'facility.permit'`, operations `created`, `updated`, `file_attached`, `file_replaced`,
+  `deleted`): create, update (replaces the scope set), set file (the object must exist in the bucket
+  under this permit's folder with an allowed type and size, read from `storage.objects.metadata`;
+  returns the previous path; refuses the object that is already the file, because the caller deletes
+  the previous one), delete (returns the file path), read. Status is one SQL function
+  (`facility_permit_status`); `org_local_today` is the active season's timezone, UTC when unset.
+- **Bucket `facility-permits`**: private, 10 MiB, PDF/JPEG/PNG, three policies: admin INSERT (full
+  path shape, the permit exists in that organization, not a demo), admin DELETE, SELECT for an admin
+  or the coach of a scheduled field's live file. No UPDATE. The migration touches `storage.buckets`
+  and `storage.objects` policies exactly as `20261017000000` does and no `auth` object.
+- **`admin_delete_field`** rebuilt behind an md5 guard: permits scoped directly to the field join
+  `affected` (`kind: 'permit'`, `disposition: 'unlinked'`); `reason` is `bookings_exist` while a booking
+  is on the ground and `permits_linked` when only permits are. A venue's permit is not listed.
+- **Verification (executed here):** `supabase/tests/facility_permits.sql` (100) and
+  `storage_facility_permits_bucket.sql` (28) under **real pgTAP 1.3.3** loaded into a scratch cluster
+  built by the harness's prelude and every migration; `demo_sessions.sql`, `definer_function_grants.sql`,
+  `field_delete_booking_guard.sql`, `programs.sql`, `one_active_season.sql`, `staff_is_admin.sql`,
+  `rls_policy_matrix.sql` and `facility_admin_rpcs.sql` unchanged but for the lists named above. The
+  harness (smoke, revert with a seed that counts 3 permits, 2 files, 4 scopes and leaves a non-empty
+  bucket, catalogue snapshot). Plants M52: "a coach reads a permit for any field once they coach a
+  scheduled team", "a coach can read a replaced file", "anyone can create a permit", each caught by the
+  smoke and by pgTAP (the full `prove.sh` sweep is a multi-hour run and was not run; the anchors
+  pre-flight and the three plants applied by hand were).
+- **Untested against production:** `admin_set_facility_permit_file` reads `storage.objects` from a
+  definer owned by `postgres`; that role needs SELECT on it (Supabase grants it). The first upload in
+  production is the proof; C3's real-backend scenario is the place to make it a test.
+
+## As built (C2)
+
+- **Core** `packages/core/src/facility/permits.js` (registered in `facility/index.js`):
+  `PermitInputSchema`, `PermitFileSchema` (type allowlist, 10 MiB, magic bytes `%PDF-`, `FFD8FF`,
+  `89504E47`), `permitObjectPath`, `permitStatus` (the SQL's twin on the organization's day),
+  `fieldsWithoutPermit` and `permitWarnings` (enumerated from the fields, not the permits).
+- **Hook** `useFacilityPermits` (read, create, update, replace file, delete, signed URL) and
+  `usePermitWarnings` (the admin home). Upload order: create the row, upload, attach; a failed attach
+  removes the upload; after a replace or delete commits the old object is removed and a failure is
+  logged with its path. A file that fails after the permit saved says so and keeps the permit.
+- **UI.** A Permits section on `/fields` (warnings, list, add/edit dialog with a venue/field picker,
+  replace/add file, open and download by a 120 s signed link made on tap, delete with a confirmation
+  that returns focus to Add permit), a permit line on each field card ("No current permit" or "Permit:
+  Expires in 12 days", text beside an icon), the delete-field confirmation naming the permits it
+  unlinks, and three lines on the admin home's Needs attention. Errors are `role="alert"`; a file is
+  checked the moment it is chosen and Save waits for the check.
+- **Mock twin** `frontend/src/lib/mockFacilityPermits.js`: the five RPCs with the SQL's refusals and
+  audit rows, the two tables' read policies (in `RESTRICTED_TABLES`), a `storage` member for the bucket
+  (policies, 10 MiB, types, no upsert over an object, demo fence), and the permit rows in the mock's
+  `admin_delete_field`. Its header lists what is not mirrored (bytes live in memory, signed URLs are
+  `data:` URLs that never expire).
+- **Tests:** `tests/facilityPermits.test.js`, `mockFacilityPermits.test.js`,
+  `FieldManagementPermits.test.jsx`, `permitText.test.jsx`, `permitsBlockNothing.test.js`; E2E
+  `tests/e2e/features/field_permits.feature` (4 scenarios). `FieldManagementPage.test.jsx` and
+  `facility_management.feature` pass unedited.
+- **Not built (C3):** `VIEW_FIELD_PERMITS`, `/permits`, the coach home card, the real-backend scenario.
+
+### Review round (Codex, #669)
+
+- **An attach whose answer is lost** no longer deletes a live object. A refusal that carries a
+  Postgres or PostgREST `code` is confirmed and the upload is removed; a transport failure is
+  uncertain, so the permit is re-read and the upload is deleted only if its stored `file_path`
+  is not that upload. If the re-read also fails the upload is kept and the admin is told.
+- **A list read for an organization that is no longer active** is dropped (a generation counter and the
+  active org), and the list shown is always the active organization's.
+- **An older file check** that resolves last no longer replaces the newest selection or clears
+  `checking` (a selection counter in the dialog).
+- **Inline styles** in the permit dialog and section are token-based classes in `styles/page.css`.
+- Tests: `tests/facilityPermitsRaces.test.jsx` (8, each fails without its fix).

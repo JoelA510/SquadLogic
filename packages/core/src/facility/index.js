@@ -118,3 +118,17 @@ export {
 } from './adapters/season2026PracticeGeometry.js';
 
 export { checkFacilityLifecycle, isDatedNode, isLiveOn, retiredOn } from './lifecycle.js';
+
+export {
+  PERMIT_FILE_TYPES,
+  PERMIT_LEAD_DAYS,
+  PERMIT_MAGIC_BYTES,
+  PERMIT_MAX_FILE_BYTES,
+  PermitFileSchema,
+  PermitInputSchema,
+  fieldsWithoutPermit,
+  permitFieldIds,
+  permitObjectPath,
+  permitStatus,
+  permitWarnings,
+} from './permits.js';

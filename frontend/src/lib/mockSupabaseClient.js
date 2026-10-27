@@ -25,6 +25,11 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
+import {
+  createMockStorage,
+  handleFacilityPermitRpc,
+  permitsUnlinkedBy,
+} from './mockFacilityPermits.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { createAccessHelpers, handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
@@ -2044,6 +2049,12 @@ const MOCK_PASSWORD = 'test-password-123';
 
 /** @type {any} */
 export const mockSupabase = {
+  // The facility-permits bucket (migration 20261102010000); mockFacilityPermits.js says what it mirrors.
+  storage: createMockStorage({
+    getDB,
+    saveDB,
+    currentUserId: () => mockSessionUserId() ?? 'mock-admin-id',
+  }),
   auth: {
     signInWithPassword: async ({ email, password }) => {
       if (password === MOCK_PASSWORD) {
@@ -2535,6 +2546,16 @@ export const mockSupabase = {
       if (programs) {
         if (!programs.error) saveDB(db);
         return programs;
+      }
+      // Field and venue permits (migration 20261102010000): the five RPCs, refusals included.
+      const permits = handleFacilityPermitRpc(db, name, params, {
+        currentUserId,
+        isOrgAdmin,
+        markDeleted: markMockDeleted,
+      });
+      if (permits) {
+        if (!permits.error) saveDB(db);
+        return permits;
       }
       // Coach practice preferences (migration 20260927000000): the three RPCs,
       // refusals included. Behind the DEV/mock guard like the other late arms,
@@ -4149,6 +4170,11 @@ export const mockSupabase = {
           }
           return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };
         });
+        // 20261102010000: the permits scoped to this field are listed too, as 'unlinked' (the scope
+        // goes with the field; the permit, a document that outlives the ground, stays).
+        const bookingCount = affected.length;
+        affected.push(...permitsUnlinkedBy(db, orgId, p.p_field_id));
+        const refusalReason = bookingCount > 0 ? 'bookings_exist' : 'permits_linked';
 
         // **The refusal, in the same shape admin_retire_field uses**: it
         // RETURNS rather than raising, and it records the decision it refused.
@@ -4158,7 +4184,7 @@ export const mockSupabase = {
           audit('field', field.id, 'deleted', {
             operation: 'admin_delete_field',
             phase: 'refused',
-            reason: 'bookings_exist',
+            reason: refusalReason,
             affected_count: affected.length,
             affected: fieldBookingsDigest(affected),
             previous: { ...field },
@@ -4167,7 +4193,7 @@ export const mockSupabase = {
           return {
             data: {
               deleted: false,
-              reason: 'bookings_exist',
+              reason: refusalReason,
               affected_count: affected.length,
               affected,
             },
@@ -4242,6 +4268,8 @@ export const mockSupabase = {
 
         destroy('field_subunits', onField('field_subunits'));
         destroy('field_blackouts', onField('field_blackouts'));
+        // The permit scopes naming the field cascade (the permits themselves stay).
+        destroy('facility_permit_scopes', onField('facility_permit_scopes'));
         destroy('games', reported('games'));
         destroy('game_assignments', reported('game_assignments'));
         destroy('practice_assignments', reported('practice_assignments'));

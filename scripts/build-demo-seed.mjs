@@ -67,7 +67,7 @@ const BANDS = {
 };
 
 /** @param {string} file @param {string} dir */
-function load(file, dir) {
+export function load(file, dir) {
   const text = readFileSync(path.join(dir, file), 'utf8');
   const { data, errors } = Papa.parse(text, { header: true, skipEmptyLines: true });
   // Duplicate headers (the coach export repeats two) are reported, not fatal; only columns that
@@ -82,7 +82,7 @@ function load(file, dir) {
  * character is a defect (and `tests/sourceHygiene.test.js` forbids raw control characters).
  * @param {string | null | undefined} value
  */
-function lit(value) {
+export function lit(value) {
   if (value === null || value === undefined || value === '') return 'NULL';
   // eslint-disable-next-line no-control-regex
   if (/[\\\u0000-\u001f]/.test(value)) throw new Error(`unsafe character in "${value}"`);
@@ -104,7 +104,7 @@ function insert(table, columns, rows) {
 }
 
 /** @param {string} name e.g. U05B01, U4A */
-function divisionOfTeam(name) {
+export function divisionOfTeam(name) {
   if (name.startsWith('U4')) return 'U4';
   const age = Number(name.slice(1, 3));
   return `U${age}${name[3]}`;

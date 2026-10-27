@@ -1,7 +1,7 @@
 # Phase D: scheduling (home/away, practices per division, preferences, big leagues, TIME TBD)
 
-Kind: FEATURE · Drawn up: 2026-10-27 · Owner: the product owner · Status: **PROPOSED** (AGENTS.md
-rule 14: the solver, the domain model and persistence; waits for the owner's agreement).
+Kind: FEATURE · Drawn up: 2026-10-27 · Owner: the product owner · Status: **APPROVED by the owner 2026-10-27** (AGENTS.md
+rule 14: the solver, the domain model and persistence); decisions as recorded at the end.
 
 Every claim about the code is _statically reviewed_ at `origin/main` `ff2eb6a` (#673) unless marked
 _executed_. Production figures are _executed (read-only)_, 2026-10-27, catalogue and counts only,
@@ -413,6 +413,24 @@ Each PR runs the season fixture suite and the full Definition of Done.
     reading run results; E inside PR B if its review stays one sitting (recommended), else alone.
 12. **Carried:** home/away 1-3 (no rebalance of saved sides; warn at |home - away| > 1; a mirrored
     second leg later); preferences 1-3. New: a downloadable preference CSV template (recommended).
+
+## Owner answers (2026-10-27)
+
+- **1-4, 8, 10, 12:** as recommended (9, the server checks, read as recommended too; see 11).
+- **5, U4:** keep the demo's U4 Saturday sessions as **practices** (one weekly 30-minute session
+  per cohort, one cohort at a time, at least 15 minutes apart), so the field shows as in use and is
+  not offered to games. U4's division settings: 1 practice a week, 30 minutes, on its reserved
+  Saturday slots. Owner: "it is truly a once weekly practice in the example program... It is an
+  odd case."
+- **6:** confirmed: U5-U8 start scheduled, U9 and older left for the visitor's run.
+- **7, demo grid and sunset:** practices fit before sunset; only **one lit field** in the demo may
+  be used after sunset. **Past sunset is flagged, never blocked** (owner: "Flag, but don't block,
+  anything that goes past sunset"): where the daylight pass refuses a placement today, it warns
+  instead, with the reason shown, for every league, not only the demo.
+- **11, TIME TBD:** listed **in the same schedule**, a row with its date and time TBD, unless that
+  really breaks the schedule tables; only then a separate TBD table. Owner: TBD rows should be rare
+  outside SuperRec before its games are scheduled. PR B's builder decides with evidence and says
+  which in the PR.
 
 ## Plan-change output
 

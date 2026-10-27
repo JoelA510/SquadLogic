@@ -1305,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -3369,6 +3369,30 @@ PROBE
       else
         echo "FAIL revert ${id}: the permits revert did not restore every replaced object and drop every added one"
         dump 10 $SCRATCH/harness_permits; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261103020000" ]; then
+      # Nothing to lose: the views derive from tables. The two views must be back, each security_invoker,
+      # with the columns a fresh build had, and the four other views untouched. The column lists are the
+      # catalogue snapshot's own entries (supabase/catalog-snapshot.json at 20261102010000).
+      if grep -q 'this revert creates 2 view(s)' $SCRATCH/harness_rev &&
+         psql_cmd "SELECT 'VIEWS-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'v'
+                      AND relname IN ('view_org_metrics', 'view_league_standings', 'field_closures', 'import_efficiency_metrics')) <> 4 THEN 'others-lost'
+               WHEN (SELECT string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ' ORDER BY a.attnum)
+                       FROM pg_attribute a WHERE a.attrelid = 'public.coach_team_map'::regclass AND a.attnum > 0 AND NOT a.attisdropped)
+                    <> 'coach_user_id uuid, team_id uuid' THEN 'coach_team_map-wrong'
+               WHEN (SELECT string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ' ORDER BY a.attnum)
+                       FROM pg_attribute a WHERE a.attrelid = 'public.view_facility_usage'::regclass AND a.attnum > 0 AND NOT a.attisdropped)
+                    <> 'field_id uuid, organization_id uuid, field_name text, practice_count bigint, game_count bigint, total_events bigint' THEN 'view_facility_usage-wrong'
+               WHEN (SELECT count(*) FROM pg_class WHERE oid IN ('public.coach_team_map'::regclass, 'public.view_facility_usage'::regclass)
+                      AND (reloptions::text LIKE '%security_invoker=true%' OR reloptions::text LIKE '%security_invoker=on%')) <> 2 THEN 'not-invoker'
+               ELSE 'restored' END;" \
+           >$SCRATCH/harness_views 2>&1 && grep -q 'VIEWS-VERDICT:restored' $SCRATCH/harness_views; then
+        echo "  revert ${id}: the views revert recreates coach_team_map and view_facility_usage with a fresh build's columns, both security_invoker, and leaves the four views the app reads"
+      else
+        echo "FAIL revert ${id}: the views revert did not recreate both views as a fresh build had them"
+        dump 10 $SCRATCH/harness_views; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

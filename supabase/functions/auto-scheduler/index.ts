@@ -87,6 +87,7 @@ import {
   loadSlotReservations,
 } from '../_shared/engines/practice-reservations.ts';
 import {
+  CPU_CAP_MS,
   runPracticeOptimizer,
   SLOT_DATING_UNREADABLE,
   undatableSlotIds,
@@ -120,6 +121,10 @@ import { edgeLogger, logFailure, logRequest, withFailureLogging } from '../_shar
 // ---------------------------------------------------------------------------
 
 const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
+  // The request's start, for the compute cap (`CPU_CAP_MS`): the platform's
+  // 2 s of CPU is per request, so the cap runs from here, not from the search.
+  const requestStartedAt = Date.now();
+
   // 1. CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -558,6 +563,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       placeableTeams: classification.placeable.length,
       maxIterations: input.config.maxIterations,
       timeBudgetMs: input.config.timeBudgetMs,
+      cpuCapMs: CPU_CAP_MS,
     });
     await recordAuditNow(auditClient, logCtx, {
       organizationId: input.organizationId,
@@ -617,6 +623,9 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // M4.8: the same dating, and the same today, as the daylight pass.
       dating: { liveFrom, slots: daylightSlots },
       config: input.config,
+      // The server's compute cap: when it is the smaller budget the search
+      // stops with `cpu-cap` and the run completes with its best schedule.
+      requestStartedAt,
       onProgress: (progress) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
         // and swallows its own failures; the `.catch` that used to trail this

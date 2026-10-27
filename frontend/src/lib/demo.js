@@ -15,14 +15,14 @@ import { supabase } from './supabaseClient.js';
 export const DEMO_ANNOUNCE_AT_MS = Object.freeze([5 * 60_000, 60_000]);
 
 /**
- * The auto-scheduler's search budget. A run's CPU is its iterations, not its time budget (the time
- * budget only caps wall clock), and the Edge Function has a 2 s CPU ceiling per request
- * (`auto-scheduler-solver.ts`, YIELD_EVERY). Measured on the seeded demo league (128 teams, 196
- * slots): 1000 iterations cost 2.06-2.41 s of CPU, over the ceiling; 100 iterations cost about
- * 0.45 s, and the greedy seed alone already places all 128 teams. So a demo asks for 150
- * iterations and the schema's smallest time budget. Real leagues keep 1000 and 8 s: a league of
- * about 128 teams exceeds the CPU limit at 1000 iterations too, and that is an owner call, not
- * changed here.
+ * The auto-scheduler's search budget. A run's CPU is its iterations, and a request to the Edge
+ * Function gets 2 s of CPU in all (`CPU_CAP_MS` in `auto-scheduler-solver.ts` stops a search at
+ * 1.5 s and returns its best schedule). Measured on the seeded demo league (128 teams, 196 slots):
+ * 1000 iterations cost 2.06-2.41 s of CPU; 100 iterations cost about 0.45 s, and the greedy seed
+ * alone already places all 128 teams. A demo keeps asking for 150 iterations and the schema's
+ * smallest time budget: that finishes well inside the cap, so every demo run gets the same
+ * schedule and none says "stopped at the server's time limit", which a run ended by the cap
+ * would, at a point that depends on the server's speed.
  */
 const DEMO_AUTO_SCHEDULER_CONFIG = Object.freeze({
   timeBudgetMs: 1000,

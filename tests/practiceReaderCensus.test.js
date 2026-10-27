@@ -100,10 +100,6 @@ const REGISTRY = {
     class: 'series-only',
     why: "X13: a booking is judged per row by its last day; relocated targets are 11d's gap (D5)",
   },
-  'sql:view_facility_usage': {
-    class: 'series-only',
-    why: 'X11: counts rows per slot and field, makes no dates',
-  },
   'sql:practice_schedule_fingerprint': {
     class: 'series-only',
     why: 'X9: a hash of the schedule; it already covers exception ids and withdrawn_at',

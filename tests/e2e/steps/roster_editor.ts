@@ -27,6 +27,29 @@ Given('I am in a demo league of {int} players', async ({ page }, players: number
   await expect(page.getByRole('timer')).toBeVisible({ timeout: LOAD_TIMEOUT });
 });
 
+// A demo starts with its practice schedule applied (migration 20261103010000), so a league with
+// nothing applied is one whose practices were released: the rows go, and with them the practice run.
+Given("the demo league's applied practices have been released", async ({ page }) => {
+  await waitForMockClient(page);
+  const released = await page.evaluate(() => {
+    const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
+    const demo = (db.organizations ?? []).find((org) => org.demo_expires_at);
+    const before = (db.practice_assignments ?? []).filter(
+      (row) => row.organization_id === demo?.id
+    ).length;
+    db.practice_assignments = (db.practice_assignments ?? []).filter(
+      (row) => row.organization_id !== demo?.id
+    );
+    db.scheduler_runs = (db.scheduler_runs ?? []).filter(
+      (run) => !(run.organization_id === demo?.id && run.run_type === 'practice')
+    );
+    window.__saveMockDB__(db);
+    return before;
+  });
+  // Meta-assertion: the demo did start with practices, or "released" released nothing.
+  expect(released, 'practices the demo started with').toBeGreaterThan(0);
+});
+
 Then(
   'the sidebar badge for {string} reads {int}',
   async ({ page }, label: string, count: number) => {

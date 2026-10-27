@@ -787,6 +787,35 @@ describe('scoring-engine cross-arm drift: games', () => {
     expect(edgeGameProjection(edge)).toEqual(truthProjection(d1.truth));
   });
 
+  it('declared, not compared: home-away-imbalance is core-only', () => {
+    // Phase D, PR A. One team hosting all three of its games: core warns, the
+    // Edge has no home/away model in its game input and says nothing. Written
+    // down here so the difference is a known one, not a silent divergence.
+    const teams = ['A', 'B', 'C', 'D'].map((id) => ({
+      id,
+      name: id,
+      division: 'U10',
+      coachId: `c${id}`,
+    }));
+    const at = (id, away, day) => ({
+      id,
+      slotId: `slot-${id}`,
+      weekIndex: day,
+      division: 'U10',
+      fieldId: `field-${id}`,
+      homeTeamId: 'A',
+      awayTeamId: away,
+      start: `2026-10-0${day}T13:00:00Z`,
+      end: `2026-10-0${day}T14:00:00Z`,
+    });
+    const games = [at('g1', 'B', 1), at('g2', 'C', 2), at('g3', 'D', 3)];
+    const core = coreEvaluateGames({ assignments: games, teams });
+    const edge = edgeEvaluateGames({ assignments: games, teams });
+    expect(core.warnings.map((w) => w.type)).toEqual(['home-away-imbalance']);
+    expect(edge.issues).toEqual([]);
+    expect(coreGameProjection(core)).toEqual(edgeGameProjection(edge));
+  });
+
   it('declared, not compared: field-overlap is core-only (Q5)', () => {
     // Two games on one field at one time: core warns, the Edge has no field
     // model in its game input and says nothing. Written down here so the

@@ -21,6 +21,8 @@ const SEVERITY_MAP = {
   'unknown-team': 'warning',
   'unscheduled-matchups': 'warning',
   'shared-slot-imbalance': 'warning',
+  // Advisory: a team hosts or visits more than one game more than the other.
+  'home-away-imbalance': 'warning',
 };
 
 /**
@@ -35,6 +37,7 @@ const TYPE_LABELS = {
   'unknown-team': 'Unknown Team',
   'unscheduled-matchups': 'Unscheduled',
   'shared-slot-imbalance': 'Imbalance',
+  'home-away-imbalance': 'Home/Away',
 };
 
 function ConflictItem({ warning, onConflictClick }) {
@@ -79,7 +82,7 @@ ConflictItem.propTypes = {
  *
  * Mirrors the RosterManager conflict banner styling (red glow, ShieldAlert icon).
  * Separates hard conflicts (field-overlap, coach-conflict, team-double-booked) from
- * soft warnings (unscheduled-matchups, shared-slot-imbalance) with expandable sections.
+ * soft warnings (unscheduled-matchups, shared-slot-imbalance, home-away-imbalance) with expandable sections.
  */
 export default function GameConflictBanner({ warnings, onConflictClick = undefined }) {
   const [isExpanded, setIsExpanded] = useState(true);

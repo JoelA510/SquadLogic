@@ -44,15 +44,10 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
     return <LightingLoadError error={context.error} what="practice slots" />;
   }
 
-  const coachNames = new Map(
-    context.coaches
-      .filter((coach) => coach.user_id)
-      .map((coach) => [String(coach.user_id), coach.full_name])
-  );
   const requesterName = (row) =>
     String(row.requested_by) === String(userId)
       ? 'You'
-      : (coachNames.get(String(row.requested_by)) ?? 'Another user (no coach record)');
+      : (context.requesterNames.get(String(row.requested_by)) ?? 'Another user');
   const labelOf = (row) => context.slotLabels.get(String(row.practice_slot_id)) ?? 'Unknown slot';
   const pending = rows.filter((row) => row.status === 'requested');
   const approved = rows.filter((row) => row.status === 'approved');

@@ -51,7 +51,7 @@ export const PRACTICE_CHANGES_UNREAD_TEXT =
 const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * The order a schedule is shown in, on the team page and the coach home: by
+ * The order a schedule is shown in, on the team page: by
  * wall date and time, a dated TIME TBD after that day's timed events, and an
  * undated event last (a stable sort keeps those in row order). Wall dates and
  * zero-padded wall times compare as strings: a `Date` built from a dated TIME
@@ -109,9 +109,8 @@ export function useTeamPortal(teamId) {
       setTeam(teamData);
 
       // 2. Fetch Roster. Through the server-side read (20261021010000, without
-      // the guardian since 20261024010000): names and jersey number for an
-      // admin or a current coach of the team; balance fields to admins only,
-      // and no contact details (20261025010000). A caller it does not
+      // the guardian since 20261024010000): names, jersey number
+      // and balance fields for an admin, and no contact details (20261025010000). A caller it does not
       // admit gets 42501: the roster tab says so, and the rest of the page
       // (the schedule) still loads, as it reads tables every member can.
       const { data: rosterRows, error: rosterError } = await supabase.rpc('get_team_roster', {

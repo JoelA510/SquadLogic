@@ -17,13 +17,15 @@ registration platform (owner, 2026-10-22).
 | User                                  | Comes to                                                                                                                                                                                                     | Can't be assumed to                                        |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
 | League administrator (admin or staff) | Import a registration export, form teams (or keep teams already formed elsewhere), add late players, set fields and permits, schedule games and practices (coach preferences considered), publish and export | Know SQL or CSV formats, or have time; they are volunteers |
-| Coach (optional view)                 | See their own schedule, the team names and coach names in their division (no contact details), and the permits for the fields they use; export their schedule                                                | Be at a desk: they use a phone at the field                |
 | Prospective league (demo visitor)     | Try the product on a ready-made placeholder league for 30 minutes, without an account                                                                                                                        | Want to give an email address, or know how to self-host    |
 
-Players, guardians and the public are **not** users: nobody but administrators and coaches signs
-in, and there are no family or public pages. Coaches and administrators send schedules to
-families themselves (exports: CSV, XLSX, ICS), using the contacts their registration platform
-holds.
+Players, guardians, coaches and the public are **not** users: nobody but league administrators
+(admin or staff, in one organization or several) signs in, and there are no coach, family or
+public pages. Coaches are imported data that administrators manage: they anchor teams, are
+assigned to them and appear in the administrators' exports. Administrators send schedules to
+coaches and families themselves (exports: CSV, XLSX, ICS, or a team's calendar link), using the
+contacts their registration platform holds (owner, 2026-10-27;
+`docs/changes/2026-10-27-admin-only.md`).
 
 ## Non-goals
 
@@ -41,8 +43,8 @@ holds.
 
 - **Minors' data, minimised:** players are stored with name, division, team and the import's
   optional play-up flag; birthdates are read at import for teaming and dropped after teaming;
-  guardian names and contact details are never stored. Coaches are stored with name and the email
-  they sign in with; only administrators see coach contact details. Every read goes through RLS;
+  guardian names and contact details are never stored. Coaches are stored with name and email
+  (the import's key and an administrator's contact; no coach signs in); only administrators see coach contact details. Every read goes through RLS;
   no real personal data in the repository — AGENTS.md section 2; owner, 2026-10-22.
 - **Hosting on free plans:** Supabase Free (500 MB database before read-only, 50,000 monthly
   active users, 1 GB storage) and Vercel Hobby (100 deployments a day) — `docs/operations/ci-cd.md`

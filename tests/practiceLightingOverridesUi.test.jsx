@@ -39,8 +39,9 @@ const LONG_AGO = '2020-01-01';
 const ENDED = '2020-06-30';
 
 /**
- * By construction: `coach-user` coaches T1 (slot S1) now and T3 (slot S3) only
- * in 2020; `other-coach` coaches T2 (slot S2).
+ * By construction: `req-staff` (a staff member, "Rae Requester") requested the override on S2;
+ * `former-coach` requested the ones on S1 before coach requests ended (20261028010000) and is no
+ * longer a member, so the queue names them "Another user".
  */
 const SLOTS = [
   { id: 'S1', day: 'tue', start: '18:00:00', end: '19:30:00', field: 'F1' },
@@ -52,6 +53,12 @@ const LABEL = {
   S1: 'Tue 18:00–19:30 · North Pitch',
   S2: 'Wed 17:00–18:00 · North Pitch',
   S3: 'Thu 16:00–17:00 · South Pitch',
+};
+
+const MEMBER_NAMES = {
+  'admin-a': 'Ada Admin',
+  'admin-b': 'Bo Admin',
+  'req-staff': 'Rae Requester',
 };
 
 const override = (id, slot, window, status, requestedBy, extra = {}) => ({
@@ -75,12 +82,11 @@ function freshTables() {
     organization_members: [
       { organization_id: ORG, profile_id: 'admin-a', role: 'admin' },
       { organization_id: ORG, profile_id: 'admin-b', role: 'admin' },
-      { organization_id: ORG, profile_id: 'coach-user', role: 'coach' },
-      { organization_id: ORG, profile_id: 'other-coach', role: 'coach' },
+      { organization_id: ORG, profile_id: 'req-staff', role: 'staff' },
     ],
     coaches: [
-      { id: 'C1', organization_id: ORG, user_id: 'coach-user', full_name: 'Coach One' },
-      { id: 'C2', organization_id: ORG, user_id: 'other-coach', full_name: 'Coach Two' },
+      { id: 'C1', organization_id: ORG, full_name: 'Coach One' },
+      { id: 'C2', organization_id: ORG, full_name: 'Coach Two' },
     ],
     team_coach_assignments: [
       { id: 'a1', organization_id: ORG, team_id: 'T1', coach_id: 'C1', effective_from: LONG_AGO },
@@ -109,11 +115,11 @@ function freshTables() {
     })),
     fields: Object.entries(FIELDS).map(([id, name]) => ({ id, name, organization_id: ORG })),
     practice_lighting_overrides: [
-      override('mine-req', 'S1', '[2026-10-01,2026-10-03)', 'requested', 'coach-user'),
-      override('mine-appr', 'S1', '[2026-10-10,2026-10-11)', 'approved', 'coach-user'),
-      override('mine-rej', 'S1', '[2026-10-20,2026-10-21)', 'rejected', 'coach-user'),
+      override('mine-req', 'S1', '[2026-10-01,2026-10-03)', 'requested', 'former-coach'),
+      override('mine-appr', 'S1', '[2026-10-10,2026-10-11)', 'approved', 'former-coach'),
+      override('mine-rej', 'S1', '[2026-10-20,2026-10-21)', 'rejected', 'former-coach'),
       override('others-on-mine', 'S1', '[2026-11-01,2026-11-02)', 'requested', 'admin-a'),
-      override('theirs', 'S2', '[2026-10-05,2026-10-08)', 'requested', 'other-coach'),
+      override('theirs', 'S2', '[2026-10-05,2026-10-08)', 'requested', 'req-staff'),
     ],
   };
 }
@@ -182,11 +188,29 @@ beforeEach(() => {
   vi.mocked(supabase.rpc).mockReset();
   vi.mocked(supabase.rpc).mockImplementation(
     /** @type {any} */ (
-      async (name, params) =>
-        handleLightingOverrideRpc(tables, name, params, { currentUserId: currentUser }) ?? {
-          data: null,
-          error: { code: 'PGRST202', message: `no rpc ${name}` },
+      async (name, params) => {
+        // The admin-only members read that names a requester (20261025010000).
+        if (name === 'get_organization_members') {
+          if (tableErrors.get_organization_members) {
+            return { data: null, error: tableErrors.get_organization_members };
+          }
+          return {
+            data: tables.organization_members.map((member) => ({
+              profile_id: member.profile_id,
+              role: member.role,
+              full_name: MEMBER_NAMES[member.profile_id] ?? null,
+              email: `${member.profile_id}@example.test`,
+            })),
+            error: null,
+          };
         }
+        return (
+          handleLightingOverrideRpc(tables, name, params, { currentUserId: currentUser }) ?? {
+            data: null,
+            error: { code: 'PGRST202', message: `no rpc ${name}` },
+          }
+        );
+      }
     )
   );
 });
@@ -211,6 +235,27 @@ describe('admin approval queue', () => {
     );
     expect(screen.getAllByTestId('lighting-pending-row')).toHaveLength(requested.length);
     expect(screen.getByText(`Requests awaiting a decision (${requested.length})`)).toBeVisible();
+  });
+
+  // Requests now come only from admins (20261028010000), so a requester is a member, named from
+  // the members read, not from a coach record. A request from someone who has since left is
+  // "Another user".
+  it('names each requester from the members read, you included', async () => {
+    await adminView('admin-a');
+    expect(within(rowFor(LABEL.S2, '2026-10-05')).getByText('Rae Requester')).toBeVisible();
+    expect(within(rowFor(LABEL.S1, '2026-11-01')).getByText('You')).toBeVisible();
+    expect(within(rowFor(LABEL.S1, '2026-10-01')).getByText('Another user')).toBeVisible();
+  });
+
+  it('a failed members read is a load error, not a table of unnamed requesters', async () => {
+    tableErrors.get_organization_members = {
+      code: '42501',
+      message: 'Access denied: admin required',
+    };
+    asUser('admin', 'admin-a');
+    renderPage();
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByTestId('lighting-pending-row')).not.toBeInTheDocument();
   });
 
   // Plant: drop `own ||` from the Approve/Reject `disabled` -> red.
@@ -339,7 +384,7 @@ describe('failed reads', () => {
 
   it('an empty stored window is a load error too', async () => {
     tables.practice_lighting_overrides.push(
-      override('empty', 'S1', '[2026-10-01,2026-10-01)', 'requested', 'coach-user')
+      override('empty', 'S1', '[2026-10-01,2026-10-01)', 'requested', 'former-coach')
     );
     asUser('admin', 'admin-a');
     renderPage();
@@ -350,7 +395,7 @@ describe('failed reads', () => {
 
   it('a malformed stored row is a load error, never silently dropped', async () => {
     tables.practice_lighting_overrides.push(
-      override('bad', 'S1', '[2026-10-01,)', 'requested', 'coach-user')
+      override('bad', 'S1', '[2026-10-01,)', 'requested', 'former-coach')
     );
     asUser('admin', 'admin-a');
     renderPage();

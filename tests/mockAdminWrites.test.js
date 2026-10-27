@@ -20,10 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOW = new Date('2026-10-02T16:00:00Z');
 
 const makeDb = () => ({
-  organization_members: [
-    { organization_id: MOCK_ORG_ID, profile_id: 'admin-1', role: 'admin' },
-    { organization_id: MOCK_ORG_ID, profile_id: 'coach-1', role: 'coach' },
-  ],
+  organization_members: [{ organization_id: MOCK_ORG_ID, profile_id: 'admin-1', role: 'admin' }],
   season_settings: [
     { id: 's1', organization_id: MOCK_ORG_ID },
     { id: 's2', organization_id: 'org-2' },
@@ -121,7 +118,7 @@ describe('admin_upsert_division_settings', () => {
         db,
         'admin_upsert_division_settings',
         { p_organization_id: MOCK_ORG_ID, p_season_settings_id: 's1', p_name: 'X' },
-        ctxFor(db, 'coach-1')
+        ctxFor(db, 'outsider-1')
       ).error.code
     ).toBe('42501');
     expect(
@@ -139,7 +136,7 @@ describe('create_org_invite and redeem_org_invite', () => {
     const db = makeDb();
     const created = call(db, 'create_org_invite', {
       p_org_id: MOCK_ORG_ID,
-      p_role: 'coach',
+      p_role: 'staff',
       p_expires_in: '7 days',
     });
     const [{ code, expires_at }] = created.data;
@@ -155,7 +152,7 @@ describe('create_org_invite and redeem_org_invite', () => {
     expect(db.organization_members).toContainEqual({
       organization_id: MOCK_ORG_ID,
       profile_id: 'new-user',
-      role: 'coach',
+      role: 'staff',
     });
     expect(
       call(db, 'redeem_org_invite', { p_code: code }, ctxFor(db, 'other')).error.message
@@ -168,12 +165,13 @@ describe('create_org_invite and redeem_org_invite', () => {
       call(
         db,
         'create_org_invite',
-        { p_org_id: MOCK_ORG_ID, p_role: 'coach' },
-        ctxFor(db, 'coach-1')
+        { p_org_id: MOCK_ORG_ID, p_role: 'staff' },
+        ctxFor(db, 'outsider-1')
       ).error.code
     ).toBe('42501');
-    // No parent or player role since 20261024010000 (R3), as the SQL's whitelist.
-    for (const role of ['owner', 'parent', 'player']) {
+    // No coach, parent or player role (20261024010000, R3; docs/changes/2026-10-27-admin-only.md),
+    // as the SQL's whitelist.
+    for (const role of ['owner', 'coach', 'parent', 'player']) {
       expect(
         call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: role }).error?.code,
         role
@@ -185,7 +183,7 @@ describe('create_org_invite and redeem_org_invite', () => {
     expect(call(db, 'redeem_org_invite', { p_code: 'NOPE' }).error.message).toMatch(/not found/);
     const [{ code }] = call(db, 'create_org_invite', {
       p_org_id: MOCK_ORG_ID,
-      p_role: 'coach',
+      p_role: 'staff',
       p_expires_in: '1 hours',
     }).data;
     const later = { ...ctxFor(db, 'u'), now: new Date('2026-10-02T18:00:00Z') };
@@ -197,11 +195,11 @@ describe('create_org_invite and redeem_org_invite', () => {
   it('a null expiry means no expiry; an absent one means 7 days', () => {
     const db = makeDb();
     expect(
-      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'coach', p_expires_in: null })
+      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'staff', p_expires_in: null })
         .data[0].expires_at
     ).toBeNull();
     expect(
-      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'coach' }).data[0].expires_at
+      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'staff' }).data[0].expires_at
     ).toBe('2026-10-09T16:00:00.000Z');
   });
 

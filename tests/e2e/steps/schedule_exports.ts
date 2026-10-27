@@ -12,7 +12,7 @@ import { SCHEDULE_EXPORT_COLUMNS } from '../../../packages/core/src/outputGenera
 /**
  * The schedule downloads (plan docs/changes/2026-10-22-admin-focus.md, R7).
  * Each download is caught with Playwright's `download` event and read from
- * disk: the files are checked, not the page. Seeding is `coach_view.ts`'s
+ * disk: the files are checked, not the page. Seeding is `admin_navigation.ts`'s
  * "Team A has an upcoming game and a weekly practice" (a game at home to
  * Team B at 10:00, four Thursday practices at 17:30), plus the base seed's
  * two Team A games with no slot.
@@ -67,12 +67,6 @@ function parseCsv(text: string): string[][] {
   rows.push(row);
   return rows;
 }
-
-When('I download {string} from my schedule', async ({ page }, button: string) => {
-  const group = page.getByRole('group', { name: /full season/ });
-  // A coach of one team: the calendar button is named without the team.
-  await download(page, group, button);
-});
 
 When('I download {string} from the team page', async ({ page }, button: string) => {
   await download(page, page.getByRole('group', { name: "Download this team's schedule" }), button);

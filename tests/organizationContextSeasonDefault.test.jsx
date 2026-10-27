@@ -10,7 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * (`OrganizationContext` ordered by created_at and fell back to `data[0]`, and matched a stored
  * value by name too).
  */
-const mocks = vi.hoisted(() => ({ user: null, role: 'coach', seasons: [] }));
+const mocks = vi.hoisted(() => ({
+  user: null,
+  role: 'coach',
+  seasons: [],
+  /** Every RPC the provider called: it calls none (no coach-record link). */
+  rpcCalls: /** @type {string[]} */ ([]),
+}));
 
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
   useAuth: () => ({ user: mocks.user }),
@@ -43,7 +49,10 @@ async function mount() {
   vi.resetModules();
   vi.doMock('../frontend/src/lib/supabaseClient.js', () => ({
     supabase: {
-      rpc: vi.fn(async () => ({ data: { status: 'no_match' }, error: null })),
+      rpc: vi.fn(async (name) => {
+        mocks.rpcCalls.push(name);
+        return { data: null, error: null };
+      }),
       from: (table) => ({
         select: () => ({
           eq: () => {
@@ -97,6 +106,7 @@ async function mount() {
 
 beforeEach(() => {
   localStorage.clear();
+  mocks.rpcCalls = [];
   mocks.role = 'coach';
   mocks.seasons = [NEW_DRAFT, OLD_ACTIVE, COMPLETED];
 });
@@ -104,6 +114,16 @@ beforeEach(() => {
 afterEach(() => {
   vi.doUnmock('../frontend/src/lib/supabaseClient.js');
   vi.restoreAllMocks();
+});
+
+describe('signing in (docs/changes/2026-10-27-admin-only.md)', () => {
+  // The provider used to call link_my_coach_record on every sign-in. No coach signs in, and the
+  // function goes in the server change, so nothing may call it.
+  it('calls no RPC to link the account to a coach record', async () => {
+    mocks.role = 'admin';
+    await mount();
+    expect(mocks.rpcCalls).toEqual([]);
+  });
 });
 
 describe('the current season (E1)', () => {
@@ -135,7 +155,7 @@ describe('the current season (E1)', () => {
     expect(seen.current.currentSeasonSetting.id).toBe('season-draft');
   });
 
-  it('falls back to the active season for a coach whose stored id is a draft', async () => {
+  it('falls back to the active season for a stale coach-role member whose stored id is a draft', async () => {
     mocks.role = 'coach';
     localStorage.setItem('squadlogic-current-season-id', 'season-draft');
     const seen = await mount();

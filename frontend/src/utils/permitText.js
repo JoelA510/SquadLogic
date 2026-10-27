@@ -74,5 +74,5 @@ export function permitSizeText(bytes) {
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-/** What a permit with no file says to a coach, who cannot add one. */
-export const PERMIT_NO_FILE_TEXT = 'No file added yet. Ask your league administrator to add it.';
+/** What a permit with no file says on the permits page. */
+export const PERMIT_NO_FILE_TEXT = 'No file added yet. Add it in Fields & Venues.';

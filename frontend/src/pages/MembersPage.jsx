@@ -13,12 +13,10 @@ import { usePermission } from '../hooks/usePermission.js';
 import { logger } from '../lib/logger.js';
 import { ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
-// The roles admin_change_member_role accepts (no parent or player since
-// 20261024010000).
+// The roles admin_change_member_role accepts (no coach, parent or player: only admins sign in).
 const ROLE_OPTIONS = ASSIGNABLE_ROLES;
 const ROLE_TONE = {
   admin: 'danger',
-  coach: 'info',
   staff: 'warning',
 };
 

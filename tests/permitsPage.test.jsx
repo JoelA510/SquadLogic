@@ -1,9 +1,10 @@
 /**
- * The coach's /permits page (Phase C3, docs/changes/2026-10-22-phase-c-permits.md): each permit's
- * number, issuer, dates and covered fields as text, Open and Download through a short signed link,
- * every state in words, and the guardian redirect. The supabase client is a stand-in the test
- * reads; what a coach may read is the database's (`supabase/tests/facility_permits.sql`) and the
- * mock twin's (`tests/mockFacilityPermits.test.js`), not this page's.
+ * The admins' /permits page (docs/changes/2026-10-27-admin-only.md, F3; Phase C3's coach page made
+ * the admins' consolidated one): each permit's number, issuer, dates and covered fields as text,
+ * Open and Download through a short signed link, every state in words, and who reaches the route.
+ * The supabase client is a stand-in the test reads; what a caller may read is the database's
+ * (`supabase/tests/facility_permits.sql`) and the mock twin's (`tests/mockFacilityPermits.test.js`),
+ * not this page's.
  */
 import React from 'react';
 import { readFileSync } from 'node:fs';
@@ -20,11 +21,11 @@ import {
   VALID,
   permitFixture,
   readOf,
-} from './helpers/coachPermitFixtures.js';
+} from './helpers/permitFixtures.js';
 
 const rpc = vi.fn();
 const createSignedUrl = vi.fn();
-const context = vi.hoisted(() => ({ role: 'coach' }));
+const context = vi.hoisted(() => ({ role: 'admin' }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -55,12 +56,12 @@ const renderPage = () =>
       <PermitsPage />
     </MemoryRouter>
   );
-const itemOf = (permit) => screen.findByTestId(`coach-permit-${permit.id}`);
+const itemOf = (permit) => screen.findByTestId(`permits-page-${permit.id}`);
 
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
-  context.role = 'coach';
+  context.role = 'admin';
   rpc.mockImplementation(async (name) => {
     if (name === 'get_facility_permits') return readOf([VALID]);
     throw new Error(`unexpected rpc ${name}`);
@@ -71,7 +72,7 @@ beforeEach(() => {
   });
 });
 
-describe('the coach permits page', () => {
+describe('the admins’ permits page', () => {
   it('shows a permit as text: issuer, number with its leading zero, dates, fields, file and status', async () => {
     renderPage();
     const item = await itemOf(VALID);
@@ -90,7 +91,7 @@ describe('the coach permits page', () => {
     rpc.mockResolvedValue(readOf([EXPIRED, NOT_YET, NO_FILE, EXPIRING, VALID]));
     renderPage();
     await itemOf(VALID);
-    const issuers = within(screen.getByTestId('coach-permit-list'))
+    const issuers = within(screen.getByTestId('permits-page-list'))
       .getAllByRole('heading', { level: 2 })
       .map((h) => h.textContent);
     // Current ones (soonest to end first), then no file, not yet in force, expired.
@@ -110,9 +111,7 @@ describe('the coach permits page', () => {
     expect(screen.getByText('Expired 3 days ago')).toBeInTheDocument();
     expect(screen.getByText('Starts Dec 1, 2026')).toBeInTheDocument();
     expect(
-      within(await itemOf(NO_FILE)).getByText(
-        'No file added yet. Ask your league administrator to add it.'
-      )
+      within(await itemOf(NO_FILE)).getByText('No file added yet. Add it in Fields & Venues.')
     ).toBeInTheDocument();
   });
 
@@ -127,11 +126,15 @@ describe('the coach permits page', () => {
     expect(within(missing).queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('shows a clear empty state, not an error, when no permit covers the coach’s fields', async () => {
+  it('shows a clear empty state, not an error, when no permit is on record, pointing to Fields & Venues', async () => {
     rpc.mockResolvedValue(readOf([]));
     renderPage();
     const empty = await screen.findByTestId('permits-empty');
-    expect(empty).toHaveTextContent('No permits are on record for the fields your teams use');
+    expect(empty).toHaveTextContent('No permits are on record yet');
+    expect(within(empty).getByRole('link', { name: 'Fields & Venues' })).toHaveAttribute(
+      'href',
+      '/fields'
+    );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByTestId('permits-error')).not.toBeInTheDocument();
   });
@@ -259,7 +262,7 @@ describe('the coach permits page', () => {
     expect(Number(/min-width:\s*(\d+)px/.exec(rule[1])?.[1])).toBeGreaterThanOrEqual(44);
     // And the page gives its buttons the class.
     renderPage();
-    return screen.findByTestId(`coach-permit-${VALID.id}`).then((item) => {
+    return screen.findByTestId(`permits-page-${VALID.id}`).then((item) => {
       for (const button of within(item).getAllByRole('button')) {
         expect(button).toHaveClass('permit-touch');
       }
@@ -290,17 +293,18 @@ describe('who reaches /permits', () => {
       </MemoryRouter>
     );
 
-  it.each(['coach', 'admin', 'tenant_admin', 'staff'])('lets a %s in', async (role) => {
+  it.each(['admin', 'tenant_admin', 'staff'])('lets a %s in', async (role) => {
     context.role = role;
     renderRoute();
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Field permits' })
     ).toBeInTheDocument();
     expect(screen.queryByTestId('home')).not.toBeInTheDocument();
+    expect(screen.getByTestId('permits-manage-hint')).toHaveTextContent('Fields & Venues');
   });
 
-  it.each(['parent', 'player', 'guardian'])(
-    'redirects a %s (a role SquadLogic no longer has) home, reading nothing',
+  it.each(['coach', 'parent', 'player', 'guardian'])(
+    'redirects a %s (a role that does not sign in) home, reading nothing',
     async (role) => {
       context.role = role;
       renderRoute();
@@ -324,7 +328,7 @@ describe('who reaches /permits', () => {
   });
 });
 
-describe('what a coach is shown', () => {
+describe('what an admin is shown', () => {
   it('is the server’s answer, unchanged: one permit more or fewer is the server’s doing', async () => {
     const other = permitFixture('9', { issuer: 'Another Authority' });
     rpc.mockResolvedValue(readOf([VALID, other]));

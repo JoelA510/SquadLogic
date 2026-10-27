@@ -17,12 +17,10 @@ const NOW = new Date('2026-09-28T12:00:00Z');
 
 function freshDb() {
   return {
-    organization_members: [
-      { organization_id: ORG, profile_id: 'admin-user', role: 'admin' },
-      { organization_id: ORG, profile_id: 'coach-user', role: 'coach' },
-      { organization_id: ORG, profile_id: 'other-user', role: 'coach' },
-    ],
-    coaches: [{ id: COACH, organization_id: ORG, user_id: 'coach-user', full_name: 'C' }],
+    organization_members: [{ organization_id: ORG, profile_id: 'admin-user', role: 'admin' }],
+    // 'coach-user' and 'other-user' below are signed-in accounts with no membership: no coach signs
+    // in (docs/changes/2026-10-27-admin-only.md), and a coach row is data an admin manages.
+    coaches: [{ id: COACH, organization_id: ORG, full_name: 'C' }],
     locations: [],
     coach_practice_preferences: [],
   };
@@ -36,7 +34,7 @@ const call = (db, name, params, user, now = NOW) =>
     newId: () => `pref-${++seq}`,
   });
 
-const request = (db, value, user = 'coach-user') =>
+const request = (db, value, user = 'admin-user') =>
   call(
     db,
     'request_coach_practice_preference',
@@ -92,9 +90,10 @@ describe('mock coach preference RPCs', () => {
     expect(db.coach_practice_preferences).toHaveLength(0);
   });
 
-  it('refuses a request for another coach by a non-admin (42501)', () => {
+  it('refuses a request by anyone who is not an admin of the coach’s organization (42501)', () => {
     const db = freshDb();
     expect(request(db, 'MON', 'other-user').error?.code).toBe('42501');
+    expect(request(db, 'MON', 'coach-user').error?.code).toBe('42501');
     expect(request(db, 'MON', 'admin-user').error).toBeNull();
   });
 
@@ -184,11 +183,11 @@ describe('mock coach preference RPCs', () => {
           p_level: 'must_keep',
           p_value: '22222222-2222-4222-8222-222222222222',
         },
-        'coach-user'
+        'admin-user'
       ).error?.code
     ).toBe('23503');
     expect(
-      call(db, 'request_coach_practice_preference', { p_coach_id: COACH }, 'coach-user').error?.code
+      call(db, 'request_coach_practice_preference', { p_coach_id: COACH }, 'admin-user').error?.code
     ).toBe('23502');
     expect(db.coach_practice_preferences.every((row) => row.organization_id === ORG)).toBe(true);
   });

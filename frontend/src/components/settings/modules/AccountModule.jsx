@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { User } from 'lucide-react';
 import Button from '../../ui/Button.jsx';
 import { useAuth } from '../../../contexts/AuthContext.jsx';
-import { supabase } from '../../../lib/supabaseClient.js';
+import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 
 export default function AccountModule() {
-  const { user, updatePassword, isImpersonating } = useAuth();
+  const { user, updatePassword } = useAuth();
+  const { currentOrganization } = useOrganization();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,25 +27,11 @@ export default function AccountModule() {
     setMessage({ type: '', text: '' });
 
     try {
-      const { error } = await updatePassword(newPassword);
+      // `updatePassword` writes the `auth.password_updated` audit row, to the active organization.
+      const { error } = await updatePassword(newPassword, {
+        organizationId: currentOrganization?.id,
+      });
       if (error) throw error;
-
-      // Audit the change
-      const orgId = user?.profile?.organization_id;
-      if (orgId) {
-        await supabase.rpc('record_audit_event', {
-          p_organization_id: orgId,
-          p_action: 'auth.password_updated',
-          p_metadata: {
-            user_id: user?.id,
-            ...(isImpersonating && {
-              target_user_id: user?.profile?.id,
-              impersonated_by: user?.id,
-              admin_email: user?.email,
-            }),
-          },
-        });
-      }
 
       setMessage({ type: 'success', text: 'Password updated successfully' });
       setNewPassword('');

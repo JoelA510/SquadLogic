@@ -1,9 +1,11 @@
 // The mock arms of migration 20261021010000 apply the same access table as the
 // SQL (supabase/tests/server_side_reads.sql holds the database to it), in both
 // directions: the caller admitted gets the data, the caller refused gets 42501.
-// Since 20261024010000 (R3) there is no guardian: no guardian link, a coach's
-// roster is names only, and the member with no tie to a team ('mo') is a
-// coach-role member who coaches none. Since 20261025010000 (R4) there is no
+// Since 20261024010000 (R3) there is no guardian, and since
+// docs/changes/2026-10-27-admin-only.md no coach signs in: only an admin or
+// staff member reads a roster or a team's staff, and the coaches in the seed
+// ('cora', 'finn', 'otto') are signed-in accounts with no membership, whose
+// coach rows are data. Since 20261025010000 (R4) there is no
 // contact surface: no read returns a contact, and the contact card writer and
 // the coach directory are not arms of this module. The seed still carries a
 // coach's imported phone and email and players' guardian contacts, as a row
@@ -22,9 +24,7 @@ function seed() {
     organization_members: [
       { organization_id: ORG, profile_id: 'admin', role: 'admin' },
       { organization_id: ORG, profile_id: 'staff', role: 'staff' },
-      { organization_id: ORG, profile_id: 'cora', role: 'coach' },
-      { organization_id: ORG, profile_id: 'finn', role: 'coach' },
-      { organization_id: ORG, profile_id: 'otto', role: 'coach' },
+      // A stale coach-role member: nothing grants one a read.
       { organization_id: ORG, profile_id: 'mo', role: 'coach' },
     ],
     profiles: [{ id: 'cora', email: 'cora@example.test' }],
@@ -38,14 +38,13 @@ function seed() {
       {
         id: 'c-cora',
         organization_id: ORG,
-        user_id: 'cora',
         full_name: 'Cora',
         phone: '555-0102',
         email: 'cora@example.test',
         status: 'active',
       },
-      { id: 'c-finn', organization_id: ORG, user_id: 'finn', full_name: 'Finn', status: 'active' },
-      { id: 'c-otto', organization_id: ORG, user_id: 'otto', full_name: 'Otto', status: 'active' },
+      { id: 'c-finn', organization_id: ORG, full_name: 'Finn', status: 'active' },
+      { id: 'c-otto', organization_id: ORG, full_name: 'Otto', status: 'active' },
     ],
     team_coach_assignments: [
       {
@@ -136,28 +135,18 @@ describe('mock server-side reads', () => {
     }
   });
 
-  it('admits admins, staff and the current coach to the roster, the coach to names only', () => {
+  it('admits admins and staff to the roster, with every column', () => {
     for (const user of ['admin', 'staff']) {
       expect(roster(user).data.map((r) => `${r.first_name}:${r.rating}`)).toEqual([
         'Pia:3',
         'Rex:4',
       ]);
-    }
-    const coach = roster('cora').data;
-    expect(coach.map((r) => `${r.first_name} ${r.last_name}`)).toEqual(['Pia Able', 'Rex Baker']);
-    for (const row of coach) {
-      expect(row).not.toHaveProperty('is_my_child');
-      expect([row.gender, row.years_played, row.rating, row.willing_to_coach]).toEqual([
-        null,
-        null,
-        null,
-        null,
-      ]);
+      for (const row of roster(user).data) expect(row).not.toHaveProperty('is_my_child');
     }
   });
 
   it('returns no contact to anyone: no guardian contact on the roster, no phone or email on the staff', () => {
-    for (const user of ['admin', 'staff', 'cora']) {
+    for (const user of ['admin', 'staff']) {
       for (const row of roster(user).data) {
         expect(Object.keys(row).filter((key) => /mail|phone|contact|guardian/i.test(key))).toEqual(
           []
@@ -169,7 +158,7 @@ describe('mock server-side reads', () => {
           coach_id: 'c-cora',
           full_name: 'Cora',
           role: 'lead',
-          status: user === 'cora' ? null : 'active',
+          status: 'active',
         },
       ]);
     }
@@ -187,8 +176,12 @@ describe('mock server-side reads', () => {
     }
   });
 
-  it('refuses the former coach, another team’s coach, an unrelated member and an unknown team', () => {
-    for (const user of ['finn', 'otto', 'mo']) {
+  it('refuses a team’s coach, its former coach and a stale coach-role member, and an unknown team', () => {
+    // Non-vacuous: the current coach of team-a has an assignment, and still reads nothing.
+    expect(
+      db.team_coach_assignments.some((a) => a.team_id === 'team-a' && a.coach_id === 'c-cora')
+    ).toBe(true);
+    for (const user of ['cora', 'finn', 'otto', 'mo']) {
       expect(roster(user).error?.code).toBe('42501');
       expect(call(user, 'get_team_staff', { p_team_id: 'team-a' }).error?.code).toBe('42501');
     }
@@ -196,100 +189,14 @@ describe('mock server-side reads', () => {
     expect(call(null, 'get_team_roster', { p_team_id: 'team-a' }).error?.code).toBe('42501');
   });
 
-  it('answers an admin’s role preview of a coach, and refuses a non-admin', () => {
-    expect(
-      call('admin', 'admin_get_coached_team_ids', { p_organization_id: ORG, p_user_id: 'cora' })
-        .data
-    ).toEqual(['team-a']);
-    expect(
-      call('otto', 'admin_get_coached_team_ids', { p_organization_id: ORG, p_user_id: 'cora' })
-        .error?.code
-    ).toBe('42501');
-  });
-
-  it('lists the teams the caller currently coaches', () => {
-    expect(call('cora', 'get_my_coached_team_ids', { p_organization_id: ORG }).data).toEqual([
-      'team-a',
-    ]);
-    expect(call('finn', 'get_my_coached_team_ids', { p_organization_id: ORG }).data).toEqual([]);
-  });
-});
-
-// Admin focus R6 (20261028010000): the coach's divisions, as division_teams_of
-// answers them -- every team of a division where the user currently coaches a
-// team, its current coaches' names (lead first), and no contact.
-describe('mock division reads', () => {
-  beforeEach(() => {
-    db.divisions = [
-      { id: 'div', organization_id: ORG, season_settings_id: 'season', name: 'U10' },
-      { id: 'div-2', organization_id: ORG, season_settings_id: 'season', name: 'U12' },
-    ];
-    db.teams.push({ id: 'team-c', organization_id: ORG, division_id: 'div-2', name: 'C-Team' });
-    db.coaches.push({
-      id: 'c-uma',
-      organization_id: ORG,
-      user_id: 'uma',
-      full_name: 'Uma',
-      email: 'uma@example.test',
-    });
-    db.organization_members.push({ organization_id: ORG, profile_id: 'uma', role: 'coach' });
-    db.team_coach_assignments.push(
-      {
-        organization_id: ORG,
-        team_id: 'team-c',
-        coach_id: 'c-uma',
-        role: 'lead',
-        effective_from: '2026-09-01',
-        effective_to: null,
-      },
-      // Otto also assists A-Team: named after its lead.
-      {
-        organization_id: ORG,
-        team_id: 'team-a',
-        coach_id: 'c-otto',
-        role: 'assistant',
-        effective_from: '2026-09-01',
-        effective_to: null,
-      }
-    );
-  });
-
-  const teams = (user, name = 'get_my_division_teams', extra = {}) =>
-    call(user, name, { p_organization_id: ORG, ...extra });
-
-  it('gives a coach every team of their division, its current coaches lead first, and no contact', () => {
-    expect(teams('cora').data).toEqual([
-      {
-        division_id: 'div',
-        division_name: 'U10',
-        team_id: 'team-a',
-        team_name: 'A-Team',
-        coach_names: ['Cora', 'Otto'],
-        is_mine: true,
-      },
-      {
-        division_id: 'div',
-        division_name: 'U10',
-        team_id: 'team-b',
-        team_name: 'B-Team',
-        coach_names: ['Otto'],
-        is_mine: false,
-      },
-    ]);
-    // Finn's A-Team assignment ended yesterday: he is named nowhere and reads nothing.
-    expect(JSON.stringify(teams('cora').data)).not.toMatch(/Finn|@|555/);
-    expect(teams('finn').data).toEqual([]);
-    expect(teams('uma').data.map((row) => row.team_name)).toEqual(['C-Team']);
-    for (const user of ['mo', 'admin']) expect(teams(user).data).toEqual([]);
-  });
-
-  it('answers an admin’s preview of a coach, and refuses a non-admin and no session', () => {
-    expect(
-      teams('admin', 'admin_get_division_teams', { p_user_id: 'uma' }).data.map((r) => r.team_id)
-    ).toEqual(['team-c']);
-    expect(teams('cora', 'admin_get_division_teams', { p_user_id: 'uma' }).error?.code).toBe(
-      '42501'
-    );
-    expect(teams(null).error?.code).toBe('42501');
+  it('has no coached-team or division read to call: no coach signs in', () => {
+    for (const name of [
+      'get_my_coached_team_ids',
+      'admin_get_coached_team_ids',
+      'get_my_division_teams',
+      'admin_get_division_teams',
+    ]) {
+      expect(call('admin', name, { p_organization_id: ORG, p_user_id: 'cora' })).toBeNull();
+    }
   });
 });

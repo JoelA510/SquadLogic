@@ -27,7 +27,7 @@ header normalization: lower-cased and trimmed, then the alias map in
 
 1. a key the finalizer for that import type reads, less every guardian,
    parent, contact, email, phone and payment key for players and the phone key
-   for coaches (the coach's email is how they sign in);
+   for coaches (the coach's email is the import's key and an admin's contact; no coach signs in);
 2. for players, a team-placement column: `team name`, `team age`,
    `team gender` (kept for Phase B, which keeps teams formed outside
    SquadLogic); or
@@ -111,7 +111,7 @@ source) went with it, so every payment column is stripped before upload.
 | Canonical key(s)                                           | Stored as                           | Used for                   |
 | ---------------------------------------------------------- | ----------------------------------- | -------------------------- |
 | `full_name`                                                | `full_name`                         | Coach identity             |
-| `email`                                                    | `email`, `contact_info.email`       | Sign-in, dedupe            |
+| `email`                                                    | `email`, `contact_info.email`       | Dedupe key, admin contact  |
 | `status`, `coach_status`                                   | `status`                            | Active / inactive          |
 | `can_coach_multiple_teams`, `multiple_teams`, `multi_team` | `can_coach_multiple_teams`          | Multi-team assignment      |
 | `certifications`, `certification`                          | `certifications`                    | Certifications             |
@@ -138,7 +138,7 @@ together.
 
 Everything not listed above, including: guardian and parent names, emails,
 alternate emails, phones and addresses; the player's or coach's own email and
-phone (a coach's sign-in email excepted); payment status, payment plan and every
+phone (a coach's email excepted); payment status, payment plan and every
 amount, discount and financial-aid column; the coach's child's name, gender and
 birth date, playing-up and preferred co-coach answers on the coach export; the
 adult coach's own birth date, birth year and gender; enroller, role and club

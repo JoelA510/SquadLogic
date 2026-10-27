@@ -72,12 +72,13 @@ export default function InvitePage() {
   // review).
   useEffect(() => {
     if (state.status !== 'success') return;
-    if (typeof refetchOrgs === 'function') refetchOrgs();
+    // The redeemed organization becomes the active one, even for an admin already in another.
+    if (typeof refetchOrgs === 'function') refetchOrgs(state.orgId);
     const t = setTimeout(() => {
       navigate('/?joined=true', { replace: true });
     }, 1200);
     return () => clearTimeout(t);
-  }, [state.status, refetchOrgs, navigate]);
+  }, [state.status, state.orgId, refetchOrgs, navigate]);
 
   if (authLoading) return <LoadingScreen message="Validating invite..." />;
 

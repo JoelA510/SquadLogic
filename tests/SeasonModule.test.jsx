@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => ({
     currentOrganization: { id: MOCK_ORG_ID },
     currentSeasonSetting: { id: MOCK_SEASON_ID, organization_id: MOCK_ORG_ID, timezone: null },
   },
-  auth: { isImpersonating: false },
 }));
 
 vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
@@ -38,7 +37,6 @@ vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
       email: 'admin@example.com',
       profile: { id: 'profile-1', organization_id: MOCK_ORG_ID },
     },
-    isImpersonating: mocks.auth.isImpersonating,
   }),
 }));
 
@@ -71,7 +69,6 @@ describe('SeasonModule', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ error: null });
-    mocks.auth.isImpersonating = false;
     mocks.org.currentOrganization = { id: MOCK_ORG_ID };
     mocks.org.currentSeasonSetting = {
       id: MOCK_SEASON_ID,
@@ -125,7 +122,6 @@ describe('SeasonModule timezone select: every stored zone renders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ error: null });
-    mocks.auth.isImpersonating = false;
     mocks.org.currentOrganization = { id: MOCK_ORG_ID };
     mocks.org.currentSeasonSetting = {
       id: MOCK_SEASON_ID,
@@ -182,16 +178,14 @@ describe('SeasonModule timezone select: every stored zone renders', () => {
 /**
  * One audit row for one change.
  *
- * The RPC has audited since 20260913000000, and under impersonation this
- * control fired a second `record_audit_event` of the SAME action beside it --
- * two rows, neither complete. The client now sends the one fact the server
- * cannot derive and writes nothing itself.
+ * The RPC has audited since 20260913000000, and this control once fired a
+ * second `record_audit_event` of the SAME action beside it -- two rows, neither
+ * complete. The client writes nothing itself; the server derives the actor.
  */
 describe('SeasonModule timezone change: one writer, one audit row', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ error: null });
-    mocks.auth.isImpersonating = false;
     mocks.org.currentOrganization = { id: MOCK_ORG_ID };
     mocks.org.currentSeasonSetting = {
       id: MOCK_SEASON_ID,
@@ -215,25 +209,8 @@ describe('SeasonModule timezone change: one writer, one audit row', () => {
     });
   });
 
-  it('carries the impersonation target INTO the writer, not into a second row', async () => {
-    mocks.auth.isImpersonating = true;
-    render(<SeasonModule />);
-    fireEvent.change(timezoneSelect(), { target: { value: 'America/Chicago' } });
-    await vi.waitFor(() => expect(mocks.refetchOrgs).toHaveBeenCalled());
-
-    const names = mocks.rpc.mock.calls.map(([name]) => name);
-    // The defect, stated as a list: this used to be
-    // ['admin_set_season_timezone', 'record_audit_event'].
-    expect(names).toEqual(['admin_set_season_timezone']);
-    expect(names).not.toContain('record_audit_event');
-    expect(mocks.rpc.mock.calls[0][1].p_actor_context).toEqual({
-      target_user_id: 'profile-1',
-    });
-  });
-
   it('does not refetch or audit anything when the writer refuses', async () => {
     mocks.rpc.mockResolvedValue({ error: { message: 'Unknown IANA timezone: Nope/Nowhere' } });
-    mocks.auth.isImpersonating = true;
     render(<SeasonModule />);
     fireEvent.change(timezoneSelect(), { target: { value: 'America/Chicago' } });
 

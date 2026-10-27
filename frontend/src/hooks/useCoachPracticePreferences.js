@@ -9,8 +9,7 @@ import { logger } from '../lib/logger.js';
  * definer RPCs of migration `20260927000000` only (Phase 8.6 PR 3b, PR 2).
  *
  * The table is read with `.from('coach_practice_preferences')`; RLS lets an
- * admin read the organization's rows and a coach read their own
- * (`coaches.user_id = auth.uid()`). Every write validates its payload with the
+ * admin read the organization's rows (no coach signs in). Every write validates its payload with the
  * core `CoachPreferenceSchema` first, so a malformed value is refused here with
  * the schema's message instead of reaching the RPC, and every RPC error is
  * thrown with the database's own message and code for the caller to surface.
@@ -48,17 +47,6 @@ async function callRpc(name, args) {
   const { data, error } = await supabase.rpc(name, args);
   if (error) throw new PreferenceRpcError(error);
   return data;
-}
-
-/** A coach (for themself) or an admin requests a preference. Never in force until decided. */
-export async function requestCoachPreference({ coachId, dimension, level, value }) {
-  const preference = validatePreference({ coachId, dimension, level, value });
-  return callRpc('request_coach_practice_preference', {
-    p_coach_id: preference.coachId,
-    p_dimension: preference.dimension,
-    p_level: preference.level,
-    p_value: preference.value,
-  });
 }
 
 /**

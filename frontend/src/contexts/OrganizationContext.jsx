@@ -1,12 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-} from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from './AuthContext.jsx';
 import { ROLE_PERMISSIONS, isAdminRole } from '../constants/permissions.js';
@@ -38,7 +30,8 @@ import { FeatureFlagSchema } from '../constants/featureFlags.js';
  *   consumer that reads the season's clock has to be able to tell "not yet"
  *   from "there is none".
  * @property {Error | null} fetchError - surfaces org-fetch failures to AppContent
- * @property {() => void} refetchOrgs - re-runs the initial organization_members fetch
+ * @property {(preferredOrgId?: string) => void} refetchOrgs - re-runs the initial
+ *   organization_members fetch; given an organization id (a redeemed invite's), makes it the active one
  * @property {function} switchOrganization
  * @property {function} switchSeason
  * @property {function} updateFeatureFlags - persistence via secure RPC
@@ -66,28 +59,8 @@ const OrganizationContext = createContext({});
  */
 export const useOrganization = () => useContext(OrganizationContext);
 
-/** Links the caller to their coach record; never rejects (failures are logged). */
-async function linkCoachRecord() {
-  try {
-    const { data, error } = await supabase.rpc('link_my_coach_record');
-    if (error) throw error;
-    if (data?.status && !['linked', 'already_linked', 'no_match'].includes(data.status)) {
-      logger.warn('Coach record not linked', {
-        status: data.status,
-        coachId: data.coach_id ?? null,
-      });
-    }
-  } catch (err) {
-    // An RPC error or a transport failure: the account stays unlinked.
-    logger.error('Could not link this account to its coach record', err);
-  }
-}
-
 export const OrganizationProvider = ({ children }) => {
   const { user } = useAuth();
-  // The link_my_coach_record call for the current user and refetch (see
-  // fetchOrgs). There is no guardian link since 20261024010000 (R3).
-  const linkCall = useRef(/** @type {{ key: string, done: Promise<void> } | null} */ (null));
   const [organizations, setOrganizations] = useState([]);
   const [currentOrganization, setCurrentOrganization] = useState(null);
   const [orgMember, setOrgMember] = useState(null);
@@ -109,7 +82,21 @@ export const OrganizationProvider = ({ children }) => {
   // policy returning 500 before the latest migration is applied).
   const [fetchError, setFetchError] = useState(null);
   const [refetchTick, setRefetchTick] = useState(0);
-  const refetchOrgs = useCallback(() => setRefetchTick((n) => n + 1), []);
+  // With an organization id, that organization becomes the active one when the refetch lands: an
+  // admin who redeems an invite to a second organization is taken into it, not left in the first
+  // (the refetch otherwise prefers the stored one). Anything that is not an id (a click event
+  // handed straight to this function) is ignored.
+  const refetchOrgs = useCallback((preferredOrgId) => {
+    if (typeof preferredOrgId === 'string' && preferredOrgId) {
+      try {
+        localStorage.setItem('squadlogic_active_org', preferredOrgId);
+      } catch (err) {
+        // Storage blocked (private window): the refetch keeps the current organization.
+        logger.warn('Could not store the active organization', err);
+      }
+    }
+    setRefetchTick((n) => n + 1);
+  }, []);
 
   // Fetch season_settings for a given organization.
   //
@@ -173,24 +160,6 @@ export const OrganizationProvider = ({ children }) => {
     const fetchOrgs = async () => {
       setLoading(true);
       setFetchError(null);
-      // Link a signed-in coach's account to their coach row (20261020040000)
-      // first, so the pages that read coaches.user_id after the organization
-      // loads find it. One call per user and per refetch (a
-      // redeemed invite refetches, and may make a new match); a restarted
-      // effect for the same key awaits the call already in flight rather than
-      // starting a second or skipping it. Best effort: a failure leaves the
-      // account unlinked, which those pages already handle, so it is logged
-      // with its context, not shown.
-      const linkKey = `${user.id}:${refetchTick}`;
-      if (linkCall.current?.key !== linkKey) {
-        linkCall.current = {
-          key: linkKey,
-          // An anonymous visitor (a demo's) has no verified email to link by.
-          done: user.is_anonymous === true ? Promise.resolve() : linkCoachRecord(),
-        };
-      }
-      await linkCall.current.done;
-      if (cancelled) return;
       try {
         const { data, error } = await supabase
           .from('organization_members')

@@ -252,7 +252,6 @@ jobs:
         env:
           VITE_USE_MOCK_SUPABASE: 'true'
           TEST_ADMIN_EMAIL: 'admin@squadlogic.app'
-          TEST_COACH_EMAIL: 'coach@squadlogic.app'
           TEST_PASSWORD: 'test-password-123'
 
       - name: Upload Playwright HTML report

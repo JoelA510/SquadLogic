@@ -4,11 +4,13 @@
 // an admin's behind the score entry setting since 20261028010000, R6), so a page that still
 // reads a restricted table directly, or offers an action the server refuses,
 // fails in mock mode and in the E2E suite as it would against Postgres. Since
-// 20261024010000 (R3) there is no guardian: players and team_players are an
-// admin's, and the calendar token an admin's or the team's current coach's.
+// 20261024010000 (R3) there is no guardian, and since docs/changes/2026-10-27-admin-only.md no
+// coach signs in: every restricted table is an admin's, and a signed-in account with no
+// membership (what a coach's account is now) reads none of it.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 
 const ORG = MOCK_ORG_ID;
 const TIGERS = '00000000-0000-0000-0000-000000000001';
@@ -29,18 +31,15 @@ beforeEach(() => {
 });
 
 describe('mock read policies :: the restricted tables', () => {
-  it('shows players and roster rows to an admin only, not to the coach of their team', async () => {
+  it('shows players and roster rows to an admin only, not to a non-member', async () => {
     setSession('mock-admin-id');
     await supabase.from('teams').update({ name: 'Tigers' }).eq('id', TIGERS);
     const db = /** @type {any} */ (window.__MOCK_DB__);
-    // A player on the coach's own team (t1), so the coach's empty read below
-    // is the policy's doing, not an empty roster.
+    // A player on team t1, so the non-member's empty read below is the policy's doing, not an
+    // empty roster.
     db.team_players.push({ team_id: 't1', player_id: 'player-1', organization_id: ORG });
     window.__saveMockDB__(db);
-    expect(
-      await read('team_players', 'team_id'),
-      'nothing is rostered on the coach team'
-    ).toContain('t1');
+    expect(await read('team_players', 'team_id'), 'nothing is rostered on team t1').toContain('t1');
     expect(await read('players')).toEqual(
       getMockData('players')
         .map((row) => String(row.id))
@@ -52,44 +51,48 @@ describe('mock read policies :: the restricted tables', () => {
     expect(await read('team_players', 'player_id')).toEqual([]);
   });
 
-  it('shows a coach their own coach row and assignments, and no roster', async () => {
-    setSession('mock-coach-id');
+  it('shows a non-member no coach row, assignment, staging row or permit, though the data exists', async () => {
+    setSession('mock-admin-id');
+    // Non-vacuous: the admin reads every one of these.
+    expect((await read('coaches')).length).toBeGreaterThan(0);
+    expect((await read('team_coach_assignments')).length).toBeGreaterThan(0);
 
-    expect(await read('coaches')).toEqual(['mock-coach-id']);
-    expect(await read('team_coach_assignments')).toEqual(
-      getMockData('team_coach_assignments')
-        .filter((row) => row.coach_id === 'mock-coach-id')
-        .map((row) => String(row.id))
-        .sort()
-    );
-    expect(await read('players')).toEqual([]);
+    setSession('mock-coach-id');
+    expect(await read('coaches')).toEqual([]);
+    expect(await read('team_coach_assignments')).toEqual([]);
     expect(await read('staging_players')).toEqual([]);
     expect(await read('staging_import_rows')).toEqual([]);
+    expect(await read('facility_permits')).toEqual([]);
   });
 
-  it('shows a removed coach neither their coach row nor their assignments', async () => {
+  it('shows a removed member nothing they read before', async () => {
+    setSession('mock-admin-id');
+    seedMockDb({
+      organization_members: [{ organization_id: ORG, profile_id: 'm2', role: 'staff' }],
+    });
+    setSession('m2');
+    expect((await read('coaches')).length).toBeGreaterThan(0);
     setSession('mock-admin-id');
     const { error } = await supabase.rpc('admin_remove_member', {
       p_organization_id: ORG,
-      p_profile_id: 'mock-coach-id',
+      p_profile_id: 'm2',
     });
     expect(error).toBeNull();
-    setSession('mock-coach-id');
+    setSession('m2');
 
     expect(await read('coaches')).toEqual([]);
     expect(await read('team_coach_assignments')).toEqual([]);
   });
 
-  it('shows a team s calendar token to its current coach and an admin, not to another team s coach', async () => {
-    setSession('mock-coach-id');
-    expect(await read('team_calendar_tokens', 'team_id')).toEqual([]);
+  it('shows a team s calendar token to an admin, not to a non-member', async () => {
+    setSession('mock-admin-id');
     await supabase.from('teams').update({ name: 'Tigers' }).eq('id', TIGERS);
     const db = /** @type {any} */ (window.__MOCK_DB__);
     db.team_calendar_tokens.push({ team_id: 't1', token: 'mock-calendar-token-t1' });
     window.__saveMockDB__(db);
-    expect(await read('team_calendar_tokens', 'team_id')).toEqual(['t1']);
-    setSession('mock-admin-id');
     expect(await read('team_calendar_tokens', 'team_id')).toEqual([TIGERS, 't1'].sort());
+    setSession('mock-coach-id');
+    expect(await read('team_calendar_tokens', 'team_id')).toEqual([]);
   });
 
   it('shows an admin every row', async () => {
@@ -105,14 +108,16 @@ describe('mock read policies :: the restricted tables', () => {
 });
 
 describe('mock rotate_calendar_token and update_game_score :: who may', () => {
-  it('rotates for the team s current coach and an admin only', async () => {
+  it('rotates for an admin only, not for the team s own coach', async () => {
+    // The seeded coach of t1 signs in with no membership: refused, token untouched.
     setSession('mock-coach-id');
-    const otherCoach = await supabase.rpc('rotate_calendar_token', { p_team_id: TIGERS });
-    expect(otherCoach.data).toEqual({ status: 'error', message: 'Access denied' });
-    const ownCoach = await supabase.rpc('rotate_calendar_token', { p_team_id: 't1' });
-    expect(ownCoach.data?.status).toBe('success');
+    const before = getMockData('team_calendar_tokens').find((row) => row.team_id === 't1')?.token;
+    for (const team of [TIGERS, 't1']) {
+      const refused = await supabase.rpc('rotate_calendar_token', { p_team_id: team });
+      expect(refused.data).toEqual({ status: 'error', message: 'Access denied' });
+    }
     expect(getMockData('team_calendar_tokens').find((row) => row.team_id === 't1')?.token).toBe(
-      ownCoach.data.calendar_token
+      before
     );
 
     setSession('mock-admin-id');
@@ -148,11 +153,11 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
 
     setSession('mock-outsider-id');
     expect((await score('game-2')).error?.code).toBe('42501');
-    // The home team's own coach is refused too.
+    // A coach's account (a non-member) is refused too.
     setSession('mock-coach-id');
     expect((await score('game-2')).error?.code).toBe('42501');
     expect(getMockData('games').find((g) => g.id === 'game-2')?.score_home).toBeNull();
-    // Nor may a coach turn the setting on.
+    // Nor may a non-member turn the setting on.
     expect(
       (await supabase.rpc('update_org_feature_flags', { p_org_id: ORG, p_flags: {} })).error
     ).toBeTruthy();
@@ -165,9 +170,9 @@ describe('mock rotate_calendar_token and update_game_score :: who may', () => {
 });
 
 describe('mock .or() :: an in-list with several values', () => {
-  it('reads every value of an in-list, as the Scores page filters a coach s games', async () => {
+  it('reads every value of an in-list', async () => {
     // Split on every comma, `home_team_id.in.(zzz,t2)` became the clauses
-    // `home_team_id.in.(zzz` and `t2)`, and a coach of two teams matched none.
+    // `home_team_id.in.(zzz` and `t2)`, and a filter on two teams matched none.
     const { data, error } = await supabase
       .from('games')
       .select('*')

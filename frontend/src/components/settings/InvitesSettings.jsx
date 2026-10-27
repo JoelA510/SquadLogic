@@ -15,8 +15,8 @@ import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import Button from '../ui/Button.jsx';
 import { ASSIGNABLE_ROLES } from '../../constants/permissions.js';
 
-const ROLE_LABELS = { admin: 'Admin', coach: 'Coach', staff: 'Staff' };
-// The roles create_org_invite accepts (no parent or player since 20261024010000).
+const ROLE_LABELS = { admin: 'Admin', staff: 'Staff' };
+// The roles create_org_invite accepts (no coach, parent or player: only admins sign in).
 const ROLE_OPTIONS = ASSIGNABLE_ROLES.map((value) => ({ value, label: ROLE_LABELS[value] }));
 
 const EXPIRY_OPTIONS = [
@@ -38,7 +38,7 @@ export default function InvitesSettings() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(null);
 
-  const [role, setRole] = useState('coach');
+  const [role, setRole] = useState('staff');
   const [expiresIn, setExpiresIn] = useState('7 days');
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState(null);

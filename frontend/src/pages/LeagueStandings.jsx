@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS, hasPermission } from '../constants/permissions.js';
 import { Trophy, CheckCircle2 } from 'lucide-react';
 import { logger } from '../lib/logger.js';
-import { useScorableGames } from '../hooks/useScorableGames.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
@@ -35,7 +33,6 @@ const fetchStandings = (organizationId, seasonId) =>
     : Promise.resolve({ data: [], error: null });
 
 export default function LeagueStandings() {
-  const { user, isImpersonating } = useAuth();
   const { currentOrganization, currentSeasonSetting, orgMember } = useOrganization();
   const seasonId = currentSeasonSetting?.id ?? null;
 
@@ -51,7 +48,6 @@ export default function LeagueStandings() {
   const canEditScores =
     hasPermission(orgMember?.role, PERMISSIONS.MANAGE_SCHEDULE) &&
     isEnabled(FEATURE_FLAGS.SCORE_ENTRY);
-  const { canScoreGame, error: scorableError } = useScorableGames({ enabled: canEditScores });
 
   useEffect(() => {
     async function loadData() {
@@ -110,13 +106,6 @@ export default function LeagueStandings() {
         p_game_id: gameId,
         p_score_home: hScore,
         p_score_away: aScore,
-        p_metadata: {
-          ...(isImpersonating && {
-            target_user_id: user.profile.id,
-            impersonated_by: user.id,
-            admin_email: user.email,
-          }),
-        },
       });
 
       if (error) throw error;
@@ -252,11 +241,6 @@ export default function LeagueStandings() {
           <CheckCircle2 className="text-text-muted w-5 h-5" /> Recent Games{' '}
           {canEditScores && '- Score Entry'}
         </h2>
-        {canEditScores && scorableError && (
-          <p className="text-sm text-status-warning-text mb-4" role="alert">
-            Your teams could not be loaded, so no score can be entered here. Reload to try again.
-          </p>
-        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((game) => (
@@ -274,7 +258,7 @@ export default function LeagueStandings() {
                   {game.home_team?.name}
                 </span>
                 <div className="flex items-center gap-2 w-1/3 justify-center">
-                  {canEditScores && canScoreGame(game) ? (
+                  {canEditScores ? (
                     <>
                       <input
                         type="number"

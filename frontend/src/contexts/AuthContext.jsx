@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
-import { isAdminRole } from '../constants/permissions.js';
 
 /**
  * @typedef {Object} AuthContextValue
@@ -10,14 +9,9 @@ import { isAdminRole } from '../constants/permissions.js';
  * @property {boolean} loading
  * @property {() => Promise<any>} signOut
  * @property {(email: string, options?: { captchaToken?: string }) => Promise<{error: any}>} resetPasswordForEmail
- * @property {(password: string) => Promise<{error: any}>} updatePassword
+ * @property {(password: string, options?: { organizationId?: string }) => Promise<{error: any}>} updatePassword
  * @property {boolean} isConfigured
  * @property {boolean} isAdmin
- * @property {boolean} isCoach
- * @property {any} impersonatedUser
- * @property {boolean} isImpersonating
- * @property {(targetProfile: any, options?: { orgRole?: string }) => Promise<void>} impersonateUser
- * @property {() => Promise<void>} stopImpersonation
  */
 
 /** @type {React.Context<AuthContextValue>} */
@@ -29,7 +23,6 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
-  const [impersonatedUser, setImpersonatedUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -177,7 +170,15 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const updatePassword = async (newPassword) => {
+  // `organizationId` is the organization the caller is working in (the active one): an admin can
+  // belong to several, and the audit row names the one the change was made from. Without it (the
+  // reset-password page, before an organization is chosen) the stored active organization is used
+  // when the caller is a member of it, else the first membership.
+  /**
+   * @param {string} newPassword
+   * @param {{ organizationId?: string }} [options]
+   */
+  const updatePassword = async (newPassword, { organizationId } = {}) => {
     try {
       const { data, error } = await supabase.auth.updateUser({
         password: newPassword,
@@ -187,28 +188,31 @@ export const AuthProvider = ({ children }) => {
 
       // Log the password update
       if (data.user) {
-        // We need organization_id for audit log. Fetch if not in user profile yet.
-        const orgId =
-          user?.profile?.organization_id ||
-          (
-            await supabase
-              .from('organization_members')
-              .select('organization_id')
-              .eq('profile_id', data.user.id)
-              .single()
-          ).data?.organization_id;
+        let orgId = organizationId;
+        if (!orgId) {
+          const { data: memberships, error: membershipError } = await supabase
+            .from('organization_members')
+            .select('organization_id')
+            .eq('profile_id', data.user.id);
+          if (membershipError) {
+            // The password is already changed; only its audit row cannot be addressed.
+            console.error('[Auth] password audit: memberships not read:', membershipError);
+          }
+          const ids = (memberships || []).map((row) => row.organization_id);
+          let stored = null;
+          try {
+            stored = localStorage.getItem('squadlogic_active_org');
+          } catch {
+            // Storage can be blocked (private window): fall through to the first membership.
+          }
+          orgId = stored && ids.includes(stored) ? stored : ids[0];
+        }
 
         if (orgId) {
           await supabase.rpc('record_audit_event', {
             p_organization_id: orgId,
             p_action: 'auth.password_updated',
-            p_metadata: {
-              user_id: data.user.id,
-              ...(impersonatedUser && {
-                impersonated_by: user.id,
-                admin_email: user.email,
-              }),
-            },
+            p_metadata: { user_id: data.user.id },
           });
         }
       }
@@ -220,83 +224,15 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // `orgRole` is the caller's role in the organization they preview from: an
-  // org admin-equivalent (staff included, ADMIN_ROLES) may preview as well as a
-  // profile admin. The server decides in the end: the impersonation.started
-  // audit below requires is_org_admin, and a refused audit refuses the preview.
-  /**
-   * @param {any} targetProfile
-   * @param {{ orgRole?: string }} [options]
-   */
-  const impersonateUser = async (targetProfile, { orgRole } = {}) => {
-    if (user?.profile?.role !== 'admin' && !isAdminRole(orgRole)) {
-      throw new Error('Unauthorized: Only admins can impersonate users.');
-    }
-
-    try {
-      // Log impersonation start. supabase-js returns an RPC failure as `{ error }`
-      // and does not throw it, so the result is checked: a preview that could not
-      // be audited is refused (and the caller says so) rather than started unlogged.
-      const { error: auditError } = await supabase.rpc('record_audit_event', {
-        p_organization_id: targetProfile.organization_id || user.profile.organization_id,
-        p_action: 'impersonation.started',
-        p_metadata: {
-          target_user_id: targetProfile.id,
-          impersonated_by: user.id,
-          admin_email: user.email,
-        },
-      });
-      if (auditError) throw auditError;
-
-      setImpersonatedUser(targetProfile);
-    } catch (err) {
-      console.error('[Auth] Impersonation failed:', err);
-      throw err;
-    }
-  };
-
-  const stopImpersonation = async () => {
-    if (!impersonatedUser) return;
-
-    try {
-      // Log impersonation end. Best effort by design: an admin whose end-audit
-      // fails must still be able to leave the preview, so the failure is logged,
-      // not thrown (unlike the start, which is refused).
-      const { error: auditError } = await supabase.rpc('record_audit_event', {
-        p_organization_id: impersonatedUser.organization_id || user.profile.organization_id,
-        p_action: 'impersonation.ended',
-        p_metadata: {
-          target_user_id: impersonatedUser.id,
-          impersonated_by: user.id,
-          admin_email: user.email,
-        },
-      });
-
-      if (auditError)
-        console.error('[Auth] impersonation.ended audit row not written:', auditError);
-    } catch (err) {
-      // Best-effort cleanup (see above): a thrown end-audit (network failure) is logged, not
-      // rethrown, so the banner's unhandled click never leaves the admin stuck in the preview.
-      console.error('[Auth] impersonation.ended audit call failed:', err);
-    } finally {
-      setImpersonatedUser(null);
-    }
-  };
-
   const value = {
     session,
-    user: impersonatedUser ? { ...user, profile: impersonatedUser } : user,
+    user,
     loading,
     signOut: () => supabase?.auth.signOut(),
     resetPasswordForEmail,
     updatePassword,
-    impersonateUser,
-    stopImpersonation,
-    impersonatedUser,
-    isImpersonating: !!impersonatedUser,
     isConfigured: !!supabase,
     isAdmin: user?.profile?.role === 'admin',
-    isCoach: user?.profile?.role === 'coach',
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

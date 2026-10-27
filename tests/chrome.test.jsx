@@ -1,6 +1,6 @@
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TopBar from '../frontend/src/components/chrome/TopBar.jsx';
 import SideNav from '../frontend/src/components/chrome/SideNav.jsx';
@@ -12,10 +12,8 @@ const mocks = vi.hoisted(() => ({
   switchOrganization: vi.fn(),
   switchSeason: vi.fn(),
   toggleThemeMode: vi.fn(),
-  impersonateUser: vi.fn().mockResolvedValue(undefined),
   toast: vi.fn(),
-  previewMembers: [],
-  readFails: /** @type {string | null} */ (null),
+  reads: vi.fn(),
   rpc: vi.fn(),
   auth: {},
   org: {},
@@ -49,53 +47,13 @@ vi.mock('../frontend/src/hooks/useNavBadges.js', () => ({
   useNavBadges: () => ({ players: 42, coaches: 7, teams: 6 }),
 }));
 
-// The role preview's coach is a member whose membership role is `coach`
-// (admin focus R6; `profiles.role` is set by nothing), named from their coach
-// record. `previewMembers` holds the members and their coach names; each table
-// answers as its filters say, and a profile read answers nothing, so a preview
-// found by `profiles.role` would not show. `readFails` names a table whose read
-// fails.
+// The account menu reads nothing: role preview (impersonation) is gone, and it was the only thing
+// the top bar read. `reads` records any table read, so a regression shows.
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
     from: (table) => {
-      const filters = {};
-      const answer = () => {
-        if (mocks.readFails === table) {
-          return Promise.resolve({ data: null, error: { code: '500', message: 'boom' } });
-        }
-        if (table === 'organization_members') {
-          return Promise.resolve({
-            data: mocks.previewMembers
-              .filter((m) => !filters.role || m.role === filters.role)
-              .map((m) => ({ profile_id: m.profile_id, role: m.role })),
-            error: null,
-          });
-        }
-        if (table === 'coaches') {
-          return Promise.resolve({
-            data: mocks.previewMembers
-              .filter((m) => m.full_name && (filters.user_id || []).includes(m.profile_id))
-              .map((m) => ({ user_id: m.profile_id, full_name: m.full_name })),
-            error: null,
-          });
-        }
-        return Promise.resolve({ data: [], error: null });
-      };
-      const q = {
-        select: () => q,
-        eq: (column, value) => {
-          filters[column] = value;
-          return column === 'role' || table !== 'organization_members' ? answerOrQ(column) : q;
-        },
-        in: (column, values) => {
-          filters[column] = values;
-          return answer();
-        },
-      };
-      // organization_members ends on its second eq (role); coaches on in().
-      const answerOrQ = (column) =>
-        table === 'organization_members' && column === 'role' ? answer() : q;
-      return q;
+      mocks.reads(table);
+      return { select: () => Promise.resolve({ data: [], error: null }) };
     },
     rpc: (name, params) => mocks.rpc(name, params),
   },
@@ -117,8 +75,6 @@ function configureRole(role) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.previewMembers = [];
-  mocks.readFails = null;
   mocks.rpc.mockImplementation(async (name) => ({
     data: null,
     error: { code: 'PGRST202', message: `no rpc ${name}` },
@@ -126,8 +82,6 @@ beforeEach(() => {
   localStorage.clear();
   mocks.auth.signOut = mocks.signOut;
   mocks.auth.isAdmin = true;
-  mocks.auth.isImpersonating = false;
-  mocks.auth.impersonateUser = mocks.impersonateUser;
   mocks.auth.user = {
     email: 'admin@example.com',
     profile: { full_name: 'Avery Admin', role: 'admin' },
@@ -199,132 +153,24 @@ describe('TopBar', () => {
     expect(mocks.signOut).toHaveBeenCalled();
   });
 
-  it('toasts when starting a role preview fails, and not when it starts', async () => {
-    mocks.previewMembers = [
-      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
-    ];
-    mocks.impersonateUser.mockRejectedValueOnce(new Error('rpc down'));
+  // Role preview (impersonation) was removed with the coach role: its only target was a coach, and
+  // no coach signs in (docs/changes/2026-10-27-admin-only.md, decision 2).
+  it.each([
+    ['an admin', 'Avery Admin', 'admin'],
+    ['a staff member', 'Sam Staff', 'staff'],
+  ])('offers %s no role preview, and reads nothing to look for one', async (_who, name, role) => {
+    mocks.auth.user = { email: 'x@example.com', profile: { full_name: name, role: 'user' } };
+    mocks.org = { ...mocks.org, orgMember: { role } };
     render(
       <MemoryRouter>
         <TopBar />
       </MemoryRouter>
     );
-    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
-    await waitFor(() =>
-      expect(mocks.toast).toHaveBeenCalledWith(expect.stringMatching(/Could not start/), 'warning')
-    );
-
-    mocks.toast.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
-    await waitFor(() => expect(mocks.impersonateUser).toHaveBeenCalledTimes(2));
-    expect(mocks.toast).not.toHaveBeenCalled();
-  });
-
-  it('offers role preview to a staff member (staff are admins), passing the org role', async () => {
-    mocks.previewMembers = [
-      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
-    ];
-    mocks.auth.isAdmin = false;
-    mocks.auth.user = {
-      email: 'staff@example.com',
-      profile: { full_name: 'Sam Staff', role: 'user' },
-    };
-    mocks.org = { ...mocks.org, orgMember: { role: 'staff' } };
-    render(
-      <MemoryRouter>
-        <TopBar />
-      </MemoryRouter>
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Account menu for Sam Staff/ }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
-    await waitFor(() =>
-      expect(mocks.impersonateUser).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'coach-1' }),
-        {
-          orgRole: 'staff',
-        }
-      )
-    );
-  });
-
-  // Admin focus R6: the preview looked for `profiles.role = 'coach'`, which
-  // nothing sets (every profile reads `user`), so it was never offered. The
-  // coach is found by membership role, and handed over shaped as a profile.
-  it('finds the previewed coach by membership role, and previews them as a coach', async () => {
-    mocks.previewMembers = [
-      { profile_id: 'admin-1', role: 'admin', full_name: 'Avery Admin' },
-      // A coach-role member with no coach record is a later choice.
-      { profile_id: 'coach-0', role: 'coach', full_name: null },
-      { profile_id: 'coach-2', role: 'coach', full_name: 'Zed Coach' },
-      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach' },
-    ];
-    render(
-      <MemoryRouter>
-        <TopBar />
-      </MemoryRouter>
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Preview as Coach' }));
-    await waitFor(() => expect(mocks.impersonateUser).toHaveBeenCalledTimes(1));
-    // No member list with every sign-in email is read for it.
-    expect(mocks.rpc).not.toHaveBeenCalledWith('get_organization_members', expect.anything());
-    expect(mocks.impersonateUser.mock.calls[0][0]).toEqual({
-      id: 'coach-1',
-      full_name: 'Cora Coach',
-      role: 'coach',
-      organization_id: MOCK_ORG_ID,
-    });
-  });
-
-  it.each(['organization_members', 'coaches'])(
-    'offers no preview when %s cannot be read',
-    async (table) => {
-      mocks.previewMembers = [{ profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach' }];
-      mocks.readFails = table;
-      render(
-        <MemoryRouter>
-          <TopBar />
-        </MemoryRouter>
-      );
-      fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
-      await screen.findByRole('menuitem', { name: 'Sign out' });
-      expect(screen.queryByRole('menuitem', { name: /Preview as/ })).not.toBeInTheDocument();
-    }
-  );
-
-  // No parent view to preview since 20261024010000 (R3): a member still
-  // carrying the old role is not offered, even if a read returns one.
-  it('offers no parent preview', async () => {
-    mocks.previewMembers = [{ profile_id: 'parent-1', role: 'parent', full_name: 'Pat Parent' }];
-    render(
-      <MemoryRouter>
-        <TopBar />
-      </MemoryRouter>
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Account menu for Avery Admin/ }));
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`Account menu for ${name}`) }));
     await screen.findByRole('menuitem', { name: 'Sign out' });
     expect(screen.queryByRole('menuitem', { name: /Preview as/ })).not.toBeInTheDocument();
-  });
-
-  it('offers no role preview to a coach', () => {
-    mocks.previewMembers = [
-      { profile_id: 'coach-1', role: 'coach', full_name: 'Cora Coach', email: 'cora@example.test' },
-    ];
-    mocks.auth.isAdmin = false;
-    mocks.auth.user = {
-      email: 'coach@example.com',
-      profile: { full_name: 'Cal Coach', role: 'user' },
-    };
-    mocks.org = { ...mocks.org, orgMember: { role: 'coach' } };
-    render(
-      <MemoryRouter>
-        <TopBar />
-      </MemoryRouter>
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Account menu for Cal Coach/ }));
-    expect(screen.queryByRole('menuitem', { name: 'Preview as Coach' })).not.toBeInTheDocument();
+    expect(mocks.reads).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it('focuses the global search when "/" is pressed', () => {
@@ -393,20 +239,6 @@ describe('SideNav', () => {
     expect(screen.queryByRole('link', { name: /Practices/ })).not.toBeInTheDocument();
   });
 
-  it('shows the flat coach navigation for coach role', () => {
-    configureRole(ROLES.COACH);
-    mocks.auth.isAdmin = false;
-    mocks.auth.user = { email: 'coach@example.com', profile: { full_name: 'C', role: 'coach' } };
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
-      </MemoryRouter>
-    );
-    expect(screen.getByRole('link', { name: 'My Team' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Audit Log/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Import/ })).not.toBeInTheDocument();
-  });
-
   it('shows staff the admin navigation, Audit Log included (staff are admins)', () => {
     configureRole(ROLES.STAFF);
     mocks.auth.isAdmin = false;
@@ -419,12 +251,13 @@ describe('SideNav', () => {
     expect(screen.getByRole('link', { name: 'Audit Log' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Teams & Rosters/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Scheduling/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Field Permits' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'My Team' })).not.toBeInTheDocument();
   });
 
-  // No parent or player role since 20261024010000 (R3): a membership still
-  // carrying one gets Home and nothing else, not the admin shell.
-  it.each(['parent', 'player'])('shows a stale %s role Home only', (role) => {
+  // No coach, parent or player role (20261024010000, R3; docs/changes/2026-10-27-admin-only.md): a
+  // membership still carrying one gets Home and nothing else, not the admin shell.
+  it.each(['coach', 'parent', 'player'])('shows a stale %s role Home only', (role) => {
     configureRole(role);
     mocks.auth.isAdmin = false;
     render(
@@ -432,26 +265,8 @@ describe('SideNav', () => {
         <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
       </MemoryRouter>
     );
-    expect(screen.getAllByRole('link').map((link) => link.textContent.trim())).toEqual([
-      'My Dashboard',
-    ]);
+    expect(screen.getAllByRole('link').map((link) => link.textContent.trim())).toEqual(['Home']);
     expect(screen.queryByRole('button', { name: /Scheduling/ })).not.toBeInTheDocument();
-  });
-
-  it('scopes navigation to the previewed role while impersonating', () => {
-    mocks.auth.isImpersonating = true;
-    mocks.auth.user = {
-      email: 'coach@example.com',
-      profile: { full_name: 'Cal Coach', role: 'coach' },
-    };
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
-      </MemoryRouter>
-    );
-    expect(screen.getByRole('link', { name: 'My Dashboard' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'My Team' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Audit Log/ })).not.toBeInTheDocument();
   });
 });
 

@@ -24,8 +24,8 @@ import { PERMISSIONS } from './permissions.js';
 import { FEATURE_FLAGS } from './featureFlags.js';
 
 /**
- * Single source of truth for the admin navigation tree, the role-scoped
- * flat navs, and per-route breadcrumb metadata.
+ * Single source of truth for the admin navigation tree and per-route
+ * breadcrumb metadata.
  *
  * - `permission`: hides the item unless `usePermission().can(permission)`.
  * - `feature`: hides the item unless `useFeatures().isEnabled(feature)`.
@@ -104,6 +104,13 @@ export const NAV = [
         icon: Map,
         path: '/fields',
         permission: PERMISSIONS.MANAGE_ORGANIZATION,
+      },
+      {
+        id: 'permits',
+        label: 'Field Permits',
+        icon: FileText,
+        path: '/permits',
+        permission: PERMISSIONS.VIEW_FIELD_PERMITS,
       },
       {
         id: 'blackouts',
@@ -225,29 +232,9 @@ export const NAV = [
   },
 ];
 
-/**
- * Flat navigation for non-admin roles. A coach's schedule is on their home
- * (20261028010000, R6): the admin scheduling pages, score entry, standings
- * and lighting are an admin's. "My Team" opens the team the coach coaches,
- * or their home when they coach none or several (`/my-team`).
- */
-export const ROLE_NAV = {
-  coach: [
-    { id: 'home', label: 'My Dashboard', icon: Home, path: '/' },
-    { id: 'my-team', label: 'My Team', icon: Shield, path: '/my-team' },
-    // Phase C3: the permits of the fields their teams use, to show at the field.
-    { id: 'permits', label: 'Field Permits', icon: FileText, path: '/permits' },
-    {
-      id: 'practice-preferences',
-      label: 'Practice Preferences',
-      icon: UserRoundCheck,
-      path: '/coaches/practice-preferences',
-    },
-  ],
-};
-// No parent or player nav: both roles were removed (20261024010000, R3).
-// Staff have no flat nav: they are admins (ADMIN_ROLES) and get the grouped
-// admin NAV, filtered by permission, as SideNav decides.
+// No role-scoped flat navs: only league admins sign in (ADMIN_ROLES, staff included) and they get
+// the grouped admin NAV, filtered by permission, as SideNav decides. The coach, parent and player
+// roles and their navs are gone (20261024010000, R3; docs/changes/2026-10-27-admin-only.md).
 
 /** path -> { label, groupLabel } for breadcrumbs / PageHeader. */
 export const ROUTE_META = {};
@@ -265,8 +252,6 @@ ROUTE_META['/account'] = { label: 'Account', groupLabel: null };
 ROUTE_META['/setup'] = { label: 'Season Setup', groupLabel: null };
 ROUTE_META['/setup/features'] = { label: 'Choose your tools', groupLabel: 'Season Setup' };
 ROUTE_META['/workflow'] = { label: 'Pipeline', groupLabel: 'Data' };
-ROUTE_META['/my-team'] = { label: 'My Team', groupLabel: null };
-ROUTE_META['/permits'] = { label: 'Field Permits', groupLabel: null };
 
 /**
  * Routes whose pages use the full-bleed <Page> scaffold (pinned header +

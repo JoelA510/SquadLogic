@@ -2,10 +2,9 @@ import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, FlaskConical } from 'lucide-react';
-import { NAV, ROLE_NAV } from '../../constants/navigation.js';
+import { NAV } from '../../constants/navigation.js';
 import { isAdminRole } from '../../constants/permissions.js';
 import { usePermission } from '../../hooks/usePermission.js';
-import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useNavBadges } from '../../hooks/useNavBadges.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import { IS_MOCK_MODE } from '../../config.js';
@@ -35,7 +34,7 @@ NavItem.propTypes = {
 };
 
 /**
- * Nested collapsible navigation (admin) or the coach's flat nav.
+ * Nested collapsible admin navigation, or Home alone for a role that is not an admin.
  * Desktop: 256px ↔ 60px collapse, persisted. Mobile (<900px): off-canvas
  * drawer opened from the TopBar hamburger.
  */
@@ -46,13 +45,9 @@ export default function SideNav({
   onMobileClose = undefined,
 }) {
   const { can, role } = usePermission();
-  const { user, isImpersonating } = useAuth();
   const badges = useNavBadges();
   const { isEnabled } = useFeatures();
   const location = useLocation();
-
-  // Under role preview (impersonation) the nav scopes to the previewed role.
-  const effectiveRole = isImpersonating ? user?.profile?.role || role : role;
 
   const [openGroups, setOpenGroups] = useState(() => {
     const init = {};
@@ -80,15 +75,10 @@ export default function SideNav({
   };
 
   // Admins (and a role not loaded yet) get the grouped admin nav, filtered by
-  // permission; a coach the coach's flat nav. Any other role (a stale `parent`
-  // or `player`, both removed in 20261024010000) gets Home and nothing else,
-  // not the admin shell.
-  const isAdminNav = !effectiveRole || isAdminRole(effectiveRole);
-  const flatItems = isAdminNav
-    ? null
-    : effectiveRole === 'coach'
-      ? ROLE_NAV.coach
-      : ROLE_NAV.coach.filter((item) => item.id === 'home');
+  // permission. Any other role (a stale `coach`, `parent` or `player`: none can sign in)
+  // gets Home and nothing else, not the admin shell.
+  const isAdminNav = !role || isAdminRole(role);
+  const flatItems = isAdminNav ? null : NAV.filter((node) => node.type === 'item');
 
   const visible = (item) =>
     (!item.permission || can(item.permission)) && (!item.feature || isEnabled(item.feature));
@@ -111,7 +101,7 @@ export default function SideNav({
             <>
               {!collapsed && (
                 <div className="nav-group-label" style={{ pointerEvents: 'none' }}>
-                  {effectiveRole === 'coach' ? 'Coach' : 'Account'}
+                  Account
                 </div>
               )}
               {flatItems.map((item) => (

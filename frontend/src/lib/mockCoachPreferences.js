@@ -6,8 +6,8 @@
  * looser than the database lets a defect the database would refuse pass every
  * test. Mirrored here, with the SQL's error codes:
  *   - 23502 required arguments;
- *   - 42501 a request by anyone but the coach themself (org member) or an org
- *     admin; a decide or set by a non-admin (or on an unknown row / coach);
+ *   - 42501 a request, decide or set by a non-admin (or on an unknown row / coach; no coach
+ *     signs in, so the database's coach-themself arm of a request is not mirrored);
  *   - 22023 a decision other than approve/reject, deciding a row that is not
  *     `requested`, a rejection carrying a level or value, a stale approval;
  *   - 23503 a venue that is not a location of the coach's organization, and
@@ -112,7 +112,6 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
         String(member.profile_id) === String(currentUserId)
     )?.role ?? null;
   const isOrgAdmin = (orgId) => ADMIN_ROLES.includes(String(roleIn(orgId) || ''));
-  const isOrgMember = (orgId) => roleIn(orgId) !== null;
   const coachById = (coachId) =>
     (db.coaches || []).find((coach) => String(coach.id) === String(coachId)) ?? null;
   const normValue = (value) => (value === undefined ? null : value);
@@ -137,11 +136,12 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
     }
     const coach = coachById(p.p_coach_id);
     const orgId = coach?.organization_id ?? null;
-    const isSelf = Boolean(currentUserId) && String(coach?.user_id ?? '') === String(currentUserId);
-    if (!orgId || !((isSelf && isOrgMember(orgId)) || isOrgAdmin(orgId))) {
+    // Admin-only here: no coach signs in (docs/changes/2026-10-27-admin-only.md). The database's
+    // own twin still admits the coach's account until its server change drops that arm.
+    if (!orgId || !isOrgAdmin(orgId)) {
       return fail(
         '42501',
-        'Access denied: only the coach themself or an admin of their organization requests a coach practice preference'
+        'Access denied: only an admin of the coach’s organization requests a coach practice preference'
       );
     }
     const value = normValue(p.p_value);

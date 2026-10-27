@@ -379,7 +379,7 @@ describe('team portal: a refused roster read (20261021010000)', () => {
     await renderPortal({ rosterError: { code: '42501', message: 'not permitted' } });
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /Roster/ }));
-    expect(screen.getByText(/The roster is shown to the team's coaches/)).toBeInTheDocument();
+    expect(screen.getByText(/The roster is shown to league admins/)).toBeInTheDocument();
   });
 });
 

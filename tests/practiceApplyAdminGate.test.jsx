@@ -188,15 +188,17 @@ function renderAs(role) {
 const REASON = 'Only an organization admin can apply a practice schedule.';
 
 describe('practice Apply is for org admins only (#64)', () => {
-  // Admin focus R6 (20261028010000): a coach holds neither VIEW_SCHEDULE nor
-  // MANAGE_SCHEDULE, so never reaches this page (App.jsx's route); the
-  // disabled-Apply state this test once rendered for a coach is one no role
-  // can reach (declared: the page keeps it for a role with MANAGE_SCHEDULE and
-  // not MANAGE_ORGANIZATION, of which there is none).
-  it('gives a coach no route to the practice scheduling page', () => {
-    expect(ROLE_PERMISSIONS[ROLES.COACH]).not.toContain(PERMISSIONS.VIEW_SCHEDULE);
-    expect(ROLE_PERMISSIONS[ROLES.COACH]).not.toContain(PERMISSIONS.MANAGE_SCHEDULE);
-    expect(ROLE_PERMISSIONS[ROLES.COACH]).not.toContain(PERMISSIONS.MANAGE_ORGANIZATION);
+  // Admin focus R6 (20261028010000), then docs/changes/2026-10-27-admin-only.md: no coach role
+  // exists, so no role but an admin's reaches this page (App.jsx's route); the disabled-Apply
+  // state this test once rendered for a coach is one no role can reach (declared: the page keeps
+  // it for a role with MANAGE_SCHEDULE and not MANAGE_ORGANIZATION, of which there is none).
+  it('has no coach role, and every role that can view the schedule can manage the organization', () => {
+    expect(ROLES).not.toHaveProperty('COACH');
+    for (const [role, permissions] of Object.entries(ROLE_PERMISSIONS)) {
+      if (permissions.includes(PERMISSIONS.VIEW_SCHEDULE)) {
+        expect(permissions, role).toContain(PERMISSIONS.MANAGE_ORGANIZATION);
+      }
+    }
   });
 
   it('an admin sees Apply enabled, with no reason', async () => {

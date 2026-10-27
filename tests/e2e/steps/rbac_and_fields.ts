@@ -296,11 +296,11 @@ Then(
   }
 );
 
-// The read-only route checks, the parent's until R3 (20261024010000), are the
-// coach's since R6 (20261028010000; docs/changes/2026-10-22-admin-focus.md):
-// a coach holds no MANAGE_SCHEDULE or VIEW_SCHEDULE, so each admin page sends
-// them home with the route guard's notice.
-const coachRedirects: string[] = [];
+// The read-only route checks, the parent's until R3 (20261024010000) and the coach's until
+// docs/changes/2026-10-27-admin-only.md, are a member's whose role the league no longer has:
+// it holds no MANAGE_SCHEDULE or VIEW_SCHEDULE, so each admin page sends them home with the
+// route guard's notice.
+const memberRedirects: string[] = [];
 
 /** Open `route` and wait to land on the Dashboard with the guard's notice. */
 async function expectRedirectedHome(page: Page, route: string) {
@@ -310,22 +310,22 @@ async function expectRedirectedHome(page: Page, route: string) {
   await expect(page.getByRole('heading', { name: 'My Dashboard' })).toBeVisible();
 }
 
-When('I open the guarded team and schedule routes as a coach', async ({ page }) => {
-  coachRedirects.length = 0;
+When('I open the guarded team and schedule routes as that member', async ({ page }) => {
+  memberRedirects.length = 0;
   for (const route of ['/teams', '/schedule/practice', '/schedule/game']) {
     await expectRedirectedHome(page, route);
-    coachRedirects.push(route);
+    memberRedirects.push(route);
   }
 });
 
 Then(
-  'Team Management, Practice Scheduling and Game Scheduling each redirect the coach to the Dashboard',
+  'Team Management, Practice Scheduling and Game Scheduling each redirect that member to the Dashboard',
   async () => {
-    expect(coachRedirects).toEqual(['/teams', '/schedule/practice', '/schedule/game']);
+    expect(memberRedirects).toEqual(['/teams', '/schedule/practice', '/schedule/game']);
   }
 );
 
-Then('the lighting, scores and standings pages redirect the coach too', async ({ page }) => {
+Then('the lighting, scores and standings pages redirect that member too', async ({ page }) => {
   for (const route of ['/schedule/practice-lighting', '/scores', '/standings']) {
     await expectRedirectedHome(page, route);
   }

@@ -48,14 +48,17 @@ config) + Prettier, knip for unused code; TypeScript checkJs/allowJs, `strict: f
   imports); components in `frontend/src/components/` (feature subdirs such as `scheduling/`,
   `teaming/`, `ui/`); hooks (`use…`) in `frontend/src/hooks/`; pages in `frontend/src/pages/`;
   contexts in `frontend/src/contexts/`; Edge Functions in `supabase/functions/<name>/index.ts`.
-- **RBAC:** roles `admin`, `coach`, `staff` (and `tenant_admin`; no `parent` or `player` since
-  `20261024010000`); `staff` are
+- **RBAC:** roles `admin`, `staff` and `tenant_admin`: only league admins sign in (no `parent` or
+  `player` since `20261024010000`, no `coach` since `docs/changes/2026-10-27-admin-only.md`; coaches
+  are imported data admins manage). `staff` are
   admins, as `ADMIN_ROLES` in `frontend/src/constants/permissions.js` says and `is_org_admin()` and
   the Edge `verifyOrgAdmin` agree (`tests/adminRolesParity.test.js`); permissions in
   `frontend/src/constants/permissions.js`, enforced by the `usePermission` hook and
-  `<ProtectedRoute>`. A coach holds no scheduling permission since `20261028010000` (R6): their
-  schedule is on their home, and score entry and standings are admin functions behind the
-  `score_entry` and `standings` settings (off by default).
+  `<ProtectedRoute>`. Score entry and standings are admin functions behind the
+  `score_entry` and `standings` settings (off by default). An admin may belong to several
+  organizations: the app names the active one (`currentOrganization.id`) in every read and audit
+  call, `refetchOrgs(orgId)` makes a redeemed invite's organization the active one, and the server
+  has no "active organization" (`tests/organizationSwitch.test.jsx`).
 
 ## 6. Design System — "Lightning-class" (Light + Dark)
 
@@ -112,8 +115,8 @@ surface in both themes. New colors go into `index.css` (light **and** dark block
 - `VITE_DEMO_ENABLED`, `VITE_OFFICIAL_SITE_URL`, `VITE_TURNSTILE_SITE_KEY` — demo mode, all optional:
   `true` shows the demo's entry point; the official deployment's URL (set on that project only);
   the public Turnstile site key. `docs/operations/ENVIRONMENT.md`, `self-hosting.md`.
-- `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PASSWORD` — E2E test
-  accounts: `.env.test`.
+- `TEST_ADMIN_EMAIL`, `TEST_PASSWORD` — E2E test
+  account: `.env.test`.
 
 Only `frontend/src/env.js` reads `import.meta.env`, by name; a production build fails on a missing
 or malformed variable. **Never commit** `.env`, `.env.local`, or `.env.test`. The full reference

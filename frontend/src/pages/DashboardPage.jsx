@@ -32,11 +32,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import { isAdminRole } from '../constants/permissions.js';
-import { useMyCoachedTeams } from '../hooks/useMyCoachedTeams.js';
 import { usePermitWarnings } from '../hooks/useFacilityPermits.js';
-import CoachScheduleCard from '../components/coach/CoachScheduleCard.jsx';
-import DivisionTeamsCard from '../components/coach/DivisionTeamsCard.jsx';
-import CoachPermitsCard from '../components/coach/CoachPermitsCard.jsx';
 
 /**
  * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
@@ -583,94 +579,8 @@ function AdminHome() {
 }
 
 /**
- * Coach Home (plan docs/changes/2026-10-22-admin-focus.md, R6): the teams the
- * coach coaches, their own schedule (games and practices), and the teams and
- * coaches of their divisions, names only. No coach directory: coaches see no
- * contact details (R4). Scheduling, score entry and standings are an admin's,
- * so nothing here links to them. Field permits (Phase C3,
- * docs/changes/2026-10-22-phase-c-permits.md) are the card beside the
- * schedule: the permits of the fields their teams use.
- */
-function CoachDashboard() {
-  const { currentOrganization } = useOrganization();
-  const { teams, loaded, error, previewUserId } = useMyCoachedTeams();
-  const orgId = currentOrganization?.id ? String(currentOrganization.id) : null;
-
-  if (!loaded) return <LoadingScreen />;
-
-  return (
-    <Page
-      header={
-        <PageHeader
-          title="My Dashboard"
-          subtitle="Your teams, schedule, and division at a glance."
-          icon={
-            <span className="page-obj-icon" style={{ background: 'var(--primary)' }}>
-              <Shield size={20} aria-hidden="true" />
-            </span>
-          }
-          crumbs={['Home']}
-        />
-      }
-    >
-      <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {error && <DataErrorBanner message="Your teams could not be loaded. Try again shortly." />}
-        {teams.length > 0
-          ? teams.map((team) => (
-              <div className="card" key={team.id}>
-                <div
-                  className="card-body"
-                  style={{ display: 'flex', alignItems: 'center', gap: 12 }}
-                >
-                  <span
-                    className="record-avatar"
-                    style={{ background: 'var(--primary)', width: 44, height: 44 }}
-                  >
-                    <Shield size={20} aria-hidden="true" />
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{team.name}</div>
-                    <div className="muted" style={{ fontSize: 12.5 }}>
-                      Your team — open it for the roster and schedule.
-                    </div>
-                  </div>
-                  <Link to={`/team/${team.id}`} aria-label={`Open ${team.name}`}>
-                    <Button variant="primary" size="sm" icon={ArrowRight}>
-                      Open team
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            ))
-          : !error && (
-              <div className="card">
-                <div className="card-body muted">
-                  No team is assigned to you yet — your league admin will assign one.
-                </div>
-              </div>
-            )}
-        {teams.length > 0 && <CoachScheduleCard teams={teams} />}
-        {/* C3: the permits of the fields their teams use; the read is a current coach's, so only
-            a coach of a team asks (a member with no team would be refused, not shown nothing). */}
-        {teams.length > 0 && <CoachPermitsCard />}
-        {orgId && !error && <DivisionTeamsCard orgId={orgId} previewUserId={previewUserId} />}
-        <div className="card">
-          <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Link to="/coaches/practice-preferences">
-              <Button variant="secondary" size="sm" icon={Calendar}>
-                Practice preferences
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </div>
-    </Page>
-  );
-}
-
-/**
- * Home for a membership whose role SquadLogic no longer has (a stale `parent`
- * or `player`, both removed in 20261024010000): it says so, and reads nothing.
+ * Home for a membership whose role SquadLogic no longer has (a stale `coach`,
+ * `parent` or `player`: only admins sign in): it says so, and reads nothing.
  */
 function NoRoleHome() {
   return (
@@ -686,10 +596,9 @@ function NoRoleHome() {
 }
 
 /**
- * Home — role-scoped: admins get the league overview, coaches their focused
- * dashboard (there is no parent or player home since 20261024010000; a
- * membership still carrying either gets NoRoleHome). Under role preview the
- * previewed role wins.
+ * Home: admins and staff get the league overview; there is no coach, parent or
+ * player home (docs/changes/2026-10-27-admin-only.md), so a membership still
+ * carrying one of those roles gets NoRoleHome.
  */
 export default function DashboardPage() {
   // E2E Testing Error Trigger (resilience scenarios force a render error here)
@@ -701,9 +610,7 @@ export default function DashboardPage() {
   }
 
   const { role } = usePermission();
-  const { user, isImpersonating } = useAuth();
   const location = useLocation();
-  const effectiveRole = isImpersonating ? user?.profile?.role || role : role;
 
   // ProtectedRoute redirects here with state.error (e.g. "Unauthorized
   // access"). This was a second hand-rolled red alert -- `role="alert"` on a
@@ -715,12 +622,7 @@ export default function DashboardPage() {
   const routeError = location.state?.error;
   const banner = <DataErrorBanner message={routeError} className="mx-6 mt-3" />;
 
-  const Home =
-    effectiveRole === 'coach'
-      ? CoachDashboard
-      : !effectiveRole || isAdminRole(effectiveRole)
-        ? AdminHome
-        : NoRoleHome;
+  const Home = !role || isAdminRole(role) ? AdminHome : NoRoleHome;
   return (
     <>
       {banner}

@@ -50,7 +50,6 @@ const PlayerRecordPage = lazy(() => import('./pages/PlayerRecordPage.jsx'));
 const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx'));
 const PracticeLightingPage = lazy(() => import('./pages/PracticeLightingPage.jsx'));
 const HeatForecastPage = lazy(() => import('./pages/HeatForecastPage.jsx'));
-const MyTeamPage = lazy(() => import('./pages/MyTeamPage.jsx'));
 const PermitsPage = lazy(() => import('./pages/PermitsPage.jsx'));
 const DemoStartPage = lazy(() => import('./pages/DemoStartPage.jsx'));
 const DemoEndedPage = lazy(() => import('./pages/DemoEndedPage.jsx'));
@@ -271,7 +270,7 @@ function AppContent() {
           <Route
             path="/coaches/practice-preferences"
             element={
-              <ProtectedRoute requiredPermission={PERMISSIONS.REQUEST_PRACTICE_PREFERENCE}>
+              <ProtectedRoute requiredPermission={PERMISSIONS.DECIDE_PRACTICE_PREFERENCE}>
                 <CoachPreferencesPage />
               </ProtectedRoute>
             }
@@ -361,7 +360,6 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
-          <Route path="/my-team" element={<MyTeamPage />} />
           <Route
             path="/permits"
             element={

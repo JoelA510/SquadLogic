@@ -1,5 +1,7 @@
 # Admin focus: removals, data minimisation, coach view and exports
 
+> **Superseded in part (2026-10-27):** the owner removed coach sign-in and every coach screen; see `docs/changes/2026-10-27-admin-only.md`. R6's coach view and R7's coach downloads are undone there; R6's admin-only score entry, standings and lighting stand.
+
 Status: **approved by the owner 2026-10-22**, with the recommended decisions and the additions under
 "Decisions" (AGENTS.md rule 14: persistence, the domain model and roles).
 R0 to R6 are merged; R7 is built (see "As built (R7)"), its calls for the owner recorded there. It turns the owner's 2026-10-22 scope decisions (`docs/product.md`) into eight PRs. Every claim

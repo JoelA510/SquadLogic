@@ -177,20 +177,21 @@ export function usePracticeLightingOverrides(orgId, { enabled = true } = {}) {
 
 /**
  * @type {Readonly<{ forOrg: string | null, slots: any[], slotLabels: Map<string, string>,
- *   coaches: any[], error: any, loading: boolean }>}
+ *   requesterNames: Map<string, string>, error: any, loading: boolean }>}
  */
 const LOADING_CONTEXT = Object.freeze({
   forOrg: null,
   slots: [],
   slotLabels: new Map(),
-  coaches: [],
+  requesterNames: new Map(),
   error: null,
   loading: true,
 });
 
 /**
- * The slots the admin view offers, their field names, and the organization's
- * coaches (to name a requester).
+ * The slots the admin view offers, their field names, and the names of the
+ * organization's members (to name a requester: requests come from admins, so
+ * a requester is a member, not a coach record).
  *
  * Until the load for the CURRENT org lands, the loading context is returned,
  * so a switch never shows the previous one's.
@@ -208,7 +209,7 @@ export function useLightingSlotContext(orgId) {
     (async () => {
       setState(LOADING_CONTEXT);
       try {
-        const [slots, fields, subunits, coaches] = await Promise.all([
+        const [slots, fields, subunits, members] = await Promise.all([
           fetchAllPages(() =>
             supabase
               .from('practice_slots')
@@ -223,12 +224,15 @@ export function useLightingSlotContext(orgId) {
           fetchAllPages(() =>
             supabase.from('field_subunits').select('id, label').eq('organization_id', orgId)
           ),
-          fetchAllPages(() =>
-            supabase
-              .from('coaches')
-              .select('id, organization_id, full_name, user_id')
-              .eq('organization_id', orgId)
-          ),
+          // The members read is an admin's (get_organization_members); it names the profile
+          // that requested an override. Its error is thrown like the other reads'.
+          (async () => {
+            const { data, error: membersError } = await supabase.rpc('get_organization_members', {
+              p_organization_id: orgId,
+            });
+            if (membersError) throw membersError;
+            return data || [];
+          })(),
         ]);
         if (cancelled) return;
         setState({
@@ -239,7 +243,17 @@ export function useLightingSlotContext(orgId) {
             new Map(fields.map((field) => [String(field.id), field.name])),
             new Map(subunits.map((subunit) => [String(subunit.id), subunit.label]))
           ),
-          coaches,
+          requesterNames: new Map(
+            members
+              .map((member) => [
+                String(member.profile_id),
+                member.full_name ||
+                  [member.first_name, member.last_name].filter(Boolean).join(' ') ||
+                  member.email ||
+                  '',
+              ])
+              .filter(([, name]) => name)
+          ),
           error: null,
           loading: false,
         });

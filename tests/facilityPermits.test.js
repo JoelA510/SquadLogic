@@ -17,8 +17,7 @@ import {
   permitObjectPath,
   permitStatus,
   permitWarnings,
-  coachPermitSummary,
-  sortPermitsForCoach,
+  sortPermitsForPage,
 } from '@squadlogic/core/facility/permits.js';
 
 const ORG = 'a1111111-1111-4111-8111-111111111111';
@@ -300,7 +299,7 @@ describe('the warnings', () => {
   });
 });
 
-describe('what a coach is told (Phase C3)', () => {
+describe('the order the permits page lists them in', () => {
   const file = { path: 'x', name: 'x.pdf', mime: 'application/pdf', size: 1 };
   const p = (id, status, over = {}) => ({
     id,
@@ -320,7 +319,7 @@ describe('what a coach is told (Phase C3)', () => {
       p('soon', 'expiring', { valid_to: '2026-11-05' }),
     ];
     const before = permits.map((permit) => permit.id);
-    expect(sortPermitsForCoach(permits).map((permit) => permit.id)).toEqual([
+    expect(sortPermitsForPage(permits).map((permit) => permit.id)).toEqual([
       'soon',
       'late',
       'none',
@@ -334,46 +333,18 @@ describe('what a coach is told (Phase C3)', () => {
   it('breaks a tie by issuer, then id, so the order never depends on arrival order', () => {
     const a = p('a', 'valid', { issuer: 'Same' });
     const b = p('b', 'valid', { issuer: 'Same' });
-    expect(sortPermitsForCoach([b, a]).map((permit) => permit.id)).toEqual(['a', 'b']);
-    expect(sortPermitsForCoach([a, b]).map((permit) => permit.id)).toEqual(['a', 'b']);
-  });
-
-  it('is clear when every permit is in date with a file, and says nothing for no permits', () => {
-    expect(coachPermitSummary([p('a', 'valid'), p('b', 'valid')])).toMatchObject({
-      total: 2,
-      clear: true,
-      attention: [],
-    });
-    expect(coachPermitSummary([])).toMatchObject({ total: 0, clear: true, attention: [] });
-  });
-
-  it('flags each concern once, and a permit with two concerns is listed once', () => {
-    const summary = coachPermitSummary([
-      p('ok', 'valid'),
-      p('exp', 'expired', { file: null }),
-      p('soon', 'expiring', { file: null }),
-      p('yet', 'not_yet_valid'),
-      p('none', 'valid', { file: null }),
-    ]);
-    // An expired permit with no file is expired, not "no file" as well: there is nothing to add.
-    expect(summary.expired.map((x) => x.id)).toEqual(['exp']);
-    expect(summary.noFile.map((x) => x.id)).toEqual(['soon', 'none']);
-    expect(summary.expiring.map((x) => x.id)).toEqual(['soon']);
-    expect(summary.notYetValid.map((x) => x.id)).toEqual(['yet']);
-    // Most urgent first: expired, no file, expiring, not yet valid; "soon" once, among no-file ones.
-    expect(summary.attention.map((x) => x.id)).toEqual(['exp', 'none', 'soon', 'yet']);
-    expect(summary.clear).toBe(false);
+    expect(sortPermitsForPage([b, a]).map((permit) => permit.id)).toEqual(['a', 'b']);
+    expect(sortPermitsForPage([a, b]).map((permit) => permit.id)).toEqual(['a', 'b']);
   });
 
   it('never refuses: an expired permit is still returned for display', () => {
     const only = p('exp', 'expired');
-    expect(coachPermitSummary([only]).attention).toEqual([only]);
-    expect(sortPermitsForCoach([only])).toEqual([only]);
+    expect(sortPermitsForPage([only])).toEqual([only]);
   });
 });
 
 describe('the facility barrel', () => {
-  it('re-exports every permits helper, the coach view included', async () => {
+  it('re-exports every permits helper', async () => {
     const barrel = await import('@squadlogic/core/facility/index.js');
     const permits = await import('@squadlogic/core/facility/permits.js');
     for (const name of Object.keys(permits)) {

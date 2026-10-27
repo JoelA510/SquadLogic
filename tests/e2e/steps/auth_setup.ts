@@ -17,7 +17,6 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
   // In mock mode, use the mock seed's organization to align with pre-seeded initialMockData.
   // Random UUIDs cause org ID fragmentation — hooks filter by active org and find nothing.
   const dynamicOrgId = isMockMode ? MOCK_ORG_ID : randomUUID();
-  const _email = role === 'coach' ? 'coach@squadlogic.app' : 'admin@squadlogic.app';
   const userId = `mock-${role}-id`;
 
   if (!supabaseUrl || !supabaseKey || process.env.VITE_USE_MOCK_SUPABASE === 'true') {
@@ -127,18 +126,17 @@ Given(
 
     const roleMap: Record<string, string> = {
       admin: process.env.TEST_ADMIN_EMAIL || 'admin@squadlogic.app',
-      coach: process.env.TEST_COACH_EMAIL || 'coach@squadlogic.app',
     };
 
-    // Robust role parsing to handle names like "Coach Alice"
+    // Robust role parsing to handle names like "Admin Bob"
     const rawRole = role.toLowerCase();
-    let cleanRole = 'admin';
-    if (rawRole.includes('coach')) cleanRole = 'coach';
-    else if (rawRole.includes('parent') || rawRole.includes('player')) {
-      // Refused, not mapped to the default admin: there is no parent or player
-      // role since 20261024010000 (R3), and a scenario signed in as one would
-      // otherwise run as an admin and pass for the wrong reason.
-      throw new Error(`No "${role}" persona: the parent and player roles were removed (R3)`);
+    const cleanRole = 'admin';
+    if (rawRole.includes('coach') || rawRole.includes('parent') || rawRole.includes('player')) {
+      // Refused, not mapped to the default admin: only league admins sign in (the parent and
+      // player roles went in 20261024010000, R3; the coach role in docs/changes/
+      // 2026-10-27-admin-only.md), and a scenario signed in as one would otherwise run as an
+      // admin and pass for the wrong reason.
+      throw new Error(`No "${role}" persona: only league admins sign in`);
     }
 
     const email = roleMap[cleanRole] || roleMap.admin;
@@ -161,7 +159,7 @@ Given(
           const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
           const profiles = db.profiles || [];
 
-          // Check if this specific user was pre-seeded (e.g., "Coach Alice")
+          // Check if this specific user was pre-seeded (e.g., "Admin Bob")
           const seededUser = profiles.find(
             (p: Record<string, unknown>) => p.full_name === rawRoleName
           );

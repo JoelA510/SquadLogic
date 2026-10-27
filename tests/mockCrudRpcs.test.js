@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 
 const setSession = (userId) => {
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: userId } }));
@@ -98,13 +99,19 @@ describe('mock: the removed registration and compliance RPCs', () => {
   });
 });
 
+/** A second member of the seeded organization (the seed holds the one admin; only admins exist). */
+const addMember = (role = 'staff') => {
+  const member = { organization_id: MOCK_ORG_ID, profile_id: 'mock-member-2', role };
+  seedMockDb({ organization_members: [member] });
+  return member;
+};
+
 // ---------------------------------------------------------------------------
 // admin_remove_member
 // ---------------------------------------------------------------------------
 describe('mock admin_remove_member rpc', () => {
-  it('removes a non-admin member', async () => {
-    const coachMember = getMockData('organization_members').find((m) => m.role === 'coach');
-    expect(coachMember).toBeTruthy();
+  it('removes another member', async () => {
+    const coachMember = addMember();
 
     const { error } = await supabase.rpc('admin_remove_member', {
       p_organization_id: coachMember.organization_id,
@@ -147,13 +154,12 @@ describe('mock admin_remove_member rpc', () => {
 // ---------------------------------------------------------------------------
 describe('mock admin_change_member_role rpc', () => {
   it('changes role of a member', async () => {
-    const coachMember = getMockData('organization_members').find((m) => m.role === 'coach');
-    expect(coachMember).toBeTruthy();
+    const coachMember = addMember('staff');
 
     const { error } = await supabase.rpc('admin_change_member_role', {
       p_organization_id: coachMember.organization_id,
       p_profile_id: coachMember.profile_id,
-      p_role: 'staff',
+      p_role: 'admin',
     });
     expect(error).toBeNull();
 
@@ -161,21 +167,30 @@ describe('mock admin_change_member_role rpc', () => {
       (m) =>
         m.profile_id === coachMember.profile_id && m.organization_id === coachMember.organization_id
     );
-    expect(updated?.role).toBe('staff');
+    expect(updated?.role).toBe('admin');
 
     const audit = getMockData('audit_log').find((row) => row.action === 'member.role_changed');
     expect(audit).toBeTruthy();
   });
 
-  it('prevents demoting the last admin', async () => {
-    const { data, error } = await supabase.rpc('admin_change_member_role', {
-      p_organization_id: MOCK_ORG_ID,
-      p_profile_id: 'mock-admin-id',
-      p_role: 'coach',
-    });
-    expect(data).toBeNull();
-    expect(error?.message).toMatch(/last admin/i);
-  });
+  // No coach, parent or player role (docs/changes/2026-10-27-admin-only.md): the whitelist is
+  // admin and staff, both admins, so a role change can no longer demote anyone out of admin.
+  it.each(['coach', 'parent', 'player'])(
+    'refuses %s as a role (22023) and changes nothing',
+    async (role) => {
+      const { data, error } = await supabase.rpc('admin_change_member_role', {
+        p_organization_id: MOCK_ORG_ID,
+        p_profile_id: 'mock-admin-id',
+        p_role: role,
+      });
+      expect(data).toBeNull();
+      expect(error?.code).toBe('22023');
+      const admin = getMockData('organization_members').find(
+        (m) => m.profile_id === 'mock-admin-id'
+      );
+      expect(admin?.role).toBe('admin');
+    }
+  );
 
   it('denies non-admin callers', async () => {
     setSession('mock-coach-id');

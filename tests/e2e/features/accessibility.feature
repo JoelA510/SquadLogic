@@ -66,12 +66,13 @@ Feature: Every top-level route passes an automated accessibility scan
       | /team/t1                      | Team A                   | Team Schedule                           |
       | /scheduling/blackouts         | Blackout Dates           | No closures on file                     |
       | /exports                      | Exports                  | Nothing has been published yet          |
-      | /admin/members                | Members & Roles          | Mock Coach                              |
+      | /admin/members                | Members & Roles          | Mock Admin                              |
       | /coaches                      | Coaches                  | Casey Rivera                            |
       | /coaches/practice-preferences | Practice preferences     | Morgan Reyes                            |
       | /schedule/practice-lighting   | Practice lighting        | Set lighting override                   |
       | /schedule/heat                | Heat forecast            | turned off for this organization        |
       | /fields                       | Field Management         | Field 1                                 |
+      | /permits                      | Field permits            | No permits are on record yet            |
       | /admin/audit-logs             | Audit Explorer           | Total Events                            |
       | /admin/analytics              | Analytical Insights      | No traceable evaluation records         |
       | /admin/reports                | Enterprise Dashboard     | Fluid Attributes Distribution           |
@@ -84,22 +85,10 @@ Feature: Every top-level route passes an automated accessibility scan
       | /organizations/new            | Welcome to SquadLogic    | Establish Organization                  |
       | /auth/reset-password          | Reset Your Password      | Confirm Password                        |
 
-  # Field permits for a coach (docs/changes/2026-10-22-phase-c-permits.md, C3): the coach's home with
-  # its Field permits card, and the /permits page, each with a permit on it, in both themes.
-  Scenario: The coach's home, with its Field permits card, passes axe in the light and dark themes
-    Given I am logged into SquadLogic as a "coach"
-    And Team A has an upcoming game and a weekly practice
-    And a permit from "City Recreation" numbered "0042" expires in 12 days, has a file and covers "Field 1"
-    When I open "/" and see its "My Dashboard" heading
-    Then the scan sees "City Recreation #0042" on the page
-    And axe finds no serious or critical violations on "/" in the "light" theme
-    When I switch to the dark theme and reopen "/" with its "My Dashboard" heading
-    Then the scan sees "City Recreation #0042" on the page
-    And axe finds no serious or critical violations on "/" in the "dark" theme
-
-  Scenario: The coach's permits page passes axe in the light and dark themes
-    Given I am logged into SquadLogic as a "coach"
-    And Team A has an upcoming game and a weekly practice
+  # The admins' Field Permits page (docs/changes/2026-10-27-admin-only.md, F3), with a permit on it,
+  # in both themes.
+  Scenario: The permits page, with a permit on it, passes axe in the light and dark themes
+    Given I am logged into SquadLogic as an admin
     And a permit from "City Recreation" numbered "0042" expires in 12 days, has a file and covers "Field 1"
     When I open "/permits" and see its "Field permits" heading
     Then the scan sees "Central Park, Field 1" on the page
@@ -177,29 +166,6 @@ Feature: Every top-level route passes an automated accessibility scan
     When I switch to the dark theme and reopen "/standings" with its "League Standings" heading
     Then the scan sees "Team A" on the page
     And axe finds no serious or critical violations on "/standings" in the "dark" theme
-
-  # The coach's home and "My Team" (admin focus R6). "/my-team" renders nothing of its own: it
-  # takes a coach of one team to that team's page, which is what is scanned under its name.
-
-  Scenario: The coach's home with a schedule and a division on it passes axe in both themes
-    Given I am logged into SquadLogic as a "coach"
-    And Team A has an upcoming game and a weekly practice
-    When I open "/" and see its "My Dashboard" heading
-    Then the scan sees "Your division" on the page
-    And the scan sees "Team A: Practice" on the page
-    And axe finds no serious or critical violations on "/" in the "light" theme
-    When I switch to the dark theme on this page
-    Then the scan sees "Team A: Practice" on the page
-    And axe finds no serious or critical violations on "/" in the "dark" theme
-
-  Scenario: My Team takes a coach to their team's page, which passes axe in both themes
-    Given I am logged into SquadLogic as a "coach"
-    When I follow "My Team" in the coach navigation to the "Team A" page
-    Then the scan sees "Team Schedule" on the page
-    And axe finds no serious or critical violations on "/my-team" in the "light" theme
-    When I switch to the dark theme on this page
-    Then the scan sees "Team Schedule" on the page
-    And axe finds no serious or critical violations on "/my-team" in the "dark" theme
 
   # Routes the mock seed leaves empty, scanned again with content on them. The theme is switched
   # on the page itself, so content the page holds only in memory (an invite just generated, a

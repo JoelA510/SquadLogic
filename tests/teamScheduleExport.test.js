@@ -1,7 +1,6 @@
 // The schedule exports (plan docs/changes/2026-10-22-admin-focus.md, R7): a
-// team's CSV, XLSX and calendar, built from the schedule the team page and the
-// coach home show (`fetchTeamEvents`, run here against the mock client's twin
-// of the tables).
+// team's CSV, XLSX and calendar, built from the schedule the team page shows
+// (`fetchTeamEvents`, run here against the mock client's twin of the tables).
 //
 // The plan's three tests:
 // - the export's rows equal the schedule's events, every one of them, the
@@ -217,7 +216,7 @@ async function readTeamA() {
 beforeEach(() => {
   sessionStorage.clear();
   delete window.__MOCK_DB__;
-  sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-coach-id' } }));
+  sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
   seedSeason();
 });
 
@@ -339,7 +338,7 @@ describe('the schedule export: one row per event, none dropped', () => {
   });
 });
 
-describe('no contact column in the coach export', () => {
+describe('no contact column in the schedule export', () => {
   /** Every email and phone the mock holds, from the people tables, not from the export. */
   const contacts = async () => {
     const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');

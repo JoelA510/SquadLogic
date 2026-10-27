@@ -70,7 +70,7 @@ const UNREAD_NOTE = (names) =>
  * every team given, and each team's calendar (`.ics`).
  *
  * **What it reads.** Each team's schedule through `fetchTeamEvents`, the read
- * the team page and the coach home make, under the caller's own session, so
+ * the team page makes, under the caller's own session, so
  * the database's row policies decide what comes back; this component only
  * offers the buttons. The files carry the whole season, not only what is
  * upcoming, and every event the page shows, including a TIME TBD practice and

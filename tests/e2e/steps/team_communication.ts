@@ -9,20 +9,19 @@ const { Given, Then } = createBdd();
  * The team portal's shared steps. Availability marking (RSVP) and team chat
  * were removed (20261022030000; plan docs/changes/2026-10-22-admin-focus.md,
  * R2), and their feature and steps with them; what is left seeds a team and
- * opens its page, and checks the page as a coach sees it.
+ * opens its page, and checks the page as an admin sees it (no coach signs in,
+ * docs/changes/2026-10-27-admin-only.md).
  */
 
 // --- Existing Steps ---
 
 /*
- * The signed-in coach (mock-coach-id) leads `team` today, and `player` is on
- * its roster. It was "my child ... is on the ... team", signed in as a parent,
- * until 20261024010000 (R3) removed the guardian view and the parent role.
- * Every row carries `organization_id`; the assignment's window holds today in
- * any season timezone. Synthetic names only.
+ * `team` has a coach (data only: coaches never sign in) leading it today, and
+ * `player` is on its roster. Every row carries `organization_id`; the
+ * assignment's window holds today in any season timezone. Synthetic names only.
  */
 Given(
-  'I coach the {string} team, which has the player {string}',
+  'the {string} team has the player {string}',
   async ({ page }, teamName: string, playerName: string) => {
     await waitForMockClient(page);
     await page.evaluate(
@@ -31,7 +30,6 @@ Given(
         const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const teamId = team.toLowerCase().replace(/\s+/g, '-');
         const playerId = `player-${player.toLowerCase()}`;
-        const coachUserId = 'mock-coach-id';
         const coachId = `coach-${teamId}`;
 
         db.teams = db.teams || [];
@@ -71,25 +69,11 @@ Given(
         );
         db.team_players.push({ team_id: teamId, player_id: playerId, organization_id: orgId });
 
-        // The coach: a member of the organization, a coach row linked to the
-        // account, and a current lead assignment, which is what the
-        // server-side reads admit a coach by.
-        const org = (db.organizations || []).find((o: Record<string, unknown>) => o.id === orgId);
-        db.organization_members = (db.organization_members || []).filter(
-          (m: Record<string, unknown>) =>
-            !(m.organization_id === orgId && m.profile_id === coachUserId)
-        );
-        db.organization_members.push({
-          organization_id: orgId,
-          profile_id: coachUserId,
-          role: 'coach',
-          organizations: org,
-        });
+        // The coach: a coach row and a current lead assignment (data an admin manages).
         db.coaches = (db.coaches || []).filter((c: Record<string, unknown>) => c.id !== coachId);
         db.coaches.push({
           id: coachId,
           organization_id: orgId,
-          user_id: coachUserId,
           full_name: 'Mock Coach',
           status: 'active',
         });
@@ -129,11 +113,10 @@ Given(
 );
 
 /*
- * R2: the team page for its coach. One Tuesday series on the coach's team (the
- * team the Pillar 2 background assigns), seeded with `organization_id` on
+ * R2: the team page. One Tuesday series on the team just seeded, with `organization_id` on
  * every row (AGENTS.md section 8, rule 1). Synthetic names; DOM assertions only.
  */
-Given('my team has a practice series on Tuesdays', async ({ page }) => {
+Given('the team has a practice series on Tuesdays', async ({ page }) => {
   await waitForMockClient(page);
   await page.evaluate(
     ({ mockOrgId }) => {

@@ -16,8 +16,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 
 | Route                           | Page Component           | Description                                                                                                                  |
 | ------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `/`                             | `DashboardPage`          | Role-scoped Home (admin KPIs/setup card; coach: their teams, their schedule, their division's teams and coaches)             |
-| `/my-team`                      | `MyTeamPage`             | The coach's "My Team": their one team's page, or home                                                                        |
+| `/`                             | `DashboardPage`          | Admin Home (KPIs, setup card, permit reminders); any other role gets a no-role notice                                       |
 | `/import`                       | `ImportPage`             | GotSport CSV data ingestion with validation                                                                                  |
 | `/teams`                        | `TeamAnalysisPage`       | Roster generation, analysis, drag-and-drop overrides                                                                         |
 | `/fields`                       | `FieldManagementPage`    | Venue/field/blackout date CRUD with weekly grid                                                                              |
@@ -40,8 +39,9 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/admin/members`                | `MembersPage`            | Invites & membership                                                                                                         |
 | `/schedule/heat`                | `HeatForecastPage`       | Field WBGT forecast (admin, `heat_forecast` feature; NWS API)                                                                |
 | `/coaches`                      | `CoachesPage`            | Coach roster, status and team assignment (admin)                                                                             |
-| `/coaches/practice-preferences` | `CoachPreferencesPage`   | Coach practice-preference requests; admin reviews them                                                                       |
+| `/coaches/practice-preferences` | `CoachPreferencesPage`   | Coach practice preferences; admins review requests and set them                                                            |
 | `/schedule/practice-lighting`   | `PracticeLightingPage`   | Portable lighting on practice slots (admin; no coach requests since R6)                                                      |
+| `/permits`                      | `PermitsPage`            | Field Permits: every permit, to open or download (admin); upload stays in Fields & Venues                                    |
 | `/setup/features`               | `FeaturesSetupPage`      | "Choose your tools": feature flags, outside the dashboard chrome                                                             |
 | `/account`                      | `AccountSettingsPage`    | The signed-in user's account settings                                                                                        |
 | `/invite/:code`                 | `InvitePage`             | Invite redemption; reachable with or without a session or organization (signed out, the page shows an inline login)          |
@@ -101,7 +101,7 @@ frontend/src/components/
 ├── ImportPanel.jsx             # CSV import with validation
 ├── TeamPersistencePanel.jsx    # Team save with optimistic UI
 ├── OutputGenerationPanel.jsx   # CSV/XLSX/email export generation (the admin's master schedule)
-├── ScheduleExports.jsx         # A team's season as CSV, XLSX and .ics (team page, coach home; R7)
+├── ScheduleExports.jsx         # A team's season as CSV, XLSX and .ics (team page; R7)
 ├── ProtectedRoute.jsx          # RBAC route guard
 ├── ErrorBoundary.jsx           # Global error boundary
 └── ...                         # Other panels and shared components

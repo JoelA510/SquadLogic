@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 
 /**
  * Staff are admins in the mock as in the database (migration 20261020030000):
@@ -11,17 +12,14 @@ const setSession = (userId) => {
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: userId } }));
 };
 
-const COACH = 'mock-coach-id';
+// An account that signs in with no membership (what a coach's account is now), made staff.
+const MEMBER = 'mock-staff-id';
 const ADMIN = 'mock-admin-id';
 
-async function makeCoachStaff() {
-  setSession(ADMIN);
-  const { error } = await supabase.rpc('admin_change_member_role', {
-    p_organization_id: MOCK_ORG_ID,
-    p_profile_id: COACH,
-    p_role: 'staff',
+function makeStaff() {
+  seedMockDb({
+    organization_members: [{ organization_id: MOCK_ORG_ID, profile_id: MEMBER, role: 'staff' }],
   });
-  expect(error).toBeNull();
 }
 
 beforeEach(() => {
@@ -30,15 +28,14 @@ beforeEach(() => {
 });
 
 describe('staff in the mock client', () => {
-  it('a coach is refused the audit log; the same member as staff reads it', async () => {
-    setSession(COACH);
+  it('a non-member is refused the audit log; the same account as staff reads it', async () => {
+    setSession(MEMBER);
     const refused = await supabase.rpc('get_settings_audit_log', {
       p_organization_id: MOCK_ORG_ID,
     });
     expect(refused.error?.message).toMatch(/access denied/i);
 
-    await makeCoachStaff();
-    setSession(COACH);
+    makeStaff();
     const allowed = await supabase.rpc('get_settings_audit_log', {
       p_organization_id: MOCK_ORG_ID,
     });
@@ -47,32 +44,34 @@ describe('staff in the mock client', () => {
   });
 
   it('a staff member passes the admin gate and counts toward the last-admin guard', async () => {
-    await makeCoachStaff();
+    makeStaff();
     const members = getMockData('organization_members').filter(
       (m) => m.organization_id === MOCK_ORG_ID
     );
-    const admins = members.filter((m) => m.role === 'admin');
-    expect(admins.map((m) => m.profile_id)).toEqual([ADMIN]);
+    expect(members.filter((m) => m.role === 'admin').map((m) => m.profile_id)).toEqual([ADMIN]);
 
-    // Staff demotes the only admin: allowed, staff remains admin-equivalent.
-    setSession(COACH);
-    const demoted = await supabase.rpc('admin_change_member_role', {
+    // Staff removes the only admin: allowed, staff remains admin-equivalent.
+    setSession(MEMBER);
+    const removed = await supabase.rpc('admin_remove_member', {
       p_organization_id: MOCK_ORG_ID,
       p_profile_id: ADMIN,
-      p_role: 'coach',
     });
-    expect(demoted.error).toBeNull();
+    expect(removed.error).toBeNull();
+    expect(
+      getMockData('organization_members')
+        .filter((m) => m.organization_id === MOCK_ORG_ID)
+        .map((m) => m.profile_id)
+    ).toEqual([MEMBER]);
 
-    // Now staff is the last admin-equivalent member and may not demote itself.
-    const self = await supabase.rpc('admin_change_member_role', {
+    // Now staff is the last admin-equivalent member and may not remove itself.
+    const self = await supabase.rpc('admin_remove_member', {
       p_organization_id: MOCK_ORG_ID,
-      p_profile_id: COACH,
-      p_role: 'coach',
+      p_profile_id: MEMBER,
     });
-    expect(self.error?.message).toMatch(/last admin/i);
+    expect(self.error?.message).toMatch(/yourself|last admin/i);
     expect(
       getMockData('organization_members').find(
-        (m) => m.organization_id === MOCK_ORG_ID && m.profile_id === COACH
+        (m) => m.organization_id === MOCK_ORG_ID && m.profile_id === MEMBER
       )?.role
     ).toBe('staff');
   });

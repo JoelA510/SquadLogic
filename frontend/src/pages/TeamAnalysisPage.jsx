@@ -346,6 +346,8 @@ const YEARS_PLAYED_KEYS = ['years_played', 'Years Played', 'yearsPlayed'];
 const WAITLIST_KEYS = ['waitlist', 'waitlisted'];
 const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
 const LOOKUP_CHUNK = 200;
+/** The coach statuses `admin_assign_team_coach` accepts, and so the ones whose child links anchor a team. */
+const ANCHORING_COACH_STATUSES = ['active', 'pending-confirmation'];
 const LOOKUP_CONCURRENCY = 8;
 
 /**
@@ -465,6 +467,38 @@ async function readCoachNames(organizationId, coachIds) {
     }
   }
   return names;
+}
+
+/**
+ * The ids, of the coaches given, that may anchor a team: those `admin_assign_team_coach` would
+ * assign a team to, status `active` or `pending-confirmation` (20260503050000). A link of a coach
+ * who is `inactive` or `interested` stays on file -- the coach import writes it whatever the
+ * status, so re-activating the coach restores the anchor -- but teaming does not read it. Not
+ * guarded, as the link read above it is not (Phase B3): a refused read stops the run.
+ * @param {string} organizationId
+ * @param {string[]} coachIds
+ * @returns {Promise<Set<string>>}
+ */
+async function readAnchoringCoachIds(organizationId, coachIds) {
+  const anchoring = new Set();
+  for (let start = 0; start < coachIds.length; start += LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from('coaches')
+      .select('id, status')
+      .eq('organization_id', organizationId)
+      .in('id', coachIds.slice(start, start + LOOKUP_CHUNK));
+    if (error) {
+      throw new Error(
+        `Could not read the coaches' status, so teams were not generated: ${
+          error.message || 'the read was refused'
+        }.`
+      );
+    }
+    for (const row of data || []) {
+      if (ANCHORING_COACH_STATUSES.includes(row.status)) anchoring.add(String(row.id));
+    }
+  }
+  return anchoring;
 }
 
 /** A roster entry buddy requests are matched against: identity only. */
@@ -1199,9 +1233,15 @@ export default function TeamAnalysisPage() {
           }.`
         );
       }
+      // Only a coach who is active or pending confirmation anchors a team; an inactive coach's
+      // child is placed like any other player and the team is left needing a coach.
+      const anchoringCoachIds = await readAnchoringCoachIds(currentOrganization.id, [
+        ...new Set((coachLinks || []).map((link) => String(link.coach_id))),
+      ]);
       const coachesById = new Map();
       for (const link of coachLinks || []) {
         if (!link.player_id) continue;
+        if (!anchoringCoachIds.has(String(link.coach_id))) continue;
         const entry = coachesById.get(link.coach_id) || {
           id: link.coach_id,
           children: [],

@@ -12,7 +12,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(33);
+SELECT plan(39);
 
 INSERT INTO public.import_jobs (
     id, organization_id, job_type, storage_path, status, created_by, total_rows
@@ -130,7 +130,9 @@ INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, sta
     ('11111111-3333-3333-3333-555555555553', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/c1.csv', 'importing', '11111111-1111-1111-1111-111111111111', 1),
     ('11111111-3333-3333-3333-555555555554', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/c2.csv', 'importing', '11111111-1111-1111-1111-111111111111', 1),
     ('11111111-3333-3333-3333-555555555555', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/c3.csv', 'importing', '11111111-1111-1111-1111-111111111111', 1),
-    ('11111111-3333-3333-3333-555555555556', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/empty.csv', 'importing', '11111111-1111-1111-1111-111111111111', 0);
+    ('11111111-3333-3333-3333-555555555556', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/empty.csv', 'importing', '11111111-1111-1111-1111-111111111111', 0),
+    ('11111111-3333-3333-3333-555555555557', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/d1.csv', 'importing', '11111111-1111-1111-1111-111111111111', 2),
+    ('11111111-3333-3333-3333-555555555558', 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/d2.csv', 'importing', '11111111-1111-1111-1111-111111111111', 2);
 
 INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors) VALUES
     ('a1111111-1111-1111-1111-111111111111', '11111111-3333-3333-3333-555555555553', 'coaches', 1, '{}'::jsonb,
@@ -140,7 +142,17 @@ INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_t
      jsonb_build_object('full_name', 'Linker Coach', 'email', 'linker@example.com',
                         'child_registration_id', 'R-200'), '[]'::jsonb),
     ('a1111111-1111-1111-1111-111111111111', '11111111-3333-3333-3333-555555555555', 'coaches', 1, '{}'::jsonb,
-     jsonb_build_object('full_name', 'Linker Coach Renamed', 'email', 'linker@example.com'), '[]'::jsonb);
+     jsonb_build_object('full_name', 'Linker Coach Renamed', 'email', 'linker@example.com'), '[]'::jsonb),
+    -- Two coaches imported, then re-imported with other children; one is deleted before the
+    -- re-import is rolled back.
+    ('a1111111-1111-1111-1111-111111111111', '11111111-3333-3333-3333-555555555557', 'coaches', 1, '{}'::jsonb,
+     jsonb_build_object('full_name', 'Gone Coach', 'email', 'gone@example.com', 'child_registration_id', 'R-100'), '[]'::jsonb),
+    ('a1111111-1111-1111-1111-111111111111', '11111111-3333-3333-3333-555555555557', 'coaches', 2, '{}'::jsonb,
+     jsonb_build_object('full_name', 'Stays Coach', 'email', 'stays@example.com', 'child_registration_id', 'R-100'), '[]'::jsonb),
+    ('a1111111-1111-1111-1111-111111111111', '11111111-3333-3333-3333-555555555558', 'coaches', 1, '{}'::jsonb,
+     jsonb_build_object('full_name', 'Gone Coach', 'email', 'gone@example.com', 'child_registration_id', 'R-200'), '[]'::jsonb),
+    ('a1111111-1111-1111-1111-111111111111', '11111111-3333-3333-3333-555555555558', 'coaches', 2, '{}'::jsonb,
+     jsonb_build_object('full_name', 'Stays Coach', 'email', 'stays@example.com', 'child_registration_id', 'R-200'), '[]'::jsonb);
 
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
@@ -384,6 +396,48 @@ SELECT is(
         AND external_registration_id IN ('R-100', 'R-200'))::int,
     2,
     'no player was touched'
+);
+
+-- A coach deleted after the re-import has nothing left to link: rolling the re-import back must not
+-- abort on the foreign key, and the other coach it covered is restored.
+SELECT is(
+    (public.finalize_coach_import_job('11111111-3333-3333-3333-555555555557', '[]'::jsonb)->>'inserted_coaches')::int,
+    2,
+    'two coaches are imported with a child each'
+);
+
+SELECT is(
+    (public.finalize_coach_import_job('11111111-3333-3333-3333-555555555558', '[]'::jsonb)->>'updated_coaches')::int,
+    2,
+    'a re-import gives each another child, replacing the first'
+);
+
+SELECT is(
+    public.admin_delete_coaches(ARRAY(SELECT id FROM public.coaches
+        WHERE organization_id = 'a1111111-1111-1111-1111-111111111111' AND email = 'gone@example.com')),
+    1,
+    'a coach the re-import covered is deleted afterwards, through admin_delete_coaches'
+);
+
+SELECT is(
+    (public.rollback_coach_import_job('11111111-3333-3333-3333-555555555558')->>'status'),
+    'rolled_back',
+    'the rollback completes although one of the coaches it covers is gone'
+);
+
+SELECT is(
+    (SELECT string_agg(r.slot || ':' || p.external_registration_id, ',' ORDER BY r.slot)
+       FROM public.coach_team_requests r JOIN public.players p ON p.id = r.player_id
+      WHERE r.coach_id = (SELECT id FROM public.coaches WHERE organization_id = 'a1111111-1111-1111-1111-111111111111' AND email = 'stays@example.com')),
+    '1:R-100',
+    'and the other coach gets back the child the re-import replaced'
+);
+
+SELECT is(
+    (SELECT count(*) FROM public.coach_team_requests r
+      WHERE r.coach_id NOT IN (SELECT id FROM public.coaches))::int,
+    0,
+    'and no link is left for the coach that is gone'
 );
 
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';

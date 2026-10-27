@@ -3003,9 +3003,12 @@ plant "M15 unlock is by team, not by row" "$M18" \
   "     WHERE NOT (t.id IN (SELECT u.id FROM public.practice_assignments u WHERE u.team_id IN (SELECT w.team_id FROM public.practice_assignments w WHERE w.id = ANY (v_unlock_ids))))" \
   "FAIL smoke 20260929000000"
 
-plant "M15 the unlock gate stops checking is_org_admin" "$M18" \
+# Since 20261104010000 every member is an admin, so the gate's is_org_admin half can no longer
+# refuse anyone the membership check above it has not (a mutant removing only that half survives,
+# and is not planted); the half that refuses is the missing uid -- the service role.
+plant "M15 the unlock gate no longer refuses a caller with no uid" "$M18" \
   "       AND (auth.uid() IS NULL OR NOT public.is_org_admin(v_org_id)) THEN" \
-  "       AND (auth.uid() IS NULL) THEN" \
+  "       AND (false) THEN" \
   "FAIL smoke 20260929000000"
 
 plant "M15 the unlock audit call is dropped" "$M18" \
@@ -4870,7 +4873,7 @@ plant "M54 the column drop leaves coaches.profile_id" "$M54" \
 declare -A CLAIM_PROVER=(
   ["(checked) an ordinary practice save that omits, moves, re-ranges or overlaps an existing row is refused as locked, 4 of 4, and changes nothing"]="M15 the writer's lock check is removed"
   ["(checked) a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"]="M15 unlock is by team, not by row"
-  ["(checked) only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"]="M15 the unlock gate stops checking is_org_admin"
+  ["(checked) only an org admin with a uid may unlock a practice row: a service-role caller is refused by the unlock gate itself and a signed-in non-member by the membership check"]="M15 the unlock gate no longer refuses a caller with no uid"
   ["(checked) every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"]="M15 the unlock audit call is dropped"
   ["(checked) a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"]="M15 exceptions are stored as assignment rows"
   ["(checked) deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"]="M15 practice_exceptions' assignment FK cascades"
@@ -4992,11 +4995,11 @@ declare -A CLAIM_PROVER=(
   ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R27 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
-  ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
-  ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"
+  ["(checked) replaying the production drift, the reconcile left no broad ALL policy and an admin who could write teams and fields under the drift could write neither afterwards, nor could an outsider"]="M14 the reconcile skips dropping the broad policy"
+  ["(checked) replaying the production drift, the reconcile restored the missing read policies and an admin read teams and practice_slots in their own org only, an outsider none"]="M14 the reconcile skips creating the missing read policies"
   ["(checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"]="M14 the end-state check goes back to a hand-picked table list"
-  ["(checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"]="M14 the scheduler_runs admin write also admits members"
-  ["(checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"]="M14 scheduler_runs gets no admin write policy"
+  ["(checked) every write policy in public, evaluated as a signed-in outsider on an org A row, is unsatisfiable -- direct-column gates only, a gate through a parent row is not reached"]="M14 the scheduler_runs admin write also admits members"
+  ["(checked) scheduler_runs is closed to an outsider's writes and reads, and an admin session still writes it"]="M14 scheduler_runs gets no admin write policy"
   ["(checked) only an admin of the venue's own organisation sets its coordinates: a signed-in non-member and another organisation's admin are refused"]="M16 the coordinates RPC stops checking the caller is an admin of the venue's org"
   ["(checked) the coordinates RPC refuses a half pair (22023)"]="M16 the coordinates RPC stops refusing a half pair"
   ["(checked) the both-or-neither CHECK refuses a half-pair coordinates write that bypasses the RPC"]="M16 the both-or-neither CHECK is dropped"

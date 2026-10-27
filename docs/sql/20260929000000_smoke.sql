@@ -4,7 +4,7 @@
 -- and `scripts/dbharness/run.sh` requires each witness NOTICE to print.
 -- `scripts/dbharness/prelude.sql` stubs `auth.uid()` from
 -- `request.jwt.claim.sub`, so every save runs the REAL RPC as a real org
--- admin (or coach, or service role) with RLS on: the writer is SECURITY
+-- admin (or a signed-in non-member, or service role) with RLS on: the writer is SECURITY
 -- INVOKER.
 --
 -- The plan §6 witnesses for PR 6, one section each:
@@ -210,7 +210,6 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 2-9. One season, driven through the real RPC
 -- ---------------------------------------------------------------------------
--- In a transaction that is rolled back: it lifts organization_members_role_check (below).
 BEGIN;
 DO $$
 DECLARE
@@ -246,12 +245,12 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 66', 'smoke-org-66')
       RETURNING id INTO v_org;
     -- **A member who is not an admin cannot exist any more**: organization_members_role_check admits
-    -- only admin, staff and tenant_admin since 20261104010000, and all three are admins. The unlock
-    -- gate below is defence in depth for exactly that state (a membership check comes first), so the
-    -- persona is built by lifting the check for this transaction, which is rolled back.
-    ALTER TABLE public.organization_members DROP CONSTRAINT organization_members_role_check;
+    -- only admin, staff and tenant_admin since 20261104010000, and all three are admins. The
+    -- refusals a user can reach are therefore a signed-in user with no membership in the
+    -- organization (v_coach below, kept under its old name) and the service role; the role check is
+    -- left in place.
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-      (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach');
+      (v_org, v_admin, 'admin');
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'P66 Park') RETURNING id INTO v_loc;
     INSERT INTO public.fields (organization_id, location_id, name, active)
       VALUES (v_org, v_loc, 'P66 Pitch', true) RETURNING id INTO v_field;
@@ -401,29 +400,31 @@ BEGIN
     END IF;
     RAISE NOTICE 'unlock is per row: unlocking one of Team 1''s two rows left the other locked (refused 22023 naming it) and both rows in place';
 
-    -- ---- 6. unlock is admin-only, by its own gate ---------------------------
+    -- ---- 6. unlock is admin-only: a non-member by the membership check, the service role by its own gate ----
+    -- The payload names organization_id: without it a non-member cannot read the season and the call
+    -- fails earlier (23503), which is not the refusal under test.
     PERFORM set_config('request.jwt.claim.sub', v_coach::text, true);
     v_state := NULL;
     BEGIN
         PERFORM public.persist_practice_schedule(
-            jsonb_build_object('id', gen_random_uuid(), 'season_settings_id', v_s1), v_base,
-            unlock => jsonb_build_array(jsonb_build_object('assignment_id', v_row[2], 'reason', 'coach')));
+            jsonb_build_object('id', gen_random_uuid(), 'season_settings_id', v_s1, 'organization_id', v_org), v_base,
+            unlock => jsonb_build_array(jsonb_build_object('assignment_id', v_row[2], 'reason', 'non-member')));
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
-    IF v_state IS DISTINCT FROM '42501' OR v_msg NOT LIKE 'unlock requires an org admin%' THEN
-        RAISE EXCEPTION 'a coach''s unlock was not refused 42501 by the unlock gate: % %', v_state, v_msg;
+    IF v_state IS DISTINCT FROM '42501' OR v_msg NOT LIKE 'caller is not a member of organization%' THEN
+        RAISE EXCEPTION 'a non-member''s unlock was not refused 42501 by the membership check: % %', v_state, v_msg;
     END IF;
-    -- 9a. and an ordinary save by the coach is refused by the general check.
+    -- 9a. and an ordinary save by the non-member is refused by the same check.
     v_state := NULL;
     BEGIN
         PERFORM public.persist_practice_schedule(
-            jsonb_build_object('id', gen_random_uuid(), 'season_settings_id', v_s1), v_base);
+            jsonb_build_object('id', gen_random_uuid(), 'season_settings_id', v_s1, 'organization_id', v_org), v_base);
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
-    IF v_state IS DISTINCT FROM '42501' THEN
-        RAISE EXCEPTION 'a non-admin ordinary save was not refused 42501: % %', v_state, v_msg;
+    IF v_state IS DISTINCT FROM '42501' OR v_msg NOT LIKE 'caller is not a member of organization%' THEN
+        RAISE EXCEPTION 'a non-member''s ordinary save was not refused 42501: % %', v_state, v_msg;
     END IF;
     PERFORM set_config('request.jwt.claim.sub', '', true);
     PERFORM set_config('request.jwt.claim.role', 'service_role', true);
@@ -442,7 +443,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     SET LOCAL ROLE authenticated;
-    RAISE NOTICE 'unlock gate: a coach and a service-role caller (no uid) were each refused 42501 by the unlock gate itself; a coach''s ordinary save was refused 42501';
+    RAISE NOTICE 'unlock gate: a service-role caller (no uid) was refused 42501 by the unlock gate itself; a signed-in non-member''s unlock and ordinary save were each refused 42501 by the membership check';
 
     -- ---- 9b. closes naming another season's row -----------------------------
     v_state := NULL;

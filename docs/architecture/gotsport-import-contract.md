@@ -255,7 +255,11 @@ pipeline (`packages/core/src/teamingPipeline.js`) projects those links onto the
 roster so the generator anchors a team per coaching family. **Only these links
 anchor a team** (owner decision 8a, 2026-10-27): a coach an import row names
 (`coach_id`, `coach_email`) anchors nothing. The coach import writes the links
-from its `child_registration_id` column (above).
+from its `child_registration_id` column (above), whatever the coach's status; the Teams page
+reads them only for a coach who is `active` or `pending-confirmation` (the statuses
+`admin_assign_team_coach` accepts), so an `inactive` or `interested` coach's child is placed like
+any other player until the coach is active again. Rolling the import back restores the links an
+update replaced, except for a coach deleted since, which has nothing left to link.
 
 ## Operational note — pilot DB migration divergence
 

@@ -70,7 +70,6 @@ DECLARE
     v_admin uuid := gen_random_uuid();
     v_user uuid := gen_random_uuid();     -- signed in, a member of nothing
     v_other uuid := gen_random_uuid();    -- admin of the other organization
-    v_ghost uuid := gen_random_uuid();    -- a member holding the retired coach role (written past the check)
     v_org uuid;
     v_other_org uuid;
     v_season uuid;
@@ -162,11 +161,10 @@ BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin, 'ao-admin@example.test', '{"password_length": 16}'),
         (v_user, 'ao-user@example.test', '{"password_length": 16}'),
-        (v_other, 'ao-other@example.test', '{"password_length": 16}'),
-        (v_ghost, 'ao-ghost@example.test', '{"password_length": 16}');
+        (v_other, 'ao-other@example.test', '{"password_length": 16}');
     INSERT INTO public.profiles (id, email) VALUES
         (v_admin, 'ao-admin@example.test'), (v_user, 'ao-user@example.test'),
-        (v_other, 'ao-other@example.test'), (v_ghost, 'ao-ghost@example.test')
+        (v_other, 'ao-other@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Admin Only', 'smoke-admin-only') RETURNING id INTO v_org;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Admin Only Other', 'smoke-admin-only-other') RETURNING id INTO v_other_org;
@@ -223,33 +221,7 @@ BEGIN
     END LOOP;
     RAISE NOTICE 'as a user: an admin reads and writes; a non-member and another organization''s admin are refused with 42501';
 
-    -- ---- 3. defence in depth: the retired role, written past its check -------------
-    ALTER TABLE public.organization_members DROP CONSTRAINT organization_members_role_check;
-    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org, v_ghost, 'coach');
-    PERFORM pg_temp.act(v_ghost, 'authenticated');
-    IF pg_temp.reads(v_org) <> '0/0/0/0' THEN RAISE EXCEPTION 'a coach-role member reads %', pg_temp.reads(v_org); END IF;
-    FOR v_state IN SELECT format(q, v_org, v_team) FROM unnest(ARRAY[
-        'SELECT public.get_facility_permits(%1$L)',
-        'SELECT * FROM public.get_team_roster(%2$L)',
-        'SELECT * FROM public.get_team_staff(%2$L)']) q LOOP
-        IF pg_temp.state_of(v_state) <> '42501' THEN
-            RAISE EXCEPTION 'a coach-role member was not refused with 42501: %', v_state;
-        END IF;
-    END LOOP;
-    IF (SELECT count(*) FROM public.team_calendar_tokens WHERE team_id = v_team) <> 0 THEN
-        RAISE EXCEPTION 'a coach-role member reads a calendar token';
-    END IF;
-    IF public.rotate_calendar_token(v_team) ->> 'status' <> 'error' THEN
-        RAISE EXCEPTION 'a coach-role member rotated the team''s calendar token';
-    END IF;
-    RESET ROLE;
-    RAISE NOTICE 'defence in depth: a member holding the retired coach role reads none of it and is refused every RPC';
-    -- The constraint is back with the rollback; the check above has served.
-    DELETE FROM public.organization_members WHERE organization_id = v_org AND profile_id = v_ghost;
-    ALTER TABLE public.organization_members ADD CONSTRAINT organization_members_role_check
-        CHECK (role = ANY (ARRAY['admin'::text, 'staff'::text, 'tenant_admin'::text]));
-
-    -- ---- 4. the coach key ----------------------------------------------------
+    -- ---- 3. the coach key ----------------------------------------------------
     INSERT INTO public.coaches (organization_id, full_name, email, status)
         VALUES (v_other_org, 'AO Coach Elsewhere', 'ao-coach@example.test', 'active');
     IF (SELECT count(*) FROM public.coaches WHERE email = 'ao-coach@example.test') <> 2 THEN
@@ -265,7 +237,7 @@ BEGIN
     END LOOP;
     RAISE NOTICE 'the coach key: one row per organization and email, stored lower-case and trimmed';
 
-    -- ---- 5. the coach import (S7): an email scoped to the organization, and the coach's children ----
+    -- ---- 4. the coach import (S7): an email scoped to the organization, and the coach's children ----
     -- The other organization already has a coach with the address the file brings; two players of
     -- this organization and one of the other carry registration ids the file names.
     INSERT INTO public.coaches (organization_id, full_name, email, status)

@@ -381,3 +381,13 @@ each with `docs/sql/<id>_revert.sql` and `_smoke.sql`. Differences from the desi
   teams and see the coach's team anchored) is not an E2E: "Upload Another File", which switching from
   players to coaches needs, clears the session's player import the Teams page builds from. The anchoring
   on the page is held by `tests/teamAnalysisEligibility.test.jsx` instead.
+- **After review (Codex, three findings).** The pgTAP files and smokes that lifted
+  `organization_members_role_check` to forge a non-admin member no longer do: the refusals they hold
+  are those of a signed-in non-member and another organization's admin (the real paths), the
+  unlock gate's `is_org_admin` half having become unreachable for a signed-in caller (its plant is
+  re-aimed at the half that refuses, the missing uid). The Teams page reads the status of each
+  linked coach and ignores the links of one who is not `active` or `pending-confirmation`
+  (`admin_assign_team_coach`'s rule), so an inactive coach's child is placed as an ordinary player
+  and the team is listed as needing a coach; the import still writes the link. The coach-import
+  rollback restores a replaced link only for a coach that still exists, instead of aborting on the
+  foreign key.

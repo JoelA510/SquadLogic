@@ -1385,7 +1385,9 @@ BEGIN
               AND organization_id = v_job.organization_id;
 
             -- The links the import replaced (20261104010000): put back those whose player is
-            -- still here. An inserted coach's links went with the coach (ON DELETE CASCADE).
+            -- still here, and only if the coach is: a coach deleted since the import has nothing
+            -- to link, and an insert for them would abort the whole rollback on the foreign key.
+            -- An inserted coach's links went with the coach (ON DELETE CASCADE).
             IF v_previous ? 'child_links' THEN
                 DELETE FROM public.coach_team_requests r
                  WHERE r.organization_id = v_job.organization_id
@@ -1393,7 +1395,10 @@ BEGIN
                 INSERT INTO public.coach_team_requests (organization_id, coach_id, player_id, slot)
                 SELECT v_job.organization_id, v_record.target_id, (l.value->>'player_id')::uuid, (l.value->>'slot')::integer
                   FROM jsonb_array_elements(v_previous->'child_links') AS l(value)
-                 WHERE EXISTS (SELECT 1 FROM public.players p
+                 WHERE EXISTS (SELECT 1 FROM public.coaches c
+                                WHERE c.id = v_record.target_id
+                                  AND c.organization_id = v_job.organization_id)
+                   AND EXISTS (SELECT 1 FROM public.players p
                                 WHERE p.id = (l.value->>'player_id')::uuid
                                   AND p.organization_id = v_job.organization_id);
             END IF;

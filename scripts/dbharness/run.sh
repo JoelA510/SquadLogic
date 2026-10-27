@@ -667,10 +667,10 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"; STATUS=1
       fi
-      if grep -qF "unlock gate: a coach and a service-role caller (no uid) were each refused 42501 by the unlock gate itself" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"
+      if grep -qF "unlock gate: a service-role caller (no uid) was refused 42501 by the unlock gate itself; a signed-in non-member's unlock and ordinary save were each refused 42501 by the membership check" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin with a uid may unlock a practice row: a service-role caller is refused by the unlock gate itself and a signed-in non-member by the membership check"
       else
-        echo "FAIL smoke ${id}: it passed without printing the evidence that only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"; STATUS=1
+        echo "FAIL smoke ${id}: it passed without printing the evidence that only an org admin with a uid may unlock a practice row: a service-role caller is refused by the unlock gate itself and a signed-in non-member by the membership check"; STATUS=1
       fi
       if grep -qF "unlock audit: 2 of 2 accepted unlocks each left one practice.unlock_accepted row carrying its before-image and reason" $SCRATCH/harness_smoke; then
         echo "  | (checked) every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"
@@ -1015,15 +1015,15 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # assertion; these fail if the evidence lines ever stop printing.
     if [ "$id" = "20260928000000" ]; then
       if grep -q 'reconciled over the production drift: broad ALL policy gone from all 10 tables' $SCRATCH/harness_smoke &&
-         grep -q 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows' $SCRATCH/harness_smoke; then
-        echo "  | (checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"
+         grep -qF "after reconcile: direct inserts into teams, fields and practice_slots refused by RLS for org A's admin, who could write teams and fields under the drift, and for an outsider; update and delete reached 0 rows" $SCRATCH/harness_smoke; then
+        echo "  | (checked) replaying the production drift, the reconcile left no broad ALL policy and an admin who could write teams and fields under the drift could write neither afterwards, nor could an outsider"
       else
         echo "FAIL smoke ${id}: it passed without proving the broad policy gone and member writes refused over the production drift"
         STATUS=1
       fi
       if grep -q '8 read policies restored' $SCRATCH/harness_smoke &&
-         grep -q 'non-admin member after reconcile: reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B' $SCRATCH/harness_smoke; then
-        echo "  | (checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"
+         grep -qF "after reconcile: org A's admin reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B" $SCRATCH/harness_smoke; then
+        echo "  | (checked) replaying the production drift, the reconcile restored the missing read policies and an admin read teams and practice_slots in their own org only, an outsider none"
       else
         echo "FAIL smoke ${id}: it passed without proving the read policies restored and member reads scoped over the production drift"
         STATUS=1
@@ -1034,14 +1034,14 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving the end-state check covers tables nobody listed"
         STATUS=1
       fi
-      if grep -qF 'member-satisfiable exactly {"telemetry_log: Insert telemetry for own organization"}, allowlisted; a planted member-writable table is flagged' $SCRATCH/harness_smoke; then
-        echo "  | (checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"
+      if grep -qF 'satisfiable by none; a planted any-signed-in-user write policy is flagged' $SCRATCH/harness_smoke; then
+        echo "  | (checked) every write policy in public, evaluated as a signed-in outsider on an org A row, is unsatisfiable -- direct-column gates only, a gate through a parent row is not reached"
       else
         echo "FAIL smoke ${id}: it passed without proving the semantic census of every write policy in public"
         STATUS=1
       fi
-      if grep -qF 'scheduler_runs: a member reads 1 own-org run and 0 of org B, and cannot insert or update; an admin session inserts and updates' $SCRATCH/harness_smoke; then
-        echo "  | (checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"
+      if grep -qF 'scheduler_runs: an outsider reads none of org A or org B and cannot insert or update; an admin session inserts and updates' $SCRATCH/harness_smoke; then
+        echo "  | (checked) scheduler_runs is closed to an outsider's writes and reads, and an admin session still writes it"
       else
         echo "FAIL smoke ${id}: it passed without proving scheduler_runs closed to members and open to admins"
         STATUS=1
@@ -3487,11 +3487,11 @@ PROBE
     fi
     if [ "$id" = "20261104020000" ]; then
       # The columns come back empty with their three constraints; the whole catalogue must equal a
-      # build at 20261104010000 (read 2026-10-27 with the same query: 8229c664...:1549), and the
+      # build at 20261104010000 (read 2026-10-27 with the same query: b38478dc...:1549, after the rollback finalizer's deleted-coach guard), and the
       # coach survives.
       if psql_cmd "SELECT 'DROPLINK-VERDICT:' || CASE
                WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'eb100000-0000-4000-8000-00000000000a' AND user_id IS NULL AND profile_id IS NULL) <> 1 THEN 'seed-lost'
-               WHEN fp = '8229c664b4395e44e09c22b191115783:1549' THEN 'restored'
+               WHEN fp = 'b38478dc186c9afffe147586add71e8c:1549' THEN 'restored'
                ELSE 'wrong ' || fp END
              FROM (SELECT (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
   SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'

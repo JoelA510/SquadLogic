@@ -12,11 +12,11 @@
  *
  * **The rules (owner, 2026-10-27).** U4 cohorts are practice-only: each meets once a week for the
  * 30-minute session reserved to U4 on the grid, one cohort at a time, the sessions at least 15
- * minutes apart (the grid already is). Every other team gets one weekly practice (U5 to U10) or two
- * (U12 and older, on Monday and Wednesday or Tuesday and Thursday), on the seeded fields in the
- * 16:00 to 19:00 evening window of a school week; younger teams practise earlier. No field, subunit
- * and time holds more teams than its capacity, a team never has two practices at one time, and a
- * coach is never in two places at once.
+ * minutes apart (the grid already is). U5 to U8 teams (boys and girls) get one weekly practice on
+ * the seeded fields in the 16:00 to 19:00 evening window of a school week, younger teams earlier.
+ * U9 and older get none: they are the teams a demo visitor runs the auto-scheduler on. No field,
+ * subunit and time holds more teams than its capacity, a team never has two practices at one time,
+ * and a coach is never in two places at once.
  *
  * Placeholder data only: the team names are the fixture's, and nothing here names a person.
  */
@@ -38,13 +38,11 @@ export const BEGIN_MARK =
 export const END_MARK = '-- END GENERATED demo_seed practice rows';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-/** The pairs a two-practice team uses, alternating by team: never two days in a row. */
-const PAIRS = [
-  ['Mon', 'Wed'],
-  ['Tue', 'Thu'],
-];
-/** From this age up, a team practises twice a week. */
-const TWICE_FROM_AGE = 12;
+/**
+ * The oldest age with a seeded practice. U9 and older have none, so a demo visitor has teams the
+ * auto-scheduler can place (it places only teams with no row).
+ */
+const SCHEDULED_UP_TO_AGE = 8;
 
 /** `hh:mm` as minutes. */
 const minutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
@@ -57,10 +55,7 @@ const ageOf = (divisionKey) => Number(divisionKey.slice(1).replace(/[BG]$/, ''))
  * practise earlier in the evening.
  */
 function preferredStart(age) {
-  if (age <= 6) return '16:00';
-  if (age <= 8) return '16:45';
-  if (age <= 10) return '17:30';
-  return '18:15';
+  return age <= 6 ? '16:00' : '16:45';
 }
 
 /**
@@ -134,53 +129,38 @@ export function buildPracticeSchedule(fixtureDir = DEMO_FIXTURE_DIR) {
   }
   u4Teams.forEach((team, i) => place(u4Slots[i], team));
 
-  // ---- everyone else, on the open grid ----
+  // ---- U5 to U8, on the open grid; U9 and older are left for the visitor's auto-scheduler ----
   const open = grid.filter((s) => !s.division && s.day !== 'Sat' && s.day !== 'Sun');
   const gridStarts = [...new Set(open.map((s) => s.start))].sort();
-  const others = teams.filter((t) => divisionOfTeam(t) !== 'U4');
+  const scheduled = teams.filter((t) => {
+    const age = ageOf(divisionOfTeam(t));
+    return age !== 4 && age <= SCHEDULED_UP_TO_AGE;
+  });
   const indexInGroup = new Map();
   let count = 0;
-  for (const team of others) {
-    const group = Math.min(ageOf(divisionOfTeam(team)), TWICE_FROM_AGE);
-    const n = indexInGroup.get(group) ?? 0;
-    indexInGroup.set(group, n + 1);
+  for (const team of scheduled) {
     const age = ageOf(divisionOfTeam(team));
-    const days = age >= TWICE_FROM_AGE ? PAIRS[n % PAIRS.length] : [DAYS[n % 4]];
+    const n = indexInGroup.get(age) ?? 0;
+    indexInGroup.set(age, n + 1);
+    const day = DAYS[n % 4];
     // The times to try, nearest the preferred one first.
     const want = minutes(preferredStart(age));
     const starts = [...gridStarts].sort(
       (a, b) => Math.abs(minutes(a) - want) - Math.abs(minutes(b) - want) || a.localeCompare(b)
     );
-    // A team's practices share a ground and a time of day when the grid lets them: the first start
-    // (nearest the preferred one) and ground (rotating, so teams spread over the grounds) at which
-    // every day of the team is free. Otherwise each day takes whatever is nearest.
-    const grounds = (day, start) => open.filter((s) => s.day === day && s.start === start);
-    const same = (a, b) =>
-      a.location === b.location && a.field === b.field && a.subunit === b.subunit;
+    // The first start (nearest the preferred one) and ground (rotating, so teams spread over the
+    // grounds) at which the team is free.
     let chosen = null;
     for (const start of starts) {
-      const base = grounds(days[0], start);
-      for (let k = 0; k < base.length && !chosen; k += 1) {
-        const head = base[(count + k) % base.length];
-        const rest = days.slice(1).map((day) => grounds(day, start).find((s) => same(s, head)));
-        const all = [head, ...rest];
-        if (all.every((slot) => slot && free(slot, team))) chosen = all;
+      const options = open.filter((s) => s.day === day && s.start === start);
+      for (let k = 0; k < options.length && !chosen; k += 1) {
+        const option = options[(count + k) % options.length];
+        if (free(option, team)) chosen = option;
       }
       if (chosen) break;
     }
-    if (!chosen) {
-      chosen = days.map((day) => {
-        for (const start of starts) {
-          const options = grounds(day, start);
-          for (let k = 0; k < options.length; k += 1) {
-            const option = options[(count + k) % options.length];
-            if (free(option, team)) return option;
-          }
-        }
-        throw new Error(`no free slot on ${day} for ${team}`);
-      });
-    }
-    for (const slot of chosen) place(slot, team);
+    if (!chosen) throw new Error(`no free slot on ${day} for ${team}`);
+    place(chosen, team);
     count += 1;
   }
 

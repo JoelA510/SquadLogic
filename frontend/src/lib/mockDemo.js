@@ -6,7 +6,7 @@
  * `signInAnonymously` makes an anonymous session; `start_demo_session()` gives the caller a "Demo
  * league" that expires 30 minutes on, holding a SMALL slice of the real seed (two divisions, one of
  * them the practice-only U4 with its four reserved Saturday sessions) and its applied weekly practice
- * schedule (each of the four teams on a slot), enough for the UI tests. The
+ * schedule (the U4 teams on a slot, the U10 teams left to schedule), enough for the UI tests. The
  * mock re-merges its whole store on every read, so the real league's 1,259 players would make every
  * call slow. The real counts are asserted against the real backend (`real_backend_demo.feature`).
  *
@@ -311,10 +311,12 @@ export function handleDemoRpc(
     });
   });
 
-  // The applied weekly practice schedule the server's start_demo_session seeds (20261103010000): each
-  // team on a slot, live from its weekday's first date in the season (which starts on the Monday after
-  // the demo does and runs twelve weeks) to the season's last day. Here, a U4 cohort in each of the first
-  // two reserved sessions (one at a time, 15 minutes apart) and the U10 teams one on Tuesday, one on Thursday.
+  // The applied weekly practice schedule the server's start_demo_session seeds (20261103010000): the
+  // practice-only U4 cohorts and the U5 to U8 teams, each on a slot, live from its weekday's first date in
+  // the season (which starts on the Monday after the demo does and runs twelve weeks) to the season's last
+  // day. U9 and older have none, for the visitor's auto-scheduler. Here, a U4 cohort in each of the first
+  // two reserved sessions (one at a time, 15 minutes apart); the U10 teams are left unscheduled, with the
+  // two open weekday slots free for them.
   const dayMs = 24 * 60 * 60 * 1000;
   const today = new Date(now);
   const daysToMonday = (8 - today.getUTCDay()) % 7 || 7;
@@ -329,8 +331,6 @@ export function handleDemoRpc(
   const schedule = [
     [orgTeams[0], 'sat-09:00'],
     [orgTeams[1], 'sat-09:45'],
-    [orgTeams[2], 'tue-16:00'],
-    [orgTeams[3], 'thu-16:00'],
   ];
   schedule.forEach(([team, slotKey]) => {
     if (!team) return;
@@ -377,7 +377,10 @@ export function handleDemoRpc(
         assignmentRate: orgTeams.length ? assigned / orgTeams.length : 0,
         manualFollowUpRate: orgTeams.length ? (orgTeams.length - assigned) / orgTeams.length : 0,
       },
-      unassignedByReason: [],
+      unassignedByReason:
+        orgTeams.length > assigned
+          ? [{ reason: 'not scheduled yet', count: orgTeams.length - assigned }]
+          : [],
       dataQualityWarnings: [],
     },
     created_by: user.id,

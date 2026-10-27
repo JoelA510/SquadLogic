@@ -297,8 +297,12 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     const org = data.organization_id;
     const teams = db.teams.filter((t) => t.organization_id === org);
     const rows = db.practice_assignments.filter((a) => a.organization_id === org);
-    // Every team of the slice has a practice, on a slot of the demo's own grid.
-    expect(new Set(rows.map((a) => a.team_id))).toEqual(new Set(teams.map((t) => t.id)));
+    // The U4 teams have a practice, on a slot of the demo's own grid; the U10 teams (U9 and older) have
+    // none, for the visitor's auto-scheduler.
+    const u4 = db.divisions.find((d) => d.organization_id === org && d.name === 'U4');
+    const u4Teams = teams.filter((t) => t.division_id === u4.id);
+    expect(new Set(rows.map((a) => a.team_id))).toEqual(new Set(u4Teams.map((t) => t.id)));
+    expect(teams.length).toBeGreaterThan(u4Teams.length);
     const slotOf = (row) => db.practice_slots.find((s) => s.id === row.practice_slot_id);
     for (const row of rows) {
       const slot = slotOf(row);
@@ -317,7 +321,6 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
       expect(weekday).toBe(slot.day_of_week);
     }
     // U4: Saturday sessions reserved to it, 30 minutes, one cohort at a time, 15 minutes apart.
-    const u4 = db.divisions.find((d) => d.organization_id === org && d.name === 'U4');
     const u4Rows = rows.filter((a) => slotOf(a).division_id === u4.id);
     expect(u4Rows).toHaveLength(db.teams.filter((t) => t.division_id === u4.id).length);
     const sessions = u4Rows.map(slotOf).sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -336,8 +339,8 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     expect(run).toMatchObject({ status: 'completed' });
     expect(run.results.summary).toMatchObject({
       totalTeams: teams.length,
-      assignedTeams: teams.length,
-      unassignedTeams: 0,
+      assignedTeams: u4Teams.length,
+      unassignedTeams: teams.length - u4Teams.length,
       assignmentsRead: rows.length,
     });
     expect(rows.every((a) => a.run_id === run.id)).toBe(true);

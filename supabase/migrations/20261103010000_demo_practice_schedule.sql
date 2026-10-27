@@ -5,15 +5,16 @@
 -- Exports page now says why, #667). A visitor judging the product saw an empty calendar.
 --
 -- **The change.**
---   1. `demo_seed.practice_schedule` (team, ground, weekday, start): where each of the league's 128
---      teams practises each week, on the seeded facility grid. Generated from `fixtures/demo-2026/` by
+--   1. `demo_seed.practice_schedule` (team, ground, weekday, start): where the league's U4 and U5 to U8
+--      teams (68 of its 128) practise each week, on the seeded facility grid. Generated from `fixtures/demo-2026/` by
 --      scripts/build-demo-practice-seed.mjs between the two markers below; tests/demoPracticeSeed.test.js
 --      regenerates it and holds it to its rules, read from the fixture rather than from the generator:
 --        - the four U4 cohorts (practice-only) each meet once a week, in the 30-minute sessions reserved
 --          to U4, one cohort at a time, at least 15 minutes apart;
---        - every other team practises once (U5 to U10) or twice (U12 and older, never on consecutive
---          days) a week on the open grid, 16:00 to 19:00 in the season's time zone
---          (America/Los_Angeles), younger teams earlier;
+--        - every U5 to U8 team (boys and girls) practises once a week on the open grid, Monday to
+--          Thursday, 16:00 to 19:00 in the season's time zone (America/Los_Angeles), younger teams
+--          earlier;
+--        - U9 and older have no practice: they are the teams a demo visitor runs the auto-scheduler on;
 --        - no slot holds more teams than its capacity, no team is in two slots at once, and no coach is
 --          in two places at once.
 --      Placeholder data only: the fixture's team names and the facility grid; no person is named.
@@ -27,8 +28,8 @@
 --   3. An end-state check: the seed is complete and consistent, and the function is the new one.
 --
 -- **What an admin notices.** In a new demo, the practice page, team pages, coach home and the exports show
--- the league's practices. All 128 teams already have one, so they are locked: the auto-scheduler has no
--- team left to place until an admin releases some (see the PR).
+-- practices for U4 and U5 to U8. Those 68 teams are locked, as any applied practice is; the 60 teams of
+-- U9 and older have none, and the auto-scheduler places exactly them.
 --
 -- No DDL touches the auth or storage schemas. Every drop names its object, with no CASCADE. An existing
 -- demo organization is untouched (the function only runs when a visitor starts a new one).
@@ -134,94 +135,6 @@ INSERT INTO demo_seed.practice_schedule (team_name, location_name, field_name, s
   ('U08G06', 'Orchard Park', 'Field 2', 'B', 'tue', '16:45'),
   ('U08G07', 'Orchard Park', 'Field 3', 'A', 'wed', '16:45'),
   ('U08G08', 'Orchard Park', 'Field 3', 'B', 'thu', '16:45'),
-  ('U09B01', 'Orchard Park', 'Field 3', 'A', 'mon', '17:30'),
-  ('U09B02', 'Orchard Park', 'Field 3', 'B', 'tue', '17:30'),
-  ('U09B03', 'Riverside Fields', 'Field A', 'A', 'wed', '17:30'),
-  ('U09B04', 'Riverside Fields', 'Field A', 'B', 'thu', '17:30'),
-  ('U09B05', 'Riverside Fields', 'Field B', 'A', 'mon', '17:30'),
-  ('U09B06', 'Riverside Fields', 'Field B', 'B', 'tue', '17:30'),
-  ('U09B07', 'Eastgate Sports Complex', 'Field 1', 'A', 'wed', '17:30'),
-  ('U09B08', 'Eastgate Sports Complex', 'Field 1', 'B', 'thu', '17:30'),
-  ('U09G01', 'Orchard Park', 'Field 1', 'A', 'mon', '17:30'),
-  ('U09G02', 'Orchard Park', 'Field 1', 'B', 'tue', '17:30'),
-  ('U09G03', 'Orchard Park', 'Field 2', 'A', 'wed', '17:30'),
-  ('U09G04', 'Orchard Park', 'Field 2', 'B', 'thu', '17:30'),
-  ('U09G05', 'Orchard Park', 'Field 3', 'B', 'mon', '17:30'),
-  ('U09G06', 'Riverside Fields', 'Field A', 'A', 'tue', '17:30'),
-  ('U09G07', 'Riverside Fields', 'Field A', 'B', 'wed', '17:30'),
-  ('U09G08', 'Riverside Fields', 'Field B', 'A', 'thu', '17:30'),
-  ('U10B01', 'Riverside Fields', 'Field B', 'B', 'mon', '17:30'),
-  ('U10B02', 'Eastgate Sports Complex', 'Field 1', 'A', 'tue', '17:30'),
-  ('U10B03', 'Eastgate Sports Complex', 'Field 1', 'B', 'wed', '17:30'),
-  ('U10B04', 'Orchard Park', 'Field 1', 'A', 'thu', '17:30'),
-  ('U10B05', 'Orchard Park', 'Field 1', 'B', 'mon', '17:30'),
-  ('U10B06', 'Orchard Park', 'Field 2', 'A', 'tue', '17:30'),
-  ('U10B07', 'Orchard Park', 'Field 2', 'B', 'wed', '17:30'),
-  ('U10B08', 'Orchard Park', 'Field 3', 'A', 'thu', '17:30'),
-  ('U10G01', 'Riverside Fields', 'Field A', 'A', 'mon', '17:30'),
-  ('U10G02', 'Riverside Fields', 'Field A', 'B', 'tue', '17:30'),
-  ('U10G03', 'Riverside Fields', 'Field B', 'A', 'wed', '17:30'),
-  ('U10G04', 'Riverside Fields', 'Field B', 'B', 'thu', '17:30'),
-  ('U10G05', 'Eastgate Sports Complex', 'Field 1', 'A', 'mon', '17:30'),
-  ('U10G06', 'Eastgate Sports Complex', 'Field 1', 'B', 'tue', '17:30'),
-  ('U10G07', 'Orchard Park', 'Field 1', 'A', 'wed', '17:30'),
-  ('U10G08', 'Orchard Park', 'Field 1', 'B', 'thu', '17:30'),
-  ('U12B01', 'Orchard Park', 'Field 1', 'A', 'mon', '18:15'),
-  ('U12B01', 'Orchard Park', 'Field 1', 'A', 'wed', '18:15'),
-  ('U12B02', 'Orchard Park', 'Field 1', 'B', 'tue', '18:15'),
-  ('U12B02', 'Orchard Park', 'Field 1', 'B', 'thu', '18:15'),
-  ('U12B03', 'Orchard Park', 'Field 2', 'A', 'mon', '18:15'),
-  ('U12B03', 'Orchard Park', 'Field 2', 'A', 'wed', '18:15'),
-  ('U12B04', 'Orchard Park', 'Field 2', 'B', 'tue', '18:15'),
-  ('U12B04', 'Orchard Park', 'Field 2', 'B', 'thu', '18:15'),
-  ('U12B05', 'Orchard Park', 'Field 3', 'A', 'mon', '18:15'),
-  ('U12B05', 'Orchard Park', 'Field 3', 'A', 'wed', '18:15'),
-  ('U12B06', 'Orchard Park', 'Field 3', 'B', 'tue', '18:15'),
-  ('U12B06', 'Orchard Park', 'Field 3', 'B', 'thu', '18:15'),
-  ('U12B07', 'Riverside Fields', 'Field A', 'A', 'mon', '18:15'),
-  ('U12B07', 'Riverside Fields', 'Field A', 'A', 'wed', '18:15'),
-  ('U12B08', 'Riverside Fields', 'Field A', 'B', 'tue', '18:15'),
-  ('U12B08', 'Riverside Fields', 'Field A', 'B', 'thu', '18:15'),
-  ('U12G01', 'Riverside Fields', 'Field B', 'A', 'mon', '18:15'),
-  ('U12G01', 'Riverside Fields', 'Field B', 'A', 'wed', '18:15'),
-  ('U12G02', 'Riverside Fields', 'Field B', 'B', 'tue', '18:15'),
-  ('U12G02', 'Riverside Fields', 'Field B', 'B', 'thu', '18:15'),
-  ('U12G03', 'Eastgate Sports Complex', 'Field 1', 'A', 'mon', '18:15'),
-  ('U12G03', 'Eastgate Sports Complex', 'Field 1', 'A', 'wed', '18:15'),
-  ('U12G04', 'Eastgate Sports Complex', 'Field 1', 'B', 'tue', '18:15'),
-  ('U12G04', 'Eastgate Sports Complex', 'Field 1', 'B', 'thu', '18:15'),
-  ('U12G05', 'Orchard Park', 'Field 1', 'B', 'mon', '18:15'),
-  ('U12G05', 'Orchard Park', 'Field 1', 'B', 'wed', '18:15'),
-  ('U12G06', 'Orchard Park', 'Field 2', 'A', 'tue', '18:15'),
-  ('U12G06', 'Orchard Park', 'Field 2', 'A', 'thu', '18:15'),
-  ('U12G07', 'Orchard Park', 'Field 2', 'B', 'mon', '18:15'),
-  ('U12G07', 'Orchard Park', 'Field 2', 'B', 'wed', '18:15'),
-  ('U12G08', 'Orchard Park', 'Field 3', 'A', 'tue', '18:15'),
-  ('U12G08', 'Orchard Park', 'Field 3', 'A', 'thu', '18:15'),
-  ('U14B01', 'Orchard Park', 'Field 3', 'B', 'mon', '18:15'),
-  ('U14B01', 'Orchard Park', 'Field 3', 'B', 'wed', '18:15'),
-  ('U14B02', 'Riverside Fields', 'Field A', 'A', 'tue', '18:15'),
-  ('U14B02', 'Riverside Fields', 'Field A', 'A', 'thu', '18:15'),
-  ('U14G01', 'Riverside Fields', 'Field A', 'B', 'mon', '18:15'),
-  ('U14G01', 'Riverside Fields', 'Field A', 'B', 'wed', '18:15'),
-  ('U14G02', 'Riverside Fields', 'Field B', 'A', 'tue', '18:15'),
-  ('U14G02', 'Riverside Fields', 'Field B', 'A', 'thu', '18:15'),
-  ('U16B01', 'Riverside Fields', 'Field B', 'B', 'mon', '18:15'),
-  ('U16B01', 'Riverside Fields', 'Field B', 'B', 'wed', '18:15'),
-  ('U16B02', 'Eastgate Sports Complex', 'Field 1', 'A', 'tue', '18:15'),
-  ('U16B02', 'Eastgate Sports Complex', 'Field 1', 'A', 'thu', '18:15'),
-  ('U16G01', 'Eastgate Sports Complex', 'Field 1', 'B', 'mon', '18:15'),
-  ('U16G01', 'Eastgate Sports Complex', 'Field 1', 'B', 'wed', '18:15'),
-  ('U16G02', 'Orchard Park', 'Field 1', 'A', 'tue', '18:15'),
-  ('U16G02', 'Orchard Park', 'Field 1', 'A', 'thu', '18:15'),
-  ('U19B01', 'Orchard Park', 'Field 2', 'A', 'mon', '17:30'),
-  ('U19B01', 'Orchard Park', 'Field 1', 'B', 'wed', '17:30'),
-  ('U19B02', 'Orchard Park', 'Field 2', 'B', 'tue', '17:30'),
-  ('U19B02', 'Orchard Park', 'Field 2', 'A', 'thu', '17:30'),
-  ('U19G01', 'Orchard Park', 'Field 2', 'B', 'mon', '17:30'),
-  ('U19G01', 'Orchard Park', 'Field 3', 'A', 'wed', '17:30'),
-  ('U19G02', 'Orchard Park', 'Field 3', 'A', 'tue', '17:30'),
-  ('U19G02', 'Orchard Park', 'Field 3', 'B', 'thu', '17:30'),
   ('U4A', 'Orchard Park', 'Tot Lot', NULL, 'sat', '09:00'),
   ('U4B', 'Orchard Park', 'Tot Lot', NULL, 'sat', '09:45'),
   ('U4C', 'Orchard Park', 'Tot Lot', NULL, 'sat', '10:30'),
@@ -502,7 +415,9 @@ BEGIN
                    'assignmentsRead', v_rows, 'assignmentsCounted', v_rows,
                    'assignmentRate', CASE WHEN v_teams > 0 THEN round(v_assigned::numeric / v_teams, 4) ELSE 0 END,
                    'manualFollowUpRate', CASE WHEN v_teams > 0 THEN round((v_teams - v_assigned)::numeric / v_teams, 4) ELSE 0 END),
-               'unassignedByReason', '[]'::jsonb,
+               'unassignedByReason', CASE WHEN v_teams > v_assigned
+                   THEN jsonb_build_array(jsonb_build_object('reason', 'not scheduled yet', 'count', v_teams - v_assigned))
+                   ELSE '[]'::jsonb END,
                'dataQualityWarnings', '[]'::jsonb)
      WHERE id = v_practice_run;
 
@@ -527,15 +442,13 @@ DECLARE
     v_n integer;
     v_def text;
 BEGIN
-    -- Every team practises: once or twice, the four U4 cohorts exactly once.
+    -- U4 and U5 to U8 practise exactly once; U9 and older have no practice (the visitor's to schedule).
     SELECT count(*) INTO v_n FROM demo_seed.teams t
-     WHERE NOT EXISTS (SELECT 1 FROM demo_seed.practice_schedule s WHERE s.team_name = t.name);
-    IF v_n <> 0 THEN RAISE EXCEPTION '% seeded team(s) have no practice', v_n; END IF;
-    IF EXISTS (SELECT 1 FROM demo_seed.practice_schedule s
-                 JOIN demo_seed.teams t ON t.name = s.team_name
-                GROUP BY s.team_name, t.division_key
-               HAVING count(*) > 2 OR (t.division_key = 'U4' AND count(*) <> 1)) THEN
-        RAISE EXCEPTION 'a team practises more than twice, or a U4 cohort not once';
+     WHERE (SELECT count(*) FROM demo_seed.practice_schedule s WHERE s.team_name = t.name)
+           <> CASE WHEN regexp_replace(t.division_key, '[^0-9]', '', 'g')::int <= 8 THEN 1 ELSE 0 END;
+    IF v_n <> 0 THEN RAISE EXCEPTION '% seeded team(s) have the wrong number of practices (U4 to U8 once, U9 and older none)', v_n; END IF;
+    IF (SELECT count(DISTINCT team_name) FROM demo_seed.practice_schedule) <> 68 THEN
+        RAISE EXCEPTION 'the schedule does not cover 68 teams';
     END IF;
 
     -- Every row finds its seeded slot, U4 only in the sessions reserved to it and nobody else there,

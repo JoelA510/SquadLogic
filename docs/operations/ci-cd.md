@@ -571,8 +571,9 @@ other environment.
   `real_backend_demo.feature` (demo mode, D4) starts a demo as an anonymous visitor on this
   stack (anonymous sign-ins are on in `supabase/config.toml`, CAPTCHA off), reads its 128 teams, 1,259 players and
   251 coaches with the visitor's own session, checks the practice schedule it starts with (migration
-  `20261103010000`: every team once or twice a week, U4 once in each of its four reserved Saturday
-  sessions, 30 minutes and 15 apart, a practice row for all 128 teams in the master CSV), that U4 plays no
+  `20261103010000`: a practice for each U4 and U5 to U8 team, none for U9 and older), runs the
+  auto-scheduler on the rest and applies it, checks U4 sits once in each of its four reserved Saturday
+  sessions, 30 minutes and 15 apart, a practice row for all 128 teams in the master CSV, that U4 plays no
   games, changes a player's status, is refused a rename
   (`demo_read_only`), meets the import notice, then expires the demo and runs
   `purge_expired_demos()` and finds the organization, its rows and the visitor gone. That last step

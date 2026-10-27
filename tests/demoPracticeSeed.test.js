@@ -7,11 +7,11 @@
  *   - **drift**: regenerating from the fixture gives exactly the rows in the migration;
  *   - **the rules, read from the fixture, not from the generator**: the subject set is the roster's
  *     teams (`players.csv`), the grid is `fields.csv`, the coaches are `coaches.csv`. The checker
- *     parses the rows out of the migration's text and judges them: every team practises, U4 once a
- *     week in the 30-minute sessions reserved to it with 15 minutes between, everyone else once
- *     (U5 to U10) or twice (U12 and older, never on consecutive days) on the open grid in a Monday to
- *     Thursday 16:00 to 19:00 evening, nothing over a slot's capacity, no team or coach in two places
- *     at once, younger teams earlier;
+ *     parses the rows out of the migration's text and judges them: every U4 and U5 to U8 team
+ *     practises once a week and no team of U9 or older does (those are the visitor's to schedule),
+ *     U4 in the 30-minute sessions reserved to it with 15 minutes between, U5 to U8 on the open grid
+ *     in a Monday to Thursday 16:00 to 19:00 evening, nothing over a slot's capacity, no team or
+ *     coach in two places at once, younger teams earlier;
  *   - **the checker can fail**: each rule is broken in a copy of the rows (a team moved into a U4
  *     session, a slot over capacity, a team double-booked, a coach in two places, a missing team, a
  *     U4 cohort squeezed against another) and the checker names it; and a moved fixture session
@@ -44,7 +44,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const minutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 const ageOfTeam = (team) => (team.startsWith('U4') ? 4 : Number(team.slice(1, 3)));
-const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
 /** The rows of the INSERT in `text`, as `{ team, location, field, subunit, day, start }`. */
 function rowsOf(text) {
@@ -82,8 +81,12 @@ function violations(rows, dir = DEMO_FIXTURE_DIR) {
   const byTeam = new Map();
   for (const r of rows) byTeam.set(r.team, [...(byTeam.get(r.team) ?? []), r]);
 
-  // the subject set is the roster, not the schedule: a team the schedule dropped is a miss
-  for (const team of rosterTeams) if (!byTeam.has(team)) out.push(`${team} has no practice`);
+  // the subject set is the roster, not the schedule: a team the schedule dropped is a miss, and a
+  // team of U9 or older that it holds is another (they are left for the visitor's auto-scheduler)
+  for (const team of rosterTeams) {
+    if (ageOfTeam(team) <= 8 && !byTeam.has(team)) out.push(`${team} has no practice`);
+    if (ageOfTeam(team) > 8 && byTeam.has(team)) out.push(`${team} has a practice, wants none`);
+  }
   for (const team of byTeam.keys()) {
     if (!rosterTeams.includes(team)) out.push(`${team} is not on the roster`);
   }
@@ -116,14 +119,10 @@ function violations(rows, dir = DEMO_FIXTURE_DIR) {
     a && b && a.day === b.day && a.from < b.to && b.from < a.to ? `${a.day} ${a.from}` : null;
 
   for (const [team, list] of byTeam) {
-    const age = ageOfTeam(team);
-    const want = age === 4 ? 1 : age >= 12 ? 2 : 1;
-    if (list.length !== want) out.push(`${team} has ${list.length} practices, wants ${want}`);
+    if (list.length !== 1) out.push(`${team} has ${list.length} practices, wants 1`);
     for (let i = 0; i < list.length; i += 1) {
       for (let j = i + 1; j < list.length; j += 1) {
         if (clash(span(list[i]), span(list[j]))) out.push(`${team} is in two places at once`);
-        const gap = Math.abs(DAYS.indexOf(list[i].day) - DAYS.indexOf(list[j].day));
-        if (gap < 2) out.push(`${team} practises on consecutive days`);
       }
     }
   }
@@ -156,7 +155,7 @@ function violations(rows, dir = DEMO_FIXTURE_DIR) {
       .map((r) => minutes(r.start));
     return starts.reduce((a, b) => a + b, 0) / (starts.length || 1);
   };
-  const bands = [meanStart(5, 6), meanStart(7, 8), meanStart(9, 10), meanStart(12, 19)];
+  const bands = [meanStart(5, 6), meanStart(7, 8)];
   for (let i = 1; i < bands.length; i += 1) {
     if (!(bands[i] > bands[i - 1])) out.push('younger teams do not practise earlier');
   }
@@ -189,9 +188,9 @@ describe('what the schedule holds, judged from the fixture', () => {
     expect(violations(rows)).toEqual([]);
   });
 
-  it('puts 128 teams on the grid, 156 weekly practices, the four U4 cohorts on Saturday', () => {
-    expect(new Set(rows.map((r) => r.team)).size).toBe(128);
-    expect(rows).toHaveLength(156);
+  it('puts 68 teams on the grid, 68 weekly practices, the four U4 cohorts on Saturday', () => {
+    expect(new Set(rows.map((r) => r.team)).size).toBe(68);
+    expect(rows).toHaveLength(68);
     const u4 = rows.filter((r) => r.team.startsWith('U4'));
     expect(u4.map((r) => [r.team, r.day, r.start])).toEqual([
       ['U4A', 'sat', '09:00'],
@@ -210,8 +209,8 @@ describe('what the schedule holds, judged from the fixture', () => {
     const u4slot = rows.find((r) => r.team === 'U4A');
 
     it('a team missing from the schedule', () => {
-      expect(violations(copy().filter((r) => r.team !== 'U10B03'))).toContain(
-        'U10B03 has no practice'
+      expect(violations(copy().filter((r) => r.team !== 'U08B03'))).toContain(
+        'U08B03 has no practice'
       );
     });
 
@@ -250,15 +249,18 @@ describe('what the schedule holds, judged from the fixture', () => {
       expect(violations(broken).some((v) => /holds 2 teams/.test(v))).toBe(true);
     });
 
-    it('a team in two places at once, and on consecutive days', () => {
+    it('a team of U9 or older given a practice', () => {
       const broken = copy();
-      const mine = broken.filter((r) => r.team === 'U12B01');
-      Object.assign(mine[1], { day: mine[0].day, start: mine[0].start });
-      expect(violations(broken)).toContain('U12B01 is in two places at once');
-      const next = copy();
-      const pair = next.filter((r) => r.team === 'U12B01');
-      pair[1].day = DAYS[DAYS.indexOf(pair[0].day) + 1];
-      expect(violations(next)).toContain('U12B01 practises on consecutive days');
+      broken.push({ ...broken.find((r) => r.team === 'U08B03'), team: 'U10B03' });
+      expect(violations(broken)).toContain('U10B03 has a practice, wants none');
+    });
+
+    it('a team in two places at once', () => {
+      const broken = copy();
+      broken.push({ ...broken.find((r) => r.team === 'U07B01') });
+      const found = violations(broken);
+      expect(found).toContain('U07B01 is in two places at once');
+      expect(found).toContain('U07B01 has 2 practices, wants 1');
     });
 
     it('a slot that is not on the grid', () => {

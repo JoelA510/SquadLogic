@@ -1,10 +1,11 @@
 -- pgTAP: the demo league starts with an applied weekly practice schedule (migration 20261103010000).
 --
---   * a started demo has every team on the schedule, once or twice a week, the four practice-only U4
---     cohorts exactly once, under a completed `practice` run whose snapshot is counted from the rows;
+--   * a started demo has the U4 cohorts and the U5 to U8 teams (68 of 128) on the schedule, once a week
+--     each, and U9 and older on none (the auto-scheduler's to place), under a completed `practice` run
+--     whose snapshot is counted from the rows;
 --   * U4 meets in the four 30-minute sessions reserved to it, one cohort at a time, at least 15 minutes
 --     apart, and nobody else is in a reserved slot;
---   * the schedule is legal: no slot over its capacity, no team in two overlapping practices, the open
+--   * the schedule is legal: no slot over its capacity, no coach in two overlapping practices, the open
 --     slots Monday to Thursday, 16:00 to 19:00;
 --   * each row is live from its weekday's first date in the season to the season's last day;
 --   * the demo's admin reads the rows through row level security, and another organization's admin reads
@@ -43,19 +44,21 @@ SELECT pa.id, pa.team_id, t.name AS team, d.name AS division, ps.id AS slot_id, 
  WHERE pa.organization_id = (SELECT id FROM t_ids WHERE name = 'demo');
 GRANT SELECT ON t_rows TO authenticated;
 
--- ── 1. every team practises ────────────────────────────────────────────────
+-- ── 1. who practises ───────────────────────────────────────────────────────
 SELECT is(
     (SELECT array[count(*), count(DISTINCT team_id)] FROM t_rows),
-    ARRAY[(SELECT count(*) FROM demo_seed.practice_schedule), 128]::bigint[],
-    'every seeded row became an assignment, and 128 teams practise');
+    ARRAY[(SELECT count(*) FROM demo_seed.practice_schedule), 68]::bigint[],
+    'every seeded row became an assignment, on 68 teams');
 SELECT is(
-    (SELECT array_agg(n ORDER BY n) FROM (SELECT count(*) AS n FROM t_rows GROUP BY team_id) c WHERE n > 2),
+    (SELECT array_agg(n ORDER BY n) FROM (SELECT count(*) AS n FROM t_rows GROUP BY team_id) c WHERE n <> 1),
     NULL::bigint[],
-    'no team practises more than twice a week');
+    'no team practises more than once a week');
 SELECT is(
-    (SELECT array[count(*) FILTER (WHERE n = 1), count(*) FILTER (WHERE n = 2)] FROM (SELECT count(*) AS n FROM t_rows GROUP BY team_id) c),
-    ARRAY[100, 28]::bigint[],
-    '100 teams practise once (U4 and U5 to U10) and 28 twice (U12 and older)');
+    (SELECT array[count(*) FILTER (WHERE r.n = 1), count(*) FILTER (WHERE r.n = 0)]
+       FROM (SELECT t.id, (SELECT count(*) FROM t_rows x WHERE x.team_id = t.id) AS n
+               FROM public.teams t WHERE t.organization_id = (SELECT id FROM t_ids WHERE name = 'demo')) r),
+    ARRAY[68, 60]::bigint[],
+    '68 teams (U4 and U5 to U8) practise once and 60 (U9 and older) have no practice yet');
 
 -- ── 2. U4 ────────────────────────────────────────────────────────────────────
 SELECT is(
@@ -83,10 +86,9 @@ SELECT is(
     0,
     'no slot holds more teams than its capacity');
 SELECT is(
-    (SELECT count(*)::int FROM t_rows a JOIN t_rows b ON a.team_id = b.team_id AND a.id < b.id
-      WHERE a.day = b.day AND a.start_time < b.end_time AND b.start_time < a.end_time),
+    (SELECT count(*)::int FROM t_rows WHERE regexp_replace(division, '[^0-9]', '', 'g')::int > 8),
     0,
-    'no team has two overlapping practices');
+    'no team of U9 or older has a practice');
 SELECT is(
     (SELECT count(*)::int FROM t_rows
       WHERE division <> 'U4' AND (day NOT IN ('mon', 'tue', 'wed', 'thu') OR start_time < time '16:00' OR end_time > time '19:00')),
@@ -101,12 +103,9 @@ SELECT is(
     0,
     'no coach is in two overlapping practices');
 SELECT cmp_ok(
-    (SELECT count(*)::int FROM t_rows a
-      JOIN public.team_coach_assignments ca ON ca.team_id = a.team_id
-      JOIN public.team_coach_assignments cb ON cb.coach_id = ca.coach_id
-      JOIN t_rows b ON b.team_id = cb.team_id AND b.id > a.id),
+    (SELECT count(*)::int FROM public.team_coach_assignments ca JOIN t_rows a ON a.team_id = ca.team_id),
     '>', 0,
-    'the coach check examined pairs of one coach''s practices (it is not a statement about an empty set)');
+    'the coach check examined coaches joined to practices (it is not a statement about an empty set)');
 
 -- ── 4. dating ────────────────────────────────────────────────────────────────
 SELECT is(
@@ -123,7 +122,7 @@ SELECT is(
                   (results -> 'summary' ->> 'unassignedTeams')::bigint, (results -> 'summary' ->> 'assignmentsRead')::bigint]
        FROM public.scheduler_runs
       WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'demo') AND run_type = 'practice' AND status = 'completed'),
-    ARRAY[128, 128, 0, (SELECT count(*) FROM t_rows)]::bigint[],
+    ARRAY[128, 68, 60, (SELECT count(*) FROM t_rows)]::bigint[],
     'one completed practice run, its snapshot counted from the rows');
 
 -- ── 6. who reads them ────────────────────────────────────────────────────────

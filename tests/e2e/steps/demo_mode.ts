@@ -249,19 +249,15 @@ When("I download the master schedule CSV from the demo's exports page", async ({
 });
 
 Then(
-  "the master CSV holds one weekly practice for each of the demo's {int} teams",
+  "the master CSV holds one weekly practice for each of the demo's {int} scheduled teams",
   async ({ page: _page }, teams: number) => {
     // Not headers only: the seeded schedule's practices are in the file, one team each.
     const practices = masterCsv.filter((row) => row['Event Type'] === 'Practice');
-    // The mock's slice has four teams, each on one slot (mockDemo.js); the real league's 128 are
-    // checked on the real backend (real_backend_demo.feature).
+    // The mock's slice schedules its two U4 cohorts, each on one slot, and leaves the U10 teams for
+    // the auto-scheduler (mockDemo.js); the real league's 68 are checked on the real backend
+    // (real_backend_demo.feature).
     expect(practices).toHaveLength(teams);
-    expect(practices.map((row) => row['Team Name']).sort()).toEqual([
-      'U10 Team 3',
-      'U10 Team 4',
-      'U4 Team 1',
-      'U4 Team 2',
-    ]);
+    expect(practices.map((row) => row['Team Name']).sort()).toEqual(['U4 Team 1', 'U4 Team 2']);
     for (const row of practices) {
       expect(row['Start'], `${row['Team Name']} has a start`).not.toBe('');
       expect(row['End'], `${row['Team Name']} has an end`).not.toBe('');

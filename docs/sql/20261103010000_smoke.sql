@@ -2,13 +2,14 @@
 --
 -- Run on the database built to head, inside one transaction that is ROLLED BACK.
 --
---   1. A started demo has an applied weekly practice schedule: every team has one or two
---      `practice_assignments` rows (the four U4 cohorts exactly one) under a completed `practice`
---      run, whose readiness snapshot is counted from those rows.
+--   1. A started demo has an applied weekly practice schedule for U4 and U5 to U8: those 68 teams
+--      have exactly one `practice_assignments` row each, and the 60 teams of U9 and older have none
+--      (the auto-scheduler's to place), under a completed `practice` run whose readiness snapshot is
+--      counted from those rows.
 --   2. U4's four cohorts meet in the sessions reserved to U4, 30 minutes each, one at a time, at
 --      least 15 minutes apart; no other team is in a reserved slot.
 --   3. The schedule is a legal one: every row is a real slot of the demo's own grid, no slot holds
---      more teams than its capacity, no team has two overlapping practices, no coach is in two
+--      more teams than its capacity, no coach is in two
 --      overlapping practices, the weekdays are Monday to Thursday (U4: Saturday) and the times fall
 --      in the 16:00 to 19:00 evening window.
 --   4. Every row is live from its weekday's first date in the season to the season's last day.
@@ -43,23 +44,19 @@ BEGIN
     SELECT season_start, season_end INTO v_season_start, v_season_end
       FROM public.season_settings WHERE organization_id = v_demo;
 
-    -- ---- 1. every team practises, under a completed practice run --------------------
-    SELECT count(*) INTO v_n FROM public.teams t
-     WHERE t.organization_id = v_demo
-       AND (SELECT count(*) FROM public.practice_assignments pa WHERE pa.team_id = t.id)
-           NOT BETWEEN 1 AND 2;
-    IF v_n <> 0 THEN RAISE EXCEPTION '% team(s) of the demo do not practise once or twice a week', v_n; END IF;
+    -- ---- 1. U4 and U5 to U8 practise, once; U9 and older have no practice -----------
     SELECT count(*) INTO v_n FROM public.teams WHERE organization_id = v_demo;
     IF v_n <> 128 THEN RAISE EXCEPTION 'the demo has % teams, not 128', v_n; END IF;
     SELECT count(*) INTO v_n FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
-     WHERE t.organization_id = v_demo AND d.name = 'U4'
-       AND (SELECT count(*) FROM public.practice_assignments pa WHERE pa.team_id = t.id) <> 1;
-    IF v_n <> 0 THEN RAISE EXCEPTION '% U4 cohort(s) do not meet exactly once a week', v_n; END IF;
+     WHERE t.organization_id = v_demo
+       AND (SELECT count(*) FROM public.practice_assignments pa WHERE pa.team_id = t.id)
+           <> CASE WHEN regexp_replace(d.name, '[^0-9]', '', 'g')::int <= 8 THEN 1 ELSE 0 END;
+    IF v_n <> 0 THEN RAISE EXCEPTION '% team(s) have the wrong number of practices (U4 to U8 once, U9 and older none)', v_n; END IF;
+    SELECT count(DISTINCT team_id) INTO v_n FROM public.practice_assignments WHERE organization_id = v_demo AND slot_id = practice_slot_id;
+    IF v_n <> 68 THEN RAISE EXCEPTION 'only % of 68 teams have a slot', v_n; END IF;
     SELECT count(*) INTO v_n FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
      WHERE t.organization_id = v_demo AND d.name = 'U4';
     IF v_n <> 4 THEN RAISE EXCEPTION 'the demo has % U4 cohorts, not 4', v_n; END IF;
-    SELECT count(DISTINCT team_id) INTO v_n FROM public.practice_assignments WHERE organization_id = v_demo AND slot_id = practice_slot_id;
-    IF v_n <> 128 THEN RAISE EXCEPTION 'only % of 128 teams have a slot', v_n; END IF;
 
     SELECT id INTO v_run FROM public.scheduler_runs
      WHERE organization_id = v_demo AND run_type = 'practice' AND status = 'completed';
@@ -73,10 +70,11 @@ BEGIN
        OR (SELECT (results -> 'summary' ->> 'assignedTeams')::bigint FROM public.scheduler_runs WHERE id = v_run)
            IS DISTINCT FROM (SELECT count(DISTINCT team_id) FROM public.practice_assignments WHERE organization_id = v_demo)
        OR (SELECT (results -> 'summary' ->> 'totalTeams')::bigint FROM public.scheduler_runs WHERE id = v_run) <> 128
-       OR (SELECT (results -> 'summary' ->> 'unassignedTeams')::bigint FROM public.scheduler_runs WHERE id = v_run) <> 0 THEN
+       OR (SELECT (results -> 'summary' ->> 'unassignedTeams')::bigint FROM public.scheduler_runs WHERE id = v_run) <> 60
+       OR (SELECT (results -> 'unassignedByReason' -> 0 ->> 'count')::bigint FROM public.scheduler_runs WHERE id = v_run) <> 60 THEN
         RAISE EXCEPTION 'the practice run''s snapshot does not match the rows';
     END IF;
-    RAISE NOTICE 'the demo has an applied practice schedule: 128 teams, % rows, one completed practice run',
+    RAISE NOTICE 'the demo has an applied practice schedule: 68 of 128 teams, % rows, one completed practice run',
         (SELECT count(*) FROM public.practice_assignments WHERE organization_id = v_demo);
 
     -- ---- 2. U4: reserved sessions, 30 minutes, 15 apart -------------------------------
@@ -108,28 +106,21 @@ BEGIN
         SELECT 1 FROM public.practice_assignments pa JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
          WHERE pa.organization_id = v_demo GROUP BY ps.id, ps.capacity HAVING count(*) > ps.capacity) over_full;
     IF v_n <> 0 THEN RAISE EXCEPTION '% slot(s) hold more teams than their capacity', v_n; END IF;
-    SELECT count(*) INTO v_n FROM public.practice_assignments a
-      JOIN public.practice_slots sa ON sa.id = a.practice_slot_id
-      JOIN public.practice_assignments b ON b.team_id = a.team_id AND b.id < a.id
-      JOIN public.practice_slots sb ON sb.id = b.practice_slot_id
-     WHERE a.organization_id = v_demo AND sa.day_of_week = sb.day_of_week
-       AND sa.start_time < sb.end_time AND sb.start_time < sa.end_time;
-    IF v_n <> 0 THEN RAISE EXCEPTION '% team(s) have two overlapping practices', v_n; END IF;
-    -- Every pair of practices one coach has (across every team they coach), and which overlap. The
-    -- meta-assertion: the pairs exist, or "none overlap" is a statement about an empty set.
-    CREATE TEMP TABLE smoke_coach_pairs ON COMMIT DROP AS
-    SELECT a.id AS a_id, b.id AS b_id,
-           (sa.day_of_week = sb.day_of_week AND sa.start_time < sb.end_time AND sb.start_time < sa.end_time) AS overlap
-      FROM public.team_coach_assignments ca
+    -- Every pair of practices one coach has (across every team they coach), and which overlap. In this
+    -- league a coach has one team with one practice, so no pair exists; the meta-assertion is that the
+    -- coaches' practices ARE examined (each coach of a scheduled team is joined to it), and the pair
+    -- check below is the guard for a fixture that gives a coach two.
+    SELECT count(*) INTO v_n FROM public.team_coach_assignments ca
+      JOIN public.practice_assignments a ON a.team_id = ca.team_id WHERE ca.organization_id = v_demo;
+    IF v_n = 0 THEN RAISE EXCEPTION 'no coach is joined to a practice, so the coach check examined nothing'; END IF;
+    SELECT count(*) INTO v_n FROM public.team_coach_assignments ca
       JOIN public.practice_assignments a ON a.team_id = ca.team_id
       JOIN public.practice_slots sa ON sa.id = a.practice_slot_id
       JOIN public.team_coach_assignments cb ON cb.coach_id = ca.coach_id
       JOIN public.practice_assignments b ON b.team_id = cb.team_id AND b.id > a.id
       JOIN public.practice_slots sb ON sb.id = b.practice_slot_id
-     WHERE ca.organization_id = v_demo;
-    SELECT count(*) INTO v_n FROM smoke_coach_pairs;
-    IF v_n = 0 THEN RAISE EXCEPTION 'no coach has two practices, so the coach check examined nothing'; END IF;
-    SELECT count(*) INTO v_n FROM smoke_coach_pairs WHERE overlap;
+     WHERE ca.organization_id = v_demo
+       AND sa.day_of_week = sb.day_of_week AND sa.start_time < sb.end_time AND sb.start_time < sa.end_time;
     IF v_n <> 0 THEN RAISE EXCEPTION '% overlapping practice(s) put a coach in two places', v_n; END IF;
     SELECT count(*) INTO v_n FROM public.practice_assignments a JOIN public.practice_slots ps ON ps.id = a.practice_slot_id
      WHERE a.organization_id = v_demo AND ps.division_id IS NULL
@@ -142,7 +133,7 @@ BEGIN
             OR a.end_time <> ps.end_time::text OR a.field_id <> ps.field_id OR a.slot_id <> ps.id
             OR a.source <> 'auto' OR a.assigned_via <> 'auto');
     IF v_n <> 0 THEN RAISE EXCEPTION '% row(s) do not carry their slot''s weekday, times and field', v_n; END IF;
-    RAISE NOTICE 'the schedule is legal: capacity held, no team or coach double-booked, Monday to Thursday 16:00 to 19:00 outside U4';
+    RAISE NOTICE 'the schedule is legal: capacity held, no coach double-booked, Monday to Thursday 16:00 to 19:00 outside U4';
 
     -- ---- 4. live from the weekday's first date to the season's end ------------------
     SELECT count(*) INTO v_n FROM public.practice_assignments a

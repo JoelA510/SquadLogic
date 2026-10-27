@@ -84,8 +84,9 @@ Given('I am signed out on the real-backend sign-in page', async ({ page }) => {
 });
 
 When('I try the demo', async ({ page, $testInfo }) => {
-  // The scenario starts the whole 128-team league on the real stack and downloads its exports: over
-  // the project's default per-test time. Unmeasured (the stack could not be run where this was written).
+  // The scenario schedules the 60 unscheduled teams of the 128-team league on the real stack and
+  // downloads its exports: well over the project's default per-test time. Unmeasured (the stack could
+  // not be run where this was written).
   $testInfo.setTimeout(600_000);
   await page.getByRole('button', { name: 'Try the demo' }).click();
 });
@@ -126,11 +127,11 @@ Then(
 );
 
 Then(
-  'the demo starts with its practice schedule applied, once or twice a week for every team',
+  'the demo starts with a practice for each U4 and U5 to U8 team and none for U9 and older',
   async ({ page }) => {
     const org = stateOf(page).organizationId;
     expect(org, 'a previous step found the demo').toBeTruthy();
-    // 128 teams and about 150 rows: one page of PostgREST's 1,000-row cap.
+    // 128 teams and 68 rows: one page of PostgREST's 1,000-row cap.
     const rows = await visitorRows(
       page,
       `practice_assignments?select=team_id&organization_id=eq.${org}&limit=1000`
@@ -140,9 +141,25 @@ Then(
       const team = String(row.team_id);
       perTeam.set(team, (perTeam.get(team) ?? 0) + 1);
     }
-    expect(perTeam.size, 'teams with a practice').toBe(128);
+    expect(perTeam.size, 'teams with a practice').toBe(68);
     expect(rows.count, 'practice rows').toBe(rows.rows.length);
-    for (const [team, n] of perTeam) expect(n, `practices of ${team}`).toBeLessThanOrEqual(2);
+    for (const [team, n] of perTeam) expect(n, `practices of ${team}`).toBe(1);
+    // The teams with none are U9 and older: read from the divisions, not from the rows.
+    const divisions = await visitorRows(
+      page,
+      `divisions?select=id,name&organization_id=eq.${org}&limit=1000`
+    );
+    const divisionName = new Map(divisions.rows.map((row) => [String(row.id), String(row.name)]));
+    const teams = await visitorRows(
+      page,
+      `teams?select=id,division_id&organization_id=eq.${org}&limit=1000`
+    );
+    expect(teams.rows, 'the demo has 128 teams').toHaveLength(128);
+    const age = (name: string) => Number(name.replace(/[^0-9]/g, ''));
+    for (const team of teams.rows) {
+      const division = divisionName.get(String(team.division_id)) ?? '';
+      expect(perTeam.has(String(team.id)), `${team.id} in ${division}`).toBe(age(division) <= 8);
+    }
     const runs = await visitorRows(
       page,
       `scheduler_runs?select=id,status&organization_id=eq.${org}&run_type=eq.practice`

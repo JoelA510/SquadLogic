@@ -84,6 +84,30 @@ Feature: Every top-level route passes an automated accessibility scan
       | /organizations/new            | Welcome to SquadLogic    | Establish Organization                  |
       | /auth/reset-password          | Reset Your Password      | Confirm Password                        |
 
+  # Field permits for a coach (docs/changes/2026-10-22-phase-c-permits.md, C3): the coach's home with
+  # its Field permits card, and the /permits page, each with a permit on it, in both themes.
+  Scenario: The coach's home, with its Field permits card, passes axe in the light and dark themes
+    Given I am logged into SquadLogic as a "coach"
+    And Team A has an upcoming game and a weekly practice
+    And a permit from "City Recreation" numbered "0042" expires in 12 days, has a file and covers "Field 1"
+    When I open "/" and see its "My Dashboard" heading
+    Then the scan sees "City Recreation #0042" on the page
+    And axe finds no serious or critical violations on "/" in the "light" theme
+    When I switch to the dark theme and reopen "/" with its "My Dashboard" heading
+    Then the scan sees "City Recreation #0042" on the page
+    And axe finds no serious or critical violations on "/" in the "dark" theme
+
+  Scenario: The coach's permits page passes axe in the light and dark themes
+    Given I am logged into SquadLogic as a "coach"
+    And Team A has an upcoming game and a weekly practice
+    And a permit from "City Recreation" numbered "0042" expires in 12 days, has a file and covers "Field 1"
+    When I open "/permits" and see its "Field permits" heading
+    Then the scan sees "Central Park, Field 1" on the page
+    And axe finds no serious or critical violations on "/permits" in the "light" theme
+    When I switch to the dark theme and reopen "/permits" with its "Field permits" heading
+    Then the scan sees "Central Park, Field 1" on the page
+    And axe finds no serious or critical violations on "/permits" in the "dark" theme
+
   # Demo mode (docs/changes/2026-10-22-demo-mode.md, D4). The entry page is scanned in its failed
   # state (the demo is full), the one it rests in; the ended page and the demo's own dashboard,
   # with its timer in the header, are scanned as a visitor sees them.

@@ -66,3 +66,13 @@ export function permitScopeText(scope) {
       : `${scope.location_name ?? 'Venue'} (whole venue)`;
   return scope.retired ? `${text} (retired)` : text;
 }
+
+/** A file's size as a person reads it: `2.5 MB`, or `48 KB` (never less than 1 KB). */
+export function permitSizeText(bytes) {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** What a permit with no file says to a coach, who cannot add one. */
+export const PERMIT_NO_FILE_TEXT = 'No file added yet. Ask your league administrator to add it.';

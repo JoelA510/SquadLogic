@@ -14,8 +14,9 @@ const PDF = (text: string) => Buffer.from(`%PDF-1.4\n% ${text}\n%%EOF\n`, 'utf8'
 /**
  * `YYYY-MM-DD` of the organization's day plus `days`: the day the database judges permits on is the
  * active season's own (the mock seed's season has a timezone), so it is read from the page's mock
- * database rather than assumed to be the UTC date. Whole days are added to the instant, which
- * crosses no DST change in a span of weeks that this suite uses.
+ * database rather than assumed to be the UTC date. The days are added to that calendar date, not
+ * to the instant: 12 times 24 hours from 00:01 on the day before a DST change ends at 23:01 the day
+ * before the one meant (seen in CI at 00:01 Pacific on 2026-10-27).
  */
 async function orgDayPlus(page: Page, days: number): Promise<string> {
   return page.evaluate((offset) => {
@@ -24,8 +25,10 @@ async function orgDayPlus(page: Page, days: number): Promise<string> {
       (row: { status?: string }) => row.status === 'active'
     );
     const zone = (season && season.timezone) || 'UTC';
-    const instant = new Date(Date.now() + offset * 86_400_000);
-    return new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(instant);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date());
+    const day = new Date(`${today}T00:00:00Z`);
+    day.setUTCDate(day.getUTCDate() + offset);
+    return day.toISOString().slice(0, 10);
   }, days);
 }
 

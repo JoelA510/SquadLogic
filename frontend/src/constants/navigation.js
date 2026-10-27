@@ -18,6 +18,7 @@ import {
   Settings,
   Lightbulb,
   ThermometerSun,
+  FileText,
 } from 'lucide-react';
 import { PERMISSIONS } from './permissions.js';
 import { FEATURE_FLAGS } from './featureFlags.js';
@@ -234,6 +235,8 @@ export const ROLE_NAV = {
   coach: [
     { id: 'home', label: 'My Dashboard', icon: Home, path: '/' },
     { id: 'my-team', label: 'My Team', icon: Shield, path: '/my-team' },
+    // Phase C3: the permits of the fields their teams use, to show at the field.
+    { id: 'permits', label: 'Field Permits', icon: FileText, path: '/permits' },
     {
       id: 'practice-preferences',
       label: 'Practice Preferences',
@@ -263,6 +266,7 @@ ROUTE_META['/setup'] = { label: 'Season Setup', groupLabel: null };
 ROUTE_META['/setup/features'] = { label: 'Choose your tools', groupLabel: 'Season Setup' };
 ROUTE_META['/workflow'] = { label: 'Pipeline', groupLabel: 'Data' };
 ROUTE_META['/my-team'] = { label: 'My Team', groupLabel: null };
+ROUTE_META['/permits'] = { label: 'Field Permits', groupLabel: null };
 
 /**
  * Routes whose pages use the full-bleed <Page> scaffold (pinned header +
@@ -280,6 +284,7 @@ export const FULL_BLEED_ROUTES = new Set([
   '/admin/members',
   '/settings',
   '/coaches/practice-preferences',
+  '/permits',
   '/schedule/practice-lighting',
   '/schedule/heat',
 ]);

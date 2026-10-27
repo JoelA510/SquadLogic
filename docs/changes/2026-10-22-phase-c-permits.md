@@ -1,6 +1,6 @@
 # Phase C: field and venue permits
 
-Status: **C1 and C2 built (one PR; see "As built (C1)" and "As built (C2)"); C3 not started.**
+Status: **C1 and C2 built (one PR; see "As built (C1)" and "As built (C2)"); C3 built (see "As built (C3)").**
 Drafted 2026-10-22 against `origin/main` at `6a22d29`; re-verified 2026-10-27 against `c74d7d3`
 (see "Step 0 corrections"). The roadmap orders C after B, which has shipped. Owner's words:
 "managing fields, including storing permits so a coach can produce one when asked". Ships as three
@@ -8,7 +8,7 @@ PRs (C1 database, C2 admin, C3 coach), each reviewed once before it opens; C1 an
 
 - [x] C1 (see "As built (C1)")
 - [x] C2 (see "As built (C2)")
-- [ ] C3
+- [x] C3 (see "As built (C3)")
 
 **Owner rules for this phase (2026-10-26), answered.**
 
@@ -344,7 +344,7 @@ corrects is left as written.
   `FieldManagementPermits.test.jsx`, `permitText.test.jsx`, `permitsBlockNothing.test.js`; E2E
   `tests/e2e/features/field_permits.feature` (4 scenarios). `FieldManagementPage.test.jsx` and
   `facility_management.feature` pass unedited.
-- **Not built (C3):** `VIEW_FIELD_PERMITS`, `/permits`, the coach home card, the real-backend scenario.
+- **Not built here, built in C3:** `VIEW_FIELD_PERMITS`, `/permits`, the coach home card, the real-backend scenario.
 
 ### Review round (Codex, #669)
 
@@ -358,3 +358,61 @@ corrects is left as written.
   `checking` (a selection counter in the dialog).
 - **Inline styles** in the permit dialog and section are token-based classes in `styles/page.css`.
 - Tests: `tests/facilityPermitsRaces.test.jsx` (8, each fails without its fix).
+
+## As built (C3)
+
+- **Permission and route.** `VIEW_FIELD_PERMITS` for tenant admin, admin, staff (a copy of admin's) and
+  coach; `/permits` behind it, so a membership still carrying a removed role (`parent`, `player`) is
+  sent home with "Unauthorized access" and reads nothing. The permission gates the page only: what a
+  caller may read is the server's, and `get_facility_permits` is unchanged (narrowed for a coach in C1).
+  No migration.
+- **Pure helpers** in `packages/core/src/facility/permits.js`: `sortPermitsForCoach` (what can be
+  produced first, soonest to end first, then no file, not yet in force, expired last) and
+  `coachPermitSummary` (`expired`, `expiring`, `notYetValid`, `noFile`, and `attention`, each permit
+  once, most urgent first). An expired permit with no file counts as expired, not as no file.
+- **The home card** (`CoachPermitsCard`, after the schedule card; asked only when the coach has a
+  team, since a coach of none is refused by the read): "Needs attention: 1 expired, 1 with no file, 1
+  expiring within 30 days." with each permit's number, status in words beside an icon, and the fields
+  it covers; "The permit for your fields is current" when none needs attention; an empty state ("No
+  permits are on record for the fields your teams use...") that is not an error; a failed or refused
+  read said politely (`role="status"`, as the admin's section does) with the link kept. The "missing"
+  state the plan names is a permit with no file; a field with no permit at all is not shown to a coach,
+  because the server returns only permits that exist (the admin's warning for it is C2's).
+- **The page** (`PermitsPage`, "Field Permits" in the coach nav): one column; per permit the issuer,
+  number as text, dates, covered fields (only the scopes the coach reads), notes, file name and size,
+  and Open and Download (at least 44 px: `.btn.permit-touch`) through a 120 s signed link made on tap,
+  opened in a tab opened on the tap; a failed link is a `role="alert"`. An expired permit and one with
+  no file are shown as they are. A coach with no team, or a role the read refuses, reads "Permits are
+  not available to your role." (the hook's 42501 text), not an empty list.
+- **Under role preview** an admin's session reads the permits, so an admin previewing a coach sees
+  every permit in the organization, not that coach's narrowed set (the plan's "as the directory does").
+- **Not built:** offline copy (owner decision 6); the admin's Open/Download code in
+  `FieldPermitsSection` and the page's are two copies of the same ~20 lines (a shared helper is a
+  refactor of C2 left for the owner to call).
+- **Tests:** `tests/coachPermitsPage.test.jsx` (22: states, order, open and download, the 42501 text,
+  failed links, the 44 px rule in the stylesheet, `ProtectedRoute` for each role, `App.jsx`'s wiring),
+  `tests/coachPermitsCard.test.jsx` (12), `tests/coachHomePermits.test.jsx` (6, through the real home
+  and the mock twin's narrowing), `coachPermitSummary` and `sortPermitsForCoach` in
+  `tests/facilityPermits.test.js`; E2E `tests/e2e/features/field_permits_coach.feature` (3, the first at
+  390x844: warning, open, 44 px buttons measured, no sideways scroll; the empty state; the removed role
+  redirected) and two axe scenarios in `accessibility.feature` (the coach home with its card, and
+  `/permits`, each in both themes). `tests/permitsBlockNothing.test.js` names the two new files.
+  Real-backend `tests/e2e/real-backend/features/real_backend_permits.feature` (a second organization
+  in `seed.sql`, so the import and schedule scenarios are untouched): the coach's signed link returns
+  the PDF, a coach-role member with no team is refused a link and the read, the bucket refuses a
+  file declared `text/html`, and the coach's home and page work through the real client.
+- **Verification (executed here):** the unit and component tests above; the mock E2E suite; the
+  seed's public part applied to a scratch cluster built by the harness's prelude and every migration
+  (it applies, and `coach_field_ids_of` returns Permit Pitch for the coach and nothing for the
+  member). **Statically reviewed, not run:** the real-backend scenario (no Docker or Supabase CLI
+  here). The first run settles the two investigation notes above (Storage enforcing
+  `allowed_mime_types` from the declared type; signing needing the caller's SELECT policy), and the
+  C1 note that `admin_set_facility_permit_file` can read `storage.objects` from its definer.
+- **First real-backend run (CI, #670):** the API steps passed (the coach's signed link returned the PDF,
+  the member was refused, the bucket refused `text/html`), so the storage policy and its helper work
+  under the Storage API's role. The UI step failed because it read the new tab's address: on the headless
+  Chromium shell CI uses a PDF has no viewer, the navigation becomes a download and the tab stays
+  `about:blank` (reproduced locally: the signed link is requested and answered 200, a `download` event
+  fires). The step now reads the tab's request to the signed link and Storage's 200 instead. A failed
+  link request still alerts and closes the empty tab (unit tests for a returned error, a thrown one and a
+  blocked tab).

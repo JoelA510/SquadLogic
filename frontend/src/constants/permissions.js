@@ -34,6 +34,12 @@ export const PERMISSIONS = {
   // No coach requests since 20261028010000 (R6, owner decision 4), so the
   // request permission is gone with the request RPC.
   DECIDE_PRACTICE_LIGHTING_OVERRIDE: 'decide_practice_lighting_override',
+
+  // Field permits (Phase C3, docs/changes/2026-10-22-phase-c-permits.md): the page that lists the
+  // permits of the fields a coach's teams use, to open one at the field. Admins, staff and coaches;
+  // a guardian has no role here and no access (owner decision 2). Only the page is gated by this:
+  // the server decides what each caller may read (`get_facility_permits`, narrowed for a coach).
+  VIEW_FIELD_PERMITS: 'view_field_permits',
 };
 
 /**
@@ -67,6 +73,7 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
     PERMISSIONS.DECIDE_PRACTICE_PREFERENCE,
     PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE,
+    PERMISSIONS.VIEW_FIELD_PERMITS,
   ],
   [ROLES.ADMIN]: [
     PERMISSIONS.MANAGE_ORGANIZATION,
@@ -83,6 +90,7 @@ export const ROLE_PERMISSIONS = {
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
     PERMISSIONS.DECIDE_PRACTICE_PREFERENCE,
     PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE,
+    PERMISSIONS.VIEW_FIELD_PERMITS,
   ],
   [ROLES.COACH]: [
     PERMISSIONS.VIEW_ORGANIZATION,
@@ -93,6 +101,8 @@ export const ROLE_PERMISSIONS = {
     // standings are an admin's; a coach's own schedule is on their home
     // (20261028010000, R6). Practice preferences stay (decision 4).
     PERMISSIONS.REQUEST_PRACTICE_PREFERENCE,
+    // The permits of the fields their teams use (C3); the server narrows the read to those fields.
+    PERMISSIONS.VIEW_FIELD_PERMITS,
   ],
 };
 

@@ -36,6 +36,7 @@ import { useMyCoachedTeams } from '../hooks/useMyCoachedTeams.js';
 import { usePermitWarnings } from '../hooks/useFacilityPermits.js';
 import CoachScheduleCard from '../components/coach/CoachScheduleCard.jsx';
 import DivisionTeamsCard from '../components/coach/DivisionTeamsCard.jsx';
+import CoachPermitsCard from '../components/coach/CoachPermitsCard.jsx';
 
 /**
  * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
@@ -586,8 +587,9 @@ function AdminHome() {
  * coach coaches, their own schedule (games and practices), and the teams and
  * coaches of their divisions, names only. No coach directory: coaches see no
  * contact details (R4). Scheduling, score entry and standings are an admin's,
- * so nothing here links to them. Permits are not here yet: Phase C
- * (docs/changes/2026-10-22-phase-c-permits.md) has not been built.
+ * so nothing here links to them. Field permits (Phase C3,
+ * docs/changes/2026-10-22-phase-c-permits.md) are the card beside the
+ * schedule: the permits of the fields their teams use.
  */
 function CoachDashboard() {
   const { currentOrganization } = useOrganization();
@@ -648,6 +650,9 @@ function CoachDashboard() {
               </div>
             )}
         {teams.length > 0 && <CoachScheduleCard teams={teams} />}
+        {/* C3: the permits of the fields their teams use; the read is a current coach's, so only
+            a coach of a team asks (a member with no team would be refused, not shown nothing). */}
+        {teams.length > 0 && <CoachPermitsCard />}
         {orgId && !error && <DivisionTeamsCard orgId={orgId} previewUserId={previewUserId} />}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

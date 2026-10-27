@@ -143,4 +143,142 @@ WHERE NOT EXISTS (
     WHERE s.organization_id = 'e2e0b000-0000-4000-8000-000000000001'
 );
 
+-- ── The permit league (Phase C3, tests/e2e/real-backend/features/real_backend_permits.feature) ──
+-- A second organization, so nothing above changes: the scenarios that import and schedule work in
+-- the first. Three people who only belong here, all on the same throwaway password:
+--   e2e-permits-admin   an administrator, who records a permit and uploads its file
+--   e2e-permits-coach   the lead coach of Falcons, who play at Permit Pitch (a game next week)
+--   e2e-permits-member  a coach-role member who coaches no team (the old "parent": no role has
+--                       been one since 20261024010000), who may not read a permit
+-- Permit Pitch is where the Falcons play; Unused Pitch is where nobody does.
+INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change,
+    email_change_token_current, phone_change, phone_change_token, reauthentication_token
+)
+SELECT
+    '00000000-0000-0000-0000-000000000000', u.id::uuid, 'authenticated', 'authenticated', u.email,
+    extensions.crypt('e2e-local-only-password', extensions.gen_salt('bf')),
+    timezone('utc', now()),
+    '{"provider": "email", "providers": ["email"]}'::jsonb,
+    jsonb_build_object('full_name', u.full_name, 'password_length', 23),
+    timezone('utc', now()), timezone('utc', now()),
+    '', '', '', '', '', '', '', ''
+FROM (VALUES
+    ('e2e0a000-0000-4000-8000-000000000002', 'e2e-permits-admin@example.test',  'Pat Admin (E2E permit league)'),
+    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-coach@example.test',  'Casey Coach (E2E permit league)'),
+    ('e2e0a000-0000-4000-8000-000000000004', 'e2e-permits-member@example.test', 'Morgan Member (E2E permit league)')
+) AS u (id, email, full_name)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO auth.identities (
+    provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+)
+SELECT
+    u.id, u.id::uuid,
+    jsonb_build_object('sub', u.id, 'email', u.email, 'email_verified', true),
+    'email', timezone('utc', now()), timezone('utc', now()), timezone('utc', now())
+FROM (VALUES
+    ('e2e0a000-0000-4000-8000-000000000002', 'e2e-permits-admin@example.test'),
+    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-coach@example.test'),
+    ('e2e0a000-0000-4000-8000-000000000004', 'e2e-permits-member@example.test')
+) AS u (id, email)
+ON CONFLICT (provider_id, provider) DO NOTHING;
+
+INSERT INTO public.profiles (id, email, full_name) VALUES
+    ('e2e0a000-0000-4000-8000-000000000002', 'e2e-permits-admin@example.test',  'Pat Admin (E2E permit league)'),
+    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-coach@example.test',  'Casey Coach (E2E permit league)'),
+    ('e2e0a000-0000-4000-8000-000000000004', 'e2e-permits-member@example.test', 'Morgan Member (E2E permit league)')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.organizations (id, name, slug, is_onboarded, feature_flags)
+VALUES (
+    'e2e0b000-0000-4000-8000-000000000002',
+    'Example Permit League (E2E)',
+    'e2e-example-permit-league',
+    true,
+    '{"gender_model": "coed"}'::jsonb
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+    ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000002', 'admin'),
+    ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000003', 'coach'),
+    ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000004', 'coach')
+ON CONFLICT (organization_id, profile_id) DO NOTHING;
+
+INSERT INTO public.season_settings (
+    id, organization_id, name, status, season_label, season_year, season_start, season_end, timezone
+)
+VALUES (
+    'e2e0c000-0000-4000-8000-000000000002',
+    'e2e0b000-0000-4000-8000-000000000002',
+    'E2E permit season', 'active', 'Fall',
+    extract(year FROM current_date)::integer,
+    current_date - 14, current_date + 84,
+    'America/Los_Angeles'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.divisions (
+    id, organization_id, season_settings_id, name, gender_policy, max_roster_size
+)
+VALUES (
+    'e2e0d000-0000-4000-8000-000000000002',
+    'e2e0b000-0000-4000-8000-000000000002',
+    'e2e0c000-0000-4000-8000-000000000002',
+    'U12', 'coed', 12
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+    ('e2e0d100-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002', 'e2e0d000-0000-4000-8000-000000000002', 'Falcons'),
+    ('e2e0d100-0000-4000-8000-000000000002', 'e2e0b000-0000-4000-8000-000000000002', 'e2e0d000-0000-4000-8000-000000000002', 'Herons')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
+    ('e2e0d200-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002',
+     'e2e0a000-0000-4000-8000-000000000003', 'Casey Coach', 'e2e-permits-coach@example.test', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.team_coach_assignments
+    (id, organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
+VALUES
+    ('e2e0d500-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002',
+     'e2e0d100-0000-4000-8000-000000000001', 'e2e0d200-0000-4000-8000-000000000001',
+     'lead', current_date - 30, NULL, 'e2e-seed', NULL)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.locations (id, organization_id, name, address, lighting_available)
+VALUES (
+    'e2e0e000-0000-4000-8000-000000000002',
+    'e2e0b000-0000-4000-8000-000000000002',
+    'Example Permit Park (E2E)', '2 Example Way', false
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.fields (id, organization_id, location_id, name, surface_type, size)
+VALUES
+    ('e2e0f000-0000-4000-8000-000000000003', 'e2e0b000-0000-4000-8000-000000000002',
+     'e2e0e000-0000-4000-8000-000000000002', 'Permit Pitch', 'grass', 'small'),
+    ('e2e0f000-0000-4000-8000-000000000004', 'e2e0b000-0000-4000-8000-000000000002',
+     'e2e0e000-0000-4000-8000-000000000002', 'Unused Pitch', 'grass', 'small')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.game_slots (id, organization_id, field_id, slot_date, week_index)
+VALUES (
+    'e2e0d300-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002',
+    'e2e0f000-0000-4000-8000-000000000003', current_date + 7, 1
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.games (id, organization_id, game_slot_id, home_team_id, away_team_id)
+VALUES (
+    'e2e0d400-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002',
+    'e2e0d300-0000-4000-8000-000000000001',
+    'e2e0d100-0000-4000-8000-000000000001', 'e2e0d100-0000-4000-8000-000000000002'
+)
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;

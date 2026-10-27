@@ -168,6 +168,11 @@ R50="$REPO/docs/sql/20261101010000_revert.sql"
 # replaced), and the revert.
 M51="$REPO/supabase/migrations/20261101020000_programs.sql"
 R51="$REPO/docs/sql/20261101020000_revert.sql"
+# C1: field and venue permits (the tables and their read policies, the five RPCs, the bucket and its
+# policies, admin_delete_field replaced to list the permits it unlinks), and the revert. The plants
+# that aimed at the admin_delete_field body it replaces are re-aimed here.
+M52="$REPO/supabase/migrations/20261102010000_facility_permits.sql"
+R52="$REPO/docs/sql/20261102010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -1135,7 +1140,7 @@ plant "M3 retire reads a NULL confirmation as yes" "$M3" \
                 'operation', 'admin_retire_field'," \
   "scenario table" \
   "smoke 20260906000000"
-plant "M3 delete reads a NULL confirmation as yes" "$M5" \
+plant "M3 delete reads a NULL confirmation as yes" "$M52" \
   "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
         PERFORM public.record_audit_event(
             p_organization_id,
@@ -1167,7 +1172,7 @@ plant "M3 retire keeps a union of its own again" "$M3" \
   "scenario table"
 # The audit digest keeps a refusal from writing an unbounded row. Remove the cap
 # and the smoke's bound check goes red.
-plant "M3 the refusal embeds the whole list in the audit row" "$M5" \
+plant "M3 the refusal embeds the whole list in the audit row" "$M52" \
   "                'affected', public.field_bookings_digest(v_affected),
                 'previous', to_jsonb(v_existing)" \
   "                'affected', v_affected,
@@ -1184,7 +1189,7 @@ plant "M3 the refusal embeds the whole list in the audit row" "$M5" \
 # same shape -- so an anchor that is only that line matches twice and `plant`
 # refuses it. Each is disambiguated by the first key of the audit row beneath
 # it, the same way the two NULL-confirmation plants above are.
-plant "M3 delete loses its booking guard entirely" "$M5" \
+plant "M3 delete loses its booking guard entirely" "$M52" \
   "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
         PERFORM public.record_audit_event(
             p_organization_id,
@@ -1223,7 +1228,7 @@ plant "M3 the unguarded two-arg overload is left standing" "$M3" \
 # nothing ELSE. The scenario table names the exact phase set per case, so a
 # refusal that also recorded `before` -- an audit trail claiming a deletion was
 # begun when it was refused -- fails there and nowhere else.
-plant "ONLY-SCEN refusal also audits a phase it never reached" "$M5" \
+plant "ONLY-SCEN refusal also audits a phase it never reached" "$M52" \
   "        );
         RETURN jsonb_build_object(
             'deleted', false," \
@@ -2119,7 +2124,7 @@ plant "M5 a second arm starts taking a row lock" "$M46" \
 # **The prune, removed.** A confirmed delete then leaves a scenario holding
 # nothing -- still listed by get_field_availability_scenarios and still
 # activatable by admin_select_field_availability_scenario.
-plant "M5 a confirmed delete leaves an emptied scenario standing" "$M5" \
+plant "M5 a confirmed delete leaves an emptied scenario standing" "$M52" \
   "    v_deleted_scenarios := public.prune_empty_field_availability_scenarios(
                              p_organization_id, v_scenario_ids);" \
   "    v_deleted_scenarios := 0;" \
@@ -2128,7 +2133,7 @@ plant "M5 a confirmed delete leaves an emptied scenario standing" "$M5" \
 # **The capture, moved after the delete**, which is the subtle way to get this
 # wrong: the call is there, the helper is there, and by the time it runs the
 # membership rows it reads are already gone, so it always returns nothing.
-plant "M5 the scenario capture happens after the cascade removed its evidence" "$M5" \
+plant "M5 the scenario capture happens after the cascade removed its evidence" "$M52" \
   "    v_scenario_ids := public.field_availability_scenario_ids_on_field(
                         p_organization_id, p_field_id);
 
@@ -4898,6 +4903,47 @@ plant "M51 a new season gets no default program" "$M51" \
   "    AFTER INSERT ON public.season_settings
     FOR EACH ROW WHEN (false) EXECUTE FUNCTION public.season_settings_default_program();" \
   "smoke 20261101020000"
+
+# Phase C1: three plants (the smoke 20261102010000 must go red for each, each also applied by hand
+# in a scratch cluster and caught by the pgTAP files supabase/tests/facility_permits.sql and
+# storage_facility_permits_bucket.sql). The guarantees that matter most: a coach reads a permit only
+# for a field their team is scheduled on (not every permit: admin-focus R6's narrowing, which a
+# coach-of-any-team policy would silently widen); a coach is shown the LIVE file and never a
+# replaced or orphaned one; and only an administrator writes a permit.
+plant "M52 a coach reads a permit for any field once they coach a scheduled team" "$M52" \
+  "         WHERE (p_field_id IS NOT NULL AND c.field_id = p_field_id)
+            OR (p_location_id IS NOT NULL AND EXISTS (" \
+  "         WHERE true
+            OR (p_location_id IS NOT NULL AND EXISTS (" \
+  "smoke 20261102010000"
+
+plant "M52 a coach can read a replaced file" "$M52" \
+  "           AND p.file_path = p_name
+           AND public.coach_reads_facility_permit(p.id)" \
+  "           AND p.file_path IS NOT NULL
+           AND public.coach_reads_facility_permit(p.id)" \
+  "smoke 20261102010000"
+
+plant "M52 anyone can create a permit" "$M52" \
+  "    IF NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+    IF p_valid_from IS NULL OR p_valid_to IS NULL THEN
+        RAISE EXCEPTION 'a permit needs the dates it is valid from and to' USING ERRCODE = '23502';
+    END IF;
+
+    PERFORM public.facility_permit_check(" \
+  "    IF false AND NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+    IF p_valid_from IS NULL OR p_valid_to IS NULL THEN
+        RAISE EXCEPTION 'a permit needs the dates it is valid from and to' USING ERRCODE = '23502';
+    END IF;
+
+    PERFORM public.facility_permit_check(" \
+  "smoke 20261102010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

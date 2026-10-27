@@ -14,7 +14,9 @@
  *     while they are a member;
  *   - staging_players, staging_import_rows: an admin or staff member;
  *   - team_calendar_tokens: an admin or staff member, or the team's current
- *     coach.
+ *     coach;
+ *   - facility_permits, facility_permit_scopes: an admin or staff member, or a
+ *     coach whose team plays or practises at a field the permit concerns.
  *
  * **Not mirrored:** embedded rows (`select('x, players(...)')`) are not
  * filtered, and a read with no mock session is left unfiltered (the mock's
@@ -24,6 +26,7 @@
  */
 
 import { createAccessHelpers } from './mockServerSideReads.js';
+import { permitRowVisible } from './mockFacilityPermits.js';
 import { MOCK_ORG_ID } from './mockSeedIds.js';
 
 export const RESTRICTED_TABLES = Object.freeze([
@@ -34,6 +37,8 @@ export const RESTRICTED_TABLES = Object.freeze([
   'staging_players',
   'staging_import_rows',
   'team_calendar_tokens',
+  'facility_permits',
+  'facility_permit_scopes',
 ]);
 
 /**
@@ -63,6 +68,11 @@ export function applyMockReadPolicy(db, table, rows, currentUserId, now = new Da
     staging_import_rows: (row) => access.isOrgAdmin(orgOf(row)),
     team_calendar_tokens: (row) =>
       access.isOrgAdmin(orgOf(row)) || access.isCurrentTeamCoach(row.team_id),
+    // 20261102010000: an admin or staff member, or a coach whose team plays or practises at a field
+    // the permit (or the scope) concerns.
+    facility_permits: (row) => permitRowVisible(db, 'facility_permits', row, currentUserId, now),
+    facility_permit_scopes: (row) =>
+      permitRowVisible(db, 'facility_permit_scopes', row, currentUserId, now),
   }[table];
   return rows.filter((row) => visible(row));
 }

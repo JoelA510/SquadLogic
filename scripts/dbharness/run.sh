@@ -1305,7 +1305,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1959,6 +1959,40 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('e6000000-0000-4000-8000-0000000000d4','e6000000-0000-4000-8000-00000000000a','e6000000-0000-4000-8000-0000000000a1','Revert U9B');" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the programs and divisions the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261102010000's revert DESTROYS every permit, its scopes and its record of a file**, so its
+  # warning is the check. THREE permits, TWO of them with a file, FOUR scopes (one on a field, one on
+  # a venue and a field, one on a field), plus ONE object in the bucket: every figure distinct, so
+  # counting the permits (3), the files (2), the scopes (4) or the objects (1) prints a different
+  # number. The object makes the bucket non-empty, so the revert must leave it in place and say so.
+  # Inserted as the table owner; every name is synthetic.
+  if [ "$id" = "20261102010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e7000000-0000-4000-8000-00000000000a','Permit Revert Org','permit-revert-org');
+              INSERT INTO public.locations (id, organization_id, name) VALUES
+                ('e7000000-0000-4000-8000-0000000000c1','e7000000-0000-4000-8000-00000000000a','Permit Revert Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name) VALUES
+                ('e7000000-0000-4000-8000-0000000000f1','e7000000-0000-4000-8000-00000000000a','e7000000-0000-4000-8000-0000000000c1','Revert Pitch 1'),
+                ('e7000000-0000-4000-8000-0000000000f2','e7000000-0000-4000-8000-00000000000a','e7000000-0000-4000-8000-0000000000c1','Revert Pitch 2');
+              INSERT INTO public.facility_permits (id, organization_id, issuer, valid_from, valid_to, file_path, file_name, file_mime, file_size) VALUES
+                ('e7000000-0000-4000-8000-0000000000b1','e7000000-0000-4000-8000-00000000000a','Revert Issuer 1','2026-01-01','2026-12-31',
+                 'e7000000-0000-4000-8000-00000000000a/e7000000-0000-4000-8000-0000000000b1/e7000000-0000-4000-8000-0000000000d1.pdf','one.pdf','application/pdf',1000),
+                ('e7000000-0000-4000-8000-0000000000b2','e7000000-0000-4000-8000-00000000000a','Revert Issuer 2','2026-01-01','2026-12-31',
+                 'e7000000-0000-4000-8000-00000000000a/e7000000-0000-4000-8000-0000000000b2/e7000000-0000-4000-8000-0000000000d2.png','two.png','image/png',2000);
+              INSERT INTO public.facility_permits (id, organization_id, issuer, valid_from, valid_to) VALUES
+                ('e7000000-0000-4000-8000-0000000000b3','e7000000-0000-4000-8000-00000000000a','Revert Issuer 3','2026-01-01','2026-12-31');
+              INSERT INTO public.facility_permit_scopes (permit_id, organization_id, field_id, location_id) VALUES
+                ('e7000000-0000-4000-8000-0000000000b1','e7000000-0000-4000-8000-00000000000a','e7000000-0000-4000-8000-0000000000f1',NULL),
+                ('e7000000-0000-4000-8000-0000000000b2','e7000000-0000-4000-8000-00000000000a',NULL,'e7000000-0000-4000-8000-0000000000c1'),
+                ('e7000000-0000-4000-8000-0000000000b2','e7000000-0000-4000-8000-00000000000a','e7000000-0000-4000-8000-0000000000f2',NULL),
+                ('e7000000-0000-4000-8000-0000000000b3','e7000000-0000-4000-8000-00000000000a','e7000000-0000-4000-8000-0000000000f2',NULL);
+              INSERT INTO storage.objects (bucket_id, name, metadata) VALUES
+                ('facility-permits','e7000000-0000-4000-8000-00000000000a/e7000000-0000-4000-8000-0000000000b1/e7000000-0000-4000-8000-0000000000d1.pdf',jsonb_build_object('size',1000,'mimetype','application/pdf'));" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the permits, scopes and object the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3297,6 +3331,44 @@ PROBE
       else
         echo "FAIL revert ${id}: the programs revert did not restore every replaced object and drop every added one as at 20261101010000"
         dump 10 $SCRATCH/harness_programs; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261102010000" ]; then
+      # The seed planted 3 permits (2 with a file), 4 scopes and 1 bucket object.
+      if ! grep -q 'this revert DESTROYS 3 permit(s), 2 of them with a file, and 4 scope(s)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 3 permits (2 with a file) and 4 scopes and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      if ! grep -q 'the facility-permits bucket still holds 1 object(s) and is LEFT IN PLACE' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted one object in the bucket and the revert did not leave the bucket in place and say so"
+        STATUS=1
+      fi
+      # What the revert must leave: admin_delete_field as at 20260909000000 (by md5 of its body and
+      # its pin), no permit table, function, policy or audit-free trace; the bucket row, its object
+      # and the seed's organization. The expected md5 was read 2026-10-27 off a build at
+      # 20261101020000. The row counts are part of the verdict, so a lookup that finds nothing
+      # cannot pass.
+      if psql_cmd "SELECT 'PERMITS-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.fields WHERE organization_id = 'e7000000-0000-4000-8000-00000000000a') <> 2 THEN 'seed-lost'
+               WHEN (SELECT count(*) FROM storage.objects WHERE bucket_id = 'facility-permits') <> 1 THEN 'object-lost'
+               WHEN (SELECT count(*) FROM storage.buckets WHERE id = 'facility-permits') <> 1 THEN 'bucket-dropped'
+               WHEN (SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relname LIKE 'facility_permit%') <> 0 THEN 'table-left'
+               WHEN (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                      AND proname IN ('admin_create_facility_permit', 'admin_update_facility_permit', 'admin_set_facility_permit_file',
+                                      'admin_delete_facility_permit', 'get_facility_permits', 'facility_permit_check', 'facility_permit_json',
+                                      'facility_permit_status', 'coach_reads_facility_permit_file', 'coach_reads_facility_permit',
+                                      'coach_covers_permit_scope', 'coach_field_ids_of', 'org_local_today')) <> 0 THEN 'function-left'
+               WHEN (SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects'
+                      AND (policyname LIKE 'facility-permits%' OR qual LIKE '%''facility-permits''%' OR with_check LIKE '%''facility-permits''%')) <> 0 THEN 'policy-left'
+               WHEN (SELECT md5(p.prosrc) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
+                      WHERE p.oid = 'public.admin_delete_field(uuid, uuid, boolean)'::regprocedure)
+                    = '51c2d435c860594feba15f00d18c708a:true:search_path=public' THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_permits 2>&1 && grep -q 'PERMITS-VERDICT:restored' $SCRATCH/harness_permits; then
+        echo "  revert ${id}: the permits revert drops both tables, the five RPCs, the helpers and the bucket's policies, restores admin_delete_field as at 20260909000000, and leaves a non-empty bucket and its object in place"
+      else
+        echo "FAIL revert ${id}: the permits revert did not restore every replaced object and drop every added one"
+        dump 10 $SCRATCH/harness_permits; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

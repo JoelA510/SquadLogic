@@ -15,6 +15,8 @@ import PropTypes from 'prop-types';
  * @param {'button' | 'submit' | 'reset'} [props.type]
  * @param {React.ElementType} [props.icon]
  * @param {string} [props.title]
+ * @param {React.Ref<HTMLButtonElement>} [props.ref] - React 19 passes `ref` as a prop
+ * @param {string} [props.form] - the id of the form a `submit` button belongs to, when it sits outside it
  */
 const Button = ({
   children,

@@ -112,6 +112,10 @@ const REGISTRY = {
     class: 'series-only',
     why: 'Found by this census, not in the plan: slot membership for lighting overrides (as X8)',
   },
+  'sql:coach_field_ids_of': {
+    class: 'series-only',
+    why: "C1 (20261102010000): which fields a coach's teams practise on, from the assignment's slot; it makes no dated practice",
+  },
   'sql:rollback_field_import_job': {
     class: 'series-only',
     why: 'X12: an existence check before a field-import rollback',

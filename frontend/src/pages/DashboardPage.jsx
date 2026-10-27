@@ -33,6 +33,7 @@ import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import { isAdminRole } from '../constants/permissions.js';
 import { useMyCoachedTeams } from '../hooks/useMyCoachedTeams.js';
+import { usePermitWarnings } from '../hooks/useFacilityPermits.js';
 import CoachScheduleCard from '../components/coach/CoachScheduleCard.jsx';
 import DivisionTeamsCard from '../components/coach/DivisionTeamsCard.jsx';
 
@@ -134,6 +135,9 @@ function AdminHome() {
   const { genderModel, isEnabled } = useFeatures();
   const setup = useSetupProgress();
   const { players, teams, divisions, games, practices, audit, loaded } = useHomeData();
+  // Permit reminders (Phase C2): fields with no current permit, permits expiring within 30 days and
+  // expired ones. A permit blocks nothing; if they cannot be read there is simply nothing to show.
+  const permitReminders = usePermitWarnings();
 
   const firstName = user?.profile?.first_name || user?.profile?.full_name?.split(' ')[0] || 'there';
 
@@ -186,6 +190,27 @@ function AdminHome() {
         action: 'View',
         route: '/players',
       },
+    permitReminders?.fieldsWithout.length > 0 && {
+      icon: AlertTriangle,
+      color: 'var(--warning)',
+      text: `${permitReminders.fieldsWithout.length} ${permitReminders.fieldsWithout.length === 1 ? 'field has' : 'fields have'} no current permit`,
+      action: 'Review',
+      route: '/fields',
+    },
+    permitReminders?.expiring.length > 0 && {
+      icon: Calendar,
+      color: 'var(--warning)',
+      text: `${permitReminders.expiring.length} ${permitReminders.expiring.length === 1 ? 'permit expires' : 'permits expire'} within 30 days`,
+      action: 'Review',
+      route: '/fields',
+    },
+    permitReminders?.expired.length > 0 && {
+      icon: AlertTriangle,
+      color: 'var(--danger)',
+      text: `${permitReminders.expired.length} ${permitReminders.expired.length === 1 ? 'permit has' : 'permits have'} expired`,
+      action: 'Review',
+      route: '/fields',
+    },
   ].filter(Boolean);
 
   if (!loaded) return <LoadingScreen />;

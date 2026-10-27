@@ -589,7 +589,12 @@ SELECT is(
         'revoke_org_invite', 'rollback_coach_import_job', 'rollback_field_availability_import_job', 'rollback_field_import_job',
         'rotate_calendar_token', 'sanitize_player_patch', 'team_coach_assignment_drift', 'trigger_set_timestamp',
         'update_game_score', 'update_import_job_progress', 'update_org_feature_flags', 'upsert_division_for_import',
-        'validate_custom_attributes', 'withdraw_practice_lighting_override'
+        'validate_custom_attributes', 'withdraw_practice_lighting_override',
+        -- 20261102010000: permits. The five are gated by the membership helpers or the caller's own coach
+        -- record; the three coach_* are policy helpers that ask only about the caller.
+        'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
+        'admin_update_facility_permit', 'coach_covers_permit_scope', 'coach_reads_facility_permit',
+        'coach_reads_facility_permit_file', 'get_facility_permits'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -624,7 +629,12 @@ SELECT is(
         'revoke_org_invite', 'rollback_coach_import_job', 'rollback_field_availability_import_job', 'rollback_field_import_job',
         'rotate_calendar_token', 'sanitize_player_patch', 'team_coach_assignment_drift', 'trigger_set_timestamp',
         'update_game_score', 'update_import_job_progress', 'update_org_feature_flags', 'upsert_division_for_import',
-        'validate_custom_attributes', 'withdraw_practice_lighting_override'
+        'validate_custom_attributes', 'withdraw_practice_lighting_override',
+        -- 20261102010000: permits. The five are gated by the membership helpers or the caller's own coach
+        -- record; the three coach_* are policy helpers that ask only about the caller.
+        'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
+        'admin_update_facility_permit', 'coach_covers_permit_scope', 'coach_reads_facility_permit',
+        'coach_reads_facility_permit_file', 'get_facility_permits'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'
@@ -640,6 +650,9 @@ SELECT is(
             -- coach-scoped: they match the caller to a coach record, and an anonymous user has none
             'caller_coaches_practice_slot', 'get_my_coached_team_ids', 'get_my_division_teams',
             'link_my_coach_record',
+            -- permit policy helpers (20261102010000): they ask whether the CALLER's own coached fields
+            -- cover a scope, and an anonymous user coaches nothing
+            'coach_covers_permit_scope', 'coach_reads_facility_permit', 'coach_reads_facility_permit_file',
             -- reads organization_members itself (declared in the migration: after expiry it still writes the
             -- doomed demo's own evaluation rows until the purge)
             'persist_evaluation_run'

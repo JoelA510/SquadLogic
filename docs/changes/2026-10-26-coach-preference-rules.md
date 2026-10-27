@@ -6,6 +6,30 @@ solver). Owner request, 2026-10-26: a coach can log several requests, and pick s
 (_statically reviewed_ through a research pass; paths and lines are from it and get re-checked in
 task 0). Production counts are _executed_ (read-only, 2026-10-26).
 
+## Revised 2026-10-27: admins import preferences (supersedes the coach-facing parts)
+
+Only league admins sign in (`2026-10-27-admin-only.md`). What changes from the plan below:
+
+- **Preferences arrive by an admin's import**, not a coach screen. Clubs collect them however they
+  like (a Google Form exported to CSV, for example). One row is one rule: the coach (by email, the
+  coach import's key), the team (optional when the coach has one team in the season; when a coach
+  with several teams leaves it blank, the rule applies to each of their teams, and the import
+  preview says so), the requested level (prefer or must), days, start times, venues, an optional
+  date window and an optional priority (High, Medium, Low). A row naming no known coach or team is
+  listed, never created. Re-importing replaces the imported rules of the teams the file names;
+  rules an admin added in the app are left alone. The import runs after teams exist.
+- **A must counts only once an admin accepts it in the app.** An imported must request is in force
+  as prefer and appears on the **Pending musts** list (Accept as must, Keep as prefer, each with
+  the impact preview), plus **Accept all** for a file the admin reviewed before importing, with a
+  confirmation naming how many rules it makes must and listing any conflicts first.
+- **Admins can add, edit and remove rules in the app**, as before.
+- **Dropped:** the coach screens, coach withdraw, the admin notifications and the bell
+  (decision 4 no longer applies). Decisions 1 (all rules apply; priority for visibility), 2 (per
+  team) and 3 (only an admin grants must; a declined must is prefer) stand.
+- **PR split:** P1 as below (data model, solver, RPCs) plus the preference import's server side;
+  P2 the admin screens: the import with its preview, Pending musts with Accept all, the rules list
+  and editor.
+
 ## Today
 
 - **One value per row.** `coach_practice_preferences` stores a `dimension` (`weekday`,

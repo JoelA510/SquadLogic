@@ -1,7 +1,7 @@
 # Admin only: no coach sign-in, admins across organizations, permits for admins
 
 Kind: REFACTOR (removal) and FEATURE (multi-organization admins) · Drawn up: 2026-10-27 · Owner:
-the product owner · Status: **PROPOSED**, waiting for the owner (AGENTS.md rule 14: roles,
+the product owner · Status: **APPROVED by the owner 2026-10-27** (all six decisions as recommended; decision 5 amended, see the end), waiting for the owner (AGENTS.md rule 14: roles,
 persistence and the domain model).
 
 Every claim about the code is _statically reviewed_ at `origin/main` `9128db9` unless marked
@@ -294,6 +294,18 @@ server change, and nothing it leaves calls an object PR 2 drops.
   gone", their plants retired or re-aimed, as R2 did.
 - [ ] S6 `supabase/catalog-snapshot.json` regenerated; docs listed above.
 
+- [ ] S7 **Coach-to-child link in the coach import** (owner, 2026-10-27). Today nothing in
+  production writes `coach_team_requests`, so no coach anchors a team. The coach import gains an
+  optional column naming the coach's children by player registration id (one or more, separated by
+  `;` or `,`; header aliases such as `Child Registration ID`, `Player ID`), on the import
+  allowlist. `finalize_coach_import_job` writes one `coach_team_requests` row per id that matches a
+  player of the same organization (the same season once E3a lands); an id that matches nothing is
+  listed in the import's result and is never fatal; a re-import replaces that coach's imported
+  links. Players are imported before coaches; the import screen says so. pgTAP: two ids make two
+  links; an unknown id is reported and writes nothing; another organization's player is never
+  linked; a re-import replaces the links. Mock twin and an E2E: import players, then coaches with a
+  child column, then generate teams: the coach's child anchors the coach's team.
+
 ## Done when
 
 - [ ] Every task's test passes on its branch and every new check was shown failing first.
@@ -319,3 +331,12 @@ server change, and nothing it leaves calls an object PR 2 drops.
    (recommended).
 
 No question blocks PR 1; decisions 1, 2 and 4 shape it, and each has a default.
+
+## Owner decisions (2026-10-27)
+
+All six accepted as recommended. Decision 5 is amended: coaches never enter preferences; admins
+collect them by other means (a Google Form, for example) and **import** them. A preference may be
+requested as a must in the file, but it counts as a must only after an admin accepts it in the app;
+an **Accept all** action covers a file an admin already reviewed before importing. The preference
+plan (`2026-10-26-coach-preference-rules.md`) records the details. The coach-to-child link comes in
+through the coach import (S7).

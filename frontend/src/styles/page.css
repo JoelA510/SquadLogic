@@ -760,6 +760,15 @@
   border-radius: var(--r-md);
   background: var(--bg-surface);
 }
+.roster-row {
+  cursor: grab;
+}
+.roster-row:active {
+  cursor: grabbing;
+}
+.roster-row .btn {
+  cursor: pointer;
+}
 .roster-row:hover {
   border-color: var(--border-strong);
 }

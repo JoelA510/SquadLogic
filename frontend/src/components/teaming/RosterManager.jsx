@@ -59,8 +59,12 @@ const PlayerCard = ({ player, onRequestMove }) => {
   const playerSkill = player.skill || player.skillRating || player.skill_tier || 'Unrated';
 
   return (
+    // The whole row takes a pointer drag (a mouse can pick a player up anywhere, as it always
+    // could); the handle is the activator for the keyboard (`setActivatorNodeRef`: the keyboard
+    // sensor ignores keys pressed on the row's other controls) and carries the button semantics.
     <li
       ref={setNodeRef}
+      {...listeners}
       style={style}
       data-testid={`player-card-${player.id}`}
       aria-label={`${playerName}, Skill: ${playerSkill}${player.assignment_source === 'manual' ? ', manually assigned' : ''}${player.isCoachingLead ? ', coaching lead' : ''}${player.eligibilityNotChecked ? ', eligibility not checked' : ''}`}
@@ -72,7 +76,6 @@ const PlayerCard = ({ player, onRequestMove }) => {
         className="roster-handle"
         aria-label={`Drag ${playerName}`}
         {...attributes}
-        {...listeners}
       >
         <GripVertical size={16} aria-hidden="true" />
       </button>

@@ -24,7 +24,10 @@ async function openMock(page: Page) {
   await waitForMockClient(page);
 }
 
-/** The organization's own day plus `days` (the season's timezone decides it), as `YYYY-MM-DD`. */
+/**
+ * The organization's own day plus `days` (the season's timezone decides it), as `YYYY-MM-DD`. The
+ * days are added to the calendar date, not the instant, so a DST change in between moves nothing.
+ */
 async function orgDayPlus(page: Page, days: number): Promise<string> {
   return page.evaluate((offset) => {
     const stored = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -32,9 +35,10 @@ async function orgDayPlus(page: Page, days: number): Promise<string> {
       (row: { status?: string }) => row.status === 'active'
     );
     const zone = (season && season.timezone) || 'UTC';
-    return new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(
-      new Date(Date.now() + offset * 86_400_000)
-    );
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date());
+    const day = new Date(`${today}T00:00:00Z`);
+    day.setUTCDate(day.getUTCDate() + offset);
+    return day.toISOString().slice(0, 10);
   }, days);
 }
 

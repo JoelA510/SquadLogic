@@ -200,6 +200,41 @@ describe('the coach permits page', () => {
     expect(tab.location.href).toBe('');
   });
 
+  it('announces a link request that threw, closes the empty tab and never points it anywhere', async () => {
+    const tab = /** @type {any} */ ({ opener: 'x', location: { href: '' }, close: vi.fn() });
+    vi.spyOn(window, 'open').mockReturnValue(tab);
+    createSignedUrl.mockRejectedValue(new Error('Failed to fetch'));
+    renderPage();
+    fireEvent.click(
+      within(await itemOf(VALID)).getByRole('button', {
+        name: 'Open the file for the permit from Valley Parks',
+      })
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch');
+    expect(tab.close).toHaveBeenCalledTimes(1);
+    expect(tab.location.href).toBe('');
+  });
+
+  it('announces a failure when the browser blocked the new tab, and does not leave the page', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    createSignedUrl.mockResolvedValue({ data: null, error: { message: 'Object not found' } });
+    renderPage();
+    fireEvent.click(
+      within(await itemOf(VALID)).getByRole('button', {
+        name: 'Open the file for the permit from Valley Parks',
+      })
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The file could not be opened: Object not found'
+    );
+    // The button is usable again for a second try.
+    expect(
+      within(await itemOf(VALID)).getByRole('button', {
+        name: 'Open the file for the permit from Valley Parks',
+      })
+    ).toBeEnabled();
+  });
+
   it('announces a download that failed', async () => {
     createSignedUrl.mockResolvedValue({ data: null, error: { message: 'Object not found' } });
     renderPage();

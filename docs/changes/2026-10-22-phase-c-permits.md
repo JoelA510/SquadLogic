@@ -408,3 +408,11 @@ corrects is left as written.
   here). The first run settles the two investigation notes above (Storage enforcing
   `allowed_mime_types` from the declared type; signing needing the caller's SELECT policy), and the
   C1 note that `admin_set_facility_permit_file` can read `storage.objects` from its definer.
+- **First real-backend run (CI, #670):** the API steps passed (the coach's signed link returned the PDF,
+  the member was refused, the bucket refused `text/html`), so the storage policy and its helper work
+  under the Storage API's role. The UI step failed because it read the new tab's address: on the headless
+  Chromium shell CI uses a PDF has no viewer, the navigation becomes a download and the tab stays
+  `about:blank` (reproduced locally: the signed link is requested and answered 200, a `download` event
+  fires). The step now reads the tab's request to the signed link and Storage's 200 instead. A failed
+  link request still alerts and closes the empty tab (unit tests for a returned error, a thrown one and a
+  blocked tab).

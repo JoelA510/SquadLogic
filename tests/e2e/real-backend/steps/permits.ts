@@ -211,17 +211,25 @@ Then(
     await expect(card).toContainText(/Expires in 1[1-3] days/);
     await card.getByRole('link', { name: 'Show my field permits' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Field permits' })).toBeVisible();
-    const [popup] = await Promise.all([
+    // The new tab is sent to the signed link. Where the browser has no PDF viewer (the headless
+    // shell CI uses) the navigation becomes a download and the tab stays `about:blank`, so the tab's
+    // address is not what is read: the request the tab makes to the signed link, and Storage's
+    // answer to it, are.
+    const signed = page.context().waitForEvent('request', {
+      predicate: (request) =>
+        request.method() === 'GET' &&
+        /\/storage\/v1\/object\/sign\/facility-permits\/.+\?token=/.test(request.url()),
+      timeout: 30_000,
+    });
+    await Promise.all([
       page.waitForEvent('popup', { timeout: 30_000 }),
       page
         .getByRole('button', { name: /^Open the file for the permit from Example City Parks/ })
         .click(),
     ]);
-    // The new tab is sent to the signed link (a PDF may download rather than render, so the
-    // address is what is read, not the page).
-    await expect
-      .poll(() => popup.url(), { timeout: 30_000 })
-      .toMatch(/\/storage\/v1\/object\/sign\/facility-permits\/.+\?token=/);
+    const request = await signed;
+    const response = await request.response();
+    expect(response?.status(), 'Storage answered the signed link').toBe(200);
     await expect(page.getByRole('alert')).toHaveCount(0);
   }
 );

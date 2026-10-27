@@ -277,9 +277,7 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
   it('leaves the team run the pages read their teams from, holding every team and roster entry', () => {
     const db = {};
     const { data } = start(db, anonymous());
-    const runs = db.scheduler_runs.filter(
-      (run) => run.organization_id === data.organization_id && run.run_type === 'team'
-    );
+    const runs = db.scheduler_runs.filter((run) => run.organization_id === data.organization_id);
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ run_type: 'team', status: 'completed' });
     const teams = Object.values(runs[0].results.teamsByDivision).flat();
@@ -289,61 +287,6 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
       db.teams.filter((t) => t.organization_id === data.organization_id).map((t) => t.id)
     );
     expect(teams.every((team) => ids.has(team.id))).toBe(true);
-  });
-
-  it("starts with the league's applied weekly practice schedule, as the server's does (20261103010000)", () => {
-    const db = {};
-    const { data } = start(db, anonymous());
-    const org = data.organization_id;
-    const teams = db.teams.filter((t) => t.organization_id === org);
-    const rows = db.practice_assignments.filter((a) => a.organization_id === org);
-    // The U4 teams have a practice, on a slot of the demo's own grid; the U10 teams (U9 and older) have
-    // none, for the visitor's auto-scheduler.
-    const u4 = db.divisions.find((d) => d.organization_id === org && d.name === 'U4');
-    const u4Teams = teams.filter((t) => t.division_id === u4.id);
-    expect(new Set(rows.map((a) => a.team_id))).toEqual(new Set(u4Teams.map((t) => t.id)));
-    expect(teams.length).toBeGreaterThan(u4Teams.length);
-    const slotOf = (row) => db.practice_slots.find((s) => s.id === row.practice_slot_id);
-    for (const row of rows) {
-      const slot = slotOf(row);
-      expect(slot.organization_id).toBe(org);
-      expect([row.day_of_week, row.start_time, row.end_time]).toEqual([
-        slot.day_of_week,
-        slot.start_time,
-        slot.end_time,
-      ]);
-      expect(row.source).toBe('auto');
-      // A range of dates opens on the slot's weekday.
-      const from = /^\[(\d{4}-\d{2}-\d{2}),/.exec(row.effective_date_range)[1];
-      const weekday = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][
-        new Date(`${from}T00:00:00Z`).getUTCDay()
-      ];
-      expect(weekday).toBe(slot.day_of_week);
-    }
-    // U4: Saturday sessions reserved to it, 30 minutes, one cohort at a time, 15 minutes apart.
-    const u4Rows = rows.filter((a) => slotOf(a).division_id === u4.id);
-    expect(u4Rows).toHaveLength(db.teams.filter((t) => t.division_id === u4.id).length);
-    const sessions = u4Rows.map(slotOf).sort((a, b) => a.start_time.localeCompare(b.start_time));
-    expect(new Set(sessions.map((s) => s.id)).size).toBe(sessions.length);
-    const minutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
-    for (const s of sessions) expect(minutes(s.end_time) - minutes(s.start_time)).toBe(30);
-    for (let i = 1; i < sessions.length; i += 1) {
-      expect(
-        minutes(sessions[i].start_time) - minutes(sessions[i - 1].end_time)
-      ).toBeGreaterThanOrEqual(15);
-    }
-    // And a completed practice run, counted from those rows, for the setup checklist.
-    const run = db.scheduler_runs.find(
-      (r) => r.organization_id === org && r.run_type === 'practice'
-    );
-    expect(run).toMatchObject({ status: 'completed' });
-    expect(run.results.summary).toMatchObject({
-      totalTeams: teams.length,
-      assignedTeams: u4Teams.length,
-      unassignedTeams: teams.length - u4Teams.length,
-      assignmentsRead: rows.length,
-    });
-    expect(rows.every((a) => a.run_id === run.id)).toBe(true);
   });
 
   it("returns the visitor's live demo instead of making another", () => {

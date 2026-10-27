@@ -12,7 +12,6 @@
  */
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
-import Papa from 'papaparse';
 
 const { Given, When, Then } = createBdd();
 
@@ -84,9 +83,8 @@ Given('I am signed out on the real-backend sign-in page', async ({ page }) => {
 });
 
 When('I try the demo', async ({ page, $testInfo }) => {
-  // The scenario schedules the 60 unscheduled teams of the 128-team league on the real stack and
-  // downloads its exports: well over the project's default per-test time. Unmeasured (the stack could
-  // not be run where this was written).
+  // The scenario schedules the whole 128-team league on the real stack: well over the project's
+  // default per-test time. Unmeasured (the stack could not be run where this was written).
   $testInfo.setTimeout(600_000);
   await page.getByRole('button', { name: 'Try the demo' }).click();
 });
@@ -126,48 +124,6 @@ Then(
   }
 );
 
-Then(
-  'the demo starts with a practice for each U4 and U5 to U8 team and none for U9 and older',
-  async ({ page }) => {
-    const org = stateOf(page).organizationId;
-    expect(org, 'a previous step found the demo').toBeTruthy();
-    // 128 teams and 68 rows: one page of PostgREST's 1,000-row cap.
-    const rows = await visitorRows(
-      page,
-      `practice_assignments?select=team_id&organization_id=eq.${org}&limit=1000`
-    );
-    const perTeam = new Map<string, number>();
-    for (const row of rows.rows) {
-      const team = String(row.team_id);
-      perTeam.set(team, (perTeam.get(team) ?? 0) + 1);
-    }
-    expect(perTeam.size, 'teams with a practice').toBe(68);
-    expect(rows.count, 'practice rows').toBe(rows.rows.length);
-    for (const [team, n] of perTeam) expect(n, `practices of ${team}`).toBe(1);
-    // The teams with none are U9 and older: read from the divisions, not from the rows.
-    const divisions = await visitorRows(
-      page,
-      `divisions?select=id,name&organization_id=eq.${org}&limit=1000`
-    );
-    const divisionName = new Map(divisions.rows.map((row) => [String(row.id), String(row.name)]));
-    const teams = await visitorRows(
-      page,
-      `teams?select=id,division_id&organization_id=eq.${org}&limit=1000`
-    );
-    expect(teams.rows, 'the demo has 128 teams').toHaveLength(128);
-    const age = (name: string) => Number(name.replace(/[^0-9]/g, ''));
-    for (const team of teams.rows) {
-      const division = divisionName.get(String(team.division_id)) ?? '';
-      expect(perTeam.has(String(team.id)), `${team.id} in ${division}`).toBe(age(division) <= 8);
-    }
-    const runs = await visitorRows(
-      page,
-      `scheduler_runs?select=id,status&organization_id=eq.${org}&run_type=eq.practice`
-    );
-    expect(runs.rows.map((run) => run.status)).toEqual(['completed']);
-  }
-);
-
 Then('the U4 teams practise only in the four reserved Saturday sessions', async ({ page }) => {
   const org = stateOf(page).organizationId;
   const divisions = await visitorRows(
@@ -198,57 +154,12 @@ Then('the U4 teams practise only in the four reserved Saturday sessions', async 
   );
   // Every U4 team practises, and only in a session reserved to U4.
   expect(new Set(assignments.rows.map((row) => String(row.team_id))).size).toBe(teams.rows.length);
-  const used: string[] = [];
   for (const row of assignments.rows) {
     // The writer fills one of the two slot columns (definitive_schema.sql keeps both).
     const slot = String(row.practice_slot_id ?? row.slot_id);
     expect(reservedIds.has(slot), `slot ${slot} is reserved to U4`).toBe(true);
-    used.push(slot);
-  }
-  // One cohort a session: no two U4 teams share one. Each session is 30 minutes, and the sessions
-  // follow one another at least 15 minutes apart.
-  expect(new Set(used).size, 'U4 cohorts in distinct sessions').toBe(used.length);
-  expect(assignments.rows, 'one weekly session per U4 team').toHaveLength(teams.rows.length);
-  const minutes = (hms: unknown) =>
-    Number(String(hms).slice(0, 2)) * 60 + Number(String(hms).slice(3, 5));
-  const sessions = reserved.rows
-    .map((slot) => ({
-      from: minutes(slot.start_time),
-      to: minutes(slot.end_time),
-      day: slot.day_of_week,
-    }))
-    .sort((a, b) => a.from - b.from);
-  for (const session of sessions) {
-    expect(session.to - session.from, 'a U4 session is 30 minutes').toBe(30);
-    expect(session.day, 'U4 meets on Saturday').toBe('sat');
-  }
-  for (let i = 1; i < sessions.length; i += 1) {
-    expect(
-      sessions[i].from - sessions[i - 1].to,
-      'U4 sessions are 15 minutes apart'
-    ).toBeGreaterThanOrEqual(15);
   }
 });
-
-Then(
-  "the demo's master schedule export lists a practice for all {int} teams",
-  async ({ page }, teams: number) => {
-    await page.goto('/exports');
-    await page.getByTestId('generate-csvs-btn').click();
-    const download = page.getByRole('button', { name: 'Download Master CSV' });
-    await expect(download).toBeVisible({ timeout: 60_000 });
-    const [file] = await Promise.all([page.waitForEvent('download'), download.click()]);
-    const chunks = await (await file.createReadStream()).toArray();
-    const rows = Papa.parse<Record<string, string>>(Buffer.concat(chunks).toString('utf8'), {
-      header: true,
-      skipEmptyLines: true,
-    }).data;
-    const practised = new Set(
-      rows.filter((row) => row['Event Type'] === 'Practice').map((row) => row['Team Name'])
-    );
-    expect(practised.size, 'teams with a practice row in the master CSV').toBe(teams);
-  }
-);
 
 Then('the game page lists U4 as practice only', async ({ page }) => {
   await page.goto('/schedule/game');

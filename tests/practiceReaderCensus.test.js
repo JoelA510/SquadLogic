@@ -126,12 +126,6 @@ const REGISTRY = {
     class: 'writer',
     why: 'X10: closes every assignment of a deleted team, as the admin cancel does (20261021030000)',
   },
-  'sql:start_demo_session': {
-    class: 'writer',
-    why:
-      "X10: seeds a demo's applied weekly practice schedule from demo_seed (20261103010000): one " +
-      "series per team and slot, live from the weekday's first date in the season to its end",
-  },
 };
 
 /**

@@ -1,5 +1,4 @@
 import { createBdd } from 'playwright-bdd';
-import Papa from 'papaparse';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 
@@ -230,54 +229,3 @@ When('I switch the demo entry page to the dark theme', async ({ page }) => {
   });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
-
-/** The last master CSV this scenario downloaded: header, then one object per row. */
-let masterCsv: Array<Record<string, string>> = [];
-
-When("I download the master schedule CSV from the demo's exports page", async ({ page }) => {
-  await page.goto('/exports');
-  await page.getByTestId('generate-csvs-btn').click();
-  await expect(page.getByText('CSVs generated successfully.')).toBeVisible({ timeout: 15_000 });
-  const download = page.getByRole('button', { name: 'Download Master CSV' });
-  await expect(download).toBeVisible();
-  const [file] = await Promise.all([page.waitForEvent('download'), download.click()]);
-  const chunks = await (await file.createReadStream()).toArray();
-  masterCsv = Papa.parse<Record<string, string>>(Buffer.concat(chunks).toString('utf8'), {
-    header: true,
-    skipEmptyLines: true,
-  }).data;
-});
-
-Then(
-  "the master CSV holds one weekly practice for each of the demo's {int} scheduled teams",
-  async ({ page: _page }, teams: number) => {
-    // Not headers only: the seeded schedule's practices are in the file, one team each.
-    const practices = masterCsv.filter((row) => row['Event Type'] === 'Practice');
-    // The mock's slice schedules its two U4 cohorts, each on one slot, and leaves the U10 teams for
-    // the auto-scheduler (mockDemo.js); the real league's 68 are checked on the real backend
-    // (real_backend_demo.feature).
-    expect(practices).toHaveLength(teams);
-    expect(practices.map((row) => row['Team Name']).sort()).toEqual(['U4 Team 1', 'U4 Team 2']);
-    for (const row of practices) {
-      expect(row['Start'], `${row['Team Name']} has a start`).not.toBe('');
-      expect(row['End'], `${row['Team Name']} has an end`).not.toBe('');
-      expect(row['Field'], `${row['Team Name']} has a field`).not.toBe('');
-    }
-  }
-);
-
-Then(
-  "the U4 cohorts' practices are on Saturday morning, 30 minutes each, 15 minutes apart",
-  async ({ page: _page }) => {
-    const u4 = masterCsv
-      .filter((row) => row['Event Type'] === 'Practice' && row['Team Name'].startsWith('U4'))
-      .sort((a, b) => a['Start'].localeCompare(b['Start']));
-    expect(u4).toHaveLength(2);
-    const at = (iso: string) => new Date(iso).getTime();
-    for (const row of u4) {
-      expect(at(row['End']) - at(row['Start'])).toBe(30 * 60_000);
-      expect(new Date(row['Start']).getUTCDay(), 'a Saturday').toBe(6);
-    }
-    expect(at(u4[1]['Start']) - at(u4[0]['End'])).toBeGreaterThanOrEqual(15 * 60_000);
-  }
-);

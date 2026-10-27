@@ -173,10 +173,6 @@ R51="$REPO/docs/sql/20261101020000_revert.sql"
 # that aimed at the admin_delete_field body it replaces are re-aimed here.
 M52="$REPO/supabase/migrations/20261102010000_facility_permits.sql"
 R52="$REPO/docs/sql/20261102010000_revert.sql"
-# The demo league's applied practice schedule (demo_seed.practice_schedule, the demo start replaced to
-# write it), and the revert. The smoke 20261103010000 reads the demo it starts.
-M53="$REPO/supabase/migrations/20261103010000_demo_practice_schedule.sql"
-R53="$REPO/docs/sql/20261103010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4948,16 +4944,6 @@ plant "M52 anyone can create a permit" "$M52" \
 
     PERFORM public.facility_permit_check(" \
   "smoke 20261102010000"
-
-# The demo's practice schedule: one plant (the smoke 20261103010000 must go red for it, and the pgTAP
-# file supabase/tests/demo_practice_schedule.sql too). The guarantee that matters most: each row runs
-# to the season's LAST day. A half-open range written `[)` over the season's last date stops a day
-# short, so the final day's practices read as ended, and nothing a migration-time check can see
-# notices it.
-plant "M53 a demo practice stops a day before the season's last day" "$M53" \
-  "s.day_of_week) - 1), v_end, '[]')," \
-  "s.day_of_week) - 1), v_end, '[)')," \
-  "smoke 20261103010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

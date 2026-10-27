@@ -1612,6 +1612,13 @@ const mockSessionUserId = () => {
   return stored ? JSON.parse(stored)?.user?.id || null : null;
 };
 
+/**
+ * PostgREST's `max_rows` (supabase/config.toml, and the hosted default): a response never holds
+ * more rows than this, whatever `limit` or `range` asked for, so a read that must see a whole
+ * table has to page. The mock applies it so a read that forgets to page fails here too.
+ */
+const MOCK_MAX_ROWS = 1000;
+
 const createMockQuery = (table, data = null) => {
   // A generic read honours the restricted tables' SELECT policies
   // (20261021020000; mockReadPolicies.js says what is and is not mirrored).
@@ -1624,10 +1631,16 @@ const createMockQuery = (table, data = null) => {
   let queryContent = '';
   // Set by `select()` when the embed is one PostgREST would refuse.
   let embedError = null;
+  // `select(columns, { count, head })`: an exact count of the matching rows (before the row
+  // cap, as PostgREST counts), and with `head` no rows at all.
+  let wantsCount = false;
+  let headOnly = false;
 
   const proxy = {
-    select: (query) => {
+    select: (query, options) => {
       queryContent = query;
+      wantsCount = Boolean(options?.count);
+      headOnly = options?.head === true;
       // Schema-level, so it errs whether or not any row matches.
       let slotEmbed = null;
       embedError = null;
@@ -1984,7 +1997,13 @@ const createMockQuery = (table, data = null) => {
       return proxy;
     },
     then: (onFulfilled, onRejected) => {
-      let finalData = embedError ? null : JSON.parse(JSON.stringify(results));
+      const matched = results.length;
+      // The server's row cap, on a list read (a single row is never cut).
+      const served =
+        !isSingle && !isMaybeSingle && matched > MOCK_MAX_ROWS
+          ? results.slice(0, MOCK_MAX_ROWS)
+          : results;
+      let finalData = embedError ? null : JSON.parse(JSON.stringify(served));
       let error = embedError;
 
       if (error) {
@@ -2000,7 +2019,10 @@ const createMockQuery = (table, data = null) => {
         finalData = results.length > 0 ? results[0] : null;
       }
 
-      return Promise.resolve({ data: finalData, error }).then(onFulfilled, onRejected);
+      if (headOnly) finalData = null;
+      const response = { data: finalData, error };
+      if (wantsCount) response.count = error ? null : matched;
+      return Promise.resolve(response).then(onFulfilled, onRejected);
     },
     catch: (onRejected) =>
       Promise.resolve({ data: null, error: 'Mock error' }).then(null, onRejected),
@@ -2681,6 +2703,10 @@ export const mockSupabase = {
           ? Number(sessionStorage.getItem('__MOCK_DEMO_MS__')) || undefined
           : undefined,
       failure: typeof window !== 'undefined' ? sessionStorage.getItem('__MOCK_DEMO_FAIL__') : null,
+      playerCount:
+        typeof window !== 'undefined'
+          ? Number(sessionStorage.getItem('__MOCK_DEMO_PLAYERS__')) || undefined
+          : undefined,
     });
     if (demoResult) {
       if (!demoResult.error) saveDB(db);

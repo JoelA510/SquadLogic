@@ -178,6 +178,9 @@ export default function Login() {
             <input
               id="email"
               type="email"
+              // `username` pairs the address with the saved password on sign-in; sign-up (and the
+              // forgot-password form) is an address for a new or reset account.
+              autoComplete={isSignUp || isForgotPassword ? 'email' : 'username'}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -232,6 +235,7 @@ export default function Login() {
               <input
                 id="password"
                 type="password"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

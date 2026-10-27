@@ -31,6 +31,9 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
       select: () => b,
       eq: () => b,
       order: () => b,
+      // The players read pages (`fetchAllPages`: order then range); its first page is still
+      // started together with the other read, which is what this file holds.
+      range: () => b,
       single: () => b,
       then: (onOk, onErr) =>
         new Promise((resolve) => {

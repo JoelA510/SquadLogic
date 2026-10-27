@@ -291,9 +291,11 @@ async function press(control) {
 }
 
 describe('OutputGenerationPanel refuses only what the failed read feeds', () => {
-  it('exports a genuinely empty season, because empty is not the same as unread', async () => {
+  it('says a genuinely empty season is empty, because empty is not the same as unread', async () => {
     // The negative twin of the whole file. Without it, "the panel refuses"
-    // would pass just as well on a panel that refuses everything.
+    // would pass just as well on a panel that refuses everything. An empty season is
+    // not an unread one (no "could not be read" reason), and it is not a file of headers
+    // either: the panel says what is missing (OutputGenerationPanel.nothingScheduled).
     render(
       <OutputGenerationPanel
         teams={[]}
@@ -304,10 +306,12 @@ describe('OutputGenerationPanel refuses only what the failed read feeds', () => 
     );
 
     await press(screen.getByRole('button', { name: GENERATE }));
-    // Through the same helper the refusal cases use: this is what proves the
-    // flush is long enough for a generation to have appeared if one ran.
-    expect(screen.getByText('Generated Files')).toBeInTheDocument();
-    expect(screen.getByText('Master Schedule: 0 rows')).toBeInTheDocument();
+    // Through the same helper the refusal cases use: the flush is long enough for a
+    // generation to have appeared if one ran.
+    expect(screen.queryByText('Generated Files')).toBeNull();
+    expect(screen.getByTestId('csv-empty-reason')).toHaveTextContent(
+      'no practices or games have been applied'
+    );
     expect(screen.queryByTestId('csv-blocked-reason')).toBeNull();
   });
 

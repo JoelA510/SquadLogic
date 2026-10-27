@@ -22,6 +22,8 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
     const chain = {
       select: () => chain,
       eq: () => chain,
+      order: () => chain,
+      range: () => chain,
       single: () => Promise.resolve({ data: null, error: null }),
       then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
     };

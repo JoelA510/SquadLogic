@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import OutputGenerationPanel from '../frontend/src/components/OutputGenerationPanel.jsx';
 import { generateScheduleExports } from '@squadlogic/core/outputGeneration.js';
@@ -155,5 +155,64 @@ describe('OutputGenerationPanel', () => {
     // …and the one with no address is named in the count, not dropped in silence.
     expect(screen.queryByText(/To: Sam Coach/)).toBeNull();
     expect(screen.getAllByText(/Your assigned practice schedule is:/).length).toBe(2);
+  });
+});
+
+// The demo's Exports page produced files with only the header row: the master and per-team
+// files hold one row per practice or game, and a league that has applied no schedule has none
+// (migration 20261030010000's `start_demo_session` seeds teams, players and coaches, and no
+// `practice_assignments` or game run). The page now says so instead of downloading headers.
+describe('OutputGenerationPanel with nothing scheduled', () => {
+  const press = async (control) => {
+    fireEvent.click(control);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
+  it('says what is missing and writes no file', async () => {
+    render(<OutputGenerationPanel teams={teams} supabaseClient={null} />);
+
+    const generate = screen.getByRole('button', { name: 'Generate CSVs' });
+    const reason = screen.getByTestId('csv-empty-reason');
+    expect(reason).toHaveTextContent('no practices or games have been applied');
+    expect(reason).toHaveTextContent('Practices');
+    expect(generate).toHaveAttribute('aria-disabled', 'true');
+    expect(generate.getAttribute('aria-describedby')).toBe(reason.getAttribute('id'));
+
+    await press(generate);
+    expect(screen.queryByText('Generated Files')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download Master CSV' })).toBeNull();
+  });
+
+  it('POSITIVE CONTROL: one applied practice is a real export and no empty notice', async () => {
+    render(
+      <OutputGenerationPanel
+        teams={teams}
+        practiceAssignments={practiceAssignments}
+        supabaseClient={null}
+      />
+    );
+    expect(screen.queryByTestId('csv-empty-reason')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Generate CSVs' })).not.toHaveAttribute(
+      'aria-disabled'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Generate CSVs' }));
+    expect(await screen.findByText('Master Schedule: 1 rows')).toBeInTheDocument();
+  });
+
+  it('refuses a file of headers when every applied practice has no time', async () => {
+    render(
+      <OutputGenerationPanel
+        teams={teams}
+        practiceAssignments={[{ teamId: 'team-1', day: 'Monday', slotId: 'practice_17:30' }]}
+        supabaseClient={null}
+      />
+    );
+    await press(screen.getByRole('button', { name: 'Generate CSVs' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+        'with no start or end time are not in these files'
+      )
+    );
+    expect(screen.queryByText('Generated Files')).toBeNull();
   });
 });

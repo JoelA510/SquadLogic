@@ -1,6 +1,7 @@
 # Phase D: home/away balance (research item 4)
 
-Status: **draft for owner approval** (AGENTS.md rule 14: the solver's round robin). Research item 4
+Status: **built** as PR A of `2026-10-27-phase-d-scheduling.md` (owner-approved 2026-10-27). Was: draft
+for owner approval (AGENTS.md rule 14: the solver's round robin). Research item 4
 (`2026-10-20-research-defects.md` section 4), roadmap Phase D. No migration, schema or Edge
 Function change; three PRs. Code read at `origin/main` 6a22d29.
 

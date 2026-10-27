@@ -264,6 +264,7 @@ describe('counts :: gameMetrics publishes no number without a unit', () => {
     expect([...types].sort()).toEqual([
       'coach-conflict',
       'field-overlap',
+      'home-away-imbalance',
       'shared-slot-imbalance',
       'team-double-booked',
       'unknown-team',

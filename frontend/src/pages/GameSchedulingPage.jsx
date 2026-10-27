@@ -10,7 +10,11 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { buildDivisionRoundRobins, scheduleGames } from '@squadlogic/core/gameScheduling.js';
+import {
+  buildDivisionRoundRobins,
+  savedSides,
+  scheduleGames,
+} from '@squadlogic/core/gameScheduling.js';
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useDashboardData } from '../hooks/useDashboardData.js';
@@ -725,7 +729,24 @@ export default function GameSchedulingPage() {
 
   // D2: the teams that play, their round robins, and the practice-only
   // divisions, listed apart rather than counted as unscheduled.
-  const divisionPlan = useMemo(() => buildDivisionRoundRobins(schedulerTeams), [schedulerTeams]);
+  // Phase D, PR A: a pair already saved keeps its sides when the schedule is
+  // generated again. Only the saved run counts (`game.assignments`), never a
+  // staged or discarded review, and a pair is not rebalanced.
+  const keepSides = useMemo(
+    () =>
+      savedSides(
+        (game?.assignments ?? []).map((assignment) => ({
+          homeTeamId: getAssignmentHomeTeamId(assignment),
+          awayTeamId: getAssignmentAwayTeamId(assignment),
+          weekIndex: getAssignmentWeekIndex(assignment),
+        }))
+      ),
+    [game?.assignments]
+  );
+  const divisionPlan = useMemo(
+    () => buildDivisionRoundRobins(schedulerTeams, { keepSides }),
+    [keepSides, schedulerTeams]
+  );
   const gameTeams = /** @type {typeof schedulerTeams} */ (divisionPlan.gameTeams);
   // The practice-only divisions' teams, counted once (D2).
   const practiceOnlyTeamCount = divisionPlan.practiceOnlyDivisions.reduce(

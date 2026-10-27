@@ -19,15 +19,22 @@ const BYE = '__BYE__';
  * column's default, so a caller that does not read the setting schedules
  * exactly what it did before.
  *
+ * `keepSides` (see {@link savedSides}) are the sides a saved schedule already
+ * decided: each division's round robin is given the entries whose two teams
+ * are both in that division, so a regenerate keeps who hosts whom. An entry
+ * for a pair in no division (a team moved or removed since) is not an error
+ * here; it just has nothing to keep.
+ *
  * @template {{ id: string, division: string, playsGames?: boolean }} T
  * @param {ReadonlyArray<T>} teams
+ * @param {{ keepSides?: ReadonlyArray<{ homeTeamId: string, awayTeamId: string }> }} [options]
  * @returns {{
  *   roundRobinByDivision: Record<string, ReturnType<typeof generateRoundRobinWeeks>>,
  *   gameTeams: T[],
  *   practiceOnlyDivisions: Array<{ division: string, teamIds: string[] }>,
  * }}
  */
-export function buildDivisionRoundRobins(teams) {
+export function buildDivisionRoundRobins(teams, { keepSides = [] } = {}) {
   if (!Array.isArray(teams)) {
     throw new TypeError('teams must be an array');
   }
@@ -48,7 +55,13 @@ export function buildDivisionRoundRobins(teams) {
   const roundRobinByDivision = {};
   for (const [division, teamIds] of playing.entries()) {
     if (teamIds.length >= 2) {
-      roundRobinByDivision[division] = generateRoundRobinWeeks({ teamIds });
+      const members = new Set(teamIds);
+      roundRobinByDivision[division] = generateRoundRobinWeeks({
+        teamIds,
+        keepSides: keepSides.filter(
+          (entry) => members.has(entry?.homeTeamId) && members.has(entry?.awayTeamId)
+        ),
+      });
     }
   }
   const practiceOnlyDivisions = [...practiceOnly.entries()]
@@ -58,13 +71,69 @@ export function buildDivisionRoundRobins(teams) {
 }
 
 /**
+ * The sides a saved schedule decided, one entry per pair, for `keepSides`.
+ *
+ * A pair saved twice with opposite sides (reachable only through manual edits)
+ * keeps the sides of its earliest week, so the answer does not depend on the
+ * order the rows arrive in. Rows that name no home or away team are skipped:
+ * they decide nothing.
+ *
+ * @param {ReadonlyArray<{ homeTeamId?: string | null, awayTeamId?: string | null, weekIndex?: number }>} assignments
+ * @returns {Array<{ homeTeamId: string, awayTeamId: string }>}
+ */
+export function savedSides(assignments) {
+  if (!Array.isArray(assignments)) {
+    throw new TypeError('assignments must be an array');
+  }
+  /** @type {Map<string, { homeTeamId: string, awayTeamId: string, weekIndex: number }>} */
+  const byPair = new Map();
+  for (const row of assignments) {
+    const { homeTeamId, awayTeamId } = row ?? {};
+    if (typeof homeTeamId !== 'string' || typeof awayTeamId !== 'string') continue;
+    if (homeTeamId === awayTeamId) continue;
+    const weekIndex = Number.isFinite(row.weekIndex) ? /** @type {number} */ (row.weekIndex) : 0;
+    const key = pairKey(homeTeamId, awayTeamId);
+    const held = byPair.get(key);
+    const earlier =
+      !held ||
+      weekIndex < held.weekIndex ||
+      (weekIndex === held.weekIndex && homeTeamId.localeCompare(held.homeTeamId) < 0);
+    if (earlier) byPair.set(key, { homeTeamId, awayTeamId, weekIndex });
+  }
+  return [...byPair.values()].map(({ homeTeamId, awayTeamId }) => ({ homeTeamId, awayTeamId }));
+}
+
+/**
  * Generate a deterministic round-robin schedule for a division.
+ *
+ * **Who hosts** (plan `docs/changes/2026-10-27-phase-d-scheduling.md`, PR A).
+ * The pairings and byes are the circle method's, as they always were: the
+ * smallest id is fixed at rotation index 0 and the rest rotate one place a
+ * week. Orientation reads the rotation index, not the id: for the pair at
+ * indices `i` and `N - 1 - i` (`N` the rotation length, a bye counted), the team at the
+ * **odd** index hosts, because the two indices sum to the odd `N - 1` and so
+ * exactly one is odd. The pair at index 0 is the exception: with an even
+ * number of teams the fixed team hosts in even (0-based) weeks; with an odd
+ * number it hosts unless its opponent's own bye falls at an odd index, in which
+ * case the opponent does (the host that bye cost it comes back there). Every
+ * team then hosts within one game of half its games, and exactly (n - 1) / 2
+ * when n is odd; nobody keeps one side for more than two weeks running.
+ * (Proved and executed in `tests/gameScheduling.test.js`, n = 2..16.)
+ *
+ * Matchups within a week stay sorted by the alphabetised pair, whichever side
+ * hosts, so `scheduleGames` sees them in the order it always did and places
+ * each pair in the same week and slot.
  *
  * @param {Object} params
  * @param {Array<string>} params.teamIds - Unique team identifiers.
+ * @param {Array<{ homeTeamId: string, awayTeamId: string }>} [params.keepSides]
+ *   - Pairs whose sides are already decided (a saved schedule): each entry's
+ *   `homeTeamId` hosts that pair, whatever the rule says. Not named `freeze`:
+ *   `scheduleGames` refuses that word on purpose. A malformed entry, a team
+ *   that is not in `teamIds`, or two entries for one pair throws a TypeError.
  * @returns {Array<{ weekIndex: number, matchups: Array<{ homeTeamId: string, awayTeamId: string }>, byes: Array<string> }>}
  */
-export function generateRoundRobinWeeks({ teamIds }) {
+export function generateRoundRobinWeeks({ teamIds, keepSides = [] }) {
   if (!Array.isArray(teamIds)) {
     throw new TypeError('teamIds must be an array');
   }
@@ -78,43 +147,81 @@ export function generateRoundRobinWeeks({ teamIds }) {
     throw new Error('at least two teams are required for a round-robin schedule');
   }
 
+  const kept = indexKeepSides(keepSides, new Set(uniqueTeams));
+
   const sortedTeams = [...uniqueTeams].sort((a, b) => a.localeCompare(b));
-  const rotation = [...sortedTeams];
+  let rotation = [...sortedTeams];
 
   if (rotation.length % 2 === 1) {
     rotation.push(BYE);
   }
 
   const totalTeams = rotation.length;
+  const oddTeamCount = uniqueTeams.length % 2 === 1;
   const weeks = totalTeams - 1;
   const half = totalTeams / 2;
-  const schedule = [];
 
+  // First pass: the rotation each week, and (odd n) the index each team sits
+  // at when it meets the bye, which decides its fixed-team game.
+  const rotations = [];
+  /** @type {Map<string, number>} */
+  const byeIndex = new Map();
   for (let week = 0; week < weeks; week += 1) {
+    rotations.push(rotation);
+    for (let i = 0; i < half; i += 1) {
+      const low = rotation[i];
+      const high = rotation[totalTeams - 1 - i];
+      if (low === BYE) byeIndex.set(high, totalTeams - 1 - i);
+      if (high === BYE) byeIndex.set(low, i);
+    }
+    const [first, ...rest] = rotation;
+    rest.unshift(/** @type {string} */ (rest.pop()));
+    rotation = [first, ...rest];
+  }
+
+  const schedule = [];
+  for (let week = 0; week < weeks; week += 1) {
+    const current = rotations[week];
     const matchups = [];
     const byes = [];
 
     for (let i = 0; i < half; i += 1) {
-      const home = rotation[i];
-      const away = rotation[totalTeams - 1 - i];
+      const low = current[i];
+      const high = current[totalTeams - 1 - i];
 
-      if (home === BYE || away === BYE) {
-        const byeTeam = home === BYE ? away : home;
+      if (low === BYE || high === BYE) {
+        const byeTeam = low === BYE ? high : low;
         if (byeTeam !== BYE) {
           byes.push(byeTeam);
         }
         continue;
       }
 
-      const ordered = [home, away].sort((a, b) => a.localeCompare(b));
-      matchups.push({ homeTeamId: ordered[0], awayTeamId: ordered[1] });
+      let lowHosts;
+      if (i === 0) {
+        lowHosts = oddTeamCount ? (byeIndex.get(high) ?? 0) % 2 === 0 : week % 2 === 0;
+      } else {
+        lowHosts = i % 2 === 1;
+      }
+      let [homeTeamId, awayTeamId] = lowHosts ? [low, high] : [high, low];
+
+      const keptHome = kept.get(pairKey(low, high));
+      if (keptHome !== undefined) {
+        homeTeamId = keptHome;
+        awayTeamId = keptHome === low ? high : low;
+      }
+      matchups.push({ homeTeamId, awayTeamId });
     }
 
+    // The alphabetised pair, not the host: placement order is unchanged by
+    // who hosts, so no pair moves to another week or slot.
     matchups.sort((a, b) => {
-      if (a.homeTeamId !== b.homeTeamId) {
-        return a.homeTeamId.localeCompare(b.homeTeamId);
+      const [aFirst, aSecond] = [a.homeTeamId, a.awayTeamId].sort((x, y) => x.localeCompare(y));
+      const [bFirst, bSecond] = [b.homeTeamId, b.awayTeamId].sort((x, y) => x.localeCompare(y));
+      if (aFirst !== bFirst) {
+        return aFirst.localeCompare(bFirst);
       }
-      return a.awayTeamId.localeCompare(b.awayTeamId);
+      return aSecond.localeCompare(bSecond);
     });
 
     byes.sort((a, b) => a.localeCompare(b));
@@ -124,14 +231,52 @@ export function generateRoundRobinWeeks({ teamIds }) {
       matchups,
       byes,
     });
-
-    const first = rotation[0];
-    const rest = rotation.slice(1);
-    rest.unshift(rest.pop());
-    rotation.splice(0, rotation.length, first, ...rest);
   }
 
   return schedule;
+}
+
+/** One key for a pair, whichever side is named first. */
+function pairKey(a, b) {
+  return a.localeCompare(b) <= 0 ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+}
+
+/**
+ * Validate `keepSides` and index it by pair: pair key -> the hosting team id.
+ *
+ * @param {unknown} keepSides
+ * @param {Set<string>} teamSet
+ * @returns {Map<string, string>}
+ */
+function indexKeepSides(keepSides, teamSet) {
+  if (!Array.isArray(keepSides)) {
+    throw new TypeError('keepSides must be an array');
+  }
+  /** @type {Map<string, string>} */
+  const kept = new Map();
+  for (const entry of keepSides) {
+    if (!entry || typeof entry !== 'object') {
+      throw new TypeError('keepSides entries must be objects');
+    }
+    const { homeTeamId, awayTeamId } = /** @type {Record<string, unknown>} */ (entry);
+    if (typeof homeTeamId !== 'string' || typeof awayTeamId !== 'string') {
+      throw new TypeError('keepSides entries require string homeTeamId and awayTeamId');
+    }
+    if (homeTeamId === awayTeamId) {
+      throw new TypeError(`keepSides entry names team ${homeTeamId} on both sides`);
+    }
+    for (const id of [homeTeamId, awayTeamId]) {
+      if (!teamSet.has(id)) {
+        throw new TypeError(`keepSides names team ${id}, which is not in teamIds`);
+      }
+    }
+    const key = pairKey(homeTeamId, awayTeamId);
+    if (kept.has(key)) {
+      throw new TypeError(`keepSides names the pair ${homeTeamId} / ${awayTeamId} more than once`);
+    }
+    kept.set(key, homeTeamId);
+  }
+  return kept;
 }
 
 /**

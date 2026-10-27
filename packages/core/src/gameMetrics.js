@@ -73,6 +73,10 @@ export const GAME_METRICS_COUNT_UNITS = buildCountUnitRegistry({
   'summary.sharedFieldDistribution.*.*': 'GAME',
   'warnings.[].details.weekIndex': 'WEEK_INDEX',
   'warnings.[].details.spread': 'GAME',
+  'warnings.[].details.homeGames': 'GAME',
+  'warnings.[].details.awayGames': 'GAME',
+  'warnings.[].details.totalGames': 'GAME',
+  'warnings.[].details.unscheduledGames': 'UNSCHEDULED_MATCHUP',
   'warnings.[].details.breakdown.*': 'UNSCHEDULED_MATCHUP',
   'warnings.[].details.divisionBreakdown.*': 'UNSCHEDULED_MATCHUP',
   'warnings.[].details.distribution.[].count': 'GAME',
@@ -295,6 +299,10 @@ export function evaluateGameSchedule({
     messageFn: (id) => `Field ${id} has overlapping games`,
   });
 
+  warnings.push(
+    ...detectHomeAwayImbalance({ teamsById, teamGameLoad: summary.teamGameLoad, unscheduled })
+  );
+
   if (unscheduled.length > 0) {
     const total = unscheduled.length;
     const breakdownEntries = Object.entries(summary.unscheduledByReason).sort(
@@ -317,6 +325,50 @@ export function evaluateGameSchedule({
   const report = { summary, warnings };
   assertCountsLabelled(report, GAME_METRICS_COUNT_UNITS, 'evaluateGameSchedule()');
   return report;
+}
+
+/**
+ * A rostered team that hosts (or visits) more than one game more than it does
+ * the other: |home - away| > 1 over the games placed, which is hosting outside
+ * floor(g / 2)..ceil(g / 2) of g games and so the season constraint's 4 or 5
+ * of 9. Advisory: nothing is blocked.
+ *
+ * The subject set is the roster, not the games, so a team the schedule dropped
+ * entirely is not mistaken for a balanced one; it has no load and is judged by
+ * the unscheduled-matchups warning instead. A team with an unscheduled matchup
+ * says how many, because a game that could not be placed can read a balanced
+ * orientation two apart.
+ *
+ * Sides that name a team the roster lacks are not counted: their own
+ * `unknown-team` warning says so.
+ */
+function detectHomeAwayImbalance({ teamsById, teamGameLoad, unscheduled }) {
+  const unscheduledByTeam = {};
+  for (const entry of unscheduled) {
+    for (const teamId of [entry.matchup?.homeTeamId, entry.matchup?.awayTeamId]) {
+      if (teamId !== undefined) incrementKey(unscheduledByTeam, teamId);
+    }
+  }
+  const found = [];
+  for (const [teamId, team] of teamsById.entries()) {
+    const load = teamGameLoad[teamId];
+    if (!load || Math.abs(load.homeGames - load.awayGames) <= 1) {
+      continue;
+    }
+    found.push({
+      type: 'home-away-imbalance',
+      message: `Team ${teamId} hosts ${load.homeGames} of its ${load.totalGames} games (${load.awayGames} away)`,
+      details: {
+        teamId,
+        division: team.division,
+        homeGames: load.homeGames,
+        awayGames: load.awayGames,
+        totalGames: load.totalGames,
+        unscheduledGames: unscheduledByTeam[teamId] ?? 0,
+      },
+    });
+  }
+  return found.sort((a, b) => a.details.teamId.localeCompare(b.details.teamId));
 }
 
 function analyzeSharedSlotUsage(sharedSlotUsage) {

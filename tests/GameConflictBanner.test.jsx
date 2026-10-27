@@ -92,6 +92,25 @@ describe('GameConflictBanner', () => {
     expect(items[3]).toHaveAttribute('data-testid', 'conflict-item-shared-slot-imbalance');
   });
 
+  test('a home-away-imbalance is a labelled advisory, not a conflict', () => {
+    const imbalance = {
+      type: 'home-away-imbalance',
+      message: 'Team A hosts 3 of its 3 games (0 away)',
+      details: { teamId: 'A', homeGames: 3, awayGames: 0, totalGames: 3, unscheduledGames: 0 },
+    };
+    // Alone, it is a warning: no "Conflict" in the header.
+    const { unmount } = render(<GameConflictBanner warnings={[imbalance]} />);
+    expect(screen.getByText(/1 Warning/)).toBeInTheDocument();
+    expect(screen.queryByText(/Conflicts? Detected/)).not.toBeInTheDocument();
+    expect(screen.getByText('Home/Away')).toBeInTheDocument();
+    unmount();
+    // Beside a hard conflict it is not counted as one, and sorts after it.
+    render(<GameConflictBanner warnings={[imbalance, ...HARD_CONFLICTS]} />);
+    expect(screen.getByText(/2 Conflicts Detected/)).toBeInTheDocument();
+    const items = screen.getByTestId('conflict-list').children;
+    expect(items[2]).toHaveAttribute('data-testid', 'conflict-item-home-away-imbalance');
+  });
+
   test('collapse/expand toggle hides and shows conflict list', () => {
     render(<GameConflictBanner warnings={ALL_WARNINGS} />);
     // List should be visible initially

@@ -10,9 +10,9 @@ import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
  * has, through `window.__saveMockDB__`, as the other coach steps do.
  *
  * The mock's Open link is a `data:` URL (it has no Storage server), which a browser will not
- * navigate a new tab to, so `window.open` is replaced by a stand-in that records the address it is
- * given: the step proves a tab was asked for and a signed link was made for the coach, not what a
- * browser then renders (the real-backend scenario proves the 200).
+ * navigate a new tab to, so the step proves what the browser shows: a new tab opens and the page
+ * announces no failure. That the tab is pointed at a signed link Storage answers is the
+ * real-backend scenario's (`real_backend_permits.feature`).
  */
 
 const { Given, When, Then } = createBdd();
@@ -179,36 +179,22 @@ Then(
   }
 );
 
+/** The new tab each Open click asked the browser for, by page. */
+const openedTabs = new WeakMap<Page, Promise<Page>>();
+
 When('I open the file of the permit from {string}', async ({ page }, issuer: string) => {
-  await page.evaluate(() => {
-    const opened: string[] = [];
-    (window as unknown as { __openedTabs: string[] }).__openedTabs = opened;
-    window.open = (() => ({
-      opener: window,
-      close() {},
-      location: {
-        set href(value: string) {
-          opened.push(value);
-        },
-      },
-    })) as unknown as typeof window.open;
-  });
+  openedTabs.set(page, page.context().waitForEvent('page', { timeout: 15_000 }));
   await permitItem(page, issuer)
     .getByRole('button', { name: /^Open the file/ })
     .click();
 });
 
 Then('the file opens in a new tab through a signed link', async ({ page }) => {
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as unknown as { __openedTabs: string[] }).__openedTabs.length)
-    )
-    .toBe(1);
-  const [address] = await page.evaluate(
-    () => (window as unknown as { __openedTabs: string[] }).__openedTabs
-  );
-  expect(address).toMatch(/^data:/);
-  // A refused link would be announced.
+  const tab = openedTabs.get(page);
+  expect(tab, 'a previous step clicked Open').toBeDefined();
+  // A browser event, not a stand-in: the click opened a real tab.
+  await expect(tab!).resolves.toBeTruthy();
+  // A refused link would be announced, and its empty tab closed.
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 

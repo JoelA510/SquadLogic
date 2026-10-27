@@ -371,3 +371,13 @@ describe('what a coach is told (Phase C3)', () => {
     expect(sortPermitsForCoach([only])).toEqual([only]);
   });
 });
+
+describe('the facility barrel', () => {
+  it('re-exports every permits helper, the coach view included', async () => {
+    const barrel = await import('@squadlogic/core/facility/index.js');
+    const permits = await import('@squadlogic/core/facility/permits.js');
+    for (const name of Object.keys(permits)) {
+      expect(barrel[name], `${name} is exported from facility/index.js`).toBe(permits[name]);
+    }
+  });
+});

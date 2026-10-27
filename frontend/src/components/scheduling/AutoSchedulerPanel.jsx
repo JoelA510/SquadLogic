@@ -4,6 +4,17 @@ import { Zap, CheckCircle, AlertTriangle, Loader2, RotateCcw, XCircle } from 'lu
 import Button from '../ui/Button.jsx';
 
 /**
+ * The Edge Function stops its search at the server's compute cap (`CPU_CAP_MS` in
+ * `auto-scheduler-solver.ts`) and says so with this `terminationReason`. The run still completes,
+ * with the best schedule found by then, so the admin is told in plain words rather than shown the
+ * code. Re-running does not search further: the search starts from the same seed.
+ */
+const CPU_CAP_REASON = 'cpu-cap';
+const CPU_CAP_NOTICE =
+  "Stopped at the server's time limit. This is the best schedule found in that time; " +
+  'check any unassigned teams before you apply it.';
+
+/**
  * AutoSchedulerPanel — WCAG 2.2 AA compliant panel for triggering and
  * displaying the status of the Hill Climbing auto-scheduler.
  *
@@ -176,9 +187,16 @@ export default function AutoSchedulerPanel({
               {(result.optimization.elapsedMs / 1000).toFixed(1)}s
               {result.optimization.restarts > 0 &&
                 ` (${result.optimization.restarts} restart${result.optimization.restarts > 1 ? 's' : ''})`}
-              {' · '}
-              Terminated: {result.optimization.terminationReason}
+              {result.optimization.terminationReason !== CPU_CAP_REASON && (
+                <>
+                  {' · '}
+                  Terminated: {result.optimization.terminationReason}
+                </>
+              )}
             </p>
+          )}
+          {result.optimization?.terminationReason === CPU_CAP_REASON && (
+            <p className="mt-2 text-sm text-text-primary">{CPU_CAP_NOTICE}</p>
           )}
         </div>
       )}

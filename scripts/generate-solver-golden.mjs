@@ -118,6 +118,9 @@ export function sweepRuns(extract, prepareTeam, liveFrom) {
             maxIterations: SWEEP.maxIterations,
             seed,
           },
+          // The server's compute cap (CPU_CAP_MS) would end a slow machine's run early and
+          // make the answer depend on the machine; an offline sweep has no request to protect.
+          cpuCapMs: Infinity,
         },
       });
     }

@@ -512,7 +512,10 @@ function, policy and trigger matches, and two views are `only_in_snapshot`,
 `coach_team_map` and `view_facility_usage`, which every fresh build creates and
 production never had. Nothing in the app reads either (schema-drift-2026-10.md,
 section 7); until a migration settles them, expect those two rows besides the
-four `count` rows.
+four `count` rows. `20261103020000` drops both views from the build (production never had them, so
+there it is a no-op), and the snapshot loses their rows: at that version the operator query expects
+no `only_in_snapshot` row for either, and a `present` view of either name in production would be
+new drift.
 
 ## Real-backend E2E (`e2e-real-backend.yml`)
 

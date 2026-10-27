@@ -335,10 +335,8 @@
     "CREATE TRIGGER tr_validate_team_attributes BEFORE INSERT OR UPDATE ON public.teams FOR EACH ROW EXECUTE FUNCTION validate_custom_attributes('team')"
   ],
   "views": [
-    "coach_team_map|v|security_invoker=true|coach_user_id uuid, team_id uuid",
     "field_closures|v|security_invoker=true|id uuid, organization_id uuid, closes_location_id uuid, closes_field_id uuid, field_location_id uuid, blackout_from date, blackout_until date, start_minutes integer, end_minutes integer, reason text, note text, source_reason_text text, source text",
     "import_efficiency_metrics|v|security_invoker=true|import_job_id uuid, suggestions_applied bigint, total_suggestions bigint, match_rate double precision",
-    "view_facility_usage|v|security_invoker=true|field_id uuid, organization_id uuid, field_name text, practice_count bigint, game_count bigint, total_events bigint",
     "view_league_standings|v|security_invoker=true|team_id uuid, organization_id uuid, team_name text, division_id uuid, games_played bigint, wins bigint, losses bigint, draws bigint, goals_for bigint, goals_against bigint, goal_differential bigint, points bigint, division text, season_settings_id uuid",
     "view_org_metrics|v|security_invoker=true|organization_id uuid, organization_name text, total_players bigint, total_teams bigint, total_users bigint"
   ]

@@ -418,3 +418,11 @@ reports two views `only_in_snapshot`: `view_facility_usage` (above) and
 `supabase/functions` or `packages` reads it. Whether to drop both from the
 build or create them in production is the owner's call (AGENTS.md rule 14);
 until then the operator check expects those two rows.
+
+**Settled, 2026-10-27.** Migration `20261103020000_drop_unused_views.sql` (owner approval 2026-10-27)
+drops `coach_team_map` and `view_facility_usage` from the build with `DROP VIEW IF EXISTS` (no
+CASCADE); in production, which never had either, it is a no-op. A search of `frontend/`, `packages/`,
+`supabase/functions/`, `scripts/` and `tests/` for either name found only the practice-reader census's
+registry entry for `view_facility_usage`, removed with it. The snapshot no longer lists them, so the
+operator check expects no `only_in_snapshot` rows for them. Revert and smoke in
+`docs/sql/20261103020000_revert.sql` and `_smoke.sql`, pgTAP in `supabase/tests/unused_views_dropped.sql`.

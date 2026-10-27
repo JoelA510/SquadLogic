@@ -899,16 +899,33 @@ export interface OptimizerResult {
   iterations: number;
   restarts: number;
   elapsedMs: number;
-  terminationReason: string;
+  terminationReason: TerminationReason;
 }
 
-// Yield every N iterations to avoid 2s CPU limit on Supabase free tier.
-// The free tier enforces a 2s CPU ceiling per isolate burst but allows
-// up to 150s wall-clock time; yielding lets the event loop breathe.
+// Yield to the event loop every N iterations. A yield does NOT reset the CPU
+// budget: a Supabase Edge Function request gets 2 s of CPU time on every plan
+// (150 s wall clock on Free), counted per request, and awaiting spends none of
+// it but gives none back. The yield only lets pending I/O run, such as the
+// fire-and-forget progress audit; the CPU limit is held by `CPU_CAP_MS`.
 const YIELD_EVERY = 100;
 // Safety wall-clock cutoff (140s) — leave 10s headroom before the
 // hard 150s isolate timeout on the free tier.
 const WALL_CLOCK_LIMIT_MS = 140_000;
+/**
+ * The compute cap for one request, measured from when the function started
+ * handling it. The platform kills a request at 2,000 ms of CPU with nothing
+ * returned; 1,500 ms leaves 500 ms for what comes after the search (the
+ * daylight post-pass, scoring the result, persisting the run, the response).
+ *
+ * It is a wall-clock reading used as a proxy for CPU: the search is
+ * synchronous compute, so while it runs the two move together. Time the
+ * request spent awaiting the database before the search counts against the
+ * cap too, which only makes it stop earlier (safe) and never later.
+ */
+export const CPU_CAP_MS = 1_500;
+
+/** Why the search stopped; the response and the audit trail carry it. */
+export type TerminationReason = 'cpu-cap' | 'wall-clock-safety' | 'time-budget' | 'max-iterations';
 
 export async function runPracticeOptimizer(params: {
   teams: SchedulerTeam[];
@@ -938,6 +955,20 @@ export async function runPracticeOptimizer(params: {
    */
   dating: SolverDating;
   config: OptimizerConfig;
+  /**
+   * When the request began, in `now()`'s units. The cap runs from here, not
+   * from the search loop, because the greedy seed, the scoring and the
+   * post-passes are CPU too. Defaults to when this function was called.
+   */
+  requestStartedAt?: number;
+  /**
+   * The compute cap, in ms from `requestStartedAt`. Defaults to `CPU_CAP_MS`;
+   * `Infinity` switches it off, for an offline sweep whose answer must depend
+   * only on its seed (`scripts/generate-solver-golden.mjs`), never for a request.
+   */
+  cpuCapMs?: number;
+  /** The clock, in ms. Defaults to `Date.now`; a test injects its own. */
+  now?: () => number;
   /** Called at each CPU yield, e.g. for a progress audit. */
   onProgress?: (progress: {
     iteration: number;
@@ -949,7 +980,13 @@ export async function runPracticeOptimizer(params: {
   const { teams, locked, placeableTeamIds, config: cfg } = params;
   const { liveFrom } = params.dating;
   const gate = params.preferenceGate ?? EMPTY_PREFERENCE_GATE;
-  const startTime = Date.now();
+  const now = params.now ?? Date.now;
+  const startTime = now();
+  // The effective budget is the smaller of the caller's `timeBudgetMs` (from
+  // the search's start) and the server's cap (from the request's start).
+  const budgetDeadline = startTime + cfg.timeBudgetMs;
+  const capDeadline = (params.requestStartedAt ?? startTime) + (params.cpuCapMs ?? CPU_CAP_MS);
+  const capBinds = capDeadline < budgetDeadline;
   const slots = dateSchedulerSlots(params.slots, params.dating);
   const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotsById = new Map(slots.map((s) => [s.id, s]));
@@ -975,23 +1012,30 @@ export async function runPracticeOptimizer(params: {
   let iteration = 0;
   let stallCount = 0;
   let restartCount = 0;
+  // Set where the loop stops; a loop that runs out of iterations never sets it.
+  let stoppedBy: TerminationReason | null = null;
   const stallLimit = 80;
   const maxRestarts = 5;
 
   // Hill Climbing loop (with CPU yield + wall-clock guard)
   while (iteration < cfg.maxIterations) {
-    const elapsed = Date.now() - startTime;
+    const clock = now();
+    const elapsed = clock - startTime;
 
     // Phase 9: Wall-clock safety cutoff (140s)
     if (elapsed >= WALL_CLOCK_LIMIT_MS) {
       console.warn(
         `[auto-scheduler] Wall-clock safety cutoff at ${elapsed}ms / ${iteration} iterations`
       );
+      stoppedBy = 'wall-clock-safety';
       break;
     }
 
-    // Original time-budget check (user-configurable, shorter)
-    if (elapsed >= cfg.timeBudgetMs) break;
+    // The effective budget: the caller's, or the server's cap when that is smaller.
+    if (clock >= Math.min(budgetDeadline, capDeadline)) {
+      stoppedBy = capBinds ? 'cpu-cap' : 'time-budget';
+      break;
+    }
 
     iteration++;
 
@@ -1064,21 +1108,19 @@ export async function runPracticeOptimizer(params: {
       params.onProgress?.({
         iteration,
         bestScore,
-        elapsedMs: Date.now() - startTime,
+        elapsedMs: now() - startTime,
         restartCount,
       });
     }
   }
 
-  const elapsedMs = Date.now() - startTime;
-  const terminationReason =
-    elapsedMs >= WALL_CLOCK_LIMIT_MS
-      ? 'wall-clock-safety'
-      : elapsedMs >= cfg.timeBudgetMs
-        ? 'time-budget'
-        : iteration >= cfg.maxIterations
-          ? 'max-iterations'
-          : 'converged';
+  const elapsedMs = now() - startTime;
+  // The loop's own exit says why it stopped. It used to be re-derived here
+  // from the elapsed time, which reads a run that ended on its last iteration
+  // just past the budget as a budget stop.
+  // The while condition is the only other way out, so a loop that set nothing
+  // ran out of iterations.
+  const terminationReason: TerminationReason = stoppedBy ?? 'max-iterations';
 
   let placements: Placement[] = bestPlacements;
   let unassigned = explainUnplaced(

@@ -21,7 +21,7 @@ The current function inventory is:
 | `game-persistence` | Thin write wrapper | Authenticate, validate, rate-limit, org-scope check, call `persist_game_schedule`, audit. |
 | `import-validation` | Validation and staging | Chunked CSV validation, capped rows/fields, staging writes. |
 | `fairness-scoring` | CPU-bound scoring | Score one submitted schedule and optionally persist evaluation output. |
-| `auto-scheduler` | Long-running CPU work | Hill-climbing loop with explicit wall-clock cap, periodic yielding, and progress events. |
+| `auto-scheduler` | Long-running CPU work | Hill-climbing loop that stops at a 1.5 s compute cap measured from the request's start (`CPU_CAP_MS`; a request gets 2 s of CPU on every plan, and awaiting does not reset it), returns its best schedule with `terminationReason: 'cpu-cap'`, and keeps a 140 s wall-clock guard and progress events. |
 | `calendar-feed` | Token-based public read | Generate one team calendar feed from a valid expiring token. |
 
 ## Guardrails

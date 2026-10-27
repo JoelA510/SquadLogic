@@ -1,20 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, matchPath } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext.jsx';
 import TopBar from '../components/chrome/TopBar.jsx';
 import SideNav from '../components/chrome/SideNav.jsx';
-import ShadowBanner from '../components/auth/ShadowBanner.jsx';
 import { FULL_BLEED_ROUTES } from '../constants/navigation.js';
 
 const COLLAPSE_KEY = 'sl-nav-collapsed';
 
 /**
- * Lightning-class app shell: role-preview banner row (when impersonating),
- * top bar, collapsible side nav, and the routed page in the main area.
+ * Lightning-class app shell: top bar, collapsible side nav, and the routed page in the main area.
  * Grid layout comes from `.app` in styles/chrome.css.
  */
 export default function DashboardLayout() {
-  const { isImpersonating } = useAuth();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -28,10 +24,7 @@ export default function DashboardLayout() {
   );
 
   return (
-    <div
-      className={`app ${collapsed ? 'nav-collapsed' : ''} ${isImpersonating ? 'has-banner' : ''}`}
-    >
-      {isImpersonating && <ShadowBanner />}
+    <div className={`app ${collapsed ? 'nav-collapsed' : ''}`}>
       <TopBar onToggleNav={() => setMobileNavOpen((open) => !open)} />
       <SideNav
         collapsed={collapsed}

@@ -147,10 +147,11 @@ WHERE NOT EXISTS (
 -- A second organization, so nothing above changes: the scenarios that import and schedule work in
 -- the first. Three people who only belong here, all on the same throwaway password:
 --   e2e-permits-admin   an administrator, who records a permit and uploads its file
---   e2e-permits-coach   the lead coach of Falcons, who play at Permit Pitch (a game next week)
---   e2e-permits-member  a coach-role member who coaches no team (the old "parent": no role has
---                       been one since 20261024010000), who may not read a permit
--- Permit Pitch is where the Falcons play; Unused Pitch is where nobody does.
+--   e2e-permits-staff   a staff member, an admin too (20261020030000), who reads the permit
+--   e2e-permits-member  an account with NO membership (what a coach's account is now: only league
+--                       admins sign in, docs/changes/2026-10-27-admin-only.md), who may not read one
+-- The Falcons' lead coach is a coach row, data an admin manages; nobody signs in as them. Permit
+-- Pitch is where the Falcons play; Unused Pitch is where nobody does.
 INSERT INTO auth.users (
     instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
     raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
@@ -167,7 +168,7 @@ SELECT
     '', '', '', '', '', '', '', ''
 FROM (VALUES
     ('e2e0a000-0000-4000-8000-000000000002', 'e2e-permits-admin@example.test',  'Pat Admin (E2E permit league)'),
-    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-coach@example.test',  'Casey Coach (E2E permit league)'),
+    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-staff@example.test',  'Sam Staff (E2E permit league)'),
     ('e2e0a000-0000-4000-8000-000000000004', 'e2e-permits-member@example.test', 'Morgan Member (E2E permit league)')
 ) AS u (id, email, full_name)
 ON CONFLICT (id) DO NOTHING;
@@ -181,14 +182,14 @@ SELECT
     'email', timezone('utc', now()), timezone('utc', now()), timezone('utc', now())
 FROM (VALUES
     ('e2e0a000-0000-4000-8000-000000000002', 'e2e-permits-admin@example.test'),
-    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-coach@example.test'),
+    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-staff@example.test'),
     ('e2e0a000-0000-4000-8000-000000000004', 'e2e-permits-member@example.test')
 ) AS u (id, email)
 ON CONFLICT (provider_id, provider) DO NOTHING;
 
 INSERT INTO public.profiles (id, email, full_name) VALUES
     ('e2e0a000-0000-4000-8000-000000000002', 'e2e-permits-admin@example.test',  'Pat Admin (E2E permit league)'),
-    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-coach@example.test',  'Casey Coach (E2E permit league)'),
+    ('e2e0a000-0000-4000-8000-000000000003', 'e2e-permits-staff@example.test',  'Sam Staff (E2E permit league)'),
     ('e2e0a000-0000-4000-8000-000000000004', 'e2e-permits-member@example.test', 'Morgan Member (E2E permit league)')
 ON CONFLICT (id) DO NOTHING;
 
@@ -204,8 +205,7 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
     ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000002', 'admin'),
-    ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000003', 'coach'),
-    ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000004', 'coach')
+    ('e2e0b000-0000-4000-8000-000000000002', 'e2e0a000-0000-4000-8000-000000000003', 'staff')
 ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
 INSERT INTO public.season_settings (
@@ -237,9 +237,9 @@ INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
     ('e2e0d100-0000-4000-8000-000000000002', 'e2e0b000-0000-4000-8000-000000000002', 'e2e0d000-0000-4000-8000-000000000002', 'Herons')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
+INSERT INTO public.coaches (id, organization_id, full_name, email, status) VALUES
     ('e2e0d200-0000-4000-8000-000000000001', 'e2e0b000-0000-4000-8000-000000000002',
-     'e2e0a000-0000-4000-8000-000000000003', 'Casey Coach', 'e2e-permits-coach@example.test', 'active')
+     'Casey Coach', 'e2e-permits-coach@example.test', 'active')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.team_coach_assignments

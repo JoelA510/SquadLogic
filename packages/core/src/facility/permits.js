@@ -333,17 +333,17 @@ export function permitWarnings(args) {
 }
 
 /**
- * The fields of a `get_facility_permits` permit that the coach's ordering and summary read; the
+ * The fields of a `get_facility_permits` permit that the permits page's ordering reads; the
  * permit may carry more, and comes back as it came.
  * @typedef {{ id: string, issuer: string, status: string, valid_to: string, file: object|null }} PermitLike
  */
 
-/** Does a permit hold a file a coach can produce? A current permit has one, and is not over. */
+/** Does a permit hold a file to produce? A current permit has one, and is not over. */
 const isCurrent = (permit) =>
   Boolean(permit.file) && (permit.status === 'valid' || permit.status === 'expiring');
 
 /**
- * The order a coach reads their permits in, at the field: the ones they can produce now first
+ * The order the permits page lists them in, for use at the field: the ones to produce now first
  * (soonest to end first), then those with no file, those not yet in force, and the expired last.
  * A copy; the input is untouched.
  *
@@ -351,7 +351,7 @@ const isCurrent = (permit) =>
  * @param {T[]} permits
  * @returns {T[]}
  */
-export function sortPermitsForCoach(permits) {
+export function sortPermitsForPage(permits) {
   const rank = (permit) =>
     isCurrent(permit)
       ? 0
@@ -367,52 +367,4 @@ export function sortPermitsForCoach(permits) {
       (a.issuer < b.issuer ? -1 : a.issuer > b.issuer ? 1 : 0) ||
       (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   );
-}
-
-/**
- * What a coach is told about the permits of their fields (`get_facility_permits` already narrows
- * them to those fields). Nothing here refuses anything: a permit blocks nothing, and this is only
- * the words on the coach's home.
- *
- * `expired`, `expiring` (0 to 30 days left, with or without a file) and `notYetValid` follow the
- * server's status; `noFile` is a permit that is not over and has no document yet, which a coach
- * cannot produce. `attention` lists each permit that has any of them once, the most urgent first
- * (expired, no file, expiring, not yet valid); `clear` is true when there is none.
- *
- * @template {PermitLike} T
- * @param {T[]} permits
- * @returns {{ total: number, expired: T[], expiring: T[], notYetValid: T[], noFile: T[], attention: T[], clear: boolean }}
- */
-export function coachPermitSummary(permits) {
-  const expired = permits.filter((permit) => permit.status === 'expired');
-  const expiring = permits.filter((permit) => permit.status === 'expiring');
-  const notYetValid = permits.filter((permit) => permit.status === 'not_yet_valid');
-  const noFile = permits.filter((permit) => !permit.file && permit.status !== 'expired');
-  const urgency = (permit) =>
-    permit.status === 'expired'
-      ? 0
-      : !permit.file
-        ? 1
-        : permit.status === 'expiring'
-          ? 2
-          : permit.status === 'not_yet_valid'
-            ? 3
-            : 4;
-  const attention = permits
-    .filter((permit) => urgency(permit) < 4)
-    .sort(
-      (a, b) =>
-        urgency(a) - urgency(b) ||
-        (a.valid_to < b.valid_to ? -1 : a.valid_to > b.valid_to ? 1 : 0) ||
-        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-    );
-  return {
-    total: permits.length,
-    expired,
-    expiring,
-    notYetValid,
-    noFile,
-    attention,
-    clear: attention.length === 0,
-  };
 }

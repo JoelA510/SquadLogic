@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MOCK_PATH = path.join(REPO, 'frontend/src/lib/mockSupabaseClient.js');
@@ -363,7 +364,6 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/async_and_optimistic_ui.ts': 3,
   'tests/e2e/steps/auth_setup.ts': 1,
   'tests/e2e/steps/auto_scheduler.ts': 1,
-  'tests/e2e/steps/coach_and_calendar.ts': 4,
   'tests/e2e/steps/dashboard_and_sidebar.ts': 9,
   'tests/e2e/steps/network_resilience.ts': 2,
   'tests/e2e/steps/onboarding.ts': 2,
@@ -382,8 +382,9 @@ describe('mock db writes :: nothing new may go past saveDB', () => {
     // A floor for a scanner that broke, not a count: the exact inventory is
     // pinned below. Lowered from 60 when M4.6 removed nine Pillar 1 writes (56
     // left), and from 50 when R1 removed the registration and compliance steps
-    // (47 left); R2 removed the RSVP practice seeder and the twin seeder (45 left).
-    expect(writes.length).toBeGreaterThanOrEqual(45);
+    // (47 left); R2 removed the RSVP practice seeder and the twin seeder (45 left); the
+    // admin-only change removed the Pillar 2 coach steps (42 left).
+    expect(writes.length).toBeGreaterThanOrEqual(40);
     expect(new Set(writes.map((write) => write.file))).toContain(
       'frontend/src/lib/mockSupabaseClient.js'
     );
@@ -633,23 +634,27 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
     // back, carrying `app_metadata.role` rather than the role the admin had
     // assigned. Signing in does not create a membership in real Supabase, and
     // it must not here.
+    // A second member (the seed holds the one admin; only admins sign in).
+    seedMockDb({
+      organization_members: [{ organization_id: ORG, profile_id: 'mock-staff-id', role: 'staff' }],
+    });
     const { error } = await supabase.rpc('admin_remove_member', {
       p_organization_id: ORG,
-      p_profile_id: 'mock-coach-id',
+      p_profile_id: 'mock-staff-id',
     });
     expect(error).toBeNull();
     expect(
-      getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id'),
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-staff-id'),
       'the member was not removed, so the sign-in below proves nothing'
     ).toHaveLength(0);
 
     await supabase.auth.signInWithPassword({
-      email: 'coach@example.com',
+      email: 'staff@example.com',
       password: 'test-password-123',
     });
 
     expect(
-      getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id')
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-staff-id')
     ).toHaveLength(0);
   });
 
@@ -657,12 +662,8 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
     // The other half of the same branch, so the tombstone check cannot be
     // "fixed" by deleting the seeding push outright.
     expect(
-      getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id')
-    ).toHaveLength(1);
-    await supabase.rpc('admin_remove_member', {
-      p_organization_id: ORG,
-      p_profile_id: 'mock-coach-id',
-    });
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-staff-id')
+    ).toHaveLength(0);
 
     await supabase.auth.signInWithPassword({
       email: 'staff@example.com',

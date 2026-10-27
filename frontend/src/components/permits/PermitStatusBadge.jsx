@@ -12,7 +12,7 @@ const STATUS_ICON = {
 };
 
 /**
- * A permit's status for a coach: the words ("Expires in 12 days", "Expired 3 days ago") beside an
+ * A permit's status: the words ("Expires in 12 days", "Expired 3 days ago") beside an
  * icon, never colour alone.
  *
  * @param {{ permit: { status: string, days_left: number, valid_from: string, valid_to: string } }} props

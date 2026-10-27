@@ -1,6 +1,6 @@
 // Home for a membership whose role SquadLogic no longer has (R3, migration
-// 20261024010000 removed `parent` and `player`): a notice, and no read of
-// anything an admin's or a coach's home would read.
+// 20261024010000 removed `parent` and `player`; docs/changes/2026-10-27-admin-only.md removed
+// `coach`): a notice, and no read of anything an admin's home would read.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,7 +23,7 @@ vi.mock('../frontend/src/hooks/usePermission.js', () => ({
 }));
 
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
-  useAuth: () => ({ user: { id: 'pat', email: 'pat@example.test' }, isImpersonating: false }),
+  useAuth: () => ({ user: { id: 'pat', email: 'pat@example.test' } }),
 }));
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
@@ -44,13 +44,16 @@ beforeEach(() => {
 });
 
 describe('DashboardPage for a stale role', () => {
-  it.each(['parent', 'player'])('shows a %s the no-role notice and reads nothing', (role) => {
-    mocks.role = role;
-    render(<DashboardPage />);
-    expect(
-      screen.getByText(/no role in this organization that SquadLogic recognizes/)
-    ).toBeVisible();
-    expect(mocks.rpc).not.toHaveBeenCalled();
-    expect(mocks.from).not.toHaveBeenCalled();
-  });
+  it.each(['coach', 'parent', 'player'])(
+    'shows a %s the no-role notice and reads nothing',
+    (role) => {
+      mocks.role = role;
+      render(<DashboardPage />);
+      expect(
+        screen.getByText(/no role in this organization that SquadLogic recognizes/)
+      ).toBeVisible();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+    }
+  );
 });

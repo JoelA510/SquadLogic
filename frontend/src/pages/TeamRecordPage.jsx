@@ -12,7 +12,6 @@ import Badge from '../components/ui/Badge.jsx';
 import Avatar from '../components/ui/Avatar.jsx';
 import InlineField from '../components/ui/InlineField.jsx';
 import { usePermission } from '../hooks/usePermission.js';
-import { useScorableGames } from '../hooks/useScorableGames.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
@@ -65,18 +64,12 @@ export default function TeamRecordPage() {
 
   const [tab, setTab] = useState('schedule');
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
-  // Who may regenerate the calendar link: an admin or the team's current
-  // coach (rotate_calendar_token, 20261021020000). Asked only once the dialog
-  // is open.
-  const { coachesTeam } = useScorableGames({ enabled: calendarModalOpen });
   const [staff, setStaff] = useState(/** @type {any[] | null} */ (null));
   const [staffError, setStaffError] = useState(false);
 
   // Staff tab: every current coach, through the server-side read
-  // (20261021010000), which admits admins and the team's current coaches (no
-  // guardian since 20261024010000) and returns names and roles, with no
-  // contact details (20261025010000); an admin finds a coach's sign-in email
-  // on the Coaches page.
+  // (20261021010000) that returns names and roles, with no contact details
+  // (20261025010000); an admin finds a coach's email on the Coaches page.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -200,8 +193,7 @@ export default function TeamRecordPage() {
             </h2>
 
             {/* R7: the whole season as CSV, XLSX and the team's calendar, for
-                an admin and for the team's coach alike (the files carry no
-                contact column). */}
+                an admin (the files carry no contact column). */}
             {team?.id && (
               <ScheduleExports
                 teams={[team]}
@@ -325,7 +317,7 @@ export default function TeamRecordPage() {
               {roster.length === 0 && (
                 <div className="col-span-full text-center text-text-muted py-8">
                   {rosterUnavailable === 'refused'
-                    ? "The roster is shown to the team's coaches and league admins."
+                    ? 'The roster is shown to league admins.'
                     : rosterUnavailable === 'failed'
                       ? 'The roster could not be loaded. Try again shortly.'
                       : 'No players assigned yet.'}
@@ -455,7 +447,7 @@ export default function TeamRecordPage() {
       {calendarModalOpen && (
         <CalendarModal
           team={team}
-          canRotate={coachesTeam(team?.id)}
+          canRotate={can(PERMISSIONS.MANAGE_ALL_TEAMS)}
           onClose={() => setCalendarModalOpen(false)}
         />
       )}
@@ -467,9 +459,9 @@ export default function TeamRecordPage() {
  * Phase 2.3 (H-2): Calendar modal with token rotation support.
  *
  * The token is read from `team_calendar_tokens` (20261021020000), which admins
- * and the team's current coaches can read (no guardian since 20261024010000);
- * anyone else gets no row and is told so. `canRotate` (an admin or the team's current coach)
- * offers Regenerate; the server refuses everyone else regardless.
+ * can read; anyone else gets no row and is told so. `canRotate` (an admin)
+ * offers Regenerate; the server refuses everyone else regardless. The link itself works for
+ * whoever an admin hands it to (the `calendar-feed` Edge Function checks the token alone).
  */
 export function CalendarModal({ team, canRotate = false, onClose }) {
   const [calendarToken, setCalendarToken] = useState('');
@@ -558,7 +550,7 @@ export function CalendarModal({ team, canRotate = false, onClose }) {
           <p className="text-sm text-status-warning-text mb-3">
             {canRotate
               ? 'No calendar link is currently available. Regenerate the link before sharing it.'
-              : "The calendar link is shared with the team's coaches and league admins."}
+              : 'The calendar link is available to league admins.'}
           </p>
         )}
         {tokenState === 'failed' && (

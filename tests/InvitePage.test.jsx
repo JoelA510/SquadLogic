@@ -78,6 +78,9 @@ describe('InvitePage', () => {
     );
     expect(await screen.findByText(/you're in!/i)).toBeInTheDocument();
     expect(sessionStorage.getItem(PENDING_INVITE_STORAGE_KEY)).toBeNull();
+    // The redeemed organization becomes the active one, even for an admin already in another: a
+    // bare refetch kept them in the old one.
+    await waitFor(() => expect(mocks.refetchOrgs).toHaveBeenCalledWith(MOCK_ORG_ID));
   });
 
   it('shows the error card when redeem fails', async () => {

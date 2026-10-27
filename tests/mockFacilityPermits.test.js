@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FACILITY_PERMIT_RPCS,
-  coachFieldIds,
   createMockStorage,
   handleFacilityPermitRpc,
   permitRowVisible,
@@ -34,8 +33,7 @@ const makeDb = () => ({
   organization_members: [
     { organization_id: ORG, profile_id: ALICE, role: 'admin' },
     { organization_id: OTHER_ORG, profile_id: BOB, role: 'admin' },
-    { organization_id: ORG, profile_id: CORA, role: 'coach' },
-    { organization_id: ORG, profile_id: QUIN, role: 'coach' },
+    // CORA and QUIN sign in with no membership: no coach does (docs/changes/2026-10-27-admin-only.md).
   ],
   season_settings: [
     // UTC+14: at 12:00 UTC on the 27th it is already the 28th there.
@@ -48,8 +46,8 @@ const makeDb = () => ({
     { id: 'tx', organization_id: ORG, division_id: 'd1' },
   ],
   coaches: [
-    { id: 'kc', organization_id: ORG, user_id: CORA },
-    { id: 'kq', organization_id: ORG, user_id: QUIN },
+    { id: 'kc', organization_id: ORG },
+    { id: 'kq', organization_id: ORG },
   ],
   team_coach_assignments: [
     {
@@ -83,7 +81,7 @@ const makeDb = () => ({
       effective_to: null,
     },
   ],
-  // Cora's team plays at Pitch 1; Quin's practises at Pitch 3.
+  // Coach kc's team plays at Pitch 1; kq's practises at Pitch 3 (data only: nobody signs in as them).
   game_slots: [{ id: 'gs1', organization_id: ORG, field_id: F1 }],
   games: [
     { id: 'g1', organization_id: ORG, game_slot_id: 'gs1', home_team_id: 'tc', away_team_id: 'tx' },
@@ -268,7 +266,7 @@ describe('the permit RPCs', () => {
   });
 });
 
-describe('the coach read', () => {
+describe('the admin read', () => {
   const seeded = () => {
     const db = makeDb();
     create(db, { p_issuer: 'P1', p_field_ids: [F1] });
@@ -280,44 +278,23 @@ describe('the coach read', () => {
   };
   const issuers = (result) => result.data.permits.map((p) => p.issuer).sort();
 
-  it('derives the fields from games (through the slot) and practices (through the practice slot)', () => {
-    const db = makeDb();
-    expect([...coachFieldIds(db, ORG, CORA, NOW)]).toEqual([F1]);
-    expect([...coachFieldIds(db, ORG, QUIN, NOW)]).toEqual([F3]);
-    expect([...coachFieldIds(db, ORG, BOB, NOW)]).toEqual([]);
+  it('an admin reads all five, each with all its scopes', () => {
+    const db = seeded();
+    const alice = call(db, ALICE, 'get_facility_permits', { p_organization_id: ORG });
+    expect(issuers(alice)).toEqual(['P1', 'P2', 'P3', 'P4', 'P5']);
+    expect(alice.data.permits.find((p) => p.issuer === 'P4').scopes).toHaveLength(2);
   });
 
-  it("an admin reads all five; a coach reads only the permits for her team's fields and venue, with only those scopes", () => {
+  it('anyone who is not an admin of the organization is refused (42501), not shown an empty list', () => {
     const db = seeded();
-    expect(issuers(call(db, ALICE, 'get_facility_permits', { p_organization_id: ORG }))).toEqual([
-      'P1',
-      'P2',
-      'P3',
-      'P4',
-      'P5',
-    ]);
-    const cora = call(db, CORA, 'get_facility_permits', { p_organization_id: ORG });
-    expect(issuers(cora)).toEqual(['P1', 'P2', 'P4']);
-    expect(cora.data.permits.find((p) => p.issuer === 'P4').scopes).toHaveLength(1);
-    expect(issuers(call(db, QUIN, 'get_facility_permits', { p_organization_id: ORG }))).toEqual([
-      'P3',
-      'P4',
-    ]);
-  });
-
-  it('a coach of a team scheduled elsewhere reads nothing (an empty list, not an error); a non-coach is refused', () => {
-    const db = seeded();
-    db.practice_assignments = [];
-    expect(call(db, QUIN, 'get_facility_permits', { p_organization_id: ORG }).data.permits).toEqual(
-      []
-    );
+    // Signed in with no membership (what a coach's account is now), another organization's admin,
+    // and a stale coach-role member: none reads a permit.
     db.organization_members.push({ organization_id: ORG, profile_id: 'mo', role: 'coach' });
-    expect(call(db, 'mo', 'get_facility_permits', { p_organization_id: ORG }).error.code).toBe(
-      '42501'
-    );
-    expect(call(db, BOB, 'get_facility_permits', { p_organization_id: ORG }).error.code).toBe(
-      '42501'
-    );
+    for (const user of [CORA, QUIN, BOB, 'mo']) {
+      expect(call(db, user, 'get_facility_permits', { p_organization_id: ORG }).error.code).toBe(
+        '42501'
+      );
+    }
   });
 
   it('the table policies agree with the RPC', () => {
@@ -325,9 +302,11 @@ describe('the coach read', () => {
     const visible = (table, user) =>
       db[table].filter((row) => permitRowVisible(db, table, row, user, NOW)).length;
     expect(visible('facility_permits', ALICE)).toBe(5);
-    expect(visible('facility_permits', CORA)).toBe(3);
-    expect(visible('facility_permit_scopes', CORA)).toBe(3);
-    expect(visible('facility_permits', BOB)).toBe(0);
+    expect(visible('facility_permit_scopes', ALICE)).toBe(6);
+    for (const user of [CORA, QUIN, BOB]) {
+      expect(visible('facility_permits', user)).toBe(0);
+      expect(visible('facility_permit_scopes', user)).toBe(0);
+    }
   });
 
   it("a field delete lists the permits scoped directly to the field, not the venue's", () => {
@@ -388,7 +367,7 @@ describe('the files', () => {
     const admin = storageFor(db, ALICE).from('facility-permits');
     // never uploaded
     expect(setFile(db, data.id, objectPath(data.id, 9)).error.details).toBe('object_missing');
-    // a permit folder that holds no permit; a coach; the other organization's admin; a bad extension
+    // a permit folder that holds no permit; a non-member; the other organization's admin; a bad extension
     expect(
       (await admin.upload(objectPath('f6000000-0000-4000-8000-0000000000ee', 1), pdf())).error
         .statusCode
@@ -446,43 +425,31 @@ describe('the files', () => {
     expect((await admin.upload(objectPath(data.id, 1), pdf())).error.statusCode).toBe('403');
   });
 
-  it('signed URLs: an admin gets any object, a coach only the live file of a permit she may read', async () => {
+  it('signed URLs: an admin gets any object, replaced files included; nobody else gets one', async () => {
     const db = makeDb();
     const mine = create(db, { p_issuer: 'Mine', p_field_ids: [F1] }).data;
-    const theirs = create(db, { p_issuer: 'Theirs', p_field_ids: [F3] }).data;
     const admin = storageFor(db, ALICE).from('facility-permits');
-    for (const [permit, n] of [
-      [mine, 1],
-      [mine, 2],
-      [theirs, 3],
-    ])
-      await admin.upload(objectPath(permit.id, n), pdf());
+    for (const n of [1, 2]) await admin.upload(objectPath(mine.id, n), pdf());
     setFile(db, mine.id, objectPath(mine.id, 1));
     setFile(db, mine.id, objectPath(mine.id, 2)); // the first file is now replaced
-    setFile(db, theirs.id, objectPath(theirs.id, 3));
-    const cora = storageFor(db, CORA).from('facility-permits');
-    expect((await cora.createSignedUrl(objectPath(mine.id, 2), 120)).data.signedUrl).toMatch(
+    expect((await admin.createSignedUrl(objectPath(mine.id, 2), 120)).data.signedUrl).toMatch(
       /^data:/
     );
-    expect((await cora.createSignedUrl(objectPath(mine.id, 1), 120)).error.statusCode).toBe('404'); // replaced
-    expect((await cora.createSignedUrl(objectPath(theirs.id, 3), 120)).error.statusCode).toBe(
-      '404'
-    ); // another field
-    expect((await cora.createSignedUrl(objectPath(mine.id, 4), 120)).error.statusCode).toBe('404'); // never uploaded
-    expect(
-      (
-        await storageFor(db, BOB)
-          .from('facility-permits')
-          .createSignedUrl(objectPath(mine.id, 2), 120)
-      ).error
-    ).not.toBeNull();
     expect((await admin.createSignedUrl(objectPath(mine.id, 1), 120)).data.signedUrl).toMatch(
       /^data:/
     );
+    expect((await admin.createSignedUrl(objectPath(mine.id, 4), 120)).error.statusCode).toBe('404'); // never uploaded
     expect((await admin.createSignedUrl(objectPath(mine.id, 2), 0)).error.statusCode).toBe('400');
+    // A signed-in account with no membership (a coach's, before), and another organization's admin.
+    for (const user of [CORA, BOB]) {
+      const outsider = storageFor(db, user).from('facility-permits');
+      expect((await outsider.createSignedUrl(objectPath(mine.id, 2), 120)).error.statusCode).toBe(
+        '404'
+      );
+    }
   });
 
-  it("remove is the admin's: a coach removes nothing, an admin removes the object", async () => {
+  it("remove is the admin's: a non-member removes nothing, an admin removes the object", async () => {
     const db = makeDb();
     const { data } = create(db);
     await storageFor(db, ALICE).from('facility-permits').upload(objectPath(data.id, 1), pdf());

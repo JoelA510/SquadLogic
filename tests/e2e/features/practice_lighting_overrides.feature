@@ -9,8 +9,9 @@ Feature: Portable-lighting overrides on practice slots
   (20261028010000, owner decision 4): the seeded requests are rows coaches
   requested before then, which an admin still decides.
 
-  Scenario: A coach has no lighting page
-    Given I am logged into SquadLogic as a "coach"
+  Scenario: A member whose role the league no longer has gets no lighting page
+    Given I am logged into SquadLogic as an "admin"
+    And my membership carries the removed role "coach"
     When I go to "/schedule/practice-lighting"
     Then I should be redirected to the Dashboard
 

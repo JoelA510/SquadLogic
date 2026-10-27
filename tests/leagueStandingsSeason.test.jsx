@@ -34,10 +34,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
-  useAuth: () => ({ user: { id: 'viewer-standings' }, isImpersonating: false }),
-}));
-vi.mock('../frontend/src/hooks/useScorableGames.js', () => ({
-  useScorableGames: () => ({ canScoreGame: () => false, error: null }),
+  useAuth: () => ({ user: { id: 'viewer-standings' } }),
 }));
 vi.mock('../frontend/src/hooks/useFeatures.js', () => ({
   useFeatures: () => ({ genderModel: 'split' }),

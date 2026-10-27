@@ -58,7 +58,7 @@ describe('CalendarModal', () => {
     );
   });
 
-  it('shows the link it reads, and no Regenerate to a guardian', async () => {
+  it('shows the link it reads, and no Regenerate to a caller who cannot rotate', async () => {
     mocks.tokenRead = { data: { token: 'secure-calendar-token' }, error: null };
     render(<CalendarModal team={{ id: 'team-1' }} onClose={vi.fn()} />);
 
@@ -69,11 +69,9 @@ describe('CalendarModal', () => {
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeEnabled();
   });
 
-  it('tells a member the policy refuses that the link is not theirs to see', async () => {
+  it('tells a member the policy refuses that the link is for league admins', async () => {
     render(<CalendarModal team={{ id: 'team-1' }} onClose={vi.fn()} />);
-    expect(
-      await screen.findByText(/shared with the team's coaches and league admins/)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/available to league admins/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Regenerate Link' })).not.toBeInTheDocument();
   });
 

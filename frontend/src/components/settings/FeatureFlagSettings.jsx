@@ -68,7 +68,7 @@ export default function FeatureFlagSettings({
 }) {
   const { updateFeatureFlags, loading, currentOrganization, featureFlags = {} } = useOrganization();
   const { features, genderModel, buddyRule } = useFeatures();
-  const { user, isImpersonating } = useAuth();
+  const { user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [formatPrompt, setFormatPrompt] = useState(null); // 'split' | 'coed' | null
@@ -103,11 +103,6 @@ export default function FeatureFlagSettings({
       p_metadata: {
         user_id: user?.id,
         ...metadata,
-        ...(isImpersonating && {
-          target_user_id: user?.profile?.id,
-          impersonated_by: user?.id,
-          admin_email: user?.email,
-        }),
       },
     });
   };

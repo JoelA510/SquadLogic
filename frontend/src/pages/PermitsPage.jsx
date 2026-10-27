@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AlertTriangle, Download, ExternalLink, FileText } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
-import PermitStatusBadge from '../components/coach/PermitStatusBadge.jsx';
+import PermitStatusBadge from '../components/permits/PermitStatusBadge.jsx';
 import { useFacilityPermits } from '../hooks/useFacilityPermits.js';
-import { sortPermitsForCoach } from '@squadlogic/core/facility/permits.js';
+import { sortPermitsForPage } from '@squadlogic/core/facility/permits.js';
 import {
   PERMIT_NO_FILE_TEXT,
   formatPermitDate,
@@ -15,22 +16,22 @@ import {
 import { logger } from '../lib/logger.js';
 
 /**
- * The permits of the fields a coach's teams use, to produce at the field (plan
- * docs/changes/2026-10-22-phase-c-permits.md, C3). One column, for a phone: each permit's number,
- * issuer, dates and the fields it covers as text, with Open and Download buttons of at least 44 px
- * that make a short signed link on tap (two minutes). The server narrows the read to the coach's
- * fields (`get_facility_permits`); this page widens nothing. Guardians have no role and no route
- * here (`VIEW_FIELD_PERMITS`, owner decision 2).
+ * The admins' Field Permits page (docs/changes/2026-10-27-admin-only.md, decision 4; Phase C3's
+ * coach page, made the admins' consolidated, quick access): every permit on record for the
+ * organization, each with its number, issuer, dates and the fields it covers as text, and Open and
+ * Download buttons of at least 44 px that make a short signed link on tap (two minutes). Adding,
+ * changing and removing a permit stays in Fields & Venues (`FieldPermitsSection`); this page only
+ * reads (`get_facility_permits`, an admin's), and says where to go to change one.
  *
  * **A permit blocks nothing** (owner, 2026-10-26): an expired permit, or one with no file, is
- * shown as it is. There is no offline copy (owner decision 6): "Download" saves the file to the
- * phone, and the number, issuer and dates stay readable as text.
+ * shown as it is. There is no offline copy (owner decision 6): "Download" saves the file, and the
+ * number, issuer and dates stay readable as text.
  */
 export default function PermitsPage() {
   const { permits, loading, error, signedUrl } = useFacilityPermits();
   const [notice, setNotice] = useState(/** @type {null | string} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string|null} */ (null));
-  const sorted = sortPermitsForCoach(permits);
+  const sorted = sortPermitsForPage(permits);
 
   const fail = (err, what) => {
     logger.error(`[PermitsPage] ${what}`, { message: err?.message });
@@ -80,7 +81,7 @@ export default function PermitsPage() {
       header={
         <PageHeader
           title="Field permits"
-          subtitle="The permits for the fields your teams use. Open one to show it when you are asked."
+          subtitle="Every permit on record for your fields and venues. Open or download one when you are asked for it."
           icon={
             <span className="page-obj-icon permit-page-icon">
               <FileText size={20} aria-hidden="true" />
@@ -91,10 +92,13 @@ export default function PermitsPage() {
     >
       <div className="permit-page">
         <div aria-live="polite">{notice && <DataErrorBanner message={notice} />}</div>
+        <p className="muted" data-testid="permits-manage-hint">
+          To add, replace or remove a permit, go to <Link to="/fields">Fields &amp; Venues</Link>.
+        </p>
 
         {loading && (
           <p className="muted" role="status">
-            Loading your field permits…
+            Loading field permits…
           </p>
         )}
         {!loading && error && (
@@ -107,18 +111,17 @@ export default function PermitsPage() {
         {!loading && !error && sorted.length === 0 && (
           <div className="card" data-testid="permits-empty">
             <div className="card-body muted">
-              No permits are on record for the fields your teams use. A permit appears here once
-              your league administrator adds one for a field or venue where your team plays or
-              practises. If you are asked for one at a field, ask your league administrator.
+              No permits are on record yet. Add one for a field or venue in{' '}
+              <Link to="/fields">Fields &amp; Venues</Link> and it appears here.
             </div>
           </div>
         )}
         {!loading && !error && sorted.length > 0 && (
-          <ul className="permit-card-list" data-testid="coach-permit-list">
+          <ul className="permit-card-list" data-testid="permits-page-list">
             {sorted.map((permit) => {
               const busy = busyId === permit.id;
               return (
-                <li key={permit.id} className="card" data-testid={`coach-permit-${permit.id}`}>
+                <li key={permit.id} className="card" data-testid={`permits-page-${permit.id}`}>
                   <div className="card-body">
                     <div className="permit-head">
                       <h2 className="permit-title">{permit.issuer}</h2>
@@ -142,7 +145,7 @@ export default function PermitsPage() {
                         <dt>Covers</dt>
                         <dd>
                           {permit.scopes.length === 0
-                            ? 'None of your fields'
+                            ? 'No field or venue'
                             : permit.scopes.map(permitScopeText).join('; ')}
                         </dd>
                       </div>

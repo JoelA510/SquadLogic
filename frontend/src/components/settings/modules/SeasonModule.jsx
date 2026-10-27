@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useTheme } from '../../../contexts/ThemeContext.jsx';
-import { useAuth } from '../../../contexts/AuthContext.jsx';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 import { supabase } from '../../../lib/supabaseClient.js';
 import ProgramsSection from './ProgramsSection.jsx';
@@ -31,7 +30,6 @@ const SEASON_TIMEZONE_OPTIONS = Object.freeze([
 
 export default function SeasonModule() {
   const { currentSeason, updateCurrentSeason, availableSeasons } = useTheme();
-  const { user, isImpersonating } = useAuth();
   // **`season_settings.timezone`, not the ThemeContext copy.** That copy is
   // localStorage-backed and ThemeContext's own header calls it legacy state
   // slated for removal. Until GAP-30 it was the only thing this control wrote,
@@ -63,18 +61,13 @@ export default function SeasonModule() {
             aria-pressed={seasonFormat === 'single'}
             onClick={async () => {
               setSeasonFormat('single');
-              const orgId = user?.profile?.organization_id;
+              const orgId = currentOrganization?.id;
               if (orgId) {
                 await supabase.rpc('record_audit_event', {
                   p_organization_id: orgId,
                   p_action: 'settings.season_format_updated',
                   p_metadata: {
                     format: 'single',
-                    ...(isImpersonating && {
-                      target_user_id: user.profile.id,
-                      impersonated_by: user.id,
-                      admin_email: user.email,
-                    }),
                   },
                 });
               }
@@ -93,18 +86,13 @@ export default function SeasonModule() {
             aria-pressed={seasonFormat === 'dual'}
             onClick={async () => {
               setSeasonFormat('dual');
-              const orgId = user?.profile?.organization_id;
+              const orgId = currentOrganization?.id;
               if (orgId) {
                 await supabase.rpc('record_audit_event', {
                   p_organization_id: orgId,
                   p_action: 'settings.season_format_updated',
                   p_metadata: {
                     format: 'dual',
-                    ...(isImpersonating && {
-                      target_user_id: user.profile.id,
-                      impersonated_by: user.id,
-                      admin_email: user.email,
-                    }),
                   },
                 });
               }
@@ -137,18 +125,13 @@ export default function SeasonModule() {
               onChange={(e) => setLocalCurrentSeason(e.target.value)}
               onBlur={async () => {
                 updateCurrentSeason(localCurrentSeason);
-                const orgId = user?.profile?.organization_id;
+                const orgId = currentOrganization?.id;
                 if (orgId) {
                   await supabase.rpc('record_audit_event', {
                     p_organization_id: orgId,
                     p_action: 'settings.season_updated',
                     p_metadata: {
                       season: localCurrentSeason,
-                      ...(isImpersonating && {
-                        target_user_id: user.profile.id,
-                        impersonated_by: user.id,
-                        admin_email: user.email,
-                      }),
                     },
                   });
                 }
@@ -199,7 +182,7 @@ export default function SeasonModule() {
             aria-invalid={timezoneError ? 'true' : undefined}
             onChange={async (e) => {
               const newVal = e.target.value;
-              const orgId = currentOrganization?.id ?? user?.profile?.organization_id;
+              const orgId = currentOrganization?.id;
               const seasonId = currentSeasonSetting?.id;
               if (!orgId || !seasonId) {
                 setTimezoneError('No active season to set a timezone on.');
@@ -211,23 +194,13 @@ export default function SeasonModule() {
               // column, rather than beside it from here: a timezone change that
               // is audited but not persisted is the shape this control had.
               //
-              // **One row, not two.** Under impersonation this used to fire a
-              // second `record_audit_event` of the SAME action beside the RPC,
-              // and neither row was complete -- the RPC's carried
-              // `previous_timezone` and nothing about the impersonation, the
-              // client's carried the impersonation and nothing about what the
-              // value had been. `p_actor_context` (20260917000000) carries the
-              // one fact the server cannot know, the profile being viewed as;
-              // the RPC derives `impersonated_by` from `auth.uid()` and the
-              // admin's email from `profiles`, because a client-asserted actor
-              // in an audit row is decoration.
+              // **One row, not two.** The RPC derives the actor from `auth.uid()`; a
+              // client-asserted actor in an audit row is decoration.
               const { error } = await supabase.rpc('admin_set_season_timezone', {
                 p_organization_id: orgId,
                 p_season_settings_id: seasonId,
                 p_timezone: newVal,
-                p_actor_context: isImpersonating
-                  ? { target_user_id: user?.profile?.id ?? null }
-                  : {},
+                p_actor_context: {},
               });
               setTimezoneSaving(false);
               if (error) {

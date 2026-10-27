@@ -4,10 +4,10 @@ import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 /**
- * The coach's side of field permits (plan docs/changes/2026-10-22-phase-c-permits.md, C3). Every
- * check is a DOM assertion. The mock database is touched only to seed what a league's admin would
- * have entered (a permit with its file record) and to give the member a role the league no longer
- * has, through `window.__saveMockDB__`, as the other coach steps do.
+ * The admins' Field Permits page (docs/changes/2026-10-27-admin-only.md, F3; Phase C3's coach page
+ * made the admins'). Every check is a DOM assertion. The mock database is touched only to seed what
+ * an admin would have entered in Fields & Venues (a permit with its file record) and to give the
+ * signed-in member a role the league no longer has, through `window.__saveMockDB__`.
  *
  * The mock's Open link is a `data:` URL (it has no Storage server), which a browser will not
  * navigate a new tab to, so the step proves what the browser shows: a new tab opens and the page
@@ -109,9 +109,9 @@ Given('my membership carries the removed role {string}', async ({ page }, role: 
       );
       const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
       const members = (db.organization_members || []).filter(
-        (m: MockRow) => m.organization_id === orgId && m.profile_id === 'mock-coach-id'
+        (m: MockRow) => m.organization_id === orgId && m.profile_id === 'mock-admin-id'
       );
-      if (members.length === 0) throw new Error('seed: the mock coach has no membership');
+      if (members.length === 0) throw new Error('seed: the mock admin has no membership');
       for (const member of members) member.role = role;
       window.__saveMockDB__(db);
     },
@@ -123,27 +123,10 @@ Given('I am using a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
 });
 
-Then(
-  'my Field permits card shows {string} as {string}',
-  async ({ page }, permit: string, status: string) => {
-    const card = page.getByRole('region', { name: 'Field permits' });
-    await expect(card).toBeVisible({ timeout: 20_000 });
-    const item = card.getByTestId('coach-permit-attention');
-    await expect(item).toContainText(permit);
-    await expect(item).toContainText(status);
-  }
-);
-
-Then('my Field permits card says no permit is on record for my fields', async ({ page }) => {
-  const card = page.getByRole('region', { name: 'Field permits' });
-  await expect(card.getByTestId('coach-permits-empty')).toBeVisible({ timeout: 20_000 });
-  await expect(card.getByRole('alert')).toHaveCount(0);
-});
-
-When('I open the permits page from the Field permits card', async ({ page }) => {
+When('I open Field Permits from the navigation', async ({ page }) => {
   await page
-    .getByRole('region', { name: 'Field permits' })
-    .getByRole('link', { name: 'Show my field permits' })
+    .getByRole('navigation', { name: 'Primary' })
+    .getByRole('link', { name: 'Field Permits' })
     .click();
   await page.waitForURL((url) => url.pathname === '/permits', { timeout: 15_000 });
   await expect(page.getByRole('heading', { level: 1, name: 'Field permits' })).toBeVisible({
@@ -152,7 +135,7 @@ When('I open the permits page from the Field permits card', async ({ page }) => 
 });
 
 const permitItem = (page: Page, issuer: string) =>
-  page.getByTestId('coach-permit-list').getByRole('listitem').filter({ hasText: issuer });
+  page.getByTestId('permits-page-list').getByRole('listitem').filter({ hasText: issuer });
 
 Then(
   'the permit from {string} lists number {string}, the dates and the field {string}',
@@ -202,11 +185,17 @@ Then('the file opens in a new tab through a signed link', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-Then('the permits page says no permit is on record for my fields', async ({ page }) => {
-  await expect(page.getByTestId('permits-empty')).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('alert')).toHaveCount(0);
-  await expect(page.getByTestId('coach-permit-list')).toHaveCount(0);
-});
+Then(
+  'the permits page says no permit is on record and points to Fields & Venues',
+  async ({ page }) => {
+    await expect(
+      page.getByTestId('permits-empty').getByRole('link', { name: 'Fields & Venues' })
+    ).toHaveAttribute('href', '/fields');
+    await expect(page.getByTestId('permits-empty')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByTestId('permits-page-list')).toHaveCount(0);
+  }
+);
 
 Then('I am sent home with the message {string}', async ({ page }, message: string) => {
   await page.waitForURL((url) => url.pathname === '/', { timeout: 20_000 });
@@ -215,5 +204,5 @@ Then('I am sent home with the message {string}', async ({ page }, message: strin
 
 Then('no permit is shown', async ({ page }) => {
   await expect(page.getByText('City Recreation')).toHaveCount(0);
-  await expect(page.getByTestId('coach-permit-list')).toHaveCount(0);
+  await expect(page.getByTestId('permits-page-list')).toHaveCount(0);
 });

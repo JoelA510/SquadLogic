@@ -1,5 +1,7 @@
 # Phase C: field and venue permits
 
+> **Superseded in part (2026-10-27):** the owner removed coach sign-in and every coach screen; see `docs/changes/2026-10-27-admin-only.md`. C1 and C2 stand; C3's coach read is withdrawn and its page became the admins' Field Permits page.
+
 Status: **C1 and C2 built (one PR; see "As built (C1)" and "As built (C2)"); C3 built (see "As built (C3)").**
 Drafted 2026-10-22 against `origin/main` at `6a22d29`; re-verified 2026-10-27 against `c74d7d3`
 (see "Step 0 corrections"). The roadmap orders C after B, which has shipped. Owner's words:

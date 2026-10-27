@@ -41,8 +41,8 @@ const slot = (day, time) => ({ day_of_week: day, start_time: time, field: { loca
 function freshTables() {
   return {
     coaches: [
-      { id: C1, organization_id: ORG, full_name: 'Casey Coach', user_id: 'user-coach' },
-      { id: C3, organization_id: ORG, full_name: 'Robin Unassigned', user_id: null },
+      { id: C1, organization_id: ORG, full_name: 'Casey Coach' },
+      { id: C3, organization_id: ORG, full_name: 'Robin Unassigned' },
     ],
     locations: [{ id: L1, organization_id: ORG, name: 'Riverside Park' }],
     teams: [
@@ -152,7 +152,7 @@ function builder(table) {
   return b;
 }
 
-function asRole(role, userId = role === 'coach' ? 'user-coach' : 'user-admin') {
+function asRole(role, userId = 'user-admin') {
   vi.mocked(useOrganization).mockReturnValue(
     /** @type {any} */ ({ currentOrganization: { id: ORG }, orgMember: { role } })
   );
@@ -168,53 +168,12 @@ const renderPage = () =>
     </MemoryRouter>
   );
 
-const DECISION_CONTROL = /^(approve|reject|change|set)/i;
-
 beforeEach(() => {
   tables = freshTables();
   tableErrors = {};
   vi.mocked(supabase.from).mockImplementation(/** @type {any} */ (builder));
   vi.mocked(supabase.rpc).mockReset();
   vi.mocked(supabase.rpc).mockResolvedValue(/** @type {any} */ ({ data: {}, error: null }));
-});
-
-describe('coach view', () => {
-  // Plant (c): render the admin view's decision buttons for a coach -> red.
-  it('shows the request form per dimension and no decision controls', async () => {
-    asRole('coach');
-    renderPage();
-    await screen.findByTestId('coach-preferences-view');
-    // Non-vacuous: the three request forms are there.
-    expect(screen.getByRole('button', { name: 'Request weekday preference' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Request start time preference' })
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Request venue preference' })).toBeInTheDocument();
-    // The coach's pending request is listed; nothing can decide it.
-    expect(await screen.findByText('Pending')).toBeInTheDocument();
-    expect(screen.queryAllByRole('button', { name: DECISION_CONTROL })).toHaveLength(0);
-    expect(screen.queryByTestId('admin-preferences-view')).not.toBeInTheDocument();
-  });
-
-  it('submits a request through the request RPC with the chosen level and value', async () => {
-    asRole('coach');
-    renderPage();
-    await screen.findByTestId('coach-preferences-view');
-    await screen.findByText('Pending'); // rows loaded, forms enabled
-    const form = screen
-      .getByRole('button', { name: 'Request start time preference' })
-      .closest('form');
-    fireEvent.change(within(form).getByLabelText('Level'), { target: { value: 'must_keep' } });
-    fireEvent.change(within(form).getByLabelText('Value'), { target: { value: '17:30' } });
-    fireEvent.click(within(form).getByRole('button', { name: 'Request start time preference' }));
-    await waitFor(() => expect(supabase.rpc).toHaveBeenCalledTimes(1));
-    expect(supabase.rpc).toHaveBeenCalledWith('request_coach_practice_preference', {
-      p_coach_id: C1,
-      p_dimension: 'start_time',
-      p_level: 'must_keep',
-      p_value: 1050,
-    });
-  });
 });
 
 describe('admin view', () => {
@@ -340,7 +299,7 @@ describe('failure states', () => {
     message: "Could not find the table 'public.coach_practice_preferences' in the schema cache",
   };
 
-  it.each([['admin'], ['coach']])(
+  it.each([['admin']])(
     'the %s view names a missing table instead of showing an empty list',
     async (role) => {
       tableErrors.coach_practice_preferences = MISSING;
@@ -375,36 +334,19 @@ describe('failure states', () => {
     ).toBeInTheDocument();
   });
 
-  it('an RPC refusal is surfaced with the database message', async () => {
-    vi.mocked(supabase.rpc).mockResolvedValue(
-      /** @type {any} */ ({
-        data: null,
-        error: {
-          code: '42501',
-          message:
-            'Access denied: only the coach themself or an admin of their organization requests a coach practice preference',
-        },
-      })
-    );
-    asRole('coach');
-    renderPage();
-    await screen.findByTestId('coach-preferences-view');
-    await screen.findByText('Pending'); // rows loaded, forms enabled
-    fireEvent.click(screen.getByRole('button', { name: 'Request weekday preference' }));
-    expect(await screen.findByText(/Access denied: only the coach themself/)).toBeInTheDocument();
-  });
-
   it('a value the core schema refuses never reaches the RPC', async () => {
     tables.locations = [{ id: 'loc-not-a-uuid', organization_id: ORG, name: 'Legacy Park' }];
-    asRole('coach');
+    asRole('admin');
     renderPage();
-    await screen.findByTestId('coach-preferences-view');
-    await screen.findByText('Pending'); // rows loaded, forms enabled
-    const form = screen.getByRole('button', { name: 'Request venue preference' }).closest('form');
-    fireEvent.change(within(form).getByLabelText('Venue (location)'), {
+    await screen.findByTestId('admin-preferences-view');
+    fireEvent.click(screen.getByRole('button', { name: 'Set a preference for Robin Unassigned' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Set preference directly' });
+    fireEvent.change(within(dialog).getByLabelText('Level'), { target: { value: 'must_keep' } });
+    fireEvent.change(within(dialog).getByLabelText('Dimension'), { target: { value: 'venue' } });
+    fireEvent.change(within(dialog).getByLabelText(/Venue/), {
       target: { value: 'loc-not-a-uuid' },
     });
-    fireEvent.click(within(form).getByRole('button', { name: 'Request venue preference' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Set preference' }));
     expect(await screen.findByText(/is not a venue value/)).toBeInTheDocument();
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
@@ -412,7 +354,7 @@ describe('failure states', () => {
 
 /*
  * Every user-triggered RPC path, enumerated from the `callRpc(` call sites in
- * `useCoachPracticePreferences.js` (request, reject, approve, approve with
+ * `useCoachPracticePreferences.js` (reject, approve, approve with
  * change, set), driven through the real UI with the RPC refusing. Each must
  * put the database's own message on screen AND claim no success. A catch
  * that swallows (`void err`) turns its row red.
@@ -424,20 +366,6 @@ describe('every RPC path surfaces a database refusal', () => {
       .mockResolvedValue(/** @type {any} */ ({ data: null, error: { code, message } }));
 
   const PATHS = [
-    {
-      path: 'request (coach)',
-      role: 'coach',
-      code: '42501',
-      message: 'Access denied: planted refusal on request_coach_practice_preference',
-      success: /request sent for admin review/,
-      rpc: 'request_coach_practice_preference',
-      drive: async () => {
-        await screen.findByTestId('coach-preferences-view');
-        await screen.findByText('Pending');
-        fireEvent.click(screen.getByRole('button', { name: 'Request weekday preference' }));
-      },
-      stillThere: () => expect(screen.getAllByText('Pending')).toHaveLength(1),
-    },
     {
       path: 'reject',
       role: 'admin',
@@ -507,7 +435,7 @@ describe('every RPC path surfaces a database refusal', () => {
     },
   ];
 
-  it('the table names every RPC the hook calls and all five user paths', async () => {
+  it('the table names every RPC the hook calls and all four user paths', async () => {
     // Enumerated from the hook's source, not from this table: a new callRpc
     // site with no row here fails this test.
     const fs = await import('node:fs');
@@ -516,9 +444,9 @@ describe('every RPC path surfaces a database refusal', () => {
       'utf8'
     );
     const called = new Set([...source.matchAll(/callRpc\('([a-z_]+)'/g)].map((m) => m[1]));
-    expect(called.size).toBe(3);
+    expect(called.size).toBe(2);
     expect(new Set(PATHS.map((entry) => entry.rpc))).toEqual(called);
-    // Five sites: request, reject, approve, approve-with-change, set.
+    // Four sites: reject, approve, approve-with-change, set. (No coach requests: none signs in.)
     expect([...source.matchAll(/callRpc\('/g)]).toHaveLength(PATHS.length);
   });
 
@@ -567,16 +495,6 @@ describe('every load and compute failure is visible', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Could not load coaches or locations: permission denied for table coaches'
     );
-  });
-
-  it('coach: a failed coach-record read is a banner, not "not linked"', async () => {
-    tableErrors.coaches = { code: '42501', message: 'permission denied for table coaches' };
-    asRole('coach');
-    renderPage();
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Could not load your coach record: permission denied for table coaches'
-    );
-    expect(screen.queryByText(/not linked to a coach record/)).not.toBeInTheDocument();
   });
 
   it('admin: a preview core cannot compute says so instead of "None"', async () => {

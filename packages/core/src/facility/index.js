@@ -126,11 +126,10 @@ export {
   PERMIT_MAX_FILE_BYTES,
   PermitFileSchema,
   PermitInputSchema,
-  coachPermitSummary,
   fieldsWithoutPermit,
   permitFieldIds,
   permitObjectPath,
   permitStatus,
   permitWarnings,
-  sortPermitsForCoach,
+  sortPermitsForPage,
 } from './permits.js';

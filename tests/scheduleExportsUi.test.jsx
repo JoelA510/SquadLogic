@@ -1,5 +1,6 @@
 // The schedule download buttons (plan docs/changes/2026-10-22-admin-focus.md,
-// R7) on the coach home's schedule card, driven through the real card,
+// R7), as the admin's team page mounts them (the coach home's card is gone,
+// docs/changes/2026-10-27-admin-only.md), driven through the real
 // component, `fetchTeamEvents` and the mock client: each button hands the
 // browser a file built from the team's schedule, and a team whose schedule
 // cannot be read makes no file at all and says which team.
@@ -36,10 +37,23 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
 }));
 
-const { default: CoachScheduleCard } =
-  await import('../frontend/src/components/coach/CoachScheduleCard.jsx');
+const { default: ScheduleExports } = await import('../frontend/src/components/ScheduleExports.jsx');
 const { fetchTeamEvents } = await import('../frontend/src/hooks/useTeamPortal.js');
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
+
+/** The component as the team page mounts it, for one team or several. */
+function Exports({ teams }) {
+  return (
+    <ScheduleExports
+      teams={teams}
+      fileName={teams.length === 1 ? teams[0].name || 'team' : 'My_teams'}
+      label={
+        teams.length === 1 ? "Download this team's schedule" : "Download these teams' schedule"
+      }
+      idPrefix="team"
+    />
+  );
+}
 
 const ZONE = 'America/Los_Angeles';
 const TEAM_A = {
@@ -59,7 +73,7 @@ let saved;
 beforeEach(() => {
   sessionStorage.clear();
   delete window.__MOCK_DB__;
-  sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-coach-id' } }));
+  sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
   saved = [];
   let current = null;
   URL.createObjectURL = vi.fn((blob) => {
@@ -78,11 +92,11 @@ afterEach(() => {
 });
 
 const exportsGroup = async () =>
-  screen.findByRole('group', { name: "Download your teams' full season" });
+  screen.findByRole('group', { name: "Download these teams' schedule" });
 
-describe('the coach home’s schedule downloads', () => {
+describe('the schedule downloads', () => {
   it('downloads every team’s whole season as CSV, the rows the schedule holds', async () => {
-    render(<CoachScheduleCard teams={[TEAM_A, TEAM_B]} />);
+    render(<Exports teams={[TEAM_A, TEAM_B]} />);
     const group = await exportsGroup();
     fireEvent.click(within(group).getByRole('button', { name: 'CSV' }));
     await waitFor(() => expect(saved).toHaveLength(1));
@@ -107,8 +121,8 @@ describe('the coach home’s schedule downloads', () => {
   });
 
   it('downloads the same rows as XLSX', async () => {
-    render(<CoachScheduleCard teams={[TEAM_A]} />);
-    const group = await screen.findByRole('group', { name: "Download your team's full season" });
+    render(<Exports teams={[TEAM_A]} />);
+    const group = await screen.findByRole('group', { name: "Download this team's schedule" });
     fireEvent.click(within(group).getByRole('button', { name: 'Excel (.xlsx)' }));
     await waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0].name).toBe('Team_A_Schedule.xlsx');
@@ -122,7 +136,7 @@ describe('the coach home’s schedule downloads', () => {
   });
 
   it('offers each team’s calendar, which parses and is that team’s', async () => {
-    render(<CoachScheduleCard teams={[TEAM_A, TEAM_B]} />);
+    render(<Exports teams={[TEAM_A, TEAM_B]} />);
     const group = await exportsGroup();
     fireEvent.click(within(group).getByRole('button', { name: 'Calendar (.ics): Team B' }));
     await waitFor(() => expect(saved).toHaveLength(1));
@@ -136,12 +150,9 @@ describe('the coach home’s schedule downloads', () => {
 
   it('makes no file when a team’s schedule cannot be read, and names the team', async () => {
     const realFrom = mockSupabase.from.bind(mockSupabase);
-    render(<CoachScheduleCard teams={[TEAM_A, TEAM_B]} />);
+    render(<Exports teams={[TEAM_A, TEAM_B]} />);
     const group = await exportsGroup();
-    // The card has read; now the games read fails for the export.
-    await within(screen.getByRole('region', { name: 'Your schedule' })).findAllByTestId(
-      'coach-schedule-event'
-    );
+    // Now the games read fails for the export.
     vi.spyOn(mockSupabase, 'from').mockImplementation((table) =>
       table === 'games'
         ? /** @type {any} */ ({
@@ -172,8 +183,8 @@ describe('the coach home’s schedule downloads', () => {
   });
 
   it('keeps its buttons focusable while a file is made, and says so politely', async () => {
-    render(<CoachScheduleCard teams={[TEAM_A]} />);
-    const group = await screen.findByRole('group', { name: "Download your team's full season" });
+    render(<Exports teams={[TEAM_A]} />);
+    const group = await screen.findByRole('group', { name: "Download this team's schedule" });
     const csv = within(group).getByRole('button', { name: 'CSV' });
     fireEvent.click(csv);
     expect(csv).not.toBeDisabled();
@@ -181,6 +192,6 @@ describe('the coach home’s schedule downloads', () => {
     expect(within(group).getByRole('status')).toHaveTextContent('Preparing the file…');
     await waitFor(() => expect(saved).toHaveLength(1));
     expect(csv).not.toHaveAttribute('aria-disabled');
-    expect(csv).toHaveAttribute('aria-describedby', 'coach-schedule-exports-status');
+    expect(csv).toHaveAttribute('aria-describedby', 'team-schedule-exports-status');
   });
 });

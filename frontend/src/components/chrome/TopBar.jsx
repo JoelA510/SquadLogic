@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -15,20 +15,15 @@ import {
   Sparkles,
   Sun,
   User,
-  UserRoundCheck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 import { usePermission } from '../../hooks/usePermission.js';
-import { supabase } from '../../lib/supabaseClient.js';
-import { logger } from '../../lib/logger.js';
 import Dropdown from '../ui/Dropdown.jsx';
-import { useToast } from '../ui/ToastHost.jsx';
 import Badge from '../ui/Badge.jsx';
 import { initialsOf } from '../ui/Avatar.jsx';
 import logo from '../../assets/SL-Logo.png';
-import { isAdminRole } from '../../constants/permissions.js';
 import { isDemoOrganization } from '../../lib/demo.js';
 import DemoTimer from '../auth/DemoTimer.jsx';
 
@@ -80,29 +75,22 @@ CtxSwitcher.propTypes = {
 
 /**
  * Application top bar: brand, org/season switchers, global search,
- * Season Setup shortcut, theme toggle, notifications, account menu
- * with role preview (impersonation).
+ * Season Setup shortcut, theme toggle, notifications, account menu.
  */
 export default function TopBar({ onToggleNav = undefined }) {
   const navigate = useNavigate();
-  const { user, signOut, isAdmin: isProfileAdmin, impersonateUser } = useAuth();
+  const { user, signOut } = useAuth();
   const {
     organizations = [],
     currentOrganization,
-    orgMember,
     availableSeasons = [],
     currentSeasonSetting,
     switchOrganization,
     switchSeason,
   } = useOrganization();
-  // Role preview: a profile admin, or an admin-equivalent of this organization
-  // (staff included).
-  const isAdmin = isProfileAdmin || isAdminRole(orgMember?.role);
   const { themeMode, toggleThemeMode } = useTheme();
   const { can, PERMISSIONS } = usePermission();
-  const toast = useToast();
   const searchRef = useRef(null);
-  const [previewTargets, setPreviewTargets] = useState([]);
 
   // "/" focuses the global search unless the user is already typing somewhere.
   useEffect(() => {
@@ -118,78 +106,6 @@ export default function TopBar({ onToggleNav = undefined }) {
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, []);
-
-  // Role-preview target (one coach), fetched for admins. There is no parent
-  // view to preview since 20261024010000 (R3). A coach is a member whose
-  // organization role is `coach` (`organization_members.role`): `profiles.role`
-  // is set by nothing and every profile reads `user`, so the preview, which
-  // looked there, was never offered (admin focus R6). Two narrow reads, no
-  // email: the coach-role members, then their coach records' names (admins read
-  // `coaches`), preferring a member with a coach record. The target is shaped
-  // as a profile, its role the membership's, for `impersonateUser` and the
-  // role-scoped nav and home.
-  const orgId = currentOrganization?.id;
-  useEffect(() => {
-    if (!isAdmin || !orgId) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data: members, error } = await supabase
-          .from('organization_members')
-          .select('profile_id, role')
-          .eq('organization_id', orgId)
-          .eq('role', 'coach');
-        if (error) throw error;
-        const ids = (members || [])
-          .filter((member) => member.role === 'coach' && member.profile_id)
-          .map((member) => String(member.profile_id));
-        let names = new Map();
-        if (ids.length > 0) {
-          const { data: coachRows, error: coachError } = await supabase
-            .from('coaches')
-            .select('user_id, full_name')
-            .eq('organization_id', orgId)
-            .in('user_id', ids);
-          if (coachError) throw coachError;
-          names = new Map(
-            (coachRows || [])
-              .filter((row) => row.user_id && row.full_name)
-              .map((row) => [String(row.user_id), String(row.full_name)])
-          );
-        }
-        if (cancelled) return;
-        const pick = [...ids].sort(
-          (a, b) =>
-            Number(!names.has(a)) - Number(!names.has(b)) ||
-            String(names.get(a) ?? '').localeCompare(String(names.get(b) ?? '')) ||
-            a.localeCompare(b)
-        )[0];
-        setPreviewTargets(
-          pick
-            ? [
-                {
-                  id: pick,
-                  full_name: names.get(pick) ?? null,
-                  role: 'coach',
-                  organization_id: orgId,
-                },
-              ]
-            : []
-        );
-      } catch (err) {
-        // Best effort, said not swallowed: the account menu works without a
-        // preview entry.
-        logger.warn('[TopBar] role preview targets not loaded', {
-          code: err?.code,
-          message: err?.message,
-        });
-        if (!cancelled) setPreviewTargets([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin, orgId]);
 
   const displayName =
     user?.profile?.full_name ||
@@ -236,22 +152,10 @@ export default function TopBar({ onToggleNav = undefined }) {
   }));
 
   const accountItems = [
-    ...(isAdmin && previewTargets.length > 0
-      ? previewTargets.map((profile) => ({
-          id: `preview-${profile.id}`,
-          label: 'Preview as Coach',
-          icon: UserRoundCheck,
-          onSelect: () =>
-            impersonateUser(profile, { orgRole: orgMember?.role }).catch(() => {
-              toast('Could not start the preview as a coach. Try again.', 'warning');
-            }),
-        }))
-      : []),
     {
       id: 'account',
       label: 'Account settings',
       icon: User,
-      separatorAbove: isAdmin && previewTargets.length > 0,
       onSelect: () => navigate('/account'),
     },
     ...(can(PERMISSIONS.MANAGE_ORGANIZATION)

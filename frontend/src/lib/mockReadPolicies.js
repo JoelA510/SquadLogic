@@ -7,16 +7,14 @@
  *
  * Mirrored, per table, for the signed-in caller:
  *   - players, team_players: an admin or staff member of the row's
- *     organization (a coach reads names through `get_team_roster`);
- *   - coaches: an admin or staff member, or the coach row linked to the caller
- *     while they are a member;
- *   - team_coach_assignments: an admin or staff member, or the caller's own
- *     while they are a member;
+ *     organization;
+ *   - coaches, team_coach_assignments: an admin or staff member;
  *   - staging_players, staging_import_rows: an admin or staff member;
- *   - team_calendar_tokens: an admin or staff member, or the team's current
- *     coach;
- *   - facility_permits, facility_permit_scopes: an admin or staff member, or a
- *     coach whose team plays or practises at a field the permit concerns.
+ *   - team_calendar_tokens: an admin or staff member;
+ *   - facility_permits, facility_permit_scopes: an admin or staff member.
+ *
+ * No coach signs in (docs/changes/2026-10-27-admin-only.md), so every one of these is an admin's
+ * read: a signed-in caller with no membership reads nothing.
  *
  * **Not mirrored:** embedded rows (`select('x, players(...)')`) are not
  * filtered, and a read with no mock session is left unfiltered (the mock's
@@ -54,22 +52,16 @@ export function applyMockReadPolicy(db, table, rows, currentUserId, now = new Da
   const access = createAccessHelpers(db, currentUserId, now);
   const orgOf = (row) =>
     row?.organization_id ?? access.teamById(row?.team_id)?.organization_id ?? MOCK_ORG_ID;
-  const own = (value) => String(value ?? '') === String(currentUserId);
 
   const visible = {
     players: (row) => access.isOrgAdmin(orgOf(row)),
     team_players: (row) => access.isOrgAdmin(orgOf(row)),
-    coaches: (row) =>
-      access.isOrgAdmin(orgOf(row)) || (access.isOrgMember(orgOf(row)) && own(row.user_id)),
-    team_coach_assignments: (row) =>
-      access.isOrgAdmin(orgOf(row)) ||
-      (access.isOrgMember(orgOf(row)) && access.myCoachIds.has(String(row.coach_id))),
+    coaches: (row) => access.isOrgAdmin(orgOf(row)),
+    team_coach_assignments: (row) => access.isOrgAdmin(orgOf(row)),
     staging_players: (row) => access.isOrgAdmin(orgOf(row)),
     staging_import_rows: (row) => access.isOrgAdmin(orgOf(row)),
-    team_calendar_tokens: (row) =>
-      access.isOrgAdmin(orgOf(row)) || access.isCurrentTeamCoach(row.team_id),
-    // 20261102010000: an admin or staff member, or a coach whose team plays or practises at a field
-    // the permit (or the scope) concerns.
+    team_calendar_tokens: (row) => access.isOrgAdmin(orgOf(row)),
+    // 20261102010000: an admin or staff member.
     facility_permits: (row) => permitRowVisible(db, 'facility_permits', row, currentUserId, now),
     facility_permit_scopes: (row) =>
       permitRowVisible(db, 'facility_permit_scopes', row, currentUserId, now),

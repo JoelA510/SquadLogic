@@ -120,7 +120,9 @@ export default function AccountSettingsPage() {
     setPasswordMessage(null);
 
     try {
-      const { error } = await updatePassword(passwordForm.password);
+      const { error } = await updatePassword(passwordForm.password, {
+        organizationId: currentOrganization?.id,
+      });
       if (error) throw error;
 
       setPasswordForm({ password: '', confirm: '' });
@@ -150,11 +152,14 @@ export default function AccountSettingsPage() {
     setInviteMessage(null);
 
     try {
-      const { error } = await supabase.rpc('redeem_org_invite', { p_code: code });
+      const { data: redeemedOrgId, error } = await supabase.rpc('redeem_org_invite', {
+        p_code: code,
+      });
       if (error) throw error;
 
       setInviteCode('');
-      refetchOrgs?.();
+      // The redeemed organization becomes the active one, even for an admin already in another.
+      refetchOrgs?.(redeemedOrgId);
       setInviteMessage({ type: 'success', text: 'Invite redeemed. Organization list refreshed.' });
     } catch (error) {
       logger.error('Account invite redemption failed', error);

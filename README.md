@@ -37,19 +37,19 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 - **Multi-Tenant Enforcement**: Strict organization partitioning ensuring data isolation.
 - **Facility Management**: Full CRUD UI for venues, fields, blackout dates, and availability profiles.
 - **Notifications**: trigger-based notifications (rainouts, schedule changes). Availability marking (RSVP) and team chat were removed on 2026-10-22: families are reached through the league's registration platform.
-- **Calendar Sync**: Public ICS feeds for coaches and admins.
+- **Calendar Sync**: A team's ICS feed, a link an admin hands to its coach or families.
 - **Reporting**: Game score entry, standings calculations, and tie-breaker logic.
 
 ### Lightning-class redesign
 
 - **Design system**: Cobalt light + dark themes driven by CSS tokens (`data-theme` on `<html>`, persisted preference), self-hosted Public Sans, and a shared UI primitive library.
-- **App chrome**: Top bar with org/season switchers, global search (`/` shortcut), and role preview; nested collapsible navigation with a role-scoped view for coaches.
+- **App chrome**: Top bar with org/season switchers, global search (`/` shortcut), and nested collapsible navigation; admins only (coaches never sign in).
 - **Players workspace**: Excel-grade editable, virtualized data grid (click-to-edit, keyboard navigation, multi-select bulk actions, instant search) smooth at 1,400+ rows.
 - **Record pages**: Tabbed player records (overview, guardians, schedule) and team records absorbing the team portal (roster, schedule, staff).
 - **Team Builder**: Drag-and-drop roster balancing with a serpentine signal balancer (rating or years-played), buddy links, and coach-parent spreading — every move audited.
 - **Org feature configuration**: Per-organization toggles (player rating, years played, buddy requests, coaching interest, waitlist) and a division **gender model** — gendered (U8B/U8G) or co-ed display with real merge/split transitions.
 - **Season Setup**: Resumable checklist that derives progress from live data — leave and return without losing your place.
-- **Role dashboards**: Admin KPI home and coach dashboard, each scoped to what that role needs (there is no parent or player view; families stay on the league's registration platform).
+- **Admin dashboard**: The league overview for admins and staff (there is no coach, parent or player view: only league admins sign in; families stay on the league's registration platform).
 
 ## 🛠️ Tech Stack
 
@@ -63,7 +63,7 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 
 The application is structured around the following workflows (see `frontend/src/App.jsx`; legacy paths redirect):
 
-- `/` — **Home**: Role-scoped dashboard (admin KPIs, coach view).
+- `/` — **Home**: The admin dashboard (KPIs, setup progress, permit reminders).
 - `/setup` — **Season Setup**: Resumable onboarding/season checklist (`/setup/features` for feature selection).
 - `/import` — **Data Import**: Staged GotSport CSV ingestion (players, coaches, field slots) with rollback.
 - `/players` — **Players**: Editable roster grid; `/players/:playerId` for individual records.

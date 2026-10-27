@@ -1,5 +1,5 @@
 /**
- * Synthetic permits in the shape `get_facility_permits` returns them, for the coach's card and page
+ * Synthetic permits in the shape `get_facility_permits` returns them, for the permits page
  * tests (Phase C3). No real venue, issuer or document: invented names, example data only.
  */
 export const ORG = 'a1111111-1111-4111-8111-111111111111';

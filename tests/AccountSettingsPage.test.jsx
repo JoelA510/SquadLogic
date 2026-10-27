@@ -35,10 +35,6 @@ vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
   useTheme: () => ({ themeMode: 'light', toggleThemeMode: vi.fn() }),
 }));
 
-vi.mock('../frontend/src/components/auth/ShadowBanner.jsx', () => ({
-  default: () => null,
-}));
-
 vi.mock('../frontend/src/components/OfflineGuard.jsx', () => ({
   default: ({ children }) => children,
 }));
@@ -251,7 +247,9 @@ describe('AccountSettingsPage', () => {
 
     await waitFor(() => {
       expect(mocks.rpc).toHaveBeenCalledWith('redeem_org_invite', { p_code: 'JOIN-123' });
-      expect(mocks.refetchOrgs).toHaveBeenCalled();
+      // The redeemed organization (what the RPC returns) becomes the active one, even for an admin
+      // already in another: a bare refetch kept them in the old one.
+      expect(mocks.refetchOrgs).toHaveBeenCalledWith('org-2');
     });
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Invite redeemed. Organization list refreshed.'

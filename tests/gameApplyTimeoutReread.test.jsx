@@ -40,13 +40,13 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', async () => {
   const { ROLE_PERMISSIONS: perms, ROLES: roles } =
     await import('../frontend/src/constants/permissions.js');
   const values = Object.fromEntries(
-    ['admin', 'coach'].map((name) => [
+    ['admin'].map((name) => [
       name,
       {
         currentOrganization: { id: '00000000-0000-4000-8000-0000000000e1', name: 'Synthetic FC' },
         currentSeasonSetting: { id: 'season-gtimeout', timezone: 'America/New_York' },
         featureFlags: {},
-        permissions: perms[name === 'admin' ? roles.ADMIN : roles.COACH],
+        permissions: perms[roles.ADMIN],
         loading: false,
         seasonSettingsLoading: false,
       },
@@ -268,19 +268,19 @@ describe('the game page and the admin-only save (docs/PLAN_AUDIT_IN_TRANSACTION.
     expect(gameRunReads).toBe(readsBefore);
   });
 
-  // Admin focus R6 (20261028010000): a coach holds neither VIEW_SCHEDULE nor
-  // MANAGE_SCHEDULE, so never reaches this page (App.jsx's route), and the
-  // coach Apply state this test once rendered is one no role can reach. The
-  // disabled-Apply note stays in the page for a role with MANAGE_SCHEDULE and
-  // not MANAGE_ORGANIZATION, of which there is none (declared).
-  it('gives a coach no route to the game scheduling page', async () => {
+  // Admin focus R6 (20261028010000), then docs/changes/2026-10-27-admin-only.md: no coach role
+  // exists, so no role but an admin's reaches this page (App.jsx's route), and the coach Apply
+  // state this test once rendered is one no role can reach. The disabled-Apply note stays in the
+  // page for a role with MANAGE_SCHEDULE and not MANAGE_ORGANIZATION, of which there is none
+  // (declared).
+  it('has no coach role, so none has a route to the game scheduling page', async () => {
     const {
       ROLE_PERMISSIONS: perms,
       ROLES: roles,
       PERMISSIONS: p,
     } = await import('../frontend/src/constants/permissions.js');
-    expect(perms[roles.COACH]).not.toContain(p.VIEW_SCHEDULE);
-    expect(perms[roles.COACH]).not.toContain(p.MANAGE_SCHEDULE);
+    expect(roles).not.toHaveProperty('COACH');
+    expect(perms).not.toHaveProperty('coach');
     expect(perms[roles.ADMIN]).toContain(p.VIEW_SCHEDULE);
   });
 });

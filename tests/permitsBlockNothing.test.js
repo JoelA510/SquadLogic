@@ -29,12 +29,11 @@ const ALLOWED = new Set([
   // the mock twin's wiring and its tables' read policies
   'frontend/src/lib/mockReadPolicies.js',
   'frontend/src/lib/mockSupabaseClient.js',
-  // the pages that show them: Field Management, the admin home's reminders, and (Phase C3) the
-  // coach's /permits page and its home card
+  // the pages that show them: Field Management, the admin home's reminders, and the admins'
+  // /permits page
   'frontend/src/pages/FieldManagementPage.jsx',
   'frontend/src/pages/DashboardPage.jsx',
   'frontend/src/pages/PermitsPage.jsx',
-  'frontend/src/components/coach/CoachPermitsCard.jsx',
   // the core module, and the barrel that registers it
   'packages/core/src/facility/index.js',
   'packages/core/src/facility/permits.js',
@@ -96,7 +95,6 @@ describe('a permit blocks nothing', () => {
       'frontend/src/pages/FieldManagementPage.jsx',
       'frontend/src/pages/DashboardPage.jsx',
       'frontend/src/pages/PermitsPage.jsx',
-      'frontend/src/components/coach/CoachPermitsCard.jsx',
     ]) {
       const text = readFileSync(path.join(REPO, file), 'utf8');
       // The only uses are the read, the warnings and the delete confirmation's wording.

@@ -22,13 +22,11 @@ describe('mock get_organization_members', () => {
       p_organization_id: MOCK_ORG_ID,
     });
     expect(error).toBeNull();
-    expect(data.map((row) => row.profile_id)).toEqual(
-      expect.arrayContaining(['mock-admin-id', 'mock-coach-id'])
-    );
+    expect(data.map((row) => row.profile_id)).toEqual(expect.arrayContaining(['mock-admin-id']));
     expect(data.every((row) => 'email' in row)).toBe(true);
   });
 
-  it('refuses a coach 42501, so a coach reads no member email', async () => {
+  it('refuses a non-member 42501 (a coach’s account is one now), so none reads a member email', async () => {
     signIn('mock-coach-id');
     const { data, error } = await supabase.rpc('get_organization_members', {
       p_organization_id: MOCK_ORG_ID,

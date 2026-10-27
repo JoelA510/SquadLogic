@@ -37,25 +37,23 @@ describe('usePermission', () => {
     expect(result.current.can(PERMISSIONS.MANAGE_GLOBAL_SETTINGS)).toBe(true);
   });
 
-  it('should deny a Coach managing the organization', () => {
-    /** @type {any} */ (OrgContext.useOrganization).mockReturnValue({
-      orgMember: makeOrganizationMember({ role: ROLES.COACH }),
-    });
-    const { result } = renderHook(() => usePermission());
-    expect(result.current.can(PERMISSIONS.MANAGE_ORGANIZATION)).toBe(false);
-    expect(result.current.can(PERMISSIONS.VIEW_ORGANIZATION)).toBe(true);
-  });
-
-  // No parent or player role since 20261024010000 (R3): a membership still
-  // carrying one (a stale cache, a row written before the migration) is granted
-  // nothing, not a family's read-only view.
-  it.each(['parent', 'player'])('grants a stale %s role no permission', (role) => {
+  // No coach, parent or player role (20261024010000, R3; docs/changes/2026-10-27-admin-only.md):
+  // only league admins sign in, and a membership still carrying one of those roles (a stale cache,
+  // a row written before the migration) is granted nothing.
+  it.each(['coach', 'parent', 'player'])('grants a stale %s role no permission', (role) => {
     /** @type {any} */ (OrgContext.useOrganization).mockReturnValue({
       orgMember: makeOrganizationMember({ role }),
     });
     const { result } = renderHook(() => usePermission());
     for (const permission of Object.values(PERMISSIONS)) {
       expect(result.current.can(permission), permission).toBe(false);
+    }
+  });
+
+  it('has no coach role and no permission only a coach held', () => {
+    expect(ROLES).not.toHaveProperty('COACH');
+    for (const stale of ['manage_own_team', 'request_practice_preference']) {
+      expect(Object.values(PERMISSIONS)).not.toContain(stale);
     }
   });
 });

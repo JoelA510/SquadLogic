@@ -4,8 +4,7 @@
  * `storage` member that stands in for the `facility-permits` bucket.
  *
  * **Refusals included, not just the happy path** (LESSONS_LEARNED #13), with the SQL's codes:
- *   - 42501 no session, or a caller who is not an admin of the organization named (the read: or
- *     a current coach of a team);
+ *   - 42501 no session, or a caller who is not an admin of the organization named;
  *   - 23502 a missing argument;
  *   - 22023 a bad issuer, number, notes or dates, no scope, a scope that is not in the
  *     organization (one message whether it exists or not), a file whose object is missing, of a
@@ -14,8 +13,8 @@
  * Each success appends one `audit_log` row (`settings.updated` / `facility_permit`, with
  * `setting: 'facility.permit'` and the SQL's operation and metadata); a refusal appends none.
  *
- * A coach reads a permit only for a field where a team they currently coach has a game or a
- * practice, or for the venue of such a field (admin-focus R6), and sees only those scopes.
+ * Only admins and staff read or write permits (docs/changes/2026-10-27-admin-only.md: no coach
+ * signs in, so the coach read of Phase C3 is gone).
  *
  * **The `storage` member** mirrors the bucket's rules: private; PDF, JPEG, PNG; 10 MiB; an object is
  * `<organization>/<permit>/<uuid>.<ext>`; an admin of the organization uploads (not for a demo
@@ -71,82 +70,22 @@ export function orgLocalToday(db, orgId, now = new Date()) {
 }
 
 /**
- * `coach_field_ids_of`: the fields where a team the user currently coaches has a game (through its
- * slot) or a practice (through its practice slot).
- */
-export function coachFieldIds(db, orgId, userId, now = new Date()) {
-  const access = createAccessHelpers(db, userId, now);
-  if (!access.isOrgMember(orgId)) return new Set();
-  const teamIds = new Set(
-    (db.team_coach_assignments || [])
-      .filter(
-        (row) =>
-          same(row.organization_id, orgId) &&
-          access.myCoachIds.has(String(row.coach_id)) &&
-          access.isLive(row)
-      )
-      .map((row) => String(row.team_id))
-  );
-  const fields = new Set();
-  if (teamIds.size === 0) return fields;
-  const slotById = (rows, id) => rows.find((row) => same(row.id, id));
-  for (const game of db.games || []) {
-    if (!same(game.organization_id, orgId)) continue;
-    if (!teamIds.has(String(game.home_team_id)) && !teamIds.has(String(game.away_team_id)))
-      continue;
-    const slot = slotById(db.game_slots || [], game.game_slot_id);
-    if (slot?.field_id && same(slot.organization_id ?? orgId, orgId))
-      fields.add(String(slot.field_id));
-  }
-  for (const assignment of db.practice_assignments || []) {
-    if (!same(assignment.organization_id, orgId) || !teamIds.has(String(assignment.team_id)))
-      continue;
-    const slot = (db.practice_slots || []).find(
-      (row) => same(row.id, assignment.practice_slot_id) || same(row.id, assignment.slot_id)
-    );
-    if (slot?.field_id) fields.add(String(slot.field_id));
-  }
-  return fields;
-}
-
-/** `coach_covers_permit_scope`. */
-function coachCoversScope(db, scope, fieldIds) {
-  if (scope.field_id && fieldIds.has(String(scope.field_id))) return true;
-  if (scope.location_id) {
-    return (db.fields || []).some(
-      (field) =>
-        fieldIds.has(String(field.id)) &&
-        same(field.location_id, scope.location_id) &&
-        same(field.organization_id, scope.organization_id)
-    );
-  }
-  return false;
-}
-
-/**
  * The tables' SELECT policies for the signed-in caller: an admin or staff member of the row's
- * organization, or a coach whose fields the permit (or the scope) concerns.
+ * organization.
  * @returns {boolean}
  */
 export function permitRowVisible(db, table, row, currentUserId, now = new Date()) {
-  const access = createAccessHelpers(db, currentUserId, now);
-  if (access.isOrgAdmin(row.organization_id)) return true;
-  const fields = coachFieldIds(db, row.organization_id, currentUserId, now);
-  if (fields.size === 0) return false;
-  if (table === 'facility_permit_scopes') return coachCoversScope(db, row, fields);
-  return (db.facility_permit_scopes || []).some(
-    (scope) => same(scope.permit_id, row.id) && coachCoversScope(db, scope, fields)
-  );
+  void table;
+  return createAccessHelpers(db, currentUserId, now).isOrgAdmin(row.organization_id);
 }
 
-/** `facility_permit_json`. `coachFields` is a Set to narrow the scopes to, or null for an admin. */
-export function permitView(db, permit, today, coachFields = null) {
+/** `facility_permit_json`. */
+export function permitView(db, permit, today) {
   const venueOf = (id) => (db.locations || []).find((l) => same(l.id, id));
   const live = (effectiveTo) =>
     effectiveTo === null || effectiveTo === undefined || String(effectiveTo) >= today;
   const scopes = (db.facility_permit_scopes || [])
     .filter((s) => same(s.permit_id, permit.id))
-    .filter((s) => coachFields === null || coachCoversScope(db, s, coachFields))
     .map((s) => {
       const field = s.field_id ? (db.fields || []).find((f) => same(f.id, s.field_id)) : null;
       const venue = venueOf(s.location_id ?? field?.location_id);
@@ -276,29 +215,19 @@ export function handleFacilityPermitRpc(db, name, params, ctx) {
   if (!orgId) return fail('23502', 'p_organization_id is required');
 
   if (name === 'get_facility_permits') {
-    const admin = c.isOrgAdmin(orgId);
-    const fields = coachFieldIds(db, orgId, c.currentUserId, now);
-    const access = createAccessHelpers(db, c.currentUserId, now);
-    const isCoach = access.isOrgMember(orgId) && currentCoachHasTeam(db, orgId, access);
-    if (!admin && !isCoach) {
-      return fail(
-        '42501',
-        'Access denied: permits are read by an administrator or a coach of a team'
-      );
+    if (!c.isOrgAdmin(orgId)) {
+      return fail('42501', 'Access denied: permits are read by an administrator');
     }
     const today = orgLocalToday(db, orgId, now);
     const permits = db.facility_permits
       .filter((permit) => same(permit.organization_id, orgId))
-      .filter(
-        (permit) => admin || permitRowVisible(db, 'facility_permits', permit, c.currentUserId, now)
-      )
       .sort(
         (a, b) =>
           String(a.valid_to).localeCompare(String(b.valid_to)) ||
           String(a.issuer).localeCompare(String(b.issuer)) ||
           String(a.id).localeCompare(String(b.id))
       )
-      .map((permit) => permitView(db, permit, today, admin ? null : fields));
+      .map((permit) => permitView(db, permit, today));
     return { data: { today, lead_days: 30, permits }, error: null };
   }
 
@@ -500,16 +429,6 @@ export function handleFacilityPermitRpc(db, name, params, ctx) {
   return { data: { id: permit.id, deleted: true, file_path: permit.file_path }, error: null };
 }
 
-/** Does the caller currently coach a team in the organization? (the read's second gate) */
-function currentCoachHasTeam(db, orgId, access) {
-  return (db.team_coach_assignments || []).some(
-    (row) =>
-      same(row.organization_id, orgId) &&
-      access.myCoachIds.has(String(row.coach_id)) &&
-      access.isLive(row)
-  );
-}
-
 /**
  * `admin_delete_field`'s additions: the permits scoped directly to the field, as `affected` rows
  * (`kind: 'permit'`, `disposition: 'unlinked'`).
@@ -663,19 +582,7 @@ export function createMockStorage({ getDB, saveDB, currentUserId, now = () => ne
             (o) => o.bucket_id === bucket && o.name === path
           );
           const access = createAccessHelpers(db, userId, now());
-          let readable = false;
-          if (userId && where && object) {
-            if (access.isOrgAdmin(where.org)) readable = true;
-            else {
-              // A coach reads only the LIVE file of a permit they may read.
-              const permit = (db.facility_permits || []).find(
-                (p) => same(p.file_path, path) && same(p.organization_id, where.org)
-              );
-              readable = Boolean(
-                permit && permitRowVisible(db, 'facility_permits', permit, userId, now())
-              );
-            }
-          }
+          const readable = Boolean(userId && where && object && access.isOrgAdmin(where.org));
           if (!readable) return storageError(404, 'Object not found');
           const signedUrl =
             bytesByPath.get(path) ??

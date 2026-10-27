@@ -40,7 +40,7 @@ describe('InvitesSettings', () => {
         id: 'invite-1',
         code: 'ABCD-1234',
         organization_id: MOCK_ORG_ID,
-        role: 'coach',
+        role: 'staff',
         created_at: '2026-05-01T00:00:00.000Z',
         expires_at: '2099-05-08T00:00:00.000Z',
         used_at: null,
@@ -73,5 +73,32 @@ describe('InvitesSettings', () => {
 
     resolveRpc({ data: 'invite-1', error: null });
     await waitFor(() => expect(revokeButton).not.toBeDisabled());
+  });
+
+  // Only league admins sign in (docs/changes/2026-10-27-admin-only.md): an invite is for an admin or
+  // a staff member, who is an admin too, and never a coach.
+  it('offers exactly the Admin and Staff roles, Staff first chosen, and sends the chosen one', async () => {
+    mocks.invites = [];
+    render(<InvitesSettings />);
+
+    const role = await screen.findByLabelText('Role');
+    const options = Array.from(role.querySelectorAll('option')).map((option) => ({
+      value: option.getAttribute('value'),
+      label: option.textContent,
+    }));
+    expect(options).toEqual([
+      { value: 'admin', label: 'Admin' },
+      { value: 'staff', label: 'Staff' },
+    ]);
+    expect(role).toHaveValue('staff');
+
+    fireEvent.change(role, { target: { value: 'admin' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Create new invite' }));
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'create_org_invite',
+        expect.objectContaining({ p_org_id: MOCK_ORG_ID, p_role: 'admin' })
+      )
+    );
   });
 });

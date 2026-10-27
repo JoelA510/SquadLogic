@@ -9,6 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChainMock } from './helpers/index.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 
 const ORG_ID = '3d0f4a1e-6b2c-4e8d-9a7f-1c2b3d4e5f60';
 const DIVISION_ID = 'd-u10';
@@ -124,6 +125,9 @@ describe('TeamBuilder applies the stored buddy rule', () => {
     world.teams = TEAMS;
     mocks.updatePlayer.mockReset().mockResolvedValue({ success: true });
     mocks.rpc.mockReset().mockResolvedValue({ data: null, error: null });
+    toast.mockClear();
+    delete window.__MOCK_DB__;
+    sessionStorage.removeItem('__MOCK_DB__');
   });
 
   it('defaults to mutual: one-way requests are not honoured or counted', async () => {
@@ -175,15 +179,58 @@ describe('TeamBuilder applies the stored buddy rule', () => {
     { id: 't2', name: 'Team Two', division_id: 'd-u10g', organization_id: ORG_ID },
   ];
 
-  it('a co-ed board folding two divisions pairs a boy and a girl who name each other', async () => {
-    Object.assign(playersData, U10_BOYS_AND_GIRLS);
-    world.teams = U10_TEAMS;
+  it('a co-ed board folding two stored divisions pairs within each, shows the pair it cannot, and saves through the real RPC', async () => {
+    // U10B and U10G fold into one "U10" board. A team belongs to one stored division and
+    // `admin_update_player` refuses a team outside the player's own, so Ann (U10B) and Bo
+    // (U10G), who name each other, are not paired: they are shown to the admin. Kit and Zed
+    // (both U10B) are a pair and stay together. The saves go through the mock's own
+    // `admin_update_player`, which applies the database function's team-in-division check.
+    const { mockSupabase, getMockData } = await import('../frontend/src/lib/mockSupabaseClient.js');
+    sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
+    const folded = [
+      player('ann', 'Ann', 'Ross', 5, { division_id: 'd-u10b', buddy_request: 'Bo Hale' }),
+      player('bo', 'Bo', 'Hale', 4, { division_id: 'd-u10g', buddy_request: 'Ann Ross' }),
+      player('kit', 'Kit', 'Lane', 3, { division_id: 'd-u10b', buddy_request: 'Zed Park' }),
+      player('zed', 'Zed', 'Park', 2, { division_id: 'd-u10b', buddy_request: 'Kit Lane' }),
+      player('max', 'Max', 'Dorn', 1, { division_id: 'd-u10g' }),
+      player('lia', 'Lia', 'Cole', 1, { division_id: 'd-u10g' }),
+    ];
+    const foldedTeams = ['t1', 't2', 't3', 't4'].map((id, i) => ({
+      id: `team-${id}`,
+      name: `Team ${i + 1}`,
+      division_id: i < 2 ? 'd-u10b' : 'd-u10g',
+      organization_id: ORG_ID,
+    }));
+    Object.assign(playersData, {
+      divisions: U10_BOYS_AND_GIRLS.divisions,
+      players: folded,
+    });
+    world.teams = foldedTeams;
+    seedMockDb({ players: folded, teams: foldedTeams });
+    mocks.updatePlayer.mockImplementation(async (playerId, patch) => {
+      const { error } = await mockSupabase.rpc('admin_update_player', {
+        p_player_id: playerId,
+        p_patch: patch,
+      });
+      return error ? { success: false, error: error.message } : { success: true };
+    });
+
     const { tileText, teamOf } = await balance({ ...BASE_FLAGS, gender_model: 'coed' });
+
     expect(tileText).toBe('0/2 buddies met');
-    expect(teamOf.ann).toBe(teamOf.bo);
-    // The pair is one unit: the other two are not dealt with them.
-    expect(teamOf.kit).toBe(teamOf.max);
-    expect(teamOf.kit).not.toBe(teamOf.ann);
+    expect(screen.getByText(/Buddies in different divisions, so not paired/)).toHaveTextContent(
+      'Ann Ross (U10B) and Bo Hale (U10G)'
+    );
+    // Every save was accepted: no refused update, no warning to the admin.
+    expect(toast).not.toHaveBeenCalledWith(expect.anything(), 'warning');
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/^Balanced 6 players/), 'success');
+    const stored = Object.fromEntries(getMockData('players').map((p) => [p.id, p.team_id]));
+    const divisionOfTeam = Object.fromEntries(foldedTeams.map((t) => [t.id, t.division_id]));
+    for (const p of folded) {
+      expect(stored[p.id], p.id).toBe(teamOf[p.id]);
+      expect(divisionOfTeam[stored[p.id]], p.id).toBe(p.division_id);
+    }
+    expect(teamOf.kit).toBe(teamOf.zed);
   });
 
   it('two gender-specific divisions shown separately pair nobody across them', async () => {

@@ -797,15 +797,26 @@ plan is the rule-14 plan for them. No migration, no new persistence, no dependen
    `aria-describedby` (`Toggle` takes `describedBy`). The stored value is not touched and is shown
    as stored; turning Coaching Interest off writes only that flag. A disabled button is not
    focusable, so the text is reached in reading order, not by tabbing to the switch.
-7. **(8d) Co-ed buddies.** TeamBuilder's buddy division is the board's key when the board folds
-   two or more divisions (the Co-ed model: `divisionFilters` folds the boys' and girls' divisions
-   of one age group into one board), so a boy and a girl who name each other are paired; separate
-   gender-specific boards (the Boys / Girls model) never pair across each other, as before. The
-   Teams page needed no change: it runs one program at a time, `buddyLinking` reads no gender, and
-   a single co-ed division (U4) pairs a boy and a girl (`tests/teamingOwnerDecisions.test.js`, the
-   generator path). A co-ed league whose boys' and girls' divisions are not yet merged still runs
-   them as two programs on the Teams page, where a cross-division pair is `cross-division`
-   (unchanged); merge the divisions to team them together.
+7. **(8d) Co-ed buddies.** The owner's rule: a co-ed _division_ pairs boy and girl; gender-specific
+   divisions never pair across each other. A board that folds the boys' and girls' divisions of
+   one age group is still two stored divisions, so TeamBuilder's buddy division stays the
+   player's stored `division_id`: a team belongs to one stored division, and `admin_update_player`
+   refuses a team outside the player's own (review finding: an earlier draft paired across the
+   fold, which could not be saved). A single co-ed division (U4) pairs a boy and a girl. On a
+   folded board, a mutual pair split across the two divisions is not paired and is shown to the
+   admin ("Buddies in different divisions, so not paired: Ann Ross (U10B) and Bo Hale (U10G).
+   ... merge them into a co-ed division to pair them"). Auto-balance now deals each stored
+   division on the board to its own teams (before, a folded board dealt every player to every
+   team, and a refused save left it half done). The Teams page needed no change: it runs one
+   program at a time, `buddyLinking` reads no gender, and a single co-ed division pairs a boy and
+   a girl (`tests/teamingOwnerDecisions.test.js`, the generator path). The test saves a folded
+   board through the mock's own `admin_update_player`, which applies the database function's
+   team-in-division check.
+8. **A held-out player cannot sanction a buddy's play-up** (review finding). Route B (a coach's
+   child who is the mutual buddy) needs the two placed together. `applyPlayUpEligibility` now
+   refuses the sanction when the buddy is waitlisted, so the younger player comes out
+   `play_up_blocked` with its review reason and is held out too; a coach's child who would play
+   down was already refused (`rawPlacement !== 'down'`), and a test holds both.
 
 Tests: `tests/teamingOwnerDecisions.test.js` (means, waitlist, the coach with two children,
 co-ed buddies in the generator), `tests/teamAnalysisEligibility.test.jsx` (the page: waitlist,

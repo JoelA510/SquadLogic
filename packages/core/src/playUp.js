@@ -267,7 +267,11 @@ export function applyPlayUpEligibility({
           buddyInfo &&
           String(buddy.division).toLowerCase() === String(player.division).toLowerCase() &&
           buddyInfo.isCoachChild &&
-          buddyInfo.rawPlacement !== 'down'
+          buddyInfo.rawPlacement !== 'down' &&
+          // Route B needs the two placed together. A waitlisted buddy is seated nowhere
+          // (`isWaitlisted`), so cannot sanction; a blocked one (a coach's child who would play
+          // down) is already refused above (owner, 2026-10-27; review finding).
+          !isWaitlisted(buddy)
         ) {
           buddySanction = true;
         }

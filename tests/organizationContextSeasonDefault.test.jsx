@@ -162,6 +162,16 @@ describe('the current season (E1)', () => {
     expect(seen.current.currentSeasonSetting.id).toBe('season-active');
   });
 
+  it('shows a completed season when it was chosen (history, read-only), and never by default', async () => {
+    mocks.role = 'admin';
+    localStorage.setItem('squadlogic-current-season-id', 'season-done');
+    let seen = await mount();
+    expect(seen.current.currentSeasonSetting.id).toBe('season-done');
+    localStorage.removeItem('squadlogic-current-season-id');
+    seen = await mount();
+    expect(seen.current.currentSeasonSetting.id).toBe('season-active');
+  });
+
   it('lists the active season first, drafts for admins only', async () => {
     mocks.role = 'admin';
     let seen = await mount();

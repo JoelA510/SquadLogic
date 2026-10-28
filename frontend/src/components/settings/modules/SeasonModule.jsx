@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { useTheme } from '../../../contexts/ThemeContext.jsx';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
+import { useSeasonReadOnly } from '../../../hooks/useSeasonReadOnly.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import ProgramsSection from './ProgramsSection.jsx';
+import SeasonsSection from './SeasonsSection.jsx';
 
 /**
  * The zones this control offers by name.
@@ -29,7 +30,6 @@ const SEASON_TIMEZONE_OPTIONS = Object.freeze([
 ]);
 
 export default function SeasonModule() {
-  const { currentSeason, updateCurrentSeason, availableSeasons } = useTheme();
   // **`season_settings.timezone`, not the ThemeContext copy.** That copy is
   // localStorage-backed and ThemeContext's own header calls it legacy state
   // slated for removal. Until GAP-30 it was the only thing this control wrote,
@@ -43,9 +43,10 @@ export default function SeasonModule() {
   // the same second-source-of-truth this gap is made of, one layer up.
   const { currentOrganization, currentSeasonSetting, refetchOrgs } = useOrganization();
   const timezone = currentSeasonSetting?.timezone ?? '';
+  // A completed season's clock is fixed (20261109010000): the calendar feed expands its dates in it.
+  const seasonReadOnly = useSeasonReadOnly();
 
-  const [seasonFormat, setSeasonFormat] = useState('single');
-  const [localCurrentSeason, setLocalCurrentSeason] = useState(currentSeason);
+  const [seasonFormat, setSeasonFormat] = useState(/** @type {'single' | 'dual'} */ ('single'));
   const [timezoneError, setTimezoneError] = useState(null);
   const [timezoneSaving, setTimezoneSaving] = useState(false);
 
@@ -109,63 +110,6 @@ export default function SeasonModule() {
         </div>
       </div>
 
-      <div>
-        <label
-          htmlFor="current-season-label"
-          className="block text-sm font-medium text-text-secondary mb-2"
-        >
-          Current Season Label
-        </label>
-        <div className="space-y-3">
-          <div className="relative">
-            <input
-              id="current-season-label"
-              type="text"
-              value={localCurrentSeason}
-              onChange={(e) => setLocalCurrentSeason(e.target.value)}
-              onBlur={async () => {
-                updateCurrentSeason(localCurrentSeason);
-                const orgId = currentOrganization?.id;
-                if (orgId) {
-                  await supabase.rpc('record_audit_event', {
-                    p_organization_id: orgId,
-                    p_action: 'settings.season_updated',
-                    p_metadata: {
-                      season: localCurrentSeason,
-                    },
-                  });
-                }
-              }}
-              className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
-              placeholder={seasonFormat === 'single' ? '2025' : '2025-2026'}
-            />
-            {availableSeasons.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {availableSeasons.map((season) => (
-                  <button
-                    key={season}
-                    type="button"
-                    aria-pressed={localCurrentSeason === season}
-                    aria-label={`Select ${season} as current season`}
-                    onClick={() => {
-                      setLocalCurrentSeason(season);
-                      updateCurrentSeason(season);
-                    }}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                      localCurrentSeason === season
-                        ? 'bg-brand-glow border-brand-400 text-text-primary'
-                        : 'bg-bg-surface text-text-muted border-border-subtle hover:bg-bg-surface-hover'
-                    }`}
-                  >
-                    {season}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label
@@ -177,10 +121,17 @@ export default function SeasonModule() {
           <select
             id="season-timezone"
             value={timezone}
-            disabled={timezoneSaving || !currentSeasonSetting?.id}
-            aria-describedby={timezoneError ? 'season-timezone-error' : undefined}
+            disabled={timezoneSaving || !currentSeasonSetting?.id || seasonReadOnly}
+            aria-describedby={
+              timezoneError
+                ? 'season-timezone-error'
+                : seasonReadOnly
+                  ? 'season-timezone-readonly'
+                  : undefined
+            }
             aria-invalid={timezoneError ? 'true' : undefined}
             onChange={async (e) => {
+              if (seasonReadOnly) return;
               const newVal = e.target.value;
               const orgId = currentOrganization?.id;
               const seasonId = currentSeasonSetting?.id;
@@ -229,6 +180,11 @@ export default function SeasonModule() {
               </option>
             ))}
           </select>
+          {seasonReadOnly && (
+            <p id="season-timezone-readonly" className="mt-2 text-sm text-text-muted">
+              This season is completed and read-only: its timezone cannot be changed.
+            </p>
+          )}
           {timezoneError && (
             <p id="season-timezone-error" role="alert" className="mt-2 text-sm text-danger">
               {timezoneError}
@@ -251,6 +207,8 @@ export default function SeasonModule() {
           />
         </div>
       </div>
+
+      <SeasonsSection seasonFormat={seasonFormat} />
 
       <ProgramsSection />
     </div>

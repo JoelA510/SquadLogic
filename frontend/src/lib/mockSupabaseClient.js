@@ -26,6 +26,14 @@ import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
 import {
+  ageRuleChangedRefusal,
+  completedSeasonRefusal,
+  handleSeasonRpc,
+  ageRuleForImport,
+  divisionBandRefusal,
+  scheduleWriteRefusal,
+} from './mockSeasons.js';
+import {
   activeSeasonOf,
   coachTeamSeasonRefusal,
   enrollmentRefusal,
@@ -51,6 +59,17 @@ import { ADMIN_ROLES, ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
+
+/** A write the database would refuse: the builder every chained call resolves to the refusal. */
+function refusedWrite(refusal) {
+  const chainable = {
+    select: () => chainable,
+    single: () => Promise.resolve(refusal),
+    maybeSingle: () => Promise.resolve(refusal),
+    then: (onFulfilled, onRejected) => Promise.resolve(refusal).then(onFulfilled, onRejected),
+  };
+  return chainable;
+}
 /**
  * What Postgres accepts for a `uuid` cast. Used where a mocked RPC mirrors a
  * real one that casts and raises `22023` rather than dropping the value.
@@ -857,9 +876,10 @@ const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
  *   excludeSlotId?: string|null }} probe
  */
 /**
- * 20261101010000: an import goes only to the organization's active season (players are
- * organization-level and divisions season-level, so a draft import would move a live player
- * into the draft's divisions until enrolment is season-scoped). Mirrors the SQL refusal.
+ * 20261101010000: a field import goes only to the organization's active season (fields and
+ * locations are organization-level). Since 20261109010000 a draft season takes a player or coach
+ * import, as players and coaches belong to one season; this is the refusal that remains. Mirrors
+ * the SQL refusal.
  */
 function seasonNotActiveError(seasonId, status, noun) {
   return {
@@ -2243,6 +2263,12 @@ export const mockSupabase = {
       ...query,
       insert: (records) => {
         const db = getDB();
+        const insertRefused = scheduleWriteRefusal(
+          db,
+          table,
+          Array.isArray(records) ? records : [records]
+        );
+        if (insertRefused) return refusedWrite(insertRefused);
         const newRecords = (Array.isArray(records) ? records : [records]).map((r) => {
           const id = r.id || mockId();
           if (table === 'fields' && r.supports_halves) {
@@ -2285,6 +2311,14 @@ export const mockSupabase = {
       },
       upsert: (records) => {
         const db = getDB();
+        const upsertRows = Array.isArray(records) ? records : [records];
+        const upsertRefused = scheduleWriteRefusal(db, table, [
+          ...upsertRows,
+          ...(db[table] || []).filter((item) =>
+            upsertRows.some((r) => String(r.id) === String(item.id))
+          ),
+        ]);
+        if (upsertRefused) return refusedWrite(upsertRefused);
         const newRecords = (Array.isArray(records) ? records : [records]).map((r) => ({
           id: r.id || mockId(),
           created_at: r.created_at || new Date().toISOString(),
@@ -2361,6 +2395,12 @@ export const mockSupabase = {
           eq: (col, val) => {
             const db = getDB();
             let updatedItem = null;
+            const matching = (db[table] || []).filter((item) => String(item[col]) === String(val));
+            const updateRefused = scheduleWriteRefusal(db, table, [
+              ...matching,
+              ...matching.map((item) => ({ ...item, ...updates })),
+            ]);
+            if (updateRefused) return refusedWrite(updateRefused);
             if (db[table]) {
               db[table] = db[table].map((item) => {
                 if (String(item[col]) === String(val)) {
@@ -2468,6 +2508,8 @@ export const mockSupabase = {
             const db = getDB();
             if (db[table]) {
               const doomed = db[table].filter((item) => String(item[col]) === String(val));
+              const deleteRefused = scheduleWriteRefusal(db, table, doomed);
+              if (deleteRefused) return Promise.resolve(deleteRefused);
               // A hard delete with no tombstone resurrects: `getDB()` rebuilds
               // from `initialMockData` and `mergeSource` only adds or updates.
               // The RPCs tombstone; this generic path did not, so a direct
@@ -2575,6 +2617,12 @@ export const mockSupabase = {
       if (programs) {
         if (!programs.error) saveDB(db);
         return programs;
+      }
+      // Seasons rolled over (migration 20261109010000): the four season writers, refusals included.
+      const seasons = handleSeasonRpc(db, name, params, { currentUserId, isOrgAdmin });
+      if (seasons) {
+        if (!seasons.error) saveDB(db);
+        return seasons;
       }
       // Field and venue permits (migration 20261102010000): the five RPCs, refusals included.
       const permits = handleFacilityPermitRpc(db, name, params, {
@@ -4505,9 +4553,12 @@ export const mockSupabase = {
             },
           };
         }
-        // Players are organization-level and a division season-level: an import into another
-        // season would move a live player into its divisions, so only the active season takes one.
-        if (named.status !== 'active') {
+        // 20261109010000: the active season or a draft takes a player or coach import; a field
+        // import stays with the active season.
+        if (
+          named.status !== 'active' &&
+          (named.status !== 'draft' || (importType !== 'players' && importType !== 'coaches'))
+        ) {
           return { data: null, error: seasonNotActiveError(named.id, named.status, 'season') };
         }
         jobSeasonId = named.id;
@@ -4974,7 +5025,8 @@ export const mockSupabase = {
     }
 
     if (name === 'upsert_division_for_import') {
-      const { p_organization_id, p_season_settings_id, p_name, p_gender } = params || {};
+      const { p_organization_id, p_season_settings_id, p_name, p_gender, p_min_age, p_max_age } =
+        params || {};
       // 20261101010000: a completed season is history; no import adds to it.
       const upsertSeason = (db.season_settings || []).find(
         (item) => String(item.id) === String(p_season_settings_id)
@@ -4993,9 +5045,21 @@ export const mockSupabase = {
       let division = db.divisions.find(
         (item) =>
           String(item.organization_id) === String(p_organization_id) &&
+          String(item.season_settings_id) === String(p_season_settings_id) &&
           String(item.name).toLowerCase() === String(p_name).toLowerCase()
       );
       if (division) {
+        // 20261109010000: the band of a division that bears a window is part of the age rule, fixed
+        // once the season has players or while an import is pending (refused, never ignored); the
+        // arguments left out change nothing (COALESCE).
+        const nextBand = {
+          min_age: p_min_age ?? division.min_age ?? null,
+          max_age: p_max_age ?? division.max_age ?? null,
+        };
+        const bandRefusal = divisionBandRefusal(db, division, nextBand);
+        if (bandRefusal) return bandRefusal;
+        division.min_age = nextBand.min_age;
+        division.max_age = nextBand.max_age;
         if (p_gender) division.gender_policy = p_gender;
       } else {
         division = {
@@ -5027,6 +5091,9 @@ export const mockSupabase = {
       if (rejected) {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
+      // 20261109010000: a completed season is read-only.
+      const readOnly = completedSeasonRefusal(db, [player]);
+      if (readOnly) return readOnly;
       const patch = { ...(p_patch || {}) };
       const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
       // Mirror admin_update_player: changing division invalidates the team
@@ -5099,6 +5166,11 @@ export const mockSupabase = {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
       const ids = (p_player_ids || []).map(String);
+      const bulkReadOnly = completedSeasonRefusal(
+        db,
+        (db.players || []).filter((player) => ids.includes(String(player.id)))
+      );
+      if (bulkReadOnly) return bulkReadOnly;
       let count = 0;
       (db.players || []).forEach((player) => {
         if (ids.includes(String(player.id))) {
@@ -5194,6 +5266,8 @@ export const mockSupabase = {
       const ids = (p_player_ids || []).map(String);
       const before = (db.players || []).length;
       const doomedPlayers = (db.players || []).filter((player) => ids.includes(String(player.id)));
+      const deleteReadOnly = completedSeasonRefusal(db, doomedPlayers);
+      if (deleteReadOnly) return deleteReadOnly;
       db.players = (db.players || []).filter((player) => !ids.includes(String(player.id)));
       markMockDeleted(
         db,
@@ -5264,12 +5338,9 @@ export const mockSupabase = {
           },
         };
       }
-      if (seasonRow && seasonRow.status !== 'active') {
-        return {
-          data: null,
-          error: seasonNotActiveError(seasonRow.id, seasonRow.status, 'Season'),
-        };
-      }
+      // The ages were counted under the rule stamped on the job when the file was validated.
+      const ageRuleRefused = ageRuleChangedRefusal(db, job, seasonRow);
+      if (ageRuleRefused) return ageRuleRefused;
 
       const deriveDivision = (payload) => {
         const ageText = String(payload.age_group ?? payload['age group'] ?? payload.age ?? '');
@@ -5711,12 +5782,6 @@ export const mockSupabase = {
           `Season ${coachSeason.id} is completed and takes no import`,
           'season_completed'
         );
-      }
-      if (coachSeason.status !== 'active') {
-        return {
-          data: null,
-          error: seasonNotActiveError(coachSeason.id, coachSeason.status, 'Season'),
-        };
       }
 
       const validationErrors = Array.isArray(p_validation_errors) ? p_validation_errors : [];
@@ -7198,6 +7263,8 @@ export const mockSupabase = {
         };
       }
       const orgId = [...orgIds][0];
+      const coachDeleteReadOnly = completedSeasonRefusal(db, targets);
+      if (coachDeleteReadOnly) return coachDeleteReadOnly;
       const member = (db.organization_members || []).find(
         (item) =>
           String(item.organization_id) === orgId &&
@@ -7297,6 +7364,8 @@ export const mockSupabase = {
       if (!coach) {
         return { data: null, error: { message: 'Coach not found in organization' } };
       }
+      const coachStatusReadOnly = completedSeasonRefusal(db, [coach]);
+      if (coachStatusReadOnly) return coachStatusReadOnly;
 
       const assignedTeamCount = (db.teams || []).filter(
         (team) =>
@@ -7371,6 +7440,8 @@ export const mockSupabase = {
       if (!team) {
         return { data: null, error: { message: 'Team not found in organization' } };
       }
+      const coachScheduleRefused = scheduleWriteRefusal(db, 'teams', [team]);
+      if (coachScheduleRefused) return coachScheduleRefused;
 
       const previousCoachId = team.coach_id || null;
       if (p_coach_id) {
@@ -7617,6 +7688,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
+      const gameCancelRefused = scheduleWriteRefusal(db, 'game_assignments', [assignment]);
+      if (gameCancelRefused) return gameCancelRefused;
       db.game_assignments = (db.game_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
@@ -7654,6 +7727,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
+      const practiceCancelRefused = scheduleWriteRefusal(db, 'practice_assignments', [assignment]);
+      if (practiceCancelRefused) return practiceCancelRefused;
       db.practice_assignments = (db.practice_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
@@ -7691,6 +7766,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
+      const teamUpdateRefused = scheduleWriteRefusal(db, 'teams', [team]);
+      if (teamUpdateRefused) return teamUpdateRefused;
       const patch = p_patch || {};
       const allowed = ['name', 'notes'];
       for (const key of Object.keys(patch)) {
@@ -7753,6 +7830,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
+      const teamDeleteRefused = scheduleWriteRefusal(db, 'teams', [team]);
+      if (teamDeleteRefused) return teamDeleteRefused;
       // As 20261108020000 (20261022030000 with the TIME TBD rows counted; that is 20261021030000
       // without RSVPs or team chat): the
       // team's practice exceptions are withdrawn, audited and archived, each
@@ -7928,16 +8007,20 @@ export const mockSupabase = {
         // As the Edge Function does (R5): a player's natural age is counted in the season the
         // finalizer attaches divisions to (the mock's active one), and no birth key is staged.
         // E1: the season the job adds to (its own, else the organization's active one).
-        const importJobRow = (getDB().import_jobs || []).find(
-          (item) => String(item.id) === String(body.import_job_id)
-        );
-        const importSeasonRow = (getDB().season_settings || []).find(
-          (item) =>
-            String(item.organization_id) === String(body.organization_id) &&
-            (importJobRow?.season_settings_id
-              ? String(item.id) === String(importJobRow.season_settings_id)
-              : item.status === 'active')
-        );
+        // As the Edge Function does: the rule and its revision come from one read, which also
+        // stamps the job; the ages below are counted from what it returned and nothing else.
+        let ageRule = null;
+        if (body.import_type === 'players') {
+          const ruleDb = getDB();
+          ageRule = ageRuleForImport(
+            ruleDb,
+            body.organization_id,
+            body.import_job_id ?? null,
+            (body.row_offset || 0) === 0
+          );
+          saveDB(ruleDb);
+        }
+        const importSeasonRow = ageRule?.season ?? null;
         filterImportRows(
           body.import_type,
           canonicalizeForUpload(body.import_type, body.rows || []),
@@ -7965,6 +8048,11 @@ export const mockSupabase = {
               dob: rest.date_of_birth,
               seasonYear: importSeasonRow?.season_year ?? null,
               cutoffMode: importSeasonRow?.age_cutoff_mode ?? null,
+              cutoffMonth: importSeasonRow?.age_cutoff_month ?? null,
+              cutoffDay: importSeasonRow?.age_cutoff_day ?? null,
+              // As the Edge Function does (20261109010000): the season's divisions with a
+              // birth-date window, so a birth date in one counts as that division's age.
+              divisions: ageRule?.divisions ?? [],
             });
             row = naturalAge === null ? rest : { ...rest, natural_age: String(naturalAge) };
           }

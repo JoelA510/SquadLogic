@@ -370,6 +370,13 @@ describe('the other writers (mock)', () => {
   beforeEach(rollOver);
 
   it('refuses a division or team of another season in the player patch (22023)', async () => {
+    // A player of the completed season is read-only (E3b); the patch rule is about a player of
+    // the active season, so player-1 is brought into it first.
+    save({
+      season_settings: getMockData('season_settings').map((s) =>
+        s.id === MOCK_SEASON_ID ? { ...s, status: 'active' } : { ...s, status: 'draft' }
+      ),
+    });
     const stray = await supabase.rpc('admin_update_player', {
       p_player_id: 'player-1',
       p_patch: { division_id: NEXT_DIV },

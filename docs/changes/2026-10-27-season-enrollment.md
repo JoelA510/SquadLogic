@@ -166,3 +166,102 @@ Built as written; where the code or production differed from the plan:
 - **Left for E3b:** the guard widening to drafts (the coach finalizer now has the same guard as the
   player finalizer, so E3b widens both), the Seasons page, rollover, the cutoff. E3c: the evaluations
   import.
+
+## Build notes: E3b (2026-10-28)
+
+Built as written; where the plans left a choice, the recommended option was taken (listed in the PR body
+under "For the owner"). Migration `20261109010000_season_rollover.sql`.
+
+- **RPCs.** `admin_create_season_from(source, name, year, start, end)`, `admin_update_draft_season(season,
+  patch)`, `admin_activate_season(season)` and, for the optional window the C3 section names,
+  `admin_set_division_birthdate_window(division, start, end)`. Each takes the organization's season lock and
+  is audited (`season.created_from`, `season.updated`, `season.activated`, `division.window_changed`). What a
+  rollover copies is two catalogues (`rollover_division_columns()` and its skipped list, the same for
+  `season_settings`) that pgTAP holds equal to the table's columns: a column added later fails until it is
+  classified.
+- **Age cutoff.** `age_cutoff_mode` gains `custom` with `age_cutoff_month/day` (a CHECK ties them to the mode). A
+  custom cutoff of Jan 1 is the calendar year, Feb 29 is Mar 1 in a year without one. The window rule for the
+  natural age: a birth date inside a division's window (both ends) takes that division's age, which is the age
+  the cutoff gives brought into the division's band (`min_age/max_age`, else the U-numbers in its name); two
+  windows holding a date take the lower age; a window with no readable band is ignored. Core
+  (`ageGroups.js`), the Edge twin (`natural-age.ts`, `import-validation` reads the season's divisions) and the
+  mock agree on a corpus (`tests/naturalAgeParity.test.js`, `natural-age_test.ts`), and the Teams page's
+  birth-date path (`resolveNaturalAge`, `applyPlayUpEligibility`, `computeAgeGroup`) uses the same rule. The
+  Teams page reads each division's `birthdate_start`/`birthdate_end` with the rest of its row (it did not at
+  first, so the window never reached `applyPlayUpEligibility`; Codex's finding on #680), and counts ages
+  against the windows compiled once per roster (`compileDivisionWindows`): the season fixture's play-up
+  comparison counts ~600,000 ages, and reading the window dates per player took its tests from ~2.3s to
+  ~3.5s under coverage, past vitest's 5s in CI.
+- **Once a season has players** its cutoff, season year and its divisions' windows cannot change: triggers on
+  `season_settings` and `divisions` (22023, `season_has_players`), so a direct write meets them as the RPCs do.
+  Name and dates change on a draft or the active season; the year and cutoff on a draft only (Decision 7).
+  **Nor while a player import is pending** (22023, `import_pending`; Codex's finding on #680): the import
+  stages each row's natural age under the rule in force, so changing the rule between the staging and the
+  apply would store ages counted under the old one. `season_has_pending_player_import(season)` is an
+  unfinished registration job of the season (a legacy job with no season counts for the active one) with
+  staged rows not yet promoted; cancelling a job fails it, which ends it, and a coach-only job stages no
+  player rows. Ages are never recomputed: the rule waits instead.
+  **The window the pending check cannot see** (Codex, rounds two and three on #680): `import-validation` reads
+  the rule and only then stages its first row, so a change between the two finds nothing pending, and a
+  change followed by its reversal (A, B, A) leaves a rule that looks the same. So `season_settings` carries
+  an `age_rule_revision` that only goes up, bumped by a trigger on every change that moves an age (the cutoff
+  mode, month, day, the season year, and a window-bearing division's window, `min_age`/`max_age` or, where a
+  band column is empty and the name supplies the band, its name; a window-bearing division arriving or
+  going). One service-role RPC, `import_age_rule(org, job, restart)`, returns the rule the validation needs
+  (the season's year, cutoff and its window-bearing divisions) with the revision from one statement, and
+  stamps the job with the season and that revision; the Edge Function counts every age from what it
+  returned and reads nothing of its own. `finalize_import_job` takes the season lock and refuses a stamped
+  job whose season and revision are not the season's now (22023, `age_rule_changed`), leaving the job to be
+  validated again. A revision rather than a digest of the values: a digest cannot tell A, B, A from no
+  change, and the revision is taken from the same snapshot as the data. The first batch of a file replaces
+  a stamp (validating again refreshes it); a later batch keeps the first's. A job with no stamp (a coach
+  or field job, or one made before this migration) is never refused.
+- **Every writer of the rule takes the season lock** (Codex, round four): the guard triggers on `season_settings`
+  and `divisions` (and the revision trigger, for a delete) take `pg_advisory_xact_lock('season:' || org)`, the
+  lock the finalizer and the rollover RPCs take, before they look at players or a pending import and before
+  they raise the revision, so an uncommitted band or window change from any path (`upsert_division_for_import`
+  included, which is not replaced) cannot interleave with a finalization that read the revision. The lock is
+  reentrant for the RPCs that already hold it. Order: a finalizer holds the job row, then the lock; a rollover
+  RPC the lock, then season rows; a direct write to `season_settings` or `divisions` has its row, then the
+  lock, so such a write racing a rollover RPC can deadlock on that pair, and Postgres aborts one (40P01);
+  the finalizer's own division inserts carry no window and return before the lock. pgTAP shows each path takes
+  the lock by reading `pg_locks` in a fresh organization (a true two-session race cannot run inside one
+  pgTAP transaction); the smoke does the same for a cutoff write.
+- **A completed season's timezone is fixed** (`season_settings_completed_guard`): the calendar feed expands a
+  season's occurrences in it. The RPC and a direct write meet one trigger (signed-in callers); the control in
+  Settings is disabled with a note. The master export reads a completed season's TIME TBD list without a rebuild.
+- **A division the file has no registrants in is a program when its rules take players from the file**: the
+  Teams page places the file's rows against every division of the season and lists a division that gets any
+  (id: the division's own, count: the incoming players); generating it seats them.
+- **A division's band is part of the rule.** The guard on `divisions` also covers `min_age`, `max_age` and a
+  name that supplies the band, but only for a division that bears a window (a division with none does not
+  move an age): once the season has players (`season_has_players`) or while an import is pending
+  (`import_pending`), the change is refused. `upsert_division_for_import` is left as it is and meets the
+  trigger: a call that names no band (the coed transition's) changes nothing, and one that moves the band
+  of a window-bearing division in such a season is refused loudly rather than ignored, since silently
+  keeping the old band would hide that the admin's request did nothing.
+- **Guard widening.** `create_import_job`, `finalize_import_job` and `finalize_coach_import_job` allow the
+  active season or a draft and refuse a completed one; `finalize_field_import_job` (organization-level
+  locations and fields) and a field job for a draft stay active-only.
+- **Completed seasons** are read-only for a signed-in caller by a trigger on `players` and `coaches`
+  (22023, `season_completed`), whichever writer; a job with no signed-in user (the retention job, the demo
+  purge) and the cascade of a deleted organization pass. A completed season can be opened from the header to look
+  back at (a notice above each page says it is read-only). **Schedules too** (Codex's finding on #680): the
+  same rule, one more trigger function, on `teams`, `team_players`, `team_coach_assignments`,
+  `practice_assignments`, `practice_exceptions`, `game_assignments` and `schedule_tbd` (the TIME TBD list that
+  #678 added: `sync_schedule_tbd_practices`, run by a signed-in admin through `persist_practice_schedule` and
+  `refresh_schedule_tbd_practices`, rebuilds a season's rows, so a completed season's rebuild is refused; the
+  export reads a completed season's list and does not refresh it). A row's season is its team's
+  division's (a team has no season column), or `practice_exceptions.season_settings_id`; an update is judged on
+  the old row and the new, so a team cannot be moved out of or into a completed season. They are triggers, not
+  checks in the writers, so the persistence RPCs a later PR replaces (`schedule_tbd`, #678) are covered
+  without being edited; a table that PR adds joins the trigger list. The Teams, Practice and Game pages turn
+  Generate, Apply, Save, the manual override and the cancels off on a completed season and say why
+  (`useSeasonReadOnly`, `SeasonReadOnlyNote`), so the database's refusal is not the first the admin hears.
+- **Activation** needs a known timezone, both dates (end not before start) and a season year, completes the
+  previous active season and activates the draft in two statements; a completed season is never reactivated
+  (Decision 6).
+- **Seasons page.** A section of Settings, Season & Calendar (above Programs): the list, "Start next season from
+  this", Edit (name, dates, year, cutoff presets and custom, each division's window) and Activate. The
+  "Current Season Label" control and its ThemeContext state are removed.
+- **Verification** is in the PR body. Not done here, left for E3c: the evaluations import.

@@ -103,4 +103,40 @@ describe('the mock refresh_schedule_tbd_practices', () => {
     expect(data).toEqual({ changed: false, practice_rows: 1, missing_practices: 2 });
     expect(JSON.stringify(db.schedule_tbd)).toBe(before);
   });
+
+  it('refuses the rebuild of a completed season that has rows (20261109010000), and answers for one with none', () => {
+    const completed = {
+      ...db,
+      season_settings: [
+        { id: 's1', organization_id: 'o1', status: 'completed' },
+        db.season_settings[1],
+      ],
+    };
+    const { data, error } = handleScheduleTbdRpc(
+      completed,
+      'refresh_schedule_tbd_practices',
+      { p_season_settings_id: 's1' },
+      { isOrgAdmin: admin }
+    );
+    expect(data).toBeNull();
+    expect(error).toMatchObject({ code: '22023', details: 'season_completed' });
+    const empty = { ...completed, schedule_tbd: [] };
+    expect(
+      handleScheduleTbdRpc(
+        empty,
+        'refresh_schedule_tbd_practices',
+        { p_season_settings_id: 's1' },
+        { isOrgAdmin: admin }
+      ).error
+    ).toBeNull();
+    // Reading the list of a completed season is not a write.
+    expect(
+      handleScheduleTbdRpc(
+        completed,
+        'get_schedule_tbd',
+        { p_season_settings_id: 's1' },
+        { isOrgAdmin: admin }
+      ).error
+    ).toBeNull();
+  });
 });

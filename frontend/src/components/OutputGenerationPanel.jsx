@@ -541,6 +541,8 @@ export default function OutputGenerationPanel({
   const { user } = useAuth() || {};
   const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
   const seasonSettingsId = currentSeasonSetting?.id ?? null;
+  // A completed season's TIME TBD list is read, never rebuilt (20261109010000).
+  const seasonCompleted = currentSeasonSetting?.status === 'completed';
   // How many TIME TBD items the season has, as refreshed and read when the panel opened (or the season
   // changed). The refresh matters here: a run that placed nothing never reached the practice save, so
   // without it the list could be empty while the roster still owes practices.
@@ -552,7 +554,7 @@ export default function OutputGenerationPanel({
     }
     let current = true;
     setTbdPreview({ status: 'loading', count: 0 });
-    refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId).then(
+    refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId, { readOnly: seasonCompleted }).then(
       (list) => {
         if (current) setTbdPreview({ status: 'ready', count: list.items.length });
       },
@@ -564,7 +566,7 @@ export default function OutputGenerationPanel({
     return () => {
       current = false;
     };
-  }, [seasonSettingsId, supabaseClient]);
+  }, [seasonSettingsId, seasonCompleted, supabaseClient]);
   // The TIME TBD rows the files hold, as `get_schedule_tbd` returned them (null: none generated).
   const [tbdRows, setTbdRows] = useState(/** @type {Array<Record<string, any>> | null} */ (null));
   // A demo uploads nothing (the server refuses the folder, D3); downloads still work.
@@ -692,7 +694,9 @@ export default function OutputGenerationPanel({
         let tbd = { rows: /** @type {Array<Record<string, any>>} */ ([]), items: [] };
         if (seasonSettingsId) {
           try {
-            tbd = await refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId);
+            tbd = await refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId, {
+              readOnly: seasonCompleted,
+            });
           } catch (tbdErr) {
             logger.error('TIME TBD refresh/read error:', tbdErr);
             setGenerated(null);

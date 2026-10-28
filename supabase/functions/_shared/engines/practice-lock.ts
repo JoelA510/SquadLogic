@@ -280,7 +280,7 @@ export function planTeamsForRun(
 export function outsideHoldsFor(
   rows: readonly LoadedPracticeRow[],
   runSlotIds: ReadonlySet<string>,
-  stored: ReadonlyMap<string, { firstDate: string | null; validUntil: string | null }>,
+  stored: ReadonlyMap<string, { firstDate?: string | null; validUntil?: string | null }>,
   needing: ReadonlySet<string>
 ): {
   holds: Array<{
@@ -302,7 +302,7 @@ export function outsideHoldsFor(
     if (!needing.has(row.teamId)) continue;
     if (row.slotId !== null && runSlotIds.has(row.slotId)) continue;
     const slot = row.slotId === null ? undefined : stored.get(row.slotId);
-    if (!slot || slot.firstDate === null || slot.validUntil === null) {
+    if (!slot || slot.firstDate == null || slot.validUntil == null) {
       unchecked.push({ teamId: row.teamId, slotId: row.slotId });
       continue;
     }

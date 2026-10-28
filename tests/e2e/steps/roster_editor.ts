@@ -29,14 +29,20 @@ Given('I am in a demo league of {int} players', async ({ page }, players: number
 
 // A demo starts with its practice schedule applied (migration 20261110010000), so a league with
 // nothing applied is one whose practices were released: the rows go, and with them the practice run.
+// The release is fixture setup (the mock store); that the demo DID start with practices is proved
+// through the page first, because otherwise "released" could release nothing: the Exports page does
+// not call the league empty, and offers to generate its files.
 Given("the demo league's applied practices have been released", async ({ page }) => {
+  await page.goto('/exports');
+  const generate = page.getByTestId('generate-csvs-btn');
+  await expect(generate).toBeVisible({ timeout: LOAD_TIMEOUT });
+  await expect(generate).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByTestId('csv-empty-reason')).toHaveCount(0);
+
   await waitForMockClient(page);
-  const released = await page.evaluate(() => {
+  await page.evaluate(() => {
     const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
     const demo = (db.organizations ?? []).find((org) => org.demo_expires_at);
-    const before = (db.practice_assignments ?? []).filter(
-      (row) => row.organization_id === demo?.id
-    ).length;
     db.practice_assignments = (db.practice_assignments ?? []).filter(
       (row) => row.organization_id !== demo?.id
     );
@@ -44,10 +50,7 @@ Given("the demo league's applied practices have been released", async ({ page })
       (run) => !(run.organization_id === demo?.id && run.run_type === 'practice')
     );
     window.__saveMockDB__(db);
-    return before;
   });
-  // Meta-assertion: the demo did start with practices, or "released" released nothing.
-  expect(released, 'practices the demo started with').toBeGreaterThan(0);
 });
 
 Then(

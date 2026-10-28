@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
+import { useSeasonReadOnly } from '../../../hooks/useSeasonReadOnly.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import ProgramsSection from './ProgramsSection.jsx';
 import SeasonsSection from './SeasonsSection.jsx';
@@ -42,6 +43,8 @@ export default function SeasonModule() {
   // the same second-source-of-truth this gap is made of, one layer up.
   const { currentOrganization, currentSeasonSetting, refetchOrgs } = useOrganization();
   const timezone = currentSeasonSetting?.timezone ?? '';
+  // A completed season's clock is fixed (20261109010000): the calendar feed expands its dates in it.
+  const seasonReadOnly = useSeasonReadOnly();
 
   const [seasonFormat, setSeasonFormat] = useState(/** @type {'single' | 'dual'} */ ('single'));
   const [timezoneError, setTimezoneError] = useState(null);
@@ -118,10 +121,17 @@ export default function SeasonModule() {
           <select
             id="season-timezone"
             value={timezone}
-            disabled={timezoneSaving || !currentSeasonSetting?.id}
-            aria-describedby={timezoneError ? 'season-timezone-error' : undefined}
+            disabled={timezoneSaving || !currentSeasonSetting?.id || seasonReadOnly}
+            aria-describedby={
+              timezoneError
+                ? 'season-timezone-error'
+                : seasonReadOnly
+                  ? 'season-timezone-readonly'
+                  : undefined
+            }
             aria-invalid={timezoneError ? 'true' : undefined}
             onChange={async (e) => {
+              if (seasonReadOnly) return;
               const newVal = e.target.value;
               const orgId = currentOrganization?.id;
               const seasonId = currentSeasonSetting?.id;
@@ -170,6 +180,11 @@ export default function SeasonModule() {
               </option>
             ))}
           </select>
+          {seasonReadOnly && (
+            <p id="season-timezone-readonly" className="mt-2 text-sm text-text-muted">
+              This season is completed and read-only: its timezone cannot be changed.
+            </p>
+          )}
           {timezoneError && (
             <p id="season-timezone-error" role="alert" className="mt-2 text-sm text-danger">
               {timezoneError}

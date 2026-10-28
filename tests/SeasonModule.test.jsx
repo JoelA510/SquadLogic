@@ -208,4 +208,33 @@ describe('SeasonModule timezone change: one writer, one audit row', () => {
     expect(mocks.refetchOrgs).not.toHaveBeenCalled();
     expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual(['admin_set_season_timezone']);
   });
+
+  it('fixes the clock of a completed season and says why, and makes no call', () => {
+    mocks.org.currentSeasonSetting = {
+      id: MOCK_SEASON_ID,
+      organization_id: MOCK_ORG_ID,
+      timezone: 'America/Chicago',
+      status: 'completed',
+    };
+    render(<SeasonModule />);
+    const select = timezoneSelect();
+    expect(select).toBeDisabled();
+    expect(select).toHaveAccessibleDescription(
+      'This season is completed and read-only: its timezone cannot be changed.'
+    );
+    fireEvent.change(select, { target: { value: 'America/New_York' } });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the clock of an active season can be changed', () => {
+    mocks.org.currentSeasonSetting = {
+      id: MOCK_SEASON_ID,
+      organization_id: MOCK_ORG_ID,
+      timezone: 'America/Chicago',
+      status: 'active',
+    };
+    render(<SeasonModule />);
+    expect(timezoneSelect()).toBeEnabled();
+    expect(screen.queryByText(/its timezone cannot be changed/)).toBeNull();
+  });
 });

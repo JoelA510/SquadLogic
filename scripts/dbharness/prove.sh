@@ -191,6 +191,11 @@ M56="$REPO/supabase/migrations/20261106010000_play_up_requested.sql"
 # bodies it replaces are re-aimed here.
 M58="$REPO/supabase/migrations/20261108010000_season_enrollment.sql"
 R58="$REPO/docs/sql/20261108010000_revert.sql"
+# E3b: the next season from this one, draft editing and activation, the age cutoff and division
+# windows, drafts that take imports, completed seasons read-only, and the revert. It replaces the two
+# finalizers and create_import_job, so the plants that aimed at those bodies in $M58 are re-aimed here.
+M59="$REPO/supabase/migrations/20261109010000_season_rollover.sql"
+R59="$REPO/docs/sql/20261109010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3609,7 +3614,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M26 create_import_job still audits the file name" "$M50" \
+plant "M26 create_import_job still audits the file name" "$M59" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
@@ -3793,7 +3798,7 @@ END;
 # again at 20261022020000, which replaces that one, again at 20261025010000,
 # and again at 20261026010000 ($M43), the live body: the staged payload stored
 # whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M58" \
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M59" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4064,12 +4069,12 @@ plant "R36 the revert leaves the column defaults on now()" "$R36" \
 # body that drifted and on a new function left behind. The purge plants are
 # aimed at $M42, whose minimise_import_people_data (R4: no player contact
 # columns) replaces this file's.
-plant "M37 the coach finalizer stores the payload minus a denylist again" "$M58" \
+plant "M37 the coach finalizer stores the payload minus a denylist again" "$M59" \
   "        v_custom_attributes := public.import_declared_attributes(v_declared, v_row.normalized_payload);" \
   "        v_custom_attributes := v_row.normalized_payload - 'full_name' - 'email';" \
   "smoke 20261022010000"
 
-plant "M37 the coach finalizer keeps a phone in contact_info" "$M58" \
+plant "M37 the coach finalizer keeps a phone in contact_info" "$M59" \
   "                contact_info = (COALESCE(v_existing.contact_info, '{}'::jsonb) - 'phone') || v_contact_info," \
   "                contact_info = COALESCE(v_existing.contact_info, '{}'::jsonb) || v_contact_info," \
   "smoke 20261022010000"
@@ -4479,7 +4484,7 @@ plant "M43 apply_player_patch still writes the birth date" "$M58" \
         updated_at      = now()" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 the finalizer promotes only a row with a natural age" "$M58" \
+plant "M43 the finalizer promotes only a row with a natural age" "$M59" \
   "        WHERE p.first_name IS NOT NULL
           AND p.last_name IS NOT NULL
     )," \
@@ -4489,7 +4494,7 @@ plant "M43 the finalizer promotes only a row with a natural age" "$M58" \
     )," \
   "smoke 20261026010000"
 
-plant "M43 the finalizer prefers the age group to the staged natural age" "$M58" \
+plant "M43 the finalizer prefers the age group to the staged natural age" "$M59" \
   "                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
                     THEN p.natural_age_text::smallint
                 WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
@@ -4500,7 +4505,7 @@ plant "M43 the finalizer prefers the age group to the staged natural age" "$M58"
                     THEN p.natural_age_text::smallint" \
   "smoke 20261026010000"
 
-plant "M43 a re-import keeps the old natural age" "$M58" \
+plant "M43 a re-import keeps the old natural age" "$M59" \
   "            natural_age = de.natural_age," \
   "            natural_age = COALESCE(de.natural_age, p.natural_age)," \
   "smoke 20261026010000"
@@ -4781,7 +4786,7 @@ plant "M49 an anonymous user's first password goes unchecked" "$M49" \
 # caller names (a completed season's program edited through the active season's id); and a season
 # made after the migration still gets its default program (the trigger, which no migration-time
 # check can see, since the harness's migration build has no season to give one to).
-plant "M50 the finalizer ignores the job's season" "$M58" \
+plant "M50 the finalizer ignores the job's season" "$M59" \
   "                ELSE s.id = v_job.season_settings_id END);
 
     -- A player belongs to one season" \
@@ -4867,7 +4872,7 @@ plant "M53 the member role check keeps coach" "$M53" \
     CHECK (role = ANY (ARRAY['admin'::text, 'coach'::text, 'staff'::text, 'tenant_admin'::text]));" \
   "applying 20261104010000_admin_only.sql"
 
-plant "M53 the coach finalizer looks a coach up in every organization" "$M58" \
+plant "M53 the coach finalizer looks a coach up in every organization" "$M59" \
   "        WHERE c.organization_id = v_job.organization_id
           AND c.season_settings_id = v_season_settings_id
           AND c.email = v_email;
@@ -4887,7 +4892,7 @@ plant "M54 the column drop leaves coaches.profile_id" "$M54" \
 # blank play-up cell is a present column that withdraws a request; `import_payload_text` returns
 # NULL for it just as for a missing key, so the finalizer reads presence from the key. Read from
 # the text, a blank cell leaves the stored request in place and the smoke's re-import row sees it.
-plant "M56 a blank play-up cell is read as an absent column" "$M58" \
+plant "M56 a blank play-up cell is read as an absent column" "$M59" \
   "                WHEN NOT p.play_up_present THEN NULL" \
   "                WHEN p.play_up_text IS NULL THEN NULL" \
   "smoke 20261106010000"
@@ -4898,11 +4903,40 @@ plant "M56 a blank play-up cell is read as an absent column" "$M58" \
 # season's player (the case Codex found on #666); the smoke's season-2 import sees the update, and the
 # division trigger refuses the move into the new season's division first. Executed by hand against the
 # smoke and supabase/tests/season_enrollment.sql: both red.
-plant "M58 the finalizer matches a player of any season" "$M58" \
+plant "M58 the finalizer matches a player of any season" "$M59" \
   "              AND players.season_settings_id = v_season_settings_id
               AND players.external_registration_id = de.external_registration_id" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
+
+# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Three
+# plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red):
+# a draft season refused an import again; the rollover without the organization's season lock and
+# row locks (the smoke's second session then writes at once instead of timing out); and a completed
+# season writable again for a signed-in caller (the smoke's player patch is accepted).
+plant "M59 the finalizer refuses a draft season again" "$M59" \
+  "    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
+  "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
+        RAISE EXCEPTION 'Season % is % and takes no import yet', v_season_settings_id, v_season_status
+            USING ERRCODE = '22023', DETAIL = 'season_not_active';
+    END IF;
+    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
+  "smoke 20261109010000"
+
+plant "M59 the rollover takes no season lock" "$M59" \
+  "    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_org::text, 0));
+    PERFORM 1 FROM public.season_settings s WHERE s.organization_id = v_org ORDER BY s.id FOR UPDATE;
+
+    SELECT * INTO v_source FROM public.season_settings s WHERE s.id = p_source_season_id;" \
+  "    SELECT * INTO v_source FROM public.season_settings s WHERE s.id = p_source_season_id;" \
+  "smoke 20261109010000"
+
+plant "M59 a completed season is writable for a signed-in caller" "$M59" \
+  "    IF v_status = 'completed' THEN
+        -- The cascade of a deleted organization: the season may not have been removed yet." \
+  "    IF v_status = 'completed' AND false THEN
+        -- The cascade of a deleted organization: the season may not have been removed yet." \
+  "smoke 20261109010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

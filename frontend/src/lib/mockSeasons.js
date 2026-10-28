@@ -287,11 +287,12 @@ const SCHEDULE_TABLES = [
   'practice_assignments',
   'practice_exceptions',
   'game_assignments',
+  'schedule_tbd',
 ];
 
-/** The season a schedule row belongs to: its own column, else its team's division's season. */
+/** The season a schedule row belongs to: its own column (exceptions, TIME TBD), else its team's division's season. */
 function scheduleSeasonOf(db, table, row) {
-  if (table === 'practice_exceptions' && row?.season_settings_id) {
+  if ((table === 'practice_exceptions' || table === 'schedule_tbd') && row?.season_settings_id) {
     return seasonOf(db, row.season_settings_id);
   }
   let divisionId = table === 'teams' ? row?.division_id : null;

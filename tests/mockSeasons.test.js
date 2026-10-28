@@ -886,6 +886,22 @@ describe('a completed season is read-only for its schedule (mock of the schedule
           team_id: TEAM,
         },
       ],
+      schedule_tbd: [
+        {
+          id: 'ms-tbd-old',
+          organization_id: MOCK_ORG_ID,
+          season_settings_id: OLD,
+          kind: 'practice',
+          team_id: TEAM,
+        },
+        {
+          id: 'ms-tbd-live',
+          organization_id: MOCK_ORG_ID,
+          season_settings_id: MOCK_SEASON_ID,
+          kind: 'practice',
+          team_id: LIVE_TEAM,
+        },
+      ],
       game_assignments: [
         {
           id: 'ms-ga-old',
@@ -974,6 +990,16 @@ describe('a completed season is read-only for its schedule (mock of the schedule
     expect(getMockData('teams').find((t) => t.id === TEAM).notes).toBeUndefined();
     expect(getMockData('team_players').filter((r) => r.team_id === TEAM)).toHaveLength(1);
 
+    // The TIME TBD list is a schedule table too.
+    expect(
+      await write('schedule_tbd', (t) => t.update({ reason: 'late' }).eq('id', 'ms-tbd-old'))
+    ).toMatchObject(refused);
+    expect(await write('schedule_tbd', (t) => t.delete().eq('id', 'ms-tbd-old'))).toMatchObject(
+      refused
+    );
+    expect(
+      await write('schedule_tbd', (t) => t.update({ reason: 'live' }).eq('id', 'ms-tbd-live'))
+    ).toBeNull();
     // The active season's rows take the same writes.
     expect(await write('teams', (t) => t.update({ notes: 'ok' }).eq('id', LIVE_TEAM))).toBeNull();
     expect(

@@ -114,13 +114,18 @@ the Edge counterpart of core `practice/daylight.js`:
   units (a unit's id is the team id when it needs one, else `teamId#k`), each on a different
   weekday (a hard rule beside capacity and coaches, `checkHardConstraints`), in a slot of exactly the
   division's length when it sets one. A division at one a week runs byte-identically to before.
+- **Weekdays held outside the run.** A saved practice on a slot the run does not carry still holds its
+  team's weekday: its dating is read from the organization's slots (`outsideHoldsFor`), and a hold that
+  cannot be dated refuses the run (422 `TEAM_HOLDS_UNREADABLE`) for a team that needs several.
+- **A division at 0 practices** needs nothing: not in coverage, the run's report (`practices.noPractices`)
+  or the readiness counts.
 - **What is missing, and why.** Each unplaced unit carries `no-slot-available`, `coach-preference`,
   `no-live-date`, `practice-length` or `not-enough-days`; the response's `practices` block lists, per
   team that wants several, how many it holds, was given and still lacks, and the teams holding more
   rows than their count now (the rows stay; lowering a count never deletes a practice).
 - **The writer's gate.** `persist_practice_schedule` refuses a save whose new `auto` rows break
   capacity, a slot reservation, the division's length, the different-weekday rule or the weekly
-  count (`practice_new_auto_row_refusals`, P0001, naming each row). Manual, repair, recommendation
+  count (`practice_new_auto_row_refusals`, P0001, naming each row). The count is per scheduling week (Monday to Sunday), a saved row with no date range holds its slot's whole validity, and `teams_without_practice` leaves out the teams of a 0-a-week division. Manual, repair, recommendation
   and override rows keep their existing checks. Coach overlap, preferences and daylight are the
   server's verify, not the writer.
 

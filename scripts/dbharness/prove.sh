@@ -2868,10 +2868,14 @@ plant "M12 teams without practice are listed from the payload, not the roster" "
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
+                   -- A division that gives no practice (0 a week) leaves its teams with none on
+                   -- purpose: that is not a team the save left without one.
+                   AND d.practices_per_week > 0
                )," \
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
+                   AND d.practices_per_week > 0
                    AND t.id = ANY (v_payload_teams)
                )," \
   "FAIL smoke 20260924000000"

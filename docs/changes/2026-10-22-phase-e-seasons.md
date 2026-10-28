@@ -1,6 +1,6 @@
 # Phase E: seasons and programs
 
-Status: **E1 and E2 built (one PR; see "As built (E1)" and "As built (E2)"); E3 not started.**
+Status: **E1 and E2 built (one PR; see "As built (E1)" and "As built (E2)"); E3 built in two PRs (E3a, E3b; see the build notes in `2026-10-27-season-enrollment.md`).**
 Owner rules of 2026-10-26 are in Decisions 9 and 10. It
 applies decisions 5.1, 5.2 and 5.3 of `2026-10-20-core-roadmap.md` to research item 5
 (`2026-10-20-research-defects.md`). The roadmap's "Registration" row (per-program registration
@@ -196,7 +196,7 @@ program, move it to another, or remove it from one. A division is in at most one
 
 - [x] E1 (see "As built (E1)")
 - [x] E2 (see "As built (E2)")
-- [ ] E3
+- [x] E3 (E3a: per-season enrollment; E3b: rollover, drafts, activation, the Seasons page)
 
 | PR  | Contents                                                                                                              | Live effect                                 |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |

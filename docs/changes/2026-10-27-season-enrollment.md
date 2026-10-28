@@ -166,3 +166,41 @@ Built as written; where the code or production differed from the plan:
 - **Left for E3b:** the guard widening to drafts (the coach finalizer now has the same guard as the
   player finalizer, so E3b widens both), the Seasons page, rollover, the cutoff. E3c: the evaluations
   import.
+
+## Build notes: E3b (2026-10-28)
+
+Built as written; where the plans left a choice, the recommended option was taken (listed in the PR body
+under "For the owner"). Migration `20261109010000_season_rollover.sql`.
+
+- **RPCs.** `admin_create_season_from(source, name, year, start, end)`, `admin_update_draft_season(season,
+  patch)`, `admin_activate_season(season)` and, for the optional window the C3 section names,
+  `admin_set_division_birthdate_window(division, start, end)`. Each takes the organization's season lock and
+  is audited (`season.created_from`, `season.updated`, `season.activated`, `division.window_changed`). What a
+  rollover copies is two catalogues (`rollover_division_columns()` and its skipped list, the same for
+  `season_settings`) that pgTAP holds equal to the table's columns: a column added later fails until it is
+  classified.
+- **Age cutoff.** `age_cutoff_mode` gains `custom` with `age_cutoff_month/day` (a CHECK ties them to the mode). A
+  custom cutoff of Jan 1 is the calendar year, Feb 29 is Mar 1 in a year without one. The window rule for the
+  natural age: a birth date inside a division's window (both ends) takes that division's age, which is the age
+  the cutoff gives brought into the division's band (`min_age/max_age`, else the U-numbers in its name); two
+  windows holding a date take the lower age; a window with no readable band is ignored. Core
+  (`ageGroups.js`), the Edge twin (`natural-age.ts`, `import-validation` reads the season's divisions) and the
+  mock agree on a corpus (`tests/naturalAgeParity.test.js`, `natural-age_test.ts`), and the Teams page's
+  birth-date path (`resolveNaturalAge`, `applyPlayUpEligibility`, `computeAgeGroup`) uses the same rule.
+- **Once a season has players** its cutoff, season year and its divisions' windows cannot change: triggers on
+  `season_settings` and `divisions` (22023, `season_has_players`), so a direct write meets them as the RPCs do.
+  Name and dates change on a draft or the active season; the year and cutoff on a draft only (Decision 7).
+- **Guard widening.** `create_import_job`, `finalize_import_job` and `finalize_coach_import_job` allow the
+  active season or a draft and refuse a completed one; `finalize_field_import_job` (organization-level
+  locations and fields) and a field job for a draft stay active-only.
+- **Completed seasons** are read-only for a signed-in caller by a trigger on `players` and `coaches`
+  (22023, `season_completed`), whichever writer; a job with no signed-in user (the retention job, the demo
+  purge) and the cascade of a deleted organization pass. A completed season can be opened from the header to look
+  back at (a notice above each page says it is read-only).
+- **Activation** needs a known timezone, both dates (end not before start) and a season year, completes the
+  previous active season and activates the draft in two statements; a completed season is never reactivated
+  (Decision 6).
+- **Seasons page.** A section of Settings, Season & Calendar (above Programs): the list, "Start next season from
+  this", Edit (name, dates, year, cutoff presets and custom, each division's window) and Activate. The
+  "Current Season Label" control and its ThemeContext state are removed.
+- **Verification** is in the PR body. Not done here, left for E3c: the evaluations import.

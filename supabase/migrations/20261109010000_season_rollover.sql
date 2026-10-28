@@ -49,11 +49,16 @@
 --      completed one", in `create_import_job` (registration jobs), `finalize_import_job` and
 --      `finalize_coach_import_job`, each behind the md5 of its current text. A field import
 --      (`finalize_field_import_job`, organization-level locations and fields) stays active-only.
---   6. A player file is stamped with the age rule it was validated under (`import_jobs.age_rule_fingerprint`,
---      `stamp_import_job_age_rule`, called by import-validation before it reads the rule), and
---      `finalize_import_job` refuses, under the season lock, a job whose stamp is not the rule now
---      (22023, `age_rule_changed`): the one window item 3 cannot see, between the validation's read
---      and its first staged row. A job with no stamp is not refused.
+--   6. A player file is stamped with the revision of the age rule it was validated under. A season's
+--      `age_rule_revision` only ever goes up, bumped by a trigger on every change that moves an age
+--      (the cutoff, the season year, and a window-bearing division's window, band or, where the
+--      name supplies the band, name). One service-role RPC, `import_age_rule`, returns the rule the
+--      validation counts ages with and its revision from one statement, and stamps the job with
+--      that revision; the validation computes from what it returned. `finalize_import_job` refuses,
+--      under the season lock, a job whose stamp is not the season's revision now (22023,
+--      `age_rule_changed`): the window between the validation's read and its first staged row, which
+--      the pending-import guard cannot see, including a change and its reversal (A, B, A). A job with
+--      no stamp is not refused.
 --   7. An end-state check.
 --
 -- **Production's bodies are not read from here.** The migration refuses to replace a function
@@ -182,9 +187,10 @@ IMMUTABLE
 SET search_path = public
 AS $$
     -- name, season_year, season_start and season_end are the new season's own; the dated daylight
-    -- adjustments belong to the source season's calendar.
+    -- adjustments belong to the source season's calendar; the age-rule revision counts this season's
+    -- own changes.
     SELECT ARRAY['id', 'organization_id', 'name', 'status', 'season_label', 'season_year',
-                 'season_start', 'season_end', 'daylight_adjustments', 'created_at', 'updated_at']::text[];
+                 'season_start', 'season_end', 'daylight_adjustments', 'age_rule_revision', 'created_at', 'updated_at']::text[];
 $$;
 
 REVOKE ALL ON FUNCTION public.rollover_division_columns() FROM PUBLIC, anon, authenticated;
@@ -235,89 +241,89 @@ COMMENT ON FUNCTION public.season_has_pending_player_import(uuid) IS
 
 -- The age rule a player file was checked under. import-validation counts each natural age under the
 -- season's rule and stages it; a rule change made after its read but before its first staged row
--- finds nothing pending to refuse (the guard above). So the validation stamps the job with a
--- fingerprint of the rule it is about to read, and the finalizer refuses a job whose stamp is no
--- longer the season's rule (22023, `age_rule_changed`): the file is validated again. A fingerprint,
--- not a version counter: nothing else has to bump anything, a change to a windowed division's band
--- is covered too, and the stamp is taken BEFORE the rule is read, so a change in between can only
--- make the stamp stale (a refusal), never make it match a rule the ages were not counted under.
-ALTER TABLE public.import_jobs ADD COLUMN age_rule_fingerprint text;
-COMMENT ON COLUMN public.import_jobs.age_rule_fingerprint IS
-    'The season''s age rule (cutoff, season year, windowed divisions) as it stood when the player file was validated; finalize_import_job refuses the job when the rule is not this any more (age_rule_changed). NULL: not stamped (a coach or field job, or one made before 20261109010000), never refused. 20261109010000.';
+-- finds nothing pending to refuse (the guard above), and a change followed by its reversal leaves
+-- a rule that looks unchanged. So the season carries a revision that only goes up, bumped by a
+-- trigger on every change that moves an age; the validation takes the rule and its revision from
+-- one statement (`import_age_rule`), stamps the job with that revision and counts ages from what the
+-- statement returned; the finalizer refuses a job whose stamp is not the season's revision now
+-- (22023, `age_rule_changed`): the file is validated again.
+ALTER TABLE public.season_settings ADD COLUMN age_rule_revision bigint NOT NULL DEFAULT 0;
+COMMENT ON COLUMN public.season_settings.age_rule_revision IS
+    'Goes up by one on every change that moves a natural age: the cutoff mode, month or day, the season year, and a window-bearing division''s window, age band or (where the name supplies the band) name. Never reset. import_age_rule stamps a player file with it; finalize_import_job refuses a file stamped with another (age_rule_changed). 20261109010000.';
 
-CREATE FUNCTION public.season_age_rule_fingerprint(p_season_id uuid)
-RETURNS text
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-SET timezone = 'UTC'
-AS $$
-    SELECT md5(jsonb_build_object(
-               'mode', s.age_cutoff_mode,
-               'month', s.age_cutoff_month,
-               'day', s.age_cutoff_day,
-               'year', s.season_year,
-               -- Only a division with both ends can take a player by birth date; its band is the
-               -- columns, else the U-number in its name.
-               'windows', COALESCE((
-                   SELECT jsonb_agg(jsonb_build_array(
-                              d.id, d.birthdate_start, d.birthdate_end, d.min_age, d.max_age,
-                              CASE WHEN d.min_age IS NULL OR d.max_age IS NULL THEN d.name END)
-                          ORDER BY d.id)
-                     FROM public.divisions d
-                    WHERE d.season_settings_id = s.id
-                      AND d.birthdate_start IS NOT NULL AND d.birthdate_end IS NOT NULL), '[]'::jsonb)
-           )::text)
-      FROM public.season_settings s
-     WHERE s.id = p_season_id;
-$$;
+ALTER TABLE public.import_jobs ADD COLUMN age_rule_season_id uuid;
+ALTER TABLE public.import_jobs ADD COLUMN age_rule_revision bigint;
+COMMENT ON COLUMN public.import_jobs.age_rule_season_id IS
+    'The season whose age rule the player file was validated under (with age_rule_revision). NULL: not stamped. 20261109010000.';
+COMMENT ON COLUMN public.import_jobs.age_rule_revision IS
+    'season_settings.age_rule_revision when the player file was validated; finalize_import_job refuses the job when the season''s revision is another (age_rule_changed). NULL: not stamped (a coach or field job, or one made before 20261109010000), never refused. 20261109010000.';
 
-REVOKE ALL ON FUNCTION public.season_age_rule_fingerprint(uuid) FROM PUBLIC, anon, authenticated;
-COMMENT ON FUNCTION public.season_age_rule_fingerprint(uuid) IS
-    'A digest of the age rule that counts a natural age in the season: cutoff mode, month, day, season year, and each window-bearing division''s id, window and band. 20261109010000.';
-
--- The stamp: called by import-validation (service role) before it reads the rule. The first batch of a
--- file (`p_restart`) takes a new stamp, so validating a file again refreshes it; a later batch keeps
--- the first's, so a rule change between two batches still shows at finalization.
-CREATE FUNCTION public.stamp_import_job_age_rule(p_import_job_id uuid, p_restart boolean DEFAULT false)
-RETURNS text
+-- The rule the validation counts ages with, and its revision, from ONE statement (one snapshot), so
+-- the revision is the revision of exactly the data returned. With a job it also stamps the job with
+-- that revision: `p_restart` (the first batch of a file) replaces an earlier stamp, a later batch
+-- keeps the first's. The season is the job's own, else the organization's active one (as the
+-- finalizer resolves it); no season: NULL, and nothing is stamped.
+CREATE FUNCTION public.import_age_rule(p_organization_id uuid, p_import_job_id uuid DEFAULT NULL, p_restart boolean DEFAULT false)
+RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 SET timezone = 'UTC'
 AS $$
 DECLARE
-    v_job public.import_jobs%ROWTYPE;
-    v_season uuid;
-    v_fingerprint text;
+    v_job_season uuid;
+    v_rule jsonb;
 BEGIN
-    SELECT * INTO v_job FROM public.import_jobs WHERE id = p_import_job_id;
-    IF NOT FOUND OR v_job.job_type <> 'registration' THEN
-        RETURN NULL;
+    IF p_organization_id IS NULL THEN
+        RAISE EXCEPTION 'p_organization_id is required' USING ERRCODE = '22023';
     END IF;
-    SELECT s.id INTO v_season
+    IF p_import_job_id IS NOT NULL THEN
+        SELECT j.season_settings_id INTO v_job_season
+          FROM public.import_jobs j
+         WHERE j.id = p_import_job_id AND j.organization_id = p_organization_id AND j.job_type = 'registration';
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Import job % not found for organization %', p_import_job_id, p_organization_id
+                USING ERRCODE = 'P0002';
+        END IF;
+    END IF;
+
+    SELECT jsonb_build_object(
+               'season_id', s.id,
+               'status', s.status,
+               'season_year', s.season_year,
+               'age_cutoff_mode', s.age_cutoff_mode,
+               'age_cutoff_month', s.age_cutoff_month,
+               'age_cutoff_day', s.age_cutoff_day,
+               'revision', s.age_rule_revision,
+               -- Only a division with both ends can take a player by birth date.
+               'divisions', COALESCE((
+                   SELECT jsonb_agg(jsonb_build_object(
+                              'name', d.name, 'min_age', d.min_age, 'max_age', d.max_age,
+                              'birthdate_start', d.birthdate_start, 'birthdate_end', d.birthdate_end)
+                          ORDER BY d.id)
+                     FROM public.divisions d
+                    WHERE d.season_settings_id = s.id
+                      AND d.birthdate_start IS NOT NULL AND d.birthdate_end IS NOT NULL), '[]'::jsonb))
+      INTO v_rule
       FROM public.season_settings s
-     WHERE s.organization_id = v_job.organization_id
-       AND (CASE WHEN v_job.season_settings_id IS NULL
-                 THEN s.status = 'active'
-                 ELSE s.id = v_job.season_settings_id END);
-    IF v_season IS NULL THEN
-        RETURN NULL;
+     WHERE s.organization_id = p_organization_id
+       AND (CASE WHEN v_job_season IS NULL THEN s.status = 'active' ELSE s.id = v_job_season END);
+
+    IF v_rule IS NOT NULL AND p_import_job_id IS NOT NULL THEN
+        UPDATE public.import_jobs
+           SET age_rule_season_id = (v_rule ->> 'season_id')::uuid,
+               age_rule_revision = (v_rule ->> 'revision')::bigint
+         WHERE id = p_import_job_id
+           AND (p_restart OR age_rule_revision IS NULL);
     END IF;
-    v_fingerprint := public.season_age_rule_fingerprint(v_season);
-    UPDATE public.import_jobs
-       SET age_rule_fingerprint = v_fingerprint
-     WHERE id = p_import_job_id
-       AND (p_restart OR age_rule_fingerprint IS NULL);
-    RETURN v_fingerprint;
+    RETURN v_rule;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.stamp_import_job_age_rule(uuid, boolean) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.stamp_import_job_age_rule(uuid, boolean) TO service_role;
-COMMENT ON FUNCTION public.stamp_import_job_age_rule(uuid, boolean) IS
-    'Service role only (import-validation): record on a registration job the fingerprint of its season''s age rule, before the rule is read. p_restart replaces an earlier stamp (the first batch of a file); otherwise the first stamp stands. Returns the fingerprint, NULL for a job or season it cannot stamp. 20261109010000.';
+REVOKE ALL ON FUNCTION public.import_age_rule(uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.import_age_rule(uuid, uuid, boolean) TO service_role;
+COMMENT ON FUNCTION public.import_age_rule(uuid, uuid, boolean) IS
+    'Service role only (import-validation): the age rule a player file is counted under (season, cutoff, season year, window-bearing divisions) and its revision, from one statement; with a job it stamps the job with that revision (p_restart replaces an earlier stamp). NULL when the organization has no season for the job. 20261109010000.';
 
 CREATE FUNCTION public.season_settings_cutoff_guard()
 RETURNS trigger
@@ -335,6 +341,8 @@ BEGIN
         RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before its age cutoff or season year changes', OLD.id
             USING ERRCODE = '22023', DETAIL = 'import_pending';
     END IF;
+    -- A change that moves an age: the revision a validated file is checked against.
+    NEW.age_rule_revision := OLD.age_rule_revision + 1;
     RETURN NEW;
 END;
 $$;
@@ -348,6 +356,33 @@ CREATE TRIGGER season_settings_cutoff_guard
           OR OLD.season_year IS DISTINCT FROM NEW.season_year)
     EXECUTE FUNCTION public.season_settings_cutoff_guard();
 
+-- Does this change to a division move an age? Its window (new, moved or removed); or, for a division
+-- that bears a window (before or after), its age band; or its name where the name supplies the band
+-- (a band column is empty: "U4"). Shared by the guard and the revision trigger below.
+CREATE FUNCTION public.division_age_rule_differs(p_old public.divisions, p_new public.divisions)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+    SELECT p_old.birthdate_start IS DISTINCT FROM p_new.birthdate_start
+        OR p_old.birthdate_end IS DISTINCT FROM p_new.birthdate_end
+        OR (
+            ((p_old.birthdate_start IS NOT NULL AND p_old.birthdate_end IS NOT NULL)
+              OR (p_new.birthdate_start IS NOT NULL AND p_new.birthdate_end IS NOT NULL))
+            AND (
+                p_old.min_age IS DISTINCT FROM p_new.min_age
+                OR p_old.max_age IS DISTINCT FROM p_new.max_age
+                OR (p_old.name IS DISTINCT FROM p_new.name
+                    AND (p_old.min_age IS NULL OR p_old.max_age IS NULL
+                         OR p_new.min_age IS NULL OR p_new.max_age IS NULL))
+            )
+        );
+$$;
+REVOKE ALL ON FUNCTION public.division_age_rule_differs(public.divisions, public.divisions) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.division_age_rule_differs(public.divisions, public.divisions) IS
+    'True when a change to a division moves a natural age: its birth-date window, or (for a division that bears one) its age band, or its name where the name supplies the band. 20261109010000.';
+
 CREATE FUNCTION public.divisions_window_guard()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -356,20 +391,18 @@ SET search_path = public
 SET timezone = 'UTC'
 AS $$
 BEGIN
-    IF TG_OP = 'UPDATE'
-       AND OLD.birthdate_start IS NOT DISTINCT FROM NEW.birthdate_start
-       AND OLD.birthdate_end IS NOT DISTINCT FROM NEW.birthdate_end THEN
+    IF TG_OP = 'UPDATE' AND NOT public.division_age_rule_differs(OLD, NEW) THEN
         RETURN NEW;
     END IF;
     IF TG_OP = 'INSERT' AND NEW.birthdate_start IS NULL AND NEW.birthdate_end IS NULL THEN
         RETURN NEW;
     END IF;
     IF EXISTS (SELECT 1 FROM public.players p WHERE p.season_settings_id = NEW.season_settings_id) THEN
-        RAISE EXCEPTION 'Season % has players: a division''s birth-date window cannot change', NEW.season_settings_id
+        RAISE EXCEPTION 'Season % has players: a division''s birth-date window or age band cannot change', NEW.season_settings_id
             USING ERRCODE = '22023', DETAIL = 'season_has_players';
     END IF;
     IF public.season_has_pending_player_import(NEW.season_settings_id) THEN
-        RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before a division''s birth-date window changes', NEW.season_settings_id
+        RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before a division''s birth-date window or age band changes', NEW.season_settings_id
             USING ERRCODE = '22023', DETAIL = 'import_pending';
     END IF;
     RETURN NEW;
@@ -377,15 +410,46 @@ END;
 $$;
 
 CREATE TRIGGER divisions_window_guard
-    BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end ON public.divisions
+    BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name ON public.divisions
     FOR EACH ROW EXECUTE FUNCTION public.divisions_window_guard();
+
+-- The revision of the season's age rule goes up with every such change (after it is allowed), and
+-- with the arrival or removal of a window-bearing division.
+CREATE FUNCTION public.divisions_age_rule_revision()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.birthdate_start IS NULL OR NEW.birthdate_end IS NULL THEN RETURN NEW; END IF;
+    ELSIF TG_OP = 'DELETE' THEN
+        IF OLD.birthdate_start IS NULL OR OLD.birthdate_end IS NULL THEN RETURN OLD; END IF;
+    ELSIF NOT public.division_age_rule_differs(OLD, NEW) THEN
+        RETURN NEW;
+    END IF;
+    UPDATE public.season_settings
+       SET age_rule_revision = age_rule_revision + 1
+     WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD.season_settings_id ELSE NEW.season_settings_id END;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER divisions_age_rule_revision
+    AFTER INSERT OR UPDATE OR DELETE ON public.divisions
+    FOR EACH ROW EXECUTE FUNCTION public.divisions_age_rule_revision();
 
 REVOKE ALL ON FUNCTION public.season_settings_cutoff_guard() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.divisions_window_guard() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.divisions_age_rule_revision() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_settings_cutoff_guard() IS
     'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
 COMMENT ON FUNCTION public.divisions_window_guard() IS
-    'Trigger function: refuses a new or changed division birth-date window once the division''s season has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
+    'Trigger function: refuses a new or changed division birth-date window, or the age band (or band-supplying name) of a division that bears one, once the division''s season has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
+COMMENT ON FUNCTION public.divisions_age_rule_revision() IS
+    'Trigger function: raises the season''s age_rule_revision when a division change moves a natural age, or a window-bearing division arrives or goes. 20261109010000.';
 
 -- ---------------------------------------------------------------------------
 -- 5. A completed season is read-only, players and coaches included.
@@ -1187,11 +1251,14 @@ BEGIN
     -- a club prepares next season from its own registration data), and a completed one never does.
 
     -- The ages in the staged rows were counted under the season's rule when the file was validated
-    -- (the job's stamp). Under the season lock the rule writers take, a job whose stamp is not the
-    -- rule now is refused: the file is validated again. A job with no stamp is not refused.
+    -- (the job's stamp: the season and its age-rule revision). Under the season lock the rule writers
+    -- take, a job whose stamp is not the season's revision now is refused, a change and its reversal
+    -- included: the file is validated again. A job with no stamp is not refused.
     PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_job.organization_id::text, 0));
-    IF v_job.age_rule_fingerprint IS NOT NULL
-       AND v_job.age_rule_fingerprint IS DISTINCT FROM public.season_age_rule_fingerprint(v_season_settings_id) THEN
+    IF v_job.age_rule_revision IS NOT NULL
+       AND (v_job.age_rule_season_id IS DISTINCT FROM v_season_settings_id
+            OR v_job.age_rule_revision IS DISTINCT FROM
+               (SELECT s.age_rule_revision FROM public.season_settings s WHERE s.id = v_season_settings_id)) THEN
         RAISE EXCEPTION 'The age rules of season % changed since this file was checked; validate it again', v_season_settings_id
             USING ERRCODE = '22023', DETAIL = 'age_rule_changed';
     END IF;
@@ -2048,15 +2115,12 @@ BEGIN
         RAISE EXCEPTION 'writer(s) missing or wrongly granted: %', v_bad;
     END IF;
 
-    -- The stamp is for the service role alone; the fingerprint is not a signed-in caller's to call.
-    IF to_regprocedure('public.stamp_import_job_age_rule(uuid,boolean)') IS NULL
-       OR to_regprocedure('public.season_age_rule_fingerprint(uuid)') IS NULL
-       OR NOT has_function_privilege('service_role', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
-       OR has_function_privilege('authenticated', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
-       OR has_function_privilege('anon', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
-       OR has_function_privilege('authenticated', 'public.season_age_rule_fingerprint(uuid)', 'EXECUTE')
-       OR has_function_privilege('anon', 'public.season_age_rule_fingerprint(uuid)', 'EXECUTE') THEN
-        RAISE EXCEPTION 'the age-rule stamp or fingerprint is missing or wrongly granted';
+    -- The rule read is for the service role alone, and nobody signed in may call it.
+    IF to_regprocedure('public.import_age_rule(uuid,uuid,boolean)') IS NULL
+       OR NOT has_function_privilege('service_role', 'public.import_age_rule(uuid,uuid,boolean)', 'EXECUTE')
+       OR has_function_privilege('authenticated', 'public.import_age_rule(uuid,uuid,boolean)', 'EXECUTE')
+       OR has_function_privilege('anon', 'public.import_age_rule(uuid,uuid,boolean)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'import_age_rule is missing or wrongly granted';
     END IF;
 
     SELECT count(*) INTO v_n FROM public.audit_actions
@@ -2080,7 +2144,7 @@ BEGIN
     END IF;
 
     SELECT string_agg(t.name, ', ') INTO v_bad
-      FROM (VALUES ('season_settings_cutoff_guard'), ('divisions_window_guard'),
+      FROM (VALUES ('season_settings_cutoff_guard'), ('divisions_window_guard'), ('divisions_age_rule_revision'),
                    ('players_readonly_when_completed'), ('coaches_readonly_when_completed'),
                    ('teams_readonly_when_completed'), ('team_players_readonly_when_completed'),
                    ('team_coach_assignments_readonly_when_completed'),

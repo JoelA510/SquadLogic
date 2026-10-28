@@ -4909,15 +4909,16 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
 
-# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Five
+# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Six
 # plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red;
-# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth against the smoke
+# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth and sixth against the smoke
 # and the stamp block of season_rollover.sql):
 # a draft season refused an import again; the rollover without the organization's season lock and
 # row locks (the smoke's second session then writes at once instead of timing out); and a completed
 # season writable again for a signed-in caller (the smoke's player patch is accepted); and a
 # completed season's schedule writable again (the smoke's team write is accepted); and the finalizer
-# applying a file whose age-rule stamp is stale (the smoke's finalize is accepted).
+# applying a file whose age-rule stamp is stale (the smoke's finalize is accepted); and a cutoff change
+# that leaves the age-rule revision where it was (the same, and the A, B, A the smoke does).
 plant "M59 the finalizer refuses a draft season again" "$M59" \
   "    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
   "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
@@ -4950,10 +4951,19 @@ plant "M59 a completed season's schedule is writable for a signed-in caller" "$M
   "smoke 20261109010000"
 
 plant "M59 the finalizer applies a file whose age-rule stamp is stale" "$M59" \
-  "    IF v_job.age_rule_fingerprint IS NOT NULL
-       AND v_job.age_rule_fingerprint IS DISTINCT FROM" \
-  "    IF v_job.age_rule_fingerprint IS NOT NULL AND false
-       AND v_job.age_rule_fingerprint IS DISTINCT FROM" \
+  "    IF v_job.age_rule_revision IS NOT NULL
+       AND (v_job.age_rule_season_id IS DISTINCT FROM" \
+  "    IF v_job.age_rule_revision IS NOT NULL AND false
+       AND (v_job.age_rule_season_id IS DISTINCT FROM" \
+  "smoke 20261109010000"
+
+# The age rule changed and changed back (A, B, A) between the read and the apply: the values look the
+# same, so only a revision that goes up on the change catches it. Without the bump in the cutoff guard,
+# the smoke's finalize is accepted and the pgTAP stamp block fails.
+plant "M59 the age-rule revision does not move with the cutoff" "$M59" \
+  "    NEW.age_rule_revision := OLD.age_rule_revision + 1;
+    RETURN NEW;" \
+  "    RETURN NEW;" \
   "smoke 20261109010000"
 
 # ---------------------------------------------------------------------------

@@ -3,9 +3,9 @@
 -- Puts back the three replaced functions as they stood after 20261108010000 (create_import_job,
 -- finalize_import_job and finalize_coach_import_job: the active season only takes an import; each
 -- checked by the md5 of its text at the end), drops the four season writers, the catalogues, the
--- three guard triggers (with the pending-import helper, the age-rule stamp and its fingerprint) and the
+-- three guard triggers (with the pending-import helper, `import_age_rule`, the division age-rule helpers and the revision trigger) and the
 -- completed-season triggers on the people and schedule tables with their functions, the two cutoff
--- columns, `import_jobs.age_rule_fingerprint` and the `custom` mode, and unregisters the four audit actions while no audit row uses
+-- columns, `season_settings.age_rule_revision`, `import_jobs.age_rule_season_id`/`age_rule_revision` and the `custom` mode, and unregisters the four audit actions while no audit row uses
 -- them.
 --
 -- **What it cannot undo.** A season set to the `custom` cutoff goes back to the default school year
@@ -48,15 +48,17 @@ DROP TRIGGER practice_exceptions_readonly_when_completed ON public.practice_exce
 DROP TRIGGER game_assignments_readonly_when_completed ON public.game_assignments;
 DROP TRIGGER players_readonly_when_completed ON public.players;
 DROP TRIGGER coaches_readonly_when_completed ON public.coaches;
+DROP TRIGGER divisions_age_rule_revision ON public.divisions;
 DROP TRIGGER divisions_window_guard ON public.divisions;
 DROP TRIGGER season_settings_cutoff_guard ON public.season_settings;
 DROP FUNCTION public.season_schedule_readonly_when_completed();
 DROP FUNCTION public.season_rows_readonly_when_completed();
+DROP FUNCTION public.divisions_age_rule_revision();
 DROP FUNCTION public.divisions_window_guard();
+DROP FUNCTION public.division_age_rule_differs(public.divisions, public.divisions);
 DROP FUNCTION public.season_settings_cutoff_guard();
 DROP FUNCTION public.season_has_pending_player_import(uuid);
-DROP FUNCTION public.stamp_import_job_age_rule(uuid, boolean);
-DROP FUNCTION public.season_age_rule_fingerprint(uuid);
+DROP FUNCTION public.import_age_rule(uuid, uuid, boolean);
 
 -- The writers and the catalogues.
 DROP FUNCTION public.admin_create_season_from(uuid, text, integer, date, date);
@@ -1097,9 +1099,11 @@ $function$;
 COMMENT ON FUNCTION public.create_import_job(uuid, text, text, uuid) IS
     'Admin-only import job creation RPC for browser-driven CSV workflows. As of 20261101010000 the job names its season: the one passed (the organization''s, not completed) or else the organization''s active season, fixed at creation.';
 
--- The age-rule stamp column: the finalizer that read it is back to its old body above. Stamped jobs
--- lose their stamp (it only ever made a stale file refuse to apply).
-ALTER TABLE public.import_jobs DROP COLUMN age_rule_fingerprint;
+-- The age-rule stamp and revision columns: the finalizer that read them is back to its old body above.
+-- Stamped jobs lose their stamp (it only ever made a stale file refuse to apply).
+ALTER TABLE public.import_jobs DROP COLUMN age_rule_season_id;
+ALTER TABLE public.import_jobs DROP COLUMN age_rule_revision;
+ALTER TABLE public.season_settings DROP COLUMN age_rule_revision;
 
 -- End state: the bodies are the ones that stood before.
 DO $revert$

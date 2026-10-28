@@ -53,7 +53,7 @@ Deno.test('a slot is read on the season clock, whatever the host zone', () => {
   assertEquals(late.endMinutes, 22 * 60 + 30);
 });
 
-Deno.test('lit is exempt, noon is in daylight, 22:30 is withdrawn to TIME TBD', () => {
+Deno.test('lit is exempt, noon is in daylight, 22:30 is kept whole and flagged past sunset', () => {
   const slots = new Map([
     ['s-lit', slotEnding('s-lit', 'f-lit', '22:30')],
     ['s-noon', slotEnding('s-noon', 'f-unlit', '12:00')],
@@ -77,21 +77,22 @@ Deno.test('lit is exempt, noon is in daylight, 22:30 is withdrawn to TIME TBD', 
     timeZone: ZONE,
     today: '2026-09-01',
   });
+  // Past sunset is flagged, never blocked (owner, 2026-10-27): every placement is kept,
+  // unchanged, the SAME objects, and nothing is added to the unplaced list.
   assertEquals(
     pass.placements.map((p) => p.slotId),
-    ['s-lit', 's-noon']
+    ['s-lit', 's-noon', 's-late']
   );
-  // The same objects where nothing changed.
-  assertEquals(pass.placements[0] === placements[0], true);
-  assertEquals(pass.unassigned, [
-    { teamId: 't2', reason: DAYLIGHT_TBD_REASON, date: '2026-09-15' },
-  ]);
+  placements.forEach((placement, i) => assertEquals(pass.placements[i] === placement, true));
+  assertEquals('effectiveUntil' in pass.placements[2], false);
+  assertEquals(pass.unassigned, []);
   assertEquals(pass.report.meta.litPlacementsExempt, 1);
   // s-noon: 15, 22, 29 in daylight; s-late: its first date is past sunset.
   assertEquals(pass.report.meta.occurrencesWithinDaylight, 3);
   assertEquals(pass.report.meta.occurrencesExamined, 4);
+  assertEquals(pass.report.meta.placementsPastSunset, 1);
   assertEquals(
-    pass.report.timeTbd.map((t) => [t.teamId, t.from, t.until, t.withdrawn]),
-    [['t2', '2026-09-15', '2026-09-29', true]]
+    pass.report.pastSunset.map((p) => [p.teamId, p.date, p.reason, p.endMinutes > p.limitMinutes]),
+    [['t2', '2026-09-15', DAYLIGHT_TBD_REASON, true]]
   );
 });

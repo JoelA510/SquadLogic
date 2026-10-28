@@ -9,7 +9,7 @@ const { Given, When, Then } = createBdd();
 interface AutoSchedulerPage extends Page {
   __autoSchedulerResolve?: (value: unknown) => void;
   __autoSchedulerUnavailable?: boolean;
-  __daylightTruncation?: boolean;
+  __daylightPastSunset?: boolean;
   __persistenceBodies?: Array<Record<string, unknown>>;
 }
 
@@ -18,31 +18,29 @@ const isoFromToday = (days: number) =>
   new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 
 /**
- * 8.9 PR 6b: the daylight post-pass truncated t2's new placement the day
- * before D (today + 14) and reported the remainder as TIME TBD; a second
- * placement (t9) was withdrawn whole and has no row. The shape is the Edge's
+ * The daylight post-pass found t2's new placement past sunset from today + 14 and flagged it. It is
+ * kept whole (past sunset is flagged, never blocked: owner, 2026-10-27), so the run carries no
+ * `effectiveUntil` and no TIME TBD. The shape is the Edge's
  * (supabase/functions/_shared/engines/practice-daylight.ts).
  */
-function daylightTruncationReport() {
-  const entry = (teamId: string, from: string, withdrawn: boolean) => ({
-    teamId,
-    slotId: 'ps-1',
-    from,
-    until: isoFromToday(90),
-    reason: 'past-sunset',
-    code: 'PRACTICE_PAST_SUNSET',
-    marginMinutes: 0,
-    withdrawn,
-    date: from,
-    endMinutes: 1170,
-    sunsetMinutes: 1150,
-    limitMinutes: 1150,
-  });
+function daylightPastSunsetReport() {
   return {
     marginMinutes: 0,
     today: isoFromToday(0),
-    meta: { placementsTruncated: 1, placementsWithdrawn: 1 },
-    timeTbd: [entry('t2', isoFromToday(14), false), entry('t9', isoFromToday(0), true)],
+    meta: { placementsPastSunset: 1 },
+    pastSunset: [
+      {
+        teamId: 't2',
+        slotId: 'ps-1',
+        reason: 'past-sunset',
+        code: 'PRACTICE_PAST_SUNSET',
+        marginMinutes: 0,
+        date: isoFromToday(14),
+        endMinutes: 1170,
+        sunsetMinutes: 1150,
+        limitMinutes: 1150,
+      },
+    ],
     unknown: [],
     lockedPastSunset: [],
   };
@@ -99,21 +97,17 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
       const lockedTeams = new Set(
         lockedAssignments.map((assignment: { teamId: string }) => assignment.teamId)
       );
-      const truncate = (page as AutoSchedulerPage).__daylightTruncation === true;
-      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments
-        .filter((assignment) => !lockedTeams.has(assignment.teamId))
-        .map((assignment) =>
-          truncate && assignment.teamId === 't2'
-            ? { ...assignment, effectiveUntil: isoFromToday(13) }
-            : assignment
-        );
+      const pastSunset = (page as AutoSchedulerPage).__daylightPastSunset === true;
+      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments.filter(
+        (assignment) => !lockedTeams.has(assignment.teamId)
+      );
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           ...MOCK_AUTO_SCHEDULER_RESPONSE,
           assignments,
-          ...(truncate ? { daylight: daylightTruncationReport() } : {}),
+          ...(pastSunset ? { daylight: daylightPastSunsetReport() } : {}),
         }),
       });
     });
@@ -264,15 +258,25 @@ Then('I should see the practice schedule review panel', async ({ page }) => {
   await expect(panel).toContainText('Review Practice Changes');
 });
 
-Given('the auto-scheduler truncates a placement at sunset', async ({ page }) => {
-  (page as AutoSchedulerPage).__daylightTruncation = true;
+Given('the auto-scheduler reports a placement past sunset', async ({ page }) => {
+  (page as AutoSchedulerPage).__daylightPastSunset = true;
 });
 
-// The request the page sent, as the network carried it: one daylight
-// exception per reported truncated placement, enumerated from the report
-// above (t2), none for the withdrawn t9, naming the new row by its key.
 Then(
-  'the applied save records one daylight TIME TBD exception for the truncated placement',
+  'the practice page warns that the placement runs past sunset and is kept',
+  async ({ page }) => {
+    await expect(
+      page.getByText(/runs? past sunset on unlit ground and .*kept as placed/i)
+    ).toBeVisible({
+      timeout: 10000,
+    });
+  }
+);
+
+// The request the page sent, as the network carried it: the flagged placement is saved whole, to its
+// slot's last date, and the save records no TIME TBD exception (it used to cut t2 short and record one).
+Then(
+  'the applied save keeps the flagged placement whole and records no TIME TBD',
   async ({ page }) => {
     const bodies = (page as AutoSchedulerPage).__persistenceBodies ?? [];
     await expect.poll(() => bodies.length, { timeout: 10000 }).toBe(1);
@@ -280,30 +284,11 @@ Then(
       repair?: { exceptions?: Array<Record<string, unknown>> };
       snapshot?: { payload?: { assignmentRows?: Array<Record<string, unknown>> } };
     };
-    const reported = daylightTruncationReport().timeTbd.filter((entry) => !entry.withdrawn);
-    const exceptions = body.repair?.exceptions ?? [];
-    expect(exceptions).toHaveLength(reported.length);
-    const [exception] = exceptions;
-    const key = exception.new_assignment as Record<string, string>;
-    expect(key.team_id).toBe('t2');
-    expect(key.practice_slot_id).toBe('ps-1');
-    expect(key.effective_date_range.endsWith(`,${isoFromToday(13)}]`)).toBe(true);
-    expect(exception).toMatchObject({
-      window: `[${reported[0].from},${reported[0].until}]`,
-      kind: 'time_tbd',
-      tbd_reason: 'past-sunset',
-      cause_kind: 'daylight',
-    });
-    // The key is a row the same save inserts.
+    expect(body.repair?.exceptions ?? []).toEqual([]);
     const rows = body.snapshot?.payload?.assignmentRows ?? [];
-    expect(
-      rows.filter(
-        (row) =>
-          row.team_id === key.team_id &&
-          row.practice_slot_id === key.practice_slot_id &&
-          row.effective_date_range === key.effective_date_range
-      )
-    ).toHaveLength(1);
+    const mine = rows.filter((row) => row.team_id === 't2' && row.practice_slot_id === 'ps-1');
+    expect(mine).toHaveLength(1);
+    expect(String(mine[0].effective_date_range).endsWith(`,${isoFromToday(90)}]`)).toBe(true);
   }
 );
 

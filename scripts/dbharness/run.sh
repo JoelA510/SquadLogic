@@ -1324,7 +1324,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261106010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2012,6 +2012,49 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('facility-permits','e7000000-0000-4000-8000-00000000000a/e7000000-0000-4000-8000-0000000000b1/e7000000-0000-4000-8000-0000000000d1.pdf',jsonb_build_object('size',1000,'mimetype','application/pdf'));" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the permits, scopes and object the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261105010000's revert DESTROYS every division's practice settings**, so its warning is the
+  # check. FOUR divisions: ONE at 2 a week, ONE at 3 a week of 60 minutes, ONE at the default count
+  # with a 45-minute length, and ONE at the defaults; their teams are 2, 1, 1 and 3 (so the teams in
+  # divisions that lose settings are 4, not 7); the third division's team and the defaults' team each
+  # hold TWO practice rows, so the divisions already over their count are 1 (the third), not 2: the
+  # default division is not losing anything. Every figure distinct. Inserted as the table owner, past
+  # the writer's gate; every name is synthetic.
+  if [ "$id" = "20261105010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e8000000-0000-4000-8000-00000000000a','Practice Settings Revert Org','practice-settings-revert-org');
+              INSERT INTO public.season_settings (id, organization_id, name, status) VALUES
+                ('e8000000-0000-4000-8000-0000000000a1','e8000000-0000-4000-8000-00000000000a','Practice Settings Active','active');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week, practice_minutes) VALUES
+                ('e8000000-0000-4000-8000-0000000000d1','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000a1','Settings U7',2,NULL),
+                ('e8000000-0000-4000-8000-0000000000d2','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000a1','Settings U9',3,60),
+                ('e8000000-0000-4000-8000-0000000000d3','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000a1','Settings U11',1,45),
+                ('e8000000-0000-4000-8000-0000000000d4','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000a1','Settings U13',1,NULL);
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('e8000000-0000-4000-8000-0000000000e1','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d1','Settings T1'),
+                ('e8000000-0000-4000-8000-0000000000e2','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d1','Settings T2'),
+                ('e8000000-0000-4000-8000-0000000000e3','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d2','Settings T3'),
+                ('e8000000-0000-4000-8000-0000000000e4','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d3','Settings T4'),
+                ('e8000000-0000-4000-8000-0000000000e5','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d4','Settings T5'),
+                ('e8000000-0000-4000-8000-0000000000e6','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d4','Settings T6'),
+                ('e8000000-0000-4000-8000-0000000000e7','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000d4','Settings T7');
+              INSERT INTO public.locations (id, organization_id, name) VALUES
+                ('e8000000-0000-4000-8000-0000000000c1','e8000000-0000-4000-8000-00000000000a','Settings Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name) VALUES
+                ('e8000000-0000-4000-8000-0000000000f1','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000c1','Settings Pitch');
+              INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity) VALUES
+                ('e8000000-0000-4000-8000-0000000000a5','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000f1','mon','17:00','17:45','2026-09-01','2026-11-30',5),
+                ('e8000000-0000-4000-8000-0000000000a6','e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000f1','wed','17:00','17:45','2026-09-01','2026-11-30',5);
+              INSERT INTO public.practice_assignments (organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source) VALUES
+                ('e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000e4','e8000000-0000-4000-8000-0000000000a5','e8000000-0000-4000-8000-0000000000a5','[2026-09-01,2026-11-30]','auto'),
+                ('e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000e4','e8000000-0000-4000-8000-0000000000a6','e8000000-0000-4000-8000-0000000000a6','[2026-09-01,2026-11-30]','auto'),
+                ('e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000e5','e8000000-0000-4000-8000-0000000000a5','e8000000-0000-4000-8000-0000000000a5','[2026-09-01,2026-11-30]','auto'),
+                ('e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000e5','e8000000-0000-4000-8000-0000000000a6','e8000000-0000-4000-8000-0000000000a6','[2026-09-01,2026-11-30]','auto');" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the divisions, teams and practice rows the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3435,6 +3478,36 @@ PROBE
       else
         echo "FAIL revert ${id}: the permits revert did not restore every replaced object and drop every added one"
         dump 10 $SCRATCH/harness_permits; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261105010000" ]; then
+      # The seed planted 4 divisions (3 off the defaults) with 7 teams (4 of them in those 3) and 4 rows
+      # on two teams, one in a division that loses its settings and one in a default division.
+      if ! grep -q 'this revert DESTROYS the practice settings of 3 division(s) (4 team(s) in them); 1 of them already have a team holding more practices than its count' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 3 divisions off the defaults with 4 teams, 1 of them over its count, and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # What the revert must leave: both bodies as production's (by md5, carriage returns stripped, and
+      # the pin), no helper, no column, one of each writer, and the four practice rows as saved.
+      if psql_cmd "SELECT 'PPW-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.practice_assignments WHERE organization_id = 'e8000000-0000-4000-8000-00000000000a') <> 4 THEN 'rows-lost'
+               WHEN (SELECT count(*) FROM public.teams WHERE organization_id = 'e8000000-0000-4000-8000-00000000000a') <> 7 THEN 'teams-lost'
+               WHEN (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'divisions'
+                      AND column_name IN ('practices_per_week', 'practice_minutes')) <> 0 THEN 'column-left'
+               WHEN (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'practice_new_auto_row_refusals') <> 0 THEN 'helper-left'
+               WHEN (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'admin_upsert_division_settings') <> 1 THEN 'overload-left'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
+                      WHERE p.oid = 'public.admin_upsert_division_settings(uuid, uuid, uuid, text, integer, integer, integer, integer, integer, integer, boolean)'::regprocedure)
+                    <> 'fe36f0e26a724e81b7883e14e8dd2079:true:search_path=public,TimeZone=UTC' THEN 'settings-writer-wrong'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
+                      WHERE p.oid = 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)'::regprocedure)
+                    <> '2d3b68c192d881a153c1bec102779ea0:false:search_path=public,TimeZone=UTC' THEN 'practice-writer-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_ppw 2>&1 && grep -q 'PPW-VERDICT:restored' $SCRATCH/harness_ppw; then
+        echo "  revert ${id}: the practices-per-division revert restores both writers' bodies as production's, drops the helper and both columns, and leaves the teams and the saved practice rows"
+      else
+        echo "FAIL revert ${id}: the practices-per-division revert did not restore both writers or left something of the migration"
+        dump 10 $SCRATCH/harness_ppw; STATUS=1
       fi
     fi
     if [ "$id" = "20261104010000" ]; then

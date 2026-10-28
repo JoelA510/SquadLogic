@@ -34,6 +34,16 @@
  * A run slot the solver cannot date is refused by `index.ts` (422
  * `SLOT_DATING_UNREADABLE`, Q3) and throws here.
  *
+ * **Practice units (Phase D PR B).** The search places practice UNITS, not teams: a team whose
+ * division wants N practices a week and holds r rows has `N - r` units to place (the caller's
+ * `unitsNeeded`; one when it says nothing). A team that needs exactly one unit has that unit's id
+ * equal to its team id, so a division at one practice a week runs the very search it ran before
+ * (`tests/autoSchedulerDatedSweep.test.js`); a team that needs several has `teamId#1`, `teamId#2`.
+ * The hard constraint adds two rules (`practice-coaches.ts`): the slot is exactly the division's
+ * practice length when it sets one, and no two of a team's practices share a weekday on a shared
+ * date. A unit that finds no legal slot is reported TIME TBD with the reason, per missing
+ * practice, never dropped.
+ *
  * Declared, not enforced (plan §7): no partial placement -- a team whose slot
  * is free only until a future locked row starts stays unplaced (Q4); `liveFrom`
  * is the date the run started on.
@@ -46,16 +56,21 @@
  * judged by the daylight pass (declared).
  *
  * Daylight (8.9 PR 6): given a `daylight` context, the search's placements go
- * through `practice-daylight.ts`'s post-pass -- truncated at the first date
- * past sunset on unlit ground, the remainder TIME TBD. The search itself is
- * unchanged and does not optimise toward surviving slots (D11).
+ * through `practice-daylight.ts`'s post-pass -- a placement with a date past
+ * sunset on unlit ground is FLAGGED, never changed or blocked (owner,
+ * 2026-10-27; it used to be truncated there, the remainder TIME TBD). The
+ * search itself is unchanged and does not optimise toward slots that end in
+ * daylight (D11).
  */
 import { evaluatePracticeSchedule } from './scoring-engine.ts';
 import {
   checkHardConstraints,
+  practiceLengthRefuses,
+  reservationRefuses,
   type LiveDays,
   type PreparedTeam,
   type SlotOccupant,
+  type TeamHold,
   type TimeWindow,
 } from './practice-coaches.ts';
 import { LIVE_SPAN_STATUS, assignmentLiveSpan, calendarDayNumber } from './practice-live-dates.ts';
@@ -68,7 +83,14 @@ import {
 } from './practice-daylight.ts';
 import type { LoadedRelocation } from './practice-lock.ts';
 
-export type SchedulerTeam = PreparedTeam & { division: string };
+export type SchedulerTeam = PreparedTeam & {
+  division: string;
+  /**
+   * How many practices a week the team's division gives it (Phase D PR B), from the store; absent:
+   * one. Read only to score coverage by practice and to say why a practice is missing.
+   */
+  practicesPerWeek?: number;
+};
 
 export interface SchedulerSlot {
   id: string;
@@ -121,6 +143,66 @@ export const NO_LIVE_DATE_REASON = 'no-live-date';
 
 /** The search's own reason for a team no legal slot was left for. */
 const NO_SLOT_REASON = 'no-slot-available';
+
+/**
+ * Why a practice is missing when the division sets a practice length and no slot open to it is
+ * that long (Phase D PR B). One enum with core's (`packages/core/src/practice/unplacedReasons.js`),
+ * pinned by `tests/practiceUnplacedReasons.test.js`.
+ */
+export const PRACTICE_LENGTH_REASON = 'practice-length';
+
+/**
+ * Why a practice is missing when the slots open to the division fall on fewer weekdays than its
+ * practices a week, so no choice of slots could put them on different days (Phase D PR B).
+ */
+export const NOT_ENOUGH_DAYS_REASON = 'not-enough-days';
+
+// ---------------------------------------------------------------------------
+// Practice units
+// ---------------------------------------------------------------------------
+
+/** One practice to place: a team's, with an id the search keys on. */
+export interface PracticeUnit {
+  unitId: string;
+  teamId: string;
+}
+
+/**
+ * The units to place for `placeableTeamIds`, in that order. `unitsNeeded` is each team's missing
+ * practices (the division's count less the rows it holds); a team it does not name needs one,
+ * which is the solver's behaviour before practices per division. A team that needs exactly one
+ * has its team id for the unit's id; one that needs several has `teamId#1` .. `teamId#n`; one that
+ * needs none has no unit.
+ */
+export function practiceUnitsFor(
+  placeableTeamIds: readonly string[],
+  unitsNeeded?: Readonly<Record<string, number>>
+): PracticeUnit[] {
+  const units: PracticeUnit[] = [];
+  for (const teamId of placeableTeamIds) {
+    const needed = unitsNeeded?.[teamId] ?? 1;
+    if (!Number.isInteger(needed) || needed < 0) {
+      throw new TypeError(`team ${teamId} needs ${String(needed)} practice units`);
+    }
+    if (needed === 1) units.push({ unitId: teamId, teamId });
+    else for (let k = 1; k <= needed; k++) units.push({ unitId: `${teamId}#${k}`, teamId });
+  }
+  return units;
+}
+
+/** A placement of `unit` on `slotId`. */
+function placementOf(unit: PracticeUnit, slotId: string): Placement {
+  return {
+    teamId: unit.teamId,
+    slotId,
+    source: 'auto',
+    ...(unit.unitId !== unit.teamId ? { unitId: unit.unitId } : {}),
+  };
+}
+
+/** The unit a placement or unplaced entry names. */
+export const unitIdOf = (entry: { teamId: string; unitId?: string }): string =>
+  entry.unitId ?? entry.teamId;
 
 /** One slot's dating, read; `null` when it cannot be dated. */
 function readDating(
@@ -217,8 +299,8 @@ export function dateSchedulerSlots(
 
 /**
  * The range a NEW placement is judged on and written with (M4.8, plan §1.2):
- * `[max(slot first date, liveFrom), slot last date]`, inclusive, or to the
- * daylight pass's truncated end. One place for it: the objective scores it,
+ * `[max(slot first date, liveFrom), slot last date]`, inclusive, or to an
+ * earlier end a caller gave. One place for it: the objective scores it,
  * and the response hands it to the page, which writes it unchanged, so the
  * range saved is the range judged even when the slot's dates changed in the
  * store after the page loaded them.
@@ -249,17 +331,31 @@ export interface Placement {
   teamId: string;
   slotId: string;
   source: 'auto';
-  /** Set only when the daylight pass truncated the placement (D8). */
+  /**
+   * The practice unit this placement fills, set only when it differs from the team id (a team
+   * that needed several practices; Phase D PR B).
+   */
+  unitId?: string;
+  /**
+   * The placement's last date, when something ended it early. The solver never sets it since
+   * past sunset is flagged, not truncated (2026-10-27); a caller that ends a placement early is
+   * still judged on the range it writes (`placementRange`).
+   */
   effectiveUntil?: string;
 }
 
 export interface Unplaced {
   teamId: string;
+  /** The practice unit left unplaced, set only when it differs from the team id. */
+  unitId?: string;
   reason: string;
   /** For `coach-preference`: the `must_keep` dimensions no legal slot kept. */
   dimensions?: string[];
-  /** For `past-sunset`: the first date past sunset. */
-  date?: string;
+  /**
+   * The practices a week the team's division gives it, set only for a division that wants several
+   * (Phase D PR B), so the run's report can say "1 of 2" per team without the roster.
+   */
+  target?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,10 +391,11 @@ function admissible(
   slot: DatedSchedulerSlot,
   coachAssignments: Map<string, TimeWindow[]>,
   slotOccupants: Map<string, SlotOccupant[]>,
-  slotCapacity: Map<string, number>
+  slotCapacity: Map<string, number>,
+  teamHolds: Map<string, TeamHold[]>
 ): boolean {
   if (mustKeepViolated(gate, team.id, slot.id)) return false;
-  return checkHardConstraints(team, slot, coachAssignments, slotOccupants, slotCapacity);
+  return checkHardConstraints(team, slot, coachAssignments, slotOccupants, slotCapacity, teamHolds);
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +423,12 @@ export interface BaseOccupancy {
   slotOccupants: Map<string, SlotOccupant[]>;
   /** Coach windows held by locked rows and relocations, each on its dates. */
   coachAssignments: Map<string, TimeWindow[]>;
+  /**
+   * The practices each team already holds, on their dates: its locked rows (a relocation is not a
+   * row of the team's, so it is not one). A team's new practice may not share a weekday with one
+   * of these on a shared date (Phase D PR B).
+   */
+  teamHolds: Map<string, TeamHold[]>;
   /** Locked rows that occupy a slot of this run (scored as `locked`). */
   inRun: LockedOccupant[];
   /**
@@ -362,6 +465,19 @@ function wholeValidity(slot: DatedSchedulerSlot): LiveDays | null {
 }
 
 /**
+ * A saved row whose slot is not in the run, with that slot's dating read from the store (Phase D
+ * PR B): the team's weekday hold, never its capacity. `effectiveDateRange` null is the slot's whole
+ * validity, as for a row inside the run.
+ */
+export interface OutsideHold {
+  teamId: string;
+  /** The first date on the slot's weekday, and its last date: `YYYY-MM-DD`. */
+  firstDate: string;
+  lastDate: string;
+  effectiveDateRange: string | null;
+}
+
+/**
  * Every locked row, one at a time, each on its own live dates (M4.8, plan
  * §3.3). Iterating the list -- not a team-keyed collection -- is what keeps a
  * two-row team's both slots occupied. Then every live relocation, on its
@@ -372,20 +488,27 @@ export function buildLockedOccupancy(
   teamsById: Map<string, SchedulerTeam>,
   slotsById: Map<string, DatedSchedulerSlot>,
   relocated: LoadedRelocation[],
-  liveFrom: string
+  liveFrom: string,
+  outsideHolds: readonly OutsideHold[] = []
 ): BaseOccupancy {
   const today = calendarDayNumber(liveFrom);
   if (today === null) throw new TypeError(`liveFrom ${String(liveFrom)} is not a date`);
   const slotCapacity = new Map([...slotsById.values()].map((s) => [s.id, s.capacity]));
   const slotOccupants = new Map<string, SlotOccupant[]>();
   const coachAssignments = new Map<string, TimeWindow[]>();
+  const teamHolds = new Map<string, TeamHold[]>();
   const inRun: LockedOccupant[] = [];
   const outsideRun: LockedOccupant[] = [];
   const relocatedOutsideRun: LoadedRelocation[] = [];
   const unreadableRange: LockedOccupant[] = [];
   const endedRows: LockedOccupant[] = [];
   // One unit of the slot on these dates, and the team's coaches there then.
-  const hold = (teamId: string, slot: DatedSchedulerSlot, days: LiveDays) => {
+  const hold = (teamId: string, slot: DatedSchedulerSlot, days: LiveDays, ownRow = false) => {
+    if (ownRow) {
+      const held = teamHolds.get(teamId) ?? [];
+      held.push({ first: days.first, last: days.last });
+      teamHolds.set(teamId, held);
+    }
     const occupants = slotOccupants.get(slot.id) ?? [];
     occupants.push({ teamId, first: days.first, last: days.last });
     slotOccupants.set(slot.id, occupants);
@@ -421,14 +544,30 @@ export function buildLockedOccupancy(
       // ever be live on, so this holds at least what it does.
       unreadableRange.push(row);
       const whole = wholeValidity(slot);
-      if (whole) hold(row.teamId, slot, whole);
+      if (whole) hold(row.teamId, slot, whole, true);
       continue;
     }
     if (span.status !== LIVE_SPAN_STATUS.LIVE || span.last < today) {
       endedRows.push(row);
       continue;
     }
-    hold(row.teamId, slot, span);
+    hold(row.teamId, slot, span, true);
+  }
+  // A saved row on a slot outside the run still holds its weekday: a team that needs two
+  // practices and already has a Tuesday one must not be given a second Tuesday (the writer's gate
+  // would refuse the apply). Only the team's own holds are read from it, not the slot's capacity.
+  for (const outside of outsideHolds) {
+    const firstDay = calendarDayNumber(outside.firstDate);
+    const lastDay = calendarDayNumber(outside.lastDate);
+    if (firstDay === null || lastDay === null) continue;
+    let span = assignmentLiveSpan({ firstDay, lastDay, range: outside.effectiveDateRange });
+    // Q2: an unreadable range holds the slot's whole validity.
+    if (span.status === LIVE_SPAN_STATUS.UNREADABLE)
+      span = assignmentLiveSpan({ firstDay, lastDay });
+    if (span.status !== LIVE_SPAN_STATUS.LIVE) continue;
+    const held = teamHolds.get(outside.teamId) ?? [];
+    held.push({ first: span.first, last: span.last });
+    teamHolds.set(outside.teamId, held);
   }
   // One unit per (row, slot): a row has at most one live window at a time
   // (the table's EXCLUDE constraint), so two windows of one row moved onto
@@ -450,6 +589,7 @@ export function buildLockedOccupancy(
     slotCapacity,
     slotOccupants,
     coachAssignments,
+    teamHolds,
     inRun,
     outsideRun,
     relocatedOutsideRun,
@@ -484,8 +624,8 @@ function scoreSchedule(
   // `firstDate`, `lastDate`, `startTime` and `endTime`, each locked row its
   // stored range (one the constraint holds season-long, Q2, is scored the same
   // way: on its slot's whole validity), and each new placement the range the
-  // page writes, `[max(firstDate, liveFrom), lastDate]` -- or the daylight
-  // pass's truncated end. So the objective, the hard constraint, the persisted
+  // page writes, `[max(firstDate, liveFrom), lastDate]` -- or an earlier end
+  // a caller gave. So the objective, the hard constraint, the persisted
   // evaluation and the panel judge one schedule by one rule
   // (`summary.dateModel: 'dated'`). Nothing from the request's slot objects
   // reaches here: only the fields below are passed.
@@ -504,12 +644,21 @@ function scoreSchedule(
       return { ...p, effectiveDateRange: placementRange(slot, liveFrom, p.effectiveUntil) };
     }),
   ];
+  // **A team whose division gives no practice, and that holds none, needs nothing** (Phase D PR B):
+  // it is not a shortfall, so it is not in the evaluation's roster, and neither the coverage below
+  // nor the report counts it unassigned. One that holds a row anyway is still counted.
+  const heldTeamIds = new Set<string>();
+  for (const row of base.inRun) heldTeamIds.add(row.teamId);
+  for (const p of placements) heldTeamIds.add(p.teamId);
+  const rosterTeams = teams.filter(
+    (team) => (team.practicesPerWeek ?? 1) !== 0 || heldTeamIds.has(team.id)
+  );
   const evaluation = evaluatePracticeSchedule({
     assignments: assignments as unknown as Parameters<
       typeof evaluatePracticeSchedule
     >[0]['assignments'],
     unassigned,
-    teams: teams as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['teams'],
+    teams: rosterTeams as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['teams'],
     slots: slots.map(
       ({ id, day, start, end, capacity, firstDate, lastDate, startTime, endTime }) => ({
         id,
@@ -528,7 +677,23 @@ function scoreSchedule(
   // Compute fitness from scoring-engine metrics
   const { summary, coachConflicts } = evaluation;
   const totalTeams = summary.totalTeams || 1;
-  const coverage = summary.assignedTeams / totalTeams;
+  // **Coverage counts a team's second and later practices too** (Phase D PR B). The engine
+  // counts a team once however many practices it holds, so with it alone a team given one of its
+  // two practices would score as well as one given both and the climb would have nothing to
+  // climb. The extras are zero for a team whose division gives one practice a week, which leaves
+  // `assignedTeams / totalTeams` -- the same two numbers, the same division -- as before.
+  const held = new Map<string, number>();
+  for (const row of base.inRun) held.set(row.teamId, (held.get(row.teamId) ?? 0) + 1);
+  for (const p of placements) held.set(p.teamId, (held.get(p.teamId) ?? 0) + 1);
+  let extraRequired = 0;
+  let extraPlaced = 0;
+  for (const team of teams) {
+    const target = team.practicesPerWeek ?? 1;
+    if (target < 2) continue;
+    extraRequired += target - 1;
+    extraPlaced += Math.min(Math.max((held.get(team.id) ?? 0) - 1, 0), target - 1);
+  }
+  const coverage = (summary.assignedTeams + extraPlaced) / (totalTeams + extraRequired);
   const conflictPenalty = Math.min(1, (coachConflicts?.length ?? 0) * 0.15);
   const coveragePenalty = 1 - coverage;
   const fairnessScore = 1 - (conflictPenalty * 0.15 + coveragePenalty * 0.5);
@@ -541,17 +706,19 @@ function scoreSchedule(
 // ---------------------------------------------------------------------------
 
 interface OptimizerState {
-  /** Placeable teams only. A locked team is never a key here. */
+  /** Practice units, keyed by unit id (a team's id when it needs one). A locked row is never a key here. */
   assignmentMap: Map<string, string>;
-  autoTeams: string[];
+  autoUnits: string[];
   slotsById: Map<string, DatedSchedulerSlot>;
   teamsById: Map<string, SchedulerTeam>;
   slotCapacity: Map<string, number>;
   slotOccupants: Map<string, SlotOccupant[]>;
   coachAssignments: Map<string, TimeWindow[]>;
+  teamHolds: Map<string, TeamHold[]>;
   gate: PreferenceGate;
-  placeableTeamIds: string[];
-  unassignedTeamIds: string[];
+  units: PracticeUnit[];
+  unitsById: Map<string, PracticeUnit>;
+  unassignedUnitIds: string[];
 }
 
 function cloneWindows<T>(source: Map<string, T[]>): Map<string, T[]> {
@@ -568,19 +735,26 @@ function cloneWindows<T>(source: Map<string, T[]>): Map<string, T[]> {
 function seat(
   occupants: Map<string, SlotOccupant[]>,
   coachAssignments: Map<string, TimeWindow[]>,
+  teamHolds: Map<string, TeamHold[]>,
   team: SchedulerTeam | undefined,
-  teamId: string,
+  unit: PracticeUnit,
   slot: DatedSchedulerSlot
 ): void {
   const span = slot.span as LiveDays;
+  const { teamId, unitId } = unit;
   const list = occupants.get(slot.id) ?? [];
-  list.push({ teamId, first: span.first, last: span.last, placed: true });
+  list.push({ teamId, unitId, first: span.first, last: span.last, placed: true });
   occupants.set(slot.id, list);
+  // The unit is a practice of the team: its next one may not share its weekday.
+  const holds = teamHolds.get(teamId) ?? [];
+  holds.push({ first: span.first, last: span.last, unitId });
+  teamHolds.set(teamId, holds);
   if (!team) return;
   for (const coachId of team.coachIds) {
     const existing = coachAssignments.get(coachId) ?? [];
     existing.push({
       teamId,
+      unitId,
       slotId: slot.id,
       first: span.first,
       last: span.last,
@@ -595,37 +769,42 @@ function seat(
 function buildState(
   base: BaseOccupancy,
   placements: Placement[],
-  placeableTeamIds: string[],
+  units: PracticeUnit[],
   teamsById: Map<string, SchedulerTeam>,
   slotsById: Map<string, DatedSchedulerSlot>,
   gate: PreferenceGate
 ): OptimizerState {
+  const unitsById = new Map(units.map((u) => [u.unitId, u]));
   const assignmentMap = new Map<string, string>();
-  const autoTeams: string[] = [];
+  const autoUnits: string[] = [];
   for (const a of placements) {
-    assignmentMap.set(a.teamId, a.slotId);
-    autoTeams.push(a.teamId);
+    assignmentMap.set(unitIdOf(a), a.slotId);
+    autoUnits.push(unitIdOf(a));
   }
 
   const slotOccupants = cloneWindows(base.slotOccupants);
   const coachAssignments = cloneWindows(base.coachAssignments);
-  for (const [teamId, slotId] of assignmentMap) {
+  const teamHolds = cloneWindows(base.teamHolds);
+  for (const [unitId, slotId] of assignmentMap) {
     const slot = slotsById.get(slotId);
-    if (!slot || !slot.span) continue;
-    seat(slotOccupants, coachAssignments, teamsById.get(teamId), teamId, slot);
+    const unit = unitsById.get(unitId);
+    if (!slot || !slot.span || !unit) continue;
+    seat(slotOccupants, coachAssignments, teamHolds, teamsById.get(unit.teamId), unit, slot);
   }
 
   return {
     assignmentMap,
-    autoTeams,
+    autoUnits,
     slotsById,
     teamsById,
     slotCapacity: base.slotCapacity,
     slotOccupants,
     coachAssignments,
+    teamHolds,
     gate,
-    placeableTeamIds,
-    unassignedTeamIds: placeableTeamIds.filter((id) => !assignmentMap.has(id)),
+    units,
+    unitsById,
+    unassignedUnitIds: units.map((u) => u.unitId).filter((id) => !assignmentMap.has(id)),
   };
 }
 
@@ -633,34 +812,40 @@ function tryMutate(
   state: OptimizerState,
   rand: () => number
 ): { placements: Placement[]; unassigned: Unplaced[]; type: string } | null {
-  const { autoTeams, unassignedTeamIds, slotsById, teamsById, gate } = state;
-  const hasUnassigned = unassignedTeamIds.length > 0;
-  const hasMultipleAuto = autoTeams.length >= 2;
+  const { autoUnits, unassignedUnitIds, slotsById, teamsById, unitsById, gate } = state;
+  const hasUnassigned = unassignedUnitIds.length > 0;
+  const hasMultipleAuto = autoUnits.length >= 2;
 
   const r = rand();
   let mutationType: string;
   if (hasUnassigned && r < 0.4) mutationType = 'relocate';
   else if (hasMultipleAuto && r < 0.85) mutationType = 'swap';
-  else if (hasMultipleAuto && autoTeams.length >= 3) mutationType = 'chain-swap';
+  else if (hasMultipleAuto && autoUnits.length >= 3) mutationType = 'chain-swap';
   else if (hasMultipleAuto) mutationType = 'swap';
   else return null;
 
   const newMap = new Map(state.assignmentMap);
   const newOcc = cloneWindows(state.slotOccupants);
   const newCoach = cloneWindows(state.coachAssignments);
+  const newHolds = cloneWindows(state.teamHolds);
 
-  const remove = (teamId: string) => {
-    const slotId = newMap.get(teamId);
+  const remove = (unitId: string) => {
+    const slotId = newMap.get(unitId);
     if (!slotId) return;
-    newMap.delete(teamId);
-    // Only the team's own placement leaves: a relocation or locked row that
-    // names the same team (a relocation whose source row is not current) is
-    // fixed occupancy and stays held.
-    const ownPlacement = (o: { teamId?: string; placed?: boolean }) =>
-      o.placed === true && o.teamId === teamId;
+    newMap.delete(unitId);
+    const teamId = (unitsById.get(unitId) as PracticeUnit).teamId;
+    // Only the unit's own placement leaves: a relocation or locked row that
+    // names the same team (a relocation whose source row is not current), or
+    // the team's other unit, is fixed or separate and stays held.
+    const ownPlacement = (o: { unitId?: string; placed?: boolean }) =>
+      o.placed === true && o.unitId === unitId;
     newOcc.set(
       slotId,
       (newOcc.get(slotId) ?? []).filter((o) => !ownPlacement(o))
+    );
+    newHolds.set(
+      teamId,
+      (newHolds.get(teamId) ?? []).filter((h) => h.unitId !== unitId)
     );
     const team = teamsById.get(teamId);
     if (!team) return;
@@ -673,30 +858,31 @@ function tryMutate(
     }
   };
 
-  const add = (teamId: string, slotId: string): boolean => {
-    const team = teamsById.get(teamId);
+  const add = (unitId: string, slotId: string): boolean => {
+    const unit = unitsById.get(unitId);
+    const team = unit ? teamsById.get(unit.teamId) : undefined;
     const slot = slotsById.get(slotId);
-    if (!team || !slot) return false;
-    if (!admissible(gate, team, slot, newCoach, newOcc, state.slotCapacity)) return false;
-    newMap.set(teamId, slotId);
-    seat(newOcc, newCoach, team, teamId, slot);
+    if (!unit || !team || !slot) return false;
+    if (!admissible(gate, team, slot, newCoach, newOcc, state.slotCapacity, newHolds)) return false;
+    newMap.set(unitId, slotId);
+    seat(newOcc, newCoach, newHolds, team, unit, slot);
     return true;
   };
 
   if (mutationType === 'swap') {
-    const i = Math.floor(rand() * autoTeams.length);
-    let j = Math.floor(rand() * (autoTeams.length - 1));
+    const i = Math.floor(rand() * autoUnits.length);
+    let j = Math.floor(rand() * (autoUnits.length - 1));
     if (j >= i) j++;
-    const slotA = newMap.get(autoTeams[i]);
-    const slotB = newMap.get(autoTeams[j]);
+    const slotA = newMap.get(autoUnits[i]);
+    const slotB = newMap.get(autoUnits[j]);
     if (!slotA || !slotB || slotA === slotB) return null;
-    remove(autoTeams[i]);
-    remove(autoTeams[j]);
-    if (!add(autoTeams[i], slotB) || !add(autoTeams[j], slotA)) return null;
+    remove(autoUnits[i]);
+    remove(autoUnits[j]);
+    if (!add(autoUnits[i], slotB) || !add(autoUnits[j], slotA)) return null;
   } else if (mutationType === 'relocate') {
     const targetId = hasUnassigned
-      ? unassignedTeamIds[Math.floor(rand() * unassignedTeamIds.length)]
-      : autoTeams[Math.floor(rand() * autoTeams.length)];
+      ? unassignedUnitIds[Math.floor(rand() * unassignedUnitIds.length)]
+      : autoUnits[Math.floor(rand() * autoUnits.length)];
     const slotIds = [...slotsById.keys()];
     const targetSlot = slotIds[Math.floor(rand() * slotIds.length)];
     const currentSlot = newMap.get(targetId);
@@ -707,27 +893,31 @@ function tryMutate(
       return null;
     }
   } else {
-    if (autoTeams.length < 3) return null;
+    if (autoUnits.length < 3) return null;
     const indices = new Set<number>();
-    while (indices.size < 3) indices.add(Math.floor(rand() * autoTeams.length));
+    while (indices.size < 3) indices.add(Math.floor(rand() * autoUnits.length));
     const [iA, iB, iC] = [...indices];
-    const sA = newMap.get(autoTeams[iA]);
-    const sB = newMap.get(autoTeams[iB]);
-    const sC = newMap.get(autoTeams[iC]);
+    const sA = newMap.get(autoUnits[iA]);
+    const sB = newMap.get(autoUnits[iB]);
+    const sC = newMap.get(autoUnits[iC]);
     if (!sA || !sB || !sC || sA === sB || sB === sC || sA === sC) return null;
-    remove(autoTeams[iA]);
-    remove(autoTeams[iB]);
-    remove(autoTeams[iC]);
-    if (!add(autoTeams[iA], sB) || !add(autoTeams[iB], sC) || !add(autoTeams[iC], sA)) return null;
+    remove(autoUnits[iA]);
+    remove(autoUnits[iB]);
+    remove(autoUnits[iC]);
+    if (!add(autoUnits[iA], sB) || !add(autoUnits[iB], sC) || !add(autoUnits[iC], sA)) return null;
   }
 
   const placements = [...newMap.entries()]
-    .map(([teamId, slotId]) => ({ teamId, slotId, source: 'auto' as const }))
-    .sort((a, b) => a.teamId.localeCompare(b.teamId));
+    .map(([unitId, slotId]) => placementOf(unitsById.get(unitId) as PracticeUnit, slotId))
+    .sort((a, b) => unitIdOf(a).localeCompare(unitIdOf(b)));
 
-  const unassigned = state.placeableTeamIds
-    .filter((id) => !newMap.has(id))
-    .map((teamId) => ({ teamId, reason: 'optimizer-unplaced' }));
+  const unassigned = state.units
+    .filter((u) => !newMap.has(u.unitId))
+    .map((u) => ({
+      teamId: u.teamId,
+      ...(u.unitId !== u.teamId ? { unitId: u.unitId } : {}),
+      reason: 'optimizer-unplaced',
+    }));
 
   return { placements, unassigned, type: mutationType };
 }
@@ -739,20 +929,22 @@ function tryMutate(
 function generateGreedySeed(
   base: BaseOccupancy,
   teams: SchedulerTeam[],
-  placeableTeamIds: string[],
+  units: PracticeUnit[],
   slots: DatedSchedulerSlot[],
   gate: PreferenceGate
 ): { placements: Placement[]; unassigned: Unplaced[] } {
   const slotsById = new Map(slots.map((s) => [s.id, s]));
+  const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotOccupants = cloneWindows(base.slotOccupants);
   const coachAssignments = cloneWindows(base.coachAssignments);
-  const assignedTeamIds = new Set<string>();
+  const teamHolds = cloneWindows(base.teamHolds);
+  const assignedUnitIds = new Set<string>();
   const placements: Placement[] = [];
 
-  const assign = (team: SchedulerTeam, slotId: string) => {
-    placements.push({ teamId: team.id, slotId, source: 'auto' });
-    assignedTeamIds.add(team.id);
-    seat(slotOccupants, coachAssignments, team, team.id, slotsById.get(slotId)!);
+  const assign = (unit: PracticeUnit, team: SchedulerTeam, slotId: string) => {
+    placements.push(placementOf(unit, slotId));
+    assignedUnitIds.add(unit.unitId);
+    seat(slotOccupants, coachAssignments, teamHolds, team, unit, slotsById.get(slotId)!);
   };
 
   // 1. Locked rows are already in `base` -- one unit per row.
@@ -771,24 +963,29 @@ function generateGreedySeed(
       Math.max(0, ...team.coachIds.map((coachId) => coachTeamCounts.get(coachId) ?? 0)),
     ])
   );
-  const placeable = new Set(placeableTeamIds);
-  const sorted = teams
-    .filter((team) => placeable.has(team.id))
+  // The units of the placeable roster, busiest coach first, then by unit id: a team's own units
+  // sit together, and for a team that needs one, the unit id is the team id (the order before
+  // practice units).
+  const sorted = units
+    .filter((unit) => teamsById.has(unit.teamId))
     .sort((a, b) => {
-      const ac = busiestCoachCount.get(a.id) ?? 0;
-      const bc = busiestCoachCount.get(b.id) ?? 0;
-      return bc - ac || a.id.localeCompare(b.id);
+      const ac = busiestCoachCount.get(a.teamId) ?? 0;
+      const bc = busiestCoachCount.get(b.teamId) ?? 0;
+      return bc - ac || a.unitId.localeCompare(b.unitId);
     });
 
-  // 3. Greedy assignment, placeable teams only. Among the admissible slots
+  // 3. Greedy assignment, placeable units only. Among the admissible slots
   //    (must_keep already filtered), fewest prefer_keep breaches first, then
   //    slot order -- so with no preferences this is the first legal slot.
-  for (const team of sorted) {
-    if (assignedTeamIds.has(team.id)) continue;
+  for (const unit of sorted) {
+    if (assignedUnitIds.has(unit.unitId)) continue;
+    const team = teamsById.get(unit.teamId) as SchedulerTeam;
     let bestSlot: SchedulerSlot | undefined;
     let bestBreaches = Infinity;
     for (const slot of slots) {
-      if (!admissible(gate, team, slot, coachAssignments, slotOccupants, base.slotCapacity)) {
+      if (
+        !admissible(gate, team, slot, coachAssignments, slotOccupants, base.slotCapacity, teamHolds)
+      ) {
         continue;
       }
       const breaches = breachesOf(gate, team.id, slot.id);
@@ -798,12 +995,16 @@ function generateGreedySeed(
         if (breaches === 0) break;
       }
     }
-    if (bestSlot) assign(team, bestSlot.id);
+    if (bestSlot) assign(unit, team, bestSlot.id);
   }
 
   const unassigned = sorted
-    .filter((t) => !assignedTeamIds.has(t.id))
-    .map((t) => ({ teamId: t.id, reason: NO_SLOT_REASON }));
+    .filter((u) => !assignedUnitIds.has(u.unitId))
+    .map((u) => ({
+      teamId: u.teamId,
+      ...(u.unitId !== u.teamId ? { unitId: u.unitId } : {}),
+      reason: NO_SLOT_REASON,
+    }));
 
   return { placements, unassigned };
 }
@@ -813,41 +1014,74 @@ function generateGreedySeed(
 // ---------------------------------------------------------------------------
 
 /**
- * Re-derive each unplaced team's reason against the FINAL schedule, the rule
- * core's repair applies (plan §4): legal slots before the `must_keep` filter
- * and none after is TIME TBD `coach-preference`, naming the dimensions. No
- * legal slot at all keeps the search's own reason. The subject set is the
- * search's unplaced list, which both the seed and `tryMutate` derive from the
- * placeable roster minus the placements -- never from the placements alone.
+ * Re-derive each unplaced practice's reason against the FINAL schedule, the rule core's repair
+ * applies (plan §4). The subject set is the search's unplaced list -- one entry per missing
+ * practice (a unit), which both the seed and `tryMutate` derive from the units to place minus the
+ * placements -- never from the placements alone. In order:
  *
- * When no run slot has a live date from today on, every unplaced team is
- * `no-live-date` (M4.8 Q3): no slot was left to fit, whatever the search
- * called it.
+ *   * no run slot has a live date from today on: `no-live-date` (M4.8 Q3), whatever the search
+ *     called it -- no slot was left to fit;
+ *   * the division sets a practice length and no slot open to it is that long:
+ *     `practice-length` (Phase D PR B);
+ *   * the slots open to the division (not reserved away, the right length, a live date) fall on
+ *     fewer weekdays than the division's practices a week: `not-enough-days`, since no choice of
+ *     slots could put them on different days. Only for a division that wants several a week; one
+ *     practice a week with no slot keeps the search's own reason;
+ *   * legal slots before the `must_keep` filter and none after: TIME TBD `coach-preference`,
+ *     naming the dimensions;
+ *   * otherwise the search's own reason.
  */
 function explainUnplaced(
   gate: PreferenceGate,
   base: BaseOccupancy,
   placements: Placement[],
   unassigned: Unplaced[],
+  units: PracticeUnit[],
   teamsById: Map<string, SchedulerTeam>,
   slotsById: Map<string, DatedSchedulerSlot>
 ): Unplaced[] {
   if (slotsById.size > 0 && [...slotsById.values()].every((slot) => slot.span === null)) {
-    return unassigned.map((entry) => ({ teamId: entry.teamId, reason: NO_LIVE_DATE_REASON }));
+    return unassigned.map((entry) => ({ ...entry, reason: NO_LIVE_DATE_REASON }));
   }
-  if (gate.verdicts.size === 0) return unassigned;
-  const final = buildState(base, placements, [], teamsById, slotsById, gate);
+  const final = buildState(base, placements, units, teamsById, slotsById, gate);
+  // The weekdays of a team's open slots: reserved away, the wrong length and dateless slots left out.
+  const openWeekdays = new Map<string, number>();
+  const lengthOpen = new Map<string, boolean>();
+  const weekdaysOf = (team: SchedulerTeam): { days: number; anyLength: boolean } => {
+    const key = `${team.divisionId ?? ''}|${team.practiceMinutes ?? ''}`;
+    if (!openWeekdays.has(key)) {
+      const days = new Set<number>();
+      let anyLength = false;
+      for (const slot of slotsById.values()) {
+        if (slot.span === null || reservationRefuses(team, slot)) continue;
+        if (practiceLengthRefuses(team, slot)) continue;
+        anyLength = true;
+        days.add(slot.firstDay % 7);
+      }
+      openWeekdays.set(key, days.size);
+      lengthOpen.set(key, anyLength);
+    }
+    return { days: openWeekdays.get(key) as number, anyLength: lengthOpen.get(key) as boolean };
+  };
   return unassigned.map((entry) => {
-    const verdicts = gate.verdicts.get(entry.teamId);
     const team = teamsById.get(entry.teamId);
-    if (!verdicts || !team) return entry;
+    if (!team) return entry;
+    if (team.practiceMinutes != null && !weekdaysOf(team).anyLength) {
+      return { ...entry, reason: PRACTICE_LENGTH_REASON };
+    }
+    if ((team.practicesPerWeek ?? 1) > 1 && weekdaysOf(team).days < (team.practicesPerWeek ?? 1)) {
+      return { ...entry, reason: NOT_ENOUGH_DAYS_REASON };
+    }
+    const verdicts = gate.verdicts.get(entry.teamId);
+    if (!verdicts) return entry;
     const legal = [...slotsById.values()].filter((slot) =>
       checkHardConstraints(
         team,
         slot,
         final.coachAssignments,
         final.slotOccupants,
-        final.slotCapacity
+        final.slotCapacity,
+        final.teamHolds
       )
     );
     const kept = legal.filter((slot) => !verdicts.get(slot.id)?.mustKeepViolated);
@@ -855,7 +1089,7 @@ function explainUnplaced(
     const dimensions = [
       ...new Set(legal.flatMap((slot) => verdicts.get(slot.id)?.violatedDimensions ?? [])),
     ].sort();
-    return { teamId: entry.teamId, reason: COACH_PREFERENCE_TBD_REASON, dimensions };
+    return { ...entry, reason: COACH_PREFERENCE_TBD_REASON, dimensions };
   });
 }
 
@@ -872,7 +1106,10 @@ export interface OptimizerConfig {
 export interface OptimizerResult {
   /** New placements for placeable teams ONLY. Never a locked team. */
   placements: Placement[];
-  /** Placeable teams the run could not place, each with its reason. */
+  /**
+   * Practices the run could not place, each with its reason: one entry per missing practice (a
+   * team that needed several appears once per practice it did not get).
+   */
   unassigned: Unplaced[];
   /** `prefer_keep` breaches across the returned placements (0 with no preferences). */
   preferKeepBreaches: number;
@@ -887,8 +1124,8 @@ export interface OptimizerResult {
   /** The date new placements are live from (M4.8 Q7). */
   liveFrom: string;
   /**
-   * Each returned placement's judged range, by team (`placementRange`): what
-   * the page writes. A placeable team holds at most one placement.
+   * Each returned placement's judged range, by practice unit (`placementRange`): what
+   * the page writes. A unit is the team id for a team that needed one practice.
    */
   placementRanges: Record<string, string>;
   /** The daylight post-pass's report; `null` when the run was given no daylight context. */
@@ -938,6 +1175,18 @@ export async function runPracticeOptimizer(params: {
   relocated?: LoadedRelocation[];
   placeableTeamIds: string[];
   /**
+   * Saved rows on slots outside the run, dated from the store (Phase D PR B): they hold their
+   * team's weekday, so a team needing several practices is never given a second one on a weekday
+   * it already practises. Built by `outsideHoldsFor` (`practice-lock.ts`).
+   */
+  outsideHolds?: OutsideHold[];
+  /**
+   * How many practices each placeable team still needs (its division's count less the rows it
+   * holds; Phase D PR B), by team id. A team it does not name needs one, which is the solver
+   * before practices per division. Computed server-side from the store, never from the body.
+   */
+  unitsNeeded?: Readonly<Record<string, number>>;
+  /**
    * Approved coach preferences, as verdicts per (placeable team, slot). Loaded
    * server-side (`coach-preference-load.ts`); never from the request body.
    */
@@ -977,7 +1226,8 @@ export async function runPracticeOptimizer(params: {
     restartCount: number;
   }) => void;
 }): Promise<OptimizerResult> {
-  const { teams, locked, placeableTeamIds, config: cfg } = params;
+  const { teams, locked, config: cfg } = params;
+  const units = practiceUnitsFor(params.placeableTeamIds, params.unitsNeeded);
   const { liveFrom } = params.dating;
   const gate = params.preferenceGate ?? EMPTY_PREFERENCE_GATE;
   const now = params.now ?? Date.now;
@@ -990,10 +1240,17 @@ export async function runPracticeOptimizer(params: {
   const slots = dateSchedulerSlots(params.slots, params.dating);
   const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotsById = new Map(slots.map((s) => [s.id, s]));
-  const base = buildLockedOccupancy(locked, teamsById, slotsById, params.relocated ?? [], liveFrom);
+  const base = buildLockedOccupancy(
+    locked,
+    teamsById,
+    slotsById,
+    params.relocated ?? [],
+    liveFrom,
+    params.outsideHolds ?? []
+  );
   const rand = createPRNG(cfg.seed);
 
-  const seed = generateGreedySeed(base, teams, placeableTeamIds, slots, gate);
+  const seed = generateGreedySeed(base, teams, units, slots, gate);
   const seedScoring = scoreSchedule(base, seed.placements, seed.unassigned, teams, slots, liveFrom);
   let bestPlacements = seed.placements;
   let bestUnassigned = seed.unassigned;
@@ -1039,7 +1296,7 @@ export async function runPracticeOptimizer(params: {
 
     iteration++;
 
-    const state = buildState(base, currentPlacements, placeableTeamIds, teamsById, slotsById, gate);
+    const state = buildState(base, currentPlacements, units, teamsById, slotsById, gate);
     const mutated = tryMutate(state, rand);
 
     if (!mutated) {
@@ -1047,7 +1304,7 @@ export async function runPracticeOptimizer(params: {
       if (stallCount >= stallLimit && restartCount < maxRestarts) {
         restartCount++;
         stallCount = 0;
-        const restart = generateGreedySeed(base, teams, placeableTeamIds, slots, gate);
+        const restart = generateGreedySeed(base, teams, units, slots, gate);
         currentPlacements = restart.placements;
         currentBreaches = totalBreaches(gate, restart.placements);
         currentScore = scoreSchedule(
@@ -1128,18 +1385,18 @@ export async function runPracticeOptimizer(params: {
     base,
     bestPlacements,
     bestUnassigned,
+    units,
     teamsById,
     slotsById
   );
-  let preferKeepBreaches = bestBreaches;
-  let evaluation = bestEvaluation;
+  const preferKeepBreaches = bestBreaches;
+  const evaluation = bestEvaluation;
   let daylight: DaylightReport | null = null;
   // The daylight post-pass (8.9 PR 6): after the search, over its placements
-  // only. Declared, not optimised (D11): nothing above steers toward slots
-  // that survive the season. A withdrawn placement leaves the schedule, so
-  // the score, evaluation and breaches are re-measured over what remains
-  // (the returned schedule's, not the search's); otherwise they are the
-  // search's own values, untouched.
+  // only. Past sunset is FLAGGED, never blocked (owner, 2026-10-27): the pass
+  // changes no placement, so the score, evaluation and breaches are the
+  // search's own. Declared, not optimised (D11): nothing above steers toward
+  // placements that end in daylight.
   if (params.daylight) {
     const pass = applyDaylightPostPass({
       placements,
@@ -1148,22 +1405,6 @@ export async function runPracticeOptimizer(params: {
       ...params.daylight,
     });
     daylight = pass.report;
-    // Re-measured when the pass truncated a placement as well as when it
-    // withdrew one: the objective is dated (M4.8 Q1), so the dates a
-    // truncation hands to TIME TBD leave the persisted evaluation too.
-    if (pass.report.meta.placementsWithdrawn > 0 || pass.report.meta.placementsTruncated > 0) {
-      const rescored = scoreSchedule(
-        base,
-        pass.placements,
-        pass.unassigned,
-        teams,
-        slots,
-        liveFrom
-      );
-      evaluation = rescored.evaluation;
-      bestScore = rescored.score;
-      preferKeepBreaches = totalBreaches(gate, pass.placements);
-    }
     placements = pass.placements;
     unassigned = pass.unassigned;
   }
@@ -1179,7 +1420,7 @@ export async function runPracticeOptimizer(params: {
     liveFrom,
     placementRanges: Object.fromEntries(
       placements.map((p) => [
-        p.teamId,
+        unitIdOf(p),
         placementRange(slotsById.get(p.slotId)!, liveFrom, p.effectiveUntil),
       ])
     ),

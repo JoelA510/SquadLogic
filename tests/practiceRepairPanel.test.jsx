@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 
 const h = vi.hoisted(() => ({
   /** @type {Record<string, any[]>} */
@@ -72,6 +72,8 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
 }));
 
 import PracticeRepairPanel from '../frontend/src/components/scheduling/PracticeRepairPanel.jsx';
+import PracticeEnactDialog from '../frontend/src/components/scheduling/PracticeEnactDialog.jsx';
+import { pastSunsetText } from '../frontend/src/utils/practiceRepairPanel.js';
 import PracticeRepairLauncher from '../frontend/src/components/scheduling/PracticeRepairLauncher.jsx';
 import { PRACTICE_TBD_REASON } from '@squadlogic/core/practice/index.js';
 
@@ -366,6 +368,73 @@ describe('practice repair panel :: daylight', () => {
     expect(screen.getByTestId('practice-repair-lighting-declared')).toHaveTextContent(
       /no portable-lighting windows supplied/
     );
+  });
+});
+
+describe('practice repair panel :: past sunset is shown, not hidden', () => {
+  // Past sunset is flagged, never blocked (owner, 2026-10-27): a recommendation that runs past it is
+  // kept, and the admin must see its flag, its first date and the minutes over before enacting.
+  it('shows the flag on a recommendation that ends past sunset, and not on one that does not', async () => {
+    seed({ coordinates: true, lit: false });
+    await openPanel();
+    const rows = screen.getAllByTestId('practice-repair-window');
+    const flagged = rows.filter((row) => within(row).queryByTestId('practice-repair-past-sunset'));
+    // T1's Monday 17:00-18:00 re-home ends past a November sunset at 40 degrees north.
+    expect(flagged.map((row) => row.getAttribute('data-assignment-id'))).toContain(A1);
+    const note = within(flagged[0]).getByTestId('practice-repair-past-sunset');
+    expect(note).toHaveTextContent(
+      /Runs past sunset from 2026-1\d-\d\d: it ends 18:00, \d+ minutes? after/
+    );
+    expect(note).toHaveTextContent('flagged, not blocked');
+    // Control: with lit ground nothing is flagged.
+    cleanup();
+    seed({ coordinates: true, lit: true });
+    await openPanel();
+    expect(screen.queryAllByTestId('practice-repair-past-sunset')).toHaveLength(0);
+  });
+
+  it('words the flag from the recommendation alone, and says nothing without one', () => {
+    expect(pastSunsetText({})).toBeNull();
+    expect(
+      pastSunsetText({
+        daylightPastSunset: { date: '2026-11-03', endMinutes: 1080, limitMinutes: 1010, dates: 4 },
+      })
+    ).toBe(
+      'Runs past sunset from 2026-11-03: it ends 18:00, 70 minutes after the latest allowed (16:50), on 4 dates. It is flagged, not blocked: check it before you enact it.'
+    );
+    expect(
+      pastSunsetText({
+        daylightPastSunset: { date: '2026-11-03', endMinutes: 1011, limitMinutes: 1010, dates: 1 },
+      })
+    ).toMatch(/1 minute after the latest allowed \(16:50\), on 1 date\./);
+  });
+
+  it('the confirmation dialog shows the flag before the override is accepted', () => {
+    const text = pastSunsetText({
+      daylightPastSunset: { date: '2026-11-03', endMinutes: 1080, limitMinutes: 1010, dates: 4 },
+    });
+    const props = {
+      open: true,
+      heading: 'Enact: Pitch 1 retires',
+      lead: 'Move Team One off Pitch 1',
+      stored: '2026-10-14',
+      teams: [{ id: T1, name: 'Team One' }],
+      rows: [],
+      replacement: 'Mon 17:00 · Pitch 2, from 2026-10-15 to 2026-11-30',
+      affected: 0,
+      busy: false,
+      notice: null,
+      blocked: null,
+      onConfirm: () => {},
+      onClose: () => {},
+    };
+    const { unmount } = render(<PracticeEnactDialog {...props} pastSunset={text} />);
+    expect(screen.getByTestId('practice-enact-past-sunset')).toHaveTextContent(
+      'Past sunset. Runs past sunset from 2026-11-03'
+    );
+    unmount();
+    render(<PracticeEnactDialog {...props} />);
+    expect(screen.queryByTestId('practice-enact-past-sunset')).toBeNull();
   });
 });
 

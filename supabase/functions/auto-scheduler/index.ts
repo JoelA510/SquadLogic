@@ -48,10 +48,12 @@
  * Daylight (8.9 PR 6, plan §3): each venue's `lighting_available` and
  * coordinates are loaded by `fieldId` (fields -> locations) -- AS THE CALLER
  * through RLS, never from the request body; a failed read refuses the run.
- * The solver's post-pass truncates each NEW placement at its first date past
- * `floor(sunset)` on unlit ground, the remainder TIME TBD (D8); an unlit
- * venue with no coordinates is flagged and counted, not refused (D4); a
- * locked row past sunset is reported with a proposed fix, never changed.
+ * The solver's post-pass flags each NEW placement that has a date past
+ * `floor(sunset)` on unlit ground and keeps it whole (past sunset is flagged,
+ * never blocked: owner, 2026-10-27; it used to truncate there and call the
+ * remainder TIME TBD, D8); an unlit venue with no coordinates is flagged and
+ * counted, not refused (D4); a locked row past sunset is reported with a
+ * proposed fix, never changed.
  * See `_shared/engines/practice-daylight.ts`.
  *
  * Portable-lighting overrides (8.9 D14 PR C): approved
@@ -69,6 +71,21 @@
  * (`checkHardConstraints`); locked rows are never judged. A failed read, or a
  * run slot the read does not return, refuses the run (503
  * `SLOT_RESERVATIONS_UNREADABLE`). See `_shared/engines/practice-reservations.ts`.
+ *
+ * Practices per division (Phase D PR B, migration 20261105010000): each team's
+ * division says how many practices a week it gets and how long each is, read as
+ * the caller through RLS and never from the body (503
+ * `DIVISION_PRACTICE_SETTINGS_UNREADABLE` when it cannot be read in full). The
+ * run places a team for the practices it is short of (its division's count less
+ * the rows it holds), each on a different weekday and in a slot of the division's
+ * length, and a practice it cannot place comes back unplaced with a reason, one
+ * entry per missing practice (`practice-length`, `not-enough-days`, ...). A
+ * division at one a week with no length runs as it did before. See
+ * `_shared/engines/practice-division-settings.ts` and `practice-lock.ts`.
+ *
+ * Past sunset is flagged, never blocked (owner, 2026-10-27): the daylight pass
+ * keeps a placement that runs past sunset on unlit ground whole and reports it in
+ * `daylight.pastSunset` (it used to cut it short and call the rest TIME TBD).
  */
 
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
@@ -91,14 +108,21 @@ import {
   runPracticeOptimizer,
   SLOT_DATING_UNREADABLE,
   undatableSlotIds,
+  unitIdOf,
 } from '../_shared/engines/auto-scheduler-solver.ts';
 import {
-  classifyTeamsForRun,
   crossCheckLockedAssignments,
   describeLockMismatch,
   loadSeasonPracticeLock,
+  outsideHoldsFor,
+  planTeamsForRun,
+  TEAM_HOLDS_UNREADABLE,
   TIME_TBD_EXCLUDED_REASON,
 } from '../_shared/engines/practice-lock.ts';
+import {
+  applyPracticeSettings,
+  loadTeamPracticeSettings,
+} from '../_shared/engines/practice-division-settings.ts';
 import { anchorWallTimes, describeAnchorFailure } from '../_shared/timing/anchorWallTimes.ts';
 import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 import {
@@ -335,12 +359,52 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       baseSlotId: s.baseSlotId,
     }));
 
-    //     Every roster team lands in exactly one of: placeable (no row, no
-    //     TIME TBD series), locked (has a row), TIME TBD (excluded; decision 4).
-    const classification = classifyTeamsForRun(
+    // 5c-bis. PRACTICES PER DIVISION (Phase D PR B). Each team's division's
+    //     count and length, loaded as the caller through RLS -- never from the
+    //     body. A failed read, or a division the table's checks would not hold,
+    //     refuses the run: it never runs a division at a count nobody set.
+    const practiceSettings = await loadTeamPracticeSettings(
+      createUserClient(req, supabaseUrl, anonKey),
+      { organizationId: input.organizationId, seasonSettingsId }
+    );
+    if (!practiceSettings.ok) {
+      logRequest(logCtx, 'error', 'Auto-scheduler could not read the division practice settings', {
+        orgId: input.organizationId,
+        seasonSettingsId,
+        code: practiceSettings.code,
+        message: practiceSettings.message,
+      });
+      await recordAuditNow(auditClient, logCtx, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: {
+          reason: practiceSettings.code,
+          message: auditErrorText(practiceSettings.message),
+        },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            "The divisions' practices per week and practice lengths could not be read, so the " +
+            `run was refused rather than scheduled at one practice a week (${practiceSettings.message}).`,
+          code: practiceSettings.code,
+        },
+        503
+      );
+    }
+    const withSettings = applyPracticeSettings(input.teams, practiceSettings.byTeam);
+
+    //     Every roster team lands in exactly one of: placeable (it is short of
+    //     practices: its division's count less the rows it holds), locked (it
+    //     has all it needs), TIME TBD (excluded; decision 4), or none wanted (a
+    //     division at 0 practices a week).
+    const classification = planTeamsForRun(
       input.teams.map((t) => t.id),
       lock.rows,
-      lock.timeTbdTeamIds
+      lock.timeTbdTeamIds,
+      new Map(withSettings.teams.map((t) => [t.id, t.practicesPerWeek]))
     );
 
     // 5d. COACH PREFERENCES (plan §4). Approved rows, and the coaches current
@@ -470,6 +534,55 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       );
     }
 
+    // 5e-ter. THE WEEKDAYS A TEAM ALREADY PRACTISES ON (Phase D PR B). A team that needs several
+    //     practices must not be given one on a weekday a saved row of its own already holds, and a
+    //     saved row may sit on a slot outside this run. Those rows are dated from the store (the
+    //     organization's slots the venue read already returned); a hold that cannot be dated
+    //     refuses the run, naming the team, rather than running blind to it and having the
+    //     writer's weekday rule refuse the apply. Only teams needing more than one practice are
+    //     examined, so a run at one a week reads and refuses nothing it did not before.
+    const outside = outsideHoldsFor(
+      lock.rows,
+      new Set(anchored.rows.map((s) => s.id)),
+      venueDaylight.allSlots,
+      new Set(
+        Object.keys(classification.unitsNeeded).filter(
+          (teamId) => classification.targets[teamId] > 1
+        )
+      )
+    );
+    if (outside.unchecked.length > 0) {
+      const teamIds = [...new Set(outside.unchecked.map((u) => u.teamId))].sort();
+      logRequest(
+        logCtx,
+        'error',
+        'Auto-scheduler refused: a team weekday hold could not be dated',
+        {
+          orgId: input.organizationId,
+          seasonSettingsId,
+          teamCount: teamIds.length,
+        }
+      );
+      await recordAuditNow(auditClient, logCtx, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: { reason: TEAM_HOLDS_UNREADABLE, teamIds: teamIds.slice(0, 20) },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            `${teamIds.length} team(s) need more than one practice and already hold a practice ` +
+            'whose slot could not be read, so the weekdays they are free on are unknown. The run ' +
+            `was refused rather than scheduled blind to them: ${teamIds.slice(0, 5).join(', ')}`,
+          code: TEAM_HOLDS_UNREADABLE,
+          teamIds,
+        },
+        422
+      );
+    }
+
     // 5f. PORTABLE LIGHTING (8.9 D14 PR C). Approved overrides on the run's
     //     slots, loaded as the caller through RLS -- never from the body
     //     (W25). A failed read refuses (W26): it never runs as if there were
@@ -576,6 +689,10 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         relocatedLoaded: lock.relocations.length,
         placeableTeams: classification.placeable.length,
         timeTbdExcluded: classification.timeTbd.length,
+        practiceUnitsToPlace: Object.values(classification.unitsNeeded).reduce((a, b) => a + b, 0),
+        teamsWithNoPracticesWanted: classification.noPractices.length,
+        teamsOverPracticeTarget: classification.overTarget.length,
+        teamsWithoutPracticeSettings: withSettings.withoutSettings.length,
         approvedPreferencesLoaded: preferences.preferencesLoaded,
         teamsConstrainedByPreferences: preferences.teamsConstrained,
         coachAssignmentsLoaded: preferences.coachAssignmentsLoaded,
@@ -590,7 +707,12 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     //    D2: the store's reservations on both, so every placement the search
     //    makes is judged by them (`checkHardConstraints`).
     const reserved = applySlotReservations(
-      input.teams.map((t) => prepareTeam(t)),
+      withSettings.teams.map((t) => ({
+        ...prepareTeam(t),
+        // The store's settings (5c-bis), never the body's.
+        practicesPerWeek: t.practicesPerWeek,
+        practiceMinutes: t.practiceMinutes,
+      })),
       slots,
       reservations
     );
@@ -612,6 +734,8 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // season-wide like a locked row's own slot.
       relocated: lock.relocations,
       placeableTeamIds: classification.placeable,
+      outsideHolds: outside.holds,
+      unitsNeeded: classification.unitsNeeded,
       preferenceGate: preferences.gate,
       daylight: {
         slots: daylightSlots,
@@ -639,7 +763,11 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       },
     });
     const bestAssignments = run.placements;
-    const bestUnassigned = run.unassigned;
+    // A team whose division wants several practices a week carries that count on each practice it
+    // is short of, so the run's report can say "1 of 2" per team (Phase D PR B).
+    const bestUnassigned = run.unassigned.map((u) =>
+      classification.targets[u.teamId] > 1 ? { ...u, target: classification.targets[u.teamId] } : u
+    );
     const bestScore = run.bestScore;
     const iteration = run.iterations;
     const totalElapsedMs = run.elapsedMs;
@@ -648,9 +776,30 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     const daylight = run.daylight!;
     const warningCount =
       bestUnassigned.length +
-      daylight.timeTbd.filter((t) => !t.withdrawn).length +
+      daylight.pastSunset.length +
       daylight.unknown.length +
       daylight.lockedPastSunset.length;
+    // Per team that wants several practices a week: how many it holds, was given and is missing
+    // (Phase D PR B). The subject set is the plan's (the roster and each division's count), never
+    // the solver's output, so a team the solver dropped still appears with its shortfall.
+    const placedByTeam = new Map<string, number>();
+    for (const placement of bestAssignments) {
+      placedByTeam.set(placement.teamId, (placedByTeam.get(placement.teamId) ?? 0) + 1);
+    }
+    const practiceTeams = Object.keys(classification.targets)
+      .filter((teamId) => classification.targets[teamId] > 1)
+      .sort()
+      .map((teamId) => {
+        const placed = placedByTeam.get(teamId) ?? 0;
+        const held = classification.held[teamId] ?? 0;
+        return {
+          teamId,
+          target: classification.targets[teamId],
+          held,
+          placed,
+          missing: Math.max(classification.targets[teamId] - held - placed, 0),
+        };
+      });
     const timeTbdExcluded = classification.timeTbd.map((teamId) => ({
       teamId,
       reason: TIME_TBD_EXCLUDED_REASON,
@@ -699,21 +848,32 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       severity: 'warning',
       finding_code: 'UNASSIGNED_TEAM',
       description:
-        `Team ${u.teamId} could not be assigned: ${u.reason}` +
+        (u.target
+          ? `Team ${u.teamId} could not be given one of its ${u.target} practices a week`
+          : `Team ${u.teamId} could not be assigned`) +
+        `: ${u.reason}` +
         (u.dimensions?.length ? ` (must_keep ${u.dimensions.join(', ')})` : ''),
-      affected_entities: [{ teamId: u.teamId, reason: u.reason, dimensions: u.dimensions ?? [] }],
+      affected_entities: [
+        {
+          teamId: u.teamId,
+          ...(u.target ? { unitId: u.unitId ?? u.teamId, target: u.target } : {}),
+          reason: u.reason,
+          dimensions: u.dimensions ?? [],
+        },
+      ],
     }));
-    // Daylight: every TIME TBD remainder, unjudged sunset and locked row past
-    // sunset is a finding, so the run's record carries what the page shows.
+    // Daylight: every placement past sunset (kept, flagged), unjudged sunset and
+    // locked row past sunset is a finding, so the run's record carries what the
+    // page shows.
     const daylightFindings = [
-      ...daylight.timeTbd.map((tbd) => ({
+      ...daylight.pastSunset.map((past) => ({
         severity: 'warning',
-        finding_code: 'DAYLIGHT_TIME_TBD',
+        finding_code: 'PRACTICE_PAST_SUNSET',
         description:
-          `Team ${tbd.teamId} practices past sunset in slot ${tbd.slotId} from ${tbd.from}: ` +
-          `TIME TBD ${tbd.from}..${tbd.until}` +
-          (tbd.withdrawn ? ' (no date before it remained)' : ''),
-        affected_entities: [tbd],
+          `Team ${past.teamId}'s practice in slot ${past.slotId} runs past sunset from ${past.date} ` +
+          `(it ends at minute ${past.endMinutes}, the latest allowed is ${past.limitMinutes}); ` +
+          'kept as placed, flagged for the admin to decide',
+        affected_entities: [past],
       })),
       ...daylight.unknown.map((unknown) => ({
         severity: 'warning',
@@ -809,13 +969,13 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         // The daylight post-pass, audited: its counts, every TIME TBD
         // remainder with its date, and every locked row it reported.
         daylight: daylight.meta,
-        daylightTimeTbd: daylight.timeTbd.map((t) => ({
-          teamId: t.teamId,
-          slotId: t.slotId,
-          from: t.from,
-          until: t.until,
-          reason: t.reason,
-          withdrawn: t.withdrawn,
+        daylightPastSunset: daylight.pastSunset.map((p) => ({
+          teamId: p.teamId,
+          slotId: p.slotId,
+          date: p.date,
+          endMinutes: p.endMinutes,
+          limitMinutes: p.limitMinutes,
+          reason: p.reason,
         })),
         daylightLockedPastSunset: daylight.lockedPastSunset.map((l) => ({
           assignmentId: l.assignmentId,
@@ -848,7 +1008,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         // loaded earlier and that may since have changed.
         assignments: bestAssignments.map((placement) => ({
           ...placement,
-          effectiveDateRange: run.placementRanges[placement.teamId],
+          effectiveDateRange: run.placementRanges[unitIdOf(placement)],
         })),
         unassigned: bestUnassigned,
         // Every roster team is accounted for: placed above, unplaced with a
@@ -856,6 +1016,8 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         lock: {
           lockedLoaded: lock.rows.length,
           lockedTeams: classification.locked.length,
+          // Phase D PR B: teams whose division gives no practice and that hold none.
+          noPracticesWanted: classification.noPractices.length,
           lockedOutsideRun: run.lockedOutsideRun.map((row) => row.assignmentId),
           // 11d-0: live relocations held (each one slot unit, season-wide), and
           // those whose slot this run holds no time for.
@@ -867,6 +1029,17 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
           // their slot's whole validity (Q2). Both still locked.
           endedRows: run.endedRows.map((row) => row.assignmentId),
           unreadableRange: run.unreadableRange.map((row) => row.assignmentId),
+        },
+        // Phase D PR B: per team that wants several practices a week, how many it holds, was given
+        // and is still missing; and the teams holding more rows than their division's count (the
+        // count was lowered below saved rows: the rows stay, decision 10). `unassigned` above has
+        // one entry per missing practice.
+        practices: {
+          teams: practiceTeams,
+          overTarget: classification.overTarget,
+          // Teams whose division gives no practice and that hold none: nothing to place, nothing
+          // missing. The page leaves them out of the run's report and the readiness counts.
+          noPractices: classification.noPractices,
         },
         // M4.8 Q7: the date every new placement above is live from. The page
         // writes each one as `[max(slot first date, liveFrom), slot end]`, so

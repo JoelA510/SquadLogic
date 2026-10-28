@@ -151,6 +151,8 @@ const initialMockData = {
       min_teams: 1,
       max_teams: 4,
       plays_games: true,
+      practices_per_week: 1,
+      practice_minutes: null,
     },
     {
       id: 'u10-div-id',
@@ -161,6 +163,8 @@ const initialMockData = {
       min_roster_size: 10,
       target_team_size: 12,
       plays_games: true,
+      practices_per_week: 1,
+      practice_minutes: null,
     },
   ],
   teams: [
@@ -4976,6 +4980,9 @@ export const mockSupabase = {
           gender_policy: p_gender || 'coed',
           // The trigger on divisions (20261101020000): a new division joins its season's default program.
           program_id: defaultProgramOf(db, p_season_settings_id)?.id ?? null,
+          // The column defaults (20261105010000): one practice a week, any slot length.
+          practices_per_week: 1,
+          practice_minutes: null,
           created_at: new Date().toISOString(),
         };
         db.divisions.push(division);
@@ -5249,6 +5256,8 @@ export const mockSupabase = {
             name: derived.name,
             gender_policy: derived.gender_policy,
             program_id: defaultProgramOf(db, seasonRow.id)?.id ?? null,
+            practices_per_week: 1,
+            practice_minutes: null,
           };
           db.divisions = db.divisions || [];
           db.divisions.push(division);

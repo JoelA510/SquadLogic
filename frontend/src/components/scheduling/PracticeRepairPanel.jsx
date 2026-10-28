@@ -7,6 +7,7 @@ import {
   TBD_REASON_TEXT,
   WEEKDAY_TEXT,
   clock,
+  pastSunsetText,
   declineIn,
   describeShape,
   namesOf,
@@ -438,6 +439,11 @@ function Recommendations({
                       <span data-testid="practice-repair-to">
                         {row.to}
                         {row.tier === 'cross-venue' ? ' (another venue)' : ''}
+                        {row.pastSunset && (
+                          <span className="text-sm block" data-testid="practice-repair-past-sunset">
+                            <span className="badge warning">Past sunset</span> {row.pastSunset}
+                          </span>
+                        )}
                       </span>
                     ) : (
                       <span data-testid="practice-repair-time-tbd" data-tbd-reason={row.reason}>
@@ -597,6 +603,7 @@ function Recommendations({
           teams={dialog.teams}
           rows={dialog.rows}
           replacement={dialog.replacement}
+          pastSunset={dialog.pastSunset}
           moves={dialog.moves}
           affected={dialog.affected}
           busy={busy}
@@ -699,6 +706,7 @@ function dialogFor(shown, adapted, rows, names, loss, subject) {
     replacement: shown.to
       ? `${describeShape(shown.to, names)}, from ${prompt.lossDate} to ${shown.effectiveUntil}`
       : `TIME TBD from ${prompt.lossDate}, because ${TBD_REASON_TEXT[shown.reason] ?? shown.reason}`,
+    pastSunset: pastSunsetText(shown),
     affected: prompt.record.published_practices_affected,
     blocked: null,
   };
@@ -763,6 +771,7 @@ function blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team
     replacement: shown.to
       ? `${describeShape(shown.to, names)}, from ${w.from} to ${w.until} only`
       : `TIME TBD from ${w.from} to ${w.until} only, because ${because}`,
+    pastSunset: pastSunsetText(shown),
     moves: moved
       ? `${moved.from.count} practice${moved.from.count === 1 ? '' : 's'} on ${dayText(moved.from.weekday)} move to ${moved.to.count} on ${dayText(moved.to.weekday)}.`
       : null,

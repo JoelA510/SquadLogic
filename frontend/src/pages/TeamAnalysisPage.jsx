@@ -25,6 +25,7 @@ import ProgressBar from '../components/ui/ProgressBar.jsx';
 import { Edit2, Save, ArrowRight, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { edgeFunctionCache } from '../lib/cache.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
@@ -257,6 +258,14 @@ function configFromDivisionRow(divisionRow) {
     ...(typeof divisionRow.plays_games === 'boolean'
       ? { playsGames: divisionRow.plays_games }
       : {}),
+    // Phase D PR B: likewise the practice settings, once their columns exist. A length of
+    // `null` is "any slot length".
+    ...(typeof divisionRow.practices_per_week === 'number'
+      ? {
+          practicesPerWeek: divisionRow.practices_per_week,
+          practiceMinutes: divisionRow.practice_minutes ?? null,
+        }
+      : {}),
     targetTeamSize: divisionRow.target_team_size ?? defaults.targetTeamSize,
     minRosterSize: divisionRow.min_roster_size ?? defaults.minRosterSize,
     maxRosterSize: divisionRow.max_roster_size ?? defaults.maxRosterSize,
@@ -280,6 +289,14 @@ function toDivisionConfigPayload({ program, config, organizationId, seasonSettin
     // D2: sent only when the division's setting was read (a boolean), so a
     // save before the migration calls the ten-argument writer it has.
     ...(typeof config.playsGames === 'boolean' ? { plays_games: config.playsGames } : {}),
+    // Phase D PR B: sent only when the settings were read (a number), for the same reason. The
+    // writer keeps a stored length on NULL and clears it on 0, so "any slot length" is sent as 0.
+    ...(typeof config.practicesPerWeek === 'number'
+      ? {
+          practices_per_week: config.practicesPerWeek,
+          practice_minutes: config.practiceMinutes ?? 0,
+        }
+      : {}),
   };
 }
 
@@ -885,8 +902,15 @@ export default function TeamAnalysisPage() {
           .eq('season_settings_id', currentSeasonSetting.id)
           .order('name', { ascending: true });
       let { data, error } = await readDivisions(
-        `${DIVISION_SETTING_COLUMNS}, plays_games, program_id`
+        `${DIVISION_SETTING_COLUMNS}, plays_games, program_id, practices_per_week, practice_minutes`
       );
+      // Phase D PR B: before migration 20261105010000 the practice settings do not exist (42703).
+      // They are read without them: the settings offer no practice fields.
+      if (!cancelled && error?.code === '42703') {
+        ({ data, error } = await readDivisions(
+          `${DIVISION_SETTING_COLUMNS}, plays_games, program_id`
+        ));
+      }
       // D2 and E2: before migration 20261029010000 `plays_games` does not exist, and before
       // 20261101020000 `program_id` does not (42703). The rules are read without them: no
       // division offers the games setting, and none is grouped under a program. Every other
@@ -994,6 +1018,12 @@ export default function TeamAnalysisPage() {
           ...(typeof payload.plays_games === 'boolean'
             ? { p_plays_games: payload.plays_games }
             : {}),
+          ...(typeof payload.practices_per_week === 'number'
+            ? {
+                p_practices_per_week: payload.practices_per_week,
+                p_practice_minutes: payload.practice_minutes,
+              }
+            : {}),
         });
 
         if (error) {
@@ -1032,6 +1062,9 @@ export default function TeamAnalysisPage() {
           ...prev,
           [program.id]: configFromDivisionRow(savedDivision),
         }));
+        // The auto-scheduler's cached runs were made with the settings as they were: a run for
+        // identical teams and slots must not answer for a division whose count just changed.
+        edgeFunctionCache.invalidateByPrefix(`auto-scheduler:${currentOrganization.id}:`);
         if (!silent) setConfigSaveMessage('Rules saved.');
         return savedDivision;
       } finally {
@@ -1090,6 +1123,35 @@ export default function TeamAnalysisPage() {
       selectedConfig.teamCountOverride > selectedConfig.maxTeams
     ) {
       errors.push({ type: 'teams', message: 'Override team count cannot exceed max teams.' });
+    }
+    const hasPracticeSettings = Boolean(selectedConfig) && 'practicesPerWeek' in selectedConfig;
+    if (
+      hasPracticeSettings &&
+      !(
+        Number.isInteger(selectedConfig.practicesPerWeek) &&
+        selectedConfig.practicesPerWeek >= 0 &&
+        selectedConfig.practicesPerWeek <= 7
+      )
+    ) {
+      errors.push({
+        type: 'practice-settings',
+        message: 'Practices per week must be a whole number from 0 to 7.',
+      });
+    }
+    if (
+      hasPracticeSettings &&
+      selectedConfig.practiceMinutes != null &&
+      !(
+        Number.isInteger(selectedConfig.practiceMinutes) &&
+        selectedConfig.practiceMinutes >= 15 &&
+        selectedConfig.practiceMinutes <= 240
+      )
+    ) {
+      errors.push({
+        type: 'practice-settings',
+        message:
+          'A practice is from 15 to 240 minutes long (or leave it empty for any slot length).',
+      });
     }
     if (generationError) {
       errors.push({ type: 'generation', message: generationError });

@@ -180,7 +180,11 @@ M53="$REPO/supabase/migrations/20261104010000_admin_only.sql"
 R53="$REPO/docs/sql/20261104010000_revert.sql"
 M54="$REPO/supabase/migrations/20261104020000_drop_coach_user_link.sql"
 R54="$REPO/docs/sql/20261104020000_revert.sql"
-M55="$REPO/supabase/migrations/20261106010000_play_up_requested.sql"
+# Phase D PR B: practices per division (two division columns, the settings writer with a new signature,
+# the refusals helper, the practice writer's gate on new auto rows), and the revert.
+M55="$REPO/supabase/migrations/20261105010000_practices_per_division.sql"
+R55="$REPO/docs/sql/20261105010000_revert.sql"
+M56="$REPO/supabase/migrations/20261106010000_play_up_requested.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -2852,7 +2856,7 @@ plant "R10 the assignment warning stops counting teams distinctly" "$R10" \
 # The prune survives in v3 for unlocked rows, and this smoke unlocks them.
 # Re-aimed again, at 20261002000000, by 8.9 PR 6b, which copies the writer
 # whole: 20260929000000's body is now superseded in turn.)
-plant "M11 the writer stops pruning superseded rows" "$M18" \
+plant "M11 the writer stops pruning superseded rows" "$M55" \
   "         WHERE pa.id = ANY (v_prune_ids)" \
   "         WHERE false AND pa.id = ANY (v_prune_ids)" \
   "FAIL smoke 20260924000000"
@@ -2861,14 +2865,18 @@ plant "M11 the writer stops pruning superseded rows" "$M18" \
 # instead -- with the roster count left intact, so the count meta-assertion
 # cannot be what catches it -- the dropped team and the never-scheduled one
 # both vanish: the exact silence the operator's condition on #64 forbids.
-plant "M12 teams without practice are listed from the payload, not the roster" "$M18" \
+plant "M12 teams without practice are listed from the payload, not the roster" "$M55" \
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
+                   -- A division that gives no practice (0 a week) leaves its teams with none on
+                   -- purpose: that is not a team the save left without one.
+                   AND d.practices_per_week > 0
                )," \
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
+                   AND d.practices_per_week > 0
                    AND t.id = ANY (v_payload_teams)
                )," \
   "FAIL smoke 20260924000000"
@@ -2994,12 +3002,12 @@ plant "M14 scheduler_runs gets no admin write policy" "$M53" \
 # PR 6b (20261002000000) copies persist_practice_schedule whole, so the body
 # in $M15 is superseded and a plant there would be dead. The FK plant is
 # table DDL, which 20261002000000 does not touch, and stays on $M15.
-plant "M15 the writer's lock check is removed" "$M18" \
+plant "M15 the writer's lock check is removed" "$M55" \
   "    IF v_locked_id IS NOT NULL THEN" \
   "    IF false THEN" \
   "FAIL smoke 20260929000000"
 
-plant "M15 unlock is by team, not by row" "$M18" \
+plant "M15 unlock is by team, not by row" "$M55" \
   "     WHERE NOT (t.id = ANY (v_unlock_ids))" \
   "     WHERE NOT (t.id IN (SELECT u.id FROM public.practice_assignments u WHERE u.team_id IN (SELECT w.team_id FROM public.practice_assignments w WHERE w.id = ANY (v_unlock_ids))))" \
   "FAIL smoke 20260929000000"
@@ -3007,12 +3015,12 @@ plant "M15 unlock is by team, not by row" "$M18" \
 # Since 20261104010000 every member is an admin, so the gate's is_org_admin half can no longer
 # refuse anyone the membership check above it has not (a mutant removing only that half survives,
 # and is not planted); the half that refuses is the missing uid -- the service role.
-plant "M15 the unlock gate no longer refuses a caller with no uid" "$M18" \
+plant "M15 the unlock gate no longer refuses a caller with no uid" "$M55" \
   "       AND (auth.uid() IS NULL OR NOT public.is_org_admin(v_org_id)) THEN" \
   "       AND (false) THEN" \
   "FAIL smoke 20260929000000"
 
-plant "M15 the unlock audit call is dropped" "$M18" \
+plant "M15 the unlock audit call is dropped" "$M55" \
   "        PERFORM public.record_audit_event(
             v_org_id,
             'practice.unlock_accepted'," \
@@ -3023,7 +3031,7 @@ plant "M15 the unlock audit call is dropped" "$M18" \
 
 # The representation plan §1 rejects: the temporary move written as a second
 # assignment row (on the relocated slot, or the series' own for TIME TBD).
-plant "M15 exceptions are stored as assignment rows" "$M18" \
+plant "M15 exceptions are stored as assignment rows" "$M55" \
   "        INSERT INTO public.practice_exceptions (
             organization_id, season_settings_id, team_id, assignment_id, \"window\",
             kind, practice_slot_id, tbd_reason, cause_kind, cause_id, run_id, created_by
@@ -3058,7 +3066,7 @@ plant "M15 practice_exceptions' assignment FK cascades" "$M15" \
 # The double-booking rule is a TIME clash (coordinator ruling on #461). Three
 # plants, one per case: range-only turns (a) red, never-clash turns (b) red,
 # weekday-only turns (c) red.
-plant "M15 the double-booking rule reverts to range-only" "$M18" \
+plant "M15 the double-booking rule reverts to range-only" "$M55" \
   "     WHERE ps.day_of_week = ks.day_of_week
        AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
@@ -3067,14 +3075,14 @@ plant "M15 the double-booking rule reverts to range-only" "$M18" \
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the double-booking time predicate is dropped entirely" "$M18" \
+plant "M15 the double-booking time predicate is dropped entirely" "$M55" \
   "     WHERE ps.day_of_week = ks.day_of_week
 " \
   "     WHERE false AND ps.day_of_week = ks.day_of_week
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the double-booking rule ignores minutes" "$M18" \
+plant "M15 the double-booking rule ignores minutes" "$M55" \
   "       AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
 " \
@@ -3082,7 +3090,7 @@ plant "M15 the double-booking rule ignores minutes" "$M18" \
   "FAIL smoke 20260929000000"
 
 # Case (d): back-to-back slots touch at a boundary and share no minute.
-plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M18" \
+plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M55" \
   "       AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
 " \
@@ -3091,7 +3099,7 @@ plant "M15 the double-booking minute test counts a touching boundary as a clash"
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the base_fingerprint check is skipped" "$M18" \
+plant "M15 the base_fingerprint check is skipped" "$M55" \
   "    IF base_fingerprint IS NOT NULL AND base_fingerprint IS DISTINCT FROM v_fingerprint THEN" \
   "    IF false AND base_fingerprint IS NOT NULL THEN" \
   "FAIL smoke 20260929000000"
@@ -3213,12 +3221,12 @@ plant "M18 the cause_kind CHECK drops daylight" "$M18" \
   "IN ('blackout', 'retirement')" \
   "FAIL smoke 20261002000000"
 
-plant "M18 the new-row resolution links the team's other row on the slot" "$M18" \
+plant "M18 the new-row resolution links the team's other row on the slot" "$M55" \
   "                       AND r.effective_date_range = (e.value#>>'{new_assignment,effective_date_range}')::daterange))" \
   "                       AND r.effective_date_range <> (e.value#>>'{new_assignment,effective_date_range}')::daterange))" \
   "FAIL smoke 20261002000000"
 
-plant "M18 the new-row resolution resolves nothing" "$M18" \
+plant "M18 the new-row resolution resolves nothing" "$M55" \
   "                     WHERE r.organization_id = v_org_id" \
   "                     WHERE false AND r.organization_id = v_org_id" \
   "FAIL smoke 20261002000000"
@@ -3230,14 +3238,14 @@ plant "M18 the daylight shape CHECK admits any reason" "$M18" \
   "            AND tbd_reason IS NOT NULL)" \
   "FAIL smoke 20261002000000"
 
-plant "M18 the mid-range daylight window check is removed" "$M18" \
+plant "M18 the mid-range daylight window check is removed" "$M55" \
   "    IF v_bad_id IS NOT NULL THEN
         RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
   "    IF false THEN
         RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
   "FAIL smoke 20261002000000"
 
-plant "M18 new_assignment skips the season scope" "$M18" \
+plant "M18 new_assignment skips the season scope" "$M55" \
   "               AND d.season_settings_id = v_season_id)
      LIMIT 1;
     IF v_bad_ref IS NOT NULL THEN
@@ -3779,7 +3787,7 @@ END;
 # again at 20261022020000, which replaces that one, again at 20261025010000,
 # and again at 20261026010000 ($M43), the live body: the staged payload stored
 # whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M55" \
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M56" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4141,7 +4149,7 @@ plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" 
 # drifted. The patch helper plants are aimed at $M43, whose
 # sanitize_player_patch and apply_player_patch (R5: no birth date) replace
 # this file's (and R4's).
-plant "M38 the patch sanitizer still takes paid" "$M55" \
+plant "M38 the patch sanitizer still takes paid" "$M56" \
   "            WHEN 'willing_to_coach', 'play_up_requested' THEN" \
   "            WHEN 'paid', 'willing_to_coach', 'play_up_requested' THEN" \
   "smoke 20261022020000"
@@ -4152,7 +4160,7 @@ plant "M38 coach_update_player_compliance is left behind" "$M38" \
   "" \
   "smoke 20261022020000"
 
-plant "M38 apply_player_patch loses its UTC pin" "$M55" \
+plant "M38 apply_player_patch loses its UTC pin" "$M56" \
   "LANGUAGE plpgsql
 SET search_path = public
 SET timezone = 'UTC'
@@ -4395,7 +4403,7 @@ plant "M42 the member list admits any signed-in user" "$M42" \
 
 # The sanitizer is R5's since 20261026010000 ($M43), which has no birth date
 # arm: the key is taken with the text fields.
-plant "M42 the sanitizer takes guardian_contacts again" "$M55" \
+plant "M42 the sanitizer takes guardian_contacts again" "$M56" \
   "                 'buddy_request' THEN" \
   "                 'buddy_request', 'guardian_contacts' THEN" \
   "smoke 20261025010000"
@@ -4455,7 +4463,7 @@ plant "M43 players.birth_year is left behind" "$M43" \
   "    DROP COLUMN date_of_birth;" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 apply_player_patch still writes the birth date" "$M55" \
+plant "M43 apply_player_patch still writes the birth date" "$M56" \
   "        team_id         = CASE WHEN p_sanitized ? 'team_id' THEN (p_sanitized->>'team_id')::uuid ELSE p.team_id END,
         updated_at      = now()" \
   "        team_id         = CASE WHEN p_sanitized ? 'team_id' THEN (p_sanitized->>'team_id')::uuid ELSE p.team_id END,
@@ -4463,7 +4471,7 @@ plant "M43 apply_player_patch still writes the birth date" "$M55" \
         updated_at      = now()" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 the finalizer promotes only a row with a natural age" "$M55" \
+plant "M43 the finalizer promotes only a row with a natural age" "$M56" \
   "        WHERE p.first_name IS NOT NULL
           AND p.last_name IS NOT NULL
     )," \
@@ -4473,7 +4481,7 @@ plant "M43 the finalizer promotes only a row with a natural age" "$M55" \
     )," \
   "smoke 20261026010000"
 
-plant "M43 the finalizer prefers the age group to the staged natural age" "$M55" \
+plant "M43 the finalizer prefers the age group to the staged natural age" "$M56" \
   "                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
                     THEN p.natural_age_text::smallint
                 WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
@@ -4484,12 +4492,12 @@ plant "M43 the finalizer prefers the age group to the staged natural age" "$M55"
                     THEN p.natural_age_text::smallint" \
   "smoke 20261026010000"
 
-plant "M43 a re-import keeps the old natural age" "$M55" \
+plant "M43 a re-import keeps the old natural age" "$M56" \
   "            natural_age = de.natural_age," \
   "            natural_age = COALESCE(de.natural_age, p.natural_age)," \
   "smoke 20261026010000"
 
-plant "M43 the sanitizer takes date_of_birth again" "$M55" \
+plant "M43 the sanitizer takes date_of_birth again" "$M56" \
   "                 'buddy_request' THEN" \
   "                 'buddy_request', 'date_of_birth' THEN" \
   "smoke 20261026010000"
@@ -4646,12 +4654,12 @@ plant "M46 the reservation writer takes another organization's division" "$M46" 
   "           AND true;" \
   "smoke 20261029010000"
 
-plant "M46 a settings save by id without plays_games resets it" "$M50" \
+plant "M46 a settings save by id without plays_games resets it" "$M55" \
   "                   plays_games = COALESCE(p_plays_games, plays_games)," \
   "                   plays_games = COALESCE(p_plays_games, true)," \
   "smoke 20261029010000"
 
-plant "M46 a settings save by name ignores a changed plays_games" "$M50" \
+plant "M46 a settings save by name ignores a changed plays_games" "$M55" \
   "                   OR (p_plays_games IS NOT NULL
                        AND public.divisions.plays_games IS DISTINCT FROM p_plays_games)
 " \
@@ -4765,7 +4773,7 @@ plant "M49 an anonymous user's first password goes unchecked" "$M49" \
 # caller names (a completed season's program edited through the active season's id); and a season
 # made after the migration still gets its default program (the trigger, which no migration-time
 # check can see, since the harness's migration build has no season to give one to).
-plant "M50 the finalizer ignores the job's season" "$M55" \
+plant "M50 the finalizer ignores the job's season" "$M56" \
   "                ELSE s.id = v_job.season_settings_id END);
 
     IF v_season_status = 'completed' THEN" \
@@ -4814,6 +4822,23 @@ plant "M52 anyone can create a permit" "$M53" \
     PERFORM public.facility_permit_check(" \
   "smoke 20261102010000"
 
+# Phase D PR B: two plants (the smoke 20261105010000 must go red for each, each also applied by hand in a
+# scratch cluster and caught by the pgTAP file supabase/tests/practice_writer_v3.sql). The guarantees that
+# matter most in the writer's gate: a division's practice length is held for a new auto row (a 60-minute
+# division is not given a 45-minute slot by a client that bypassed the solver), and a team's practices fall
+# on different weekdays (two new auto rows of one team on one weekday are refused whatever their times).
+plant "M55 the writer does not check the division's practice length" "$M55" \
+  "     WHERE j.practice_minutes IS NOT NULL
+       AND (j.end_time - j.start_time) <> make_interval(mins => j.practice_minutes)" \
+  "     WHERE j.practice_minutes IS NOT NULL
+       AND false" \
+  "smoke 20261105010000"
+
+plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
+  "        ON o.team_id = j.team_id AND o.id <> j.id AND o.day_of_week = j.day_of_week" \
+  "        ON false AND o.team_id = j.team_id AND o.id <> j.id AND o.day_of_week = j.day_of_week" \
+  "smoke 20261105010000"
+
 
 # Admin only (20261104010000; plan docs/changes/2026-10-27-admin-only.md, S5). Three plants were run
 # against the real harness when it was written; each failed the named check. The re-aimed plants
@@ -4851,7 +4876,7 @@ plant "M54 the column drop leaves coaches.profile_id" "$M54" \
 # The play-up request (20261106010000; plan docs/changes/2026-10-27-play-up-by-request.md). The
 # finalizer reads x as a request beside yes, true, y, t and 1; the smoke stores one player per
 # spelling, so a list without x leaves that player without a request.
-plant "M55 the finalizer does not read x as a play-up request" "$M55" \
+plant "M56 the finalizer does not read x as a play-up request" "$M56" \
   "ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1', 'x')" \
   "ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1')" \
   "smoke 20261106010000"

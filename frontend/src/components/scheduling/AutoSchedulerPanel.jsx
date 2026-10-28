@@ -2,6 +2,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import { Zap, CheckCircle, AlertTriangle, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import Button from '../ui/Button.jsx';
+import { practiceLines } from '../../utils/practiceLines.js';
 
 /**
  * The Edge Function stops its search at the server's compute cap (`CPU_CAP_MS` in
@@ -35,6 +36,7 @@ export default function AutoSchedulerPanel({
   onCancel,
   onReset,
   disabled = false,
+  teamNames = {},
 }) {
   const isRunning = status === 'running' || status === 'polling';
   const isCompleted = status === 'completed';
@@ -198,6 +200,7 @@ export default function AutoSchedulerPanel({
           {result.optimization?.terminationReason === CPU_CAP_REASON && (
             <p className="mt-2 text-sm text-text-primary">{CPU_CAP_NOTICE}</p>
           )}
+          <PracticeLines result={result} teamNames={teamNames} />
         </div>
       )}
 
@@ -218,6 +221,43 @@ export default function AutoSchedulerPanel({
   );
 }
 
+/** The per-team practice counts, and the teams holding more than their division's count now. */
+function PracticeLines({ result, teamNames }) {
+  const lines = practiceLines(result, teamNames);
+  const over = result?.practices?.overTarget ?? [];
+  if (lines.length === 0 && over.length === 0) return null;
+  return (
+    <div className="mt-3 text-sm text-text-primary" data-testid="practice-lines">
+      {lines.length > 0 && (
+        <>
+          <p className="font-semibold">Practices per team</p>
+          <ul className="mt-1 space-y-1" aria-label="Practices per team">
+            {lines.map((line) => (
+              <li key={line.teamId}>
+                {line.name}: {line.have} of {line.target} practices
+                {line.have < line.target && line.reasons.length > 0
+                  ? ` (${line.reasons.join('; ')})`
+                  : ''}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {over.length > 0 && (
+        <p className="mt-2">
+          {over.length === 1 ? '1 team holds' : `${over.length} teams hold`} more practices than its
+          division gives now. The saved practices stay.
+        </p>
+      )}
+    </div>
+  );
+}
+
+PracticeLines.propTypes = {
+  result: PropTypes.object,
+  teamNames: PropTypes.object,
+};
+
 AutoSchedulerPanel.propTypes = {
   title: PropTypes.string,
   description: PropTypes.string,
@@ -236,10 +276,12 @@ AutoSchedulerPanel.propTypes = {
     evaluation: PropTypes.object,
     optimization: PropTypes.object,
     runId: PropTypes.string,
+    practices: PropTypes.object,
   }),
   error: PropTypes.string,
   onTrigger: PropTypes.func.isRequired,
   onCancel: PropTypes.func,
   onReset: PropTypes.func.isRequired,
   disabled: PropTypes.bool,
+  teamNames: PropTypes.objectOf(PropTypes.string),
 };

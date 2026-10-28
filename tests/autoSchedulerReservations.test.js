@@ -247,10 +247,14 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
   });
 
   it("hands the solver the reserved teams and slots, never the body's", () => {
+    // Phase D PR B: the teams carry the store's practice settings (never the body's) as they go in.
     assert.match(
       source,
-      /applySlotReservations\(\s*input\.teams\.map\(\(t\) => prepareTeam\(t\)\),\s*slots,\s*reservations\s*\)/
+      /applySlotReservations\(\s*withSettings\.teams\.map\(\(t\) => \(\{\s*\.\.\.prepareTeam\(t\),/
     );
+    assert.match(source, /practicesPerWeek: t\.practicesPerWeek,/);
+    assert.match(source, /practiceMinutes: t\.practiceMinutes,/);
+    assert.match(source, /\s*slots,\s*reservations\s*\)/);
     assert.match(source, /const teams = reserved\.teams;/);
     assert.match(source, /slots: reserved\.slots,/);
   });

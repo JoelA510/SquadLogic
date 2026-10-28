@@ -432,6 +432,36 @@ Each PR runs the season fixture suite and the full Definition of Done.
   outside SuperRec before its games are scheduled. PR B's builder decides with evidence and says
   which in the PR.
 
+## Build notes: PR B (2026-10-27)
+
+- **Built:** B1 to B7 and the owner's sunset answer (flag, never block) for the Edge pass and the
+  repair, in migration `20261105010000`. Owner answers applied: settings per division; a practice
+  takes a slot of exactly its length; Monday to Friday comes from the field grid (no weekday list
+  is added); different weekdays is a hard rule; lowering a count below saved rows keeps the rows and
+  reports `overTarget`.
+- **E (TIME TBD in the master export) is NOT in this PR.** Decision, with evidence: **a separate
+  `schedule_tbd` table**, not rows in the schedule tables. A TIME TBD row in `practice_assignments`
+  has no slot and no dates, and everything that reads that table treats a row as a placed or locked
+  practice: the lock loader (`practice-lock.ts` loads every row, a null `slotId` included, as a
+  locked occupant of the team), the writer's prune and lock rules (`persist_practice_schedule`
+  prunes and locks by team and slot), `teams_without_practice` (a team with a TBD row would count as
+  having a practice), and the metrics (`practiceMetrics.js` counts a row as an assigned team). Each
+  would need a "not a real practice" filter, and a reader missed would count a missing practice as a
+  held one, which is the failure this plan exists to prevent. A table read only by the export and
+  the roster check cannot be mistaken for a placement. E is its own migration, writer change and
+  export change; it fits a review of its own, not this one.
+- **Daylight:** both passes flag past-sunset (Edge `practice-daylight.ts`: `daylight.pastSunset`,
+  finding `PRACTICE_PAST_SUNSET`, audit `daylightPastSunset`; core `repair.js`: `daylightPastSunset`
+  on the re-home and the recommendation, `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET` now a compromise).
+  `frontend/src/utils/daylightExceptions.js` (which built the exceptions that wrote a truncation) is
+  deleted. An unknown sunset is still refused. `PRACTICE_TBD_REASON.PAST_SUNSET` stays for rows
+  saved before.
+- **Migration contents:** the two columns with their CHECKs, the helper
+  `practice_new_auto_row_refusals`, `persist_practice_schedule` replaced behind its md5 (production's
+  body; the gate is the only change, `now()` for `timezone('utc', now())` in the one place it was
+  written), `admin_upsert_division_settings` replaced by its 13-argument form (the 11-argument one
+  dropped by its exact signature, no CASCADE).
+
 ## Plan-change output
 
 Size: planned (PRs, migrations, the solver, RPC shapes, an Edge Function). Departures: none.

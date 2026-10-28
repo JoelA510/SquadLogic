@@ -131,6 +131,62 @@ describe('admin_upsert_division_settings', () => {
   });
 });
 
+describe('admin_upsert_division_settings: practices per week and practice length (20261105010000)', () => {
+  const upsert = (db, extra) =>
+    call(db, 'admin_upsert_division_settings', {
+      p_organization_id: MOCK_ORG_ID,
+      p_season_settings_id: 's1',
+      p_name: 'U10',
+      ...extra,
+    });
+
+  it('a new division takes one a week and any length; NULL keeps; 0 clears the length', () => {
+    const db = makeDb();
+    const created = upsert(db, {});
+    expect(created.data).toMatchObject({ practices_per_week: 1, practice_minutes: null });
+    const set = upsert(db, {
+      p_division_id: created.data.id,
+      p_practices_per_week: 2,
+      p_practice_minutes: 60,
+    });
+    expect(set.data).toMatchObject({ practices_per_week: 2, practice_minutes: 60, changed: true });
+    // A save that names neither keeps both, and reports no change.
+    const kept = upsert(db, { p_division_id: created.data.id });
+    expect(kept.data).toMatchObject({
+      practices_per_week: 2,
+      practice_minutes: 60,
+      changed: false,
+    });
+    const cleared = upsert(db, { p_division_id: created.data.id, p_practice_minutes: 0 });
+    expect(cleared.data).toMatchObject({
+      practices_per_week: 2,
+      practice_minutes: null,
+      changed: true,
+    });
+    // Zero practices a week is a value, not "unset".
+    const none = upsert(db, { p_division_id: created.data.id, p_practices_per_week: 0 });
+    expect(none.data).toMatchObject({ practices_per_week: 0, changed: true });
+  });
+
+  it('refuses out-of-range values with 23514, as the table check does, and writes nothing', () => {
+    const db = makeDb();
+    const created = upsert(db, {});
+    for (const extra of [
+      { p_practices_per_week: 8 },
+      { p_practices_per_week: -1 },
+      { p_practices_per_week: 1.5 },
+      { p_practice_minutes: 14 },
+      { p_practice_minutes: 241 },
+    ]) {
+      expect(
+        upsert(db, { p_division_id: created.data.id, ...extra }).error?.code,
+        JSON.stringify(extra)
+      ).toBe('23514');
+    }
+    expect(db.divisions[0]).toMatchObject({ practices_per_week: 1, practice_minutes: null });
+  });
+});
+
 describe('create_org_invite and redeem_org_invite', () => {
   it('an admin creates a code that a new user redeems once', () => {
     const db = makeDb();

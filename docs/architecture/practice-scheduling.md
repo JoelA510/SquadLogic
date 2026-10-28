@@ -75,16 +75,16 @@ the Edge counterpart of core `practice/daylight.js`:
   `valid_until` is null (the page's season-start and season-end fallbacks). A failed read, or a run slot or field
   the read does not return, refuses the run with `VENUE_DAYLIGHT_UNREADABLE`
   (the coach-preference loader's contract).
-- **New placements only.** Each is expanded weekly from the season's today (where
-  the page starts a new placement) to the slot's `effectiveUntil`. At the first
-  date past the limit the placement is truncated (`effectiveUntil` = the day
-  before, which the page honours in `newPlacementRange`), and the remainder is
-  TIME TBD with reason `past-sunset` (core `PRACTICE_TBD_REASON.PAST_SUNSET`,
-  pinned) and the date. If the first
-  occurrence is already past the limit, the placement is withdrawn and the team
-  is unplaced with that reason. Every remainder is returned in `daylight.timeTbd`,
-  written as a `DAYLIGHT_TIME_TBD` run finding, and audited on
-  `scheduler.auto_completed`.
+- **New placements only; past sunset is flagged, never blocked.** Each is expanded weekly
+  from the season's today (where the page starts a new placement) to the slot's
+  `effectiveUntil`. A placement with a date past the limit is **kept whole** (owner decision of
+  2026-10-27, every league): it is returned in `daylight.pastSunset` with the first such date,
+  the time it ends against the limit, and the count of dates, written as a
+  `PRACTICE_PAST_SUNSET` run finding (a warning), shown on the practice page ("runs past
+  sunset... kept") and audited on `scheduler.auto_completed` (`daylightPastSunset`). Nothing is
+  truncated, withdrawn or made TIME TBD for being past sunset. (Before Phase D PR B the pass
+  truncated at the first such date and withdrew a first occurrence past it; `PRACTICE_TBD_REASON.PAST_SUNSET`
+  stays in the table for rows saved then.)
 - **No coordinates on unlit ground** is flagged `SUNSET_UNKNOWN`
   (`venue-coordinates-missing`), counted in `daylightUnknownOccurrences`, shown on
   the page, and never treated as within daylight. It does not refuse the run.
@@ -93,13 +93,41 @@ the Edge counterpart of core `practice/daylight.js`:
 - **Declared, not optimised (D11).** The search does not steer toward slots that
   survive the season, and a withdrawn placement's capacity is not offered to
   another team.
-- **Not persisted here.** The TIME TBD remainder is reported, audited and shown.
-  This pass does not write a `practice_exceptions` row for it, and
-  neither the `tbd_reason` CHECK nor `practice-persistence` admits `past-sunset` yet; that is
-  follow-up persistence work.
-- **Autumn-shaped (D8).** Truncating at the first date past sunset suits a season
-  whose sunsets get earlier. In a spring season an early dark date withdraws the
-  whole placement even though later dates would be light; D8 chose this.
+- **Nothing to persist for it.** A flagged placement is an ordinary assignment; the flag is
+  reported, audited and shown, not stored.
+- **No longer autumn-shaped.** D8's truncation at the first date past sunset is gone with the
+  block: a placement that is dark on some dates and light on others is kept and flagged with its
+  first dark date, and the admin decides.
+- **The repair agrees.** `practice/repair.js` keeps a re-home candidate past sunset and flags it
+  (`daylightPastSunset` on the re-home and its recommendation, `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET`
+  a compromise finding); a candidate whose sunset is **unknown** is still refused (`sunset-unknown`,
+  D4: unknown says nothing about being past it, and is never read as legal).
+
+## Practices per division (Phase D PR B)
+
+- **The setting.** `divisions.practices_per_week` (0 to 7, default 1) and `practice_minutes`
+  (15 to 240, NULL for any slot length), written by `admin_upsert_division_settings` and edited on
+  the Teams page beside the division's other rules. The Edge function reads them from the store as
+  the caller (`practice-division-settings.ts`), never from the body; a failed read refuses the run
+  (503), it does not run at one a week.
+- **Units.** The solver places *practice units*: a team needing N more places `max(N - rows held, 0)`
+  units (a unit's id is the team id when it needs one, else `teamId#k`), each on a different
+  weekday (a hard rule beside capacity and coaches, `checkHardConstraints`), in a slot of exactly the
+  division's length when it sets one. A division at one a week runs byte-identically to before.
+- **Weekdays held outside the run.** A saved practice on a slot the run does not carry still holds its
+  team's weekday: its dating is read from the organization's slots (`outsideHoldsFor`), and a hold that
+  cannot be dated refuses the run (422 `TEAM_HOLDS_UNREADABLE`) for a team that needs several.
+- **A division at 0 practices** needs nothing: not in coverage, the run's report (`practices.noPractices`)
+  or the readiness counts.
+- **What is missing, and why.** Each unplaced unit carries `no-slot-available`, `coach-preference`,
+  `no-live-date`, `practice-length` or `not-enough-days`; the response's `practices` block lists, per
+  team that wants several, how many it holds, was given and still lacks, and the teams holding more
+  rows than their count now (the rows stay; lowering a count never deletes a practice).
+- **The writer's gate.** `persist_practice_schedule` refuses a save whose new `auto` rows break
+  capacity, a slot reservation, the division's length, the different-weekday rule or the weekly
+  count (`practice_new_auto_row_refusals`, P0001, naming each row). The count is per scheduling week (Monday to Sunday), a saved row with no date range holds its slot's whole validity, and `teams_without_practice` leaves out the teams of a 0-a-week division. Manual, repair, recommendation
+  and override rows keep their existing checks. Coach overlap, preferences and daylight are the
+  server's verify, not the writer.
 
 ## Manual Adjustment Workflow
 

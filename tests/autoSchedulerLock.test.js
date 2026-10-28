@@ -724,7 +724,7 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.match(source, /const bestAssignments = run\.placements;/);
     assert.match(source, /assignments: bestAssignments\.map\(/);
     // M4.8: each placement goes out with the range it was judged on.
-    assert.match(source, /effectiveDateRange: run\.placementRanges\[placement\.teamId\],/);
+    assert.match(source, /effectiveDateRange: run\.placementRanges\[unitIdOf\(placement\)\],/);
     assert.doesNotMatch(source, /input\.lockedAssignments\.map|generateGreedySeed/);
   });
 

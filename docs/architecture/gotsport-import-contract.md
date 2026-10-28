@@ -190,7 +190,7 @@ that was reversed still shows. Validate the file again.
 A **completed** season is read-only for a signed-in caller, players and coaches
 included (22023, `season_completed`): no patch, delete or insert by an admin,
 through an RPC or a direct write; its teams, rosters, coach history, practices,
-TIME TBD exceptions and games likewise. Jobs with no signed-in user (the retention job,
+TIME TBD exceptions and list, and games likewise. Jobs with no signed-in user (the retention job,
 the demo purge) and the cascade of a deleted organization still reach its rows.
 
 > **Duplicate headers:** the coach export repeats `Playing Up` and

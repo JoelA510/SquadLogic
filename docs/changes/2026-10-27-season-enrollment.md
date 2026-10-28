@@ -231,7 +231,10 @@ under "For the owner"). Migration `20261109010000_season_rollover.sql`.
   purge) and the cascade of a deleted organization pass. A completed season can be opened from the header to look
   back at (a notice above each page says it is read-only). **Schedules too** (Codex's finding on #680): the
   same rule, one more trigger function, on `teams`, `team_players`, `team_coach_assignments`,
-  `practice_assignments`, `practice_exceptions` and `game_assignments`. A row's season is its team's
+  `practice_assignments`, `practice_exceptions`, `game_assignments` and `schedule_tbd` (the TIME TBD list that
+  #678 added: `sync_schedule_tbd_practices`, run by a signed-in admin through `persist_practice_schedule` and
+  `refresh_schedule_tbd_practices`, rebuilds a season's rows, so a completed season's rebuild is refused; the
+  export reads a completed season's list and does not refresh it). A row's season is its team's
   division's (a team has no season column), or `practice_exceptions.season_settings_id`; an update is judged on
   the old row and the new, so a team cannot be moved out of or into a completed season. They are triggers, not
   checks in the writers, so the persistence RPCs a later PR replaces (`schedule_tbd`, #678) are covered

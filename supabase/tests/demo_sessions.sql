@@ -584,8 +584,8 @@ SELECT is(
         -- 20261102010000: permits, gated by the membership helpers.
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
         'admin_update_facility_permit', 'get_facility_permits',
-        -- 20261107010000: the TIME TBD list, read by an admin of the season's organization.
-        'get_schedule_tbd'
+        -- 20261107010000: the TIME TBD list, read, and its practice rows rebuilt, by an admin of the organization.
+        'get_schedule_tbd', 'sync_schedule_tbd_practices'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -622,8 +622,8 @@ SELECT is(
         -- 20261102010000: permits, gated by the membership helpers.
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
         'admin_update_facility_permit', 'get_facility_permits',
-        -- 20261107010000: the TIME TBD list, read by an admin of the season's organization.
-        'get_schedule_tbd'
+        -- 20261107010000: the TIME TBD list, read, and its practice rows rebuilt, by an admin of the organization.
+        'get_schedule_tbd', 'sync_schedule_tbd_practices'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

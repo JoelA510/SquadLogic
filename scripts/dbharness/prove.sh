@@ -4849,11 +4849,13 @@ plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
   "smoke 20261105010000"
 
 
-# Phase D, E: the TIME TBD list. The smoke 20261107010000 must go red for each. The first was run by
-# hand in a scratch cluster (smoke red at "A2 (an ended series only) is not listed"); the second had
-# its anchor resolved and was not run.
+# Phase D, E: the TIME TBD list. The smoke 20261107010000 must go red for each. The first and the
+# tenancy one were run by hand in a scratch cluster (smoke red at "A2 (an ended series only) is not
+# listed", and at "the tenancy trigger let in another organization's team"); the others had their
+# anchors resolved and were not run.
 #   - a practice series that has ended counts as a held practice, so a team whose only series ended
 #     in 2020 is no longer listed as short, and a missing practice vanishes from the export;
+#   - the tenancy trigger lets a row name another organization's team;
 #   - the admin read lets any signed-in user read the list.
 plant "M57 an ended series counts as a held practice" "$M57" \
   "               AND (pa.effective_date_range IS NULL
@@ -4861,6 +4863,20 @@ plant "M57 an ended series counts as a held practice" "$M57" \
                         AND (upper_inf(pa.effective_date_range)
                              OR upper(pa.effective_date_range) > CURRENT_DATE)))" \
   "               AND true" \
+  "smoke 20261107010000"
+
+plant "M57 the tenancy trigger lets another organization's team in" "$M57" \
+  " SET search_path TO 'public'
+AS \$function\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
+                    WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN" \
+  " SET search_path TO 'public'
+AS \$function\$
+BEGIN
+    RETURN NEW;
+    IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
+                    WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN" \
   "smoke 20261107010000"
 
 plant "M57 get_schedule_tbd admits any signed-in user" "$M57" \

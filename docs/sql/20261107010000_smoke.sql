@@ -4,9 +4,11 @@
 -- `prelude.sql` stubs `auth.uid()` from `request.jwt.claim.sub`, so the writers run as a real
 -- organization admin.
 --
---   1. Posture: the table as declared (RLS on, a select, an insert and a delete policy for admins, closed
---      to anon, no UPDATE grant, both shape CHECKs, the two unique indexes), `get_schedule_tbd` a
---      pinned definer for authenticated and not anon, and both writers writing the list.
+--   1. Posture: the table as declared (RLS on, one SELECT policy for admins and no policy that writes,
+--      closed to anon, no client INSERT, UPDATE or DELETE grant, the three CHECKs, the two unique
+--      indexes, the tenancy trigger), `get_schedule_tbd` and `sync_schedule_tbd_practices` pinned
+--      definers for authenticated and not anon, the tenancy trigger function closed to clients, and
+--      both writers writing the list.
 --   2. The practice list, through the real `persist_practice_schedule`: it is built from the
 --      ROSTER -- a team with none of its practices is listed whatever the payload carried, a team
 --      short by one is listed with missing_count 1, a division at 0 a week and a team that holds
@@ -18,7 +20,9 @@
 --      such list leaves it; an empty list clears it.
 --   4. The reads: an admin reads the list (names included) through the RPC and the table; a user
 --      who is a member of no organization is refused by the RPC and reads no row; nobody updates a row.
---   5. Deleting a team: `team.deleted` counts the rows its cascade takes (`schedule_tbd_deleted`).
+--   5. Tenancy: the trigger refuses another organization's season, division or team (23514), and the read
+--      names no team of another organization even for a row that got past it.
+--   6. Deleting a team: `team.deleted` counts the rows its cascade takes (`schedule_tbd_deleted`).
 --
 -- Every id is generated and every email is `@example.test`; there is no PII.
 
@@ -38,18 +42,33 @@ BEGIN
     END IF;
     SELECT count(*) INTO v_n FROM pg_policies
      WHERE schemaname = 'public' AND tablename = 'schedule_tbd' AND roles = '{authenticated}'
-       AND policyname IN ('Schedule TBD: admins select', 'Schedule TBD: admins insert', 'Schedule TBD: admins delete');
-    IF v_n <> 3 THEN RAISE EXCEPTION 'schedule_tbd does not have its three admin policies, one a command (% found)', v_n; END IF;
-    SELECT count(*) INTO v_n FROM pg_policies
-     WHERE schemaname = 'public' AND tablename = 'schedule_tbd' AND cmd IN ('ALL', 'UPDATE');
-    IF v_n <> 0 THEN RAISE EXCEPTION 'schedule_tbd has an ALL or UPDATE policy (% found)', v_n; END IF;
+       AND policyname = 'Schedule TBD: admins select' AND cmd = 'SELECT';
+    IF v_n <> 1 THEN RAISE EXCEPTION 'schedule_tbd does not have its admin select policy (% found)', v_n; END IF;
+    SELECT count(*) INTO v_n FROM pg_policies WHERE schemaname = 'public' AND tablename = 'schedule_tbd';
+    IF v_n <> 1 THEN RAISE EXCEPTION 'schedule_tbd has % policies; only the select one may exist (no client writes)', v_n; END IF;
     IF has_table_privilege('anon', 'public.schedule_tbd', 'SELECT') THEN RAISE EXCEPTION 'anon can read schedule_tbd'; END IF;
-    IF has_table_privilege('authenticated', 'public.schedule_tbd', 'UPDATE') THEN RAISE EXCEPTION 'authenticated can update schedule_tbd'; END IF;
-    IF NOT (has_table_privilege('authenticated', 'public.schedule_tbd', 'SELECT')
-            AND has_table_privilege('authenticated', 'public.schedule_tbd', 'INSERT')
-            AND has_table_privilege('authenticated', 'public.schedule_tbd', 'DELETE')) THEN
-        RAISE EXCEPTION 'authenticated lacks the SELECT, INSERT and DELETE the writers need';
+    IF has_table_privilege('authenticated', 'public.schedule_tbd', 'INSERT')
+       OR has_table_privilege('authenticated', 'public.schedule_tbd', 'UPDATE')
+       OR has_table_privilege('authenticated', 'public.schedule_tbd', 'DELETE') THEN
+        RAISE EXCEPTION 'authenticated can write schedule_tbd';
     END IF;
+    IF NOT has_table_privilege('authenticated', 'public.schedule_tbd', 'SELECT') THEN
+        RAISE EXCEPTION 'authenticated cannot read schedule_tbd';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.schedule_tbd'::regclass
+                    AND tgname = 'schedule_tbd_enforce_tenancy' AND NOT tgisinternal AND tgenabled = 'O') THEN
+        RAISE EXCEPTION 'schedule_tbd has no enabled tenancy trigger';
+    END IF;
+    IF has_function_privilege('authenticated', 'public.schedule_tbd_enforce_tenancy()', 'EXECUTE')
+       OR has_function_privilege('anon', 'public.schedule_tbd_enforce_tenancy()', 'EXECUTE') THEN
+        RAISE EXCEPTION 'a client can execute the tenancy trigger function';
+    END IF;
+    SELECT count(*) INTO v_n FROM pg_proc p
+     WHERE p.oid = 'public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)'::regprocedure
+       AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC']
+       AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
+    IF v_n <> 1 THEN RAISE EXCEPTION 'sync_schedule_tbd_practices is not a pinned definer for authenticated and not anon'; END IF;
     SELECT count(*) INTO v_n FROM pg_constraint
      WHERE conrelid = 'public.schedule_tbd'::regclass AND contype = 'c'
        AND conname IN ('schedule_tbd_kind_check', 'schedule_tbd_shape', 'schedule_tbd_reason_check');
@@ -66,13 +85,14 @@ BEGIN
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 1 THEN RAISE EXCEPTION 'get_schedule_tbd is not a pinned definer for authenticated and not anon'; END IF;
     SELECT count(*) INTO v_n FROM pg_proc p
-     WHERE p.oid IN ('public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)'::regprocedure,
-                     'public.persist_game_schedule(jsonb, jsonb)'::regprocedure)
-       AND p.prosrc LIKE '%public.schedule_tbd%'
+     WHERE ((p.oid = 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)'::regprocedure
+             AND p.prosrc LIKE '%sync_schedule_tbd_practices%')
+         OR (p.oid = 'public.persist_game_schedule(jsonb, jsonb)'::regprocedure
+             AND p.prosrc LIKE '%public.schedule_tbd%'))
        AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC']
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 2 THEN RAISE EXCEPTION 'both writers must write the list, pinned, and be closed to anon (% do)', v_n; END IF;
-    RAISE NOTICE 'posture: RLS on with an admin select, insert and delete policy and no ALL or UPDATE; closed to anon, no UPDATE grant; three CHECKs and two unique indexes; get_schedule_tbd a pinned definer (not anon); both writers write the list';
+    RAISE NOTICE 'posture: RLS on with one admin select policy and no policy or grant that writes; closed to anon; three CHECKs, two unique indexes and the tenancy trigger (its function closed to clients); get_schedule_tbd and the practice sync pinned definers (not anon); both writers write the list';
 END;
 $$;
 
@@ -260,12 +280,26 @@ BEGIN
     END IF;
     SELECT count(*) INTO v_n FROM public.schedule_tbd;
     IF v_n <> 4 THEN RAISE EXCEPTION 'the admin reads % row(s) of the table, expected 4', v_n; END IF;
-    BEGIN
-        UPDATE public.schedule_tbd SET reason = 'no-slot-available' WHERE kind = 'practice';
-        RAISE EXCEPTION 'an admin updated a row';
-    EXCEPTION WHEN insufficient_privilege THEN
-        NULL;  -- the expected refusal: there is no UPDATE grant
-    END;
+    -- Nobody writes the table directly: not an update, not a delete, and not an insert, whatever
+    -- organization it names (the first draft let an admin insert a row of their own organization naming
+    -- another organization's team).
+    FOR v_state IN VALUES ('update'), ('delete'), ('insert') LOOP
+        v_raised := false;
+        BEGIN
+            IF v_state = 'update' THEN
+                UPDATE public.schedule_tbd SET reason = 'no-slot-available' WHERE kind = 'practice';
+            ELSIF v_state = 'delete' THEN
+                DELETE FROM public.schedule_tbd WHERE kind = 'practice';
+            ELSE
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+                VALUES (v_org, v_season, 'practice', v_div1, v_x1, 1, 'no-slot-available');
+            END IF;
+        EXCEPTION WHEN insufficient_privilege THEN
+            v_raised := true;
+        END;
+        IF NOT v_raised THEN RAISE EXCEPTION 'an admin could % the table directly', v_state; END IF;
+    END LOOP;
+    RAISE NOTICE 'direct writes: an admin''s update, delete and insert (of another organization''s team) are each refused 42501';
 
     -- A user who is a member of no organization, and another organization's admin.
     FOR v_state IN VALUES ('stranger'), ('other admin') LOOP
@@ -300,6 +334,64 @@ BEGIN
     SELECT count(*) INTO v_n FROM public.schedule_tbd WHERE season_settings_id = v_season AND kind = 'game';
     IF v_n <> 0 THEN RAISE EXCEPTION 'an empty unscheduled list left % game row(s)', v_n; END IF;
     RAISE NOTICE 'game list: a save with no list left it as it was; an empty list cleared it';
+
+    -- ---- the tenancy trigger, as the table owner (which is what the definer writers are) -----------
+    RESET ROLE;
+    FOR v_state, v_msg IN VALUES
+        ('season', 'a season of another organization'),
+        ('division', 'a division of another organization'),
+        ('team', 'another organization''s team'),
+        ('other-division', 'a team of another division'),
+        ('home', 'another organization''s home team'),
+        ('away', 'another organization''s away team') LOOP
+        v_raised := false;
+        BEGIN
+            IF v_state = 'season' THEN
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+                VALUES (v_org, v_season2, 'practice', v_div1, v_c1, 1, 'no-slot-available');
+            ELSIF v_state = 'division' THEN
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+                VALUES (v_org, v_season, 'practice', v_divx, v_c1, 1, 'no-slot-available');
+            ELSIF v_state = 'team' THEN
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+                VALUES (v_org, v_season, 'practice', v_div1, v_x1, 1, 'no-slot-available');
+            ELSIF v_state = 'other-division' THEN
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+                VALUES (v_org, v_season, 'practice', v_div1, v_a1, 1, 'no-slot-available');
+            ELSIF v_state = 'home' THEN
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index, reason)
+                VALUES (v_org, v_season, 'game', v_div1, v_x1, v_c1, 9, 'no-slot-available');
+            ELSE
+                INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index, reason)
+                VALUES (v_org, v_season, 'game', v_div1, v_c1, v_x1, 9, 'no-slot-available');
+            END IF;
+        EXCEPTION WHEN check_violation THEN
+            v_raised := true;
+        END;
+        IF NOT v_raised THEN RAISE EXCEPTION 'the tenancy trigger let in %', v_msg; END IF;
+    END LOOP;
+    -- The control: the same shapes, honest, go in.
+    INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+    VALUES (v_org, v_season, 'practice', v_div1, v_c1, 1, 'no-slot-available');
+    INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index, reason)
+    VALUES (v_org, v_season, 'game', v_div1, v_c1, v_a1, 9, 'division-mismatch');
+    RAISE NOTICE 'tenancy trigger: another organization''s season, division, team, home team and away team, and a team of another division, are each refused 23514; honest rows go in';
+
+    -- And the read does not lean on the trigger: a row that got past it (the trigger off, as the
+    -- owner) still shows no other organization's name.
+    ALTER TABLE public.schedule_tbd DISABLE TRIGGER schedule_tbd_enforce_tenancy;
+    INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+    VALUES (v_org, v_season, 'practice', v_div1, v_x1, 1, 'no-slot-available');
+    ALTER TABLE public.schedule_tbd ENABLE TRIGGER schedule_tbd_enforce_tenancy;
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    SET LOCAL ROLE authenticated;
+    v_json := public.get_schedule_tbd(v_season);
+    RESET ROLE;
+    IF v_json::text LIKE '%TBD X1%' THEN RAISE EXCEPTION 'get_schedule_tbd returned another organization''s team name: %', v_json; END IF;
+    IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_json) e WHERE e->>'team_id' = v_x1::text AND e->>'team_name' IS NULL) THEN
+        RAISE EXCEPTION 'the poisoned row did not come back with a NULL team name (the join is not on the organization): %', v_json;
+    END IF;
+    RAISE NOTICE 'read: a row naming another organization''s team (the trigger off) comes back with no name';
 
     -- ---- clean up ----------------------------------------------------------------
     RESET ROLE;

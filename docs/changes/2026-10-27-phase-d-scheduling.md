@@ -473,6 +473,12 @@ Each PR runs the season fixture suite and the full Definition of Done.
 - **Why a separate table** (decision 11, owner answer: only if keeping the rows in the schedule breaks
   it; PR B's evidence stands): the lock loader, the writer's prune and lock rules,
   `teams_without_practice` and the metrics each read a `practice_assignments` row as a held practice.
+- **Who can write it (changed after review):** nobody directly. There is no write policy or grant;
+  the game list is written by `persist_game_schedule` and the practice list by the definer
+  `sync_schedule_tbd_practices`, which the (invoker) practice writer calls; a BEFORE INSERT OR UPDATE
+  trigger refuses (23514) a row whose season, division or team belongs to another organization or season,
+  and `get_schedule_tbd` joins on the row's organization. An earlier draft let admins insert through RLS,
+  which allowed a row of their own organization naming another organization's team.
 - **Where the game list comes from:** the run's `results.unscheduled`, already part of the save, not a
   new argument. A new RPC argument would have changed the writer's signature (a drop and a create, the
   Edge function's schema and its drift test) for nothing the existing field does not carry. The

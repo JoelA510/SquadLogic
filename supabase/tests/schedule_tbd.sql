@@ -15,7 +15,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(32);
+SELECT plan(43);
 
 -- ---- the roster this test schedules (as the table owner, before any role is set) ---------------
 -- Org A, season aaa: U8 wants 2 a week, U6 wants none, U10 (the fixture's) wants 1.
@@ -116,12 +116,6 @@ SELECT results_eq(
     'the list is rebuilt: A2 is now missing 1, holding 1 of 2'
 );
 
-SELECT throws_ok(
-    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
-       VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
-               'a1111111-1111-1111-1111-1111111d0008', 'aaaaaaaa-0000-0000-0000-0000000000a2', 1, 'no-slot-available') $$,
-    '23505', NULL, 'a team has one practice row (the unique index), whatever its count'
-);
 
 -- ---- the game list --------------------------------------------------------------------------------
 
@@ -278,6 +272,101 @@ SELECT throws_ok(
                'a1111111-1111-1111-1111-11111111abcd', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'aaaaaaaa-0000-0000-0000-0000000000a2', 2, 'not-scheduled-yet') $$,
     '23514', NULL, 'a game row with a practice-only reason breaks the reason CHECK'
 );
+
+-- ---- no client writes the table; the rows it holds belong to one organization and season ------------
+
+RESET role;
+SELECT throws_ok(
+    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+       VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
+               'a1111111-1111-1111-1111-1111111d0008', 'aaaaaaaa-0000-0000-0000-0000000000a1', 1, 'no-slot-available'),
+              ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
+               'a1111111-1111-1111-1111-1111111d0008', 'aaaaaaaa-0000-0000-0000-0000000000a1', 2, 'no-slot-available') $$,
+    '23505', NULL, 'a team has one practice row (the unique index), whatever its count'
+);
+
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+
+-- The first draft let an admin insert through RLS: a row of their own organization naming another
+-- organization's team. There is no INSERT policy or grant now.
+SELECT throws_ok(
+    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+       VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
+               'a1111111-1111-1111-1111-11111111abcd', 'bbbbbbbb-0000-0000-0000-0000000000b8', 1, 'no-slot-available') $$,
+    '42501', NULL, 'an admin cannot insert a row directly, whatever team it names'
+);
+SELECT throws_ok(
+    $$ DELETE FROM public.schedule_tbd $$,
+    '42501', NULL, 'an admin cannot delete a row directly'
+);
+
+-- The practice writer with another organization's team: refused, and nothing is listed for it.
+SELECT throws_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
+           jsonb_build_array(jsonb_build_object('team_id', 'bbbbbbbb-0000-0000-0000-0000000000b8',
+               'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '23503', NULL, 'the practice writer refuses another organization''s team (an admin cannot see it: it does not exist to them)'
+);
+-- The helper cannot be pointed at another organization's season, or called by another organization's admin.
+SELECT throws_ok(
+    $$ SELECT public.sync_schedule_tbd_practices('a1111111-1111-1111-1111-111111111111', 'b2222222-2222-2222-2222-222222222bbb', NULL, '[]') $$,
+    '42501', NULL, 'the practice sync refuses another organization''s season'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT throws_ok(
+    $$ SELECT public.sync_schedule_tbd_practices('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', NULL, '[]') $$,
+    '42501', NULL, 'the practice sync refuses another organization''s admin'
+);
+RESET role;
+
+-- Whoever writes it, a row that names another organization's team, division or season is refused.
+SELECT throws_ok(
+    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+       VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
+               'a1111111-1111-1111-1111-11111111abcd', 'bbbbbbbb-0000-0000-0000-0000000000b8', 1, 'no-slot-available') $$,
+    '23514', NULL, 'the tenancy trigger refuses another organization''s team'
+);
+SELECT throws_ok(
+    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+       VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
+               'b2222222-2222-2222-2222-22222222bcde', 'aaaaaaaa-0000-0000-0000-000000000001', 1, 'no-slot-available') $$,
+    '23514', NULL, 'the tenancy trigger refuses another organization''s division'
+);
+SELECT throws_ok(
+    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+       VALUES ('a1111111-1111-1111-1111-111111111111', 'b2222222-2222-2222-2222-222222222bbb', 'practice',
+               'a1111111-1111-1111-1111-11111111abcd', 'aaaaaaaa-0000-0000-0000-000000000001', 1, 'no-slot-available') $$,
+    '23514', NULL, 'the tenancy trigger refuses another organization''s season'
+);
+SELECT throws_ok(
+    $$ INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index, reason)
+       VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'game',
+               'a1111111-1111-1111-1111-11111111abcd', 'aaaaaaaa-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-0000000000b8', 1, 'no-slot-available') $$,
+    '23514', NULL, 'the tenancy trigger refuses another organization''s away team'
+);
+
+-- The read does not lean on the trigger: with it off, a row naming another organization's team still
+-- comes back without that team's name.
+ALTER TABLE public.schedule_tbd DISABLE TRIGGER schedule_tbd_enforce_tenancy;
+INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'practice',
+        'a1111111-1111-1111-1111-11111111abcd', 'bbbbbbbb-0000-0000-0000-0000000000b8', 1, 'no-slot-available');
+ALTER TABLE public.schedule_tbd ENABLE TRIGGER schedule_tbd_enforce_tenancy;
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT ok(
+    position('TBD Org B team' IN public.get_schedule_tbd('a1111111-1111-1111-1111-111111111aaa')::text) = 0,
+    'get_schedule_tbd never returns another organization''s team name'
+);
+SELECT is(
+    (SELECT e->>'team_name' FROM jsonb_array_elements(public.get_schedule_tbd('a1111111-1111-1111-1111-111111111aaa')) e
+      WHERE e->>'team_id' = 'bbbbbbbb-0000-0000-0000-0000000000b8'),
+    NULL,
+    'a row that names another organization''s team comes back with a NULL team name'
+);
+RESET role;
 
 SELECT * FROM finish();
 ROLLBACK;

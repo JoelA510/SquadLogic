@@ -59,8 +59,8 @@ describe('the reasons: core and the SQL say the same things', () => {
     assert.deepEqual(words.sort(), [...SCHEDULE_TBD_GAME_REASONS].sort());
   });
 
-  it("the practice writer labels a row only with the auto-scheduler's own reasons (never not-scheduled-yet from a run)", () => {
-    const writer = MIGRATION.slice(MIGRATION.indexOf('FUNCTION public.persist_practice_schedule'));
+  it("the practice sync labels a row only with the auto-scheduler's own reasons (never not-scheduled-yet from a run)", () => {
+    const writer = MIGRATION.slice(MIGRATION.indexOf('FUNCTION public.sync_schedule_tbd_practices'));
     const at = writer.indexOf("e.value->>'reason' IN (") + "e.value->>'reason' ".length;
     const words = [...writer.slice(at, writer.indexOf(')', at)).matchAll(/'([a-z-]+)'/g)].map(
       (m) => m[1]

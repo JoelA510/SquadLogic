@@ -21,10 +21,14 @@
 --   1. `public.schedule_tbd`: organization, season, `kind` practice|game, the division, the
 --      team (practice) or home and away team and week (game), `missing_count` (practice, 1 to 7),
 --      `reason` (a closed list per kind, a CHECK), `detail`, the run that wrote it. RLS: an
---      organization admin reads, inserts and deletes (only league admins sign in; the practice writer is
---      SECURITY INVOKER and writes as the admin, as it writes `practice_exceptions`). One row per
---      team for practices, one per (home, away, week) for games.
---   2. `get_schedule_tbd(season)`: the admin read the export panel uses (names included).
+--      organization admin reads (only league admins sign in). **No client writes the table**: no
+--      INSERT, UPDATE or DELETE policy or grant; the two writers are definers (the practice writer
+--      is an invoker and calls `sync_schedule_tbd_practices`, a definer). A BEFORE INSERT OR UPDATE
+--      trigger refuses any row whose season, division or team belongs to another organization or
+--      season (23514), so the definer writers cannot be made to store one. One row per team for
+--      practices, one per (home, away, week) for games.
+--   2. `get_schedule_tbd(season)`: the admin read the export panel uses (names included; every join
+--      is on the row's own organization).
 --   3. `persist_practice_schedule` is replaced (behind its md5): after its writes it rebuilds the
 --      season's practice rows FROM THE ROSTER -- every team whose division wants N and which
 --      holds r live rows (a range not ended) with N > r gets one row, missing_count N - r. The
@@ -141,21 +145,155 @@ CREATE POLICY "Schedule TBD: admins select"
     ON public.schedule_tbd FOR SELECT TO authenticated
     USING (public.is_org_admin(organization_id));
 
--- persist_practice_schedule is SECURITY INVOKER and writes as the calling admin, as it writes
--- practice_exceptions; persist_game_schedule is a definer. Insert and delete are their own policies,
--- not one FOR ALL beside the select: two permissive policies on a SELECT are what the RLS advisor
--- (20261018030000) refuses. No policy and no grant for UPDATE: a row is replaced, never edited.
-CREATE POLICY "Schedule TBD: admins insert"
-    ON public.schedule_tbd FOR INSERT TO authenticated
-    WITH CHECK (public.is_org_admin(organization_id));
-
-CREATE POLICY "Schedule TBD: admins delete"
-    ON public.schedule_tbd FOR DELETE TO authenticated
-    USING (public.is_org_admin(organization_id));
-
+-- No INSERT, UPDATE or DELETE policy and no such grant: a client never writes the table. The practice
+-- list is written by `sync_schedule_tbd_practices` and the game list by `persist_game_schedule`, both
+-- definers that check the caller is an admin of the organization. (The first draft let admins insert
+-- through RLS, which let one name another organization's team in a row of their own organization.)
 REVOKE ALL ON public.schedule_tbd FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT, INSERT, DELETE ON public.schedule_tbd TO authenticated;
+GRANT SELECT ON public.schedule_tbd TO authenticated;
 GRANT ALL ON public.schedule_tbd TO service_role;
+
+-- A row belongs to one organization and one season, and so do the division and the teams it names:
+-- refused (23514) whoever writes it, the definer writers included.
+CREATE FUNCTION public.schedule_tbd_enforce_tenancy()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
+                    WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN
+        RAISE EXCEPTION 'schedule_tbd: season % is not a season of organization %', NEW.season_settings_id, NEW.organization_id
+            USING ERRCODE = '23514';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.divisions d
+                    WHERE d.id = NEW.division_id AND d.organization_id = NEW.organization_id
+                      AND d.season_settings_id = NEW.season_settings_id) THEN
+        RAISE EXCEPTION 'schedule_tbd: division % is not a division of season % of organization %', NEW.division_id, NEW.season_settings_id, NEW.organization_id
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.kind = 'practice' THEN
+        -- The team is one of the row's division.
+        IF NOT EXISTS (SELECT 1 FROM public.teams t
+                        WHERE t.id = NEW.team_id AND t.organization_id = NEW.organization_id
+                          AND t.division_id = NEW.division_id) THEN
+            RAISE EXCEPTION 'schedule_tbd: team % is not a team of division % of organization %', NEW.team_id, NEW.division_id, NEW.organization_id
+                USING ERRCODE = '23514';
+        END IF;
+    ELSE
+        -- The home team is one of the row's division; the away team is any team of the season (a
+        -- 'division-mismatch' game names one from another division).
+        IF NOT EXISTS (SELECT 1 FROM public.teams t
+                        WHERE t.id = NEW.home_team_id AND t.organization_id = NEW.organization_id
+                          AND t.division_id = NEW.division_id) THEN
+            RAISE EXCEPTION 'schedule_tbd: home team % is not a team of division % of organization %', NEW.home_team_id, NEW.division_id, NEW.organization_id
+                USING ERRCODE = '23514';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM public.teams t
+                         JOIN public.divisions d ON d.id = t.division_id
+                        WHERE t.id = NEW.away_team_id AND t.organization_id = NEW.organization_id
+                          AND d.organization_id = NEW.organization_id
+                          AND d.season_settings_id = NEW.season_settings_id) THEN
+            RAISE EXCEPTION 'schedule_tbd: away team % is not a team of season % of organization %', NEW.away_team_id, NEW.season_settings_id, NEW.organization_id
+                USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.schedule_tbd_enforce_tenancy() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER schedule_tbd_enforce_tenancy
+    BEFORE INSERT OR UPDATE ON public.schedule_tbd
+    FOR EACH ROW EXECUTE FUNCTION public.schedule_tbd_enforce_tenancy();
+
+-- The practice list's writer: a definer, because no client can write the table and the practice
+-- writer is an invoker. It rebuilds the season's practice rows from the roster; the only thing a caller
+-- passes that reaches a row is the reason label (kept to a closed list), so there is nothing to forge
+-- but the label. Callable by an admin of the organization, or the service role; the practice writer
+-- calls it after its own checks.
+CREATE FUNCTION public.sync_schedule_tbd_practices(p_organization_id uuid, p_season_settings_id uuid, p_run_id uuid, p_unassigned jsonb)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET "TimeZone" TO 'UTC'
+AS $function$
+DECLARE
+    v_org_id uuid := p_organization_id;
+    v_season_id uuid := p_season_settings_id;
+    v_persisted_run_id uuid;
+    v_tbd_reasons jsonb;
+    v_rows integer;
+BEGIN
+    IF p_organization_id IS NULL OR p_season_settings_id IS NULL THEN
+        RAISE EXCEPTION 'organization and season are required'
+            USING ERRCODE = '23502';
+    END IF;
+    IF COALESCE(auth.role(), '') <> 'service_role' AND NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
+                    WHERE ss.id = p_season_settings_id AND ss.organization_id = p_organization_id) THEN
+        RAISE EXCEPTION 'season % is not a season of organization %', p_season_settings_id, p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+    -- The run labels the rows; it is kept only if it is this organization's.
+    SELECT sr.id INTO v_persisted_run_id
+      FROM public.scheduler_runs sr
+     WHERE sr.id = p_run_id AND sr.organization_id = p_organization_id;
+    v_tbd_reasons := CASE WHEN jsonb_typeof(p_unassigned) = 'array' THEN p_unassigned ELSE '[]'::jsonb END;
+    DELETE FROM public.schedule_tbd s
+     WHERE s.organization_id = v_org_id
+       AND s.season_settings_id = v_season_id
+       AND s.kind = 'practice';
+    INSERT INTO public.schedule_tbd (
+        organization_id, season_settings_id, kind, division_id, team_id,
+        missing_count, reason, detail, run_id
+    )
+    SELECT v_org_id, v_season_id, 'practice', d.id, t.id,
+           (d.practices_per_week - held.n)::smallint,
+           COALESCE(why.reason, 'not-scheduled-yet'),
+           jsonb_build_object('target', d.practices_per_week, 'held', held.n),
+           v_persisted_run_id
+      FROM public.teams t
+      JOIN public.divisions d ON d.id = t.division_id
+      CROSS JOIN LATERAL (
+            SELECT count(*)::integer AS n
+              FROM public.practice_assignments pa
+             WHERE pa.team_id = t.id
+               AND pa.organization_id = v_org_id
+               AND (pa.effective_date_range IS NULL
+                    OR (NOT isempty(pa.effective_date_range)
+                        AND (upper_inf(pa.effective_date_range)
+                             OR upper(pa.effective_date_range) > CURRENT_DATE)))
+           ) held
+      LEFT JOIN LATERAL (
+            SELECT e.value->>'reason' AS reason
+              FROM jsonb_array_elements(v_tbd_reasons) e
+             WHERE jsonb_typeof(e.value) = 'object'
+               AND lower(e.value->>'teamId') = lower(t.id::text)
+               AND e.value->>'reason' IN ('no-slot-available', 'no-live-date', 'coach-preference',
+                                          'practice-length', 'not-enough-days')
+             ORDER BY e.value->>'reason'
+             LIMIT 1
+           ) why ON true
+     WHERE t.organization_id = v_org_id
+       AND d.organization_id = v_org_id
+       AND d.season_settings_id = v_season_id
+       AND d.practices_per_week > held.n;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RETURN v_rows;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) FROM anon;
+GRANT EXECUTE ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 3. The admin read.
@@ -208,10 +346,10 @@ BEGIN
              ORDER BY s.kind, d.name, COALESCE(t.name, th.name), s.week_index NULLS FIRST, ta.name, s.id), '[]'::jsonb)
       INTO v_rows
       FROM public.schedule_tbd s
-      JOIN public.divisions d ON d.id = s.division_id
-      LEFT JOIN public.teams t ON t.id = s.team_id
-      LEFT JOIN public.teams th ON th.id = s.home_team_id
-      LEFT JOIN public.teams ta ON ta.id = s.away_team_id
+      JOIN public.divisions d ON d.id = s.division_id AND d.organization_id = s.organization_id
+      LEFT JOIN public.teams t ON t.id = s.team_id AND t.organization_id = s.organization_id
+      LEFT JOIN public.teams th ON th.id = s.home_team_id AND th.organization_id = s.organization_id
+      LEFT JOIN public.teams ta ON ta.id = s.away_team_id AND ta.organization_id = s.organization_id
      WHERE s.organization_id = v_org
        AND s.season_settings_id = p_season_settings_id;
 
@@ -296,8 +434,6 @@ DECLARE
     v_new_auto_ids uuid[];
     v_refusal_text text;
     v_refusal_rows integer;
-    -- 20261107010000: the TIME TBD list
-    v_tbd_reasons jsonb;
 BEGIN
     IF run_data IS NULL OR jsonb_typeof(run_data) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'run_data must be a JSON object'
@@ -1354,48 +1490,12 @@ BEGIN
     -- reason is the one this save's run gives the team in `results.unassigned` (the auto-scheduler's
     -- own, one of the closed list), else `not-scheduled-yet`; it labels the row and decides
     -- nothing. The whole list is rebuilt from the table as this save leaves it, under the season
-    -- lock, so it cannot go stale across saves.
-    v_tbd_reasons := CASE WHEN jsonb_typeof(run_data->'results'->'unassigned') = 'array'
-                          THEN run_data->'results'->'unassigned' ELSE '[]'::jsonb END;
-    DELETE FROM public.schedule_tbd s
-     WHERE s.organization_id = v_org_id
-       AND s.season_settings_id = v_season_id
-       AND s.kind = 'practice';
-    INSERT INTO public.schedule_tbd (
-        organization_id, season_settings_id, kind, division_id, team_id,
-        missing_count, reason, detail, run_id
-    )
-    SELECT v_org_id, v_season_id, 'practice', d.id, t.id,
-           (d.practices_per_week - held.n)::smallint,
-           COALESCE(why.reason, 'not-scheduled-yet'),
-           jsonb_build_object('target', d.practices_per_week, 'held', held.n),
-           v_persisted_run_id
-      FROM public.teams t
-      JOIN public.divisions d ON d.id = t.division_id
-      CROSS JOIN LATERAL (
-            SELECT count(*)::integer AS n
-              FROM public.practice_assignments pa
-             WHERE pa.team_id = t.id
-               AND pa.organization_id = v_org_id
-               AND (pa.effective_date_range IS NULL
-                    OR (NOT isempty(pa.effective_date_range)
-                        AND (upper_inf(pa.effective_date_range)
-                             OR upper(pa.effective_date_range) > CURRENT_DATE)))
-           ) held
-      LEFT JOIN LATERAL (
-            SELECT e.value->>'reason' AS reason
-              FROM jsonb_array_elements(v_tbd_reasons) e
-             WHERE jsonb_typeof(e.value) = 'object'
-               AND lower(e.value->>'teamId') = lower(t.id::text)
-               AND e.value->>'reason' IN ('no-slot-available', 'no-live-date', 'coach-preference',
-                                          'practice-length', 'not-enough-days')
-             ORDER BY e.value->>'reason'
-             LIMIT 1
-           ) why ON true
-     WHERE t.organization_id = v_org_id
-       AND d.organization_id = v_org_id
-       AND d.season_settings_id = v_season_id
-       AND d.practices_per_week > held.n;
+    -- lock, so it cannot go stale across saves. Done by a definer helper: no client can write the
+    -- table, and this writer is SECURITY INVOKER.
+    PERFORM public.sync_schedule_tbd_practices(
+        v_org_id, v_season_id, v_persisted_run_id,
+        CASE WHEN jsonb_typeof(run_data->'results'->'unassigned') = 'array'
+             THEN run_data->'results'->'unassigned' ELSE '[]'::jsonb END);
 
     -- The run carries its own before-images, so what it superseded, unlocked,
     -- closed and withdrew can be read back whether or not the audit rows exist.
@@ -2371,9 +2471,24 @@ DECLARE
 BEGIN
     SELECT count(*) INTO v_n FROM pg_proc p
      WHERE p.oid = to_regprocedure('public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)')
-       AND p.prosrc LIKE '%public.schedule_tbd%'
+       AND p.prosrc LIKE '%sync_schedule_tbd_practices%'
        AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC'];
     IF v_n <> 1 THEN RAISE EXCEPTION 'persist_practice_schedule does not write the list'; END IF;
+    SELECT count(*) INTO v_n FROM pg_proc p
+     WHERE p.oid = to_regprocedure('public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)')
+       AND p.prosrc LIKE '%public.schedule_tbd%' AND p.prosecdef
+       AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
+    IF v_n <> 1 THEN RAISE EXCEPTION 'sync_schedule_tbd_practices is not a definer for authenticated and not anon'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.schedule_tbd'::regclass
+                    AND tgname = 'schedule_tbd_enforce_tenancy' AND NOT tgisinternal) THEN
+        RAISE EXCEPTION 'schedule_tbd has no tenancy trigger';
+    END IF;
+    IF has_table_privilege('authenticated', 'public.schedule_tbd', 'INSERT')
+       OR has_table_privilege('authenticated', 'public.schedule_tbd', 'UPDATE')
+       OR has_table_privilege('authenticated', 'public.schedule_tbd', 'DELETE') THEN
+        RAISE EXCEPTION 'a client can write schedule_tbd';
+    END IF;
     SELECT count(*) INTO v_n FROM pg_proc p
      WHERE p.oid = to_regprocedure('public.persist_game_schedule(jsonb, jsonb)')
        AND p.prosrc LIKE '%public.schedule_tbd%'
@@ -2393,7 +2508,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = 'public.schedule_tbd'::regclass AND relrowsecurity) THEN
         RAISE EXCEPTION 'schedule_tbd has no row level security';
     END IF;
-    RAISE NOTICE 'schedule_tbd, get_schedule_tbd and both writers are in place';
+    RAISE NOTICE 'schedule_tbd, its tenancy trigger, get_schedule_tbd, the practice sync and both writers are in place';
 END;
 $$;
 

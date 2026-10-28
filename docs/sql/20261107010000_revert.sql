@@ -24,6 +24,7 @@ $revert$;
 
 DROP FUNCTION public.get_schedule_tbd(uuid);
 DROP TABLE public.schedule_tbd;
+DROP FUNCTION public.schedule_tbd_enforce_tenancy();
 
 CREATE OR REPLACE FUNCTION public.persist_practice_schedule(run_data jsonb, assignments jsonb, allow_empty boolean DEFAULT false, unlock jsonb DEFAULT '[]'::jsonb, closes jsonb DEFAULT '[]'::jsonb, exceptions jsonb DEFAULT '[]'::jsonb, withdraw_exceptions jsonb DEFAULT '[]'::jsonb, base_fingerprint text DEFAULT NULL::text)
  RETURNS jsonb
@@ -1247,6 +1248,8 @@ BEGIN
 END;
 $function$;
 
+DROP FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb);
+
 REVOKE ALL ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) FROM anon;
 GRANT EXECUTE ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) TO authenticated;
@@ -1985,7 +1988,9 @@ BEGIN
                 v_sig, v_md5, v_expected ->> v_sig;
         END IF;
     END LOOP;
-    IF to_regclass('public.schedule_tbd') IS NOT NULL OR to_regprocedure('public.get_schedule_tbd(uuid)') IS NOT NULL THEN
+    IF to_regclass('public.schedule_tbd') IS NOT NULL OR to_regprocedure('public.get_schedule_tbd(uuid)') IS NOT NULL
+       OR to_regprocedure('public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)') IS NOT NULL
+       OR to_regprocedure('public.schedule_tbd_enforce_tenancy()') IS NOT NULL THEN
         RAISE EXCEPTION 'revert: the table or the read function is still there';
     END IF;
     RAISE NOTICE 'revert: the three functions are back to their earlier bodies; the table and the read function are gone';

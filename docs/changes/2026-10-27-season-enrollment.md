@@ -201,6 +201,17 @@ under "For the owner"). Migration `20261109010000_season_rollover.sql`.
   unfinished registration job of the season (a legacy job with no season counts for the active one) with
   staged rows not yet promoted; cancelling a job fails it, which ends it, and a coach-only job stages no
   player rows. Ages are never recomputed: the rule waits instead.
+  **The window the pending check cannot see** (Codex, second round on #680): `import-validation` reads the
+  rule and only then stages its first row, and a change between the two finds nothing pending. So the
+  validation first stamps the job (`stamp_import_job_age_rule`, service role; `import_jobs.age_rule_fingerprint`)
+  with `season_age_rule_fingerprint(season)`, a digest of the cutoff mode, month, day, season year and each
+  window-bearing division's id, window and band; `finalize_import_job` takes the season lock and refuses a
+  stamped job whose stamp is not the season's rule now (22023, `age_rule_changed`), leaving the job to be
+  validated again. A fingerprint rather than a version counter: nothing else has to remember to bump it, a
+  change to a windowed division's band is covered, and the stamp is taken before the read, so a change in
+  between can only make it stale (a refusal), never make it match a rule the ages were not counted under. The
+  first batch of a file replaces a stamp (validating again refreshes it); a later batch keeps the first's. A
+  job with no stamp (a coach or field job, or one made before this migration) is never refused.
 - **Guard widening.** `create_import_job`, `finalize_import_job` and `finalize_coach_import_job` allow the
   active season or a draft and refuse a completed one; `finalize_field_import_job` (organization-level
   locations and fields) and a field job for a draft stay active-only.

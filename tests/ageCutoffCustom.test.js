@@ -4,6 +4,7 @@ import {
   birthDateAge,
   cohortWindow,
   computeAgeGroup,
+  compileDivisionWindows,
   computeAgeNumber,
   cutoffMonthDay,
   divisionBirthWindow,
@@ -214,6 +215,42 @@ describe('a division window takes every player born in it as that division', () 
     expect(windowedAgeNumber('2024-03-15', 2, [])).toBeNull();
     expect(windowedAgeNumber('2024-03-15', 2, null)).toBeNull();
     expect(windowedAgeNumber('not a date', 2, [u4])).toBeNull();
+  });
+
+  it('counts the same from divisions compiled once, as the roster-wide callers do', () => {
+    const divisions = [
+      u4,
+      { name: 'U3', birthdate_start: '2024-01-01', birthdate_end: '2024-12-31' },
+      { name: 'U8', birthdate_start: '2018-01-01' },
+      { name: 'Open', birthdate_start: '2016-01-01', birthdate_end: '2016-12-31' },
+    ];
+    const compiled = compileDivisionWindows(divisions);
+    // Only the two divisions with both dates and a readable band can take a player.
+    expect(compiled.windows).toHaveLength(2);
+    for (const dob of [
+      '2024-03-15',
+      '2024-12-31',
+      '2025-01-01',
+      '2016-05-05',
+      'not a date',
+      null,
+    ]) {
+      for (const standard of [2, 3, 4, 9]) {
+        expect(windowedAgeNumber(dob, standard, compiled)).toBe(
+          windowedAgeNumber(dob, standard, divisions)
+        );
+      }
+      expect(birthDateAge(dob, 2026, 'birth_year', undefined, compiled)).toBe(
+        birthDateAge(dob, 2026, 'birth_year', undefined, divisions)
+      );
+    }
+    // A compiled snapshot reads the divisions as they were: compile again after a change.
+    const changing = [{ ...u4 }];
+    const snapshot = compileDivisionWindows(changing);
+    changing[0].birthdate_end = '2023-01-01';
+    expect(windowedAgeNumber('2024-03-15', 2, snapshot)).toBe(4);
+    expect(windowedAgeNumber('2024-03-15', 2, changing)).toBeNull();
+    expect(windowedAgeNumber('2024-03-15', 2, compileDivisionWindows(null))).toBeNull();
   });
 
   it('applies to a window under a custom cutoff too, and the age group of the export is the fallback', () => {

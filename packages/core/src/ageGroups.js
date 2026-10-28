@@ -144,23 +144,56 @@ function storableNaturalAge(value) {
  *
  * @param {Date|string} dob
  * @param {number} standardAge - the age the season's cutoff gives the date
- * @param {Array<Object>|null|undefined} divisions
+ * @param {Array<Object>|DivisionWindows|null|undefined} divisions - or `compileDivisionWindows(divisions)`
  * @returns {number|null}
  */
 export function windowedAgeNumber(dob, standardAge, divisions) {
+  if (!Number.isFinite(standardAge)) return null;
+  let compiled;
+  if (divisions instanceof DivisionWindows) compiled = divisions;
+  else if (Array.isArray(divisions)) compiled = compileDivisionWindows(divisions);
+  else return null;
+  if (compiled.windows.length === 0) return null;
   const date = toUtcDate(dob);
-  if (!date || !Number.isFinite(standardAge) || !Array.isArray(divisions)) return null;
+  if (!date) return null;
   let found = null;
-  for (const division of divisions) {
-    const start = toUtcDate(division?.birthdate_start ?? division?.birthdateStart);
-    const end = toUtcDate(division?.birthdate_end ?? division?.birthdateEnd);
-    if (!start || !end || date < start || date > end) continue;
-    const { minAge, maxAge } = normalizeDivisionAgeBounds(division);
-    if (minAge === null || maxAge === null) continue;
+  for (const { start, end, minAge, maxAge } of compiled.windows) {
+    if (date < start || date > end) continue;
     const age = Math.min(Math.max(standardAge, minAge), maxAge);
     if (found === null || age < found) found = age;
   }
   return found;
+}
+
+/** A season's divisions reduced to the windows that can take a player (`compileDivisionWindows`). */
+export class DivisionWindows {
+  /** @param {Array<{ start: Date, end: Date, minAge: number, maxAge: number }>} windows */
+  constructor(windows) {
+    this.windows = windows;
+  }
+}
+
+/**
+ * The divisions that can take a player by birth date, parsed once: each has both window dates and
+ * a readable age band. A caller that counts many ages against the same divisions compiles them
+ * once and passes the result where `windowedAgeNumber` and `birthDateAge` take divisions, so the
+ * dates are not parsed again per player (the season fixture's play-up comparison counts ages
+ * 600,000 times). The result is a snapshot: compile again after a division changes.
+ *
+ * @param {Array<Object>|null|undefined} divisions
+ * @returns {DivisionWindows}
+ */
+export function compileDivisionWindows(divisions) {
+  const windows = [];
+  for (const division of Array.isArray(divisions) ? divisions : []) {
+    const start = toUtcDate(division?.birthdate_start ?? division?.birthdateStart);
+    const end = toUtcDate(division?.birthdate_end ?? division?.birthdateEnd);
+    if (!start || !end) continue;
+    const { minAge, maxAge } = normalizeDivisionAgeBounds(division);
+    if (minAge === null || maxAge === null) continue;
+    windows.push({ start, end, minAge, maxAge });
+  }
+  return new DivisionWindows(windows);
 }
 
 /**
@@ -174,13 +207,17 @@ export function windowedAgeNumber(dob, standardAge, divisions) {
  * @param {number} seasonYear
  * @param {string|null|undefined} cutoffMode
  * @param {{ month?: unknown, day?: unknown }} [cutoff] - the `custom` mode's cutoff day
- * @param {Array<Object>|null} [divisions] - the season's divisions (their birth-date windows and bands)
+ * @param {Array<Object>|DivisionWindows|null} [divisions] - the season's divisions (their birth-date
+ *   windows and bands), or `compileDivisionWindows(divisions)` when counting many ages
  * @returns {number|null} null when the date is unparseable or the year is not a number
  */
 export function birthDateAge(dob, seasonYear, cutoffMode, cutoff, divisions) {
-  const standard = computeAgeNumber(/** @type {any} */ (dob), seasonYear, cutoffMode, cutoff);
+  const date = toUtcDate(/** @type {any} */ (dob));
+  const standard = computeAgeNumber(date, seasonYear, cutoffMode, cutoff);
   if (standard === null) return null;
-  return windowedAgeNumber(/** @type {any} */ (dob), standard, divisions) ?? standard;
+  // Nothing to look up in a season whose divisions have no windows (nearly all of them).
+  if (divisions instanceof DivisionWindows && divisions.windows.length === 0) return standard;
+  return windowedAgeNumber(date, standard, divisions) ?? standard;
 }
 
 /**

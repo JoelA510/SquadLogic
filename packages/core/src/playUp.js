@@ -21,6 +21,7 @@
 import {
   classifyPlacement,
   birthDateAge,
+  compileDivisionWindows,
   normalizeDivisionAgeBounds,
   parseGenderFromName,
 } from './ageGroups.js';
@@ -174,7 +175,7 @@ function normalizeGender(value) {
  * @param {Object} player
  * @param {number} seasonYear
  * @param {string} [cutoffMode]
- * @param {{ cutoffMonth?: number|null, cutoffDay?: number|null, divisions?: Array<Object>|null }} [rule]
+ * @param {{ cutoffMonth?: number|null, cutoffDay?: number|null, divisions?: Array<Object>|import('./ageGroups.js').DivisionWindows|null }} [rule]
  *   the season's custom cutoff and its divisions (their birthdate windows), as the import counts
  *   an age (`importNaturalAge`): a birth date in a division's window takes that division's age
  * @returns {number|null}
@@ -308,7 +309,11 @@ export function applyPlayUpEligibility({
 }) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
   const index = buildDivisionIndex(divisions);
-  const rule = { cutoffMonth, cutoffDay, divisions: index.list.map((entry) => entry.raw) };
+  const rule = {
+    cutoffMonth,
+    cutoffDay,
+    divisions: compileDivisionWindows(index.list.map((entry) => entry.raw)),
+  };
   const byId = new Map(players.map((player) => [String(player.id), player]));
 
   // Pass 1: where each player plays. Everyone plays in their own division unless they

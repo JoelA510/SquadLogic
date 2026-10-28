@@ -72,7 +72,7 @@ describe('placement review :: not placed', () => {
 
     const items = itemsOf('Not placed');
     expect(items.map((item) => item.textContent)).toEqual([
-      'Player X. Not eligible for this division. No division in this import holds a player of their age. Natural age 13.',
+      'Player X. Not eligible for this division. No suitable division in this import (the same gender or co-ed) holds a player of their age. Natural age 13.',
       'Player Y. No room: the teams were full. Natural age 10.',
       'Player Z. No room: the teams were full. Natural age 10.',
     ]);
@@ -124,7 +124,7 @@ describe('placement review :: needs review', () => {
   const blocked = (id) =>
     player(id, {
       placement: 'no_division',
-      reviewReason: 'no division holds natural age 8',
+      reviewReason: 'no suitable division holds natural age 8',
       division: 'U10',
       registeredDivision: 'U10',
     });
@@ -147,7 +147,7 @@ describe('placement review :: needs review', () => {
     );
 
     expect(itemsOf('Needs review').map((item) => item.textContent)).toEqual([
-      'Player H, on Team B. Not eligible for this division. No division in this import holds a player of their age. Kept on the reviewed roster; move them by hand if you agree.',
+      'Player H, on Team B. Not eligible for this division. No suitable division in this import (the same gender or co-ed) holds a player of their age. Kept on the reviewed roster; move them by hand if you agree.',
     ]);
   });
 

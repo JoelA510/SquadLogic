@@ -11,10 +11,11 @@
 -- **The change.**
 --   1. `finalize_import_job` writes `play_up_requested` from the play-up column (`play_up`,
 --      `play up`, or the GotSport question): yes, true, y, t, 1 or x is a request, anything else
---      is none. A row without the column leaves a re-imported player's request alone. The text
---      copy in `custom_attributes.play_up` is no longer written (nothing read it); an
---      organization that declares `play_up` as its own player field still gets that field,
---      through the declared attributes.
+--      is none, a blank cell included (a request withdrawn in the file). A row without the
+--      column at all leaves a re-imported player's request alone. The text copy in
+--      `custom_attributes.play_up` is no longer written (nothing read it); an organization
+--      that declares `play_up` as its own player field still gets that field, through the
+--      declared attributes.
 --   2. `sanitize_player_patch` accepts `play_up_requested` (boolean, 22023 otherwise) and
 --      `apply_player_patch` writes it, so `admin_update_player`, `admin_bulk_update_players` and
 --      `admin_create_player` set and clear it, and the audit rows they write carry the patch.
@@ -391,6 +392,10 @@ BEGIN
                 'play_up', 'play up',
                 'are you coaching so this player can play up a division?'
             ) AS play_up_text,
+            (sp.normalized_payload ?| ARRAY[
+                'play_up', 'play up',
+                'are you coaching so this player can play up a division?'
+            ]) AS play_up_present,
             public.import_payload_text(sp.normalized_payload, 'buddy_request') AS buddy_request,
             -- Nullable: NULL means the coaching-interest column is genuinely
             -- absent from this row's payload (re-import should preserve the
@@ -442,11 +447,13 @@ BEGIN
                 ELSE 'active'
             END AS import_status,
             -- The play-up column is the player's request (20261106010000): yes, true, y, t, 1
-            -- or x is a request, anything else is none. NULL when the column is absent from
-            -- the row, so a re-import leaves the stored request alone.
+            -- or x is a request, anything else is none, a blank cell included (a request
+            -- withdrawn in the file). NULL only when the column is absent from the row, so a
+            -- re-import leaves the stored request alone. `import_payload_text` returns NULL for
+            -- a blank cell and for a missing key alike, so presence is read from the key itself.
             CASE
-                WHEN p.play_up_text IS NULL THEN NULL
-                ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1', 'x')
+                WHEN NOT p.play_up_present THEN NULL
+                ELSE COALESCE(lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1', 'x'), false)
             END AS play_up_requested,
             -- NULL when the coaching-interest column is absent (preserve
             -- existing value on re-import); a boolean otherwise.

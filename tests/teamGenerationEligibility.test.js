@@ -159,13 +159,13 @@ describe('fresh generation: a blocked player is not placed, and says why', () =>
     expect(entries.map((entry) => entry.players.map((p) => p.id))).toEqual([['down'], ['up']]);
     expect(entries[0].metadata).toEqual({
       placement: 'no_division',
-      reviewReason: 'no division holds natural age 13',
+      reviewReason: 'no suitable division holds natural age 13',
       naturalAge: 13,
       coachId: null,
     });
     expect(entries[1].metadata).toEqual({
       placement: 'no_division',
-      reviewReason: 'no division holds natural age 8',
+      reviewReason: 'no suitable division holds natural age 8',
       naturalAge: 8,
       coachId: null,
     });
@@ -350,13 +350,13 @@ describe('incremental generation: a rostered blocked player stays and is listed'
         playerId: 'rostered-blocked',
         teamId: '0b2e0000-0000-4000-8000-0000000000a1',
         placement: 'no_division',
-        reviewReason: 'no division holds natural age 13',
+        reviewReason: 'no suitable division holds natural age 13',
       },
       {
         playerId: 'locked-blocked',
         teamId: '0b2e0000-0000-4000-8000-0000000000a2',
         placement: 'no_division',
-        reviewReason: 'no division holds natural age 8',
+        reviewReason: 'no suitable division holds natural age 8',
       },
     ]);
     expect(eligibilityEntries(result)).toEqual([]);
@@ -485,7 +485,7 @@ describe('review findings (B2)', () => {
     });
     expect(eligibilityEntries(result)[0].metadata).toEqual({
       placement: 'no_division',
-      reviewReason: 'no division holds natural age 8',
+      reviewReason: 'no suitable division holds natural age 8',
       naturalAge: 8,
       coachId: null,
       assistantCoachId: 'asst-z',

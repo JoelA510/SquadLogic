@@ -295,6 +295,7 @@ export default function PlayerRecordPage() {
                 <InlineField
                   label="Play-up requested"
                   value={player.play_up_requested ? 'true' : 'false'}
+                  editable={canEditPlayerField(inDemo, 'play_up_requested')}
                   type="select"
                   options={[
                     { value: 'true', label: 'Yes' },

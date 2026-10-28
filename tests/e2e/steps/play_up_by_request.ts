@@ -113,25 +113,22 @@ const rowFor = (page: Page, name: string) =>
 
 Then('Pia is on a U12 Boys team and Quinn is on no U12 Boys team', async ({ page }) => {
   await expect(page.getByText(/Team review staged:/)).toBeVisible({ timeout: 20000 });
-  // The staged run's rosters, read from the page's own review store: who is seated is the
-  // generator's answer, never one written for it.
-  const seated = await page.evaluate(() => {
-    const key = Object.keys(sessionStorage).find((k) => k.startsWith('squadlogic:team-review:'));
-    const staged = key ? JSON.parse(sessionStorage.getItem(key) || 'null') : null;
-    const results = staged?.snapshot?.runMetadata?.results;
-    return {
-      ids: (results?.team_players ?? []).map((tp: { player_id: string }) => tp.player_id),
-      programs: Object.keys(results?.teamsByDivision ?? {}),
-    };
-  });
-  // Meta-assertion: the run seated the U12 program's players (8 aged 12 and Pia), so a missing
-  // Quinn is a real absence.
-  expect(seated.ids.length).toBe(9);
-  expect(seated.ids).toContain(ASKED.id);
-  expect(seated.ids).not.toContain(NOT_ASKED.id);
+  // The rosters as the roster editor renders them: who is seated is the generator's answer,
+  // read from the page, never one written for it.
+  const edit = page.getByRole('button', { name: 'Edit Mode' });
+  if (await edit.isVisible()) await edit.click();
+  const columns = page.getByTestId(/^team-column-/);
+  await expect(columns.first()).toBeVisible({ timeout: 15000 });
+  // Meta-assertion: the U12 program's own players are on the rendered rosters, so a missing
+  // Quinn is a real absence and not an editor that has not rendered.
+  const twelve = page.getByTestId(`player-card-${uuid(100)}`);
+  await expect(twelve).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId(`player-card-${ASKED.id}`)).toHaveCount(1);
+  // Pia is on the same team as the U12 players: she plays in the division she registered for.
   await expect(
-    page.locator('section[aria-label="Generated Teams"]').getByText('U12 Boys').first()
-  ).toBeVisible({ timeout: 15000 });
+    columns.filter({ has: page.getByTestId(`player-card-${ASKED.id}`) }).filter({ has: twelve })
+  ).toHaveCount(1);
+  await expect(page.getByTestId(`player-card-${NOT_ASKED.id}`)).toHaveCount(0);
 });
 
 Then(

@@ -213,6 +213,47 @@ test("an honoured one-way request is kept when both play in the coach's child's 
   assert.equal(out.find((p) => p.id === 'up').buddyId, 'child', 'honoured best effort');
 });
 
+test('the listing shows a buddy the run honours one-way, built from the final links', () => {
+  // The one-way link is installed after the placement, so the listing must be refreshed from the
+  // final links: it used to read "None" for a buddy the run keeps.
+  const { players: out, diagnostics } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach'),
+      named('up', 'Pia', 'Up', {
+        dob: '2017-05-01',
+        buddy_request: 'Cara Coach',
+        play_up_requested: true,
+      }),
+    ],
+    coaches: [{ id: 'coachA', player_id: 'child' }],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    buddyRule: 'one_way_best_effort',
+  });
+  assert.equal(out.find((p) => p.id === 'up').buddyId, 'child');
+  const entry = diagnostics.playUp.listing.find((e) => e.playerId === 'up');
+  assert.equal(entry.buddyId, 'child');
+  assert.equal(entry.buddyName, 'Cara Coach');
+  assert.equal(entry.buddyInPlayedDivision, true);
+});
+
+test('the listing also names a one-way buddy of the listed player who asked for them', () => {
+  const { diagnostics } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach', { buddy_request: 'Pia Up' }),
+      named('up', 'Pia', 'Up', { dob: '2017-05-01', play_up_requested: true }),
+    ],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    buddyRule: 'one_way_best_effort',
+  });
+  const entry = diagnostics.playUp.listing.find((e) => e.playerId === 'up');
+  assert.equal(entry.buddyId, 'child');
+  assert.equal(entry.buddyInPlayedDivision, true);
+});
+
 test('two coaching families as buddies give buddy-coach-conflict and no throw', () => {
   const players = [
     named('a', 'Ada', 'One', { buddy_request: 'Bea Two' }),

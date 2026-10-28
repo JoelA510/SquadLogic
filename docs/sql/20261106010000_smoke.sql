@@ -5,8 +5,9 @@
 --   * the finalizer, as an admin, on rows staged directly: the play-up column is stored as
 --     `players.play_up_requested` (yes, true, y, t, 1 and x, in any case, are a request; no,
 --     maybe and a blank are none), under each accepted key (`play_up`, `play up`, the GotSport
---     question); a row without the column leaves a re-imported player's request alone; a row
---     with it rewrites the request; the text copy `custom_attributes.play_up` is not written;
+--     question); a re-import row without the column leaves the player's request alone, one with
+--     it rewrites the request, and one with it BLANK withdraws it (a blank cell is a present
+--     column, not an absent one); the text copy `custom_attributes.play_up` is not written;
 --   * the player writers set and clear the request, alone and in bulk, and refuse a non-boolean
 --     22023; a player's other fields are left as they were by a patch that names only the flag.
 --
@@ -52,7 +53,8 @@ BEGIN
         (v_org, v_job1, 8, '{}'::jsonb, v_base || '{"first_name": "Absent", "external_registration_id": "PU-8"}'::jsonb),
         (v_org, v_job2, 1, '{}'::jsonb, v_base || '{"first_name": "Yes", "external_registration_id": "PU-1"}'::jsonb),
         (v_org, v_job2, 2, '{}'::jsonb, v_base || '{"first_name": "True", "external_registration_id": "PU-2", "play_up": "no"}'::jsonb),
-        (v_org, v_job2, 3, '{}'::jsonb, v_base || '{"first_name": "No", "external_registration_id": "PU-6", "play_up": "yes"}'::jsonb);
+        (v_org, v_job2, 3, '{}'::jsonb, v_base || '{"first_name": "No", "external_registration_id": "PU-6", "play_up": "yes"}'::jsonb),
+        (v_org, v_job2, 4, '{}'::jsonb, v_base || '{"first_name": "Question", "external_registration_id": "PU-5", "play_up": ""}'::jsonb);
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -72,15 +74,15 @@ BEGIN
     RAISE NOTICE 'finalize: yes, true, 1, x and y (under play_up, play up and the GotSport question) are a request; no, maybe and an absent column are none; no text copy kept';
 
     v_result := public.finalize_import_job(v_job2);
-    IF (v_result->>'updated_players')::int <> 3 THEN
-        RAISE EXCEPTION 'the re-import did not update its 3 players: %', v_result;
+    IF (v_result->>'updated_players')::int <> 4 THEN
+        RAISE EXCEPTION 'the re-import did not update its 4 players: %', v_result;
     END IF;
     SELECT string_agg(first_name || ':' || play_up_requested::text, ',' ORDER BY first_name)
-      INTO v_got FROM public.players WHERE organization_id = v_org AND first_name IN ('Yes', 'True', 'No');
-    IF v_got IS DISTINCT FROM 'No:true,True:false,Yes:true' THEN
+      INTO v_got FROM public.players WHERE organization_id = v_org AND first_name IN ('Yes', 'True', 'No', 'Question');
+    IF v_got IS DISTINCT FROM 'No:true,Question:false,True:false,Yes:true' THEN
         RAISE EXCEPTION 'a re-import did not keep an absent column and rewrite a present one: %', v_got;
     END IF;
-    RAISE NOTICE 're-import: an absent column leaves the request (Yes), a present one rewrites it (True to none, No to a request)';
+    RAISE NOTICE 're-import: an absent column leaves the request (Yes), a present one rewrites it (True to none, No to a request), a blank one withdraws it (Question)';
 
     SELECT id INTO v_p FROM public.players WHERE organization_id = v_org AND first_name = 'Absent';
     SET LOCAL ROLE authenticated;

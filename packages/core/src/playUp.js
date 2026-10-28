@@ -115,12 +115,26 @@ function resolveDivisionEntry(index, ref) {
 }
 
 /**
- * Find the division whose band naturally contains an age, preferring a gender
- * match when a hint is provided.
+ * Can a player registered in a division of gender `hint` play in one of gender `candidate`?
+ * The same gender, or a division that is explicitly co-ed. A gender neither division states
+ * cannot show a mismatch, so it is compatible: a girl registered in U12 Girls never goes to U10
+ * Boys, but two divisions named only "U10" and "U12" are not judged on gender at all.
+ */
+function genderCompatible(candidate, hint) {
+  const wanted = normalizeGender(hint);
+  const offered = normalizeGender(candidate);
+  if (!wanted || !offered) return true;
+  return offered === 'coed' || offered === wanted;
+}
+
+/**
+ * Find the division whose band naturally contains an age and whose gender is compatible with the
+ * division the player registered in (`genderCompatible`), preferring the same gender to a co-ed
+ * division. Null when none qualifies: the player is then listed as having no suitable division.
  *
  * @param {{ list: Array<Object> }} index
  * @param {number} naturalAge
- * @param {string} [genderHint]
+ * @param {string} [genderHint] - the registered division's gender
  * @returns {Object|null}
  */
 function findNaturalDivision(index, naturalAge, genderHint) {
@@ -130,16 +144,14 @@ function findNaturalDivision(index, naturalAge, genderHint) {
       entry.minAge !== null &&
       entry.maxAge !== null &&
       naturalAge >= entry.minAge &&
-      naturalAge <= entry.maxAge
+      naturalAge <= entry.maxAge &&
+      genderCompatible(entry.gender, genderHint)
   );
   if (candidates.length === 0) return null;
-  if (genderHint) {
-    const matched = candidates.find(
-      (entry) => normalizeGender(entry.gender) === normalizeGender(genderHint)
-    );
-    if (matched) return matched;
-  }
-  return candidates[0];
+  const same = candidates.find(
+    (entry) => genderHint && normalizeGender(entry.gender) === normalizeGender(genderHint)
+  );
+  return same ?? candidates[0];
 }
 
 function normalizeGender(value) {
@@ -208,6 +220,59 @@ function playerName(player) {
  * @property {string|null} buddyDivisionName
  * @property {boolean|null} buddyInPlayedDivision - null with no buddy
  */
+
+/** The listing's buddy columns for a buddy who plays in `buddyPlayed`, or none. */
+function buddyFacts(buddy, buddyPlayed, playedDivision, nameOfDivision) {
+  return {
+    buddyId: buddy ? String(buddy.id) : null,
+    buddyName: buddy ? playerName(buddy) : null,
+    buddyDivision: buddy && buddyPlayed != null ? String(buddyPlayed) : null,
+    buddyDivisionName: buddy && buddyPlayed != null ? nameOfDivision(buddyPlayed) : null,
+    buddyInPlayedDivision:
+      buddy && playedDivision != null && buddyPlayed != null
+        ? String(buddyPlayed).toLowerCase() === String(playedDivision).toLowerCase()
+        : buddy
+          ? false
+          : null,
+  };
+}
+
+/**
+ * Fill in the buddy columns of listing rows that had no buddy when the listing was built, from
+ * the links the run finally holds. The listing is built before a honoured one-way request is
+ * installed (and before a waitlist exception pairs two players), so a buddy the run does keep
+ * would read "None". A row that already names a buddy is left as it was, even when the pair was
+ * later told apart: that is the fact the admin needs. A player is also given the player whose
+ * link points at them, since a one-way link is stored on the requester only.
+ *
+ * @param {PlayUpListing[]} listing
+ * @param {Array<Object>} players - the final players (`division` is where each plays)
+ * @param {Array<Object>|Object} divisions
+ * @returns {PlayUpListing[]}
+ */
+export function withFinalBuddyFacts(listing, players, divisions) {
+  const index = buildDivisionIndex(divisions);
+  const nameOfDivision = (ref) => resolveDivisionEntry(index, ref)?.name ?? null;
+  const byId = new Map(players.map((player) => [String(player.id), player]));
+  /** @type {Map<string, Object>} */
+  const claimedBy = new Map();
+  for (const player of players) {
+    const target = getCanonicalBuddyId(player);
+    if (target !== undefined && !claimedBy.has(target)) claimedBy.set(target, player);
+  }
+  return listing.map((entry) => {
+    if (entry.buddyId !== null) return entry;
+    const player = byId.get(entry.playerId);
+    const ownId = getCanonicalBuddyId(player);
+    const buddy =
+      (ownId !== undefined ? byId.get(ownId) : undefined) ?? claimedBy.get(entry.playerId);
+    if (!buddy) return entry;
+    return {
+      ...entry,
+      ...buddyFacts(buddy, buddy.division, entry.playedDivision, nameOfDivision),
+    };
+  });
+}
 
 /**
  * Apply play-up / play-down placement across a set of players and divisions. Give it every
@@ -303,7 +368,7 @@ export function applyPlayUpEligibility({ players, divisions, seasonYear, cutoffM
         'play-down': 'registered in a younger division; plays in their own age division',
         'requested-own-division': 'play-up requested, but registered in their own division',
         'requested-age-unknown': 'play-up requested; natural age unknown, so nothing is checked',
-        'no-division': `no division holds natural age ${naturalAge}`,
+        'no-division': `no suitable division holds natural age ${naturalAge}`,
       }[kind];
       diagnostics.listing.push({
         playerId: String(player.id),
@@ -316,16 +381,7 @@ export function applyPlayUpEligibility({ players, divisions, seasonYear, cutoffM
         playedDivision: playedDivision == null ? null : String(playedDivision),
         playedDivisionName: playedDivision == null ? null : nameOfDivision(playedDivision),
         coachId: player.coachId == null || player.coachId === '' ? null : String(player.coachId),
-        buddyId: buddy ? String(buddy.id) : null,
-        buddyName: buddy ? playerName(buddy) : null,
-        buddyDivision: buddy && buddyPlayed != null ? String(buddyPlayed) : null,
-        buddyDivisionName: buddy && buddyPlayed != null ? nameOfDivision(buddyPlayed) : null,
-        buddyInPlayedDivision:
-          buddy && playedDivision != null && buddyPlayed != null
-            ? String(buddyPlayed).toLowerCase() === String(playedDivision).toLowerCase()
-            : buddy
-              ? false
-              : null,
+        ...buddyFacts(buddy, buddyPlayed, playedDivision, nameOfDivision),
       });
     }
 

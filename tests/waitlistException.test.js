@@ -28,8 +28,8 @@ const kid = (id, first, last, extra = {}) => ({
 const fillers = (n) => Array.from({ length: n }, (_, i) => kid(`f${i}`, `Fill${i}`, 'Er'));
 const COACH = { id: 'coachA', player_id: 'child' };
 
-/** @param {any[]} players @param {{ coaches?: any[], buddyRule?: string }} [options] */
-function run(players, { coaches = [COACH], buddyRule } = {}) {
+/** @param {any[]} players @param {{ coaches?: any[], buddyRule?: string, maxRosterSize?: number }} [options] */
+function run(players, { coaches = [COACH], buddyRule, maxRosterSize = 8 } = {}) {
   const prepared = prepareTeamingInput({
     players,
     coaches,
@@ -40,7 +40,7 @@ function run(players, { coaches = [COACH], buddyRule } = {}) {
   });
   const generated = generateTeams({
     players: prepared.players.filter((p) => p.division === 'U10B'),
-    divisionConfigs: { U10B: { id: 'U10B', slotsPerWeek: 0, teamsCount: 2, maxRosterSize: 8 } },
+    divisionConfigs: { U10B: { id: 'U10B', slotsPerWeek: 0, teamsCount: 2, maxRosterSize } },
     seed: 'waitlist-exception',
   });
   const teamOf = (id) =>
@@ -166,6 +166,71 @@ describe('under the one-way best-effort rule a honoured request counts, from eit
     );
     expect(prepared.diagnostics.waitlistExceptions.map((e) => e.playerId)).toEqual(['wait']);
     expect(teamOf('wait').id).toBe(teamOf('child').id);
+  });
+});
+
+describe('one waitlisted player for each coach’s child', () => {
+  const ONE_WAY = { buddyRule: 'one_way_best_effort' };
+
+  it('takes one of two waitlisted players who name the same child, and the roster holds', () => {
+    // A roster of two: the child and one buddy. Both Ws name Cara; the child lists no buddy, so
+    // both requests are honoured one-way, and only one may be taken.
+    const players = [
+      kid('child', 'Cara', 'Coach'),
+      kid('w2', 'Zed', 'Waiting', { status: 'waitlist', buddy_request: 'Cara Coach' }),
+      kid('w1', 'Amy', 'Waiting', { status: 'waitlist', buddy_request: 'Cara Coach' }),
+      ...fillers(4),
+    ];
+    for (const order of [players, [...players].reverse()]) {
+      const { prepared, teamOf, overflowReason } = run(order, { ...ONE_WAY, maxRosterSize: 2 });
+      expect(prepared.diagnostics.waitlistExceptions.map((e) => e.playerId)).toEqual(['w1']);
+      expect(prepared.players.find((p) => p.id === 'w2').status).toBe('waitlist');
+      expect(overflowReason('w2')).toBe(TEAM_GENERATION.REASON_Waitlisted);
+      expect(teamOf('w1').id).toBe(teamOf('child').id);
+      expect(teamOf('child').players).toHaveLength(2);
+      // The child is paired with the one taken, and nobody else.
+      expect(prepared.players.find((p) => p.id === 'child').buddyId).toBe('w1');
+    }
+  });
+
+  it('the child’s own request wins over another waitlisted player naming them', () => {
+    const players = [
+      kid('child', 'Cara', 'Coach', { buddy_request: 'Zed Waiting' }),
+      kid('w1', 'Amy', 'Waiting', { status: 'waitlist', buddy_request: 'Cara Coach' }),
+      kid('w2', 'Zed', 'Waiting', { status: 'waitlist' }),
+      ...fillers(4),
+    ];
+    const { prepared } = run(players, { ...ONE_WAY, maxRosterSize: 2 });
+    expect(prepared.diagnostics.waitlistExceptions.map((e) => e.playerId)).toEqual(['w2']);
+  });
+});
+
+describe('every link that points at a waitlisted player counts, in any row order', () => {
+  it('a coach’s child among several players who name them grants the exception', () => {
+    // Under the one-way rule the waitlisted player lists no buddy, so each request that names
+    // them is honoured; the coach's child is not the first to name them.
+    const players = [
+      kid('x', 'Xavier', 'Other', { buddy_request: 'Wendy Waiting' }),
+      kid('child', 'Cara', 'Coach', { buddy_request: 'Wendy Waiting' }),
+      kid('wait', 'Wendy', 'Waiting', { status: 'waitlist' }),
+      ...fillers(6),
+    ];
+    for (const order of [players, [...players].reverse()]) {
+      const { prepared, teamOf } = run(order, { buddyRule: 'one_way_best_effort' });
+      const exceptions = prepared.diagnostics.waitlistExceptions;
+      expect(exceptions.map((e) => [e.playerId, e.childId])).toEqual([['wait', 'child']]);
+      expect(teamOf('wait').id).toBe(teamOf('child').id);
+    }
+  });
+
+  it('a waitlisted player already paired with someone else is not taken', () => {
+    const { prepared } = run([
+      kid('x', 'Xavier', 'Other', { buddy_request: 'Wendy Waiting' }),
+      kid('wait', 'Wendy', 'Waiting', { status: 'waitlist', buddy_request: 'Xavier Other' }),
+      kid('child', 'Cara', 'Coach', { buddy_request: 'Wendy Waiting' }),
+      ...fillers(6),
+    ]);
+    expect(prepared.diagnostics.waitlistExceptions).toEqual([]);
   });
 });
 

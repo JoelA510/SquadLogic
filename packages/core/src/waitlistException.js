@@ -57,40 +57,73 @@ function playerName(player) {
 export function applyWaitlistException({ players }) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
   const byId = new Map(players.map((player) => [String(player.id), player]));
+  // Every link that points at a player: a one-way request is stored on the requester only, and
+  // more than one player may name the same one.
+  /** @type {Map<string, Object[]>} */
+  const claimers = new Map();
+  for (const player of players) {
+    const target = getCanonicalBuddyId(player);
+    if (target === undefined) continue;
+    if (!claimers.has(target)) claimers.set(target, []);
+    /** @type {Object[]} */ (claimers.get(target)).push(player);
+  }
+
+  /** The coach's children this waitlisted player is the buddy of, best first. */
+  const childrenOf = (waitlisted) => {
+    const id = String(waitlisted.id);
+    const own = getCanonicalBuddyId(waitlisted);
+    const linked = [own !== undefined ? byId.get(own) : undefined, ...(claimers.get(id) ?? [])];
+    const seen = new Set();
+    return linked
+      .filter((child) => {
+        if (!child || String(child.id) === id || seen.has(String(child.id))) return false;
+        seen.add(String(child.id));
+        if (child.coachId == null || child.coachId === '') return false;
+        if (
+          isWaitlisted(child) ||
+          isEligibilityBlocked(child) ||
+          !sameDivision(waitlisted, child)
+        ) {
+          return false;
+        }
+        // Neither may already be paired with someone else.
+        if (own !== undefined && own !== String(child.id)) return false;
+        const childBuddy = getCanonicalBuddyId(child);
+        return childBuddy === undefined || childBuddy === id;
+      })
+      .sort((a, b) => {
+        // A pair that names each other first, then by id: nothing here reads the row order.
+        const mutual = (child) =>
+          getCanonicalBuddyId(child) === id && own === String(child.id) ? 0 : 1;
+        return mutual(a) - mutual(b) || String(a.id).localeCompare(String(b.id));
+      });
+  };
+
   /** @type {Map<string, WaitlistException>} */
   const taken = new Map();
-
-  for (const waitlisted of players) {
-    if (!isWaitlisted(waitlisted) || isEligibilityBlocked(waitlisted)) continue;
-    // A coach's own child on the waitlist is not "a coach's child's buddy".
-    if (waitlisted.coachId != null && waitlisted.coachId !== '') continue;
-    const id = String(waitlisted.id);
-
-    // The buddy the player has, or the player who has them (a one-way request is stored on the
-    // requester only).
-    const own = getCanonicalBuddyId(waitlisted);
-    const claimedBy = players.find(
-      (other) => String(other.id) !== id && getCanonicalBuddyId(other) === id
-    );
-    const candidates = [own ? byId.get(own) : undefined, claimedBy].filter(Boolean);
-
-    for (const child of candidates) {
-      if (child.coachId == null || child.coachId === '') continue;
-      if (isWaitlisted(child) || isEligibilityBlocked(child)) continue;
-      if (taken.has(String(child.id)) || !sameDivision(waitlisted, child)) continue;
-      // The child must not already be paired with someone else.
-      const childBuddy = getCanonicalBuddyId(child);
-      if (childBuddy !== undefined && childBuddy !== id) continue;
-      taken.set(id, {
-        playerId: id,
-        name: playerName(waitlisted),
-        childId: String(child.id),
-        childName: playerName(child),
-        coachId: String(child.coachId),
-        division: String(waitlisted.division),
-      });
-      break;
-    }
+  const reservedChildren = new Set();
+  const waiting = players
+    .filter(
+      (player) =>
+        isWaitlisted(player) &&
+        !isEligibilityBlocked(player) &&
+        // A coach's own child on the waitlist is not "a coach's child's buddy".
+        (player.coachId == null || player.coachId === '')
+    )
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  for (const waitlisted of waiting) {
+    // One waitlisted player per child: the coach asked for a buddy, not for a second seat.
+    const child = childrenOf(waitlisted).find((entry) => !reservedChildren.has(String(entry.id)));
+    if (!child) continue;
+    reservedChildren.add(String(child.id));
+    taken.set(String(waitlisted.id), {
+      playerId: String(waitlisted.id),
+      name: playerName(waitlisted),
+      childId: String(child.id),
+      childName: playerName(child),
+      coachId: String(child.coachId),
+      division: String(waitlisted.division),
+    });
   }
 
   if (taken.size === 0) return { players, exceptions: [] };

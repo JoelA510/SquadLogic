@@ -19,9 +19,9 @@ Feature: Play-up by request, listed for admins
     And the U10 Boys import lists 8 players aged 10
     When I open the Teams page
     And I press "Generate Teams" on the Teams page
-    Then Pia is on a U12 Boys team and Quinn is on no U12 Boys team
-    And the Play-up section lists Pia as a requested play-up that plays in U12 Boys
+    Then the Play-up section lists Pia as a requested play-up that plays in U12 Boys
     And the Play-up section lists Quinn as registered in U12 Boys but playing in U10 Boys with no request
     And axe finds no serious or critical violations on "/teams" in the "light" theme
     When I switch to the dark theme on this page
     Then axe finds no serious or critical violations on "/teams" in the "dark" theme
+    And Pia is on a U12 Boys team and Quinn is on no U12 Boys team

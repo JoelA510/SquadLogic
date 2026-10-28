@@ -97,6 +97,23 @@ describe('the mock player finalizer builds custom_attributes as the SQL does', (
     expect(player().play_up_requested).toBe(true);
   });
 
+  it('a blank play-up cell withdraws the request; a missing column leaves it', async () => {
+    const find = () =>
+      getMockData('players').find((p) => p.external_registration_id === 'REG-PU-BLANK');
+    await importPlayers('mock-job-playup-blank-1', [
+      { ...BASE, 'Registration ID': 'REG-PU-BLANK', 'Play Up': 'yes' },
+    ]);
+    expect(find().play_up_requested).toBe(true);
+    await importPlayers('mock-job-playup-blank-2', [
+      { ...BASE, 'Registration ID': 'REG-PU-BLANK' },
+    ]);
+    expect(find().play_up_requested).toBe(true);
+    await importPlayers('mock-job-playup-blank-3', [
+      { ...BASE, 'Registration ID': 'REG-PU-BLANK', 'Play Up': '' },
+    ]);
+    expect(find().play_up_requested).toBe(false);
+  });
+
   it('reads each spelling of the play-up column as a request, anything else as none', async () => {
     /** @type {Array<[string, boolean]>} */
     const spellings = [

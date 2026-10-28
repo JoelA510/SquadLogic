@@ -148,7 +148,7 @@ test('a player no division can hold is blocked, listed, and stays where they reg
   assert.equal(diagnostics.counts.noDivision, 1);
   assert.equal(diagnostics.listing[0].kind, 'no-division');
   assert.equal(diagnostics.listing[0].playedDivision, null);
-  assert.match(players[0].reviewReason, /no division holds natural age 16/);
+  assert.match(players[0].reviewReason, /no suitable division holds natural age 16/);
 });
 
 test('a request registered in the player’s own division is listed for the admin to move', () => {
@@ -202,4 +202,50 @@ test('the listing is enumerated from the players, one entry per listed player', 
       .sort()
   );
   assert.deepEqual(diagnostics.listing.map((e) => e.playerId).sort(), ['down', 'old', 'up']);
+});
+
+test('a player never moves to a division of the other gender: no suitable division, listed', () => {
+  // A 10-year-old girl registered in U12 Girls, with a U10 Boys division but no U10 Girls one.
+  const { players, diagnostics } = run([{ id: 'girl', division: 'U12G', dob: AGE_10 }], {
+    divisions: [
+      { id: 'U12G', name: 'U12 Girls', minAge: 12, maxAge: 12, gender_policy: 'girls' },
+      { id: 'U10B', name: 'U10 Boys', minAge: 10, maxAge: 10, gender_policy: 'boys' },
+    ],
+  });
+  assert.equal(players[0].placement, PLACEMENT.NO_DIVISION);
+  assert.equal(players[0].division, 'U12G');
+  assert.equal(diagnostics.listing[0].kind, 'no-division');
+  assert.match(players[0].reviewReason, /no suitable division holds natural age 10/);
+});
+
+test('the same gender is found when it exists, and a co-ed division is accepted', () => {
+  const girls = { id: 'U12G', name: 'U12 Girls', minAge: 12, maxAge: 12, gender_policy: 'girls' };
+  const boysTen = { id: 'U10B', name: 'U10 Boys', minAge: 10, maxAge: 10, gender_policy: 'boys' };
+  const girlsTen = {
+    id: 'U10G',
+    name: 'U10 Girls',
+    minAge: 10,
+    maxAge: 10,
+    gender_policy: 'girls',
+  };
+  const coedTen = { id: 'U10C', name: 'U10 Coed', minAge: 10, maxAge: 10, gender_policy: 'coed' };
+  const place = (extra) =>
+    run([{ id: 'girl', division: 'U12G', dob: AGE_10 }], { divisions: [girls, boysTen, ...extra] })
+      .players[0];
+  assert.equal(place([girlsTen]).division, 'U10G');
+  assert.equal(place([coedTen]).division, 'U10C');
+  // The same gender is preferred to a co-ed division, wherever each is listed.
+  assert.equal(place([coedTen, girlsTen]).division, 'U10G');
+  // A co-ed registered division moves to a co-ed one only.
+  const coedTwelve = {
+    id: 'U12C',
+    name: 'U12 Coed',
+    minAge: 12,
+    maxAge: 12,
+    gender_policy: 'coed',
+  };
+  const moved = run([{ id: 'kid', division: 'U12C', dob: AGE_10 }], {
+    divisions: [coedTwelve, boysTen],
+  }).players[0];
+  assert.equal(moved.placement, PLACEMENT.NO_DIVISION);
 });

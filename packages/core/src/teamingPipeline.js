@@ -19,7 +19,7 @@
  */
 
 import { linkCoachesToPlayers } from './coachLinking.js';
-import { applyPlayUpEligibility } from './playUp.js';
+import { applyPlayUpEligibility, withFinalBuddyFacts } from './playUp.js';
 import { applyWaitlistException } from './waitlistException.js';
 import {
   BUDDY_REQUEST_FIELDS,
@@ -226,6 +226,11 @@ export function prepareTeamingInput({
   // Last, because it reads the final links: a waitlisted player a coach asked for comes off.
   const waitlist = applyWaitlistException({ players: withOneWay });
   const outPlayers = waitlist.players;
+  // The listing was built before the one-way links and the waitlist pairs above existed.
+  const playUpDiagnostics = {
+    ...playUp.diagnostics,
+    listing: withFinalBuddyFacts(playUp.diagnostics.listing, outPlayers, divisions),
+  };
 
   return {
     players: outPlayers,
@@ -238,7 +243,7 @@ export function prepareTeamingInput({
       ],
       buddyRequests: finalBuddyRequests,
       coachLinking: linked.diagnostics,
-      playUp: playUp.diagnostics,
+      playUp: playUpDiagnostics,
       waitlistExceptions: waitlist.exceptions,
     },
   };

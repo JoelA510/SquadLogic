@@ -263,7 +263,7 @@ describe('the Play-up section of the U12 program', () => {
       .getAllByRole('row')
       .find((r) => within(r).queryByText('Kid99 Placeholder99'));
     expect(tr).toHaveTextContent(
-      'Not placed: no division in this import holds a player of natural age 18.'
+      'Not placed: no suitable division in this import (the same gender or co-ed) holds a player of natural age 18.'
     );
   });
 

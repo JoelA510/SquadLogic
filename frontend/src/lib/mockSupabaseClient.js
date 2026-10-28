@@ -5296,6 +5296,13 @@ export const mockSupabase = {
           'play up',
           'are you coaching so this player can play up a division?',
         ]);
+        // As the SQL: the column's presence is the key itself, since a blank cell reads as no
+        // text exactly as a missing key does.
+        const playUpPresent = [
+          'play_up',
+          'play up',
+          'are you coaching so this player can play up a division?',
+        ].some((key) => Object.prototype.hasOwnProperty.call(payload, key));
         const coachingAnswer = importPayloadText(payload, [
           'willing_to_coach',
           'coach_volunteer',
@@ -5335,8 +5342,9 @@ export const mockSupabase = {
             ...customAttributes,
           },
           // As the SQL: a present column sets the request (yes, true, y, t, 1 or x is a yes,
-          // anything else no); an absent one leaves a re-imported player's request alone.
-          ...(playUp !== null || !existing
+          // anything else, a blank cell included, no); an absent one leaves a re-imported
+          // player's request alone.
+          ...(playUpPresent || !existing
             ? {
                 play_up_requested: ['true', 't', 'yes', 'y', '1', 'x'].includes(
                   String(playUp ?? '').toLowerCase()

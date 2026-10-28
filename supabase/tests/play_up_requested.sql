@@ -15,7 +15,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(14);
+SELECT plan(16);
 
 INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by) VALUES
     ('a1111111-0000-4000-8000-0000000006a1', 'a1111111-1111-1111-1111-111111111111', 'registration',
@@ -44,7 +44,11 @@ INSERT INTO public.staging_players
     ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000006a2', 1, '{}'::jsonb,
      '{"first_name": "Yes", "last_name": "Pu", "external_registration_id": "PU-1"}'::jsonb),
     ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000006a2', 2, '{}'::jsonb,
-     '{"first_name": "True", "last_name": "Pu", "external_registration_id": "PU-2", "play_up": "no"}'::jsonb);
+     '{"first_name": "True", "last_name": "Pu", "external_registration_id": "PU-2", "play_up": "no"}'::jsonb),
+    ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000006a2', 3, '{}'::jsonb,
+     '{"first_name": "Question", "last_name": "Pu", "external_registration_id": "PU-5", "play_up": ""}'::jsonb),
+    ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000006a2', 4, '{}'::jsonb,
+     '{"first_name": "Ex", "last_name": "Pu", "external_registration_id": "PU-4", "play up": null}'::jsonb);
 
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
@@ -72,7 +76,7 @@ SELECT is(
 );
 SELECT is(
     (public.finalize_import_job('a1111111-0000-4000-8000-0000000006a2') ->> 'updated_players')::int,
-    2, 'a re-import updates the two players it matches'
+    4, 'a re-import updates the four players it matches'
 );
 SELECT is(
     (SELECT play_up_requested FROM public.players WHERE external_registration_id = 'PU-1'),
@@ -81,6 +85,14 @@ SELECT is(
 SELECT is(
     (SELECT play_up_requested FROM public.players WHERE external_registration_id = 'PU-2'),
     false, 'a re-import with the column rewrites the request'
+);
+SELECT is(
+    (SELECT play_up_requested FROM public.players WHERE external_registration_id = 'PU-5'),
+    false, 'a re-import with the column present but blank withdraws the request'
+);
+SELECT is(
+    (SELECT play_up_requested FROM public.players WHERE external_registration_id = 'PU-4'),
+    false, 'a column present as null is not an affirmative answer either'
 );
 
 SELECT lives_ok(

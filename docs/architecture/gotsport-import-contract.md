@@ -238,8 +238,8 @@ decides.
 
 - **The request.** The play-up column (`play_up`, `play up`, or the GotSport question)
   is stored as `players.play_up_requested`: yes, true, y, t, 1 or x is a request,
-  anything else is none; a row without the column leaves a re-imported player's
-  request alone. An admin sets or clears it on the player record (an audited patch).
+  anything else is none, a blank cell included (a request withdrawn in the file); a
+  row without the column at all leaves a re-imported player's request alone. An admin sets or clears it on the player record (an audited patch).
 - **Play up** (registered in an older division than the natural age): with a request
   the player plays in the older division they registered for; without one, in their
   own age division. Either way the **Play-up** section of the Teams page lists them,
@@ -248,12 +248,15 @@ decides.
   pending-confirmation coach) and whether a buddy is in the division.
 - **Play down** (registered in a younger division): the player plays in their own age
   division and is listed.
-- **Only a player no division can hold** (none in the import covers their natural
-  age) is not placed: listed under "Not placed" with the reason.
+- **Only a player no division can hold** is not placed: none in the import covers
+  their natural age with the same gender (or a co-ed division). A girl registered in
+  U12 Girls never moves to U10 Boys. Listed under "Not placed" with the reason.
 - **The waitlist exception.** A waitlisted player comes off the waitlist only when a
   coach asked for them: the buddy, under the league's buddy rule, of a coach's linked
   child. They are placed on the coach's team with that child and listed; saving the
-  teams makes them active through the audited bulk status write.
+  teams makes them active through the audited bulk status write. Each child gets one
+  such buddy, and the choice reads no row order (the child's own request first, then
+  the lowest player id).
 
 A division with no registered player is not a program of the import, so a player
 whose own age division is one is listed as not placed.

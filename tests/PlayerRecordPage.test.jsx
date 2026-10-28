@@ -196,6 +196,14 @@ describe('PlayerRecordPage', () => {
       expect(screen.getByText('Alex')).toBeInTheDocument();
     });
 
+    it('offers no edit on the play-up request, which the server fence refuses too', async () => {
+      renderPage();
+      await screen.findByRole('heading', { name: 'Alex Smith' });
+      // Control: the field is shown, with its value, and only the edit is withheld.
+      expect(screen.getByText('Play-up requested')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Edit Play-up requested:/ })).toBeNull();
+    });
+
     it('still offers an edit on where the player plays (control)', async () => {
       renderPage();
       await screen.findByRole('heading', { name: 'Alex Smith' });

@@ -20,7 +20,7 @@ function placementText(entry) {
     case 'requested-age-unknown':
       return `Requested a play-up, but their natural age is unknown, so nothing is checked. Plays in ${registered}.`;
     case 'no-division':
-      return `Not placed: no division in this import holds a player of natural age ${entry.naturalAge}.`;
+      return `Not placed: no suitable division in this import (the same gender or co-ed) holds a player of natural age ${entry.naturalAge}.`;
     default:
       return `Plays in ${played}.`;
   }

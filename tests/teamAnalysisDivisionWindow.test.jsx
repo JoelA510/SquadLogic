@@ -183,7 +183,7 @@ const idOf = (n) => state.durablePlayers.find((p) => p.external_registration_id 
 
 /** A division row as the table holds it: every column, the page reads the ones it names. */
 const divisionRow = (name, minAge, maxAge, window = {}) => ({
-  id: `5d1c2b3a-4e5f-4a6b-8c7d-${name === 'U4' ? '9e0f1a2b3c13' : '9e0f1a2b3c14'}`,
+  id: `5d1c2b3a-4e5f-4a6b-8c7d-${name === 'U4' ? '9e0f1a2b3c15' : '9e0f1a2b3c14'}`,
   organization_id: IDS.organization,
   season_settings_id: IDS.season,
   name,
@@ -274,5 +274,37 @@ describe("a division's birth-date window on the Teams page", () => {
     const results = stagedResults();
     expect(seatedIn(results, 'U3')).toContain(idOf(1));
     expect(playUpOf(results, 1)).toBeUndefined();
+  });
+});
+
+describe('a window on a division the file has no registrants in', () => {
+  // The file has only U3 registrants. U4 is a division of the season that bears a window and has
+  // nobody registered in it: it still takes the U3 registrant born in its window.
+  const rows = () => [row(1, 'U3', BORN_3_IN_WINDOW), ...fill('U3', BORN_3_AFTER_WINDOW, 2, 8)];
+  beforeEach(() => {
+    reset();
+    state.rows = rows();
+    state.durablePlayers = promote(state.rows);
+    state.divisionRows = [
+      divisionRow('U4', 4, 4, { start: '2023-01-01', end: '2023-07-31' }),
+      divisionRow('U3', 3, 3),
+    ];
+  });
+  afterEach(reset);
+
+  it('plays the registrant born in the window of an empty division in that division, not in U3', async () => {
+    await generate();
+    const results = stagedResults();
+    expect(seatedIn(results, 'U3')).not.toContain(idOf(1));
+    const entry = (results.playUpByDivision.U3 ?? []).find((e) => e.playerId === idOf(1));
+    expect(entry).toMatchObject({ naturalAge: 4, playedDivisionName: 'U4' });
+    // The rest of U3 is untouched.
+    expect(seatedIn(results, 'U3')).toContain(idOf(2));
+  });
+
+  it('POSITIVE CONTROL: with no window on that division, the same registrant stays in U3', async () => {
+    state.divisionRows = [divisionRow('U4', 4, 4), divisionRow('U3', 3, 3)];
+    await generate();
+    expect(seatedIn(stagedResults(), 'U3')).toContain(idOf(1));
   });
 });

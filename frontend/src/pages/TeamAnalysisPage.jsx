@@ -1409,12 +1409,14 @@ export default function TeamAnalysisPage() {
       // Every program of the import is a division a player may play in: the selected program
       // takes its band from the saved row, the others from their division rows (the age band
       // and gender), else from the program's name.
-      const divisionDescriptors = programs.map((program) => {
+      const programRowIds = new Set();
+      const programDescriptors = programs.map((program) => {
         const programKey = String(program.id);
         const row =
           programKey === selectedProgramKey
             ? savedDivision
             : findDivisionRowForProgram(program, divisionRows ?? []);
+        if (row?.id) programRowIds.add(String(row.id));
         return {
           id: programKey,
           name: program.name,
@@ -1426,6 +1428,21 @@ export default function TeamAnalysisPage() {
           birthdate_end: row?.birthdate_end ?? null,
         };
       });
+      // The season's other divisions too, however few registrants the file has in them (none, for a
+      // U4 that only takes older 2-year-olds): a window is the season's rule, and a player whose
+      // birth date is in one belongs there, as the import counted their age.
+      const otherDescriptors = (divisionRows ?? [])
+        .filter((row) => row?.id && !programRowIds.has(String(row.id)))
+        .map((row) => ({
+          id: String(row.id),
+          name: row.name,
+          min_age: row.min_age ?? null,
+          max_age: row.max_age ?? null,
+          gender_policy: row.gender_policy ?? null,
+          birthdate_start: row.birthdate_start ?? null,
+          birthdate_end: row.birthdate_end ?? null,
+        }));
+      const divisionDescriptors = [...programDescriptors, ...otherDescriptors];
       // Who plays in this program: everyone who registered in it except a player who plays in
       // their own age division (a play-up nobody requested, a play-down), plus those who
       // registered elsewhere and play here. Placed first, on the file and the records alone, so

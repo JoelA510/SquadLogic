@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { logger } from '../lib/logger.js';
 import { REFRESH_TOPICS, emitRefresh } from '../lib/refreshBus.js';
+
+const NO_ROWS = Object.freeze([]);
 
 /**
  * Players-grid data layer: the players and divisions of the season the header shows
@@ -23,13 +25,21 @@ export function usePlayersData() {
   const [divisions, setDivisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // What the loaded rows are of, and which fetch is the latest: a response for the season shown
+  // before a switch must never replace the season shown after it, and the rows of the season left
+  // are not served while the next one loads (a bulk action on the page would submit them).
+  const key = orgId && seasonId ? `${orgId}|${seasonId}` : null;
+  const [loadedKey, setLoadedKey] = useState(/** @type {string | null} */ (null));
+  const latestRequestRef = useRef(0);
 
   const fetchAll = useCallback(async () => {
     if (!orgId || seasonSettingsLoading) return;
+    const requestId = ++latestRequestRef.current;
     if (!seasonId) {
       // An organization with no season has no players to show.
       setPlayers([]);
       setDivisions([]);
+      setLoadedKey(null);
       setLoading(false);
       return;
     }
@@ -52,13 +62,16 @@ export function usePlayersData() {
             .eq('season_settings_id', seasonId)
         ),
       ]);
+      if (latestRequestRef.current !== requestId) return;
       setPlayers(playersData);
       setDivisions(divisionsData);
+      setLoadedKey(`${orgId}|${seasonId}`);
     } catch (err) {
+      if (latestRequestRef.current !== requestId) return;
       logger.error('[usePlayersData] fetch failed:', err);
       setError(err.message || 'Failed to load players');
     } finally {
-      setLoading(false);
+      if (latestRequestRef.current === requestId) setLoading(false);
     }
   }, [orgId, seasonId, seasonSettingsLoading]);
 
@@ -68,6 +81,7 @@ export function usePlayersData() {
 
   /** Optimistically apply `patch` to `ids`, run `rpc`, roll back on error. */
   const optimistic = useCallback(async (ids, patch, runRpc) => {
+    const requestId = latestRequestRef.current;
     let snapshot;
     setPlayers((current) => {
       snapshot = current;
@@ -79,7 +93,8 @@ export function usePlayersData() {
       return { success: true };
     } catch (err) {
       logger.error('[usePlayersData] mutation failed:', err);
-      setPlayers(snapshot);
+      // Another season may be shown by now: its rows are not the snapshot's to replace.
+      if (latestRequestRef.current === requestId) setPlayers(snapshot);
       return { success: false, error: err.message || 'Update failed' };
     }
   }, []);
@@ -124,6 +139,7 @@ export function usePlayersData() {
   );
 
   const deletePlayers = useCallback(async (playerIds) => {
+    const requestId = latestRequestRef.current;
     let snapshot;
     setPlayers((current) => {
       snapshot = current;
@@ -138,15 +154,16 @@ export function usePlayersData() {
       return { success: true };
     } catch (err) {
       logger.error('[usePlayersData] delete failed:', err);
-      setPlayers(snapshot);
+      if (latestRequestRef.current === requestId) setPlayers(snapshot);
       return { success: false, error: err.message || 'Delete failed' };
     }
   }, []);
 
+  const current = key === loadedKey;
   return {
-    players,
-    divisions,
-    loading,
+    players: current ? players : NO_ROWS,
+    divisions: current ? divisions : NO_ROWS,
+    loading: loading || (key !== null && !current),
     error,
     refetch: fetchAll,
     updatePlayer,

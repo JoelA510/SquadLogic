@@ -193,6 +193,30 @@ beforeEach(() => {
 });
 
 describe('admin view', () => {
+  it("lists the requests of the season shown's coaches only", async () => {
+    // The table has no season: a request is the season's through its coach. Last season's coach
+    // has a pending request that must neither be listed nor offer an approval.
+    tables.coach_practice_preferences.push({
+      id: 'r-last',
+      organization_id: ORG,
+      coach_id: '44444444-4444-4444-8444-444444444444',
+      dimension: 'weekday',
+      level: 'must_keep',
+      value: 'TUE',
+      status: 'requested',
+      requested_at: '2026-09-21T10:00:00Z',
+      decided_at: null,
+      effective_from: null,
+      effective_to: null,
+    });
+    asRole('admin');
+    renderPage();
+    await screen.findByTestId('admin-preferences-view');
+    expect(screen.getAllByText('Casey Coach').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Approve .* weekday request$/ })).toHaveLength(1);
+  });
+
   it('offers approve, reject and change on a pending request', async () => {
     asRole('admin');
     renderPage();

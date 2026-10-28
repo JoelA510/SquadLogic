@@ -265,7 +265,12 @@ DecisionDialog.propTypes = {
 export default function AdminPreferenceReview({ orgId, toast }) {
   const { currentSeasonSetting } = useOrganization();
   const context = useReviewContext(orgId, currentSeasonSetting?.id ?? null);
-  const { rows, loading, error, refresh } = useCoachPracticePreferences(orgId);
+  const {
+    rows: allRows,
+    loading: rowsLoading,
+    error,
+    refresh,
+  } = useCoachPracticePreferences(orgId);
   const [dialog, setDialog] = useState(/** @type {any} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string|null} */ (null));
   const date = useMemo(() => localIsoDate(), []);
@@ -282,6 +287,14 @@ export default function AdminPreferenceReview({ orgId, toast }) {
     (coachId) => coachNames.get(String(coachId)) ?? `Coach ${coachId}`,
     [coachNames]
   );
+  // The table has no season of its own: a request is the season's through its coach (coaches
+  // belong to one season, 20261108010000), so another season's requests are not listed or
+  // actionable. Until the season's coaches are read there is nothing to match against.
+  const rows = useMemo(
+    () => allRows.filter((row) => coachNames.has(String(row.coach_id))),
+    [allRows, coachNames]
+  );
+  const loading = rowsLoading || context.loading;
   const approvedRows = useMemo(() => rows.filter((row) => row.status === 'approved'), [rows]);
   const pending = rows.filter((row) => row.status === 'requested');
 

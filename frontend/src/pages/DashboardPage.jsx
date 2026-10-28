@@ -57,24 +57,28 @@ function KPI({ icon: Icon, tone, label, value, sub = null }) {
   );
 }
 
+const HOME_NOT_LOADED = Object.freeze({
+  players: [],
+  teams: [],
+  divisions: [],
+  games: [],
+  practices: [],
+  audit: [],
+  loaded: false,
+});
+
 function useHomeData() {
   const { currentOrganization, currentSeasonSetting, seasonSettingsLoading } = useOrganization();
   const orgId = currentOrganization?.id;
   const seasonId = currentSeasonSetting?.id;
-  const [data, setData] = useState({
-    players: [],
-    teams: [],
-    divisions: [],
-    games: [],
-    practices: [],
-    audit: [],
-    loaded: false,
-  });
+  const [data, setData] = useState(/** @type {any} */ (HOME_NOT_LOADED));
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!orgId || seasonSettingsLoading) return;
+      // The season (or organization) just left is not shown while this one loads.
+      setData(HOME_NOT_LOADED);
       try {
         // The players and divisions of the season the header shows (20261108010000); teams are
         // the season's through their division. With no season there are none to count.

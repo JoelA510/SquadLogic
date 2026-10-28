@@ -66,6 +66,8 @@ export default function EnterpriseDashboard() {
   const orgSchema = currentOrganization?.settings?.custom_schema || {};
 
   useEffect(() => {
+    // A response for a season shown before a switch must not replace the one shown after it.
+    let cancelled = false;
     async function loadData() {
       if (!currentOrganization?.id || seasonSettingsLoading) return;
       if (!seasonId) {
@@ -74,6 +76,7 @@ export default function EnterpriseDashboard() {
         setLoading(false);
         return;
       }
+      setLoading(true);
       try {
         // Independent reads, sent together rather than one after another.
         const orgId = currentOrganization.id;
@@ -96,6 +99,7 @@ export default function EnterpriseDashboard() {
             .eq('season_settings_id', seasonId)
             .single(),
         ]);
+        if (cancelled) return;
         setLoadError(null);
         setPlayers(pData);
 
@@ -106,14 +110,18 @@ export default function EnterpriseDashboard() {
           });
         }
       } catch (err) {
+        if (cancelled) return;
         logger.error(err);
         setPlayers([]);
         setLoadError(err?.message || 'Players could not be loaded.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     loadData();
+    return () => {
+      cancelled = true;
+    };
   }, [currentOrganization?.id, seasonId, seasonSettingsLoading]);
 
   const { aggregates, isLowSample, maskedFields } = useEnterpriseMetrics(players, orgSchema);

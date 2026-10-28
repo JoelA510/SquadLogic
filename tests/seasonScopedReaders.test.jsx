@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   requests: [],
   rpc: vi.fn(),
   seasonId: 'season-fall',
+  /** Per season: a promise a read of that season waits for (a response that comes late). */
+  gates: /** @type {Record<string, Promise<void>>} */ ({}),
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => {
@@ -45,7 +47,10 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
       in: () => self,
       order: () => self,
       range: (from, to) => ((range = [from, to]), self),
-      then: (resolve, reject) => Promise.resolve(run()).then(resolve, reject),
+      then: (resolve, reject) => {
+        const gate = mocks.gates[filters.find(([column]) => column === 'season_settings_id')?.[1]];
+        return Promise.resolve(gate).then(run).then(resolve, reject);
+      },
     };
     return self;
   };
@@ -83,6 +88,7 @@ const player = (id, season, extra = {}) => ({
 
 beforeEach(() => {
   mocks.seasonId = FALL;
+  mocks.gates = {};
   mocks.requests = [];
   mocks.rpc.mockReset();
   mocks.tables = {
@@ -128,6 +134,45 @@ describe('usePlayersData (the Players page and Team Builder)', () => {
     await waitFor(() => expect(result.current.players).toHaveLength(3));
     expect(result.current.players.every((p) => p.season_settings_id === SPRING)).toBe(true);
     expect(result.current.divisions.map((d) => d.id)).toEqual(['spring-d']);
+  });
+
+  it('never lets a late response for the season left replace the season shown', async () => {
+    // Fall's read is held; the header is switched to Spring, whose read answers at once.
+    /** @type {() => void} */
+    let release = () => {};
+    mocks.gates[FALL] = new Promise((resolve) => {
+      release = resolve;
+    });
+    const { result, rerender } = renderHook(() => usePlayersData());
+    mocks.seasonId = SPRING;
+    rerender();
+    await waitFor(() => expect(result.current.players).toHaveLength(3));
+    // Fall answers now, after Spring: it must change nothing.
+    release();
+    await act(async () => {
+      await mocks.gates[FALL];
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(result.current.players.every((p) => p.season_settings_id === SPRING)).toBe(true);
+    expect(result.current.players).toHaveLength(3);
+    expect(result.current.divisions.map((d) => d.id)).toEqual(['spring-d']);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('serves none of the season left while the season now shown loads', async () => {
+    const { result, rerender } = renderHook(() => usePlayersData());
+    await waitFor(() => expect(result.current.players).toHaveLength(2));
+    /** @type {() => void} */
+    let release = () => {};
+    mocks.gates[SPRING] = new Promise((resolve) => {
+      release = resolve;
+    });
+    mocks.seasonId = SPRING;
+    rerender();
+    expect(result.current.players).toEqual([]);
+    expect(result.current.loading).toBe(true);
+    release();
+    await waitFor(() => expect(result.current.players).toHaveLength(3));
   });
 
   it('has no players to show for an organization with no season', async () => {

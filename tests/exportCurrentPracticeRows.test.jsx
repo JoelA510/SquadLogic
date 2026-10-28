@@ -154,6 +154,11 @@ function dbOf(assignments, exceptions = []) {
         results: {},
       },
     ],
+    // The TIME TBD list is read for the season the page shows (`get_schedule_tbd`, admin only), so
+    // the season exists and the signed-in mock admin administers its organization. Nothing is short.
+    season_settings: [{ id: SEASON, organization_id: ORG }],
+    organization_members: [{ organization_id: ORG, profile_id: 'mock-admin-id', role: 'admin' }],
+    schedule_tbd: [],
     divisions: [
       { id: 'div-now', organization_id: ORG, season_settings_id: SEASON, name: 'U10' },
       { id: 'div-old', organization_id: ORG, season_settings_id: OTHER_SEASON, name: 'U10' },

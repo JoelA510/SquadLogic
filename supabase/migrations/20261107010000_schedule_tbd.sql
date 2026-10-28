@@ -31,7 +31,9 @@
 --      payload and the solver's output are never the subject set; the run's own reason for the
 --      team (`results.unassigned`) only labels the row (else `not-scheduled-yet`). A division at 0
 --      a week lists nothing.
---   4. `persist_game_schedule` is replaced (behind its md5, same signature): a save whose
+--   4. `persist_game_schedule` is replaced (behind its md5, same signature; `now()` for
+--      `timezone('utc', now())` in the four places it was written, the function being pinned to UTC,
+--      where the two are the same instant -- tests/utcNowIdiom.test.js keeps the idiom out of new migrations): a save whose
 --      `results.unscheduled` is an array replaces the season's unscheduled games with it, each
 --      entry validated (week, two different teams of the season, a reason on the closed list; one
 --      bad entry refuses the save). A save with no such list (manual move, rollback) leaves the
@@ -1669,8 +1671,8 @@ BEGIN
 
     v_created_by := auth.uid();
 
-    v_started_at := COALESCE(NULLIF(run_data->>'started_at', '')::timestamptz, timezone('utc', now()));
-    v_completed_at := COALESCE(NULLIF(run_data->>'completed_at', '')::timestamptz, timezone('utc', now()));
+    v_started_at := COALESCE(NULLIF(run_data->>'started_at', '')::timestamptz, now());
+    v_completed_at := COALESCE(NULLIF(run_data->>'completed_at', '')::timestamptz, now());
 
     INSERT INTO public.scheduler_runs (
         id,
@@ -1708,7 +1710,7 @@ BEGIN
         metrics = EXCLUDED.metrics,
         results = EXCLUDED.results,
         completed_at = EXCLUDED.completed_at,
-        updated_at = timezone('utc', now())
+        updated_at = now()
     WHERE public.scheduler_runs.organization_id = EXCLUDED.organization_id
     RETURNING id INTO v_persisted_run_id;
 
@@ -2055,7 +2057,7 @@ BEGIN
         start = EXCLUDED.start,
         "end" = EXCLUDED."end",
         assignment_source = EXCLUDED.assignment_source,
-        updated_at = timezone('utc', now());
+        updated_at = now();
 
     -- 20261107010000: THE TIME TBD LIST FOR GAMES (Phase D, E). A run that found games it could
     -- not place says so in `results.unscheduled` (the scheduler's own list: week, division, the

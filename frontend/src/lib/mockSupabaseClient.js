@@ -7638,7 +7638,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
-      // As 20261022030000 (20261021030000 without RSVPs or team chat): the
+      // As 20261107010000 (20261022030000 with the TIME TBD rows counted; that is 20261021030000
+      // without RSVPs or team chat): the
       // team's practice exceptions are withdrawn, audited and archived, each
       // series is audited as cancelled, players lose the team id, and
       // team.deleted records what each table lost. Every row the database's
@@ -7737,6 +7738,11 @@ export const mockSupabase = {
         ).length,
         team_calendar_tokens_deleted: cascadeDoomed('team_calendar_tokens', (t) =>
           sameTeam(t.team_id)
+        ).length,
+        // 20261107010000: the TIME TBD rows (as the practice team, or either side of a game).
+        schedule_tbd_deleted: cascadeDoomed(
+          'schedule_tbd',
+          (row) => sameTeam(row.team_id) || sameTeam(row.home_team_id) || sameTeam(row.away_team_id)
         ).length,
       };
       db.teams = (db.teams || []).filter((t) => !sameTeam(t.id));

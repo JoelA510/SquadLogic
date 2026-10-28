@@ -1091,18 +1091,21 @@ export default function OutputGenerationPanel({
                 These are in the master and team files with the time and the ground marked TBD, and
                 the reason in Notes.
               </p>
-              {/* Focusable so a keyboard user can scroll a long list (axe: scrollable-region-focusable). */}
-              <ul
+              <div
+                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region: focusable so the keyboard can scroll it (WCAG 2.1.1)
                 tabIndex={0}
+                role="region"
                 aria-label="Practices and games not scheduled yet"
-                className="text-xs text-text-muted space-y-1 max-h-64 overflow-y-auto"
+                className="max-h-64 overflow-y-auto"
               >
-                {tbdRows.map((row) => (
-                  <li key={row.id} data-testid="schedule-tbd-row">
-                    {scheduleTbdLine(row)}
-                  </li>
-                ))}
-              </ul>
+                <ul className="text-xs text-text-muted space-y-1">
+                  {tbdRows.map((row) => (
+                    <li key={row.id} data-testid="schedule-tbd-row">
+                      {scheduleTbdLine(row)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </section>
           )}
 

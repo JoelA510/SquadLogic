@@ -83,6 +83,7 @@
  * @property {string|null} home
  * @property {string|null} away
  * @property {string|null} participant - the team a per-team export row is addressed to
+ * @property {number|null} ordinal - which of a team's TIME TBD rows this is (1, 2, ...); `null` on a row with a date
  */
 
 /**

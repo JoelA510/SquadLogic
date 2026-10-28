@@ -196,10 +196,10 @@ describe('the RPC rows become export items, or an error', () => {
 describe('the unscheduled games a save records', () => {
   it('accepts what scheduleGames() returns for a matchup it could not place', () => {
     const result = scheduleGames({
-      teams: [
+      teams: /** @type {any} */ ([
         { id: 'a', name: 'A', division: 'U8', coachIds: [] },
         { id: 'b', name: 'B', division: 'U8', coachIds: [] },
-      ],
+      ]),
       slots: [],
       roundRobinByDivision: {
         U8: [{ weekIndex: 1, matchups: [{ homeTeamId: 'a', awayTeamId: 'b' }], byes: [] }],

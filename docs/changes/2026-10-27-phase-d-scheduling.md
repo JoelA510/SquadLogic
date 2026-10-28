@@ -462,6 +462,33 @@ Each PR runs the season fixture suite and the full Definition of Done.
   written), `admin_upsert_division_settings` replaced by its 13-argument form (the 11-argument one
   dropped by its exact signature, no CASCADE).
 
+## Build notes: PR E (2026-10-28)
+
+- **Built:** E1 and E2 in migration `20261107010000`: the `schedule_tbd` table (admin-only RLS), the
+  admin read `get_schedule_tbd(season)`, `persist_practice_schedule` and `persist_game_schedule`
+  replaced behind their md5, `admin_delete_team` replaced to count `schedule_tbd_deleted` (the table
+  cascades from teams, and the delete's pgTAP and smoke walk the catalogue for a counter per cascading
+  table). `generateScheduleExports` takes `tbdItems`; the Exports panel reads the list when it generates,
+  lists it, and stops the files when it cannot be read.
+- **Why a separate table** (decision 11, owner answer: only if keeping the rows in the schedule breaks
+  it; PR B's evidence stands): the lock loader, the writer's prune and lock rules,
+  `teams_without_practice` and the metrics each read a `practice_assignments` row as a held practice.
+- **Where the game list comes from:** the run's `results.unscheduled`, already part of the save, not a
+  new argument. A new RPC argument would have changed the writer's signature (a drop and a create, the
+  Edge function's schema and its drift test) for nothing the existing field does not carry. The
+  save replaces the season's list only when `results.unscheduled` is an array; the game page sends it
+  only for a scheduler run, so a hand edit and a rollback leave it alone (declared: a rollback does not
+  restore the list of the run it undoes). Each entry is checked in Zod before the save and in SQL in it.
+- **Departures from the text above:** (1) `get_schedule_tbd` is a definer with its own admin check (42501),
+  where the plan said "an admin RPC" without saying which; (2) the practice writer reads the run's reason
+  for a team from `results.unassigned` (the auto-scheduler's own) and labels the row with it when it is on
+  the closed list, else `not-scheduled-yet`; the subject set stays the roster; (3) the baseline
+  comparison reads a declared `TIME TBD` Start as a value on both sides (`withDeclaredTbdTime`), which the
+  generic reader still refuses to do (its test holds that), because the plan's ordinal alone would have left
+  every baseline with a TBD row "unreadable as a verdict".
+- **Not done (stated):** the per-team page downloads and the calendar feed (out of scope above); the
+  demo's seeded list (PR F); no `schedule_tbd` writer in the mock (the E2E seeds the table).
+
 ## Plan-change output
 
 Size: planned (PRs, migrations, the solver, RPC shapes, an Edge Function). Departures: none.

@@ -130,7 +130,7 @@ describe('the master export lists what is not scheduled yet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download Master CSV' }));
     await waitFor(() => expect(saved).toHaveLength(1));
     const csv = await saved[0].blob.text();
-    const csvLines = csv.replace(/^﻿/, '').split('\n');
+    const csvLines = csv.replace(/^\uFEFF/, '').split('\n');
     expect(csvLines).toHaveLength(6);
     const tbd = csvLines.filter((line) => line.includes('TIME TBD,,LOCATION TBD'));
     expect(tbd).toHaveLength(4);

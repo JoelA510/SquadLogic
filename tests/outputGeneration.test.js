@@ -315,7 +315,7 @@ test('a TIME TBD item that cannot be written is an error, never a row left out',
     );
   }
   assert.throws(
-    () => generateScheduleExports({ teams: TBD_TEAMS, tbdItems: 'x' }),
+    () => generateScheduleExports({ teams: TBD_TEAMS, tbdItems: /** @type {any} */ ('x') }),
     /tbdItems must be an array/
   );
 });

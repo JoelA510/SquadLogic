@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMockDb } from './helpers/seedMockDb.js';
 
 const ORG = '00000000-0000-4000-8000-0000000000e1';
-const SEASON = 'season-gtimeout';
 
 const ROSTER = vi.hoisted(() => [
   { id: 'team-1', name: 'Synthetic Comets', division: 'U10' },
@@ -91,7 +90,6 @@ vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
   persistGameScheduleReview: (...args) => SAVE.impl(...args),
 }));
 
-const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { default: GameSchedulingPage } =
   await import('../frontend/src/pages/GameSchedulingPage.jsx');
 

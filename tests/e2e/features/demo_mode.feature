@@ -47,3 +47,9 @@ Feature: Try the demo
     When I open the demo entry page
     Then I stay on the entry page and it says the demo is busy
     And I am signed out
+
+  Scenario: A demo's exports hold the league's practices, not just headers
+    Given I am in the demo league
+    When I download the master schedule CSV from the demo's exports page
+    Then the master CSV holds one weekly practice for each of the demo's 2 scheduled teams
+    And the U4 cohorts' practices are on Saturday morning, 30 minutes each, 15 minutes apart

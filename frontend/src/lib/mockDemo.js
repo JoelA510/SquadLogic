@@ -5,7 +5,9 @@
  *
  * `signInAnonymously` makes an anonymous session; `start_demo_session()` gives the caller a "Demo
  * league" that expires 30 minutes on, holding a SMALL slice of the real seed (two divisions, one of
- * them the practice-only U4 with its four reserved Saturday sessions), enough for the UI tests. The
+ * them the practice-only U4 with its four reserved Saturday sessions) and the applied weekly practice
+ * schedule of the divisions the server seeds (the U4 cohorts on their sessions; the U10 teams, two
+ * practices a week of 60 minutes, left for the visitor's auto-scheduler), enough for the UI tests. The
  * mock re-merges its whole store on every read, so the real league's 1,259 players would make every
  * call slow. The real counts are asserted against the real backend (`real_backend_demo.feature`).
  *
@@ -29,9 +31,11 @@ const capacityError = () => ({
 
 /** The demo league's slice: two divisions, four teams, 16 players, two coaches, one ground. */
 const SLICE = {
+  // `practices` and `minutes` are the owner's settings (migration 20261110010000): U4 one 30-minute
+  // Saturday session, U5 to U12 two of 60 minutes.
   divisions: [
-    { key: 'U4', name: 'U4', plays_games: false, size: 4 },
-    { key: 'U10', name: 'U10 Boys', plays_games: true, size: 4 },
+    { key: 'U4', name: 'U4', plays_games: false, size: 4, practices: 1, minutes: 30 },
+    { key: 'U10', name: 'U10 Boys', plays_games: true, size: 4, practices: 2, minutes: 60 },
   ],
   teamsPerDivision: 2,
   playersPerTeam: 4,
@@ -178,9 +182,9 @@ export function handleDemoRpc(
       season_settings_id: seasonId,
       name: slice.name,
       plays_games: slice.plays_games,
-      // The column defaults (20261105010000).
-      practices_per_week: 1,
-      practice_minutes: null,
+      // The seed's practices a week and length (20261105010000, 20261110010000).
+      practices_per_week: slice.practices,
+      practice_minutes: slice.minutes,
       min_roster_size: 4,
       max_roster_size: 8,
       target_team_size: 4,
@@ -290,34 +294,109 @@ export function handleDemoRpc(
     surface_type: 'Grass',
     size: '7v7',
   });
-  // U4's four 30-minute Saturday sessions, 15 minutes apart, reserved to it; and one open weekday slot.
+  // U4's four 30-minute Saturday sessions, 15 minutes apart, reserved to it; and four open 60-minute
+  // weekday slots, two on Tuesday and two on Thursday, for the U10 teams' two practices a week.
   const u4 = divisionIds.get('U4');
+  const slotIds = new Map();
   [
-    ['09:00', '09:30'],
-    ['09:45', '10:15'],
-    ['10:30', '11:00'],
-    ['11:15', '11:45'],
-  ].forEach(([start, end]) => {
+    ['sat', '09:00', '09:30', u4],
+    ['sat', '09:45', '10:15', u4],
+    ['sat', '10:30', '11:00', u4],
+    ['sat', '11:15', '11:45', u4],
+    ['tue', '16:00', '17:00', null],
+    ['tue', '17:00', '18:00', null],
+    ['thu', '16:00', '17:00', null],
+    ['thu', '17:00', '18:00', null],
+  ].forEach(([day, start, end, division]) => {
+    const id = mockId();
+    slotIds.set(`${day}-${start}`, id);
     db.practice_slots.push({
-      id: mockId(),
+      id,
       organization_id: orgId,
       field_id: fieldId,
-      day_of_week: 'sat',
+      day_of_week: day,
       start_time: start,
       end_time: end,
       capacity: 1,
-      division_id: u4,
+      division_id: division,
     });
   });
-  db.practice_slots.push({
-    id: mockId(),
+
+  // The applied weekly practice schedule the server's start_demo_session seeds (20261110010000): the
+  // practice-only U4 cohorts (and, on the server, U5 to U8's two practices a week), each on a slot, live
+  // from its weekday's first date in the season (which starts on the Monday after the demo does and
+  // runs twelve weeks) to the season's last day. U9 and older have none, for the visitor's
+  // auto-scheduler. Here, a U4 cohort in each of the first two reserved sessions (one at a time, 15
+  // minutes apart); the U10 teams are left unscheduled, with the four open weekday slots free for them.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const today = new Date(now);
+  const daysToMonday = (8 - today.getUTCDay()) % 7 || 7;
+  const seasonStart = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) + daysToMonday * dayMs
+  );
+  const seasonEnd = new Date(seasonStart.getTime() + (12 * 7 - 1) * dayMs);
+  const isoDate = (date) => date.toISOString().slice(0, 10);
+  const practiceRunId = mockId();
+  const orgTeams = db.teams.filter((entry) => entry.organization_id === orgId);
+  const weekdayOffset = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
+  db.practice_assignments = db.practice_assignments || [];
+  [
+    [orgTeams[0], 'sat-09:00'],
+    [orgTeams[1], 'sat-09:45'],
+  ].forEach(([team, slotKey]) => {
+    if (!team) return;
+    const slotId = slotIds.get(slotKey);
+    const slot = db.practice_slots.find((entry) => entry.id === slotId);
+    const first = new Date(seasonStart.getTime() + weekdayOffset[slot.day_of_week] * dayMs);
+    // A closed range is stored as [first, last + 1), as Postgres canonicalises it.
+    const end = new Date(seasonEnd.getTime() + dayMs);
+    db.practice_assignments.push({
+      id: mockId(),
+      organization_id: orgId,
+      team_id: team.id,
+      slot_id: slotId,
+      practice_slot_id: slotId,
+      run_id: practiceRunId,
+      day_of_week: slot.day_of_week,
+      start_time: slot.start_time,
+      end_time: slot.end_time,
+      field_id: fieldId,
+      source: 'auto',
+      assigned_via: 'auto',
+      effective_date_range: `[${isoDate(first)},${isoDate(end)})`,
+    });
+  });
+  const practiceRows = db.practice_assignments.filter((entry) => entry.organization_id === orgId);
+  const assigned = new Set(practiceRows.map((entry) => entry.team_id)).size;
+  db.scheduler_runs.push({
+    id: practiceRunId,
     organization_id: orgId,
-    field_id: fieldId,
-    day_of_week: 'tue',
-    start_time: '16:00',
-    end_time: '16:45',
-    capacity: 1,
-    division_id: null,
+    season_id: seasonId,
+    season_settings_id: seasonId,
+    run_type: 'practice',
+    status: 'completed',
+    parameters: { source: 'demo_seed' },
+    metrics: {},
+    results: {
+      summary: {
+        totalTeams: orgTeams.length,
+        assignedTeams: assigned,
+        unassignedTeams: orgTeams.length - assigned,
+        assignmentsRead: practiceRows.length,
+        assignmentsCounted: practiceRows.length,
+        assignmentRate: orgTeams.length ? assigned / orgTeams.length : 0,
+        manualFollowUpRate: orgTeams.length ? (orgTeams.length - assigned) / orgTeams.length : 0,
+      },
+      unassignedByReason:
+        orgTeams.length > assigned
+          ? [{ reason: 'not scheduled yet', count: orgTeams.length - assigned }]
+          : [],
+      dataQualityWarnings: [],
+    },
+    created_by: user.id,
+    started_at: created,
+    completed_at: created,
+    created_at: created,
   });
 
   return {

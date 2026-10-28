@@ -76,7 +76,9 @@ BEGIN
         RAISE EXCEPTION 'a bucket insert policy does not ask is_demo_org';
     END IF;
     IF (SELECT count(*) FROM demo_seed.teams) <> 128 OR (SELECT count(*) FROM demo_seed.players) <> 1259
-       OR (SELECT count(*) FROM demo_seed.coaches) <> 251 OR (SELECT count(*) FROM demo_seed.practice_slots) <> 196 THEN
+       OR (SELECT count(*) FROM demo_seed.coaches) <> 251
+       -- 304 since 20261110010000 replaced the 196-slot facility (this smoke runs on the database at head)
+       OR (SELECT count(*) FROM demo_seed.practice_slots) <> 304 THEN
         RAISE EXCEPTION 'demo_seed does not hold the demo league';
     END IF;
     RAISE NOTICE 'posture: % demo functions pinned and closed to anon, purge scheduled every 10 minutes, % fence triggers, demo_seed closed to clients and holding % players on % teams',

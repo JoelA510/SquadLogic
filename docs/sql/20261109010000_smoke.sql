@@ -195,6 +195,42 @@ BEGIN
         RAISE EXCEPTION 'a team write in a completed season gave "%"', v_refused;
     END IF;
     RAISE NOTICE 'activation: one active season, the old one completed, read-only (people and schedules), never reactivated';
+
+    -- The completed season's clock is fixed too (the calendar feed expands its dates in it).
+    BEGIN
+        UPDATE public.season_settings SET timezone = 'Pacific/Auckland' WHERE id = v_s1;
+        v_refused := 'allowed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_detail = PG_EXCEPTION_DETAIL;
+        v_refused := v_state || ':' || v_detail;
+    END;
+    IF v_refused <> '22023:season_completed' THEN
+        RAISE EXCEPTION 'a timezone change on a completed season gave "%"', v_refused;
+    END IF;
+
+    -- A writer of the age rule takes the season lock the finalizer takes: in an organization nothing
+    -- in this transaction has touched, the lock is not held until a season's cutoff changes.
+    DECLARE
+        v_org2 uuid;
+        v_s3 uuid;
+        v_key bigint;
+        v_before boolean;
+        v_after boolean;
+    BEGIN
+        INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org Lock', 'smoke-org-lock') RETURNING id INTO v_org2;
+        DELETE FROM public.season_settings WHERE organization_id = v_org2;
+        INSERT INTO public.season_settings (organization_id, name, status, season_year) VALUES (v_org2, 'Smoke Lock', 'draft', 2030) RETURNING id INTO v_s3;
+        v_key := hashtextextended('season:' || v_org2::text, 0);
+        SELECT EXISTS (SELECT 1 FROM pg_locks l WHERE l.locktype = 'advisory' AND l.pid = pg_backend_pid() AND l.granted
+                          AND l.classid = ((v_key >> 32) & 4294967295)::oid AND l.objid = (v_key & 4294967295)::oid AND l.objsubid = 1) INTO v_before;
+        UPDATE public.season_settings SET age_cutoff_mode = 'birth_year' WHERE id = v_s3;
+        SELECT EXISTS (SELECT 1 FROM pg_locks l WHERE l.locktype = 'advisory' AND l.pid = pg_backend_pid() AND l.granted
+                          AND l.classid = ((v_key >> 32) & 4294967295)::oid AND l.objid = (v_key & 4294967295)::oid AND l.objsubid = 1) INTO v_after;
+        IF v_before OR NOT v_after THEN
+            RAISE EXCEPTION 'the season guard and the season lock: held before the write %, after %', v_before, v_after;
+        END IF;
+        RAISE NOTICE 'age-rule writers: a cutoff write took the season lock';
+    END;
 END;
 $$;
 

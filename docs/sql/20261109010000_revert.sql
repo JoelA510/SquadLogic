@@ -49,11 +49,13 @@ DROP TRIGGER game_assignments_readonly_when_completed ON public.game_assignments
 DROP TRIGGER schedule_tbd_readonly_when_completed ON public.schedule_tbd;
 DROP TRIGGER players_readonly_when_completed ON public.players;
 DROP TRIGGER coaches_readonly_when_completed ON public.coaches;
+DROP TRIGGER season_settings_completed_guard ON public.season_settings;
 DROP TRIGGER divisions_age_rule_revision ON public.divisions;
 DROP TRIGGER divisions_window_guard ON public.divisions;
 DROP TRIGGER season_settings_cutoff_guard ON public.season_settings;
 DROP FUNCTION public.season_schedule_readonly_when_completed();
 DROP FUNCTION public.season_rows_readonly_when_completed();
+DROP FUNCTION public.season_settings_completed_guard();
 DROP FUNCTION public.divisions_age_rule_revision();
 DROP FUNCTION public.divisions_window_guard();
 DROP FUNCTION public.division_age_rule_differs(public.divisions, public.divisions);

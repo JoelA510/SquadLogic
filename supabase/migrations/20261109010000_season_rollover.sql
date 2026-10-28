@@ -45,7 +45,9 @@
 --      update or delete by a signed-in caller (an RPC or a direct write; 22023, `season_completed`).
 --      Triggers, not edits to the schedule writers, so the writers stay as they are. A job with no
 --      signed-in user (the retention job, the demo purge) and a cascade from a deleted season or
---      organization pass: an admin's own "delete this season's data" is a later change.
+--      organization pass: an admin's own "delete this season's data" is a later change. A completed
+--      season's timezone is fixed too (`season_settings_completed_guard`): the calendar feed expands
+--      its occurrences in it.
 --   5. The E1 guard changes from "the active season only" to "the active season or a draft; never a
 --      completed one", in `create_import_job` (registration jobs), `finalize_import_job` and
 --      `finalize_coach_import_job`, each behind the md5 of its current text. A field import
@@ -334,6 +336,10 @@ SET search_path = public
 SET timezone = 'UTC'
 AS $$
 BEGIN
+    -- The season lock the finalizer and the rollover RPCs take, before anything is checked or bumped:
+    -- a writer that reaches here by another path (a direct write) waits for a finalization in
+    -- progress, and then sees its players and its revision.
+    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || OLD.organization_id::text, 0));
     IF EXISTS (SELECT 1 FROM public.players p WHERE p.season_settings_id = OLD.id) THEN
         RAISE EXCEPTION 'Season % has players: its age cutoff and season year cannot change', OLD.id
             USING ERRCODE = '22023', DETAIL = 'season_has_players';
@@ -398,6 +404,9 @@ BEGIN
     IF TG_OP = 'INSERT' AND NEW.birthdate_start IS NULL AND NEW.birthdate_end IS NULL THEN
         RETURN NEW;
     END IF;
+    -- Only a change that moves an age gets here; it takes the season lock before it looks at players
+    -- or a pending import, so it cannot interleave with a finalization that read the revision.
+    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || NEW.organization_id::text, 0));
     IF EXISTS (SELECT 1 FROM public.players p WHERE p.season_settings_id = NEW.season_settings_id) THEN
         RAISE EXCEPTION 'Season % has players: a division''s birth-date window or age band cannot change', NEW.season_settings_id
             USING ERRCODE = '22023', DETAIL = 'season_has_players';
@@ -431,6 +440,9 @@ BEGIN
     ELSIF NOT public.division_age_rule_differs(OLD, NEW) THEN
         RETURN NEW;
     END IF;
+    -- The same season lock (a delete has no guard before it): the bump is ordered with a finalization.
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        'season:' || (CASE WHEN TG_OP = 'DELETE' THEN OLD.organization_id ELSE NEW.organization_id END)::text, 0));
     UPDATE public.season_settings
        SET age_rule_revision = age_rule_revision + 1
      WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD.season_settings_id ELSE NEW.season_settings_id END;
@@ -446,11 +458,40 @@ REVOKE ALL ON FUNCTION public.season_settings_cutoff_guard() FROM PUBLIC, anon, 
 REVOKE ALL ON FUNCTION public.divisions_window_guard() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.divisions_age_rule_revision() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_settings_cutoff_guard() IS
-    'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
+    'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending); takes the season lock first and raises the age-rule revision. 20261109010000.';
 COMMENT ON FUNCTION public.divisions_window_guard() IS
     'Trigger function: refuses a new or changed division birth-date window, or the age band (or band-supplying name) of a division that bears one, once the division''s season has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
 COMMENT ON FUNCTION public.divisions_age_rule_revision() IS
     'Trigger function: raises the season''s age_rule_revision when a division change moves a natural age, or a window-bearing division arrives or goes. 20261109010000.';
+
+-- A completed season's clock is history: the calendar feed expands its occurrences in this timezone, so
+-- changing it would move every date of a season that is over. The RPC (`admin_set_season_timezone`) and
+-- a direct write meet the same trigger; a job with no signed-in user passes, as in section 5.
+CREATE FUNCTION public.season_settings_completed_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'Season % is completed and read-only: its timezone cannot be changed', OLD.id
+        USING ERRCODE = '22023', DETAIL = 'season_completed';
+END;
+$$;
+
+CREATE TRIGGER season_settings_completed_guard
+    BEFORE UPDATE OF timezone ON public.season_settings
+    FOR EACH ROW
+    WHEN (OLD.status = 'completed' AND OLD.timezone IS DISTINCT FROM NEW.timezone)
+    EXECUTE FUNCTION public.season_settings_completed_guard();
+
+REVOKE ALL ON FUNCTION public.season_settings_completed_guard() FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.season_settings_completed_guard() IS
+    'Trigger function: refuses a signed-in caller''s change of a completed season''s timezone (22023, season_completed). 20261109010000.';
 
 -- ---------------------------------------------------------------------------
 -- 5. A completed season is read-only, players and coaches included.
@@ -2148,7 +2189,7 @@ BEGIN
     END IF;
 
     SELECT string_agg(t.name, ', ') INTO v_bad
-      FROM (VALUES ('season_settings_cutoff_guard'), ('divisions_window_guard'), ('divisions_age_rule_revision'),
+      FROM (VALUES ('season_settings_cutoff_guard'), ('season_settings_completed_guard'), ('divisions_window_guard'), ('divisions_age_rule_revision'),
                    ('players_readonly_when_completed'), ('coaches_readonly_when_completed'),
                    ('teams_readonly_when_completed'), ('team_players_readonly_when_completed'),
                    ('team_coach_assignments_readonly_when_completed'),

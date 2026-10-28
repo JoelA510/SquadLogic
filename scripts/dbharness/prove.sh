@@ -4983,16 +4983,17 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
 
-# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Six
+# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Seven
 # plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red;
-# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth and sixth against the smoke
+# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth to seventh against the smoke
 # and the stamp block of season_rollover.sql):
 # a draft season refused an import again; the rollover without the organization's season lock and
 # row locks (the smoke's second session then writes at once instead of timing out); and a completed
 # season writable again for a signed-in caller (the smoke's player patch is accepted); and a
 # completed season's schedule writable again (the smoke's team write is accepted); and the finalizer
 # applying a file whose age-rule stamp is stale (the smoke's finalize is accepted); and a cutoff change
-# that leaves the age-rule revision where it was (the same, and the A, B, A the smoke does).
+# that leaves the age-rule revision where it was (the same, and the A, B, A the smoke does); and a
+# cutoff write taking no season lock (the smoke's pg_locks check).
 plant "M59 the finalizer refuses a draft season again" "$M59" \
   "    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
   "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
@@ -5038,6 +5039,23 @@ plant "M59 the age-rule revision does not move with the cutoff" "$M59" \
   "    NEW.age_rule_revision := OLD.age_rule_revision + 1;
     RETURN NEW;" \
   "    RETURN NEW;" \
+  "smoke 20261109010000"
+
+# The writers of the age rule take the finalizer's season lock, so an uncommitted rule change cannot
+# race a finalization that read the revision: without the lock in the season guard, the smoke's
+# pg_locks check (an organization nothing else touched) finds it not held after a cutoff write. (The
+# division guard's lock is backed by the revision trigger's, so removing one of them alone is not
+# visible; pgTAP shows each path.)
+plant "M59 the season guard takes no season lock" "$M59" \
+  "    -- The season lock the finalizer and the rollover RPCs take, before anything is checked or bumped:
+    -- a writer that reaches here by another path (a direct write) waits for a finalization in
+    -- progress, and then sees its players and its revision.
+    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || OLD.organization_id::text, 0));
+" \
+  "    -- The season lock the finalizer and the rollover RPCs take, before anything is checked or bumped:
+    -- a writer that reaches here by another path (a direct write) waits for a finalization in
+    -- progress, and then sees its players and its revision.
+" \
   "smoke 20261109010000"
 
 # ---------------------------------------------------------------------------

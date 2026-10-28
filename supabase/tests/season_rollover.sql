@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(185);
+SELECT plan(199);
 
 -- Helpers: the SQLSTATE and DETAIL of a refusal, and whether a call took the organization's lock.
 CREATE FUNCTION pg_temp.err(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
@@ -846,6 +846,79 @@ SELECT is(pg_temp.err(format($$UPDATE public.divisions SET max_age = 9 WHERE id 
     '22023:import_pending', 'a band change on a window-bearing division is refused while an import is pending');
 SELECT is(pg_temp.err(format($$UPDATE public.divisions SET name = 'U8 Renamed' WHERE id = %L$$, (SELECT division FROM band_pend))),
     '22023:import_pending', 'and so is a rename where the name supplies the band');
+
+-- ── A completed season's timezone is fixed ───────────────────────────────────────────
+-- The calendar feed expands a season's occurrences in its timezone (Codex, #680): the RPC and a direct
+-- write meet one trigger, for a signed-in caller; a job with no user passes.
+RESET role;
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SET LOCAL role = 'authenticated';
+SELECT is(pg_temp.err($$SELECT public.admin_set_season_timezone('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'Pacific/Auckland', '{}'::jsonb)$$),
+    '22023:season_completed', 'admin_set_season_timezone is refused on a completed season');
+SELECT is(pg_temp.err($$SELECT public.admin_set_season_timezone('a1111111-1111-1111-1111-111111111111', (SELECT d28 FROM ids), 'Pacific/Auckland', '{}'::jsonb)$$),
+    'no error', 'and allowed on the active one');
+RESET role;
+SELECT is(pg_temp.err($$UPDATE public.season_settings SET timezone = 'Pacific/Fiji' WHERE id = 'a1111111-1111-1111-1111-111111111aaa'$$),
+    '22023:season_completed', 'a direct write of a completed season''s timezone meets the same trigger');
+SELECT is(pg_temp.err($$UPDATE public.season_settings SET name = name || ' (renamed)' WHERE id = 'a1111111-1111-1111-1111-111111111aaa'$$),
+    'no error', 'while its other columns are not this trigger''s concern');
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT is(pg_temp.err($$UPDATE public.season_settings SET timezone = 'Pacific/Fiji' WHERE id = 'a1111111-1111-1111-1111-111111111aaa'$$),
+    'no error', 'a job with no signed-in user passes');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+
+-- ── The age-rule writers take the season lock ────────────────────────────────────────
+-- A true two-session race cannot be run inside one pgTAP transaction, so this shows what makes it
+-- safe: each writer path takes the lock the finalizer takes (`pg_advisory_xact_lock` on
+-- 'season:<org>'), before it looks at players or a pending import and before it raises the revision.
+-- The lock is read off pg_locks for an organization nothing in this file has touched, so the answer
+-- cannot come from an earlier statement of the same transaction; the control is that it is not held
+-- before the write.
+CREATE FUNCTION pg_temp.season_lock_held(p_org uuid) RETURNS boolean LANGUAGE sql AS $f$
+    SELECT EXISTS (
+        SELECT 1 FROM pg_locks l,
+               LATERAL (SELECT hashtextextended('season:' || p_org::text, 0) AS k) h
+         WHERE l.locktype = 'advisory' AND l.pid = pg_backend_pid() AND l.granted
+           AND l.classid = ((h.k >> 32) & 4294967295)::oid
+           AND l.objid = (h.k & 4294967295)::oid AND l.objsubid = 1) $f$;
+INSERT INTO public.organizations (id, name, slug) VALUES
+    ('e5555555-5555-5555-5555-555555555501', 'Lock Org One', 'lock-org-one'),
+    ('e5555555-5555-5555-5555-555555555502', 'Lock Org Two', 'lock-org-two'),
+    ('e5555555-5555-5555-5555-555555555503', 'Lock Org Three', 'lock-org-three');
+DELETE FROM public.season_settings WHERE organization_id IN ('e5555555-5555-5555-5555-555555555501', 'e5555555-5555-5555-5555-555555555502', 'e5555555-5555-5555-5555-555555555503');
+INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
+    ('e5555555-5555-5555-5555-5555555555a1', 'e5555555-5555-5555-5555-555555555501', 'Lock A', 'draft', 2030),
+    ('e5555555-5555-5555-5555-5555555555a2', 'e5555555-5555-5555-5555-555555555502', 'Lock B', 'draft', 2030),
+    ('e5555555-5555-5555-5555-5555555555a3', 'e5555555-5555-5555-5555-555555555503', 'Lock C', 'draft', 2030);
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, min_age, max_age) VALUES
+    ('e5555555-5555-5555-5555-55555555d001', 'e5555555-5555-5555-5555-555555555501', 'e5555555-5555-5555-5555-5555555555a1', 'Lock U4', 4, 4),
+    ('e5555555-5555-5555-5555-55555555d003', 'e5555555-5555-5555-5555-555555555503', 'e5555555-5555-5555-5555-5555555555a3', 'Lock U6', 6, 6);
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555501'), false, 'control: nothing has taken organization one''s season lock');
+UPDATE public.divisions SET birthdate_start = '2023-01-01', birthdate_end = '2024-07-31' WHERE id = 'e5555555-5555-5555-5555-55555555d001';
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555501'), true, 'a division write that moves an age takes the season lock (the guard)');
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555502'), false, 'control: nothing has taken organization two''s lock');
+UPDATE public.season_settings SET age_cutoff_mode = 'birth_year' WHERE id = 'e5555555-5555-5555-5555-5555555555a2';
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555502'), true, 'a cutoff write takes it too (the season guard)');
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555503'), false, 'control: nothing has taken organization three''s lock');
+UPDATE public.divisions SET name = 'Lock U6 renamed' WHERE id = 'e5555555-5555-5555-5555-55555555d003';
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555503'), false, 'a write that moves no age takes no lock (a division with no window)');
+UPDATE public.divisions SET birthdate_start = '2023-01-01', birthdate_end = '2024-07-31' WHERE id = 'e5555555-5555-5555-5555-55555555d003';
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555503'), true, 'and the write that gives it a window does');
+-- A delete has no guard before it: the revision trigger takes the lock before it raises the revision.
+INSERT INTO public.organizations (id, name, slug) VALUES ('e5555555-5555-5555-5555-555555555504', 'Lock Org Four', 'lock-org-four');
+DELETE FROM public.season_settings WHERE organization_id = 'e5555555-5555-5555-5555-555555555504';
+INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
+    ('e5555555-5555-5555-5555-5555555555a4', 'e5555555-5555-5555-5555-555555555504', 'Lock D', 'draft', 2030);
+-- (Put the window-bearing division there with both triggers off, so the insert has not taken the lock.)
+ALTER TABLE public.divisions DISABLE TRIGGER divisions_window_guard;
+ALTER TABLE public.divisions DISABLE TRIGGER divisions_age_rule_revision;
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, min_age, max_age, birthdate_start, birthdate_end) VALUES
+    ('e5555555-5555-5555-5555-55555555d004', 'e5555555-5555-5555-5555-555555555504', 'e5555555-5555-5555-5555-5555555555a4', 'Lock U8', 8, 8, '2018-01-01', '2018-12-31');
+ALTER TABLE public.divisions ENABLE TRIGGER divisions_window_guard;
+ALTER TABLE public.divisions ENABLE TRIGGER divisions_age_rule_revision;
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555504'), false, 'control: organization four''s lock is not held');
+DELETE FROM public.divisions WHERE id = 'e5555555-5555-5555-5555-55555555d004';
+SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555504'), true, 'deleting a window-bearing division takes it (the revision trigger)');
 
 -- ── Grants ─────────────────────────────────────────────────────────────────
 RESET role;

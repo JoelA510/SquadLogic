@@ -51,6 +51,7 @@ import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
 import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
+import { parseGameUnscheduled } from '@squadlogic/core/scheduleTbd.js';
 import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
@@ -1057,7 +1058,13 @@ export default function GameSchedulingPage() {
               resultSummary ?? summarizeGameResult({ assignments, byes: [], unscheduled: [] }),
             assignments: persistenceAssignments,
             byes: resultDetails?.byes ?? [],
-            unscheduled: resultDetails?.unscheduled ?? [],
+            // The scheduler's own list of games it could not place: the server records it as the
+            // season's TIME TBD games (`persist_game_schedule`, Phase D, E). Only a run has one; a
+            // rollback or a hand edit sends none (`undefined` is left out of the JSON), so it
+            // leaves the recorded list as it is.
+            unscheduled: Array.isArray(resultDetails?.unscheduled)
+              ? parseGameUnscheduled(resultDetails.unscheduled)
+              : undefined,
             sharedSlotUsage: resultDetails?.sharedSlotUsage ?? [],
             warnings: resultDetails?.evaluation?.warnings ?? [],
           },

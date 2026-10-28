@@ -185,6 +185,12 @@ R54="$REPO/docs/sql/20261104020000_revert.sql"
 M55="$REPO/supabase/migrations/20261105010000_practices_per_division.sql"
 R55="$REPO/docs/sql/20261105010000_revert.sql"
 M56="$REPO/supabase/migrations/20261106010000_play_up_requested.sql"
+# Phase D, E: the TIME TBD list. This migration replaces the practice writer whole (it rebuilds the
+# practice list from the roster), so the plants that aimed at the writer's body in $M55 are re-aimed
+# here: $M55's body is superseded and a plant there would be dead. $M55 keeps the plants on the
+# settings writer and on the gate's helper, which it still defines.
+M57="$REPO/supabase/migrations/20261108020000_schedule_tbd.sql"
+R57="$REPO/docs/sql/20261108020000_revert.sql"
 # E3a: players and coaches belong to one season (the two season columns, their keys and triggers, the
 # player and coach finalizers, the buddy materializer, the player patch, admin_create_player with a
 # season, the demo start, view_org_metrics per season), and the revert. The plants that aimed at the
@@ -2867,7 +2873,7 @@ plant "R10 the assignment warning stops counting teams distinctly" "$R10" \
 # The prune survives in v3 for unlocked rows, and this smoke unlocks them.
 # Re-aimed again, at 20261002000000, by 8.9 PR 6b, which copies the writer
 # whole: 20260929000000's body is now superseded in turn.)
-plant "M11 the writer stops pruning superseded rows" "$M55" \
+plant "M11 the writer stops pruning superseded rows" "$M57" \
   "         WHERE pa.id = ANY (v_prune_ids)" \
   "         WHERE false AND pa.id = ANY (v_prune_ids)" \
   "FAIL smoke 20260924000000"
@@ -2876,7 +2882,7 @@ plant "M11 the writer stops pruning superseded rows" "$M55" \
 # instead -- with the roster count left intact, so the count meta-assertion
 # cannot be what catches it -- the dropped team and the never-scheduled one
 # both vanish: the exact silence the operator's condition on #64 forbids.
-plant "M12 teams without practice are listed from the payload, not the roster" "$M55" \
+plant "M12 teams without practice are listed from the payload, not the roster" "$M57" \
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
@@ -3013,12 +3019,12 @@ plant "M14 scheduler_runs gets no admin write policy" "$M53" \
 # PR 6b (20261002000000) copies persist_practice_schedule whole, so the body
 # in $M15 is superseded and a plant there would be dead. The FK plant is
 # table DDL, which 20261002000000 does not touch, and stays on $M15.
-plant "M15 the writer's lock check is removed" "$M55" \
+plant "M15 the writer's lock check is removed" "$M57" \
   "    IF v_locked_id IS NOT NULL THEN" \
   "    IF false THEN" \
   "FAIL smoke 20260929000000"
 
-plant "M15 unlock is by team, not by row" "$M55" \
+plant "M15 unlock is by team, not by row" "$M57" \
   "     WHERE NOT (t.id = ANY (v_unlock_ids))" \
   "     WHERE NOT (t.id IN (SELECT u.id FROM public.practice_assignments u WHERE u.team_id IN (SELECT w.team_id FROM public.practice_assignments w WHERE w.id = ANY (v_unlock_ids))))" \
   "FAIL smoke 20260929000000"
@@ -3026,12 +3032,12 @@ plant "M15 unlock is by team, not by row" "$M55" \
 # Since 20261104010000 every member is an admin, so the gate's is_org_admin half can no longer
 # refuse anyone the membership check above it has not (a mutant removing only that half survives,
 # and is not planted); the half that refuses is the missing uid -- the service role.
-plant "M15 the unlock gate no longer refuses a caller with no uid" "$M55" \
+plant "M15 the unlock gate no longer refuses a caller with no uid" "$M57" \
   "       AND (auth.uid() IS NULL OR NOT public.is_org_admin(v_org_id)) THEN" \
   "       AND (false) THEN" \
   "FAIL smoke 20260929000000"
 
-plant "M15 the unlock audit call is dropped" "$M55" \
+plant "M15 the unlock audit call is dropped" "$M57" \
   "        PERFORM public.record_audit_event(
             v_org_id,
             'practice.unlock_accepted'," \
@@ -3042,7 +3048,7 @@ plant "M15 the unlock audit call is dropped" "$M55" \
 
 # The representation plan §1 rejects: the temporary move written as a second
 # assignment row (on the relocated slot, or the series' own for TIME TBD).
-plant "M15 exceptions are stored as assignment rows" "$M55" \
+plant "M15 exceptions are stored as assignment rows" "$M57" \
   "        INSERT INTO public.practice_exceptions (
             organization_id, season_settings_id, team_id, assignment_id, \"window\",
             kind, practice_slot_id, tbd_reason, cause_kind, cause_id, run_id, created_by
@@ -3077,7 +3083,7 @@ plant "M15 practice_exceptions' assignment FK cascades" "$M15" \
 # The double-booking rule is a TIME clash (coordinator ruling on #461). Three
 # plants, one per case: range-only turns (a) red, never-clash turns (b) red,
 # weekday-only turns (c) red.
-plant "M15 the double-booking rule reverts to range-only" "$M55" \
+plant "M15 the double-booking rule reverts to range-only" "$M57" \
   "     WHERE ps.day_of_week = ks.day_of_week
        AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
@@ -3086,14 +3092,14 @@ plant "M15 the double-booking rule reverts to range-only" "$M55" \
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the double-booking time predicate is dropped entirely" "$M55" \
+plant "M15 the double-booking time predicate is dropped entirely" "$M57" \
   "     WHERE ps.day_of_week = ks.day_of_week
 " \
   "     WHERE false AND ps.day_of_week = ks.day_of_week
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the double-booking rule ignores minutes" "$M55" \
+plant "M15 the double-booking rule ignores minutes" "$M57" \
   "       AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
 " \
@@ -3101,7 +3107,7 @@ plant "M15 the double-booking rule ignores minutes" "$M55" \
   "FAIL smoke 20260929000000"
 
 # Case (d): back-to-back slots touch at a boundary and share no minute.
-plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M55" \
+plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M57" \
   "       AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
 " \
@@ -3110,7 +3116,7 @@ plant "M15 the double-booking minute test counts a touching boundary as a clash"
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the base_fingerprint check is skipped" "$M55" \
+plant "M15 the base_fingerprint check is skipped" "$M57" \
   "    IF base_fingerprint IS NOT NULL AND base_fingerprint IS DISTINCT FROM v_fingerprint THEN" \
   "    IF false AND base_fingerprint IS NOT NULL THEN" \
   "FAIL smoke 20260929000000"
@@ -3232,12 +3238,12 @@ plant "M18 the cause_kind CHECK drops daylight" "$M18" \
   "IN ('blackout', 'retirement')" \
   "FAIL smoke 20261002000000"
 
-plant "M18 the new-row resolution links the team's other row on the slot" "$M55" \
+plant "M18 the new-row resolution links the team's other row on the slot" "$M57" \
   "                       AND r.effective_date_range = (e.value#>>'{new_assignment,effective_date_range}')::daterange))" \
   "                       AND r.effective_date_range <> (e.value#>>'{new_assignment,effective_date_range}')::daterange))" \
   "FAIL smoke 20261002000000"
 
-plant "M18 the new-row resolution resolves nothing" "$M55" \
+plant "M18 the new-row resolution resolves nothing" "$M57" \
   "                     WHERE r.organization_id = v_org_id" \
   "                     WHERE false AND r.organization_id = v_org_id" \
   "FAIL smoke 20261002000000"
@@ -3249,14 +3255,14 @@ plant "M18 the daylight shape CHECK admits any reason" "$M18" \
   "            AND tbd_reason IS NOT NULL)" \
   "FAIL smoke 20261002000000"
 
-plant "M18 the mid-range daylight window check is removed" "$M55" \
+plant "M18 the mid-range daylight window check is removed" "$M57" \
   "    IF v_bad_id IS NOT NULL THEN
         RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
   "    IF false THEN
         RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
   "FAIL smoke 20261002000000"
 
-plant "M18 new_assignment skips the season scope" "$M55" \
+plant "M18 new_assignment skips the season scope" "$M57" \
   "               AND d.season_settings_id = v_season_id)
      LIMIT 1;
     IF v_bad_ref IS NOT NULL THEN
@@ -3690,12 +3696,12 @@ plant "M27 P1 the team save writes no audit row" "$M27" \
             v_org_id, 'team.saved'," \
   "smoke 20261018070000"
 
-plant "M27 P2 the game save swallows a failed audit write" "$M27" \
-  "                'game_count', jsonb_array_length(assignments)));
+plant "M27 P2 the game save swallows a failed audit write" "$M57" \
+  "                    ELSE jsonb_build_object('unscheduled_count', v_tbd_games) END);
     EXCEPTION WHEN OTHERS THEN
         RAISE EXCEPTION 'audit write failed, nothing was saved: %', SQLERRM
             USING ERRCODE = 'SLA01', DETAIL = SQLSTATE;" \
-  "                'game_count', jsonb_array_length(assignments)));
+  "                    ELSE jsonb_build_object('unscheduled_count', v_tbd_games) END);
     EXCEPTION WHEN OTHERS THEN
         NULL;" \
   "smoke 20261018070000"
@@ -3706,7 +3712,7 @@ plant "M27 P3 the team save drops the no-actor guard" "$M27" \
   "        NULL;" \
   "smoke 20261018070000"
 
-plant "M27 P6 the game save admits any signed-in user" "$M27" \
+plant "M27 P6 the game save admits any signed-in user" "$M57" \
   "        RAISE EXCEPTION 'organization_id or season_settings_id is required'
             USING ERRCODE = '23502';
     END IF;
@@ -3981,22 +3987,25 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
 # **admin_delete_team takes its exceptions, RSVPs and players' team ids with it
 # (20261021030000).** One plant per claim the smoke prints. 20261022030000
 # (R2) replaces admin_delete_team without RSVPs, so the plants on the delete are
-# aimed at that copy ($M39), the live definition; the three RSVP plants (the
+# aimed at that copy ($M39), the live definition until 20261108020000 (Phase D, E) replaced it
+# again to count the TIME TBD rows its cascade takes, since when they are aimed at $M57; the three RSVP plants (the
 # opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
 # game lock) went with the RSVP function and table.
-plant "M35 the delete withdraws nothing" "$M39" \
-  "           AND pe.withdrawn_at IS NULL
+plant "M35 the delete withdraws nothing" "$M57" \
+  "                                         WHERE pa.team_id = p_team_id))
+           AND pe.withdrawn_at IS NULL
         RETURNING pe.*" \
-  "           AND false
+  "                                         WHERE pa.team_id = p_team_id))
+           AND false
         RETURNING pe.*" \
   "smoke 20261021030000"
 
-plant "M35 the delete archives nothing onto the run" "$M39" \
+plant "M35 the delete archives nothing onto the run" "$M57" \
   "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "smoke 20261021030000"
 
-plant "M35 the delete audits no series" "$M39" \
+plant "M35 the delete audits no series" "$M57" \
   "            'practice.cancelled',
             'practice_assignments',
             v_pa.id," \
@@ -4005,19 +4014,19 @@ plant "M35 the delete audits no series" "$M39" \
             v_pa.id," \
   "smoke 20261021030000"
 
-plant "M35 the delete leaves players.team_id" "$M39" \
+plant "M35 the delete leaves players.team_id" "$M57" \
   "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
   "    PERFORM 1;" \
   "smoke 20261021030000"
 
-plant "M35 team.deleted records no counts" "$M39" \
+plant "M35 team.deleted records no counts" "$M57" \
   "            || v_counts
 " \
   "            || '{}'::jsonb
 " \
   "smoke 20261021030000"
 
-plant "M35 the delete lets a coach through" "$M39" \
+plant "M35 the delete lets a coach through" "$M57" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
         -- Production's own text" \
   "    IF false THEN
@@ -4213,7 +4222,7 @@ plant "M39 create_team_message is left behind" "$M39" \
   "" \
   "smoke 20261022030000"
 
-plant "M39 admin_delete_team still counts the RSVP table" "$M39" \
+plant "M39 admin_delete_team still counts the RSVP table" "$M57" \
   "        'team_players_deleted',
             (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id)," \
   "        'team_players_deleted',
@@ -4852,6 +4861,71 @@ plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
   "        ON false AND o.team_id = j.team_id AND o.id <> j.id AND o.day_of_week = j.day_of_week" \
   "smoke 20261105010000"
 
+
+# Phase D, E: the TIME TBD list. The smoke 20261108020000 must go red for each. The first and the
+# tenancy one were run by hand in a scratch cluster (smoke red at "A2 (an ended series only) is not
+# listed", and at "the tenancy trigger let in another organization's team"); the others had their
+# anchors resolved and were not run.
+#   - a practice series that has ended counts as a held practice, so a team whose only series ended
+#     in 2020 is no longer listed as short, and a missing practice vanishes from the export;
+#   - the tenancy trigger lets a row name another organization's team;
+#   - the admin read lets any signed-in user read the list.
+# Re-aimed after the held count became concurrent coverage (Codex, P2): dropping the live filter alone
+# changed nothing, because the start dates were clamped to today and an ended range never contains it.
+# The plant drops the filter AND the clamp, so an ended series' own (past) start date is a candidate day
+# on which it is in force: a team whose only series ended in 2020 then holds one practice. Run by hand:
+# the smoke goes red at "A2 (an ended series only) is not listed ..." and the pgTAP at its ended-series
+# tests.
+plant "M57 an ended series counts as a held practice" "$M57" \
+  "                   AND (pa.effective_date_range IS NULL
+                        OR (NOT isempty(pa.effective_date_range)
+                            AND (upper_inf(pa.effective_date_range)
+                                 OR upper(pa.effective_date_range) > CURRENT_DATE)))
+            ), starts AS (
+                SELECT DISTINCT GREATEST(COALESCE(lower(l.r), CURRENT_DATE), CURRENT_DATE) AS d FROM live l" \
+  "                   AND true
+            ), starts AS (
+                SELECT DISTINCT COALESCE(lower(l.r), CURRENT_DATE) AS d FROM live l" \
+  "smoke 20261108020000"
+
+# A series the repair adapter split (the old closed, its successor from the retirement date) is one
+# practice: the held count is the most fragments in force on one day, not every unexpired row. The plant
+# makes every live fragment count, which lists no missing practice for a team with one split practice of
+# two a week; the smoke must go red at "a split series".
+plant "M57 a split series counts as two practices" "$M57" \
+  "FROM live l WHERE l.r IS NULL OR l.r @> s.d" \
+  "FROM live l WHERE l.r IS NULL OR true" \
+  "smoke 20261108020000"
+
+plant "M57 the tenancy trigger lets another organization's team in" "$M57" \
+  " SET search_path TO 'public'
+AS \$function\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
+                    WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN" \
+  " SET search_path TO 'public'
+AS \$function\$
+BEGIN
+    RETURN NEW;
+    IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
+                    WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN" \
+  "smoke 20261108020000"
+
+plant "M57 get_schedule_tbd admits any signed-in user" "$M57" \
+  "    IF v_org IS NULL OR NOT public.is_org_admin(v_org) THEN
+        RAISE EXCEPTION 'Access denied: the TIME TBD list is read by an administrator of the season''s organization'" \
+  "    IF v_org IS NULL OR false THEN
+        RAISE EXCEPTION 'Access denied: the TIME TBD list is read by an administrator of the season''s organization'" \
+  "smoke 20261108020000"
+
+# The labels-taking practice sync is not a client entry point: it refuses a call whose stack does not
+# show the practice save or the refresh (a direct call with no labels would reset the saved labels and
+# write no audit row). The plant makes the stack check pass for any caller; the smoke must go red at
+# "a direct call to the practice sync ... was accepted".
+plant "M57 the practice sync accepts a direct client call" "$M57" \
+  "    IF v_ctx !~ 'PL/pgSQL function (persist_practice_schedule|refresh_schedule_tbd_practices)\\(' THEN" \
+  "    IF v_ctx !~ 'PL/pgSQL function' THEN" \
+  "smoke 20261108020000"
 
 # Admin only (20261104010000; plan docs/changes/2026-10-27-admin-only.md, S5). Three plants were run
 # against the real harness when it was written; each failed the named check. The re-aimed plants

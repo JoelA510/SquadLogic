@@ -25,6 +25,8 @@ import { describeDaylightReport } from '../utils/daylightReport.js';
 import { describeLockReport } from '../utils/lockReport.js';
 import { overrideSlotLoad } from '../utils/overrideSlotLoad.js';
 import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
+import { refreshScheduleTbd } from '../utils/scheduleTbdClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
 import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
@@ -578,6 +580,10 @@ export default function PracticeSchedulingPage() {
   // #64: one warning per season team the last save left with no practice.
   const [teamWarnings, setTeamWarnings] = useState([]);
   const [reviewedSchedulerRunId, setReviewedSchedulerRunId] = useState(null);
+  // The run that placed nothing, once its TIME TBD list was brought up to date (see the effect below),
+  // and the sentence to show when that failed.
+  const tbdRefreshedForRun = useRef(null);
+  const [tbdRefreshError, setTbdRefreshError] = useState(/** @type {string | null} */ (null));
 
   // A completed season is history: nothing is generated, applied, saved or cancelled in it
   // (the database refuses the write too, `season_completed`).
@@ -840,6 +846,28 @@ export default function PracticeSchedulingPage() {
     teamById,
     timezone,
   ]);
+
+  // A run that places nothing has nothing to Apply (the Apply button and the writer both refuse an
+  // empty review), so the practice save that rebuilds the TIME TBD list never runs for it, and the list
+  // would still say what the run before it did. Bring the list up to date here, from the roster and the
+  // saved assignments; the export does the same before it reads. The result is not needed (the export
+  // reads the list); a failure is said, because the export would refuse until it is fixed.
+  const seasonIdForTbd = currentSeasonSetting?.id ?? null;
+  useEffect(() => {
+    if (!canManageSchedule || !seasonIdForTbd) return;
+    if (autoScheduler.status !== 'completed' || !autoScheduler.result) return;
+    if ((autoScheduler.result.assignments ?? []).length > 0) return;
+    const runKey = `${seasonIdForTbd}:${autoScheduler.result.runId ?? 'latest-auto-scheduler-result'}`;
+    if (tbdRefreshedForRun.current === runKey) return;
+    tbdRefreshedForRun.current = runKey;
+    setTbdRefreshError(null);
+    refreshScheduleTbd(supabase, seasonIdForTbd).catch((err) => {
+      logger.error('TIME TBD refresh error:', err);
+      setTbdRefreshError(
+        `The list of practices not scheduled yet could not be brought up to date after this run (${err.message}). The master export tries again and will not make files until it can.`
+      );
+    });
+  }, [autoScheduler.result, autoScheduler.status, canManageSchedule, seasonIdForTbd]);
 
   const localAssignments = reviewAssignments ?? assignments;
   const isColdStart = !schedulerTeams.length;
@@ -2002,6 +2030,14 @@ export default function PracticeSchedulingPage() {
                 className="border-b border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-text-accent"
               >
                 {statusMessage}
+              </div>
+            )}
+            {tbdRefreshError && (
+              <div
+                role="alert"
+                className="border-b border-status-error bg-status-error-bg px-4 py-3 text-sm text-status-error-text"
+              >
+                {tbdRefreshError}
               </div>
             )}
             <PracticeAssignmentList

@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import { createBdd } from 'playwright-bdd';
+import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { readXlsx } from '../../helpers/readXlsx.js';
 import { parseIcs } from '../../helpers/parseIcs.js';
@@ -18,7 +20,7 @@ import { SCHEDULE_EXPORT_COLUMNS } from '../../../packages/core/src/outputGenera
  * two Team A games with no slot.
  */
 
-const { When, Then } = createBdd();
+const { Given, When, Then } = createBdd();
 
 /** The last file of each kind, by suggested name. CI runs one worker. */
 const files = new Map<string, Buffer>();
@@ -140,5 +142,106 @@ Then(
   async ({ page: _page }, name: string) => {
     const sheet = readXlsx(new Uint8Array(fileNamed(name)));
     expect(sheet.rows[0]).toEqual([...SCHEDULE_EXPORT_COLUMNS]);
+  }
+);
+
+/**
+ * The TIME TBD list as the writers leave it (migration 20261108020000): the mock persists no
+ * schedule through the SQL, so the rows `get_schedule_tbd` reads are seeded here, as the real-backend
+ * project's writers would leave them. Team A (t1) is two practices short; the game t2 v t1 is not placed.
+ */
+Given(
+  'Team A is short of {int} practices and its game against {string} could not be placed',
+  async ({ page }, missing: number, _opponent: string) => {
+    if (page.url() === 'about:blank') await page.goto('/');
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ orgId, seasonId, missing }) => {
+        const db = JSON.parse(
+          sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+        );
+        const org = localStorage.getItem('squadlogic_active_org') || orgId;
+        db.schedule_tbd = [
+          {
+            id: 'tbd-e2e-practice',
+            organization_id: org,
+            season_settings_id: seasonId,
+            kind: 'practice',
+            division_id: 'u8-div-id',
+            team_id: 't1',
+            missing_count: missing,
+            reason: 'no-slot-available',
+          },
+          {
+            id: 'tbd-e2e-game',
+            organization_id: org,
+            season_settings_id: seasonId,
+            kind: 'game',
+            division_id: 'u8-div-id',
+            home_team_id: 't2',
+            away_team_id: 't1',
+            week_index: 3,
+            reason: 'coach-scheduling-conflict',
+          },
+        ];
+        window.__saveMockDB__(db);
+      },
+      { orgId: MOCK_ORG_ID, seasonId: MOCK_SEASON_ID, missing }
+    );
+  }
+);
+
+Then(
+  'the page lists {int} practices of {string} and the game against {string} as not scheduled yet',
+  async ({ page }, missing: number, team: string, opponent: string) => {
+    const list = page.getByTestId('schedule-tbd-list').first();
+    await expect(list).toBeVisible();
+    const rows = list.getByTestId('schedule-tbd-row');
+    await expect(rows).toHaveCount(2);
+    await expect(
+      rows.filter({ hasText: `${team} (U8 Coed): ${missing} practices not scheduled` })
+    ).toHaveCount(1);
+    await expect(rows.filter({ hasText: `${opponent} v ${team}, week 3` })).toHaveCount(1);
+  }
+);
+
+Then(
+  'the master CSV {string} has {int} TIME TBD practices of {string} and the TIME TBD game with {string} at home to {string}',
+  async (
+    { page: _page },
+    name: string,
+    missing: number,
+    team: string,
+    home: string,
+    away: string
+  ) => {
+    const rows = parseCsv(fileNamed(name).toString('utf8'));
+    expect(rows[0]).toEqual([...SCHEDULE_EXPORT_COLUMNS]);
+    const body = rows
+      .slice(1)
+      .filter((cells) => cells.length === SCHEDULE_EXPORT_COLUMNS.length)
+      .map((cells) =>
+        Object.fromEntries(SCHEDULE_EXPORT_COLUMNS.map((column, i) => [column, cells[i]]))
+      );
+    const tbd = body.filter((r) => r.Start === 'TIME TBD');
+    for (const r of tbd) {
+      expect(r.Field).toBe('LOCATION TBD');
+      expect(r.End).toBe('');
+      expect(r.Notes).toMatch(/not scheduled/);
+    }
+    const practices = tbd.filter((r) => r['Event Type'] === 'Practice' && r['Team Name'] === team);
+    expect(practices).toHaveLength(missing);
+    // The game: a home row and an away row, with the sides it was given (Team B at home to Team A).
+    const games = tbd.filter((r) => r['Event Type'] === 'Game');
+    expect(games).toHaveLength(2);
+    expect(games.find((r) => r.Role === 'Home')).toMatchObject({
+      'Team Name': home,
+      Opponent: away,
+    });
+    expect(games.find((r) => r.Role === 'Away')).toMatchObject({
+      'Team Name': away,
+      Opponent: home,
+    });
+    lastCsvRows = rows;
   }
 );

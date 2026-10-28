@@ -94,10 +94,11 @@ const PUBLISHED_AT = '2026-08-01T09:15:00';
  * The eight columns the corpus's two schedule CSVs are written in.
  *
  * `participant` is the ninth parity field and belongs to per-team artifacts;
- * no row either CSV produces carries one.
+ * no row either CSV produces carries one. `ordinal` (Phase D, E) is the tenth: it numbers the
+ * TIME TBD rows of a per-team artifact and is `null` on every row the corpus produces.
  */
 const SCHEDULE_PARITY_FIELDS = PARITY_FIELD_ORDER.filter(
-  (field) => field !== PARITY_FIELD.PARTICIPANT
+  (field) => field !== PARITY_FIELD.PARTICIPANT && field !== PARITY_FIELD.ORDINAL
 );
 
 /* ========================================================================== */

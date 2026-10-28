@@ -26,3 +26,14 @@ Feature: Schedule exports
     Then the system should generate the CSV file
     When I download "Download Master XLSX" from the generated files
     Then the workbook "master-schedule.xlsx" has the master schedule's columns
+
+  Scenario: The master schedule lists the practices and games that could not be placed as TIME TBD
+    Given I am logged into SquadLogic as an "admin"
+    And Team A is short of 2 practices and its game against "Team B" could not be placed
+    When I click to export the team rosters or schedules
+    Then the system should generate the CSV file
+    And the page lists 2 practices of "Team A" and the game against "Team B" as not scheduled yet
+    When I download "Download Master CSV" from the generated files
+    Then the master CSV "master-schedule.csv" has 2 TIME TBD practices of "Team A" and the TIME TBD game with "Team B" at home to "Team A"
+    When I download "Download Master XLSX" from the generated files
+    Then the workbook "master-schedule.xlsx" holds the CSV's rows

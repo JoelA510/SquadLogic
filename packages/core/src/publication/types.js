@@ -75,7 +75,7 @@
  * @property {string} rowId - provenance; never keyed or compared
  * @property {string} sourceLabel - which artifact this came from
  * @property {string|null} date - `YYYY-MM-DD`
- * @property {number|null} startMinutes - minutes past local midnight
+ * @property {number|string|null} startMinutes - minutes past local midnight; `null` when the source has none; the baseline comparison alone sets the token `TIME TBD` on a row the artifact declares TIME TBD
  * @property {string|null} venue
  * @property {string|null} field
  * @property {string|null} format
@@ -83,6 +83,7 @@
  * @property {string|null} home
  * @property {string|null} away
  * @property {string|null} participant - the team a per-team export row is addressed to
+ * @property {number|null} ordinal - which of a team's TIME TBD rows this is (1, 2, ...); `null` on a row with a date
  */
 
 /**

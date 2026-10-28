@@ -116,6 +116,10 @@ const REGISTRY = {
     class: 'writer',
     why: "Phase D PR B: the writer's gate; reads the rows to judge a new auto row against capacity, weekday and count",
   },
+  'sql:sync_schedule_tbd_practices': {
+    class: 'writer',
+    why: "Phase D, E: called by the practice writer; counts a team's live rows against its division's practices a week to rebuild the TIME TBD list (schedule_tbd). It writes no assignment; the list is its own table, never read as a placement",
+  },
   'sql:enact_practice_recommendation': { class: 'writer', why: 'X10: the repair enact wrapper' },
   'sql:admin_cancel_practice_assignment': {
     class: 'writer',

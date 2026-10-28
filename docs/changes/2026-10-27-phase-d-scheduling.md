@@ -462,6 +462,73 @@ Each PR runs the season fixture suite and the full Definition of Done.
   written), `admin_upsert_division_settings` replaced by its 13-argument form (the 11-argument one
   dropped by its exact signature, no CASCADE).
 
+## Build notes: PR E (2026-10-28)
+
+- **Built:** E1 and E2 in migration `20261108020000`: the `schedule_tbd` table (admin-only RLS), the
+  admin read `get_schedule_tbd(season)`, `persist_practice_schedule` and `persist_game_schedule`
+  replaced behind their md5, `admin_delete_team` replaced to count `schedule_tbd_deleted` (the table
+  cascades from teams, and the delete's pgTAP and smoke walk the catalogue for a counter per cascading
+  table). `generateScheduleExports` takes `tbdItems`; the Exports panel refreshes and reads the list when it opens and when it generates,
+  lists it, and stops the files when it cannot be refreshed or read.
+- **Why a separate table** (decision 11, owner answer: only if keeping the rows in the schedule breaks
+  it; PR B's evidence stands): the lock loader, the writer's prune and lock rules,
+  `teams_without_practice` and the metrics each read a `practice_assignments` row as a held practice.
+- **Who can write it (changed after review):** nobody directly. There is no write policy or grant;
+  the game list is written by `persist_game_schedule` and the practice list by the definer
+  `sync_schedule_tbd_practices`, which the (invoker) practice writer calls; a BEFORE INSERT OR UPDATE
+  trigger refuses (23514) a row whose season, division or team belongs to another organization or season,
+  and `get_schedule_tbd` joins on the row's organization. An earlier draft let admins insert through RLS,
+  which allowed a row of their own organization naming another organization's team.
+- **Where the game list comes from:** the run's `results.unscheduled`, already part of the save, not a
+  new argument. A new RPC argument would have changed the writer's signature (a drop and a create, the
+  Edge function's schema and its drift test) for nothing the existing field does not carry. The
+  save replaces the season's list only when `results.unscheduled` is an array; the game page sends it
+  only for a scheduler run, so a hand edit and a rollback leave it alone (declared: a rollback does not
+  restore the list of the run it undoes). Each entry is checked in Zod before the save and in SQL in it.
+- **Departures from the text above:** (1) `get_schedule_tbd` is a definer with its own admin check (42501),
+  where the plan said "an admin RPC" without saying which; (2) the practice writer reads the run's reason
+  for a team from `results.unassigned` (the auto-scheduler's own) and labels the row with it when it is on
+  the closed list, else `not-scheduled-yet`; the subject set stays the roster; (3) the baseline
+  comparison reads a declared `TIME TBD` Start as a value on both sides (`withDeclaredTbdTime`), which the
+  generic reader still refuses to do (its test holds that), because the plan's ordinal alone would have left
+  every baseline with a TBD row "unreadable as a verdict".
+- **When the list is rebuilt (changed after review, twice):** by a practice save, for the whole season,
+  from the roster as it stands then; **and by `refresh_schedule_tbd_practices(season)`**, an admin RPC
+  that takes no labels, which the Exports panel calls (when it opens and again when it generates)
+  before it reads the list, and the Practice Scheduling page calls after a run that placed nothing. The
+  second writer exists because the first can be skipped: Apply refuses an empty review and the writer
+  refuses an empty payload, so a run that placed nothing never reached the save and the list kept
+  saying what the run before it said (Codex, P1). Changing a division's count or generating teams
+  still rebuilds nothing by itself; the next export does. The refresh keeps each team's saved reason and
+  run (a team it newly lists is `not-scheduled-yet`), writes an `audit_log` row (`schedule_tbd.refreshed`,
+  before and after row counts, registered in `audit_actions`) in the same transaction only when the set of
+  rows changed, and a failed refresh stops the files and says why. A game save replaces the game list only
+  when the run carries one.
+- **The labels-taking sync is not client-callable (changed after review):** `sync_schedule_tbd_practices`
+  takes the run's labels and a run id; called directly it could reset every saved reason to
+  `not-scheduled-yet` with no audit row (Codex, P1). The practice writer is an invoker, so it runs the
+  sync as the calling admin and the function cannot be revoked from `authenticated` (a role grant cannot
+  tell the writer from a client). Instead it reads its own call stack (`GET DIAGNOSTICS ... PG_CONTEXT`)
+  and refuses (42501) unless `persist_practice_schedule` or `refresh_schedule_tbd_practices` is above
+  it; a client cannot put a frame there. A call with no label list at all (the refresh) keeps what each
+  team's row said; the practice save, which passes its run's list, replaces it. This departs from the
+  review's "revoke it from authenticated": that is what the guard stands in for, and the pgTAP
+  (`supabase/tests/schedule_tbd.sql`) and the smoke hold that a direct call is refused with the labels
+  unchanged, and the harness plant `M57 the practice sync accepts a direct client call` the smoke.
+- **Held practices are concurrent coverage (changed after review, Codex P1):** the sync counted every
+  unexpired row, but the repair adapter splits a series (the old closed, its successor from the
+  retirement date), so one practice read as two and a missing practice was dropped. A team's held count is
+  now the most fragments of its live series in force on one day, over the days its fragments start (no
+  earlier than today); an ended series is still not live and a series not yet started counts.
+- **The refresh needs a user (changed after review, Codex P1):** it audits a change and an audit row needs
+  an actor, so a caller with no `auth.uid()` (the service role) is refused 42501 before anything is read or
+  written, as `persist_game_schedule` refuses it. The sync inherits this when reached from the refresh.
+- **Dates in the pgTAP and the smoke are relative to `CURRENT_DATE`** (Codex, P2): the sync counts a series
+  as held only while it has not ended, so a fixed live range turned both red on 2026-12-01.
+- **Not done (stated):** the per-team page downloads and the calendar feed (out of scope above); the
+  demo's seeded list (PR F); no `schedule_tbd` writer in the mock (the E2E seeds the table), and the
+  mock's `refresh_schedule_tbd_practices` refuses as the SQL does but rebuilds nothing.
+
 ## Plan-change output
 
 Size: planned (PRs, migrations, the solver, RPC shapes, an Edge Function). Departures: none.

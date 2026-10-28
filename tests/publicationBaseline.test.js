@@ -450,7 +450,11 @@ describe('publication baseline :: the key, and why it is not the default one', (
     expect(codesOf(sound.findings)).not.toContain(PUBLICATION_REASON.PARITY_KEY_AMBIGUOUS);
     expect(sound.buckets.matched.length).toBeGreaterThan(0);
 
-    expect(BASELINE_KEY_FIELDS).toEqual([...DEFAULT_PARITY_KEY_FIELDS, PARITY_FIELD.PARTICIPANT]);
+    expect(BASELINE_KEY_FIELDS).toEqual([
+      ...DEFAULT_PARITY_KEY_FIELDS,
+      PARITY_FIELD.PARTICIPANT,
+      PARITY_FIELD.ORDINAL,
+    ]);
   });
 });
 
@@ -606,5 +610,237 @@ describe('publication baseline :: no second comparator', () => {
       expect(parity, `the needle "${needle}" matches nothing even in parity.js`).toContain(needle);
       expect(code, `baseline.js contains "${needle}"`).not.toContain(needle);
     }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* TIME TBD rows in the baseline (Phase D, E)                                  */
+/* -------------------------------------------------------------------------- */
+
+describe('publication baseline :: TIME TBD rows', () => {
+  /** The season with a TIME TBD list: team 1 short of `missing` practices, and one unplaced game. */
+  const exportWithTbd = (games, missing) =>
+    generateScheduleExports({
+      teams: TEAMS,
+      gameAssignments: games,
+      tbdItems: [
+        ...(missing > 0
+          ? [
+              {
+                kind: 'practice',
+                teamId: 't-1',
+                missingCount: missing,
+                reason: 'no-slot-available',
+              },
+            ]
+          : []),
+        {
+          kind: 'game',
+          homeTeamId: 't-2',
+          awayTeamId: 't-4',
+          weekIndex: 3,
+          reason: 'no-slot-available',
+        },
+      ],
+    });
+
+  const snapshotOf = (exported) => {
+    const { snapshot } = makePublicationSnapshot({ ...SNAPSHOT_INPUT, rows: exported.master.rows });
+    return readPublicationSnapshot(
+      JSON.parse(JSON.stringify(serialisePublicationSnapshot(snapshot)))
+    ).snapshot;
+  };
+
+  it('two TIME TBD rows of one team are not ambiguous: the ordinal tells them apart', () => {
+    const exported = exportWithTbd(PUBLISHED_GAMES, 2);
+    const tbdRows = exported.master.rows.filter(
+      (row) =>
+        row[SCHEDULE_EXPORT_HEADERS.START] === 'TIME TBD' &&
+        row[SCHEDULE_EXPORT_HEADERS.TEAM_ID] === 't-1'
+    );
+    expect(tbdRows).toHaveLength(2);
+
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf(exported),
+      currentRows: exported.master.rows,
+    });
+    expect(codesOf(parity.findings)).not.toContain(PUBLICATION_REASON.PARITY_KEY_AMBIGUOUS);
+    expect(codesOf(parity.findings)).not.toContain(PUBLICATION_REASON.PARITY_FIELD_ABSENT);
+    expect(baselineParitySoundness(parity).sound).toBe(true);
+    // 3 games x 2 rows, 2 practices, 2 sides of the unplaced game: every one matches.
+    expect(baselineDriftSummary(parity)).toMatchObject({
+      drifted: false,
+      matched: exported.master.rows.length,
+      removed: 0,
+      added: 0,
+    });
+  });
+
+  it('without the ordinal the same two rows are ambiguous (the key is necessary)', () => {
+    const exported = exportWithTbd(PUBLISHED_GAMES, 2);
+    const rows = parityRowsFromExportRows(exported.master.rows, { sourceLabel: 'x' });
+    const withoutOrdinal = BASELINE_KEY_FIELDS.filter((field) => field !== PARITY_FIELD.ORDINAL);
+    const parity = checkParity({
+      subject: 'ordinal removed',
+      published: { label: 'then', rows },
+      current: { label: 'now', rows },
+      keyFields: withoutOrdinal,
+      comparedFields: BASELINE_COMPARED_FIELDS,
+      mappingRules: [],
+    });
+    expect(codesOf(parity.findings)).toContain(PUBLICATION_REASON.PARITY_KEY_AMBIGUOUS);
+  });
+
+  it('2 TIME TBD then, 1 now: one row removed, reported as drift, and the verdict is still sound', () => {
+    const then = exportWithTbd(PUBLISHED_GAMES, 2);
+    const now = exportWithTbd(PUBLISHED_GAMES, 1);
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf(then),
+      currentRows: now.master.rows,
+    });
+
+    expect(codesOf(parity.findings)).not.toContain(PUBLICATION_REASON.PARITY_KEY_AMBIGUOUS);
+    expect(baselineParitySoundness(parity).sound).toBe(true);
+    const drift = baselineDriftSummary(parity);
+    expect(drift).toMatchObject({ drifted: true, removed: 1, added: 0, differing: 0 });
+    expect(parity.buckets.removed).toHaveLength(1);
+    expect(parity.buckets.removed[0].row.participant).toBe('t-1');
+    expect(parity.buckets.removed[0].row.ordinal).toBe(2);
+  });
+
+  it('a practice that has been scheduled since: the TIME TBD row is gone and a dated row is news', () => {
+    const then = exportWithTbd(PUBLISHED_GAMES, 1);
+    const now = generateScheduleExports({
+      teams: TEAMS,
+      gameAssignments: PUBLISHED_GAMES,
+      practiceAssignments: [
+        {
+          teamId: 't-1',
+          start: '2026-04-14T22:00:00Z',
+          end: '2026-04-14T23:00:00Z',
+          fieldId: 'pitch-9',
+        },
+      ],
+      tbdItems: [
+        {
+          kind: 'game',
+          homeTeamId: 't-2',
+          awayTeamId: 't-4',
+          weekIndex: 3,
+          reason: 'no-slot-available',
+        },
+      ],
+    });
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf(then),
+      currentRows: now.master.rows,
+    });
+    const drift = baselineDriftSummary(parity);
+    expect(drift).toMatchObject({ drifted: true, removed: 1, added: 1, differing: 0 });
+    expect(baselineParitySoundness(parity).sound).toBe(true);
+  });
+
+  it('a baseline of only TIME TBD cells, against a schedule that has since dated two of them, gives a verdict (Codex)', () => {
+    // 3 TBD practices published, no dated row at all; now 2 are scheduled on different dates, 1 is still TBD.
+    const then = generateScheduleExports({
+      teams: TEAMS,
+      tbdItems: [{ kind: 'practice', teamId: 't-1', missingCount: 3, reason: 'no-slot-available' }],
+    });
+    const now = generateScheduleExports({
+      teams: TEAMS,
+      practiceAssignments: [
+        {
+          teamId: 't-1',
+          start: '2026-04-14T22:00:00Z',
+          end: '2026-04-14T23:00:00Z',
+          fieldId: 'pitch-9',
+        },
+        {
+          teamId: 't-1',
+          start: '2026-04-16T22:00:00Z',
+          end: '2026-04-16T23:00:00Z',
+          fieldId: 'pitch-9',
+        },
+      ],
+      tbdItems: [{ kind: 'practice', teamId: 't-1', missingCount: 1, reason: 'no-slot-available' }],
+    });
+    expect(then.master.rows.every((row) => row[SCHEDULE_EXPORT_HEADERS.START] === 'TIME TBD')).toBe(
+      true
+    );
+
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf(then),
+      currentRows: now.master.rows,
+    });
+    // The dated rows are read (their dates are keys), so they do not collide on a null date.
+    expect(codesOf(parity.findings)).not.toContain(PUBLICATION_REASON.PARITY_KEY_AMBIGUOUS);
+    expect(baselineParitySoundness(parity).sound).toBe(true);
+    // TBD ordinal 1 is still TBD; ordinals 2 and 3 are gone; the two dated practices are news.
+    expect(baselineDriftSummary(parity)).toMatchObject({
+      drifted: true,
+      matched: 1,
+      removed: 2,
+      added: 2,
+      differing: 0,
+    });
+  });
+
+  it('a genuinely mixed vocabulary (a wall reading beside instants) is still refused, TIME TBD or not', () => {
+    const wall = [
+      {
+        ...exportWithTbd(PUBLISHED_GAMES, 1).master.rows[0],
+        [SCHEDULE_EXPORT_HEADERS.START]: '2026-04-11T09:00:00',
+      },
+      ...exportWithTbd(PUBLISHED_GAMES, 1).master.rows.filter(
+        (row) => row[SCHEDULE_EXPORT_HEADERS.START] === 'TIME TBD'
+      ),
+    ];
+    const now = exportWithTbd(PUBLISHED_GAMES, 1);
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf({ master: { rows: wall } }),
+      currentRows: now.master.rows,
+    });
+    expect(
+      parity.findings.some(
+        (finding) =>
+          finding.code === PUBLICATION_REASON.PARITY_FIELD_ABSENT &&
+          finding.details?.field === PARITY_FIELD.START_MINUTES &&
+          Number(finding.details?.currentInstants) > 0
+      )
+    ).toBe(true);
+  });
+
+  it('a TIME TBD Start is not read as a second time vocabulary beside the instants', () => {
+    // The mixture refusal counts `other` Start cells against instants; a `TIME TBD` cell is neither.
+    const exported = exportWithTbd(PUBLISHED_GAMES, 1);
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf(exported),
+      currentRows: exported.master.rows,
+    });
+    expect(
+      parity.findings.filter(
+        (finding) =>
+          finding.code === PUBLICATION_REASON.PARITY_FIELD_ABSENT &&
+          finding.details?.field === PARITY_FIELD.START_MINUTES
+      )
+    ).toEqual([]);
+  });
+
+  it('a time that was TIME TBD and is now set (same key) is a difference, not an agreement', () => {
+    // Same artifact order and ordinal, but the second row's Start changed: TBD against a time must differ.
+    const then = exportWithTbd(PUBLISHED_GAMES, 1).master.rows;
+    const now = then.map((row) =>
+      row[SCHEDULE_EXPORT_HEADERS.START] === 'TIME TBD' &&
+      row[SCHEDULE_EXPORT_HEADERS.TEAM_ID] === 't-1'
+        ? { ...row, [SCHEDULE_EXPORT_HEADERS.START]: '2026-04-14T22:00:00Z' }
+        : row
+    );
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf({ master: { rows: then } }),
+      currentRows: now,
+    });
+    // It moves buckets (removed + added) because the date key changed; it is never `matched`.
+    expect(parity.buckets.removed.some((orphan) => orphan.row.participant === 't-1')).toBe(true);
+    expect(baselineDriftSummary(parity).drifted).toBe(true);
   });
 });

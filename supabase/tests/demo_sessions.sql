@@ -595,7 +595,9 @@ SELECT is(
         'validate_custom_attributes', 'withdraw_practice_lighting_override',
         -- 20261102010000: permits, gated by the membership helpers.
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
-        'admin_update_facility_permit', 'get_facility_permits'
+        'admin_update_facility_permit', 'get_facility_permits',
+        -- 20261108020000: the TIME TBD list, read, and its practice rows rebuilt (and the call-stack-guarded sync under it), by an admin of the organization.
+        'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -631,7 +633,9 @@ SELECT is(
         'validate_custom_attributes', 'withdraw_practice_lighting_override',
         -- 20261102010000: permits, gated by the membership helpers.
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
-        'admin_update_facility_permit', 'get_facility_permits'
+        'admin_update_facility_permit', 'get_facility_permits',
+        -- 20261108020000: the TIME TBD list, read, and its practice rows rebuilt (and the call-stack-guarded sync under it), by an admin of the organization.
+        'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'
@@ -797,7 +801,11 @@ SELECT is(
     'and so is the live demo'
 );
 SELECT is(
-    (SELECT (orgs_deleted, users_deleted, users_skipped, live_demos)::text FROM public.demo_purge_log ORDER BY id DESC LIMIT 1),
+    -- Only this transaction's rows (ran_at defaults to the transaction's now()): the purge-expired-demos job
+    -- ticks every ten minutes on a database the suite shares with pg_cron, and a tick that commits while the
+    -- suite runs adds a row of its own, which is not the purge under test.
+    (SELECT (orgs_deleted, users_deleted, users_skipped, live_demos)::text FROM public.demo_purge_log
+      WHERE ran_at = now() ORDER BY id DESC LIMIT 1),
     '(1,2,1,1)',
     'the run is logged with its counts'
 );
@@ -807,7 +815,7 @@ SELECT is(
     'a second run deletes nothing more (and skips the same user again)'
 );
 SELECT is(
-    (SELECT count(*)::int FROM public.demo_purge_log WHERE note IS NULL),
+    (SELECT count(*)::int FROM public.demo_purge_log WHERE note IS NULL AND ran_at = now()),
     2,
     'and logs itself too'
 );

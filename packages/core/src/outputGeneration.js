@@ -1,5 +1,7 @@
 import { escapeCsvCell } from './csv.js';
 import { coachExportCells, coachesOfTeamRow } from './people/coachList.js';
+import { PUBLICATION_TBD } from './reserve/reasonCodes.js';
+import { ScheduleTbdItemSchema, scheduleTbdNote } from './scheduleTbd.js';
 
 /**
  * The schedule exports: one row per team per event, in a fixed column order.
@@ -65,6 +67,10 @@ export const SCHEDULE_EXPORT_COLUMNS = Object.freeze([...MASTER_HEADERS]);
  * @param {Array<Object>} params.teams
  * @param {Array<Object>} [params.practiceAssignments=[]]
  * @param {Array<Object>} [params.gameAssignments=[]]
+ * @param {Array<Object>} [params.tbdItems=[]] - practices a team is still short of and games not placed
+ *   (`scheduleTbd.js`): each prints as a row with Start `TIME TBD`, End blank, Field `LOCATION TBD` and
+ *   the reason in Notes. A practice item gives one row per missing practice (Event Type Practice); a
+ *   game item a home row and an away row (Event Type Game), with the sides it was given.
  * @param {string} [params.timezone]
  * @returns {{ master: { headers: Array<string>, rows: Array<Object>, csv: string }, perTeam: Array<{ teamId: string, headers: Array<string>, rows: Array<Object>, csv: string }>, coachFindings: Array<Object> }}
  */
@@ -72,6 +78,7 @@ export function generateScheduleExports({
   teams,
   practiceAssignments = [],
   gameAssignments = [],
+  tbdItems = [],
   timezone = undefined,
 }) {
   if (!Array.isArray(teams)) {
@@ -83,6 +90,9 @@ export function generateScheduleExports({
   }
   if (!Array.isArray(gameAssignments)) {
     throw new TypeError('gameAssignments must be an array');
+  }
+  if (!Array.isArray(tbdItems)) {
+    throw new TypeError('tbdItems must be an array');
   }
 
   const teamDirectory = new Map();
@@ -188,6 +198,74 @@ export function generateScheduleExports({
     pushRow(awayTeam.id, awayRow);
   }
 
+  // The TIME TBD rows. A team a TBD item names must be in the directory, as a team an assignment
+  // names must: an item that cannot be written is an error, never a row left out.
+  tbdItems.forEach((raw, index) => {
+    const parsed = ScheduleTbdItemSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new TypeError(
+        `tbdItems[${index}] is not a TIME TBD item: ${parsed.error.issues
+          .map((issue) => `${issue.path.join('.') || 'item'}: ${issue.message}`)
+          .join('; ')}`
+      );
+    }
+    const item = parsed.data;
+    const tbdDetails = { start: PUBLICATION_TBD.TIME, end: '', fieldId: PUBLICATION_TBD.LOCATION };
+
+    if (item.kind === 'practice') {
+      const team = teamDirectory.get(item.teamId);
+      if (!team) {
+        throw new Error(`TIME TBD practice references unknown team ${item.teamId}`);
+      }
+      for (let ordinal = 1; ordinal <= item.missingCount; ordinal += 1) {
+        pushRow(
+          team.id,
+          formatTbdRow({
+            team,
+            opponentName: null,
+            eventType: 'Practice',
+            role: '',
+            notes: scheduleTbdNote(item, { ordinal }),
+            ...tbdDetails,
+          })
+        );
+      }
+      return;
+    }
+
+    const homeTeam = teamDirectory.get(item.homeTeamId);
+    if (!homeTeam) {
+      throw new Error(`TIME TBD game references unknown team ${item.homeTeamId}`);
+    }
+    const awayTeam = teamDirectory.get(item.awayTeamId);
+    if (!awayTeam) {
+      throw new Error(`TIME TBD game references unknown team ${item.awayTeamId}`);
+    }
+    const notes = scheduleTbdNote(item);
+    pushRow(
+      homeTeam.id,
+      formatTbdRow({
+        team: homeTeam,
+        opponentName: awayTeam.name,
+        eventType: 'Game',
+        role: 'Home',
+        notes,
+        ...tbdDetails,
+      })
+    );
+    pushRow(
+      awayTeam.id,
+      formatTbdRow({
+        team: awayTeam,
+        opponentName: homeTeam.name,
+        eventType: 'Game',
+        role: 'Away',
+        notes,
+        ...tbdDetails,
+      })
+    );
+  });
+
   masterRows.sort(compareRows);
   for (const rows of teamRows.values()) {
     rows.sort(compareRows);
@@ -270,6 +348,28 @@ function formatRow({
     [HEADERS.END]: normalizedEnd,
     [HEADERS.FIELD]: fieldId,
     [HEADERS.SLOT]: slotId,
+    [HEADERS.NOTES]: notes,
+  };
+}
+
+/**
+ * One TIME TBD row: the same columns as a dated one, the time and the ground spelled as the
+ * publication tokens (`reserve/reasonCodes.js`) and the reason in Notes. No `Date` is involved.
+ */
+function formatTbdRow({ team, opponentName, eventType, role, start, end, fieldId, notes }) {
+  return {
+    [HEADERS.TEAM_ID]: team.id,
+    [HEADERS.TEAM_NAME]: team.name,
+    [HEADERS.DIVISION]: team.division,
+    [HEADERS.COACHES]: team.coaches,
+    [HEADERS.COACH_EMAILS]: team.coachEmails,
+    [HEADERS.EVENT_TYPE]: eventType,
+    [HEADERS.OPPONENT]: opponentName ?? '',
+    [HEADERS.ROLE]: role,
+    [HEADERS.START]: start,
+    [HEADERS.END]: end,
+    [HEADERS.FIELD]: fieldId,
+    [HEADERS.SLOT]: '',
     [HEADERS.NOTES]: notes,
   };
 }

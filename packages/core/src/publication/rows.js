@@ -46,6 +46,7 @@
  */
 
 import { SCHEDULE_EXPORT_HEADERS } from '../outputGeneration.js';
+import { PUBLICATION_TBD } from '../reserve/reasonCodes.js';
 
 /**
  * The columns a normalised parity row carries.
@@ -63,6 +64,7 @@ export const PARITY_FIELD = Object.freeze({
   HOME: 'home',
   AWAY: 'away',
   PARTICIPANT: 'participant',
+  ORDINAL: 'ordinal',
 });
 
 /**
@@ -76,6 +78,13 @@ export const PARITY_FIELD = Object.freeze({
  * fixture in a per-team artifact. It is `null` on every row the corpus's
  * schedule CSVs produce, so it never widens a comparison that does not need it.
  *
+ * `ordinal` is the same kind of field: it is `null` on every row that has a date, and numbers the
+ * TIME TBD rows of one team, event and opponent (1, 2, ...). A TBD row has no date, so two of one
+ * team (a team two practices short, or two games against one opponent) would share every other key
+ * field and be `PARITY_KEY_AMBIGUOUS`; the ordinal tells them apart, so "2 TBD then, 1 now" is a row
+ * removed, not an ambiguity. It is a key field only where a subject names it
+ * ({@link import('./baseline.js').BASELINE_KEY_FIELDS}).
+ *
  * @type {ReadonlyArray<string>}
  */
 export const PARITY_FIELD_ORDER = Object.freeze([
@@ -88,6 +97,7 @@ export const PARITY_FIELD_ORDER = Object.freeze([
   PARITY_FIELD.HOME,
   PARITY_FIELD.AWAY,
   PARITY_FIELD.PARTICIPANT,
+  PARITY_FIELD.ORDINAL,
 ]);
 
 /**
@@ -239,8 +249,11 @@ export function exportCell(row, header) {
  *   than guess at, while a row whose `Opponent` cell is present and blank says
  *   so with an empty string ({@link exportCell}).
  *
+ * - `ordinal` is only what the caller passes ({@link parityRowsFromExportRows} numbers the TBD
+ *   rows of one team, event and opponent); a lone row has none.
+ *
  * @param {Record<string, string>} row
- * @param {{ sourceLabel: string, rowId?: string, index?: number }} context
+ * @param {{ sourceLabel: string, rowId?: string, index?: number, ordinal?: number | null }} context
  * @returns {import('./types.js').ParityRow}
  */
 export function parityRowFromExportRow(row, context) {
@@ -264,6 +277,7 @@ export function parityRowFromExportRow(row, context) {
     // The team this row is addressed to: what makes the home half and the away
     // half of one fixture two distinct rows rather than one ambiguous identity.
     participant: exportCell(row, SCHEDULE_EXPORT_HEADERS.TEAM_ID),
+    ordinal: context.ordinal ?? null,
   });
 }
 
@@ -276,7 +290,25 @@ export function parityRowFromExportRow(row, context) {
  * @returns {import('./types.js').ParityRow[]}
  */
 export function parityRowsFromExportRows(rows, context) {
-  return rows.map((row, index) =>
-    parityRowFromExportRow(row, { sourceLabel: context.sourceLabel, index })
-  );
+  // The TIME TBD rows of one team, opponent and role (a practice has neither opponent nor role, a
+  // game both, so the group never mixes the two) are told apart by their order in the
+  // artifact: 1, 2, ... Rows with a date carry none (their date already identifies them). The
+  // surplus on either side then falls into `added` or `removed` as the comparator pairs by key.
+  /** @type {Map<string, number>} */
+  const seen = new Map();
+  return rows.map((row, index) => {
+    let ordinal = null;
+    if (row[SCHEDULE_EXPORT_HEADERS.START] === PUBLICATION_TBD.TIME) {
+      const group = [
+        SCHEDULE_EXPORT_HEADERS.TEAM_ID,
+        SCHEDULE_EXPORT_HEADERS.OPPONENT,
+        SCHEDULE_EXPORT_HEADERS.ROLE,
+      ]
+        .map((header) => keyText(row[header]))
+        .join('|');
+      ordinal = (seen.get(group) ?? 0) + 1;
+      seen.set(group, ordinal);
+    }
+    return parityRowFromExportRow(row, { sourceLabel: context.sourceLabel, index, ordinal });
+  });
 }

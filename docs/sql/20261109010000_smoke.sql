@@ -9,7 +9,9 @@
 --   * activating the draft completes the old active season (exactly one season is active), a
 --     completed season cannot be activated again and is read-only for a signed-in admin
 --     (a player patch and a team write are refused);
---   * while a player import into a draft is unfinished its cutoff cannot change (import_pending);
+--   * while a player import into a draft is unfinished its cutoff cannot change (import_pending), and a
+--     file stamped with the rule before the rule changed is refused at the apply (age_rule_changed) until
+--     it is validated again;
 --   * the season lock: while one session holds an activation open, a second session's activation or
 --     rollover in the same organization waits (55P03 at a 1s lock timeout) and another
 --     organization's is written at once.
@@ -84,6 +86,10 @@ BEGIN
 
     -- An import into the draft.
     v_job := (public.create_import_job(v_org, 'players', 'smoke-draft.csv', v_s2)).id;
+    -- The validation stamps the job with the rule before it reads it; the rule then changes, with
+    -- nothing staged yet (the one window the pending guard cannot see).
+    PERFORM public.stamp_import_job_age_rule(v_job, true);
+    PERFORM public.admin_update_draft_season(v_s2, '{"age_cutoff_month": 10}'::jsonb);
     PERFORM set_config('request.jwt.claim.sub', '', true);
     INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
     VALUES (v_org, v_job, 1, '{}'::jsonb,
@@ -100,6 +106,18 @@ BEGIN
     IF v_refused <> '22023:import_pending' THEN
         RAISE EXCEPTION 'a cutoff change with an import pending gave "%"', v_refused;
     END IF;
+    BEGIN
+        PERFORM public.finalize_import_job(v_job);
+        v_refused := 'allowed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_detail = PG_EXCEPTION_DETAIL;
+        v_refused := v_state || ':' || v_detail;
+    END;
+    IF v_refused <> '22023:age_rule_changed' THEN
+        RAISE EXCEPTION 'a file stamped before the rule changed gave "%"', v_refused;
+    END IF;
+    -- Validated again, it is applied.
+    PERFORM public.stamp_import_job_age_rule(v_job, true);
     v_fin := public.finalize_import_job(v_job);
     IF (v_fin ->> 'inserted_players')::int <> 1 OR (v_fin ->> 'updated_players')::int <> 0 THEN
         RAISE EXCEPTION 'the import into the draft did not insert one new player: %', v_fin;

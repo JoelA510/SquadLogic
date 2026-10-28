@@ -49,7 +49,12 @@
 --      completed one", in `create_import_job` (registration jobs), `finalize_import_job` and
 --      `finalize_coach_import_job`, each behind the md5 of its current text. A field import
 --      (`finalize_field_import_job`, organization-level locations and fields) stays active-only.
---   6. An end-state check.
+--   6. A player file is stamped with the age rule it was validated under (`import_jobs.age_rule_fingerprint`,
+--      `stamp_import_job_age_rule`, called by import-validation before it reads the rule), and
+--      `finalize_import_job` refuses, under the season lock, a job whose stamp is not the rule now
+--      (22023, `age_rule_changed`): the one window item 3 cannot see, between the validation's read
+--      and its first staged row. A job with no stamp is not refused.
+--   7. An end-state check.
 --
 -- **Production's bodies are not read from here.** The migration refuses to replace a function
 -- whose text it has not seen (the md5 of `prosrc`, carriage returns stripped, below; read off a
@@ -227,6 +232,92 @@ $$;
 REVOKE ALL ON FUNCTION public.season_has_pending_player_import(uuid) FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_has_pending_player_import(uuid) IS
     'True while a player import is in progress for the season (an unfinished registration job with staged rows not yet promoted): its natural ages are staged under the rule in force, so the rule does not change until the import is finished or cancelled. 20261109010000.';
+
+-- The age rule a player file was checked under. import-validation counts each natural age under the
+-- season's rule and stages it; a rule change made after its read but before its first staged row
+-- finds nothing pending to refuse (the guard above). So the validation stamps the job with a
+-- fingerprint of the rule it is about to read, and the finalizer refuses a job whose stamp is no
+-- longer the season's rule (22023, `age_rule_changed`): the file is validated again. A fingerprint,
+-- not a version counter: nothing else has to bump anything, a change to a windowed division's band
+-- is covered too, and the stamp is taken BEFORE the rule is read, so a change in between can only
+-- make the stamp stale (a refusal), never make it match a rule the ages were not counted under.
+ALTER TABLE public.import_jobs ADD COLUMN age_rule_fingerprint text;
+COMMENT ON COLUMN public.import_jobs.age_rule_fingerprint IS
+    'The season''s age rule (cutoff, season year, windowed divisions) as it stood when the player file was validated; finalize_import_job refuses the job when the rule is not this any more (age_rule_changed). NULL: not stamped (a coach or field job, or one made before 20261109010000), never refused. 20261109010000.';
+
+CREATE FUNCTION public.season_age_rule_fingerprint(p_season_id uuid)
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+    SELECT md5(jsonb_build_object(
+               'mode', s.age_cutoff_mode,
+               'month', s.age_cutoff_month,
+               'day', s.age_cutoff_day,
+               'year', s.season_year,
+               -- Only a division with both ends can take a player by birth date; its band is the
+               -- columns, else the U-number in its name.
+               'windows', COALESCE((
+                   SELECT jsonb_agg(jsonb_build_array(
+                              d.id, d.birthdate_start, d.birthdate_end, d.min_age, d.max_age,
+                              CASE WHEN d.min_age IS NULL OR d.max_age IS NULL THEN d.name END)
+                          ORDER BY d.id)
+                     FROM public.divisions d
+                    WHERE d.season_settings_id = s.id
+                      AND d.birthdate_start IS NOT NULL AND d.birthdate_end IS NOT NULL), '[]'::jsonb)
+           )::text)
+      FROM public.season_settings s
+     WHERE s.id = p_season_id;
+$$;
+
+REVOKE ALL ON FUNCTION public.season_age_rule_fingerprint(uuid) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.season_age_rule_fingerprint(uuid) IS
+    'A digest of the age rule that counts a natural age in the season: cutoff mode, month, day, season year, and each window-bearing division''s id, window and band. 20261109010000.';
+
+-- The stamp: called by import-validation (service role) before it reads the rule. The first batch of a
+-- file (`p_restart`) takes a new stamp, so validating a file again refreshes it; a later batch keeps
+-- the first's, so a rule change between two batches still shows at finalization.
+CREATE FUNCTION public.stamp_import_job_age_rule(p_import_job_id uuid, p_restart boolean DEFAULT false)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+DECLARE
+    v_job public.import_jobs%ROWTYPE;
+    v_season uuid;
+    v_fingerprint text;
+BEGIN
+    SELECT * INTO v_job FROM public.import_jobs WHERE id = p_import_job_id;
+    IF NOT FOUND OR v_job.job_type <> 'registration' THEN
+        RETURN NULL;
+    END IF;
+    SELECT s.id INTO v_season
+      FROM public.season_settings s
+     WHERE s.organization_id = v_job.organization_id
+       AND (CASE WHEN v_job.season_settings_id IS NULL
+                 THEN s.status = 'active'
+                 ELSE s.id = v_job.season_settings_id END);
+    IF v_season IS NULL THEN
+        RETURN NULL;
+    END IF;
+    v_fingerprint := public.season_age_rule_fingerprint(v_season);
+    UPDATE public.import_jobs
+       SET age_rule_fingerprint = v_fingerprint
+     WHERE id = p_import_job_id
+       AND (p_restart OR age_rule_fingerprint IS NULL);
+    RETURN v_fingerprint;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.stamp_import_job_age_rule(uuid, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.stamp_import_job_age_rule(uuid, boolean) TO service_role;
+COMMENT ON FUNCTION public.stamp_import_job_age_rule(uuid, boolean) IS
+    'Service role only (import-validation): record on a registration job the fingerprint of its season''s age rule, before the rule is read. p_restart replaces an earlier stamp (the first batch of a file); otherwise the first stamp stands. Returns the fingerprint, NULL for a job or season it cannot stamp. 20261109010000.';
 
 CREATE FUNCTION public.season_settings_cutoff_guard()
 RETURNS trigger
@@ -1095,6 +1186,16 @@ BEGIN
     -- a new row here. So the active season and a draft season both take an import (20261109010000:
     -- a club prepares next season from its own registration data), and a completed one never does.
 
+    -- The ages in the staged rows were counted under the season's rule when the file was validated
+    -- (the job's stamp). Under the season lock the rule writers take, a job whose stamp is not the
+    -- rule now is refused: the file is validated again. A job with no stamp is not refused.
+    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_job.organization_id::text, 0));
+    IF v_job.age_rule_fingerprint IS NOT NULL
+       AND v_job.age_rule_fingerprint IS DISTINCT FROM public.season_age_rule_fingerprint(v_season_settings_id) THEN
+        RAISE EXCEPTION 'The age rules of season % changed since this file was checked; validate it again', v_season_settings_id
+            USING ERRCODE = '22023', DETAIL = 'age_rule_changed';
+    END IF;
+
     -- Auto-create derived divisions that don't exist yet for that season.
     IF v_season_settings_id IS NOT NULL THEN
         WITH staged AS (
@@ -1945,6 +2046,17 @@ BEGIN
         OR has_function_privilege('anon', to_regprocedure('public.' || f.sig), 'EXECUTE');
     IF v_bad IS NOT NULL THEN
         RAISE EXCEPTION 'writer(s) missing or wrongly granted: %', v_bad;
+    END IF;
+
+    -- The stamp is for the service role alone; the fingerprint is not a signed-in caller's to call.
+    IF to_regprocedure('public.stamp_import_job_age_rule(uuid,boolean)') IS NULL
+       OR to_regprocedure('public.season_age_rule_fingerprint(uuid)') IS NULL
+       OR NOT has_function_privilege('service_role', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
+       OR has_function_privilege('authenticated', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
+       OR has_function_privilege('anon', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
+       OR has_function_privilege('authenticated', 'public.season_age_rule_fingerprint(uuid)', 'EXECUTE')
+       OR has_function_privilege('anon', 'public.season_age_rule_fingerprint(uuid)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'the age-rule stamp or fingerprint is missing or wrongly granted';
     END IF;
 
     SELECT count(*) INTO v_n FROM public.audit_actions

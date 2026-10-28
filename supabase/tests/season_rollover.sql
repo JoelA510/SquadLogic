@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(142);
+SELECT plan(162);
 
 -- Helpers: the SQLSTATE and DETAIL of a refusal, and whether a call took the organization's lock.
 CREATE FUNCTION pg_temp.err(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
@@ -650,6 +650,107 @@ SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), fa
 INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
 SELECT 'a1111111-1111-1111-1111-111111111111'::uuid, id, 2, '{}'::jsonb, '{"first_name": "Two"}'::jsonb FROM pend_job;
 SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), true, 'unfinished, with a row left to promote: pending');
+
+-- ── A file is checked under one rule: the stamp and the refusal at finalization ──────
+-- The pending guard cannot see a rule change made after import-validation read the rule and before
+-- it staged its first row (nothing is staged yet). The validation stamps the job first; the
+-- finalizer refuses a job whose stamp is not the season's rule any more (age_rule_changed).
+RESET role;
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SET LOCAL role = 'authenticated';
+CREATE TEMP TABLE stampd ON COMMIT DROP AS
+    SELECT (r ->> 'id')::uuid AS s1 FROM (SELECT public.admin_create_season_from((SELECT d28 FROM ids), 'Stamp Draft', 2031) AS r) x;
+CREATE TEMP TABLE stampd2 ON COMMIT DROP AS
+    SELECT (r ->> 'id')::uuid AS s2 FROM (SELECT public.admin_create_season_from((SELECT d28 FROM ids), 'Stamp Draft Two', 2032) AS r) x;
+CREATE TEMP TABLE stamp_jobs ON COMMIT DROP AS
+    SELECT (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'players', 'stamp-1.csv', (SELECT s1 FROM stampd))).id AS j1,
+           (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'players', 'stamp-2.csv', (SELECT s2 FROM stampd2))).id AS j2,
+           (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'fields', 'stamp-fields.csv')).id AS jf;
+CREATE TEMP TABLE stampd3 ON COMMIT DROP AS
+    SELECT (r ->> 'id')::uuid AS s3 FROM (SELECT public.admin_create_season_from((SELECT d28 FROM ids), 'Stamp Draft Three', 2033) AS r) x;
+GRANT SELECT ON stampd, stampd2, stampd3, stamp_jobs TO PUBLIC;
+RESET role;
+SELECT is((SELECT age_rule_fingerprint FROM public.import_jobs WHERE id = (SELECT j1 FROM stamp_jobs)), NULL,
+    'a new job carries no stamp');
+
+-- Who may stamp: the service role, and nobody signed in.
+SELECT is(has_function_privilege('authenticated', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE')
+          OR has_function_privilege('anon', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE'), false,
+    'no signed-in caller may stamp a job');
+SELECT is(has_function_privilege('service_role', 'public.stamp_import_job_age_rule(uuid,boolean)', 'EXECUTE'), true,
+    'the service role (import-validation) may');
+SET LOCAL role = 'service_role';
+CREATE TEMP TABLE fp0 ON COMMIT DROP AS SELECT public.stamp_import_job_age_rule((SELECT j1 FROM stamp_jobs), true) AS fp;
+RESET role;
+GRANT SELECT ON fp0 TO PUBLIC;
+SELECT isnt((SELECT fp FROM fp0), NULL, 'the first batch stamps the job with the fingerprint of its season''s rule');
+SELECT is((SELECT age_rule_fingerprint FROM public.import_jobs WHERE id = (SELECT j1 FROM stamp_jobs)),
+          public.season_age_rule_fingerprint((SELECT s1 FROM stampd)), 'and it is stored on the job');
+SELECT is(public.season_age_rule_fingerprint((SELECT s1 FROM stampd)), public.season_age_rule_fingerprint((SELECT s1 FROM stampd)),
+    'the fingerprint is the same each time it is read');
+SELECT is(public.stamp_import_job_age_rule((SELECT jf FROM stamp_jobs), true), NULL,
+    'a field job is not stamped (only a registration file has ages)');
+SELECT is((SELECT age_rule_fingerprint FROM public.import_jobs WHERE id = (SELECT jf FROM stamp_jobs)), NULL,
+    'and carries none');
+
+-- The race: the rule changes after the stamp (and the read), before anything is staged.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.err(format($$SELECT public.admin_update_draft_season(%L, '{"age_cutoff_mode": "custom", "age_cutoff_month": 3, "age_cutoff_day": 1}')$$, (SELECT s1 FROM stampd))),
+    'no error', 'nothing is staged, so the cutoff changes');
+RESET role;
+SELECT isnt(public.season_age_rule_fingerprint((SELECT s1 FROM stampd)), (SELECT fp FROM fp0), 'and the season''s fingerprint is not the stamp any more');
+INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
+SELECT 'a1111111-1111-1111-1111-111111111111'::uuid, (SELECT j1 FROM stamp_jobs), 1, '{}'::jsonb,
+       '{"first_name": "Stamp", "last_name": "One", "external_registration_id": "STAMP-1", "natural_age": "8"}'::jsonb;
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.err(format($$SELECT public.finalize_import_job(%L)$$, (SELECT j1 FROM stamp_jobs))),
+    '22023:age_rule_changed', 'the finalizer refuses the file: its ages were counted under the old rule');
+RESET role;
+SELECT is((SELECT count(*)::int FROM public.players WHERE season_settings_id = (SELECT s1 FROM stampd)), 0, 'and no player was written');
+SELECT is((SELECT status FROM public.import_jobs WHERE id = (SELECT j1 FROM stamp_jobs)), 'importing', 'the job is left as it was, to be validated again');
+-- A later batch of the same file keeps the first stamp; validating the file again (the first batch) takes a new one.
+SET LOCAL role = 'service_role';
+SELECT public.stamp_import_job_age_rule((SELECT j1 FROM stamp_jobs), false);
+RESET role;
+SELECT is((SELECT age_rule_fingerprint FROM public.import_jobs WHERE id = (SELECT j1 FROM stamp_jobs)), (SELECT fp FROM fp0),
+    'a later batch does not replace the stamp');
+SET LOCAL role = 'service_role';
+SELECT public.stamp_import_job_age_rule((SELECT j1 FROM stamp_jobs), true);
+RESET role;
+SELECT is((SELECT age_rule_fingerprint FROM public.import_jobs WHERE id = (SELECT j1 FROM stamp_jobs)),
+          public.season_age_rule_fingerprint((SELECT s1 FROM stampd)), 'validating the file again stamps the rule now');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is((public.finalize_import_job((SELECT j1 FROM stamp_jobs)) ->> 'inserted_players')::int, 1,
+    'and the file is applied');
+RESET role;
+
+-- A job with no stamp (made before the stamp, or never validated by the Edge function) is not refused.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.err(format($$SELECT public.admin_update_draft_season(%L, '{"age_cutoff_mode": "custom", "age_cutoff_month": 5, "age_cutoff_day": 1}')$$, (SELECT s2 FROM stampd2))),
+    'no error', 'control: a rule change on the second draft');
+RESET role;
+INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
+SELECT 'a1111111-1111-1111-1111-111111111111'::uuid, (SELECT j2 FROM stamp_jobs), 1, '{}'::jsonb,
+       '{"first_name": "Stamp", "last_name": "Two", "external_registration_id": "STAMP-2", "natural_age": "8"}'::jsonb;
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is((public.finalize_import_job((SELECT j2 FROM stamp_jobs)) ->> 'inserted_players')::int, 1,
+    'an unstamped job finalizes whatever the rule did');
+RESET role;
+
+-- What the fingerprint holds: a window on a division changes it; a division with no window does not.
+CREATE TEMP TABLE fp_w ON COMMIT DROP AS SELECT public.season_age_rule_fingerprint((SELECT s3 FROM stampd3)) AS before_fp;
+UPDATE public.divisions SET name = name || ' (renamed)' WHERE season_settings_id = (SELECT s3 FROM stampd3) AND birthdate_start IS NULL;
+SELECT is(public.season_age_rule_fingerprint((SELECT s3 FROM stampd3)), (SELECT before_fp FROM fp_w),
+    'renaming a division that has no window leaves the fingerprint alone');
+UPDATE public.divisions SET birthdate_start = '2023-01-01', birthdate_end = '2024-07-31'
+ WHERE id = (SELECT d.id FROM public.divisions d WHERE d.season_settings_id = (SELECT s3 FROM stampd3) ORDER BY d.id LIMIT 1);
+SELECT isnt(public.season_age_rule_fingerprint((SELECT s3 FROM stampd3)), (SELECT before_fp FROM fp_w),
+    'a window on a division changes it');
 
 -- ── Grants ─────────────────────────────────────────────────────────────────
 RESET role;

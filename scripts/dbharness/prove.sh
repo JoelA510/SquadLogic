@@ -4909,13 +4909,15 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
 
-# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Four
+# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Five
 # plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red;
-# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql):
+# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth against the smoke
+# and the stamp block of season_rollover.sql):
 # a draft season refused an import again; the rollover without the organization's season lock and
 # row locks (the smoke's second session then writes at once instead of timing out); and a completed
 # season writable again for a signed-in caller (the smoke's player patch is accepted); and a
-# completed season's schedule writable again (the smoke's team write is accepted).
+# completed season's schedule writable again (the smoke's team write is accepted); and the finalizer
+# applying a file whose age-rule stamp is stale (the smoke's finalize is accepted).
 plant "M59 the finalizer refuses a draft season again" "$M59" \
   "    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
   "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
@@ -4945,6 +4947,13 @@ plant "M59 a completed season's schedule is writable for a signed-in caller" "$M
             -- The cascade of a deleted organization: the season may not have been removed yet." \
   "        IF v_status = 'completed' AND false THEN
             -- The cascade of a deleted organization: the season may not have been removed yet." \
+  "smoke 20261109010000"
+
+plant "M59 the finalizer applies a file whose age-rule stamp is stale" "$M59" \
+  "    IF v_job.age_rule_fingerprint IS NOT NULL
+       AND v_job.age_rule_fingerprint IS DISTINCT FROM" \
+  "    IF v_job.age_rule_fingerprint IS NOT NULL AND false
+       AND v_job.age_rule_fingerprint IS DISTINCT FROM" \
   "smoke 20261109010000"
 
 # ---------------------------------------------------------------------------

@@ -35,12 +35,11 @@ import {
 } from '../_shared/import-allowlist.ts';
 import {
   importNaturalAge,
-  importSeason,
   type ImportSeason,
   type WindowedDivision,
 } from '../_shared/natural-age.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
-import { stampAgeRule } from '../_shared/age-rule-stamp.ts';
+import { loadImportAgeRule } from '../_shared/import-age-rule.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -580,12 +579,10 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     );
   }
 
-  // The season the job adds to (E1), read with the job: its ages are counted in that season.
-  let jobSeasonId: string | null = null;
   if (body.import_job_id) {
     const { data: job, error: jobError } = await serviceClient
       .from('import_jobs')
-      .select('id, organization_id, job_type, status, season_settings_id')
+      .select('id, organization_id, job_type, status')
       .eq('id', body.import_job_id)
       .eq('organization_id', body.organization_id)
       .maybeSingle();
@@ -624,7 +621,6 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         409
       );
     }
-    jobSeasonId = (job as { season_settings_id?: string | null }).season_settings_id ?? null;
   }
 
   // 5. Normalize headers and sanitize all rows
@@ -672,40 +668,20 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // that division's age. Read for the season the import adds to, and only when it has any.
   let windowedDivisions: WindowedDivision[] = [];
   if (body.import_type === 'players') {
-    // The rule these ages are counted under is stamped on the job BEFORE it is read, so a change
-    // made after this point cannot go unseen: finalization refuses a stale stamp (age_rule_changed).
-    const stampError = await stampAgeRule(serviceClient, {
-      importType: body.import_type,
+    // The whole rule, and its revision, in one call that also stamps the job with that revision;
+    // the ages below are counted from what it returned and from nothing read separately, so a
+    // change made after it cannot be missed (finalization refuses a stale stamp: age_rule_changed).
+    const loaded = await loadImportAgeRule(serviceClient, {
+      organizationId: body.organization_id,
       importJobId: body.import_job_id,
       rowOffset: body.row_offset,
     });
-    if (stampError) {
-      await logFailure(logCtx, 'Age rule stamp failed', stampError);
-      return jsonResponse({ status: 'error', message: 'Age rule stamp failed' }, 500);
+    if (loaded.error) {
+      await logFailure(logCtx, 'Age rule lookup failed', loaded.error);
+      return jsonResponse({ status: 'error', message: 'Age rule lookup failed' }, 500);
     }
-    const { data: seasons, error: seasonError } = await serviceClient
-      .from('season_settings')
-      .select('id, status, season_year, age_cutoff_mode, age_cutoff_month, age_cutoff_day')
-      .eq('organization_id', body.organization_id);
-    if (seasonError) {
-      await logFailure(logCtx, 'Season lookup failed', seasonError);
-      return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);
-    }
-    season = importSeason(seasons ?? [], jobSeasonId);
-    if (season?.id) {
-      const { data: divisionRows, error: divisionError } = await serviceClient
-        .from('divisions')
-        .select('name, min_age, max_age, birthdate_start, birthdate_end')
-        .eq('organization_id', body.organization_id)
-        .eq('season_settings_id', season.id)
-        .not('birthdate_start', 'is', null)
-        .not('birthdate_end', 'is', null);
-      if (divisionError) {
-        await logFailure(logCtx, 'Division window lookup failed', divisionError);
-        return jsonResponse({ status: 'error', message: 'Division window lookup failed' }, 500);
-      }
-      windowedDivisions = (divisionRows ?? []) as WindowedDivision[];
-    }
+    season = loaded.rule.season;
+    windowedDivisions = loaded.rule.windowedDivisions;
   }
 
   for (let i = 0; i < body.rows.length; i++) {

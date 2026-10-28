@@ -292,6 +292,21 @@ export default function PlayerRecordPage() {
                     </Badge>
                   )}
                 />
+                <InlineField
+                  label="Play-up requested"
+                  value={player.play_up_requested ? 'true' : 'false'}
+                  type="select"
+                  options={[
+                    { value: 'true', label: 'Yes' },
+                    { value: 'false', label: 'No' },
+                  ]}
+                  onSave={(v) => save({ play_up_requested: v === 'true' })}
+                  render={() => (
+                    <Badge tone={player.play_up_requested ? 'info' : 'neutral'}>
+                      {player.play_up_requested ? 'Yes' : 'No'}
+                    </Badge>
+                  )}
+                />
                 {isEnabled(FEATURE_FLAGS.YEARS_PLAYED) && (
                   <InlineField
                     label="Years played"

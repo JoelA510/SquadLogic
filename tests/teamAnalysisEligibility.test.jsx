@@ -253,8 +253,8 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
     expect(entry).toMatchObject({
       reason: 'eligibility-blocked',
       metadata: {
-        placement: 'play_down_blocked',
-        reviewReason: 'play-down is not permitted',
+        placement: 'no_division',
+        reviewReason: 'no division holds natural age 13',
         naturalAge: 13,
         coachId: null,
       },
@@ -304,8 +304,8 @@ describe('TeamAnalysisPage :: eligibility reaches the generator', () => {
       {
         playerId: durableIdOf(1),
         teamId: IDS.team,
-        placement: 'play_down_blocked',
-        reviewReason: 'play-down is not permitted',
+        placement: 'no_division',
+        reviewReason: 'no division holds natural age 13',
       },
     ]);
     expect(results.overflowByDivision.U10.map((e) => e.reason)).not.toContain(
@@ -356,7 +356,7 @@ describe('TeamAnalysisPage :: eligibility from stored players only (R5)', () => 
     const entry = results.overflowByDivision.U10.find((e) => e.players[0].id === durableIdOf(1));
     expect(entry).toMatchObject({
       reason: 'eligibility-blocked',
-      metadata: { placement: 'play_down_blocked', naturalAge: 13 },
+      metadata: { placement: 'no_division', naturalAge: 13 },
     });
     const placed = results.teamsByDivision.U10.flatMap((team) => team.players);
     expect(placed.find((player) => player.id === durableIdOf(2)).placement).toBe('unknown');
@@ -434,7 +434,7 @@ describe('TeamAnalysisPage :: not placed and flagged, on the review (B3)', () =>
     // Enumerated from the import: the one blocked player, and nobody else.
     expect(items).toHaveLength(1);
     expect(items[0]).toHaveTextContent(
-      'Kid1 Placeholder1. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 13.'
+      'Kid1 Placeholder1. Not eligible for this division. No division in this import holds a player of their age. Natural age 13.'
     );
     expect(screen.getByText(/^U10: 1 not placed \(1 not eligible/)).toBeInTheDocument();
   });
@@ -460,7 +460,7 @@ describe('TeamAnalysisPage :: not placed and flagged, on the review (B3)', () =>
     const items = within(reviewList('Needs review')).getAllByRole('listitem');
     expect(items).toHaveLength(1);
     expect(items[0]).toHaveTextContent(
-      'Kid1 Placeholder1, on Saved Team. Not eligible for this division. Older than the division allows, and playing down is not permitted. Kept on the reviewed roster; move them by hand if you agree.'
+      'Kid1 Placeholder1, on Saved Team. Not eligible for this division. No division in this import holds a player of their age. Kept on the reviewed roster; move them by hand if you agree.'
     );
     // Held, so not under "Not placed".
     expect(screen.queryByRole('region', { name: 'Not placed' })).toBeNull();
@@ -686,7 +686,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
     const items = within(reviewList('Not placed')).getAllByRole('listitem');
     expect(items).toHaveLength(1);
     expect(items[0]).toHaveTextContent(
-      'Kid1 Placeholder1. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 13. Coach Casey Coach has no team to anchor in this division: Kid1 Placeholder1, their only child in it, is not eligible for the division.'
+      'Kid1 Placeholder1. Not eligible for this division. No division in this import holds a player of their age. Natural age 13. Coach Casey Coach has no team to anchor in this division: Kid1 Placeholder1, their only child in it, is not eligible for the division.'
     );
     expect(screen.getByText(/^U10: 1 not placed/)).toHaveTextContent(
       '1 coach with no team to anchor'

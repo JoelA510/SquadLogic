@@ -263,7 +263,7 @@ Then(
     const list = page.getByRole('region', { name: 'Not placed' });
     await expect(list).toBeVisible({ timeout: 15000 });
     await expect(list.getByRole('listitem')).toHaveText([
-      'Player 7. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 16.',
+      'Player 7. Not eligible for this division. No division in this import holds a player of their age. Natural age 16.',
     ]);
     // Nobody was held on a reviewed roster: the saved players are in the band.
     await expect(page.getByRole('region', { name: 'Needs review' })).toHaveCount(0);

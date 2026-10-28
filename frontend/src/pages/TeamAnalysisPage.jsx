@@ -18,6 +18,7 @@ import TeamPersistencePanel from '../components/TeamPersistencePanel.jsx';
 import DataValidationPanel from '../components/teaming/DataValidationPanel.jsx';
 import BuddyRequestsList from '../components/teaming/BuddyRequestsList.jsx';
 import PlacementReviewList from '../components/teaming/PlacementReviewList.jsx';
+import PlayUpList from '../components/teaming/PlayUpList.jsx';
 import TeamSizeOutcomeList from '../components/teaming/TeamSizeOutcomeList.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
@@ -29,6 +30,7 @@ import { generateTeams, resolveTeamCount } from '@squadlogic/core/teamGeneration
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { DEFAULT_ROSTER_LIMITS, assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
+import { applyPlayUpEligibility } from '@squadlogic/core/playUp.js';
 import { summarizeBuddyRequests } from '@squadlogic/core/buddyLinking.js';
 import { isCoachingLeadAnswer } from '@squadlogic/core/coachingLeads.js';
 import { mapSchedulerRunToSummary } from '@squadlogic/core/utils/teamSummaryMapper.js';
@@ -42,6 +44,12 @@ import {
   placementReviewAnnouncement,
   summarizePlacementReview,
 } from '../utils/placementReview.js';
+import {
+  coachIdsNamedByPlayUp,
+  playUpAnnouncement,
+  summarizePlayUpReview,
+  waitlistPlayersToActivate,
+} from '../utils/playUpReview.js';
 import { summarizeTeamSizeReview, teamSizeAnnouncement } from '../utils/teamSizeReview.js';
 import { getPersistenceEndpoint, triggerTeamPersistence } from '../utils/teamPersistenceClient.js';
 import {
@@ -232,10 +240,11 @@ function findDivisionRowForProgram(program, divisionRows) {
 }
 
 /** The division columns the teaming rules read (`plays_games` is added when it exists, D2;
- *  `program_id` when it exists, E2). */
+ *  `program_id` when it exists, E2). The age band and gender are what a player's own age division
+ *  is found by (play-up by request). */
 const DIVISION_SETTING_COLUMNS =
   'id, organization_id, season_settings_id, name, max_roster_size, min_roster_size, ' +
-  'target_team_size, team_count_override, min_teams, max_teams';
+  'target_team_size, team_count_override, min_teams, max_teams, min_age, max_age, gender_policy';
 
 function configFromDivisionRow(divisionRow) {
   const defaults = createDefaultConfig();
@@ -277,6 +286,26 @@ function toDivisionConfigPayload({ program, config, organizationId, seasonSettin
 function parseBooleanLike(value) {
   return ['true', 'yes', 'y', '1'].includes(
     String(value || '')
+      .trim()
+      .toLowerCase()
+  );
+}
+
+// The import columns a play-up request is read from: the stored flag first (an admin may have
+// set or cleared it on the record), then the file's column as `canonicalImportKey` stages it.
+// Yes, true, 1 and x are a request (`finalize_import_job` reads the same spellings).
+const PLAY_UP_KEYS = [
+  'play_up_requested',
+  'play_up',
+  'Play Up',
+  'play up',
+  'are you coaching so this player can play up a division?',
+];
+
+function parsePlayUpRequest(row) {
+  const value = firstNonEmpty(row, PLAY_UP_KEYS);
+  return ['true', 'yes', 'y', '1', 'x'].includes(
+    String(value ?? '')
       .trim()
       .toLowerCase()
   );
@@ -336,7 +365,7 @@ function buddyFieldsOf(row) {
 // rows, which keep what the file said. The stored natural age (admin-focus plan R5) is what
 // eligibility reads when a row carries no birth date: no birth date is stored.
 const DURABLE_PLAYER_FIELDS =
-  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, rating, status';
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, rating, status, play_up_requested';
 const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
 // The headers a coaching answer and years played are read from (`toGeneratorPlayer`), as
 // `canonicalImportKey` stages them and as older mock rows spell them.
@@ -357,12 +386,14 @@ const LOOKUP_CONCURRENCY = 8;
  * The teaming signals the record holds win too (Phase B6): `willing_to_coach` (what makes a
  * coaching lead, as the import stored it), `years_played` and the admin's `rating`; and the
  * waitlist: the record's `status` (an admin may have moved the player on or off the waitlist
- * since the file was read) replaces the file's waitlist column.
+ * since the file was read) replaces the file's waitlist column. So does the record's
+ * `play_up_requested` for the file's play-up column: the admin may have set or cleared it.
  */
 function withDurableIdentity(row, durable) {
   if (!durable) return row;
   const storedWaitlist = typeof durable.status === 'string';
   const storedLead = typeof durable.willing_to_coach === 'boolean';
+  const storedPlayUp = typeof durable.play_up_requested === 'boolean';
   const storedYears = Number.isInteger(durable.years_played);
   const next = {};
   for (const [header, value] of Object.entries(row || {})) {
@@ -372,12 +403,14 @@ function withDurableIdentity(row, durable) {
     if (storedWaitlist && WAITLIST_KEYS.includes(key)) continue;
     if (storedLead && (COACHING_ANSWER_KEYS.includes(key) || COACHING_ANSWER_KEYS.includes(header)))
       continue;
+    if (storedPlayUp && (PLAY_UP_KEYS.includes(key) || PLAY_UP_KEYS.includes(header))) continue;
     if (storedYears && (YEARS_PLAYED_KEYS.includes(key) || YEARS_PLAYED_KEYS.includes(header)))
       continue;
     next[header] = value;
   }
   if (storedWaitlist) next.waitlist = durable.status === 'waitlist';
   if (storedLead) next.willing_to_coach = durable.willing_to_coach;
+  if (storedPlayUp) next.play_up_requested = durable.play_up_requested ? 'yes' : 'no';
   if (storedYears) next.years_played = durable.years_played;
   if (Number.isFinite(durable.rating)) next.rating = durable.rating;
   // A name the player row lacks (a mock row, a partial select) keeps the import's.
@@ -569,7 +602,7 @@ function toGeneratorPlayer(
   // import-validation returned), counted in the season of its import; no birth date is stored.
   const naturalAge = Number(firstNonEmpty(row, ['natural_age', 'naturalAge']));
   const dateOfBirth = firstNonEmpty(row, ['date_of_birth', 'DOB', 'Birthdate', 'dob', 'birthdate']);
-  const playUpRequested = parseBooleanLike(row.play_up_requested);
+  const playUpRequested = parsePlayUpRequest(row);
 
   return {
     id,
@@ -1174,25 +1207,60 @@ export default function TeamAnalysisPage() {
         savedDivision.id
       );
 
-      // Every imported player, so a buddy request naming someone outside this program is told
-      // apart from one naming nobody. The program's own rows carry their generator ids; every
-      // row carries its durable player's names and request (the record's edits), where found.
+      // Every imported player outside this program, with the durable player each is (the record's
+      // edits over the file's row, where found). They feed the buddy roster, so a request naming
+      // someone outside this program is told apart from one naming nobody, and they are who may
+      // play in this program's division instead of the one they registered for (a player plays
+      // in their own age division unless a play-up was requested).
       const programIndexBySource = new Map(
         rowsForProgram.map((entry, programIndex) => [entry.sourceIndex, programIndex])
       );
+      const otherEntries = importedPlayerRows
+        .map((row, sourceIndex) => ({ row, sourceIndex }))
+        .filter(({ sourceIndex }) => !programIndexBySource.has(sourceIndex));
+      const otherDurable =
+        otherEntries.length > 0
+          ? await fetchDurablePlayers(currentOrganization.id, collectPlayerLookupKeys(otherEntries))
+          : [];
+      const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
+      const otherByExternalId = new Map(
+        otherDurable
+          .filter((player) => player.external_registration_id)
+          .map((player) => [String(player.external_registration_id), player])
+      );
+      const others = otherEntries.map(({ row, sourceIndex }) => {
+        const division = resolveDivisionId(row);
+        const idCandidate = getPlayerIdCandidate(row);
+        const externalCandidate = getPlayerExternalCandidate(row);
+        const durable =
+          (isUuid(idCandidate) && otherById.get(idCandidate)) ||
+          (externalCandidate && otherByExternalId.get(externalCandidate)) ||
+          null;
+        const identified = withDurableIdentity(row, durable);
+        const generationRow = durable
+          ? {
+              ...identified,
+              id: durable.id,
+              player_id: durable.id,
+              division_id: durable.division_id || row.division_id,
+            }
+          : row;
+        return {
+          row,
+          sourceIndex,
+          division,
+          durable,
+          identified,
+          player: toGeneratorPlayer(generationRow, sourceIndex, division, {
+            buddyRequests: buddyRequestsEnabled,
+            coachingLeads: coachingInterestEnabled,
+            waitlist: waitlistEnabled,
+          }),
+        };
+      });
+      const otherBySource = new Map(others.map((entry) => [entry.sourceIndex, entry]));
       let buddyRoster;
       if (buddyRequestsEnabled) {
-        const otherRows = importedPlayerRows.filter(
-          (_, sourceIndex) => !programIndexBySource.has(sourceIndex)
-        );
-        const otherKeys = collectPlayerLookupKeys(otherRows.map((row) => ({ row })));
-        const otherDurable = await fetchDurablePlayers(currentOrganization.id, otherKeys);
-        const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
-        const otherByExternalId = new Map(
-          otherDurable
-            .filter((player) => player.external_registration_id)
-            .map((player) => [String(player.external_registration_id), player])
-        );
         buddyRoster = importedPlayerRows.map((row, sourceIndex) => {
           const programIndex = programIndexBySource.get(sourceIndex);
           if (programIndex !== undefined) {
@@ -1202,17 +1270,11 @@ export default function TeamAnalysisPage() {
               selectedProgramKey
             );
           }
-          const division = resolveDivisionId(row);
-          const idCandidate = getPlayerIdCandidate(row);
-          const externalCandidate = getPlayerExternalCandidate(row);
-          const durable =
-            (isUuid(idCandidate) && otherById.get(idCandidate)) ||
-            (externalCandidate && otherByExternalId.get(externalCandidate)) ||
-            null;
+          const other = otherBySource.get(sourceIndex);
           return toBuddyRosterEntry(
-            withDurableIdentity(row, durable),
-            durable?.id ?? toGeneratorPlayer(row, sourceIndex, division).id,
-            division
+            other.identified,
+            other.durable?.id ?? toGeneratorPlayer(other.row, sourceIndex, other.division).id,
+            other.division
           );
         });
       }
@@ -1250,29 +1312,72 @@ export default function TeamAnalysisPage() {
         entry.children.push({ player_id: link.player_id });
         coachesById.set(link.coach_id, entry);
       }
+      // Every program of the import is a division a player may play in: the selected program
+      // takes its band from the saved row, the others from their division rows (the age band
+      // and gender), else from the program's name.
+      const divisionDescriptors = programs.map((program) => {
+        const programKey = String(program.id);
+        const row =
+          programKey === selectedProgramKey
+            ? savedDivision
+            : findDivisionRowForProgram(program, divisionRows ?? []);
+        return {
+          id: programKey,
+          name: program.name,
+          min_age: row?.min_age ?? null,
+          max_age: row?.max_age ?? null,
+          gender_policy: row?.gender_policy ?? null,
+        };
+      });
+      // Who plays in this program: everyone who registered in it except a player who plays in
+      // their own age division (a play-up nobody requested, a play-down), plus those who
+      // registered elsewhere and play here. Placed first, on the file and the records alone, so
+      // the players of other programs are only read in when they land here.
+      const seasonYear = currentSeasonSetting?.season_year;
+      const cutoffMode = currentSeasonSetting?.age_cutoff_mode;
+      const everyone = [...generatorPlayers, ...others.map((entry) => entry.player)];
+      const playsHere = new Set(
+        applyPlayUpEligibility({
+          players: everyone,
+          divisions: divisionDescriptors,
+          seasonYear,
+          cutoffMode,
+        })
+          .players.filter((player) => String(player.division) === selectedProgramKey)
+          .map((player) => String(player.id))
+      );
+      const movedIn = others.filter((entry) => playsHere.has(String(entry.player.id)));
+      const unmatchedMovedIn = IS_MOCK_MODE
+        ? []
+        : movedIn
+            .filter((entry) => !entry.durable)
+            .map((entry) => resolveImportedPlayerName(entry.row));
+      if (unmatchedMovedIn.length > 0) {
+        throw new Error(
+          `Apply-ready team generation requires durable roster players. Could not match ${unmatchedMovedIn.length} imported row${unmatchedMovedIn.length === 1 ? '' : 's'} playing in this division to players: ${unmatchedMovedIn.slice(0, 3).join(', ')}.`
+        );
+      }
       const prepared = prepareTeamingInput({
-        players: generatorPlayers,
+        players: [...generatorPlayers, ...movedIn.map((entry) => entry.player)],
         roster: buddyRoster,
         buddyRule,
         coaches: [...coachesById.values()],
-        divisions: [
-          {
-            id: selectedProgramKey,
-            name: selectedProgram.name,
-            min_age: savedDivision.min_age,
-            max_age: savedDivision.max_age,
-            birthdate_start: savedDivision.birthdate_start,
-            birthdate_end: savedDivision.birthdate_end,
-            gender_policy: savedDivision.gender_policy,
-          },
-        ],
-        seasonYear: currentSeasonSetting?.season_year,
-        cutoffMode: currentSeasonSetting?.age_cutoff_mode,
-        // Single-division flow: annotate eligibility, do not remap across divisions.
-        remapBlocked: false,
+        divisions: divisionDescriptors,
+        seasonYear,
+        cutoffMode,
       });
-      const preparedPlayers = prepared.players;
+      // The pipeline places each player in the division they play in; this run seats the ones
+      // who play in this program. The rest of the registrants are in the listing only.
+      const preparedPlayers = prepared.players.filter(
+        (player) => String(player.division) === selectedProgramKey
+      );
       const preparedDiagnostics = prepared.diagnostics;
+      const inThisProgram = (entry) =>
+        [entry.registeredDivision, entry.playedDivision].includes(selectedProgramKey);
+      const playUpListing = preparedDiagnostics.playUp.listing.filter(inThisProgram);
+      const waitlistExceptions = preparedDiagnostics.waitlistExceptions.filter(
+        (entry) => entry.division === selectedProgramKey
+      );
 
       const divisionConfig = {
         id: selectedProgramKey,
@@ -1304,14 +1409,16 @@ export default function TeamAnalysisPage() {
         featureFlags: features,
       });
       // The "Buddy requests" list, kept in the run's results so it survives a reload.
-      const result =
+      const withBuddyList =
         buddyRequestsEnabled && preparedDiagnostics
           ? {
               ...generated,
               buddyRequestsByDivision: {
                 [selectedProgramKey]: summarizeBuddyRequests({
                   players: preparedPlayers,
-                  requests: preparedDiagnostics.buddyRequests,
+                  requests: preparedDiagnostics.buddyRequests.filter((request) =>
+                    preparedPlayers.some((player) => String(player.id) === request.playerId)
+                  ),
                   linkDiagnostics: preparedDiagnostics.buddyLinking,
                   buddyDiagnostics: generated.buddyDiagnosticsByDivision?.[selectedProgramKey],
                   teams: generated.teamsByDivision?.[selectedProgramKey],
@@ -1322,6 +1429,13 @@ export default function TeamAnalysisPage() {
               },
             }
           : generated;
+      // The Play-up section's rows and the players taken off the waitlist, kept in the run's
+      // results so they survive a reload and the save can make those players active.
+      const result = {
+        ...withBuddyList,
+        playUpByDivision: { [selectedProgramKey]: playUpListing },
+        waitlistExceptionsByDivision: { [selectedProgramKey]: waitlistExceptions },
+      };
       const generatedTeams = result.teamsByDivision?.[selectedProgramKey] ?? [];
       if (generatedTeams.length === 0) {
         throw new Error(noTeamsMessage(selectedProgram.name, preparedPlayers, result));
@@ -1329,10 +1443,12 @@ export default function TeamAnalysisPage() {
       const coverage = result.coachCoverageByDivision?.[selectedProgramKey] ?? null;
       // The review names the coaches it flags (no team to anchor, more than one child); the run
       // holds ids only, so their names are kept with it.
-      const coachNamesById = await readCoachNames(
-        currentOrganization.id,
-        coachIdsNamedByReview(summarizePlacementReview(result))
-      );
+      const coachNamesById = await readCoachNames(currentOrganization.id, [
+        ...new Set([
+          ...coachIdsNamedByReview(summarizePlacementReview(result)),
+          ...coachIdsNamedByPlayUp(summarizePlayUpReview(result)),
+        ]),
+      ]);
       const now = new Date().toISOString();
       const snapshot = buildTeamReviewSnapshot({
         generatedResult:
@@ -1368,6 +1484,7 @@ export default function TeamAnalysisPage() {
         [
           teamSizeAnnouncement(summarizeTeamSizeReview(snapshot.runMetadata.results)),
           placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results)),
+          playUpAnnouncement(summarizePlayUpReview(snapshot.runMetadata.results)),
         ]
           .filter(Boolean)
           .join(' ')
@@ -1397,6 +1514,8 @@ export default function TeamAnalysisPage() {
   }, [
     buddyRequestsEnabled,
     buddyRule,
+    coachingInterestEnabled,
+    waitlistEnabled,
     configs,
     canManageTeams,
     features,
@@ -1408,6 +1527,8 @@ export default function TeamAnalysisPage() {
     importedPlayerRows,
     persistenceSnapshot,
     persistenceLoading,
+    programs,
+    divisionRows,
     resolveGeneratorPlayers,
     saveDivisionConfig,
     session?.user,
@@ -1468,9 +1589,32 @@ export default function TeamAnalysisPage() {
   const displayPersistenceSnapshot = stagedReview?.snapshot || persistenceSnapshot;
 
   const refetchTeam = team?.refetch;
+  // The players this run took off the waitlist (a coach's child's buddy) become active when the
+  // teams are saved, through the same audited bulk status write the Players page uses. A failed
+  // write is said, never swallowed: they are on a team and still marked waitlisted until it is.
+  const activateWaitlistedPlayers = useCallback(async (playerIds, appliedMessage) => {
+    const plural = playerIds.length === 1 ? 'player' : 'players';
+    const { error } = await supabase.rpc('admin_bulk_update_players', {
+      p_player_ids: playerIds,
+      p_patch: { status: 'active' },
+    });
+    if (error) {
+      logger.error('[TeamAnalysis] waitlisted players could not be made active:', error);
+      setReviewMessage(
+        `${appliedMessage} ${playerIds.length} ${plural} taken off the waitlist could not be made active (${
+          error.message || 'the write was refused'
+        }): set their status on the Players page.`
+      );
+      return;
+    }
+    setReviewMessage(
+      `${appliedMessage} ${playerIds.length} ${plural} taken off the waitlist ${playerIds.length === 1 ? 'is' : 'are'} now active.`
+    );
+  }, []);
   const handlePersistSuccess = useCallback(
     (result) => {
       if (stagedReview) {
+        const savedSnapshot = stagedReview.snapshot;
         setStagedReview(null);
         setPlacementAnnouncement('');
         // The page's own line, so it survives the panel: the sync's counts are kept here
@@ -1479,7 +1623,13 @@ export default function TeamAnalysisPage() {
           Number.isFinite(result?.updatedTeams) && Number.isFinite(result?.updatedPlayers)
             ? ` ${result.updatedTeams} teams and ${result.updatedPlayers} players synced to Supabase.`
             : '';
-        setReviewMessage(`Team review applied.${counts}`);
+        const applied = `Team review applied.${counts}`;
+        setReviewMessage(applied);
+        const taken = waitlistPlayersToActivate(
+          savedSnapshot?.runMetadata?.results,
+          savedSnapshot?.payload?.teamPlayerRows
+        );
+        if (taken.length > 0) activateWaitlistedPlayers(taken, applied);
       }
       // Pull the just-persisted run back into the hook so a same-session re-run preserves it
       // instead of falling back to the stale pre-sync snapshot.
@@ -1489,7 +1639,7 @@ export default function TeamAnalysisPage() {
       // generate view until a reload.
       refetchTeam?.();
     },
-    [stagedReview, refreshPersistence, refetchTeam]
+    [stagedReview, refreshPersistence, refetchTeam, activateWaitlistedPlayers]
   );
 
   const handleDiscardReview = useCallback(() => {
@@ -1948,6 +2098,7 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
+          <PlayUpList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <PlacementReviewList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (

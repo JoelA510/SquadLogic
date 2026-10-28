@@ -29,7 +29,6 @@ function prepare(players, coaches = []) {
     divisions: U10,
     seasonYear: 2026,
     cutoffMode: 'birth_year',
-    remapBlocked: false,
   }).players;
 }
 
@@ -187,9 +186,9 @@ describe('a waitlisted player is seated nowhere, and is not dropped silently', (
   });
 });
 
-describe("a held-out player cannot sanction a buddy's play-up (route B needs them placed together)", () => {
+describe('a younger player who requested to play up, with a coach’s child as the buddy', () => {
   const YOUNG_DOB = '2018-05-01'; // natural age 8 in U10: a play-up
-  const pair = (childExtra) => [
+  const pair = (childExtra, youngExtra = { play_up_requested: true }) => [
     kid('child', {
       firstName: 'Cara',
       lastName: 'Coach',
@@ -201,6 +200,7 @@ describe("a held-out player cannot sanction a buddy's play-up (route B needs the
       lastName: 'Younger',
       dob: YOUNG_DOB,
       buddy_request: 'Cara Coach',
+      ...youngExtra,
     }),
     ...Array.from({ length: 4 }, (_, i) =>
       kid(`f${i}`, { firstName: `Fill${String.fromCharCode(97 + i)}`, lastName: 'Lane' })
@@ -215,48 +215,58 @@ describe("a held-out player cannot sanction a buddy's play-up (route B needs the
       divisions: U10,
       seasonYear: 2026,
       cutoffMode: 'birth_year',
-      remapBlocked: false,
-    }).players;
+    });
     return {
-      prepared,
-      result: generateTeams({ players: prepared, divisionConfigs: config(4), seed: 'route-b' }),
+      prepared: prepared.players,
+      diagnostics: prepared.diagnostics,
+      result: generateTeams({
+        players: prepared.players,
+        divisionConfigs: config(4),
+        seed: 'route-b',
+      }),
     };
   };
+  const teamOf = (result, id) =>
+    result.teamsByDivision.U10.find((team) => team.players.some((p) => p.id === id));
 
-  it('control: a placed coach child as the mutual buddy does sanction it, and they are seated together', () => {
-    const { prepared, result } = run(pair({}));
-    expect(prepared.find((p) => p.id === 'young').placement).toBe('play_up_sanctioned');
-    const teamOf = (id) =>
-      result.teamsByDivision.U10.find((team) => team.players.some((p) => p.id === id));
-    expect(teamOf('young')).toBeDefined();
-    expect(teamOf('young').id).toBe(teamOf('child').id);
+  it('is placed with the coach’s child and listed, with the buddy in the division', () => {
+    const { prepared, diagnostics, result } = run(pair({}));
+    expect(prepared.find((p) => p.id === 'young').placement).toBe('play_up');
+    expect(teamOf(result, 'young')).toBeDefined();
+    expect(teamOf(result, 'young').id).toBe(teamOf(result, 'child').id);
+    const entry = diagnostics.playUp.listing.find((e) => e.playerId === 'young');
+    expect(entry).toMatchObject({ requested: true, buddyId: 'child', buddyInPlayedDivision: true });
   });
 
-  it('a waitlisted coach child sanctions nothing: the younger player is blocked and listed with the reason', () => {
+  it('a waitlisted coach child is not placed, and the requester is placed alone, not blocked', () => {
     const { prepared, result } = run(pair({ status: 'waitlist' }));
     const young = prepared.find((p) => p.id === 'young');
-    expect(young.placement).toBe('play_up_blocked');
+    expect(young.placement).toBe('play_up');
     expect(young.needsReview).toBe(true);
-    expect(seatedIds(result)).not.toContain('young');
+    expect(seatedIds(result)).toContain('young');
     expect(seatedIds(result)).not.toContain('child');
-    const entry = overflowOf(result, TEAM_GENERATION.REASON_EligibilityBlocked).find(
-      (e) => e.players[0].id === 'young'
-    );
-    expect(entry.metadata).toMatchObject({
-      placement: 'play_up_blocked',
-      reviewReason: 'unsanctioned play-up (no coaching parent or qualifying buddy)',
-    });
+    expect(overflowOf(result, TEAM_GENERATION.REASON_EligibilityBlocked)).toEqual([]);
     expect(
       overflowOf(result, TEAM_GENERATION.REASON_Waitlisted).map((e) => e.players[0].id)
     ).toEqual(['child']);
+    expect(result.buddyDiagnosticsByDivision.U10.unmatchedRequests).toEqual([
+      { playerId: 'young', requestedBuddyId: 'child', reason: 'buddy-not-placed' },
+    ]);
   });
 
-  it('a blocked coach child (who would play down) sanctions nothing either', () => {
+  it('a coach child no division can hold is held out, and the requester is placed alone', () => {
     const { prepared, result } = run(pair({ dob: PLAY_DOWN_DOB }));
-    expect(prepared.find((p) => p.id === 'child').placement).toBe('play_down_blocked');
-    expect(prepared.find((p) => p.id === 'young').placement).toBe('play_up_blocked');
+    expect(prepared.find((p) => p.id === 'child').placement).toBe('no_division');
+    expect(prepared.find((p) => p.id === 'young').placement).toBe('play_up');
+    expect(seatedIds(result)).toContain('young');
+    expect(overflowOf(result, TEAM_GENERATION.REASON_EligibilityBlocked)).toHaveLength(1);
+  });
+
+  it('without the request, with no age division to move to, the player is held out, listed', () => {
+    const { prepared, diagnostics, result } = run(pair({}, { play_up_requested: false }));
+    expect(prepared.find((p) => p.id === 'young').placement).toBe('no_division');
     expect(seatedIds(result)).not.toContain('young');
-    expect(overflowOf(result, TEAM_GENERATION.REASON_EligibilityBlocked)).toHaveLength(2);
+    expect(diagnostics.playUp.listing.find((e) => e.playerId === 'young').kind).toBe('no-division');
   });
 });
 

@@ -9,14 +9,18 @@
  *   3. link imported coaches to their player-children (so the generator anchors
  *      a team per coaching family — separate coach exports now drive teaming), then
  *      break any mutual pair whose two players anchor different head coaches;
- *   4. flag coach-children so play-up "route A" (a coaching parent) is honored;
- *   5. apply play-up / play-down eligibility.
+ *   4. place each player in the division they play in: their own age division, unless they
+ *      requested a play-up, and list every play-up and play-down for the admin (`playUp.js`);
+ *      a buddy pair that now plays in two divisions is told apart;
+ *   5. take off the waitlist a waitlisted player a coach asked for: the buddy of a coach's
+ *      linked child (`waitlistException.js`).
  *
  * Pure module — no React / Supabase imports.
  */
 
 import { linkCoachesToPlayers } from './coachLinking.js';
 import { applyPlayUpEligibility } from './playUp.js';
+import { applyWaitlistException } from './waitlistException.js';
 import {
   BUDDY_REQUEST_FIELDS,
   BUDDY_RULES,
@@ -68,7 +72,12 @@ function breakCoachConflictPairs(players) {
 /** The buddy-request outcomes that did not link a pair, as `buddyLinking` diagnostics. */
 function requestDiagnostics(outcomes) {
   return outcomes
-    .filter((outcome) => outcome.outcome !== 'mutual' && outcome.outcome !== 'coach-conflict')
+    .filter(
+      (outcome) =>
+        outcome.outcome !== 'mutual' &&
+        outcome.outcome !== 'coach-conflict' &&
+        outcome.outcome !== 'played-apart'
+    )
     .map((outcome) => ({
       code:
         outcome.outcome === 'one-way'
@@ -83,34 +92,56 @@ function requestDiagnostics(outcomes) {
     }));
 }
 
-function collectCoachChildIds(coaches) {
-  const ids = new Set();
-  for (const coach of coaches ?? []) {
-    if (Array.isArray(coach?.children)) {
-      for (const child of coach.children) {
-        if (child?.player_id) ids.add(String(child.player_id));
-      }
-    }
-    const single = coach?.player_id ?? coach?.playerId;
-    if (single) ids.add(String(single));
+/**
+ * Break every mutual pair whose two players now play in different divisions (a play-up or
+ * play-down put one of them in their own age division): a pair is one unit, and a unit cannot
+ * sit in two divisions. Both players keep everything else; the pair is reported, never thrown.
+ */
+function breakPlayedApartPairs(players) {
+  const byId = new Map(players.map((player) => [String(player.id), player]));
+  const broken = new Set();
+  /** @type {Array<{ code: string, severity: 'info', message: string, playerIds: string[] }>} */
+  const diagnostics = [];
+  for (const player of players) {
+    const id = String(player.id);
+    const buddyId = getCanonicalBuddyId(player);
+    if (!buddyId || broken.has(id)) continue;
+    const buddy = byId.get(buddyId);
+    if (!buddy || getCanonicalBuddyId(buddy) !== id) continue;
+    if (String(buddy.division).toLowerCase() === String(player.division).toLowerCase()) continue;
+    broken.add(id);
+    broken.add(buddyId);
+    diagnostics.push({
+      code: 'buddy-played-apart',
+      severity: 'info',
+      message: `buddies ${id} and ${buddyId} play in different divisions (${player.division} and ${buddy.division}), so they are not placed together`,
+      playerIds: [id, buddyId].sort(),
+    });
   }
-  return ids;
+  if (broken.size === 0) return { players, diagnostics, broken };
+  const next = players.map((player) => {
+    if (!broken.has(String(player.id))) return player;
+    const copy = { ...player };
+    delete copy.buddyId;
+    delete copy.buddy_id;
+    return copy;
+  });
+  return { players: next, diagnostics, broken };
 }
 
 /**
  * @param {Object} params
  * @param {Array<Object>} params.players - generator players (id, division, ...)
  * @param {Array<Object>} [params.coaches] - imported coaches with child links
- * @param {Array<Object>|Object} [params.divisions]
  * @param {number} params.seasonYear
  * @param {string} [params.cutoffMode]
- * @param {boolean} [params.remapBlocked=false] - single-division flows keep this
- *   false (annotate only); multi-division flows can remap illegal placements.
+ * @param {Array<Object>|Object} [params.divisions] - every division of the league: a player
+ *   who plays in their own age division is placed in the one that holds their natural age.
  * @param {Array<Object>} [params.roster] - every imported player (id, division, names,
  *   external registration id), so a buddy request naming someone outside the program is
  *   told apart from one naming nobody. Defaults to `players`.
  * @param {string} [params.buddyRule='mutual'] - the league's `buddy_rule` (`BUDDY_RULES`).
- * @returns {{ players: Array<Object>, diagnostics: { buddyLinking: Array<Object>, buddyRequests: Array<Object>, coachLinking: Object, playUp: Object } }}
+ * @returns {{ players: Array<Object>, diagnostics: { buddyLinking: Array<Object>, buddyRequests: Array<Object>, coachLinking: Object, playUp: Object, waitlistExceptions: Array<Object> } }}
  */
 export function prepareTeamingInput({
   players,
@@ -119,7 +150,6 @@ export function prepareTeamingInput({
   divisions = [],
   seasonYear,
   cutoffMode,
-  remapBlocked = false,
   buddyRule = BUDDY_RULES.MUTUAL,
 }) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
@@ -152,40 +182,50 @@ export function prepareTeamingInput({
     return fields ? { ...player, ...fields } : player;
   });
 
-  // A coach's child is coached by their parent — mark them so a play-up gains
-  // the "coaching parent" sanction route.
-  const coachChildIds = collectCoachChildIds(coaches);
-  const flagged = restored.map((player) =>
-    coachChildIds.has(String(player.id)) ? { ...player, isCoachChild: true } : player
-  );
-
+  // Everyone plays in their own age division unless they requested a play-up; the listing
+  // carries the coach and buddy facts, so it runs after both are linked.
   const playUp = applyPlayUpEligibility({
-    players: flagged,
+    players: restored,
     divisions,
     seasonYear,
     cutoffMode,
-    remapBlocked,
   });
+  const apart = breakPlayedApartPairs(playUp.players);
+  const requestsAfterPlay = buddyRequests.map((outcome) =>
+    apart.broken.has(outcome.playerId) && outcome.outcome === 'mutual'
+      ? { ...outcome, outcome: 'played-apart', honoured: false }
+      : outcome
+  );
 
   // Honoured one-way requests, last: best effort only. A requester a code paired meanwhile
   // keeps that pair (one buddy per player), and the request is listed as not honoured.
-  const finalBuddyRequests = buddyRequests.map((outcome) =>
-    outcome.outcome === 'one-way' &&
-    outcome.honoured &&
-    getCanonicalBuddyId(playUp.players.find((p) => String(p.id) === outcome.playerId)) !== undefined
-      ? { ...outcome, honoured: false, reason: 'requester-has-another-buddy' }
-      : outcome
-  );
+  const playedIn = new Map(playUp.players.map((p) => [String(p.id), String(p.division)]));
+  const finalBuddyRequests = requestsAfterPlay.map((outcome) => {
+    if (outcome.outcome !== 'one-way' || !outcome.honoured) return outcome;
+    if (
+      getCanonicalBuddyId(apart.players.find((p) => String(p.id) === outcome.playerId)) !==
+      undefined
+    ) {
+      return { ...outcome, honoured: false, reason: 'requester-has-another-buddy' };
+    }
+    return playedIn.get(outcome.playerId)?.toLowerCase() ===
+      playedIn.get(outcome.targetId)?.toLowerCase()
+      ? outcome
+      : { ...outcome, honoured: false, reason: 'plays-in-another-division' };
+  });
   const honouredOneWay = new Set(
     finalBuddyRequests
       .filter((outcome) => outcome.outcome === 'one-way' && outcome.honoured)
       .map((outcome) => outcome.playerId)
   );
-  const outPlayers = playUp.players.map((player) =>
+  const withOneWay = apart.players.map((player) =>
     honouredOneWay.has(String(player.id))
       ? { ...player, buddyId: ruled.oneWayBuddyIds.get(String(player.id)) }
       : player
   );
+  // Last, because it reads the final links: a waitlisted player a coach asked for comes off.
+  const waitlist = applyWaitlistException({ players: withOneWay });
+  const outPlayers = waitlist.players;
 
   return {
     players: outPlayers,
@@ -194,10 +234,12 @@ export function prepareTeamingInput({
         ...requestDiagnostics(finalBuddyRequests),
         ...buddies.diagnostics,
         ...unclashed.diagnostics,
+        ...apart.diagnostics,
       ],
       buddyRequests: finalBuddyRequests,
       coachLinking: linked.diagnostics,
       playUp: playUp.diagnostics,
+      waitlistExceptions: waitlist.exceptions,
     },
   };
 }

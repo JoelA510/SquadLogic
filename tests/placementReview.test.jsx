@@ -56,10 +56,10 @@ describe('placement review :: not placed', () => {
       teamA: [inBand('a')],
       overflow: [
         {
-          players: [player('x', { placement: 'play_down_blocked', naturalAge: 13 })],
+          players: [player('x', { placement: 'no_division', naturalAge: 13 })],
           reason: 'eligibility-blocked',
           metadata: {
-            placement: 'play_down_blocked',
+            placement: 'no_division',
             reviewReason: 'play-down is not permitted',
             naturalAge: 13,
             coachId: null,
@@ -72,7 +72,7 @@ describe('placement review :: not placed', () => {
 
     const items = itemsOf('Not placed');
     expect(items.map((item) => item.textContent)).toEqual([
-      'Player X. Not eligible for this division. Older than the division allows, and playing down is not permitted. Natural age 13.',
+      'Player X. Not eligible for this division. No division in this import holds a player of their age. Natural age 13.',
       'Player Y. No room: the teams were full. Natural age 10.',
       'Player Z. No room: the teams were full. Natural age 10.',
     ]);
@@ -123,8 +123,8 @@ describe('placement review :: not placed', () => {
 describe('placement review :: needs review', () => {
   const blocked = (id) =>
     player(id, {
-      placement: 'play_up_blocked',
-      reviewReason: 'unsanctioned play-up (no coaching parent or qualifying buddy)',
+      placement: 'no_division',
+      reviewReason: 'no division holds natural age 8',
       division: 'U10',
       registeredDivision: 'U10',
     });
@@ -133,9 +133,7 @@ describe('placement review :: needs review', () => {
     const results = run({
       teamA: [blocked('h'), inBand('a')],
       teamB: [inBand('b')],
-      holds: [
-        { playerId: 'h', teamId: 'team-a', placement: 'play_up_blocked', reviewReason: null },
-      ],
+      holds: [{ playerId: 'h', teamId: 'team-a', placement: 'no_division', reviewReason: null }],
       // The admin moved the held player to Team B by hand.
       rows: [
         { team_id: 'team-b', player_id: 'h', role: 'player', player_name: 'Player H' },
@@ -149,7 +147,7 @@ describe('placement review :: needs review', () => {
     );
 
     expect(itemsOf('Needs review').map((item) => item.textContent)).toEqual([
-      "Player H, on Team B. Not eligible for this division. Younger than the division allows, with no coaching parent or coach's child as a buddy to sanction playing up. Kept on the reviewed roster; move them by hand if you agree.",
+      'Player H, on Team B. Not eligible for this division. No division in this import holds a player of their age. Kept on the reviewed roster; move them by hand if you agree.',
     ]);
   });
 
@@ -164,7 +162,7 @@ describe('placement review :: eligibility not checked', () => {
   it('flags each placed player whose placement is not a passed check, beside their name', () => {
     const results = run({
       teamA: [inBand('a'), player('u', { placement: 'unknown' })],
-      teamB: [player('s', { placement: 'play_up_sanctioned' }), player('w')],
+      teamB: [player('s', { placement: 'play_up' }), player('w')],
     });
     render(<PlacementReviewList results={results} />);
 

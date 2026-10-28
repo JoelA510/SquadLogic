@@ -12,7 +12,7 @@ import { isRosterPlayerRow, isUuid } from './teamReviewPersistence.js';
  */
 
 /** Placements that are a completed check the player passed. */
-const CHECKED_PLACEMENTS = new Set([PLACEMENT.IN_BAND, PLACEMENT.PLAY_UP_SANCTIONED]);
+const CHECKED_PLACEMENTS = new Set([PLACEMENT.IN_BAND, PLACEMENT.PLAY_UP, PLACEMENT.PLAY_DOWN]);
 
 /** The reasons a player is held out of every team, so a coach whose only child it is has none. */
 const HELD_OUT_REASONS = new Set([

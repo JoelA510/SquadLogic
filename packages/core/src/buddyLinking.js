@@ -738,6 +738,7 @@ export function applyBuddyRule({ players, requests, buddyRule }) {
 /** `normalizeBuddyLinks` and pipeline diagnostics that leave a player without the buddy asked for. */
 const UNLINKED_DIAGNOSTIC_CODES = new Set([
   'buddy-coach-conflict',
+  'buddy-played-apart',
   'buddy-code-unmatched',
   'duplicate-buddy-code',
   'cross-division-buddy',

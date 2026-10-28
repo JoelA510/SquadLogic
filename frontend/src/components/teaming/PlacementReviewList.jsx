@@ -11,11 +11,9 @@ const NOT_PLACED_REASONS = {
   'buddy-target-locked': "Their buddy's team is locked.",
 };
 
-/** Why a placement fails the division's age band, in words (`applyPlayUpEligibility`). */
+/** Why a player cannot be placed, in words (`applyPlayUpEligibility`). */
 const BLOCKED_PLACEMENTS = {
-  play_down_blocked: 'Older than the division allows, and playing down is not permitted.',
-  play_up_blocked:
-    "Younger than the division allows, with no coaching parent or coach's child as a buddy to sanction playing up.",
+  no_division: 'No division in this import holds a player of their age.',
 };
 
 function eligibilityText(placement, reviewReason) {

@@ -180,6 +180,7 @@ M53="$REPO/supabase/migrations/20261104010000_admin_only.sql"
 R53="$REPO/docs/sql/20261104010000_revert.sql"
 M54="$REPO/supabase/migrations/20261104020000_drop_coach_user_link.sql"
 R54="$REPO/docs/sql/20261104020000_revert.sql"
+M55="$REPO/supabase/migrations/20261106010000_play_up_requested.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3778,7 +3779,7 @@ END;
 # again at 20261022020000, which replaces that one, again at 20261025010000,
 # and again at 20261026010000 ($M43), the live body: the staged payload stored
 # whole as custom_attributes again.
-plant "M30 finalize stores a staged medical key in custom_attributes" "$M50" \
+plant "M30 finalize stores a staged medical key in custom_attributes" "$M55" \
   "            public.import_declared_attributes(v_declared, sp.normalized_payload)
                 AS custom_attributes" \
   "            sp.normalized_payload AS custom_attributes" \
@@ -4140,9 +4141,9 @@ plant "R37 the revert restores a drifted finalize_coach_import_job body" "$R37" 
 # drifted. The patch helper plants are aimed at $M43, whose
 # sanitize_player_patch and apply_player_patch (R5: no birth date) replace
 # this file's (and R4's).
-plant "M38 the patch sanitizer still takes paid" "$M43" \
-  "            WHEN 'willing_to_coach' THEN" \
-  "            WHEN 'paid', 'willing_to_coach' THEN" \
+plant "M38 the patch sanitizer still takes paid" "$M55" \
+  "            WHEN 'willing_to_coach', 'play_up_requested' THEN" \
+  "            WHEN 'paid', 'willing_to_coach', 'play_up_requested' THEN" \
   "smoke 20261022020000"
 
 plant "M38 coach_update_player_compliance is left behind" "$M38" \
@@ -4151,7 +4152,7 @@ plant "M38 coach_update_player_compliance is left behind" "$M38" \
   "" \
   "smoke 20261022020000"
 
-plant "M38 apply_player_patch loses its UTC pin" "$M43" \
+plant "M38 apply_player_patch loses its UTC pin" "$M55" \
   "LANGUAGE plpgsql
 SET search_path = public
 SET timezone = 'UTC'
@@ -4394,7 +4395,7 @@ plant "M42 the member list admits any signed-in user" "$M42" \
 
 # The sanitizer is R5's since 20261026010000 ($M43), which has no birth date
 # arm: the key is taken with the text fields.
-plant "M42 the sanitizer takes guardian_contacts again" "$M43" \
+plant "M42 the sanitizer takes guardian_contacts again" "$M55" \
   "                 'buddy_request' THEN" \
   "                 'buddy_request', 'guardian_contacts' THEN" \
   "smoke 20261025010000"
@@ -4454,7 +4455,7 @@ plant "M43 players.birth_year is left behind" "$M43" \
   "    DROP COLUMN date_of_birth;" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 apply_player_patch still writes the birth date" "$M43" \
+plant "M43 apply_player_patch still writes the birth date" "$M55" \
   "        team_id         = CASE WHEN p_sanitized ? 'team_id' THEN (p_sanitized->>'team_id')::uuid ELSE p.team_id END,
         updated_at      = now()" \
   "        team_id         = CASE WHEN p_sanitized ? 'team_id' THEN (p_sanitized->>'team_id')::uuid ELSE p.team_id END,
@@ -4462,7 +4463,7 @@ plant "M43 apply_player_patch still writes the birth date" "$M43" \
         updated_at      = now()" \
   "applying 20261026010000_natural_age_replaces_birthdates.sql"
 
-plant "M43 the finalizer promotes only a row with a natural age" "$M50" \
+plant "M43 the finalizer promotes only a row with a natural age" "$M55" \
   "        WHERE p.first_name IS NOT NULL
           AND p.last_name IS NOT NULL
     )," \
@@ -4472,7 +4473,7 @@ plant "M43 the finalizer promotes only a row with a natural age" "$M50" \
     )," \
   "smoke 20261026010000"
 
-plant "M43 the finalizer prefers the age group to the staged natural age" "$M50" \
+plant "M43 the finalizer prefers the age group to the staged natural age" "$M55" \
   "                WHEN p.natural_age_text ~ '^[0-9]{1,2}\$' AND p.natural_age_text::int BETWEEN 1 AND 25
                     THEN p.natural_age_text::smallint
                 WHEN p.age_group_text ~ '^[0-9]{1,2}\$' AND p.age_group_text::int BETWEEN 1 AND 25
@@ -4483,12 +4484,12 @@ plant "M43 the finalizer prefers the age group to the staged natural age" "$M50"
                     THEN p.natural_age_text::smallint" \
   "smoke 20261026010000"
 
-plant "M43 a re-import keeps the old natural age" "$M50" \
+plant "M43 a re-import keeps the old natural age" "$M55" \
   "            natural_age = de.natural_age," \
   "            natural_age = COALESCE(de.natural_age, p.natural_age)," \
   "smoke 20261026010000"
 
-plant "M43 the sanitizer takes date_of_birth again" "$M43" \
+plant "M43 the sanitizer takes date_of_birth again" "$M55" \
   "                 'buddy_request' THEN" \
   "                 'buddy_request', 'date_of_birth' THEN" \
   "smoke 20261026010000"
@@ -4764,7 +4765,7 @@ plant "M49 an anonymous user's first password goes unchecked" "$M49" \
 # caller names (a completed season's program edited through the active season's id); and a season
 # made after the migration still gets its default program (the trigger, which no migration-time
 # check can see, since the harness's migration build has no season to give one to).
-plant "M50 the finalizer ignores the job's season" "$M50" \
+plant "M50 the finalizer ignores the job's season" "$M55" \
   "                ELSE s.id = v_job.season_settings_id END);
 
     IF v_season_status = 'completed' THEN" \
@@ -4846,6 +4847,14 @@ plant "M54 the column drop leaves coaches.profile_id" "$M54" \
   "ALTER TABLE public.coaches DROP COLUMN IF EXISTS profile_id;" \
   "SELECT 1; -- plant: profile_id is left" \
   "applying 20261104020000_drop_coach_user_link.sql"
+
+# The play-up request (20261106010000; plan docs/changes/2026-10-27-play-up-by-request.md). The
+# finalizer reads x as a request beside yes, true, y, t and 1; the smoke stores one player per
+# spelling, so a list without x leaves that player without a request.
+plant "M55 the finalizer does not read x as a play-up request" "$M55" \
+  "ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1', 'x')" \
+  "ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1')" \
+  "smoke 20261106010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

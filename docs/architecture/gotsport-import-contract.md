@@ -75,7 +75,7 @@ than storing it.
 | `division_id`, `division_name`, `division`, `group`, `program`                                                                                             | `division_id`                                              | Division                                  |
 | `skill_tier`, `skill_level`, `years_played` (and the GotSport question)                                                                                    | `skill_tier`, `years_played`                               | Team balancing                            |
 | `waitlist`, `waitlisted`                                                                                                                                   | `status`                                                   | Waitlist                                  |
-| `play_up`, `play up` (and the GotSport question)                                                                                                           | `custom_attributes.play_up`                                | Play-up signal                            |
+| `play_up`, `play up` (and the GotSport question)                                                                                                           | `play_up_requested`                                        | Play-up request                           |
 | `willing_to_coach`, `coach_volunteer` (and "Can you coach for this player's team?")                                                                        | `willing_to_coach`, `custom_attributes.coaching_answer`    | Coach interest                            |
 | `buddy_request`, `buddy_id`, `buddy_external_registration_id`, `buddy_registration_id`, `friend_request`, `mutual_buddy_code`, `buddy_code`, `friend_code` | `buddy_request`, `player_buddies`                          | Buddy pairing                             |
 | `team name`, `team age`, `team gender`                                                                                                                     | `custom_attributes.team_name` / `team_age` / `team_gender` | Phase B (teams formed outside SquadLogic) |
@@ -230,16 +230,33 @@ pilot's single-year and multi-year bands, e.g. U11–U12).
 
 ## Play-up / play-down
 
-`packages/core/src/playUp.js` enforces the pilot rule:
+`packages/core/src/playUp.js` places every player in their own age division by
+default and approves or refuses nothing (owner, 2026-10-27,
+`docs/changes/2026-10-27-play-up-by-request.md`): clubs' rules differ (play up only
+with a parent coaching the team, and so on), so the app lists the facts and the admin
+decides.
 
-- **Play up** (into an older band) is allowed **only when sanctioned**: the
-  player's parent coaches that division (coach-child), or they are buddied with a
-  player who legitimately belongs to it.
-- **Play down** is never allowed.
+- **The request.** The play-up column (`play_up`, `play up`, or the GotSport question)
+  is stored as `players.play_up_requested`: yes, true, y, t, 1 or x is a request,
+  anything else is none; a row without the column leaves a re-imported player's
+  request alone. An admin sets or clears it on the player record (an audited patch).
+- **Play up** (registered in an older division than the natural age): with a request
+  the player plays in the older division they registered for; without one, in their
+  own age division. Either way the **Play-up** section of the Teams page lists them,
+  with the facts an admin needs: natural age, the division registered and the one
+  played in, whether a parent coaches (a `coach_team_requests` link of an active or
+  pending-confirmation coach) and whether a buddy is in the division.
+- **Play down** (registered in a younger division): the player plays in their own age
+  division and is listed.
+- **Only a player no division can hold** (none in the import covers their natural
+  age) is not placed: listed under "Not placed" with the reason.
+- **The waitlist exception.** A waitlisted player comes off the waitlist only when a
+  coach asked for them: the buddy, under the league's buddy rule, of a coach's linked
+  child. They are placed on the coach's team with that child and listed; saving the
+  teams makes them active through the audited bulk status write.
 
-Unsanctioned play-ups and play-downs are flagged (and, in multi-division runs,
-remapped to the player's natural division). `useConflicts` surfaces the same:
-sanctioned play-ups are not conflicts; play-downs and unsanctioned play-ups are.
+A division with no registered player is not a program of the import, so a player
+whose own age division is one is listed as not placed.
 
 ## Division auto-create
 

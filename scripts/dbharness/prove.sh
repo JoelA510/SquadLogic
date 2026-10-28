@@ -4873,12 +4873,13 @@ plant "M54 the column drop leaves coaches.profile_id" "$M54" \
   "SELECT 1; -- plant: profile_id is left" \
   "applying 20261104020000_drop_coach_user_link.sql"
 
-# The play-up request (20261106010000; plan docs/changes/2026-10-27-play-up-by-request.md). The
-# finalizer reads x as a request beside yes, true, y, t and 1; the smoke stores one player per
-# spelling, so a list without x leaves that player without a request.
-plant "M56 the finalizer does not read x as a play-up request" "$M56" \
-  "ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1', 'x')" \
-  "ELSE lower(p.play_up_text) IN ('yes', 'true', 'y', 't', '1')" \
+# The play-up request (20261106010000; plan docs/changes/2026-10-27-play-up-by-request.md). A
+# blank play-up cell is a present column that withdraws a request; `import_payload_text` returns
+# NULL for it just as for a missing key, so the finalizer reads presence from the key. Read from
+# the text, a blank cell leaves the stored request in place and the smoke's re-import row sees it.
+plant "M56 a blank play-up cell is read as an absent column" "$M56" \
+  "                WHEN NOT p.play_up_present THEN NULL" \
+  "                WHEN p.play_up_text IS NULL THEN NULL" \
   "smoke 20261106010000"
 
 # ---------------------------------------------------------------------------

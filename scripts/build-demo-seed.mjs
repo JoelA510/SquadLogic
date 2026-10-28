@@ -315,16 +315,16 @@ export const DEMO_GRID = Object.freeze({
     ['18:00', '19:00'],
   ],
   /** The lit ground: venue, ground, surface, and its 90-minute slots. */
-  litGround: [
-    'Eastgate Sports Complex',
-    'Field 1',
-    'Turf',
-    [
+  litGround: {
+    venue: 'Eastgate Sports Complex',
+    ground: 'Field 1',
+    surface: 'Turf',
+    slots: [
       ['16:00', '17:30'],
       ['17:30', '19:00'],
       ['19:00', '20:30'],
     ],
-  ],
+  },
   /** U4's four 30-minute Saturday sessions, one cohort at a time, 15 minutes apart. */
   u4: {
     venue: 'Orchard Park',
@@ -363,7 +363,8 @@ const FIELDS_HEADERS = [
  */
 export function buildFieldsCsv() {
   const rows = [];
-  const add = (location, field, subunit, day, [start, end], surface, halves, division) =>
+  /** @param {string} location @param {string} field @param {string} subunit @param {string} day @param {readonly string[]} slot @param {string} surface @param {boolean} halves @param {string} division */
+  const add = (location, field, subunit, day, slot, surface, halves, division) =>
     rows.push([
       location,
       field,
@@ -371,8 +372,8 @@ export function buildFieldsCsv() {
       'practice',
       day,
       '',
-      start,
-      end,
+      slot[0],
+      slot[1],
       '1',
       '',
       '',
@@ -388,7 +389,12 @@ export function buildFieldsCsv() {
       }
     }
   }
-  const [litLocation, litField, litSurface, litSlots] = DEMO_GRID.litGround;
+  const {
+    venue: litLocation,
+    ground: litField,
+    surface: litSurface,
+    slots: litSlots,
+  } = DEMO_GRID.litGround;
   for (const half of ['A', 'B']) {
     for (const day of DEMO_GRID.weekdays) {
       for (const slot of litSlots)

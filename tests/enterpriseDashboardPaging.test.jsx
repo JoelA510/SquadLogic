@@ -8,7 +8,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import EnterpriseDashboard from '../frontend/src/pages/EnterpriseDashboard.jsx';
 
-const mocks = vi.hoisted(() => ({ total: 0, refuseFrom: null }));
+const mocks = vi.hoisted(() => ({ total: 0, refuseFrom: null, eqs: [] }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -17,7 +17,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       let to = Infinity;
       const chain = {
         select: () => chain,
-        eq: () => chain,
+        eq: (column, value) => (mocks.eqs.push({ table, column, value }), chain),
         order: () => chain,
         range: (a, b) => {
           from = a;
@@ -48,13 +48,29 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   },
 }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1', settings: {} } }),
+  useOrganization: () => ({
+    currentOrganization: { id: 'org-1', settings: {} },
+    currentSeasonSetting: { id: 'season-1' },
+  }),
 }));
 
 describe('EnterpriseDashboard players read', () => {
   beforeEach(() => {
     mocks.total = 1259;
     mocks.refuseFrom = null;
+    mocks.eqs = [];
+  });
+
+  it("reads the season the header shows: its players and its row of the organization's metrics", async () => {
+    render(<EnterpriseDashboard />);
+    await screen.findByText('1259');
+    for (const table of ['players', 'view_org_metrics']) {
+      expect(mocks.eqs).toContainEqual({
+        table,
+        column: 'season_settings_id',
+        value: 'season-1',
+      });
+    }
   });
 
   it('counts every player of a league past the server row cap', async () => {

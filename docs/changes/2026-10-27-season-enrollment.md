@@ -139,3 +139,30 @@ deletes that season's data.
 | E3a | season column on players and coaches, per-season unique keys and import matching, writers and readers filtered by season, demo seed; the E1 guard still allows only the active season (after the admin-only PR) | none visible for one active season |
 | E3b | season rollover, draft season edit and activation, the Seasons page with the age cutoff and division windows (C3), the guard widened to drafts | admins prepare next season and import into it |
 | E3c | the evaluations import (C2) | clubs add experience or skill after registration |
+
+## Build notes: E3a (2026-10-28)
+
+Built as written; where the code or production differed from the plan:
+
+- **Production holds 130 coaches, not 0** (read-only, 2026-10-28: 1 organization, 1 active season,
+  0 players, 130 coaches, 0 buddy pairs, 0 child links). The backfill rule covers it (a coach takes
+  the organization's active season), so the 130 take the one season there is.
+- **Where the rules live.** Migration `20261108010000`: `players.season_settings_id` and
+  `coaches.season_settings_id` (NOT NULL, FK to `season_settings` ON DELETE CASCADE), filled on insert
+  by `players_enforce_season` / `coaches_enforce_season` (the division's season, else the active one)
+  so existing writers and fixtures that name no season keep working, immutable after, and held to the
+  season of the division and team. `player_buddies`, `team_players`, `team_coach_assignments`, the
+  `teams` coach columns and `coach_team_requests` each refuse another season's row (23514).
+  `persist_team_schedule` is not replaced: its roster insert goes through the `team_players` trigger,
+  which is what refuses a roster naming another season's player (pgTAP calls it through the writer).
+- **Keys.** `coaches_email_normalised` (lower-case and trimmed) is kept; only the per-organization
+  unique key is replaced, by a unique index on `(organization_id, season_settings_id, lower(email))`.
+- **`view_org_metrics`** gains `season_settings_id` last and has a row per season; its one reader
+  (the Reports page) asks for the season shown.
+- **Not touched, by design:** the `teams` table has no season column (a team's season is its
+  division's), so team lists are scoped through the season's divisions; `PlayerRecordPage` reads one
+  player by id; `useCoedTransition` reads players through the season's divisions already;
+  `coach_team_requests` has no season column and is scoped through its coach.
+- **Left for E3b:** the guard widening to drafts (the coach finalizer now has the same guard as the
+  player finalizer, so E3b widens both), the Seasons page, rollover, the cutoff. E3c: the evaluations
+  import.

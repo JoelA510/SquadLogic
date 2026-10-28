@@ -6,26 +6,51 @@ import { logger } from '../lib/logger.js';
 import { REFRESH_TOPICS, emitRefresh } from '../lib/refreshBus.js';
 
 /**
- * Players-grid data layer: org-scoped players + divisions, with optimistic
+ * Players-grid data layer: the players and divisions of the season the header shows
+ * (20261108010000: a player belongs to one season, and so does a division), with optimistic
  * mutations that all flow through the audited admin RPCs (never direct
  * table writes). Failed mutations roll back to the server snapshot.
+ *
+ * The season filter is not an authorization boundary: RLS stays organization-scoped, and the
+ * filter only chooses which of the organization's seasons the page is about.
  */
 export function usePlayersData() {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, seasonSettingsLoading } = useOrganization();
   const orgId = currentOrganization?.id;
+  const seasonId = currentSeasonSetting?.id;
+  const isActiveSeason = currentSeasonSetting?.status === 'active';
   const [players, setPlayers] = useState([]);
   const [divisions, setDivisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const fetchAll = useCallback(async () => {
-    if (!orgId) return;
+    if (!orgId || seasonSettingsLoading) return;
+    if (!seasonId) {
+      // An organization with no season has no players to show.
+      setPlayers([]);
+      setDivisions([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const [playersData, divisionsData] = await Promise.all([
-        fetchAllPages(() => supabase.from('players').select('*').eq('organization_id', orgId)),
-        fetchAllPages(() => supabase.from('divisions').select('*').eq('organization_id', orgId)),
+        fetchAllPages(() =>
+          supabase
+            .from('players')
+            .select('*')
+            .eq('organization_id', orgId)
+            .eq('season_settings_id', seasonId)
+        ),
+        fetchAllPages(() =>
+          supabase
+            .from('divisions')
+            .select('*')
+            .eq('organization_id', orgId)
+            .eq('season_settings_id', seasonId)
+        ),
       ]);
       setPlayers(playersData);
       setDivisions(divisionsData);
@@ -35,7 +60,7 @@ export function usePlayersData() {
     } finally {
       setLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, seasonId, seasonSettingsLoading]);
 
   useEffect(() => {
     fetchAll();
@@ -81,6 +106,10 @@ export function usePlayersData() {
         const { data, error: rpcError } = await supabase.rpc('admin_create_player', {
           p_organization_id: orgId,
           p_fields: fields,
+          // Named only when the season shown is not the active one, which a call without it
+          // means (20261108010000): a call for the active season keeps the shape it always had,
+          // so a browser and a database a deploy apart still understand each other.
+          ...(seasonId && !isActiveSeason ? { p_season_settings_id: seasonId } : {}),
         });
         if (rpcError) throw rpcError;
         if (data) setPlayers((current) => [...current, data]);
@@ -91,7 +120,7 @@ export function usePlayersData() {
         return { success: false, error: err.message || 'Create failed' };
       }
     },
-    [orgId]
+    [orgId, seasonId, isActiveSeason]
   );
 
   const deletePlayers = useCallback(async (playerIds) => {

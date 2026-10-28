@@ -40,7 +40,10 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   },
 }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1' } }),
+  useOrganization: () => ({
+    currentOrganization: { id: 'org-1' },
+    currentSeasonSetting: { id: 'season-1' },
+  }),
 }));
 
 const players = (n) =>

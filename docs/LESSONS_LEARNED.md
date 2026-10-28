@@ -231,3 +231,15 @@ evolves. If you are about to make a decision one of these covers, read it first.
     that proves nothing else read it (`20261104020000`).
 46. **A count per team makes every "per team" report a lie; count from the roster and the requirement.** Practices per division turned "one practice per team" into "N units per team", and four things keyed by team quietly broke: the run's unassigned list (a team given 1 of 2 vanished from the report), the metrics that counted teams without a practice, the writer (nothing stopped two rows of a team on one weekday, or a third row for a division of two), and the page's apply summary. The subject set is the roster crossed with each division's count (`practices.teams`), never the solver's output; the writer re-checks the rules SQL can check on new auto rows, because a client that bypasses the solver is a client the solver's rules do not bind. Keep a one-a-week run byte-identical to the old one (the unit id is the team id then) and test it, since that is the case every league is in.
 47. **A rule that blocks on a judgement call is a flag waiting to be asked for.** The daylight pass cut a placement at its first date past sunset and the repair refused such a re-home; the owner's answer was "flag, but don't block". Where an unknown (no coordinates, no table row) cannot be judged, keep refusing: unknown is not past, and it must never be read as legal. Test both directions (past is kept and flagged with its reason; unknown is refused; in daylight is neither), or one will silently become the other.
+48. **Make a new NOT NULL column that every writer must fill default itself, in a trigger, and then
+    expect the old fixtures to need a parent row.** `players.season_settings_id` and
+    `coaches.season_settings_id` (`20261108010000`) are NOT NULL, filled on insert by a trigger
+    (the division's season, else the active one), so the hundred-odd writers and fixtures that name
+    no season kept working; the fifteen smokes that build an organization with no season, or only a
+    draft one, were the ones that failed, and each needed the one thing production always has (an
+    active season). Also: a trigger that backstops an RPC's check makes the RPC's test pass for the
+    wrong reason. The roster-across-seasons test passed with the roster trigger removed, because the
+    `team_id` sync trigger on `players` refused it first; the test pins the roster trigger's own
+    message to tell them apart. And a backfill that updates rows fires every trigger on them (a
+    demo league's read-only fence, `updated_at`, custom-attribute validation): switch off exactly
+    those for the backfill and prove the end state has them on.

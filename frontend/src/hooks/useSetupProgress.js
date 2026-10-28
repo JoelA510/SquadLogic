@@ -32,28 +32,29 @@ import { useDashboardData } from './useDashboardData.js';
  * checklist is complete, only that the dashboard sources loaded.
  */
 export function useSetupProgress() {
-  const { currentOrganization, featureFlags = {} } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, featureFlags = {} } = useOrganization();
   const { team, practice, game, error } = useDashboardData();
   const orgId = currentOrganization?.id;
+  const seasonId = currentSeasonSetting?.id;
   const [counts, setCounts] = useState({ players: 0, teams: 0, fields: 0, loaded: false });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!orgId) return;
-      const countOf = async (table) => {
+      const countOf = async (table, seasonScoped = false) => {
         try {
-          const { data, error } = await supabase
-            .from(table)
-            .select('id')
-            .eq('organization_id', orgId);
+          let query = supabase.from(table).select('id').eq('organization_id', orgId);
+          // The players imported for the season the header shows (20261108010000).
+          if (seasonScoped) query = query.eq('season_settings_id', seasonId);
+          const { data, error } = await query;
           return error ? 0 : (data || []).length;
         } catch {
           return 0;
         }
       };
       const [players, teams, fields] = await Promise.all([
-        countOf('players'),
+        seasonId ? countOf('players', true) : 0,
         countOf('teams'),
         countOf('fields'),
       ]);
@@ -62,7 +63,7 @@ export function useSetupProgress() {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, seasonId]);
 
   return useMemo(() => {
     const steps = [

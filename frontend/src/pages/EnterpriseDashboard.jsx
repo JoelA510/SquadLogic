@@ -50,7 +50,8 @@ const AccessibleDataTable = ({ title, data, columns }) => (
 );
 
 export default function EnterpriseDashboard() {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, seasonSettingsLoading } = useOrganization();
+  const seasonId = currentSeasonSetting?.id;
   const [players, setPlayers] = useState([]);
   const [_teamsData, _setTeamsData] = useState([]);
   const [metrics, setMetrics] = useState({
@@ -66,7 +67,13 @@ export default function EnterpriseDashboard() {
 
   useEffect(() => {
     async function loadData() {
-      if (!currentOrganization?.id) return;
+      if (!currentOrganization?.id || seasonSettingsLoading) return;
+      if (!seasonId) {
+        // No season to describe (20261108010000: players belong to one season).
+        setPlayers([]);
+        setLoading(false);
+        return;
+      }
       try {
         // Independent reads, sent together rather than one after another.
         const orgId = currentOrganization.id;
@@ -79,8 +86,15 @@ export default function EnterpriseDashboard() {
               .from('players')
               .select('id, custom_attributes, team_id, division')
               .eq('organization_id', orgId)
+              .eq('season_settings_id', seasonId)
           ),
-          supabase.from('view_org_metrics').select('*').eq('organization_id', orgId).single(),
+          // One row per season of the organization: the season the header shows.
+          supabase
+            .from('view_org_metrics')
+            .select('*')
+            .eq('organization_id', orgId)
+            .eq('season_settings_id', seasonId)
+            .single(),
         ]);
         setLoadError(null);
         setPlayers(pData);
@@ -100,7 +114,7 @@ export default function EnterpriseDashboard() {
       }
     }
     loadData();
-  }, [currentOrganization?.id]);
+  }, [currentOrganization?.id, seasonId, seasonSettingsLoading]);
 
   const { aggregates, isLowSample, maskedFields } = useEnterpriseMetrics(players, orgSchema);
 

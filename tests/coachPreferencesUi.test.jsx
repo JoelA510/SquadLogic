@@ -40,9 +40,21 @@ const slot = (day, time) => ({ day_of_week: day, start_time: time, field: { loca
 /** Two current teams for C1 (T1 on Monday, T2 on Wednesday) and one ended (T3). */
 function freshTables() {
   return {
+    // Coaches belong to one season (20261108010000): the page lists the season shown, 'season-1'.
     coaches: [
-      { id: C1, organization_id: ORG, full_name: 'Casey Coach' },
-      { id: C3, organization_id: ORG, full_name: 'Robin Unassigned' },
+      { id: C1, organization_id: ORG, season_settings_id: 'season-1', full_name: 'Casey Coach' },
+      {
+        id: C3,
+        organization_id: ORG,
+        season_settings_id: 'season-1',
+        full_name: 'Robin Unassigned',
+      },
+      {
+        id: '44444444-4444-4444-8444-444444444444',
+        organization_id: ORG,
+        season_settings_id: 'season-0',
+        full_name: 'Last Season Coach',
+      },
     ],
     locations: [{ id: L1, organization_id: ORG, name: 'Riverside Park' }],
     teams: [
@@ -154,7 +166,11 @@ function builder(table) {
 
 function asRole(role, userId = 'user-admin') {
   vi.mocked(useOrganization).mockReturnValue(
-    /** @type {any} */ ({ currentOrganization: { id: ORG }, orgMember: { role } })
+    /** @type {any} */ ({
+      currentOrganization: { id: ORG },
+      currentSeasonSetting: { id: 'season-1' },
+      orgMember: { role },
+    })
   );
   vi.mocked(useAuth).mockReturnValue(/** @type {any} */ ({ user: { id: userId } }));
 }
@@ -190,7 +206,9 @@ describe('admin view', () => {
     ).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: /^Reject/ })).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: /with a change$/ })).toBeInTheDocument();
+    // Two coaches of the season shown: last season's coach is not offered.
     expect(screen.getAllByRole('button', { name: /^Set a preference for/ })).toHaveLength(2);
+    expect(screen.queryByText('Last Season Coach')).not.toBeInTheDocument();
   });
 
   it('approve-with-change sends the changed level and value', async () => {

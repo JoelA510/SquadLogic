@@ -173,9 +173,17 @@ players of the job's season only. An organization with no season has nothing to
 import into (22023, `season_missing`). An import into a draft leaves the active
 season's rows untouched, to the last column.
 
+A season's **age rule** (the cutoff, the season year and its divisions'
+birth-date windows) is fixed while a player import into it is waiting to be
+applied (22023, `import_pending`) and once it has players (`season_has_players`):
+the import stages each row's natural age under the rule in force, so the rule
+does not move between the staging and the apply. Finish or cancel the pending
+import first.
+
 A **completed** season is read-only for a signed-in caller, players and coaches
 included (22023, `season_completed`): no patch, delete or insert by an admin,
-through an RPC or a direct write. Jobs with no signed-in user (the retention job,
+through an RPC or a direct write; its teams, rosters, coach history, practices,
+TIME TBD exceptions and games likewise. Jobs with no signed-in user (the retention job,
 the demo purge) and the cascade of a deleted organization still reach its rows.
 
 > **Duplicate headers:** the coach export repeats `Playing Up` and

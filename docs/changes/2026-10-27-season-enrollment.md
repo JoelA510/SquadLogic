@@ -186,17 +186,36 @@ under "For the owner"). Migration `20261109010000_season_rollover.sql`.
   windows holding a date take the lower age; a window with no readable band is ignored. Core
   (`ageGroups.js`), the Edge twin (`natural-age.ts`, `import-validation` reads the season's divisions) and the
   mock agree on a corpus (`tests/naturalAgeParity.test.js`, `natural-age_test.ts`), and the Teams page's
-  birth-date path (`resolveNaturalAge`, `applyPlayUpEligibility`, `computeAgeGroup`) uses the same rule.
+  birth-date path (`resolveNaturalAge`, `applyPlayUpEligibility`, `computeAgeGroup`) uses the same rule. The
+  Teams page reads each division's `birthdate_start`/`birthdate_end` with the rest of its row (it did not at
+  first, so the window never reached `applyPlayUpEligibility`; Codex's finding on #680), and counts ages
+  against the windows compiled once per roster (`compileDivisionWindows`): the season fixture's play-up
+  comparison counts ~600,000 ages, and reading the window dates per player took its tests from ~2.3s to
+  ~3.5s under coverage, past vitest's 5s in CI.
 - **Once a season has players** its cutoff, season year and its divisions' windows cannot change: triggers on
   `season_settings` and `divisions` (22023, `season_has_players`), so a direct write meets them as the RPCs do.
   Name and dates change on a draft or the active season; the year and cutoff on a draft only (Decision 7).
+  **Nor while a player import is pending** (22023, `import_pending`; Codex's finding on #680): the import
+  stages each row's natural age under the rule in force, so changing the rule between the staging and the
+  apply would store ages counted under the old one. `season_has_pending_player_import(season)` is an
+  unfinished registration job of the season (a legacy job with no season counts for the active one) with
+  staged rows not yet promoted; cancelling a job fails it, which ends it, and a coach-only job stages no
+  player rows. Ages are never recomputed: the rule waits instead.
 - **Guard widening.** `create_import_job`, `finalize_import_job` and `finalize_coach_import_job` allow the
   active season or a draft and refuse a completed one; `finalize_field_import_job` (organization-level
   locations and fields) and a field job for a draft stay active-only.
 - **Completed seasons** are read-only for a signed-in caller by a trigger on `players` and `coaches`
   (22023, `season_completed`), whichever writer; a job with no signed-in user (the retention job, the demo
   purge) and the cascade of a deleted organization pass. A completed season can be opened from the header to look
-  back at (a notice above each page says it is read-only).
+  back at (a notice above each page says it is read-only). **Schedules too** (Codex's finding on #680): the
+  same rule, one more trigger function, on `teams`, `team_players`, `team_coach_assignments`,
+  `practice_assignments`, `practice_exceptions` and `game_assignments`. A row's season is its team's
+  division's (a team has no season column), or `practice_exceptions.season_settings_id`; an update is judged on
+  the old row and the new, so a team cannot be moved out of or into a completed season. They are triggers, not
+  checks in the writers, so the persistence RPCs a later PR replaces (`schedule_tbd`, #678) are covered
+  without being edited; a table that PR adds joins the trigger list. The Teams, Practice and Game pages turn
+  Generate, Apply, Save, the manual override and the cancels off on a completed season and say why
+  (`useSeasonReadOnly`, `SeasonReadOnlyNote`), so the database's refusal is not the first the admin hears.
 - **Activation** needs a known timezone, both dates (end not before start) and a season year, completes the
   previous active season and activates the draft in two statements; a completed season is never reactivated
   (Decision 6).

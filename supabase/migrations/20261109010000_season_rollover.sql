@@ -32,14 +32,19 @@
 --          needing a known timezone, both dates (end not before start) and a season year; completes
 --          the previous active season, then activates this one, in two statements so the partial
 --          index never sees two. Audited as `season.activated`.
---   3. Once a season has players its cutoff, season year and its divisions' windows cannot change
---      (their stored ages were computed with the old rule): triggers on `season_settings` and
---      `divisions`, so every writer meets them, not only the RPCs above.
---   4. Completed seasons are read-only, players and coaches included: a trigger on each refuses
---      any insert, update or delete by a signed-in caller (an RPC or a direct write; 22023,
---      `season_completed`). A job with no signed-in user (the retention job, the demo purge) and a
---      cascade from a deleted season or organization pass: an admin's own "delete this season's data"
---      is a later change.
+--   3. Once a season has players, or a player import is in progress for it (a job not yet
+--      finished with staged rows not yet promoted: validation has already staged each natural age
+--      under the old rule and finalization copies it), its cutoff, season year and its divisions'
+--      windows cannot change (22023, `season_has_players` / `import_pending`): triggers on
+--      `season_settings` and `divisions`, so every writer meets them, not only the RPCs above. Ages
+--      are not recomputed: the admin finishes or cancels the import first.
+--   4. Completed seasons are read-only, players, coaches and schedules included: a trigger on each
+--      of `players`, `coaches`, `teams`, `team_players`, `team_coach_assignments`,
+--      `practice_assignments`, `practice_exceptions` and `game_assignments` refuses any insert,
+--      update or delete by a signed-in caller (an RPC or a direct write; 22023, `season_completed`).
+--      Triggers, not edits to the schedule writers, so the writers stay as they are. A job with no
+--      signed-in user (the retention job, the demo purge) and a cascade from a deleted season or
+--      organization pass: an admin's own "delete this season's data" is a later change.
 --   5. The E1 guard changes from "the active season only" to "the active season or a draft; never a
 --      completed one", in `create_import_job` (registration jobs), `finalize_import_job` and
 --      `finalize_coach_import_job`, each behind the md5 of its current text. A field import
@@ -194,6 +199,35 @@ COMMENT ON FUNCTION public.rollover_season_columns() IS
 -- them: the RPCs below, a direct write, a future writer. SECURITY DEFINER so the players are
 -- counted whatever the caller's row level security shows.
 
+-- A player import in progress for the season: an unfinished registration job (not completed, not
+-- failed, which is what cancelling one is) with staged player rows not yet promoted. A legacy job with
+-- no season (made before 20261101010000) finalizes into the organization's active season.
+CREATE FUNCTION public.season_has_pending_player_import(p_season_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+          FROM public.season_settings s
+          JOIN public.import_jobs j
+            ON j.organization_id = s.organization_id
+           AND (j.season_settings_id = s.id OR (j.season_settings_id IS NULL AND s.status = 'active'))
+         WHERE s.id = p_season_id
+           AND j.job_type = 'registration'
+           AND j.status NOT IN ('completed', 'completed_with_warnings', 'failed')
+           AND EXISTS (SELECT 1 FROM public.staging_players sp
+                        WHERE sp.import_job_id = j.id AND sp.promoted_at IS NULL)
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.season_has_pending_player_import(uuid) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.season_has_pending_player_import(uuid) IS
+    'True while a player import is in progress for the season (an unfinished registration job with staged rows not yet promoted): its natural ages are staged under the rule in force, so the rule does not change until the import is finished or cancelled. 20261109010000.';
+
 CREATE FUNCTION public.season_settings_cutoff_guard()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -205,6 +239,10 @@ BEGIN
     IF EXISTS (SELECT 1 FROM public.players p WHERE p.season_settings_id = OLD.id) THEN
         RAISE EXCEPTION 'Season % has players: its age cutoff and season year cannot change', OLD.id
             USING ERRCODE = '22023', DETAIL = 'season_has_players';
+    END IF;
+    IF public.season_has_pending_player_import(OLD.id) THEN
+        RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before its age cutoff or season year changes', OLD.id
+            USING ERRCODE = '22023', DETAIL = 'import_pending';
     END IF;
     RETURN NEW;
 END;
@@ -239,6 +277,10 @@ BEGIN
         RAISE EXCEPTION 'Season % has players: a division''s birth-date window cannot change', NEW.season_settings_id
             USING ERRCODE = '22023', DETAIL = 'season_has_players';
     END IF;
+    IF public.season_has_pending_player_import(NEW.season_settings_id) THEN
+        RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before a division''s birth-date window changes', NEW.season_settings_id
+            USING ERRCODE = '22023', DETAIL = 'import_pending';
+    END IF;
     RETURN NEW;
 END;
 $$;
@@ -250,9 +292,9 @@ CREATE TRIGGER divisions_window_guard
 REVOKE ALL ON FUNCTION public.season_settings_cutoff_guard() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.divisions_window_guard() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_settings_cutoff_guard() IS
-    'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players). 20261109010000.';
+    'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
 COMMENT ON FUNCTION public.divisions_window_guard() IS
-    'Trigger function: refuses a new or changed division birth-date window once the division''s season has players (22023, season_has_players). 20261109010000.';
+    'Trigger function: refuses a new or changed division birth-date window once the division''s season has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
 
 -- ---------------------------------------------------------------------------
 -- 5. A completed season is read-only, players and coaches included.
@@ -305,6 +347,80 @@ CREATE TRIGGER players_readonly_when_completed
 CREATE TRIGGER coaches_readonly_when_completed
     BEFORE INSERT OR UPDATE OR DELETE ON public.coaches
     FOR EACH ROW EXECUTE FUNCTION public.season_rows_readonly_when_completed();
+
+-- The schedules of a completed season, by the same rule. A row's season is its team's division's
+-- (a team has no season column), or `practice_exceptions.season_settings_id`. An update is judged on
+-- the old row and the new, so a row cannot be moved out of a completed season either.
+CREATE FUNCTION public.season_schedule_readonly_when_completed()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET timezone = 'UTC'
+AS $$
+DECLARE
+    v_row jsonb;
+    v_team uuid;
+    v_division uuid;
+    v_season uuid;
+    v_status text;
+    v_org uuid;
+    v_pass integer;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    FOR v_pass IN 1 .. CASE WHEN TG_OP = 'UPDATE' THEN 2 ELSE 1 END LOOP
+        v_row := to_jsonb(CASE WHEN TG_OP = 'DELETE' OR v_pass = 2 THEN OLD ELSE NEW END);
+        IF TG_TABLE_NAME = 'practice_exceptions' THEN
+            v_season := (v_row ->> 'season_settings_id')::uuid;
+        ELSE
+            IF TG_TABLE_NAME = 'teams' THEN
+                v_division := (v_row ->> 'division_id')::uuid;
+            ELSE
+                v_team := COALESCE((v_row ->> 'team_id')::uuid, (v_row ->> 'home_team_id')::uuid,
+                                   (v_row ->> 'away_team_id')::uuid);
+                SELECT t.division_id INTO v_division FROM public.teams t WHERE t.id = v_team;
+            END IF;
+            SELECT d.season_settings_id INTO v_season FROM public.divisions d WHERE d.id = v_division;
+        END IF;
+        SELECT s.status, s.organization_id INTO v_status, v_org
+          FROM public.season_settings s WHERE s.id = v_season;
+        IF v_status = 'completed' THEN
+            -- The cascade of a deleted organization: the season may not have been removed yet.
+            IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM public.organizations o WHERE o.id = v_org) THEN
+                CONTINUE;
+            END IF;
+            RAISE EXCEPTION 'Season % is completed and read-only: its schedule (%) cannot be changed', v_season, TG_TABLE_NAME
+                USING ERRCODE = '22023', DETAIL = 'season_completed';
+        END IF;
+    END LOOP;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER teams_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.teams
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER team_players_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.team_players
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER team_coach_assignments_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.team_coach_assignments
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER practice_assignments_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.practice_assignments
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER practice_exceptions_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.practice_exceptions
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER game_assignments_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.game_assignments
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+
+REVOKE ALL ON FUNCTION public.season_schedule_readonly_when_completed() FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS
+    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions and game_assignments: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261109010000.';
 
 REVOKE ALL ON FUNCTION public.season_rows_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_rows_readonly_when_completed() IS
@@ -592,6 +708,10 @@ BEGIN
             RAISE EXCEPTION 'Season % has players: its age cutoff and season year cannot change', p_season_id
                 USING ERRCODE = '22023', DETAIL = 'season_has_players';
         END IF;
+        IF public.season_has_pending_player_import(p_season_id) THEN
+            RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before its age cutoff or season year changes', p_season_id
+                USING ERRCODE = '22023', DETAIL = 'import_pending';
+        END IF;
     END IF;
 
     BEGIN
@@ -676,6 +796,10 @@ BEGIN
     IF EXISTS (SELECT 1 FROM public.players p WHERE p.season_settings_id = v_division.season_settings_id) THEN
         RAISE EXCEPTION 'Season % has players: a division''s birth-date window cannot change', v_division.season_settings_id
             USING ERRCODE = '22023', DETAIL = 'season_has_players';
+    END IF;
+    IF public.season_has_pending_player_import(v_division.season_settings_id) THEN
+        RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before a division''s birth-date window changes', v_division.season_settings_id
+            USING ERRCODE = '22023', DETAIL = 'import_pending';
     END IF;
 
     UPDATE public.divisions
@@ -1845,7 +1969,12 @@ BEGIN
 
     SELECT string_agg(t.name, ', ') INTO v_bad
       FROM (VALUES ('season_settings_cutoff_guard'), ('divisions_window_guard'),
-                   ('players_readonly_when_completed'), ('coaches_readonly_when_completed')) AS t(name)
+                   ('players_readonly_when_completed'), ('coaches_readonly_when_completed'),
+                   ('teams_readonly_when_completed'), ('team_players_readonly_when_completed'),
+                   ('team_coach_assignments_readonly_when_completed'),
+                   ('practice_assignments_readonly_when_completed'),
+                   ('practice_exceptions_readonly_when_completed'),
+                   ('game_assignments_readonly_when_completed')) AS t(name)
      WHERE NOT EXISTS (SELECT 1 FROM pg_trigger g
                         WHERE g.tgname = t.name AND NOT g.tgisinternal AND g.tgenabled = 'O');
     IF v_bad IS NOT NULL THEN

@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(127);
+SELECT plan(142);
 
 -- Helpers: the SQLSTATE and DETAIL of a refusal, and whether a call took the organization's lock.
 CREATE FUNCTION pg_temp.err(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
@@ -583,6 +583,73 @@ SELECT is(pg_temp.err($$SELECT public.finalize_import_job('a1111111-0000-4000-80
     'a player import into the completed season is refused');
 SELECT is(pg_temp.err($$SELECT public.finalize_coach_import_job('a1111111-0000-4000-8000-0000000e3b32')$$), '22023:season_completed',
     'and a coach import');
+
+-- ── A player import in progress fixes the rule too ────────────────────────
+-- Validation has already staged each natural age under the rule in force, and finalization copies
+-- it without a birth date; so while a registration job has staged rows not yet promoted, the cutoff,
+-- the year and a division's window do not change (ages are not recomputed: finish or cancel first).
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+CREATE TEMP TABLE pend ON COMMIT DROP AS
+    SELECT (r ->> 'id')::uuid AS season FROM (SELECT public.admin_create_season_from(
+        (SELECT d28 FROM ids), 'Pending Draft', 2029) AS r) x;
+GRANT SELECT ON pend TO PUBLIC;
+RESET role;
+CREATE TEMP TABLE pend_job ON COMMIT DROP AS SELECT gen_random_uuid() AS id;
+GRANT SELECT ON pend_job TO PUBLIC;
+INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by, season_settings_id)
+SELECT id, 'a1111111-1111-1111-1111-111111111111', 'registration', 'orga/pending.csv', 'ready_to_apply',
+       '11111111-1111-1111-1111-111111111111', (SELECT season FROM pend) FROM pend_job;
+INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
+SELECT 'a1111111-1111-1111-1111-111111111111'::uuid, id, 1, '{}'::jsonb,
+       '{"first_name": "Pen", "last_name": "Ding", "external_registration_id": "PEND-1", "natural_age": "9"}'::jsonb
+  FROM pend_job;
+SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), true,
+    'a ready job with staged player rows is a pending import');
+SELECT is(public.season_has_pending_player_import((SELECT d28 FROM ids)), false,
+    'control: a season with none is not (the answer is not always yes)');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.err(format($$SELECT public.admin_update_draft_season(%L, '{"age_cutoff_mode": "school_year_aug_jul"}')$$, (SELECT season FROM pend))),
+    '22023:import_pending', 'a cutoff change is refused while a player import is pending');
+SELECT is(pg_temp.err(format($$SELECT public.admin_update_draft_season(%L, '{"season_year": 2030}')$$, (SELECT season FROM pend))),
+    '22023:import_pending', 'so is a season year change');
+SELECT is(pg_temp.err(format($$SELECT public.admin_set_division_birthdate_window(%L, '2023-01-01', '2024-07-31')$$,
+    (SELECT d.id FROM public.divisions d WHERE d.season_settings_id = (SELECT season FROM pend) AND d.name = 'Org A U4'))),
+    '22023:import_pending', 'and a division window');
+SELECT is(pg_temp.err(format($$SELECT public.admin_update_draft_season(%L, '{"name": "Pending Draft (named)"}')$$, (SELECT season FROM pend))),
+    'no error', 'while the name still changes');
+RESET role;
+SELECT is(pg_temp.err(format($$UPDATE public.season_settings SET age_cutoff_mode = 'school_year_aug_jul', age_cutoff_month = NULL, age_cutoff_day = NULL WHERE id = %L$$, (SELECT season FROM pend))),
+    '22023:import_pending', 'a direct write of the cutoff meets the same rule');
+SELECT is(pg_temp.err(format($$UPDATE public.divisions SET birthdate_start = '2023-01-01', birthdate_end = '2024-07-31' WHERE season_settings_id = %L AND name = 'Org A U4'$$, (SELECT season FROM pend))),
+    '22023:import_pending', 'and so does a direct write of a window');
+-- Cancelling the import (failing the job) frees the rule; the staged rows stay, unpromoted.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT lives_ok(format($$SELECT public.fail_import_job(%L, 'cancelled by the admin')$$, (SELECT id FROM pend_job)),
+    'the admin cancels the pending import');
+RESET role;
+SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), false,
+    'it is no longer pending, though its staged rows are still there');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(pg_temp.err(format($$SELECT public.admin_update_draft_season(%L, '{"age_cutoff_mode": "school_year_aug_jul"}')$$, (SELECT season FROM pend))),
+    'no error', 'and the cutoff changes');
+SELECT is(pg_temp.err(format($$SELECT public.admin_set_division_birthdate_window(%L, '2023-01-01', '2024-07-31')$$,
+    (SELECT d.id FROM public.divisions d WHERE d.season_settings_id = (SELECT season FROM pend) AND d.name = 'Org A U4'))),
+    'no error', 'and a division window');
+RESET role;
+-- A finished job is not pending either.
+UPDATE public.import_jobs SET status = 'completed' WHERE id = (SELECT id FROM pend_job);
+UPDATE public.staging_players SET promoted_at = now() WHERE import_job_id = (SELECT id FROM pend_job);
+SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), false, 'a completed job is not pending');
+-- A job whose rows are all promoted but not yet marked finished is not pending; one with a row left is.
+UPDATE public.import_jobs SET status = 'importing' WHERE id = (SELECT id FROM pend_job);
+SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), false, 'unfinished, with every row promoted: not pending');
+INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
+SELECT 'a1111111-1111-1111-1111-111111111111'::uuid, id, 2, '{}'::jsonb, '{"first_name": "Two"}'::jsonb FROM pend_job;
+SELECT is(public.season_has_pending_player_import((SELECT season FROM pend)), true, 'unfinished, with a row left to promote: pending');
 
 -- ── Grants ─────────────────────────────────────────────────────────────────
 RESET role;

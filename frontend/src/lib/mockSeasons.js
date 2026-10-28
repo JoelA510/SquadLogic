@@ -12,7 +12,8 @@
  *     before a start (`season_dates_invalid`), a custom cutoff with no day (`cutoff_day_missing`) or a
  *     day that is not on the calendar (`cutoff_day_invalid`), an unknown key or mode, a completed
  *     season (`season_completed`), the cutoff and year of an active season (`season_not_draft`), a
- *     cutoff, year or division window once the season has players (`season_has_players`), half a window
+ *     cutoff, year or division window once the season has players (`season_has_players`) or while a
+ *     player import into it is unfinished (`import_pending`), half a window
  *     (`window_incomplete`), a window that ends before it starts (`window_invalid`), activation without
  *     a timezone, dates or a year (`season_timezone_missing`, `season_dates_missing`,
  *     `season_year_missing`) and of a season that is not a draft (`season_not_draft`);
@@ -81,6 +82,26 @@ const seasonOf = (db, id) => (db.season_settings || []).find((s) => same(s.id, i
 const seasonHasPlayers = (db, seasonId) =>
   (db.players || []).some((p) => same(p.season_settings_id, seasonId));
 
+/**
+ * Mirrors `season_has_pending_player_import`: an unfinished registration job of the season (a legacy
+ * job with no season belongs to the organization's active one) with staged rows not yet promoted.
+ * Cancelling a job is failing it, which ends it.
+ */
+const FINISHED_JOB = ['completed', 'completed_with_warnings', 'failed'];
+function seasonHasPendingImport(db, seasonId) {
+  const season = seasonOf(db, seasonId);
+  if (!season) return false;
+  return (db.import_jobs || []).some(
+    (job) =>
+      same(job.organization_id, season.organization_id) &&
+      (same(job.season_settings_id, season.id) ||
+        (job.season_settings_id == null && season.status === 'active')) &&
+      job.job_type === 'registration' &&
+      !FINISHED_JOB.includes(job.status) &&
+      (db.staging_players || []).some((row) => same(row.import_job_id, job.id) && !row.promoted_at)
+  );
+}
+
 function audit(db, ctx, orgId, action, resourceType, resourceId, metadata) {
   db.audit_log = db.audit_log || [];
   db.audit_log.push({
@@ -133,6 +154,54 @@ export function completedSeasonRefusal(db, rows) {
       return fail(
         '22023',
         `Season ${season.id} is completed and read-only: its rows cannot be changed`,
+        'season_completed'
+      );
+    }
+  }
+  return null;
+}
+
+/** The tables whose `season_schedule_readonly_when_completed` trigger the mock mirrors. */
+const SCHEDULE_TABLES = [
+  'teams',
+  'team_players',
+  'team_coach_assignments',
+  'practice_assignments',
+  'practice_exceptions',
+  'game_assignments',
+];
+
+/** The season a schedule row belongs to: its own column, else its team's division's season. */
+function scheduleSeasonOf(db, table, row) {
+  if (table === 'practice_exceptions' && row?.season_settings_id) {
+    return seasonOf(db, row.season_settings_id);
+  }
+  let divisionId = table === 'teams' ? row?.division_id : null;
+  if (table !== 'teams') {
+    const teamId = row?.team_id ?? row?.home_team_id ?? row?.away_team_id;
+    divisionId = (db.teams || []).find((t) => same(t.id, teamId))?.division_id;
+  }
+  const division = (db.divisions || []).find((d) => same(d.id, divisionId));
+  return division ? seasonOf(db, division.season_settings_id) : null;
+}
+
+/**
+ * The refusal for a write by a signed-in caller to a schedule row of a completed season, or null;
+ * the mock of `season_schedule_readonly_when_completed` on teams, rosters, coach history, practices,
+ * TIME TBD exceptions and games. `rows` are the rows about to be written, and for a change both the
+ * old rows and the new ones, so a row cannot be moved out of or into a completed season.
+ * @param {any} db
+ * @param {string} table
+ * @param {Array<Record<string, any>>} rows
+ */
+export function scheduleWriteRefusal(db, table, rows) {
+  if (!SCHEDULE_TABLES.includes(table)) return null;
+  for (const row of rows || []) {
+    const season = scheduleSeasonOf(db, table, row);
+    if (season?.status === 'completed') {
+      return fail(
+        '22023',
+        `Season ${season.id} is completed and read-only: its schedule (${table}) cannot be changed`,
         'season_completed'
       );
     }
@@ -359,6 +428,13 @@ function updateDraftSeason(db, p, c) {
         'season_has_players'
       );
     }
+    if (seasonHasPendingImport(db, old.id)) {
+      return fail(
+        '22023',
+        `Season ${old.id} has a player import in progress: finish or cancel it before its age cutoff or season year changes`,
+        'import_pending'
+      );
+    }
   }
   if (
     (db.season_settings || []).some(
@@ -411,6 +487,13 @@ function setWindow(db, p, c) {
       '22023',
       `Season ${division.season_settings_id} has players: a division's birth-date window cannot change`,
       'season_has_players'
+    );
+  }
+  if (seasonHasPendingImport(db, division.season_settings_id)) {
+    return fail(
+      '22023',
+      `Season ${division.season_settings_id} has a player import in progress: finish or cancel it before a division's birth-date window changes`,
+      'import_pending'
     );
   }
   const before = { start: division.birthdate_start ?? null, end: division.birthdate_end ?? null };

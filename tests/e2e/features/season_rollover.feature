@@ -6,7 +6,8 @@ Feature: Start next season from this one
   Phase E3b (docs/changes/2026-10-27-season-enrollment.md; migration 20261109010000): an admin
   starts a draft season from the active one (its divisions and programs are copied, no people),
   sets the draft's age cutoff, imports a registration file into it, and activates it. The active
-  season's Players page does not change until then, and the draft's shows the new rows.
+  season's Players page does not change until then, and the draft's shows the new rows. The season
+  it completes is read-only: its scheduling pages say so and offer no way to change it.
 
   Background:
     Given I am logged into SquadLogic as an "admin"
@@ -31,3 +32,7 @@ Feature: Start next season from this one
     And I activate the season "Winter 2027"
     Then the season "Winter 2027" is listed as "Active"
     And the season "Fall 2026" is listed as "Completed"
+    When I switch the season to "Fall 2026 (completed)"
+    And I open the practice scheduling page
+    Then the page says the season is read-only
+    And the practice page offers no manual override

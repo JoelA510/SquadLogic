@@ -26,6 +26,10 @@ const MONTHS = [
 const STATUS_TONE = { active: 'success', draft: 'info', completed: 'neutral' };
 const STATUS_LABEL = { active: 'Active', draft: 'Draft', completed: 'Completed' };
 
+/** The database refuses an age rule change while a player import into the season is unfinished. */
+const PENDING_IMPORT_TEXT =
+  'A player import into this season is still waiting to be applied. Finish or cancel the pending import first, then change the age cutoff, season year or division window.';
+
 const inputClass =
   'w-full bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 text-text-primary focus:outline-none focus:border-brand-400 transition-colors disabled:opacity-60';
 
@@ -109,7 +113,10 @@ export default function SeasonsSection({ seasonFormat = 'single' }) {
       setMessage({ tone: 'ok', text: success });
       return result ?? true;
     } catch (err) {
-      const text = err?.issues?.[0]?.message || err?.message || 'The change could not be saved.';
+      const text =
+        err?.detail === 'import_pending'
+          ? PENDING_IMPORT_TEXT
+          : err?.issues?.[0]?.message || err?.message || 'The change could not be saved.';
       setMessage({ tone: 'error', text });
       return false;
     } finally {

@@ -47,6 +47,8 @@ import {
 } from '@squadlogic/core/timing/index.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
+import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
 import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
@@ -560,19 +562,24 @@ export default function GameSchedulingPage() {
     currentOrganization,
     currentSeasonSetting,
   });
+  // A completed season is history: nothing is generated, applied, saved or cancelled in it
+  // (the database refuses the write too, `season_completed`).
+  const seasonReadOnly = useSeasonReadOnly();
   const canManageSchedule =
-    permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
-    permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+    !seasonReadOnly &&
+    (permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
+      permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION));
   const canEditSchedule = canManageSchedule && isEditMode;
   // The grid is the full schedule; while it is open, By Team cannot be chosen.
   const shownTab = canEditSchedule ? 'full' : activeTab;
   // Cancelling is destructive and the RPC requires org admin, so the button
   // is gated tighter than general schedule editing.
-  const canCancelAssignments = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
+  const canCancelAssignments =
+    !seasonReadOnly && permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
   // Applying (or rolling back) REPLACES the season's game schedule, and the
   // server lets only an org admin do that (docs/PLAN_AUDIT_IN_TRANSACTION.md,
   // Q6), as the practice page's Apply already says (#64).
-  const canApplySchedule = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+  const canApplySchedule = !seasonReadOnly && permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
 
   useEffect(() => {
     setLastRollbackAssignments(null);
@@ -1415,6 +1422,8 @@ export default function GameSchedulingPage() {
           `errors.team`) rather than the hook's aggregate, so a refused
           `practice` read no longer opens an alert about rows the page does
           not render. */}
+      <SeasonReadOnlyNote />
+
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner

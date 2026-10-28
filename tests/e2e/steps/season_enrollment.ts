@@ -78,7 +78,7 @@ When('I switch the season to {string}', async ({ page }, name: string) => {
   await page.getByRole('button', { name: 'Active Season' }).first().click({ force: true });
   await page.getByRole('menuitem', { name }).first().click({ force: true });
   await expect(page.getByRole('button', { name: 'Active Season' }).first()).toContainText(
-    name.replace(' (draft)', '')
+    name.replace(/ \((draft|completed)\)$/, '')
   );
 });
 

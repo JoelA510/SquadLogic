@@ -553,6 +553,247 @@ describe('a draft takes an import; a completed season is read-only', () => {
   });
 });
 
+describe('a player import in progress fixes the rule (mock of season_has_pending_player_import)', () => {
+  let draftId;
+  let draftU4;
+  beforeEach(async () => {
+    draftId = (await create()).data.id;
+    draftU4 = getMockData('divisions').find(
+      (d) => d.season_settings_id === draftId && d.name === 'MS U4'
+    ).id;
+  });
+  const job = (extra = {}) => ({
+    id: 'ms-job',
+    organization_id: MOCK_ORG_ID,
+    season_settings_id: draftId,
+    job_type: 'registration',
+    status: 'ready_to_apply',
+    ...extra,
+  });
+  const staged = (extra = {}) => ({
+    id: 'ms-staged',
+    import_job_id: 'ms-job',
+    promoted_at: null,
+    ...extra,
+  });
+  const seed = (jobs, rows) =>
+    window.__saveMockDB__({ ...window.__MOCK_DB__, import_jobs: jobs, staging_players: rows });
+  const cutoff = () =>
+    rpc('admin_update_draft_season', {
+      p_season_id: draftId,
+      p_patch: { age_cutoff_mode: 'birth_year' },
+    });
+  const window_ = () =>
+    rpc('admin_set_division_birthdate_window', {
+      p_division_id: draftU4,
+      p_birthdate_start: '2023-01-01',
+      p_birthdate_end: '2023-07-31',
+    });
+
+  it('refuses a cutoff, year and window change while staged rows are waiting, and still takes a name', async () => {
+    seed([job()], [staged()]);
+    expect((await cutoff()).error).toMatchObject({ code: '22023', details: 'import_pending' });
+    expect(
+      (
+        await rpc('admin_update_draft_season', {
+          p_season_id: draftId,
+          p_patch: { season_year: 2028 },
+        })
+      ).error?.details
+    ).toBe('import_pending');
+    expect((await window_()).error).toMatchObject({ code: '22023', details: 'import_pending' });
+    expect(
+      (
+        await rpc('admin_update_draft_season', {
+          p_season_id: draftId,
+          p_patch: { name: 'Renamed draft' },
+        })
+      ).error
+    ).toBeNull();
+    // Nothing moved, and nothing was audited for the refusals.
+    expect(getMockData('season_settings').find((s) => s.id === draftId).age_cutoff_mode).toBe(
+      'custom'
+    );
+    expect(auditRows('division.window_changed')).toHaveLength(0);
+  });
+
+  it('allows the change once the job is cancelled, applied or has nothing staged', async () => {
+    for (const [jobs, rows] of [
+      [[job({ status: 'failed' })], [staged()]], // cancelled
+      [[job({ status: 'completed' })], [staged()]],
+      [[job()], [staged({ promoted_at: '2026-10-28T00:00:00Z' })]], // every row applied
+      [[job()], []], // nothing staged yet
+      [[job({ job_type: 'fields' })], [staged()]],
+      [[job({ season_settings_id: MOCK_SEASON_ID })], [staged()]], // the active season's job
+    ]) {
+      seed(jobs, rows);
+      expect((await cutoff()).error).toBeNull();
+      await rpc('admin_update_draft_season', {
+        p_season_id: draftId,
+        p_patch: { age_cutoff_mode: 'custom', age_cutoff_month: 9, age_cutoff_day: 1 },
+      });
+    }
+  });
+
+  it('counts a legacy job with no season against the active season', async () => {
+    seed([job({ season_settings_id: null })], [staged()]);
+    expect(
+      (
+        await rpc('admin_update_draft_season', {
+          p_season_id: MOCK_SEASON_ID,
+          p_patch: { name: 'Fall 2026 renamed' },
+        })
+      ).error
+    ).toBeNull();
+    // The draft is not that job's season.
+    expect((await cutoff()).error).toBeNull();
+  });
+});
+
+describe('a completed season is read-only for its schedule (mock of the schedule triggers)', () => {
+  const TEAM = 'ms-team-old';
+  const LIVE_TEAM = 'ms-team-live';
+  const OLD = 'ms-season-old';
+  const OLD_DIVISION = 'ms-division-old';
+  beforeEach(() => {
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      season_settings: [
+        ...getMockData('season_settings'),
+        { id: OLD, organization_id: MOCK_ORG_ID, name: 'Spring 2025', status: 'completed' },
+      ],
+      divisions: [
+        ...getMockData('divisions'),
+        {
+          id: OLD_DIVISION,
+          organization_id: MOCK_ORG_ID,
+          season_settings_id: OLD,
+          name: 'MS Old U10',
+        },
+      ],
+      teams: [
+        { id: TEAM, organization_id: MOCK_ORG_ID, division_id: OLD_DIVISION, name: 'Old' },
+        { id: LIVE_TEAM, organization_id: MOCK_ORG_ID, division_id: U10, name: 'Live' },
+      ],
+      team_players: [
+        { team_id: TEAM, player_id: 'ms-p1', organization_id: MOCK_ORG_ID },
+        { team_id: LIVE_TEAM, player_id: 'ms-p1', organization_id: MOCK_ORG_ID },
+      ],
+      practice_assignments: [
+        { id: 'ms-pa-old', organization_id: MOCK_ORG_ID, team_id: TEAM },
+        { id: 'ms-pa-live', organization_id: MOCK_ORG_ID, team_id: LIVE_TEAM },
+      ],
+      practice_exceptions: [
+        {
+          id: 'ms-px-old',
+          organization_id: MOCK_ORG_ID,
+          season_settings_id: OLD,
+          team_id: TEAM,
+        },
+      ],
+      game_assignments: [
+        {
+          id: 'ms-ga-old',
+          organization_id: MOCK_ORG_ID,
+          home_team_id: TEAM,
+          away_team_id: null,
+        },
+        {
+          id: 'ms-ga-live',
+          organization_id: MOCK_ORG_ID,
+          home_team_id: LIVE_TEAM,
+          away_team_id: null,
+        },
+      ],
+    });
+    sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
+  });
+  const refused = { code: '22023', details: 'season_completed' };
+
+  it('refuses each writer RPC on a completed season’s team or assignment, and allows the active one', async () => {
+    const results = [
+      await rpc('admin_update_team', { p_team_id: TEAM, p_patch: { notes: 'late' } }),
+      await rpc('admin_delete_team', { p_team_id: TEAM }),
+      await rpc('admin_cancel_practice_assignment', { p_assignment_id: 'ms-pa-old' }),
+      await rpc('admin_cancel_game_assignment', { p_assignment_id: 'ms-ga-old' }),
+      await rpc('admin_assign_team_coach', {
+        p_organization_id: MOCK_ORG_ID,
+        p_team_id: TEAM,
+        p_coach_id: null,
+      }),
+    ];
+    for (const result of results) expect(result.error).toMatchObject(refused);
+    expect(getMockData('teams').map((t) => t.id)).toContain(TEAM);
+    expect(getMockData('practice_assignments').map((a) => a.id)).toContain('ms-pa-old');
+    expect(getMockData('game_assignments').map((a) => a.id)).toContain('ms-ga-old');
+
+    expect(
+      (await rpc('admin_update_team', { p_team_id: LIVE_TEAM, p_patch: { notes: 'ok' } })).error
+    ).toBeNull();
+    expect(
+      (await rpc('admin_cancel_practice_assignment', { p_assignment_id: 'ms-pa-live' })).error
+    ).toBeNull();
+    expect(
+      (await rpc('admin_cancel_game_assignment', { p_assignment_id: 'ms-ga-live' })).error
+    ).toBeNull();
+  });
+
+  it('refuses a direct write to each of the six tables, and allows the active season’s', async () => {
+    const write = async (table, run) => (await run(supabase.from(table))).error;
+    expect(
+      await write('teams', (t) =>
+        t.insert({ organization_id: MOCK_ORG_ID, division_id: OLD_DIVISION, name: 'Late' })
+      )
+    ).toMatchObject(refused);
+    expect(await write('teams', (t) => t.update({ notes: 'late' }).eq('id', TEAM))).toMatchObject(
+      refused
+    );
+    // A move into the completed season, and out of it.
+    expect(
+      await write('teams', (t) => t.update({ division_id: OLD_DIVISION }).eq('id', LIVE_TEAM))
+    ).toMatchObject(refused);
+    expect(
+      await write('teams', (t) => t.update({ division_id: U10 }).eq('id', TEAM))
+    ).toMatchObject(refused);
+    expect(await write('teams', (t) => t.delete().eq('id', TEAM))).toMatchObject(refused);
+    expect(
+      await write('team_players', (t) => t.insert({ team_id: TEAM, player_id: 'ms-p2' }))
+    ).toMatchObject(refused);
+    expect(await write('team_players', (t) => t.delete().eq('team_id', TEAM))).toMatchObject(
+      refused
+    );
+    expect(
+      await write('team_coach_assignments', (t) =>
+        t.upsert({ id: 'ms-tca', organization_id: MOCK_ORG_ID, team_id: TEAM })
+      )
+    ).toMatchObject(refused);
+    expect(
+      await write('practice_assignments', (t) => t.delete().eq('id', 'ms-pa-old'))
+    ).toMatchObject(refused);
+    expect(
+      await write('practice_exceptions', (t) => t.update({ note: 'late' }).eq('id', 'ms-px-old'))
+    ).toMatchObject(refused);
+    expect(
+      await write('game_assignments', (t) => t.update({ field_id: 'x' }).eq('id', 'ms-ga-old'))
+    ).toMatchObject(refused);
+    expect(getMockData('teams').find((t) => t.id === TEAM).notes).toBeUndefined();
+    expect(getMockData('team_players').filter((r) => r.team_id === TEAM)).toHaveLength(1);
+
+    // The active season's rows take the same writes.
+    expect(await write('teams', (t) => t.update({ notes: 'ok' }).eq('id', LIVE_TEAM))).toBeNull();
+    expect(
+      await write('team_players', (t) =>
+        t.insert({ team_id: LIVE_TEAM, player_id: 'ms-p2', organization_id: MOCK_ORG_ID })
+      )
+    ).toBeNull();
+    expect(
+      await write('game_assignments', (t) => t.update({ field_id: 'x' }).eq('id', 'ms-ga-live'))
+    ).toBeNull();
+    // A table that is not a schedule table is untouched by the rule.
+    expect(await write('players', (t) => t.update({ notes: 'ok' }).eq('id', 'ms-p1'))).toBeNull();
+  });
+});
+
 describe('the cutoff day check', () => {
   it('accepts a real calendar day and February 29', () => {
     expect(validCutoffDay(9, 1)).toBe(true);

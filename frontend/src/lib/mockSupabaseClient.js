@@ -25,7 +25,7 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
-import { completedSeasonRefusal, handleSeasonRpc } from './mockSeasons.js';
+import { completedSeasonRefusal, handleSeasonRpc, scheduleWriteRefusal } from './mockSeasons.js';
 import {
   activeSeasonOf,
   coachTeamSeasonRefusal,
@@ -51,6 +51,17 @@ import { ADMIN_ROLES, ASSIGNABLE_ROLES } from '../constants/permissions.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
+
+/** A write the database would refuse: the builder every chained call resolves to the refusal. */
+function refusedWrite(refusal) {
+  const chainable = {
+    select: () => chainable,
+    single: () => Promise.resolve(refusal),
+    maybeSingle: () => Promise.resolve(refusal),
+    then: (onFulfilled, onRejected) => Promise.resolve(refusal).then(onFulfilled, onRejected),
+  };
+  return chainable;
+}
 /**
  * What Postgres accepts for a `uuid` cast. Used where a mocked RPC mirrors a
  * real one that casts and raises `22023` rather than dropping the value.
@@ -2244,6 +2255,12 @@ export const mockSupabase = {
       ...query,
       insert: (records) => {
         const db = getDB();
+        const insertRefused = scheduleWriteRefusal(
+          db,
+          table,
+          Array.isArray(records) ? records : [records]
+        );
+        if (insertRefused) return refusedWrite(insertRefused);
         const newRecords = (Array.isArray(records) ? records : [records]).map((r) => {
           const id = r.id || mockId();
           if (table === 'fields' && r.supports_halves) {
@@ -2286,6 +2303,14 @@ export const mockSupabase = {
       },
       upsert: (records) => {
         const db = getDB();
+        const upsertRows = Array.isArray(records) ? records : [records];
+        const upsertRefused = scheduleWriteRefusal(db, table, [
+          ...upsertRows,
+          ...(db[table] || []).filter((item) =>
+            upsertRows.some((r) => String(r.id) === String(item.id))
+          ),
+        ]);
+        if (upsertRefused) return refusedWrite(upsertRefused);
         const newRecords = (Array.isArray(records) ? records : [records]).map((r) => ({
           id: r.id || mockId(),
           created_at: r.created_at || new Date().toISOString(),
@@ -2362,6 +2387,12 @@ export const mockSupabase = {
           eq: (col, val) => {
             const db = getDB();
             let updatedItem = null;
+            const matching = (db[table] || []).filter((item) => String(item[col]) === String(val));
+            const updateRefused = scheduleWriteRefusal(db, table, [
+              ...matching,
+              ...matching.map((item) => ({ ...item, ...updates })),
+            ]);
+            if (updateRefused) return refusedWrite(updateRefused);
             if (db[table]) {
               db[table] = db[table].map((item) => {
                 if (String(item[col]) === String(val)) {
@@ -2469,6 +2500,8 @@ export const mockSupabase = {
             const db = getDB();
             if (db[table]) {
               const doomed = db[table].filter((item) => String(item[col]) === String(val));
+              const deleteRefused = scheduleWriteRefusal(db, table, doomed);
+              if (deleteRefused) return Promise.resolve(deleteRefused);
               // A hard delete with no tombstone resurrects: `getDB()` rebuilds
               // from `initialMockData` and `mergeSource` only adds or updates.
               // The RPCs tombstone; this generic path did not, so a direct
@@ -7380,6 +7413,8 @@ export const mockSupabase = {
       if (!team) {
         return { data: null, error: { message: 'Team not found in organization' } };
       }
+      const coachScheduleRefused = scheduleWriteRefusal(db, 'teams', [team]);
+      if (coachScheduleRefused) return coachScheduleRefused;
 
       const previousCoachId = team.coach_id || null;
       if (p_coach_id) {
@@ -7626,6 +7661,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
+      const gameCancelRefused = scheduleWriteRefusal(db, 'game_assignments', [assignment]);
+      if (gameCancelRefused) return gameCancelRefused;
       db.game_assignments = (db.game_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
@@ -7663,6 +7700,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
+      const practiceCancelRefused = scheduleWriteRefusal(db, 'practice_assignments', [assignment]);
+      if (practiceCancelRefused) return practiceCancelRefused;
       db.practice_assignments = (db.practice_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
@@ -7700,6 +7739,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
+      const teamUpdateRefused = scheduleWriteRefusal(db, 'teams', [team]);
+      if (teamUpdateRefused) return teamUpdateRefused;
       const patch = p_patch || {};
       const allowed = ['name', 'notes'];
       for (const key of Object.keys(patch)) {
@@ -7762,6 +7803,8 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
+      const teamDeleteRefused = scheduleWriteRefusal(db, 'teams', [team]);
+      if (teamDeleteRefused) return teamDeleteRefused;
       // As 20261022030000 (20261021030000 without RSVPs or team chat): the
       // team's practice exceptions are withdrawn, audited and archived, each
       // series is audited as cancelled, players lose the team id, and

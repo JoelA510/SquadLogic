@@ -26,6 +26,8 @@ import { describeLockReport } from '../utils/lockReport.js';
 import { overrideSlotLoad } from '../utils/overrideSlotLoad.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
+import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { autoSchedulerConfig, isDemoOrganization } from '../lib/demo.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
@@ -577,17 +579,22 @@ export default function PracticeSchedulingPage() {
   const [teamWarnings, setTeamWarnings] = useState([]);
   const [reviewedSchedulerRunId, setReviewedSchedulerRunId] = useState(null);
 
+  // A completed season is history: nothing is generated, applied, saved or cancelled in it
+  // (the database refuses the write too, `season_completed`).
+  const seasonReadOnly = useSeasonReadOnly();
   const canManageSchedule =
-    permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
-    permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+    !seasonReadOnly &&
+    (permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
+      permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION));
   const canEditSchedule = canManageSchedule && isEditMode;
   // Cancelling is destructive and the RPC requires org admin, so the button
   // is gated tighter than general schedule editing.
-  const canCancelAssignments = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
+  const canCancelAssignments =
+    !seasonReadOnly && permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
   // #64: applying REPLACES the season's practice schedule, and the server lets
   // only an org admin do that. Offering anyone else an Apply that always ends
   // in a 403 is worse than saying so up front.
-  const canApplySchedule = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+  const canApplySchedule = !seasonReadOnly && permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
 
   const autoScheduler = useAutoScheduler({ organizationId: currentOrganization?.id });
 
@@ -1809,6 +1816,8 @@ export default function PracticeSchedulingPage() {
           over a schedule that failed to load say nothing about the schedule.
           As on the game page, `dataError` is this page's own two sources
           rather than the hook's aggregate. */}
+      <SeasonReadOnlyNote />
+
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner warnings={blackoutWarnings} />
@@ -1919,7 +1928,7 @@ export default function PracticeSchedulingPage() {
                   </div>
                 )}
               </div>
-              {reviewAssignments?.length > 0 && !canApplySchedule && (
+              {reviewAssignments?.length > 0 && !canApplySchedule && !seasonReadOnly && (
                 <p id="practice-apply-admin-only" className="mt-3 text-sm text-text-muted">
                   Only an organization admin can apply a practice schedule.
                 </p>

@@ -124,3 +124,16 @@ When('I activate the season {string}', async ({ page }, name: string) => {
   await dialog.getByRole('button', { name: 'Activate' }).click();
   await expect(dialog).toHaveCount(0);
 });
+
+When('I open the practice scheduling page', async ({ page }) => {
+  await page.goto('/schedule/practice');
+  await expect(page.getByRole('heading', { name: 'Practice Scheduling' })).toBeVisible();
+});
+
+Then('the page says the season is read-only', async ({ page }) => {
+  await expect(page.getByTestId('season-readonly-note')).toContainText('completed and read-only');
+});
+
+Then('the practice page offers no manual override', async ({ page }) => {
+  await expect(page.getByRole('button', { name: /manual override/i })).toHaveCount(0);
+});

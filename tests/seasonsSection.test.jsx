@@ -248,6 +248,51 @@ describe('edit a draft', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  it('tells the admin to finish or cancel the pending import when the database refuses the change', async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: '22023',
+        message:
+          'Season s-draft has a player import in progress: finish or cancel it before its age cutoff or season year changes',
+        details: 'import_pending',
+      },
+    });
+    const dialog = await openDraft();
+    fireEvent.change(within(dialog).getByLabelText('Cutoff day'), { target: { value: '15' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save season' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Finish or cancel the pending import first'
+    );
+    // The dialog stays open: nothing was saved.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // A division window is refused the same way.
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: '22023', message: 'x', details: 'import_pending' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('U4: born from'), {
+      target: { value: '2023-01-01' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('U4: born through'), {
+      target: { value: '2024-07-31' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save the window for U4' }));
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith('admin_set_division_birthdate_window', {
+        p_division_id: 'd-u4',
+        p_birthdate_start: '2023-01-01',
+        p_birthdate_end: '2024-07-31',
+      })
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Finish or cancel the pending import first'
+      )
+    );
+  });
+
   it('switches to a preset, which clears the custom day', async () => {
     const dialog = await openDraft();
     fireEvent.change(within(dialog).getByLabelText('Cutoff'), {

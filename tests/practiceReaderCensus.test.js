@@ -112,6 +112,10 @@ const REGISTRY = {
     why: 'X12: an existence check before a field-import rollback',
   },
   'sql:persist_practice_schedule': { class: 'writer', why: 'X10: the practice writer (v3)' },
+  'sql:practice_new_auto_row_refusals': {
+    class: 'writer',
+    why: "Phase D PR B: the writer's gate; reads the rows to judge a new auto row against capacity, weekday and count",
+  },
   'sql:enact_practice_recommendation': { class: 'writer', why: 'X10: the repair enact wrapper' },
   'sql:admin_cancel_practice_assignment': {
     class: 'writer',

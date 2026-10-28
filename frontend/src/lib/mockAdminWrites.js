@@ -13,7 +13,10 @@
  *   division of another org/season; upsert by (season, name) or update by id;
  *   returns the row plus `changed`. `p_plays_games` (20261029010000): NULL
  *   keeps the stored value, a new division plays games. 22023 a completed
- *   season (20261101010000).
+ *   season (20261101010000). `p_practices_per_week` and `p_practice_minutes`
+ *   (20261105010000): NULL keeps the stored value, a new division takes 1 and
+ *   any slot length, 0 minutes clears the length, 23514 outside 0 to 7 a week
+ *   or 15 to 240 minutes; both are in the row returned.
  * - `admin_set_practice_slot_division` (20261029010000): 23502 no slot;
  *   42501 no uid, no such slot, or not an admin of its organization; 22023 a
  *   division of another organization; a repeat returns `changed: false`.
@@ -147,11 +150,33 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
     // NULL (or absent) keeps the stored value; a new division plays games.
     const playsGames =
       typeof p.p_plays_games === 'boolean' ? p.p_plays_games : (existing?.plays_games ?? true);
+    // 20261105010000: NULL keeps; a new division takes 1 a week and any slot length; 0 clears the length.
+    const practicesPerWeek = p.p_practices_per_week ?? existing?.practices_per_week ?? 1;
+    const practiceMinutes =
+      p.p_practice_minutes == null
+        ? (existing?.practice_minutes ?? null)
+        : p.p_practice_minutes === 0
+          ? null
+          : p.p_practice_minutes;
+    if (!Number.isInteger(practicesPerWeek) || practicesPerWeek < 0 || practicesPerWeek > 7) {
+      return fail('23514', `practices per week must be from 0 to 7, not ${practicesPerWeek}`);
+    }
+    if (
+      practiceMinutes !== null &&
+      !(Number.isInteger(practiceMinutes) && practiceMinutes >= 15 && practiceMinutes <= 240)
+    ) {
+      return fail(
+        '23514',
+        `a practice length must be from 15 to 240 minutes (or 0 for any slot length), not ${practiceMinutes}`
+      );
+    }
     const changed =
       !existing ||
       existing.name !== nameText ||
       DIVISION_RULES.some((k) => (existing[k] ?? null) !== next[k]) ||
-      (existing.plays_games ?? true) !== playsGames;
+      (existing.plays_games ?? true) !== playsGames ||
+      (existing.practices_per_week ?? 1) !== practicesPerWeek ||
+      (existing.practice_minutes ?? null) !== practiceMinutes;
     let row = existing;
     if (!existing) {
       row = {
@@ -163,6 +188,8 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
         // The trigger on divisions (20261101020000): a new division joins its season's default program.
         program_id: defaultProgramOf(db, seasonId)?.id ?? null,
         plays_games: playsGames,
+        practices_per_week: practicesPerWeek,
+        practice_minutes: practiceMinutes,
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
       };
@@ -172,10 +199,21 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
         name: nameText,
         ...next,
         plays_games: playsGames,
+        practices_per_week: practicesPerWeek,
+        practice_minutes: practiceMinutes,
         updated_at: now.toISOString(),
       });
     }
-    return { data: { ...row, plays_games: row.plays_games ?? true, changed }, error: null };
+    return {
+      data: {
+        ...row,
+        plays_games: row.plays_games ?? true,
+        practices_per_week: row.practices_per_week ?? 1,
+        practice_minutes: row.practice_minutes ?? null,
+        changed,
+      },
+      error: null,
+    };
   }
 
   if (name === 'admin_set_practice_slot_division') {

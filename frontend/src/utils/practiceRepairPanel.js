@@ -289,6 +289,26 @@ export function targetLostRowsOf(result, adapted, names) {
 }
 
 /**
+ * The words for a recommendation that runs past sunset (owner, 2026-10-27: flagged, never blocked),
+ * or `null`. From the flag the repair put on the recommendation: its first date past the limit, the
+ * time it ends against the latest allowed, and how many dates are affected. The admin sees it in
+ * the table and in each confirmation, so enacting it is never done without it.
+ *
+ * @param {{ daylightPastSunset?: { date: string, endMinutes: number, limitMinutes: number, dates: number } } | null | undefined} rec
+ * @returns {string | null}
+ */
+export function pastSunsetText(rec) {
+  const flag = rec?.daylightPastSunset;
+  if (!flag) return null;
+  const over = flag.endMinutes - flag.limitMinutes;
+  return (
+    `Runs past sunset from ${flag.date}: it ends ${clock(flag.endMinutes)}, ${over} minute${over === 1 ? '' : 's'} ` +
+    `after the latest allowed (${clock(flag.limitMinutes)}), on ${flag.dates} date${flag.dates === 1 ? '' : 's'}. ` +
+    'It is flagged, not blocked: check it before you enact it.'
+  );
+}
+
+/**
  * One view row per recommendation, in the repair's order (assignment id).
  *
  * @param {ReturnType<typeof openPracticeRepair>} opened
@@ -308,6 +328,7 @@ export function panelRowsOf(opened, state, names) {
     tier: rec.tier,
     reason: rec.to ? null : rec.reason,
     reasonText: rec.to ? null : (TBD_REASON_TEXT[rec.reason] ?? rec.reason),
+    pastSunset: rec.to ? pastSunsetText(rec) : null,
     refusals: (refusals.get(rec.assignmentId) ?? []).map((r) => ({
       why: r.why,
       text: SAVE_REFUSAL_TEXT[r.why] ?? r.why,

@@ -178,6 +178,9 @@ export function handleDemoRpc(
       season_settings_id: seasonId,
       name: slice.name,
       plays_games: slice.plays_games,
+      // The column defaults (20261105010000).
+      practices_per_week: 1,
+      practice_minutes: null,
       min_roster_size: 4,
       max_roster_size: 8,
       target_team_size: 4,

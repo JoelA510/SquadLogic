@@ -120,8 +120,10 @@ BEGIN
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P64 Fall') RETURNING id INTO v_s1;
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P64 Spring') RETURNING id INTO v_s2;
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_orgb, 'P64 B Fall') RETURNING id INTO v_sb;
-    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s1, 'P64 U10') RETURNING id INTO v_d1;
-    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s2, 'P64 U12') RETURNING id INTO v_d2;
+    -- 3 practices a week: a team below holds a replaced row and its successor at once, and the writer's
+    -- gate (20261105010000) counts the rows a team holds.
+    INSERT INTO public.divisions (organization_id, season_settings_id, name, practices_per_week) VALUES (v_org, v_s1, 'P64 U10', 3) RETURNING id INTO v_d1;
+    INSERT INTO public.divisions (organization_id, season_settings_id, name, practices_per_week) VALUES (v_org, v_s2, 'P64 U12', 3) RETURNING id INTO v_d2;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_orgb, v_sb, 'P64 B U10') RETURNING id INTO v_db;
     FOR i IN 1..6 LOOP
         INSERT INTO public.teams (organization_id, division_id, name)
@@ -133,12 +135,12 @@ BEGIN
     -- derived from the payload or the superseded rows cannot see at all.
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'P64 Team 8 (never scheduled)') RETURNING id INTO v_t8;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_orgb, v_db, 'P64 Team B (other org)') RETURNING id INTO v_tb;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sa;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'wed', '17:00', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sbl;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_orgb, v_fieldb, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sx;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sa;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'wed', '17:00', '18:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sbl;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_orgb, v_fieldb, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sx;
     -- The controls' rows: an auto row in ANOTHER season of the same org, and
     -- an auto row in ANOTHER org. Neither may be touched by a season-1 save.
     INSERT INTO public.practice_assignments (organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source)

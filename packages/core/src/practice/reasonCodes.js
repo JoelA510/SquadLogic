@@ -230,9 +230,10 @@ export const PRACTICE_REASON = Object.freeze({
    * Enforced in the module; shown to admins by the 8.6 3b PR 10 panel.
    */
   /**
-   * Re-home candidates for one displaced series were refused because a
-   * practice there would end past `floor(sunset)` on unlit or undeclared
-   * ground on some date of the series-window. One per series with any.
+   * Re-home candidates for one displaced series end past `floor(sunset)` on
+   * unlit or undeclared ground on some date of the series-window. They are
+   * kept and flagged, never refused (past sunset is flagged, never blocked:
+   * owner, 2026-10-27). One per series with any.
    */
   REPAIR_CANDIDATES_PAST_SUNSET: 'PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET',
   /**
@@ -301,8 +302,8 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.REPAIR_CHANGE_TERM_DISABLED]: PRACTICE_SEVERITY.COMPROMISE,
   // The sibling of REPAIR_MINIMALITY_UNPROVEN: nothing proves the result optimal.
   [PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL]: PRACTICE_SEVERITY.COMPROMISE,
-  // The gate doing its job: a refused candidate was never legal.
-  [PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET]: PRACTICE_SEVERITY.INFO,
+  // A candidate past sunset is kept, not refused (2026-10-27): the admin must see the flag.
+  [PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET]: PRACTICE_SEVERITY.COMPROMISE,
   // A candidate that may have been legal could not be judged: the result may
   // be worse than one with coordinates, so an admin must see it (D4).
   [PRACTICE_REASON.REPAIR_CANDIDATES_SUNSET_UNKNOWN]: PRACTICE_SEVERITY.COMPROMISE,

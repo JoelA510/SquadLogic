@@ -1,10 +1,15 @@
 /**
- * 8.9 PR 7: the daylight gate in `practice/repair.js`.
+ * 8.9 PR 7: the daylight gate in `practice/repair.js`; Phase D PR B changed what it does with a
+ * candidate past sunset.
  *
- * Witness W10 of `docs/PHASE_8_9_PLAN.md` section 4: the repair refuses a
- * past-sunset re-home, and "none dropped" stays green. Each guarantee below was
- * shown red by its plant (named on its describe block) before it counted; the
- * plants are source edits, recorded in the PR and not left in the tree.
+ * Witness W10 of `docs/PHASE_8_9_PLAN.md` section 4 was "the repair refuses a past-sunset
+ * re-home". **Past sunset is flagged, never blocked (owner, 2026-10-27, every league):** the repair
+ * now keeps such a candidate whole and flags it with its reason (`daylightPastSunset`), while an
+ * UNKNOWN sunset is still refused (D4: unknown says nothing about being past it). Both directions
+ * are tested: past sunset is kept and flagged, unknown is refused, in daylight is neither. "None
+ * dropped" stays green. Each guarantee below was shown red by its plant (named on its describe
+ * block) before it counted; the plants are source edits, recorded in the PR and not left in the
+ * tree.
  *
  * **No real coordinates.** Every coordinate is synthetic -- round numbers, not
  * places: 40.00/-75.00 and 41.50/-73.50. Nothing is fitted, geocoded or
@@ -210,9 +215,8 @@ describe('the rig', () => {
 /* W10 -- a past-sunset re-home is refused; none dropped                       */
 /* -------------------------------------------------------------------------- */
 
-describe('W10: the repair refuses a past-sunset re-home, and none is dropped', () => {
-  // Plant: remove the gate (the `judgeDaylight()` call in the candidate loop)
-  // -- every test in this block goes red.
+describe('W10: the repair keeps a past-sunset re-home and flags it, and none is dropped', () => {
+  // Plant: make `judgeDaylight()` return no flag -- every flag assertion in this block goes red.
   const series = [{ teamId: 'T1', surfaceId: 'dusk/f1', startMinutes: 16 * 60 }];
   // Same published time (cheapest, but ends 17:00: past sunset after DST) and
   // an hour earlier (a time change, legal on every date).
@@ -232,20 +236,34 @@ describe('W10: the repair refuses a past-sunset re-home, and none is dropped', (
     );
   });
 
-  it('with the gate the series lands on the legal candidate and the refusal is named', () => {
+  it('with the gate the cheapest candidate stands, whole, and carries its flag', () => {
     expect(gated.rehomed).toHaveLength(1);
-    expect(gated.rehomed[0].to).toMatchObject({ surfaceId: 'dusk/f2', startMinutes: 15 * 60 });
-    expect(rigIllegal(gated.rehomed[0].to, LOSS_FROM, SERIES_UNTIL)).toBe(false);
+    // Same placement as without the gate: past sunset is not a reason to move it.
+    expect(gated.rehomed[0].to).toEqual(ungated.rehomed[0].to);
+    expect(gated.rehomed[0].to).toMatchObject({ surfaceId: 'dusk/f2', startMinutes: 16 * 60 });
+    expect(rigIllegal(gated.rehomed[0].to, LOSS_FROM, SERIES_UNTIL)).toBe(true);
+    // The first illegal date is the first Tuesday after DST ends (2026-11-01); the count is
+    // derived from the solar function, not from the repair.
+    const pastDates = datesOn('TUE', LOSS_FROM, SERIES_UNTIL).filter(
+      (date) => 17 * 60 > limitAt('dusk', date)
+    );
+    expect(pastDates[0]).toBe('2026-11-03');
+    expect(gated.rehomed[0].daylightPastSunset).toEqual({
+      date: '2026-11-03',
+      endMinutes: 17 * 60,
+      limitMinutes: limitAt('dusk', '2026-11-03'),
+      dates: pastDates.length,
+    });
     expect(gated.daylight).toMatchObject({
       checked: true,
       marginMinutes: 0,
       candidatesJudged: 2,
-      candidatesRefusedPastSunset: 1,
+      candidatesFlaggedPastSunset: 1,
       candidatesWithinDaylight: 1,
       candidatesRefusedSunsetUnknown: 0,
     });
-    // The first illegal date is the first Tuesday after DST ends (2026-11-01).
-    expect(gated.daylight.refused).toEqual([
+    expect(gated.daylight.refused).toEqual([]);
+    expect(gated.daylight.flagged).toEqual([
       expect.objectContaining({
         assignmentId: 'a0',
         tier: 'same-venue',
@@ -259,10 +277,36 @@ describe('W10: the repair refuses a past-sunset re-home, and none is dropped', (
     const codes = gated.findings.map((f) => f.code);
     expect(codes).toContain(PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET);
     expect(codes).not.toContain(PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED);
+    // The admin sees it: a compromise, not information.
+    expect(
+      gated.findings.find((f) => f.code === PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET)
+    ).toMatchObject({ severity: 'compromise' });
+    expect(gated.status).not.toBe('ok');
     expectNoneDropped(gated, ['a0']);
   });
 
-  it('with no legal candidate the series is TIME TBD past-sunset, never dropped', () => {
+  it('the in-daylight candidate is neither flagged nor refused (the other direction)', () => {
+    const only = repairPracticeLoss(
+      rigInput({
+        series,
+        inventory: [{ surfaceId: 'dusk/f2', startMinutes: 15 * 60 }],
+        calendar: rigCalendar(),
+      })
+    );
+    expect(only.rehomed).toHaveLength(1);
+    expect(only.rehomed[0].daylightPastSunset).toBeUndefined();
+    expect(only.daylight).toMatchObject({
+      candidatesWithinDaylight: 1,
+      candidatesFlaggedPastSunset: 0,
+      candidatesRefusedSunsetUnknown: 0,
+    });
+    expect(only.daylight.flagged).toEqual([]);
+    expect(only.findings.map((f) => f.code)).not.toContain(
+      PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET
+    );
+  });
+
+  it('with only past-sunset candidates every series is still re-homed, flagged, never TIME TBD', () => {
     const run = repairPracticeLoss(
       rigInput({
         series: [
@@ -277,16 +321,17 @@ describe('W10: the repair refuses a past-sunset re-home, and none is dropped', (
       })
     );
     expectNoneDropped(run, ['a0', 'a1']);
-    expect(run.rehomed).toEqual([]);
-    expect(run.timeTbd.map((entry) => [entry.assignmentId, entry.reason])).toEqual([
-      ['a0', PRACTICE_TBD_REASON.PAST_SUNSET],
-      ['a1', PRACTICE_TBD_REASON.PAST_SUNSET],
-    ]);
-    expect(run.timeTbd[1].daylightRefused).toEqual({ pastSunset: 1, sunsetUnknown: 0 });
-    expect(run.recommendations.every((entry) => entry.to === null)).toBe(true);
+    expect(run.timeTbd).toEqual([]);
+    expect(run.rehomed.map((entry) => entry.assignmentId)).toEqual(['a0', 'a1']);
+    for (const entry of run.rehomed) {
+      expect(rigIllegal(entry.to, LOSS_FROM, SERIES_UNTIL)).toBe(true);
+      expect(entry.daylightPastSunset).toMatchObject({ date: expect.any(String) });
+    }
+    expect(run.daylight.flagged.filter((entry) => entry.tier === 'same-venue')).toHaveLength(2);
+    expect(run.daylight.refused).toEqual([]);
   });
 
-  it('gates tier 2 too: the cross-venue recommendation is the lit one, not the dark one', () => {
+  it('flags tier 2 too: the cross-venue recommendation is the cheapest, flagged, not swapped for the lit one', () => {
     const input = (calendar) =>
       rigInput({
         series: [{ teamId: 'T1', surfaceId: 'dusk/f1', startMinutes: 16 * 60 }],
@@ -304,25 +349,36 @@ describe('W10: the repair refuses a past-sunset re-home, and none is dropped', (
     expectNoneDropped(run, ['a0']);
     expect(run.recommendations[0]).toMatchObject({
       tier: 'cross-venue',
-      to: { surfaceId: 'bright/f2', startMinutes: 17 * 60 },
+      to: { surfaceId: 'quiet/f2', startMinutes: 16 * 60 },
     });
     expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE);
-    expect(run.daylight.refused.map((entry) => entry.tier)).toEqual(['cross-venue']);
+    expect(run.daylight.refused).toEqual([]);
+    expect(run.daylight.flagged.map((entry) => entry.tier)).toEqual(['cross-venue']);
     expect(run.daylight.candidatesLitExempt).toBe(1);
-    // The refused one stood on undeclared ground (D5), and that is counted.
+    // The flagged one stood on undeclared ground (D5), and that is counted.
     expect(run.daylight.candidatesOnUndeclaredLighting).toBe(1);
   });
 
-  it('a decline never re-offers a refused candidate', () => {
+  it('a decline of a flagged recommendation moves to the next candidate and never re-offers the declined one', () => {
     const state = createRecommendationState(
       rigInput({ series, inventory, calendar: rigCalendar() })
     );
-    expect(state.recommendations[0].to).toMatchObject({ startMinutes: 15 * 60 });
-    const next = declineRecommendation(state, 'a0');
-    expect(next.recommendations[0]).toMatchObject({
-      to: null,
-      reason: PRACTICE_TBD_REASON.DECLINED,
+    expect(state.recommendations[0].to).toMatchObject({ startMinutes: 16 * 60 });
+    expect(/** @type {any} */ (state.recommendations[0]).daylightPastSunset).toMatchObject({
+      date: '2026-11-03',
     });
+    const next = declineRecommendation(state, 'a0');
+    expect(next.recommendations[0].to).toMatchObject({
+      surfaceId: 'dusk/f2',
+      startMinutes: 15 * 60,
+    });
+    expect(/** @type {any} */ (next.recommendations[0]).daylightPastSunset).toBeUndefined();
+    expect(next.declined).toEqual([
+      expect.objectContaining({
+        assignmentId: 'a0',
+        to: expect.objectContaining({ startMinutes: 16 * 60 }),
+      }),
+    ]);
   });
 });
 
@@ -353,11 +409,11 @@ describe('D4: an unknown sunset is never allowed', () => {
     expect(run.rehomed).toEqual([]);
     expect(run.timeTbd[0]).toMatchObject({
       reason: PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
-      daylightRefused: { pastSunset: 0, sunsetUnknown: 1 },
+      daylightRefused: { sunsetUnknown: 1 },
     });
     expect(run.daylight).toMatchObject({
       candidatesRefusedSunsetUnknown: 1,
-      candidatesRefusedPastSunset: 0,
+      candidatesFlaggedPastSunset: 0,
     });
     expect(run.daylight.refused[0]).toMatchObject({
       reason: PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
@@ -373,9 +429,39 @@ describe('D4: an unknown sunset is never allowed', () => {
     expect(run.status).not.toBe('ok');
   });
 
-  it('names sunset-unknown when a venue mixes a past-sunset refusal with an unknown one', () => {
-    // A table with Tuesdays only: the Tuesday shape is judged (and runs past
-    // sunset), the Wednesday shape has no record and no coordinates.
+  it('a candidate past sunset on some dates and unknown on others is still refused sunset-unknown', () => {
+    // A table covering the first half of the Tuesdays only, at 16:00: the candidate runs past
+    // it there, and the later Tuesdays have no record and no coordinates. Unknown wins: it is
+    // never read as legal, and never as merely flagged.
+    const tuesdays = datesOn('TUE', LOSS_FROM, SERIES_UNTIL);
+    const known = tuesdays.slice(0, Math.floor(tuesdays.length / 2));
+    expect(known.length).toBeGreaterThan(0);
+    expect(known.length).toBeLessThan(tuesdays.length);
+    const run = repairPracticeLoss(
+      rigInput({
+        series: [{ teamId: 'T1', surfaceId: 'dark/f1', startMinutes: 16 * 60 }],
+        inventory: [{ surfaceId: 'dark/f2', startMinutes: 16 * 60 }],
+        calendar: rigCalendar(known.map((date) => ({ date, sunsetMinutes: 16 * 60 }))),
+      })
+    );
+    expectNoneDropped(run, ['a0']);
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({
+      reason: PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
+      daylightRefused: { sunsetUnknown: 1 },
+    });
+    expect(run.daylight).toMatchObject({
+      candidatesRefusedSunsetUnknown: 1,
+      candidatesFlaggedPastSunset: 0,
+    });
+    expect(run.daylight.refused.map((entry) => [entry.reason, entry.sunsetSource])).toEqual([
+      [PRACTICE_TBD_REASON.SUNSET_UNKNOWN, 'unknown'],
+    ]);
+  });
+
+  it('a venue mixing a past-sunset shape with an unknown one: the first is kept and flagged, the second refused', () => {
+    // A table with Tuesdays only: the Tuesday shape is judged (and runs past sunset), the
+    // Wednesday shape has no record and no coordinates.
     const tuesdays = datesOn('TUE', LOSS_FROM, SERIES_UNTIL).map((date) => ({
       date,
       sunsetMinutes: 16 * 60,
@@ -391,12 +477,16 @@ describe('D4: an unknown sunset is never allowed', () => {
       })
     );
     expectNoneDropped(run, ['a0']);
-    expect(run.timeTbd[0]).toMatchObject({
-      reason: PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
-      daylightRefused: { pastSunset: 1, sunsetUnknown: 1 },
+    expect(run.timeTbd).toEqual([]);
+    expect(run.rehomed[0].to).toMatchObject({ weekday: 'TUE', startMinutes: 16 * 60 });
+    expect(run.rehomed[0].daylightPastSunset).toMatchObject({
+      endMinutes: 17 * 60,
+      limitMinutes: 16 * 60,
     });
-    expect(run.daylight.refused.map((entry) => [entry.reason, entry.sunsetSource])).toEqual([
+    expect(run.daylight.flagged.map((entry) => [entry.reason, entry.sunsetSource])).toEqual([
       [PRACTICE_TBD_REASON.PAST_SUNSET, 'table'],
+    ]);
+    expect(run.daylight.refused.map((entry) => [entry.reason, entry.sunsetSource])).toEqual([
       [PRACTICE_TBD_REASON.SUNSET_UNKNOWN, 'unknown'],
     ]);
   });
@@ -449,15 +539,24 @@ describe('the boundary: ending at floor(sunset) is legal, one minute later is no
     expectNoneDropped(run, ['a0']);
     expect(run.rehomed).toHaveLength(1);
     expect(run.rehomed[0].to.startMinutes + 60).toBe(LIMIT);
+    expect(run.rehomed[0].daylightPastSunset).toBeUndefined();
     expect(run.daylight.candidatesWithinDaylight).toBe(1);
+    expect(run.daylight.candidatesFlaggedPastSunset).toBe(0);
   });
 
-  it('refuses a candidate ending one minute past it', () => {
+  it('flags (does not refuse) a candidate ending one minute past it', () => {
     const run = blackout(LIMIT - 59);
     expectNoneDropped(run, ['a0']);
-    expect(run.rehomed).toEqual([]);
-    expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.PAST_SUNSET);
-    expect(run.daylight.refused[0]).toMatchObject({ date: DATE, endMinutes: LIMIT + 1 });
+    expect(run.timeTbd).toEqual([]);
+    expect(run.rehomed).toHaveLength(1);
+    expect(run.rehomed[0].daylightPastSunset).toEqual({
+      date: DATE,
+      endMinutes: LIMIT + 1,
+      limitMinutes: LIMIT,
+      dates: 1,
+    });
+    expect(run.daylight.flagged[0]).toMatchObject({ date: DATE, endMinutes: LIMIT + 1 });
+    expect(run.daylight.refused).toEqual([]);
   });
 });
 
@@ -630,41 +729,44 @@ const SWEEP = [RETIREMENT, BLACKOUT].flatMap((window) =>
 );
 
 describe('season-2026: every corpus loss, gated', () => {
-  it('sweeps every surface the baseline stands on, and the gate judged and refused real candidates', () => {
+  it('sweeps every surface the baseline stands on, and the gate judged and flagged real candidates', () => {
     expect(SURFACES.length).toBe(29);
     expect(SWEEP.length).toBe(58);
     const sum = (key) => SWEEP.reduce((n, row) => n + row.gated.daylight[key], 0);
     expect(sum('candidatesJudged')).toBeGreaterThan(0);
-    expect(sum('candidatesRefusedPastSunset')).toBeGreaterThan(0);
+    expect(sum('candidatesFlaggedPastSunset')).toBeGreaterThan(0);
     expect(sum('candidatesWithinDaylight')).toBeGreaterThan(0);
-    // Every corpus venue has (synthetic) coordinates: nothing is unknown.
+    // Every corpus venue has (synthetic) coordinates: nothing is unknown, so nothing is refused.
     expect(sum('candidatesRefusedSunsetUnknown')).toBe(0);
   });
 
-  it('W10: without the gate some re-home runs past sunset (not vacuous); with it, none does', () => {
-    let ungatedIllegal = 0;
-    let gatedLegal = 0;
+  it('W10: the gate moves nothing; a re-home is flagged exactly when the independent derivation says it runs past sunset', () => {
+    let flagged = 0;
+    let clean = 0;
     for (const { ungated, gated } of SWEEP) {
-      for (const entry of ungated.recommendations) {
-        if (entry.to === null) continue;
-        if (corpusIllegal(entry.to, entry.effectiveFrom, entry.effectiveUntil)) ungatedIllegal += 1;
-      }
-      // Tier 1 and tier 2 alike: every recommendation is a candidate the gate passed.
+      // Past sunset is flagged, never blocked: the same placements with and without the calendar.
+      expect(gated.recommendations.map((entry) => [entry.assignmentId, entry.to])).toEqual(
+        ungated.recommendations.map((entry) => [entry.assignmentId, entry.to])
+      );
+      // Tier 1 and tier 2 alike: the flag is present exactly when the placement is illegal.
       for (const entry of gated.recommendations) {
         if (entry.to === null) continue;
-        expect(corpusIllegal(entry.to, entry.effectiveFrom, entry.effectiveUntil)).toBe(false);
-        gatedLegal += 1;
+        const illegal = corpusIllegal(entry.to, entry.effectiveFrom, entry.effectiveUntil);
+        expect(entry.daylightPastSunset !== undefined).toBe(illegal);
+        if (illegal) flagged += 1;
+        else clean += 1;
       }
     }
-    expect(ungatedIllegal).toBeGreaterThan(0);
-    // The blackout leaves legal ground, so "none past sunset" is not "none placed".
-    expect(gatedLegal).toBeGreaterThan(0);
+    // Neither direction is vacuous: some placements are flagged, some are in daylight.
+    expect(flagged).toBeGreaterThan(0);
+    expect(clean).toBeGreaterThan(0);
   });
 
-  it('every refusal the gate names is illegal by the independent derivation', () => {
+  it('every flag the gate lists is illegal by the independent derivation', () => {
     let count = 0;
     for (const { gated } of SWEEP) {
-      for (const entry of gated.daylight.refused) {
+      expect(gated.daylight.refused).toEqual([]);
+      for (const entry of gated.daylight.flagged) {
         const window = gated.recommendations.find((r) => r.assignmentId === entry.assignmentId);
         expect(corpusIllegal(entry.to, window.effectiveFrom, window.effectiveUntil)).toBe(true);
         count += 1;
@@ -673,16 +775,19 @@ describe('season-2026: every corpus loss, gated', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  it('none dropped: every displaced series from the plan is placed or TIME TBD with a reason', () => {
-    let pastSunset = 0;
+  it('none dropped: every displaced series from the plan is placed or TIME TBD with a reason, and none is TIME TBD for being past sunset', () => {
+    let flaggedPlacements = 0;
     for (const { displaced, gated } of SWEEP) {
       if (displaced.length === 0) continue;
       expectNoneDropped(gated, displaced);
-      pastSunset += gated.timeTbd.filter(
-        (entry) => entry.reason === PRACTICE_TBD_REASON.PAST_SUNSET
+      expect(
+        gated.timeTbd.filter((entry) => entry.reason === PRACTICE_TBD_REASON.PAST_SUNSET)
+      ).toEqual([]);
+      flaggedPlacements += gated.rehomed.filter(
+        (entry) => entry.daylightPastSunset !== undefined
       ).length;
     }
-    expect(pastSunset).toBeGreaterThan(0);
+    expect(flaggedPlacements).toBeGreaterThan(0);
   });
 
   it('the corpus as it ships -- weekend table rows, no coordinates -- refuses unknowns, drops nothing', () => {
@@ -702,17 +807,23 @@ describe('season-2026: every corpus loss, gated', () => {
       unknownTbd += run.timeTbd.filter(
         (entry) => entry.reason === PRACTICE_TBD_REASON.SUNSET_UNKNOWN
       ).length;
-      // Anything placed stands on lit ground or on dates the table covers, legally.
+      // Anything placed stands on lit ground or on dates the table covers, and is flagged when it
+      // runs past the limit.
       for (const entry of run.recommendations) {
         if (entry.to === null) continue;
         const venueId = corpusGraph.surfaces[entry.to.surfaceId].venueId;
         if (corpusGraph.venues[venueId]?.lit === true) continue;
+        let past = false;
         for (const date of datesOn(entry.to.weekday, entry.effectiveFrom, entry.effectiveUntil)) {
           expect(tableByDate.has(date)).toBe(true);
-          expect(entry.to.startMinutes + entry.to.durationMinutes).toBeLessThanOrEqual(
+          if (
+            entry.to.startMinutes + entry.to.durationMinutes >
             Math.floor(/** @type {number} */ (tableByDate.get(date)))
-          );
+          ) {
+            past = true;
+          }
         }
+        expect(entry.daylightPastSunset !== undefined).toBe(past);
       }
     }
     expect(unknownRefused).toBeGreaterThan(0);
@@ -741,8 +852,8 @@ describe('season-2026: every corpus loss, gated', () => {
 
 describe('W29: repair honours a lighting override only when every plan slot of the shape has one', () => {
   // Plant 1: ignore the overrides (hand the evaluator none). The fully lit
-  // case stays refused and goes red. Plant 2: `some` for `every` in
-  // shapeExemptOn(); the half-lit case is re-homed and goes red.
+  // case stays flagged and goes red. Plant 2: `some` for `every` in
+  // shapeExemptOn(); the half-lit case loses its flag and goes red.
   const series = [{ teamId: 'T1', surfaceId: 'dusk/f1', startMinutes: 16 * 60 }];
   // One candidate: dusk/f2 16:00, which ends 17:00 -- past sunset after DST.
   const inventory = [{ surfaceId: 'dusk/f2', startMinutes: 16 * 60 }];
@@ -767,16 +878,18 @@ describe('W29: repair honours a lighting override only when every plan slot of t
   };
   const whole = (slotId, until = SERIES_UNTIL) => ({ slotId, from: SERIES_FROM, until });
 
-  it('with no override the candidate is refused past sunset (the case is not vacuous)', () => {
+  it('with no override the candidate is kept and flagged past sunset (the case is not vacuous)', () => {
     const result = run([]);
-    expect(result.rehomed).toHaveLength(0);
-    expect(result.timeTbd.map((entry) => entry.reason)).toEqual([PRACTICE_TBD_REASON.PAST_SUNSET]);
+    expect(result.rehomed).toHaveLength(1);
+    expect(result.timeTbd).toEqual([]);
+    expect(result.rehomed[0].daylightPastSunset).toMatchObject({ date: '2026-11-03' });
   });
 
-  it('one of two identical slots overridden: still refused', () => {
+  it('one of two identical slots overridden: still flagged', () => {
     const result = run([whole('x1')]);
-    expect(result.rehomed).toHaveLength(0);
-    expect(result.daylight.candidatesRefusedPastSunset).toBe(1);
+    expect(result.rehomed).toHaveLength(1);
+    expect(result.rehomed[0].daylightPastSunset).toBeDefined();
+    expect(result.daylight.candidatesFlaggedPastSunset).toBe(1);
     expect(result.daylight.occurrencesLightingOverrideExempt).toBe(0);
     expectNoneDropped(result, ['a0']);
   });
@@ -785,18 +898,21 @@ describe('W29: repair honours a lighting override only when every plan slot of t
     const result = run([whole('x1'), whole('x2')]);
     expect(result.rehomed).toHaveLength(1);
     expect(result.rehomed[0].to).toMatchObject({ surfaceId: 'dusk/f2', startMinutes: 16 * 60 });
+    expect(result.rehomed[0].daylightPastSunset).toBeUndefined();
     expect(result.daylight.candidatesLightingOverrideExempt).toBe(1);
-    expect(result.daylight.candidatesRefusedPastSunset).toBe(0);
+    expect(result.daylight.candidatesFlaggedPastSunset).toBe(0);
+    expect(result.daylight.flagged).toEqual([]);
     expect(result.daylight.occurrencesLightingOverrideExempt).toBe(
       result.daylight.occurrencesExamined
     );
     expectNoneDropped(result, ['a0']);
   });
 
-  it('a window that stops before DST leaves the late dates judged: partly legal is refused', () => {
+  it('a window that stops before DST leaves the late dates judged: partly legal is flagged from the first late date', () => {
     const result = run([whole('x1', '2026-10-31'), whole('x2', '2026-10-31')]);
-    expect(result.rehomed).toHaveLength(0);
-    expect(result.daylight.refused[0].date).toBe('2026-11-03');
+    expect(result.rehomed).toHaveLength(1);
+    expect(result.rehomed[0].daylightPastSunset).toMatchObject({ date: '2026-11-03' });
+    expect(result.daylight.flagged[0].date).toBe('2026-11-03');
     expect(result.daylight.occurrencesLightingOverrideExempt).toBeGreaterThan(0);
   });
 

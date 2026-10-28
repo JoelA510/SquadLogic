@@ -15,7 +15,9 @@
  *     the run;
  *   * an ordinary run places only teams with no row at all, and never a team
  *     whose series is TIME TBD (decision 4: those are resolved only in the
- *     repair panel) -- `classifyTeamsForRun`.
+ *     repair panel) -- `classifyTeamsForRun`. Since Phase D PR B a team whose
+ *     division wants several practices a week and holds fewer rows is also
+ *     placed, for the practices it is short of -- `planTeamsForRun`.
  *
  * **Stated limitation.** The Edge Function has no date model. A locked row
  * consumes its slot for the whole season, whatever its `effective_date_range`
@@ -78,6 +80,9 @@ export interface LockCrossCheck {
 
 /** Why a roster team is not offered to an ordinary run. */
 export const TIME_TBD_EXCLUDED_REASON = 'time-tbd-series';
+
+/** The refusal code when a team's saved practice cannot be dated (Phase D PR B). */
+export const TEAM_HOLDS_UNREADABLE = 'TEAM_HOLDS_UNREADABLE';
 
 function sortedUnique(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
@@ -192,6 +197,123 @@ export function classifyTeamsForRun(
     else placeable.push(teamId);
   }
   return { placeable, locked, timeTbd };
+}
+
+export interface PracticePlan extends TeamClassification {
+  /**
+   * Teams whose division gives them no practice and that hold none: nothing to place, nothing
+   * missing (Phase D PR B). Every roster team lands in exactly one of `placeable`, `locked`,
+   * `timeTbd` and this.
+   */
+  noPractices: string[];
+  /** Practices still to place, for each `placeable` team: its division's count less the rows it holds. */
+  unitsNeeded: Record<string, number>;
+  /** Each team's practices a week, from its division (one when nothing says otherwise). */
+  targets: Record<string, number>;
+  /** Rows each team holds, whatever their dates: a row that has ended still counts (maximum freeze). */
+  held: Record<string, number>;
+  /**
+   * Teams holding more rows than their division's count (the count was lowered below saved rows):
+   * the rows stay, and the run says so (decision 10). Not an error.
+   */
+  overTarget: Array<{ teamId: string; target: number; held: number }>;
+}
+
+/**
+ * Plan an ordinary run per practice (Phase D PR B). The subject set is the roster (`teamIds`),
+ * never the solver's output. A team with a live TIME TBD series is excluded first (decision 4).
+ * Otherwise it needs `max(target - held, 0)` more practices, `target` being its division's count
+ * (`targets`, one for a team the map does not name) and `held` the rows it already has: a team that
+ * needs any is `placeable`, one that needs none and holds a row is `locked`, and one that needs none
+ * and holds none (a division with 0 practices a week) is in `noPractices`. For a division at one a
+ * week this is `classifyTeamsForRun` exactly. Rows count whatever their dates, so a team whose only
+ * row has ended is not given a new one -- today's behaviour at one a week, kept at every count.
+ */
+export function planTeamsForRun(
+  teamIds: string[],
+  rows: LoadedPracticeRow[],
+  timeTbdTeamIds: Iterable<string>,
+  targets: ReadonlyMap<string, number> = new Map()
+): PracticePlan {
+  const heldBy = new Map<string, number>();
+  for (const row of rows) heldBy.set(row.teamId, (heldBy.get(row.teamId) ?? 0) + 1);
+  const tbd = new Set(timeTbdTeamIds);
+  const plan: PracticePlan = {
+    placeable: [],
+    locked: [],
+    timeTbd: [],
+    noPractices: [],
+    unitsNeeded: {},
+    targets: {},
+    held: {},
+    overTarget: [],
+  };
+  for (const teamId of new Set(teamIds)) {
+    const target = targets.get(teamId) ?? 1;
+    const held = heldBy.get(teamId) ?? 0;
+    plan.targets[teamId] = target;
+    plan.held[teamId] = held;
+    if (held > target) plan.overTarget.push({ teamId, target, held });
+    if (tbd.has(teamId)) {
+      plan.timeTbd.push(teamId);
+      continue;
+    }
+    const needed = Math.max(target - held, 0);
+    if (needed > 0) {
+      plan.placeable.push(teamId);
+      plan.unitsNeeded[teamId] = needed;
+    } else if (held > 0) plan.locked.push(teamId);
+    else plan.noPractices.push(teamId);
+  }
+  return plan;
+}
+
+/**
+ * The saved rows of teams that need more than one practice and whose slot is not in the run, each
+ * with that slot's dating from the store (Phase D PR B). They hold the team's weekday: the solver
+ * must not give a team that already practises on a Tuesday a second Tuesday, or the writer's gate
+ * refuses the apply. `unchecked` names the teams whose hold cannot be dated -- a row with no slot,
+ * a slot the store did not return, or one without readable dates -- so the run is refused for
+ * them rather than run blind. Only teams in `needing` are examined: a team needing one practice
+ * has no second to misplace, so a run at one a week reads and refuses nothing it did not before.
+ */
+export function outsideHoldsFor(
+  rows: readonly LoadedPracticeRow[],
+  runSlotIds: ReadonlySet<string>,
+  stored: ReadonlyMap<string, { firstDate?: string | null; validUntil?: string | null }>,
+  needing: ReadonlySet<string>
+): {
+  holds: Array<{
+    teamId: string;
+    firstDate: string;
+    lastDate: string;
+    effectiveDateRange: string | null;
+  }>;
+  unchecked: Array<{ teamId: string; slotId: string | null }>;
+} {
+  const holds: Array<{
+    teamId: string;
+    firstDate: string;
+    lastDate: string;
+    effectiveDateRange: string | null;
+  }> = [];
+  const unchecked: Array<{ teamId: string; slotId: string | null }> = [];
+  for (const row of rows) {
+    if (!needing.has(row.teamId)) continue;
+    if (row.slotId !== null && runSlotIds.has(row.slotId)) continue;
+    const slot = row.slotId === null ? undefined : stored.get(row.slotId);
+    if (!slot || slot.firstDate == null || slot.validUntil == null) {
+      unchecked.push({ teamId: row.teamId, slotId: row.slotId });
+      continue;
+    }
+    holds.push({
+      teamId: row.teamId,
+      firstDate: slot.firstDate,
+      lastDate: slot.validUntil,
+      effectiveDateRange: row.effectiveDateRange,
+    });
+  }
+  return { holds, unchecked };
 }
 
 // ---------------------------------------------------------------------------

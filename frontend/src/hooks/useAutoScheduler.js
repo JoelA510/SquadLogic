@@ -19,10 +19,15 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
 
 /**
  * @typedef {Object} AutoSchedulerResult
- * @property {Array<{ teamId: string, slotId: string, source: string, effectiveUntil?: string, effectiveDateRange?: string }>} assignments
- *   `effectiveUntil` is set only on a placement the daylight post-pass truncated;
- *   `effectiveDateRange` is the range the run judged it on (M4.8).
- * @property {Array<Object>} unassigned
+ * @property {Array<{ teamId: string, unitId?: string, slotId: string, source: string, effectiveUntil?: string, effectiveDateRange?: string }>} assignments
+ *   `unitId` names the practice when a team was given several (Phase D PR B);
+ *   `effectiveUntil` is never set by the function any more (a placement past sunset is kept whole
+ *   and flagged, 2026-10-27); `effectiveDateRange` is the range the run judged it on (M4.8).
+ * @property {Array<Object>} unassigned One entry per practice not placed, each with its `reason`
+ *   (and `unitId` and `target` for a team whose division wants several a week).
+ * @property {{ teams: Array<{ teamId: string, target: number, held: number, placed: number, missing: number }>, overTarget: Array<{ teamId: string, target: number, held: number }>, noPractices?: string[] }|null} [practices]
+ *   Per team that wants several practices a week: how many it holds, was given and is missing;
+ *   and the teams holding more than their division's count now. `null` from a function deployed before it.
  * @property {Object} evaluation
  * @property {Object} optimization
  * @property {string|null} runId
@@ -32,7 +37,7 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
  *   and was resolved to its first occurrence. Always an array, never absent.
  * @property {Object|null} [approvedPreferences]
  * @property {Object|null} [daylight] The daylight post-pass's report (8.9 PR 6):
- *   `timeTbd`, `unknown`, `lockedPastSunset` and counts.
+ *   `pastSunset` (kept, flagged), `unknown`, `lockedPastSunset` and counts.
  * @property {{ endedRows?: string[], unreadableRange?: string[] }|null} [lock] The
  *   lock as the run held it (M4.8): ended rows and rows whose saved range could
  *   not be read. `null` from a function deployed before it.
@@ -239,10 +244,13 @@ export function useAutoScheduler({ organizationId }) {
           // counts, prefer_keep breaches, and every conflict or
           // no-reference finding. Carried through for the same reason.
           approvedPreferences: data.approvedPreferences ?? null,
-          // The daylight post-pass (8.9 PR 6): TIME TBD remainders, unjudged
-          // sunsets and locked rows past sunset. Carried through for the same
-          // reason.
+          // The daylight post-pass (8.9 PR 6): placements flagged past sunset,
+          // unjudged sunsets and locked rows past sunset. Carried through for
+          // the same reason.
           daylight: data.daylight ?? null,
+          // Phase D PR B: per team that wants several practices a week, how many
+          // it holds, was given and is missing; and the teams over their count.
+          practices: data.practices ?? null,
           // M4.8 Q7: the date the run judged new placements from (today on the
           // season's clock, server-side). The review writes each placement's
           // range from it, so a cached run reviewed after midnight still saves

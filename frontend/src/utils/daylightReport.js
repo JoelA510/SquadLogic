@@ -1,13 +1,13 @@
 /**
  * The auto-scheduler's daylight report (8.9 PR 6), as one status line.
  *
- * The Edge Function returns `daylight` on every run: each new placement cut
- * short at its first date past sunset on unlit ground (the remainder TIME
- * TBD), each placement or locked row whose sunset could not be judged (an
- * unlit venue with no coordinates: flagged, never treated as within
- * daylight), and each locked row past sunset with a proposed fix that nothing
- * applies. This renders all three so none is silently dropped; the truncated
- * range itself is honoured by `newPlacementRange`.
+ * The Edge Function returns `daylight` on every run: each new placement with a
+ * date past sunset on unlit ground (kept whole and flagged: past sunset is
+ * flagged, never blocked, owner 2026-10-27), each placement or locked row
+ * whose sunset could not be judged (an unlit venue with no coordinates:
+ * flagged, never treated as within daylight), and each locked row past sunset
+ * with a proposed fix that nothing applies. This renders all three so none is
+ * silently dropped.
  *
  * @module utils/daylightReport
  */
@@ -40,8 +40,15 @@ function listSome(items) {
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
+ * @param {number} minutes - minutes past local midnight
+ * @returns {string} `HH:MM`
+ */
+const clock = (minutes) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+/**
  * @param {{
- *   timeTbd?: Array<{ teamId: string, from: string, withdrawn?: boolean }>,
+ *   pastSunset?: Array<{ teamId: string, date: string, endMinutes: number, limitMinutes: number }>,
  *   unknown?: Array<{ teamId: string, assignmentId?: string, cause: string }>,
  *   lockedPastSunset?: Array<{ teamId: string, date: string, proposedFix?: { effectiveUntil: string|null } }>,
  * }|null|undefined} daylight
@@ -51,15 +58,17 @@ export function describeDaylightReport(daylight) {
   if (!daylight) return null;
   const lines = [];
 
-  const tbd = daylight.timeTbd ?? [];
-  if (tbd.length > 0) {
+  const past = daylight.pastSunset ?? [];
+  if (past.length > 0) {
     lines.push(
-      `${count(tbd.length, 'new practice')} would run past sunset on unlit ground and ` +
-        `${tbd.length === 1 ? 'is' : 'are'} TIME TBD from that date: ` +
+      `${count(past.length, 'new practice')} ` +
+        `${past.length === 1 ? 'runs' : 'run'} past sunset on unlit ground and ` +
+        `${past.length === 1 ? 'is' : 'are'} kept as placed, for you to decide: ` +
         listSome(
-          tbd.map(
-            (t) =>
-              `team ${t.teamId} from ${t.from}${t.withdrawn ? ' (not placed; no earlier date)' : ''}`
+          past.map(
+            (p) =>
+              `team ${p.teamId} from ${p.date} (ends ${clock(p.endMinutes)}, ` +
+              `the latest allowed is ${clock(p.limitMinutes)})`
           )
         )
     );

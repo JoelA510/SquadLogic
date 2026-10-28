@@ -8,7 +8,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(16);
+SELECT plan(29);
 
 -- Org A: a season with two teams, a second season with one, three slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -32,18 +32,93 @@ VALUES ('a1111111-1111-1111-1111-0000000066f0', 'a1111111-1111-1111-1111-1111111
 INSERT INTO public.fields (id, organization_id, location_id, name)
 VALUES ('a1111111-1111-1111-1111-0000000066f1', 'a1111111-1111-1111-1111-111111111111',
         'a1111111-1111-1111-1111-0000000066f0', 'V3 Pitch');
-INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+-- Capacity 3: the first slot holds Team 9's row and the two Teams 1 and 2 are given below, and the
+-- writer (20261105010000) refuses a new auto row that takes a slot past its capacity.
+INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
 VALUES
     ('a1111111-1111-1111-1111-0000000066a1', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+     'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30', 3),
     ('a1111111-1111-1111-1111-0000000066a2', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-0000000066f1', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+     'a1111111-1111-1111-1111-0000000066f1', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30', 3),
     ('a1111111-1111-1111-1111-0000000066a3', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30');
+     'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30', 3);
 INSERT INTO public.practice_assignments (id, organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source)
 VALUES ('a1111111-1111-1111-1111-000000006609', 'a1111111-1111-1111-1111-111111111111',
         'a1111111-1111-1111-1111-0000000066e9', 'a1111111-1111-1111-1111-0000000066a1',
         'a1111111-1111-1111-1111-0000000066a1', '[2026-09-01,2026-11-30]', 'auto');
+
+-- The writer gate (20261105010000): a season of its own, so the gate's saves do not meet the lock
+-- tests' rows. Two divisions: U8 plays 2 practices a week of 60 minutes, U9 plays 1 (any length).
+INSERT INTO public.season_settings (id, organization_id, name)
+VALUES ('a1111111-1111-1111-1111-0000000066b3', 'a1111111-1111-1111-1111-111111111111', 'V3 Gate');
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week, practice_minutes)
+VALUES
+    ('a1111111-1111-1111-1111-0000000066c1', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066b3', 'V3 Gate U8', 2, 60),
+    ('a1111111-1111-1111-1111-0000000066c2', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066b3', 'V3 Gate U9', 1, NULL);
+INSERT INTO public.teams (id, organization_id, division_id, name)
+VALUES
+    ('a1111111-1111-1111-1111-000000006601', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c1', 'Gate U8 One'),
+    ('a1111111-1111-1111-1111-000000006602', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c1', 'Gate U8 Two'),
+    ('a1111111-1111-1111-1111-000000006603', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Three'),
+    ('a1111111-1111-1111-1111-000000006604', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Four');
+-- Capacity 1 each. a4 Mon 17:00-18:00, a5 Wed 17:00-18:00, a6 Mon 18:15-19:15 (a second Monday slot),
+-- a7 Tue 17:00-17:45 (45 minutes), a8 Thu 17:00-18:00 reserved to U9, a9 Fri 17:00-18:00.
+INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity, division_id)
+VALUES
+    ('a1111111-1111-1111-1111-0000000066a4', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066a5', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066a6', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'mon', '18:15', '19:15', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066a7', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'tue', '17:00', '17:45', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066a8', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'thu', '17:00', '18:00', '2026-09-01', '2026-11-30', 1,
+     'a1111111-1111-1111-1111-0000000066c2'),
+    ('a1111111-1111-1111-1111-0000000066a9', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'fri', '17:00', '18:00', '2026-09-01', '2026-11-30', 1, NULL);
+
+-- Two more U9 teams (1 a week): Five holds a manual row with NO date range on a Saturday slot of
+-- capacity 1 (a NULL range is the slot's whole validity, as the solver reads it); Six is the team the
+-- week-count tests save for. 66aa Sat 10:00-11:00, 66ab Sun 12:00-13:00, 66ac Mon 12:00-13:00,
+-- 66ad Wed 12:00-13:00: all capacity 1, valid 2026-09-01 to 2026-11-30.
+INSERT INTO public.teams (id, organization_id, division_id, name)
+VALUES
+    ('a1111111-1111-1111-1111-000000006605', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Five'),
+    ('a1111111-1111-1111-1111-000000006606', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Six');
+-- A division that gives no practice (0 a week) and a team in it; and a U9 team with no row at all.
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week, practice_minutes)
+VALUES ('a1111111-1111-1111-1111-0000000066c3', 'a1111111-1111-1111-1111-111111111111',
+        'a1111111-1111-1111-1111-0000000066b3', 'V3 Gate U0', 0, NULL);
+INSERT INTO public.teams (id, organization_id, division_id, name)
+VALUES
+    ('a1111111-1111-1111-1111-000000006607', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c3', 'Gate U0 Seven'),
+    ('a1111111-1111-1111-1111-000000006608', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Eight');
+INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity, division_id)
+VALUES
+    ('a1111111-1111-1111-1111-0000000066aa', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'sat', '10:00', '11:00', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066ab', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'sun', '12:00', '13:00', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066ac', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'mon', '12:00', '13:00', '2026-09-01', '2026-11-30', 1, NULL),
+    ('a1111111-1111-1111-1111-0000000066ad', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'wed', '12:00', '13:00', '2026-09-01', '2026-11-30', 1, NULL);
+INSERT INTO public.practice_assignments (id, organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source)
+VALUES ('a1111111-1111-1111-1111-00000000660a', 'a1111111-1111-1111-1111-111111111111',
+        'a1111111-1111-1111-1111-000000006605', 'a1111111-1111-1111-1111-0000000066aa',
+        'a1111111-1111-1111-1111-0000000066aa', NULL, 'manual');
 
 CREATE TEMP TABLE v3_payload ON COMMIT DROP AS
 SELECT jsonb_build_array(
@@ -181,6 +256,181 @@ SELECT is(
         AND organization_id = 'a1111111-1111-1111-1111-111111111111'),
     1,
     'cancelling withdrew the exception in the same transaction, audited');
+
+-- ---- the writer gate (20261105010000): a new auto row must keep what SQL can check -------------
+-- Each refusal is its own save in the empty gate season, so each names its rule and none depends on
+-- another's rows (a refused save rolls back to its subtransaction).
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006603',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006604',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '%capacity%',
+    'a save putting two new auto rows in a slot of capacity 1 is refused, naming capacity');
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                                'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a8',
+                                                'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '%reservation%',
+    'a new auto row in a slot reserved to another division is refused, naming the reservation');
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                                'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a7',
+                                                'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '%length%',
+    'a new auto row in a 45-minute slot for a 60-minute division is refused, naming the length');
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a6',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '%weekday%',
+    'two new auto rows of one team on one weekday (at different times) are refused, naming the weekday');
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a5',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a9',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '%count%',
+    'a third new auto row for a team whose division has 2 a week is refused, naming the count');
+
+-- The saved manual row of Five has no date range: it holds the Saturday slot (capacity 1) for its whole
+-- validity, so a new auto row there is over capacity.
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006606',
+                                                'practice_slot_id', 'a1111111-1111-1111-1111-0000000066aa',
+                                                'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    '%capacity%',
+    'a new auto row in a slot a saved NULL-range manual row holds is refused, naming the capacity');
+-- A division of 1 a week: a Monday and a Wednesday row that cover the same single week
+-- ([2026-11-23,2026-11-30)) share no date, and are two practices in that week.
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006606',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066ac',
+                                  'effective_date_range', '[2026-11-23,2026-11-30)'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006606',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066ad',
+                                  'effective_date_range', '[2026-11-23,2026-11-30)'))) $$,
+    '%count%',
+    'a Monday and a Wednesday row of one week for a division of 1 a week are refused, naming the count');
+
+-- A save that keeps every rule is accepted: U8 One on Monday and Wednesday (60 minutes each, two
+-- weekdays), U9 Three on U9's reserved Thursday slot.
+SELECT lives_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006601',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a5',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006603',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a8',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+    'a save that keeps capacity, reservation, length, weekday and count is accepted');
+
+-- The same breaking rows, sent as manual or as an override, keep today's checks and are accepted;
+-- and the auto rows already saved, now over capacity beside them, are not judged again.
+SELECT lives_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           (SELECT jsonb_agg(jsonb_build_object('team_id', team_id, 'practice_slot_id', practice_slot_id,
+                                                'effective_date_range', effective_date_range::text))
+              FROM public.practice_assignments
+             WHERE team_id IN ('a1111111-1111-1111-1111-000000006601', 'a1111111-1111-1111-1111-000000006603'))
+           || jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006604',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]', 'source', 'manual'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006602',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a4',
+                                  'effective_date_range', '[2026-09-01,2026-11-30]', 'assigned_via', 'override'))) $$,
+    'the same capacity breach as a manual row and as an override row is accepted: they keep today''s checks');
+SELECT lives_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           (SELECT jsonb_agg(jsonb_build_object('team_id', team_id, 'practice_slot_id', practice_slot_id,
+                                                'effective_date_range', effective_date_range::text,
+                                                'source', source::text, 'assigned_via', assigned_via))
+              FROM public.practice_assignments
+             WHERE team_id IN ('a1111111-1111-1111-1111-000000006601', 'a1111111-1111-1111-1111-000000006602',
+                               'a1111111-1111-1111-1111-000000006603', 'a1111111-1111-1111-1111-000000006604'))) $$,
+    'saving the schedule again, with an auto row now over capacity, is accepted: a row that exists is not judged');
+SELECT is(
+    (SELECT count(*)::int FROM public.practice_assignments
+      WHERE team_id IN ('a1111111-1111-1111-1111-000000006601', 'a1111111-1111-1111-1111-000000006602',
+                        'a1111111-1111-1111-1111-000000006603', 'a1111111-1111-1111-1111-000000006604')),
+    5,
+    'the gate season holds the 3 accepted auto rows and the 2 manual and override rows');
+-- Short windows on either side of a week boundary: a Sunday (2026-11-22, the week of the 16th) and the
+-- next Monday (2026-11-23, the week of the 23rd) are adjacent days in two scheduling weeks, so a
+-- division of 1 a week accepts both.
+SELECT lives_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+           (SELECT jsonb_agg(jsonb_build_object('team_id', team_id, 'practice_slot_id', practice_slot_id,
+                                                'effective_date_range', effective_date_range::text,
+                                                'source', source::text, 'assigned_via', assigned_via))
+              FROM public.practice_assignments
+             WHERE team_id NOT IN ('a1111111-1111-1111-1111-000000006605',
+                                   'a1111111-1111-1111-1111-000000006606')
+               AND team_id IN (SELECT t.id FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
+                                WHERE d.season_settings_id = 'a1111111-1111-1111-1111-0000000066b3'))
+           || jsonb_build_array(
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006606',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066ab',
+                                  'effective_date_range', '[2026-11-22,2026-11-23)'),
+               jsonb_build_object('team_id', 'a1111111-1111-1111-1111-000000006606',
+                                  'practice_slot_id', 'a1111111-1111-1111-1111-0000000066ac',
+                                  'effective_date_range', '[2026-11-23,2026-11-24)'))) $$,
+    'a Sunday and the next Monday, in two scheduling weeks, are accepted for a division of 1 a week');
+
+-- A team in a division that gives no practice is not "left without one" by a save: only the U9 team
+-- with no row is listed (control), and the 0-a-week team is not.
+SELECT is(
+    (SELECT array_agg(e->>'team_name' ORDER BY e->>'team_name')
+       FROM jsonb_array_elements(
+           (public.persist_practice_schedule(
+               jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+               (SELECT jsonb_agg(jsonb_build_object('team_id', team_id, 'practice_slot_id', practice_slot_id,
+                                                    'effective_date_range', effective_date_range::text,
+                                                    'source', source::text, 'assigned_via', assigned_via))
+                  FROM public.practice_assignments
+                 WHERE effective_date_range IS NOT NULL
+                   AND team_id IN (SELECT t.id FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
+                                    WHERE d.season_settings_id = 'a1111111-1111-1111-1111-0000000066b3')))
+            ->'teams_without_practice')) e),
+    ARRAY['Gate U9 Eight'],
+    'a save lists the U9 team with no row as without a practice, and not the team of a 0-a-week division');
 
 -- 9. Scope and admin controls.
 SELECT throws_ok(

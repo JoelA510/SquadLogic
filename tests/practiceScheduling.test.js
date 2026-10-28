@@ -651,3 +651,25 @@ test('teams are processed busiest-coach-first across head and assistant coaches,
   );
   assert.deepEqual(result.unassigned, []);
 });
+
+test('refuses a team whose division wants other than one practice a week, by name (Phase D PR B)', () => {
+  const slots = [createSlot({ id: 's1', day: 'Mon', startHour: 22, endHour: 23, capacity: 2 })];
+  const input = (practicesPerWeek) => ({
+    teams: [
+      { id: 'T1', division: 'U10', coachId: 'c1' },
+      { id: 'T2', division: 'U10', coachId: 'c2', practicesPerWeek },
+    ],
+    slots,
+    schoolDayEnd: '16:00',
+    timezone: 'UTC',
+  });
+  for (const wanted of [2, 0, 7]) {
+    assert.throws(
+      () => schedulePractices(input(wanted)),
+      new RegExp(`team T2 wants ${wanted} a week; use the auto-scheduler's practice units`)
+    );
+  }
+  // One a week, said or unsaid, is the one-per-team behaviour it always was.
+  assert.equal(schedulePractices(input(1)).assignments.length, 2);
+  assert.equal(schedulePractices(input(undefined)).assignments.length, 2);
+});

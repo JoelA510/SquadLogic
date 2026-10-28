@@ -317,6 +317,18 @@ export function schedulePractices({
   if (!Array.isArray(slots)) {
     throw new TypeError('slots must be an array');
   }
+  // One practice per team: a division that wants any other number (Phase D PR B,
+  // `divisions.practices_per_week`) is placed by the Edge solver's practice units, not here. Refused
+  // by name rather than given one practice and reported as scheduled.
+  const wantsOther = teams.find(
+    (team) => team?.practicesPerWeek !== undefined && team.practicesPerWeek !== 1
+  );
+  if (wantsOther) {
+    throw new TypeError(
+      `schedulePractices places one practice per team, and team ${String(wantsOther.id)} wants ` +
+        `${String(wantsOther.practicesPerWeek)} a week; use the auto-scheduler's practice units`
+    );
+  }
 
   // Filter slots that start before the school day ends, Mon-Thu. Omitting
   // `schoolDayEnd` is the opt-out; asking for it is a promise to apply it, so

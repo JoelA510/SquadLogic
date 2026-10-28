@@ -1,6 +1,14 @@
 /**
  * 8.9 PR 6 -- the auto-scheduler's daylight post-pass (plan §3, witnesses W7,
- * W9 and the Deno half of W15; decisions D2, D4, D5, D6, D8, D11).
+ * W9 and the Deno half of W15; decisions D2, D4, D5, D6, D11).
+ *
+ * **Past sunset is flagged, never blocked (owner, 2026-10-27).** D8 used to
+ * truncate a placement at its first date past sunset and make the remainder TIME
+ * TBD (or withdraw it when its first date was past). The pass now keeps every
+ * placement whole and reports the first such date in `daylight.pastSunset`;
+ * these witnesses were rewritten for that, each in both directions: a placement
+ * past sunset is KEPT (the search's own, byte for byte) and FLAGGED with its
+ * date, and one in daylight is neither.
  *
  * These witnesses execute the Edge Function's own modules
  * (`_shared/engines/practice-daylight.ts`, `auto-scheduler-solver.ts`,
@@ -18,7 +26,6 @@
  * Coordinates are synthetic (40.00/-75.00, 41.50/-73.50). Nothing geocodes.
  */
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'vitest';
@@ -139,17 +146,17 @@ function slot(id, fieldId, firstDate, until, start, end, extra = {}) {
 }
 
 const BODY_SLOTS = [
-  // Unlit, coordinates: past sunset from late September -> truncated.
+  // Unlit, coordinates: past sunset from late September -> flagged.
   slot('s-a-unlit', F.unlit, '2026-09-01', '2026-11-24', '17:30', '19:00'),
   // Unlit, coordinates, early: within daylight on every date.
   slot('s-b-early', F.unlit, '2026-09-01', '2026-10-27', '16:00', '17:00'),
-  // Unlit, coordinates, after DST: past sunset on its first date -> withdrawn.
+  // Unlit, coordinates, after DST: past sunset on its first date -> flagged.
   slot('s-c-late', F.unlit2, '2026-11-03', '2026-11-24', '17:00', '18:00'),
   // Lit: exempt, however late.
   slot('s-d-lit', F.lit, '2026-09-01', '2026-11-24', '19:00', '20:30'),
   // Unlit with no coordinates: unknown (D4), flagged, never allowed.
   slot('s-e-nocoords', F.noCoords, '2026-09-01', '2026-11-24', '18:00', '19:30'),
-  // Undeclared lighting: unlit (D5), coordinates -> truncated.
+  // Undeclared lighting: unlit (D5), coordinates -> flagged.
   slot('s-f-undeclared', F.undeclared, '2026-09-01', '2026-11-24', '17:45', '19:15'),
   // No end date in the store or the body: unknown, never judged or passed.
   slot('s-g-nodates', F.unlit, '2026-09-01', undefined, '17:00', '18:00'),
@@ -324,16 +331,17 @@ function derive(slotId) {
 }
 
 /**
- * W7: every roster team is placed, TIME TBD with a reason, or locked; and for
- * every placement the SEARCH made, the kept range and the TBD remainder
- * partition its derived dates exactly. Returns the number of violations, so a
- * plant's red count is visible.
+ * W7: every roster team is placed, unplaced with a reason, or locked; and every
+ * placement the SEARCH made is KEPT unchanged (same slot, no truncation), flagged
+ * exactly when its input slot's derived dates have a first date past sunset, on
+ * that date. Returns the problems, so a plant's red count is visible.
  */
 function w7Violations(baseline, result) {
   const problems = [];
   const placed = new Map(result.placements.map((p) => [p.teamId, p]));
   const unplaced = new Map(result.unassigned.map((u) => [u.teamId, u]));
   const locked = new Set(LOCKED.map((l) => l.teamId));
+  const flagged = new Map(result.daylight.pastSunset.map((f) => [f.teamId, f]));
   // Universe 1: the roster.
   for (const { id } of ROSTER) {
     const where = [placed.has(id), unplaced.has(id), locked.has(id)].filter(Boolean).length;
@@ -344,49 +352,27 @@ function w7Violations(baseline, result) {
   // Universe 2: the search's placements x their input slot's derived dates.
   for (const p of baseline.placements) {
     const expected = derive(p.slotId);
-    const tbd = result.timeTbdByTeam.get(p.teamId);
     const now = placed.get(p.teamId);
+    const flag = flagged.get(p.teamId);
+    if (!now || now.slotId !== p.slotId || 'effectiveUntil' in now) {
+      problems.push(`${p.teamId} was not kept whole on ${p.slotId}`);
+    }
     if (expected.kind !== 'judged' || expected.firstIllegal === null) {
-      if (!now || now.slotId !== p.slotId || 'effectiveUntil' in now || tbd) {
-        problems.push(`${p.teamId} changed though its slot needs no truncation`);
-      }
+      if (flag) problems.push(`${p.teamId} flagged though its slot needs no flag`);
       continue;
     }
-    if (!tbd) {
-      problems.push(`${p.teamId}: no TIME TBD entry for its past-sunset remainder`);
+    if (!flag) {
+      problems.push(`${p.teamId}: no flag for its past-sunset date ${expected.firstIllegal}`);
       continue;
     }
-    if (tbd.from !== expected.firstIllegal || tbd.reason !== DAYLIGHT_TBD_REASON) {
-      problems.push(`${p.teamId}: TBD from ${tbd.from}, expected ${expected.firstIllegal}`);
+    if (flag.date !== expected.firstIllegal || flag.reason !== DAYLIGHT_TBD_REASON) {
+      problems.push(`${p.teamId}: flagged from ${flag.date}, expected ${expected.firstIllegal}`);
     }
-    const kept =
-      expected.legal.length === 0
-        ? []
-        : expected.dates.filter((d) => now && d <= now.effectiveUntil);
-    const remainder = expected.dates.filter((d) => d >= tbd.from && d <= tbd.until);
-    const union = [...kept, ...remainder];
-    if (
-      union.length !== expected.dates.length ||
-      new Set(union).size !== union.length ||
-      union.some((d, i) => d !== expected.dates[i])
-    ) {
-      problems.push(
-        `${p.teamId}: kept ${kept.length} + TBD ${remainder.length} != ${expected.dates.length}`
-      );
-    }
-    if (expected.legal.length === 0) {
-      if (now || unplaced.get(p.teamId)?.reason !== DAYLIGHT_TBD_REASON) {
-        problems.push(`${p.teamId}: nothing legal, yet not withdrawn with the daylight reason`);
-      }
-    } else if (!now || now.effectiveUntil !== addDays(expected.firstIllegal, -1)) {
-      problems.push(`${p.teamId}: not truncated the day before ${expected.firstIllegal}`);
+    if (!(flag.endMinutes > flag.limitMinutes)) {
+      problems.push(`${p.teamId}: flagged but its end is not past the limit it names`);
     }
   }
   return problems;
-}
-
-function withTbdIndex(result) {
-  return { ...result, timeTbdByTeam: new Map(result.daylight.timeTbd.map((t) => [t.teamId, t])) };
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +383,7 @@ describe('W15 (Deno twin): the practice margin is 0 and equals core', () => {
     assert.equal(EDGE_MARGIN, 0);
   });
 
-  it("the TIME TBD reason is core's, not a third spelling", () => {
+  it("the reason a past-sunset placement is flagged with is core's, not a third spelling", () => {
     assert.equal(DAYLIGHT_TBD_REASON, PRACTICE_TBD_REASON.PAST_SUNSET);
     assert.equal(DAYLIGHT_TBD_REASON, 'past-sunset');
   });
@@ -426,11 +412,11 @@ describe('W15 (Deno twin): the practice margin is 0 and equals core', () => {
     const atLimit = await verdict(floor);
     assert.equal(atLimit.meta.occurrencesExamined, 1, 'the boundary occurrence was not examined');
     assert.equal(atLimit.meta.occurrencesWithinDaylight, 1);
-    assert.equal(atLimit.timeTbd.length, 0);
+    assert.equal(atLimit.pastSunset.length, 0);
     const oneLater = await verdict(floor + 1);
     assert.equal(oneLater.meta.occurrencesExamined, 1);
-    assert.equal(oneLater.timeTbd.length, 1);
-    assert.equal(oneLater.timeTbd[0].limitMinutes, floor);
+    assert.equal(oneLater.pastSunset.length, 1);
+    assert.equal(oneLater.pastSunset[0].limitMinutes, floor);
   });
 });
 
@@ -581,16 +567,16 @@ describe('W9: the body never supplies the venue, its coordinates or its lighting
     }));
     const honest = await run();
     const lied = await run({ bodySlots: lying });
-    assert.ok(honest.daylight.timeTbd.length > 0, 'the fixture truncates nothing');
+    assert.ok(honest.daylight.pastSunset.length > 0, 'the fixture flags nothing');
     assert.deepEqual(lied.placements, honest.placements);
     assert.deepEqual(lied.daylight, honest.daylight);
   });
 });
 
-describe('W7: nothing silently dropped; truncated + TIME TBD = the full span', () => {
-  it('every roster team is accounted for and every span partitions exactly', async () => {
+describe('W7: nothing silently dropped; past sunset is flagged and the placement kept whole', () => {
+  it('every roster team is accounted for and every placement is kept, flagged on the right date', async () => {
     const baseline = await run({ daylight: false });
-    const result = withTbdIndex(await run());
+    const result = await run();
     // The fixture must exercise every branch, or the witness proves nothing.
     const kinds = baseline.placements.map((p) => derive(p.slotId));
     assert.equal(baseline.placements.length, PLACEABLE.length, 'the search left a team unplaced');
@@ -608,43 +594,52 @@ describe('W7: nothing silently dropped; truncated + TIME TBD = the full span', (
     );
     assert.ok(
       kinds.some((k) => k.kind === 'judged' && k.firstIllegal && k.legal.length > 0),
-      'none truncated'
+      'none past sunset after some days in daylight'
     );
     assert.ok(
       kinds.some((k) => k.kind === 'judged' && k.firstIllegal && k.legal.length === 0),
-      'none withdrawn'
+      'none past sunset from its first date'
     );
 
     assert.deepEqual(w7Violations(baseline, result), []);
+    // The pass changes nothing it judges: the placements, the unplaced list and
+    // the evaluation are the search's own.
+    assert.deepEqual(result.placements, baseline.placements);
+    assert.deepEqual(result.unassigned, baseline.unassigned);
+    assert.deepEqual(result.evaluation, baseline.evaluation);
     // The counters agree with the derivation, not with the output.
     const meta = result.daylight.meta;
     assert.equal(meta.placementsExamined, baseline.placements.length);
     assert.equal(meta.litPlacementsExempt, kinds.filter((k) => k.kind === 'lit').length);
     assert.equal(meta.litPlacementsExempt + meta.unlitPlacementsExamined, meta.placementsExamined);
     assert.equal(
-      meta.placementsTruncated,
-      kinds.filter((k) => k.kind === 'judged' && k.firstIllegal && k.legal.length > 0).length
+      meta.placementsPastSunset,
+      kinds.filter((k) => k.kind === 'judged' && k.firstIllegal).length
     );
-    assert.equal(
-      meta.placementsWithdrawn,
-      kinds.filter((k) => k.kind === 'judged' && k.firstIllegal && k.legal.length === 0).length
-    );
+    assert.equal(meta.placementsPastSunset, result.daylight.pastSunset.length);
     // D5: the undeclared venue was judged as unlit.
     assert.equal(meta.undeclaredLightingPlacements, 1, 'the undeclared venue was not counted');
   });
 
-  it('a withdrawn placement re-measures the evaluation over what remains', async () => {
+  it('a placement from its first date past sunset is kept, not withdrawn, and still scored', async () => {
     const result = await run();
-    assert.ok(result.daylight.meta.placementsWithdrawn > 0);
+    assert.ok(
+      result.daylight.pastSunset.some((f) => f.slotId === 's-c-late'),
+      'the slot past sunset from its first date was not flagged'
+    );
+    assert.ok(
+      result.placements.some((p) => p.slotId === 's-c-late'),
+      'it was withdrawn'
+    );
     assert.equal(result.evaluation.summary.assignedTeams, result.placements.length + LOCKED.length);
   });
 
-  it('a truncated placement re-measures the dated evaluation too (M4.8 Q1)', async () => {
+  it('a placement past sunset keeps its whole range, and the evaluation sees every date (M4.8 Q1)', async () => {
     // A two-place unlit slot past sunset from late September, a locked row on
     // it from 10-20 only, and one team to place. The search judges the team's
-    // whole range and seats it beside the row; the pass truncates it before the
-    // row starts. The persisted evaluation is the returned schedule's, so the
-    // two never share a date: the busiest date holds one, not two.
+    // whole range and seats it beside the row; the pass used to truncate it
+    // before the row starts. It is now kept whole, so the two share the dates
+    // from 10-20 and the persisted evaluation says so: two on the busiest date.
     const body = [
       slot('s-cap2', F.unlit, '2026-09-01', '2026-11-24', '17:30', '19:00', {
         capacity: 2,
@@ -674,17 +669,18 @@ describe('W7: nothing silently dropped; truncated + TIME TBD = the full span', (
     });
     const [placed] = result.placements;
     assert.equal(placed?.slotId, 's-cap2', 'the fixture did not place t1 on the slot');
-    assert.ok(placed.effectiveUntil && placed.effectiveUntil < '2026-10-20', 'not truncated first');
-    assert.equal(result.daylight.meta.placementsTruncated, 1);
-    assert.equal(result.daylight.meta.placementsWithdrawn, 0);
+    assert.equal('effectiveUntil' in placed, false, 'the placement was truncated');
+    assert.equal(result.placementRanges.t1, '[2026-09-01,2026-11-24]');
+    assert.equal(result.daylight.meta.placementsPastSunset, 1);
+    assert.equal(result.daylight.pastSunset[0].date, '2026-09-22');
     const util = result.evaluation.slotUtilization.find((u) => u.slotId === 's-cap2');
     assert.deepEqual(
       { assignedCount: util.assignedCount, assignmentRows: util.assignmentRows },
-      { assignedCount: 1, assignmentRows: 2 }
+      { assignedCount: 2, assignmentRows: 2 }
     );
   });
 
-  it('the page honours the truncated range, and never extends it', () => {
+  it('the page honours an earlier end a caller gave, and never extends it', () => {
     const window = { effectiveFrom: '2026-09-01', effectiveUntil: '2026-11-24' };
     assert.equal(newPlacementRange(window, TODAY, '2026-09-21'), '[2026-09-01,2026-09-21]');
     assert.equal(newPlacementRange(window, TODAY, null), '[2026-09-01,2026-11-24]');
@@ -924,7 +920,7 @@ describe('with no unlit venue, or every venue in daylight, the output is unchang
     const without = await run({ daylight: false, bodySlots: body, roster });
     const withPass = await run({ bodySlots: body, roster });
     assert.ok(withPass.daylight.meta.occurrencesExamined > 0, 'nothing unlit was examined');
-    assert.equal(withPass.daylight.timeTbd.length, 0);
+    assert.equal(withPass.daylight.pastSunset.length, 0);
     assert.equal(strip(withPass), strip(without));
   });
 });
@@ -933,11 +929,15 @@ describe('the page surfaces the report', () => {
   it('names each kind, and says nothing when there is nothing', async () => {
     const { daylight } = await run();
     const text = describeDaylightReport(daylight);
-    assert.match(text, /TIME TBD from that date/);
-    assert.match(text, /not placed; no earlier date/);
+    assert.match(text, /run past sunset on unlit ground and are kept as placed/);
+    assert.match(text, /ends 19:00, the latest allowed is 18:\d\d/);
     assert.match(text, /the venue has no coordinates/);
     assert.match(text, /stay unchanged \(proposed, not applied\)/);
-    assert.equal(describeDaylightReport({ timeTbd: [], unknown: [], lockedPastSunset: [] }), null);
+    assert.doesNotMatch(text, /TIME TBD from that date/);
+    assert.equal(
+      describeDaylightReport({ pastSunset: [], unknown: [], lockedPastSunset: [] }),
+      null
+    );
     assert.equal(describeDaylightReport(null), null);
   });
 });
@@ -968,7 +968,7 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.match(source, /venues: venueDaylight\.venues,/);
     assert.match(source, /effectiveDateRange: row\.effectiveDateRange,/);
     assert.match(source, /^ {8}daylight,$/m);
-    assert.match(source, /daylightTimeTbd: daylight\.timeTbd\.map\(/);
+    assert.match(source, /daylightPastSunset: daylight\.pastSunset\.map\(/);
     // W9: nothing in the handler reads a venue, coordinate or lighting key off a slot.
     assert.doesNotMatch(
       source,
@@ -1001,12 +1001,12 @@ function overrideRow(n, slotId, window, status = 'approved') {
 const OVERRIDE_ROWS = [
   // s-a-unlit is past sunset from 09-22: 09-22, 09-29, 10-06 exempt, cut at 10-13.
   overrideRow(1, 's-a-unlit', '[2026-09-22,2026-10-07)'),
-  // s-c-late is past sunset on every date: all four exempt, so not withdrawn.
+  // s-c-late is past sunset on every date: all four exempt, so not flagged.
   overrideRow(2, 's-c-late', '[2026-11-03,2026-11-25)'),
   // s-e-nocoords has no coordinates: every date exempt, none unknown.
   overrideRow(3, 's-e-nocoords', '[2026-09-01,2026-11-25)'),
-  // s-f-undeclared is cut at 09-15, before this window: its three covered
-  // dates sit in the TIME TBD remainder (D8 keeps one range).
+  // s-f-undeclared is flagged from 09-15, before this window: its covered dates
+  // come after the first date past sunset and exempt nothing the flag names.
   overrideRow(4, 's-f-undeclared', '[2026-10-20,2026-11-04)'),
   // The locked row's slot, past sunset from 09-08: 09-08 and 09-15 exempt.
   overrideRow(5, 's-h-locked', '[2026-09-08,2026-09-16)'),
@@ -1082,78 +1082,46 @@ function deriveExempt(slotId, rows) {
 
 const OVERRIDE_KEYS = [
   'lightingOverrideOccurrencesExempt',
-  'lightingOverrideOccurrencesInTimeTbd',
   'lockedRowOccurrencesLightingExempt',
   'lockedRowOccurrencesLightingInProposedTbd',
   'lightingOverridesUnused',
 ];
-/** The run with the five override counters removed and the clock zeroed. */
-function withoutOverrideKeys(r) {
-  const meta = { ...r.daylight.meta };
-  for (const key of OVERRIDE_KEYS) delete meta[key];
-  return JSON.stringify({ ...r, elapsedMs: 0, daylight: { ...r.daylight, meta } });
-}
 const bytes = (r) => JSON.stringify({ ...r, elapsedMs: 0 });
-const sha256 = (text) => createHash('sha256').update(text).digest('hex');
-/**
- * `run()`'s result on `origin/main` a31ddde, before M4.8, over this file's
- * fixture as M4.8 left it (`SOLVER_SLOTS`, six placeable teams), with its
- * `evaluation` and `relocatedOutsideRun` removed and hashed as
- * {@link withoutOverrideKeys} hashes it (elapsedMs zeroed). Captured by
- * executing main's modules over this file. (The pin before M4.8, over the
- * whole result and the seven-team fixture, was
- * f79c9f82b512ea18eca285673a0395238f2e2491444ee18bdf54e26176a9c926.)
- */
-const MAIN_POST_PASS_SHA256 = '34fe04500d9c4ed1d1f3d7d44aceac781b7ae2bcaa7176b0019b154012d88356';
-/**
- * What M4.8 adds to, or changes in, a run's result (plan §3.3, §3.4, §3.5):
- * the dated evaluation (Q1), the locked rows ended or held season-long, and
- * the date judged from. Everything else is main's.
- */
-const M48_KEYS = [
-  'evaluation',
-  'relocatedOutsideRun',
-  'unreadableRange',
-  'endedRows',
-  'liveFrom',
-  'placementRanges',
-];
-const withoutM48Keys = (r) =>
-  Object.fromEntries(Object.entries(r).filter(([key]) => !M48_KEYS.includes(key)));
 
 const byTeam = (list) => new Map(list.map((x) => [x.teamId, x]));
 
-describe('no overrides: the post-pass is byte-identical to main', () => {
-  it('an empty approved read reproduces main exactly, and adds only five zero counters', async () => {
+describe('no overrides: an empty approved read changes nothing', () => {
+  it('an empty approved read is the run with no override context, with four zero counters', async () => {
     const full = await run({ overrides: [] });
     // 8.6 3b PR 11d-0 added one result key, empty when no relocation is held.
     assert.deepEqual(full.relocatedOutsideRun, []);
-    // M4.8 dates the evaluation (Q1) and adds three keys; with them removed
-    // the placements, the unplaced and the daylight report are main's bytes.
+    // M4.8 dates the evaluation (Q1).
     assert.equal(full.evaluation.summary.dateModel, 'dated');
     assert.equal(full.liveFrom, TODAY);
     assert.deepEqual(full.endedRows, []);
     assert.deepEqual(full.unreadableRange, []);
-    const r = withoutM48Keys(full);
-    assert.equal(sha256(withoutOverrideKeys(r)), MAIN_POST_PASS_SHA256);
-    for (const key of OVERRIDE_KEYS) assert.equal(r.daylight.meta[key], 0, key);
+    for (const key of OVERRIDE_KEYS) assert.equal(full.daylight.meta[key], 0, key);
     // No context key at all (a caller that loaded nothing) is the same result.
     assert.equal(bytes(await run()), bytes(full));
+    // And the pass kept every placement the search made (the daylight-free run's).
+    const without = await run({ daylight: false });
+    assert.deepEqual(full.placements, without.placements);
+    assert.deepEqual(full.unassigned, without.unassigned);
+    assert.deepEqual(full.evaluation, without.evaluation);
   });
 });
 
 describe('W23: an override exempts only its own window, on its own slot', () => {
-  it('from and until are inclusive: the covered dates are kept, the cut moves past them', async () => {
+  it('from and until are inclusive: the covered dates are not flagged, the flag moves past them', async () => {
     const r = await run({ overrides: [OVERRIDE_ROWS[0]] });
     const expected = deriveExempt('s-a-unlit', [OVERRIDE_ROWS[0]]);
     assert.deepEqual(expected.covered, ['2026-09-22', '2026-09-29', '2026-10-06']);
     assert.equal(expected.firstIllegal, '2026-10-13');
-    // t1 holds s-a-unlit in the search's placement.
+    // t1 holds s-a-unlit in the search's placement, kept whole.
     assert.equal(byTeam(r.placements).get('t1').slotId, 's-a-unlit');
-    assert.equal(byTeam(r.placements).get('t1').effectiveUntil, '2026-10-12');
-    assert.equal(byTeam(r.daylight.timeTbd).get('t1').from, expected.firstIllegal);
+    assert.equal('effectiveUntil' in byTeam(r.placements).get('t1'), false);
+    assert.equal(byTeam(r.daylight.pastSunset).get('t1').date, expected.firstIllegal);
     assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, expected.exempt);
-    assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, 0);
   });
 
   it('the day before `from` and the day after `until` are judged, not exempt', async () => {
@@ -1161,13 +1129,12 @@ describe('W23: an override exempts only its own window, on its own slot', () => 
     const row = overrideRow(1, 's-a-unlit', '[2026-09-23,2026-10-06)');
     const r = await run({ overrides: [row] });
     const baseline = await run({ overrides: [] });
-    // 09-22 is judged past sunset, exactly as with no override: D8 cuts there.
-    assert.equal(byTeam(r.daylight.timeTbd).get('t1').from, '2026-09-22');
-    assert.equal(byTeam(r.placements).get('t1').effectiveUntil, '2026-09-21');
+    // 09-22 is judged past sunset, exactly as with no override: the flag names it.
+    assert.equal(byTeam(r.daylight.pastSunset).get('t1').date, '2026-09-22');
+    assert.equal('effectiveUntil' in byTeam(r.placements).get('t1'), false);
     assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, 0);
-    // Only 09-29 is covered, and it lies in the remainder; 10-06 is not covered.
+    // Only 09-29 is covered, and it lies after the flagged date; 10-06 is not covered.
     assert.deepEqual(deriveExempt('s-a-unlit', [row]).covered, ['2026-09-29']);
-    assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, 1);
     assert.equal(JSON.stringify(r.placements), JSON.stringify(baseline.placements));
   });
 
@@ -1175,22 +1142,22 @@ describe('W23: an override exempts only its own window, on its own slot', () => 
     const r = await run({ overrides: [OVERRIDE_ROWS[0]] });
     const baseline = await run({ overrides: [] });
     const before = byTeam(baseline.placements);
-    const beforeTbd = byTeam(baseline.daylight.timeTbd);
+    const beforeFlags = byTeam(baseline.daylight.pastSunset);
     let compared = 0;
     for (const p of r.placements) {
       if (p.slotId === 's-a-unlit') continue;
       assert.deepEqual(p, before.get(p.teamId));
       compared += 1;
     }
-    for (const t of r.daylight.timeTbd) {
-      if (t.slotId === 's-a-unlit') continue;
-      assert.deepEqual(t, beforeTbd.get(t.teamId));
+    for (const f of r.daylight.pastSunset) {
+      if (f.slotId === 's-a-unlit') continue;
+      assert.deepEqual(f, beforeFlags.get(f.teamId));
     }
     assert.deepEqual(r.unassigned, baseline.unassigned);
     // s-h-locked shares s-a-unlit's field; its locked report is unchanged.
     assert.deepEqual(r.daylight.lockedPastSunset, baseline.daylight.lockedPastSunset);
-    // Six placements, less t1's on s-a-unlit and the one withdrawn (s-c-late).
-    assert.ok(compared >= 4, `only ${compared} other placements were compared`);
+    // Six placements, less t1's on s-a-unlit.
+    assert.ok(compared >= 5, `only ${compared} other placements were compared`);
   });
 });
 
@@ -1257,8 +1224,8 @@ describe('W25: lighting claimed in the request body is ignored', () => {
     assert.equal(/** @type {any} */ (parsed.slots[0]).portableLighting, true);
     const claimed = await run({ bodySlots: claims, overrides: [] });
     const plain = await run({ overrides: [] });
-    // Non-vacuity: without the claims, the run truncates and withdraws.
-    assert.ok(plain.daylight.timeTbd.length >= 3);
+    // Non-vacuity: without the claims, the run flags past-sunset placements.
+    assert.ok(plain.daylight.pastSunset.length >= 3);
     assert.equal(claimed.daylight.meta.lightingOverrideOccurrencesExempt, 0);
     assert.equal(bytes(claimed), bytes(plain));
   });
@@ -1312,20 +1279,22 @@ describe('W26: a failed override read refuses the run, never an empty list', () 
 
   it('a partial read fails safe: fewer visible rows only ever keep less', async () => {
     // A coach's RLS view is a subset of the approved rows. It is not refused
-    // (see `practice-lighting-overrides.ts`) because it can only be stricter.
+    // (see `practice-lighting-overrides.ts`) because it can only flag more.
     const full = await run({ overrides: APPROVED_ROWS });
-    const keptUntil = (r, teamId) => {
-      const p = byTeam(r.placements).get(teamId);
-      return p ? (p.effectiveUntil ?? '9999-12-31') : '0000-00-00';
-    };
+    // The first date a team's placement is flagged from: a later date, or none, is looser.
+    const flaggedFrom = (r, teamId) =>
+      byTeam(r.daylight.pastSunset).get(teamId)?.date ?? '9999-12-31';
     let subsets = 0;
     let stricter = 0;
     for (let mask = 0; mask < 1 << APPROVED_ROWS.length; mask += 1) {
       const visible = APPROVED_ROWS.filter((_, i) => mask & (1 << i));
       const partial = await run({ overrides: visible });
       for (const id of PLACEABLE) {
-        assert.ok(keptUntil(partial, id) <= keptUntil(full, id), `${id} kept more, mask ${mask}`);
-        if (keptUntil(partial, id) < keptUntil(full, id)) stricter += 1;
+        assert.ok(
+          flaggedFrom(partial, id) <= flaggedFrom(full, id),
+          `${id} was flagged later with fewer rows visible, mask ${mask}`
+        );
+        if (flaggedFrom(partial, id) < flaggedFrom(full, id)) stricter += 1;
       }
       const lockedPartial = partial.daylight.lockedPastSunset[0]?.date ?? '9999-12-31';
       const lockedFull = full.daylight.lockedPastSunset[0]?.date ?? '9999-12-31';
@@ -1339,11 +1308,10 @@ describe('W26: a failed override read refuses the run, never an empty list', () 
 });
 
 describe('W28: the exempt count matches an independent derivation, and is non-zero', () => {
-  it('placements, the locked row and TIME TBD remainders, each from input rows x slot dates', async () => {
+  it('placements and the locked row and its proposed remainder, each from input rows x slot dates', async () => {
     const baseline = await run({ daylight: false });
     const r = await run({ overrides: OVERRIDE_ROWS });
     let exempt = 0;
-    let inTbd = 0;
     let judged = 0;
     /** @type {Map<string, string[]>} */
     const exemptedBySlot = new Map();
@@ -1353,14 +1321,12 @@ describe('W28: the exempt count matches an independent derivation, and is non-ze
       if (FIELD_BY_ID.get(s.fieldId)?.lighting_available === true || !s.effectiveUntil) continue;
       const d = deriveExempt(p.slotId, OVERRIDE_ROWS);
       exempt += d.exempt;
-      inTbd += d.inTbd;
       judged += d.judged;
       exemptedBySlot.set(p.slotId, d.exemptDates);
     }
     // The locked row: its stored range [09-01, 11-24], from TODAY.
     const locked = deriveExempt('s-h-locked', OVERRIDE_ROWS);
     assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, exempt);
-    assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, inTbd);
     assert.equal(r.daylight.meta.lockedRowOccurrencesLightingExempt, locked.exempt);
     assert.equal(r.daylight.meta.lockedRowOccurrencesLightingInProposedTbd, locked.inTbd);
     exemptedBySlot.set('s-h-locked', locked.exemptDates);
@@ -1376,7 +1342,7 @@ describe('W28: the exempt count matches an independent derivation, and is non-ze
     // An exempt date is not judged, so it is not examined (core's contract).
     assert.equal(r.daylight.meta.occurrencesExamined, judged);
     // Meta-assertions: non-zero, and every approved row on a run slot covers a date.
-    assert.ok(exempt > 0 && inTbd > 0 && locked.exempt > 0, 'the fixture exempts nothing');
+    assert.ok(exempt > 0 && locked.exempt > 0, 'the fixture exempts nothing');
     for (const row of APPROVED_ROWS.filter((x) => BODY_BY_ID.has(x.practice_slot_id))) {
       assert.ok(deriveExempt(row.practice_slot_id, [row]).covered.length > 0, row.window);
     }
@@ -1385,14 +1351,16 @@ describe('W28: the exempt count matches an independent derivation, and is non-ze
     assert.equal(r.daylight.meta.litPlacementsExempt, none.daylight.meta.litPlacementsExempt);
   });
 
-  it('exempt dates keep the practice, need no coordinates, and leave D8 intact elsewhere', async () => {
+  it('exempt dates keep the practice unflagged, need no coordinates, and leave the flag intact elsewhere', async () => {
     const r = await run({ overrides: OVERRIDE_ROWS });
     const placed = byTeam(r.placements);
-    const tbd = byTeam(r.daylight.timeTbd);
-    // t3 (s-c-late) is withdrawn without an override; every date is exempt,
-    // so it is kept whole and untouched: the slot's own instants, full length.
+    const flagged = byTeam(r.daylight.pastSunset);
+    // t3 (s-c-late) is past sunset on every date without an override; every
+    // date is exempt, so it is kept whole and not flagged: the slot's own
+    // instants, full length.
     assert.equal(placed.get('t3').slotId, 's-c-late');
     assert.equal('effectiveUntil' in placed.get('t3'), false);
+    assert.equal(flagged.has('t3'), false);
     assert.equal(
       r.unassigned.some((u) => u.teamId === 't3'),
       false
@@ -1403,10 +1371,10 @@ describe('W28: the exempt count matches an independent derivation, and is non-ze
       r.daylight.unknown.some((u) => u.slotId === 's-e-nocoords'),
       false
     );
-    // t6 (s-f-undeclared): its first past-sunset date is not covered, so D8
-    // truncates exactly as with no override.
-    assert.equal(tbd.get('t6').from, '2026-09-15');
-    assert.equal(placed.get('t6').effectiveUntil, '2026-09-14');
+    // t6 (s-f-undeclared): its first past-sunset date is not covered, so it is
+    // flagged from there exactly as with no override, and kept whole.
+    assert.equal(flagged.get('t6').date, '2026-09-15');
+    assert.equal('effectiveUntil' in placed.get('t6'), false);
     // The locked row: 09-08 and 09-15 exempt, so first past sunset 09-22, proposed only.
     const lockedRow = r.daylight.lockedPastSunset.find((l) => l.assignmentId === 'a-locked');
     assert.equal(lockedRow.date, '2026-09-22');

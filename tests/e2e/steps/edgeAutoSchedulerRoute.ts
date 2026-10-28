@@ -25,7 +25,11 @@
  *   seeded season's, `SEASON_TIMEZONE`), the season lock (here the page's own
  *   `lockedAssignments`, which `index.ts` only cross-checks against its read),
  *   TIME TBD series, coach preferences, venue daylight and lighting overrides
- *   (none: the solver runs without them, as with an empty read);
+ *   (none: the solver runs without them, as with an empty read). The one read made
+ *   for real is each division's practice settings (Phase D PR B): `index.ts` reads
+ *   them from the store as the caller, never from the body, so this route reads the
+ *   page's own mock store the same way (`practiceSettingsFromMock`) and the
+ *   division form's save is what the run then honours;
  * - the evaluation-run RPC, the audit rows and the progress channel.
  */
 import type { Page, Route } from '@playwright/test';
@@ -36,11 +40,16 @@ import {
   describeAnchorFailure,
 } from '../../../supabase/functions/_shared/timing/anchorWallTimes.js';
 import { prepareTeam } from '../../../supabase/functions/_shared/engines/practice-coaches.js';
-import { classifyTeamsForRun } from '../../../supabase/functions/_shared/engines/practice-lock.js';
+import { planTeamsForRun } from '../../../supabase/functions/_shared/engines/practice-lock.js';
+import {
+  applyPracticeSettings,
+  parseTeamPracticeSettings,
+} from '../../../supabase/functions/_shared/engines/practice-division-settings.js';
 import {
   runPracticeOptimizer,
   SLOT_DATING_UNREADABLE,
   undatableSlotIds,
+  unitIdOf,
 } from '../../../supabase/functions/_shared/engines/auto-scheduler-solver.js';
 import { toDaylightSlot } from '../../../supabase/functions/_shared/engines/practice-daylight.js';
 import { seasonCalendarDate } from '../../../supabase/functions/_shared/engines/coach-preference-load.js';
@@ -50,6 +59,37 @@ export const SEASON_TIMEZONE = 'America/Los_Angeles';
 
 /** Every solver call this page made, for a scenario that needs to know it ran. */
 export type EdgeSolverPage = Page & { __edgeSolverRuns?: number };
+
+type MockRow = Record<string, unknown>;
+
+/**
+ * The settings of the run's teams, from the page's mock store: the teams of the season's latest
+ * team run, each in the division of that name (or id) -- the join `index.ts` reads from `teams`.
+ */
+async function practiceSettingsFromMock(page: Page, teamIds: string[]) {
+  const db = (await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
+  )) as Record<string, MockRow[] | undefined>;
+  const run = [...(db.scheduler_runs ?? [])]
+    .filter((r) => r.run_type === 'team' && r.status !== 'deleted')
+    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0];
+  const byDivision = ((run?.results as MockRow | undefined)?.teamsByDivision ?? {}) as Record<
+    string,
+    Array<{ id: string }>
+  >;
+  const rows: unknown[] = [];
+  for (const [key, teams] of Object.entries(byDivision)) {
+    const division = (db.divisions ?? []).find((d) => d.id === key || d.name === key);
+    if (!division) continue;
+    for (const team of teams) {
+      if (teamIds.includes(team.id)) rows.push({ id: team.id, divisions: division });
+    }
+  }
+  const parsed = parseTeamPracticeSettings(rows);
+  if (!parsed.ok)
+    throw new Error('message' in parsed ? parsed.message : 'practice settings unreadable');
+  return parsed.byTeam;
+}
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -126,16 +166,28 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       slotId: row.slotId,
       effectiveDateRange: row.effectiveDateRange ?? null,
     }));
-    const classification = classifyTeamsForRun(
+    const settings = applyPracticeSettings(
+      input.teams,
+      await practiceSettingsFromMock(
+        page,
+        input.teams.map((t) => t.id)
+      )
+    );
+    const classification = planTeamsForRun(
       input.teams.map((t) => t.id),
       // The loader's row type carries more columns than the solver reads.
-      lockRows as Parameters<typeof classifyTeamsForRun>[1],
-      []
+      lockRows as Parameters<typeof planTeamsForRun>[1],
+      [],
+      new Map(settings.teams.map((t) => [t.id, t.practicesPerWeek]))
     );
 
     // index.ts steps 7-9.
     const run = await runPracticeOptimizer({
-      teams: input.teams.map((t) => prepareTeam(t)),
+      teams: settings.teams.map((t) => ({
+        ...prepareTeam(t),
+        practicesPerWeek: t.practicesPerWeek,
+        practiceMinutes: t.practiceMinutes,
+      })),
       slots,
       locked: lockRows.map((row) => ({
         assignmentId: row.id,
@@ -144,6 +196,7 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
         effectiveDateRange: row.effectiveDateRange,
       })),
       placeableTeamIds: classification.placeable,
+      unitsNeeded: classification.unitsNeeded,
       dating: { liveFrom, slots: datingSlots },
       config: input.config,
     });
@@ -151,11 +204,15 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       ((page as EdgeSolverPage).__edgeSolverRuns ?? 0) + 1;
 
     // index.ts step 13, the fields the solver produced.
+    const placedByTeam = new Map<string, number>();
+    for (const placement of run.placements) {
+      placedByTeam.set(placement.teamId, (placedByTeam.get(placement.teamId) ?? 0) + 1);
+    }
     await fulfillJson(route, {
       runId: null,
       assignments: run.placements.map((placement) => ({
         ...placement,
-        effectiveDateRange: run.placementRanges[placement.teamId],
+        effectiveDateRange: run.placementRanges[unitIdOf(placement)],
       })),
       lock: {
         lockedLoaded: lockRows.length,
@@ -163,7 +220,28 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
         endedRows: run.endedRows.map((row) => row.assignmentId),
         unreadableRange: run.unreadableRange.map((row) => row.assignmentId),
       },
-      unassigned: run.unassigned,
+      unassigned: run.unassigned.map((u) =>
+        classification.targets[u.teamId] > 1
+          ? { ...u, target: classification.targets[u.teamId] }
+          : u
+      ),
+      practices: {
+        teams: Object.keys(classification.targets)
+          .filter((teamId) => classification.targets[teamId] > 1)
+          .sort()
+          .map((teamId) => {
+            const placed = placedByTeam.get(teamId) ?? 0;
+            const held = classification.held[teamId] ?? 0;
+            return {
+              teamId,
+              target: classification.targets[teamId],
+              held,
+              placed,
+              missing: Math.max(classification.targets[teamId] - held - placed, 0),
+            };
+          }),
+        overTarget: classification.overTarget,
+      },
       liveFrom: run.liveFrom,
       evaluation: run.evaluation,
       timingFindings: anchored.findings,

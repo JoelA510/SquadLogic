@@ -740,6 +740,76 @@ describe('publication baseline :: TIME TBD rows', () => {
     expect(baselineParitySoundness(parity).sound).toBe(true);
   });
 
+  it('a baseline of only TIME TBD cells, against a schedule that has since dated two of them, gives a verdict (Codex)', () => {
+    // 3 TBD practices published, no dated row at all; now 2 are scheduled on different dates, 1 is still TBD.
+    const then = generateScheduleExports({
+      teams: TEAMS,
+      tbdItems: [{ kind: 'practice', teamId: 't-1', missingCount: 3, reason: 'no-slot-available' }],
+    });
+    const now = generateScheduleExports({
+      teams: TEAMS,
+      practiceAssignments: [
+        {
+          teamId: 't-1',
+          start: '2026-04-14T22:00:00Z',
+          end: '2026-04-14T23:00:00Z',
+          fieldId: 'pitch-9',
+        },
+        {
+          teamId: 't-1',
+          start: '2026-04-16T22:00:00Z',
+          end: '2026-04-16T23:00:00Z',
+          fieldId: 'pitch-9',
+        },
+      ],
+      tbdItems: [{ kind: 'practice', teamId: 't-1', missingCount: 1, reason: 'no-slot-available' }],
+    });
+    expect(then.master.rows.every((row) => row[SCHEDULE_EXPORT_HEADERS.START] === 'TIME TBD')).toBe(
+      true
+    );
+
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf(then),
+      currentRows: now.master.rows,
+    });
+    // The dated rows are read (their dates are keys), so they do not collide on a null date.
+    expect(codesOf(parity.findings)).not.toContain(PUBLICATION_REASON.PARITY_KEY_AMBIGUOUS);
+    expect(baselineParitySoundness(parity).sound).toBe(true);
+    // TBD ordinal 1 is still TBD; ordinals 2 and 3 are gone; the two dated practices are news.
+    expect(baselineDriftSummary(parity)).toMatchObject({
+      drifted: true,
+      matched: 1,
+      removed: 2,
+      added: 2,
+      differing: 0,
+    });
+  });
+
+  it('a genuinely mixed vocabulary (a wall reading beside instants) is still refused, TIME TBD or not', () => {
+    const wall = [
+      {
+        ...exportWithTbd(PUBLISHED_GAMES, 1).master.rows[0],
+        [SCHEDULE_EXPORT_HEADERS.START]: '2026-04-11T09:00:00',
+      },
+      ...exportWithTbd(PUBLISHED_GAMES, 1).master.rows.filter(
+        (row) => row[SCHEDULE_EXPORT_HEADERS.START] === 'TIME TBD'
+      ),
+    ];
+    const now = exportWithTbd(PUBLISHED_GAMES, 1);
+    const parity = checkBaselineParity({
+      snapshot: snapshotOf({ master: { rows: wall } }),
+      currentRows: now.master.rows,
+    });
+    expect(
+      parity.findings.some(
+        (finding) =>
+          finding.code === PUBLICATION_REASON.PARITY_FIELD_ABSENT &&
+          finding.details?.field === PARITY_FIELD.START_MINUTES &&
+          Number(finding.details?.currentInstants) > 0
+      )
+    ).toBe(true);
+  });
+
   it('a TIME TBD Start is not read as a second time vocabulary beside the instants', () => {
     // The mixture refusal counts `other` Start cells against instants; a `TIME TBD` cell is neither.
     const exported = exportWithTbd(PUBLISHED_GAMES, 1);

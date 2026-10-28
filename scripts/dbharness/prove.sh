@@ -4865,12 +4865,22 @@ plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
 #     in 2020 is no longer listed as short, and a missing practice vanishes from the export;
 #   - the tenancy trigger lets a row name another organization's team;
 #   - the admin read lets any signed-in user read the list.
+# Re-aimed after the held count became concurrent coverage (Codex, P2): dropping the live filter alone
+# changed nothing, because the start dates were clamped to today and an ended range never contains it.
+# The plant drops the filter AND the clamp, so an ended series' own (past) start date is a candidate day
+# on which it is in force: a team whose only series ended in 2020 then holds one practice. Run by hand:
+# the smoke goes red at "A2 (an ended series only) is not listed ..." and the pgTAP at its ended-series
+# tests.
 plant "M57 an ended series counts as a held practice" "$M57" \
   "                   AND (pa.effective_date_range IS NULL
                         OR (NOT isempty(pa.effective_date_range)
                             AND (upper_inf(pa.effective_date_range)
-                                 OR upper(pa.effective_date_range) > CURRENT_DATE)))" \
-  "                   AND true" \
+                                 OR upper(pa.effective_date_range) > CURRENT_DATE)))
+            ), starts AS (
+                SELECT DISTINCT GREATEST(COALESCE(lower(l.r), CURRENT_DATE), CURRENT_DATE) AS d FROM live l" \
+  "                   AND true
+            ), starts AS (
+                SELECT DISTINCT COALESCE(lower(l.r), CURRENT_DATE) AS d FROM live l" \
   "smoke 20261108020000"
 
 # A series the repair adapter split (the old closed, its successor from the retirement date) is one

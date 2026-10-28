@@ -345,11 +345,13 @@ export function checkBaselineParity(input) {
     );
   }
 
-  // When both sides are instants, both are re-spelled the same way. When
-  // neither is, nothing is touched. A mixture is re-spelled on neither side,
-  // so the comparison cannot accidentally agree across vocabularies — the
-  // finding above says so and `PARITY_FIELD_ABSENT` fires per cell besides.
-  const respell = !mixed && publishedVocabulary.instants > 0 && currentVocabulary.instants > 0;
+  // When either side has instants and the other has no wall reading (instants, or only `TIME TBD`
+  // cells -- a baseline that listed nothing but missing practices), both are re-spelled the same way,
+  // so the dated side is read instead of arriving with a null date that collides on the key. When
+  // neither has any, nothing is touched. A mixture is re-spelled on neither side, so the comparison
+  // cannot accidentally agree across vocabularies -- the finding above says so and
+  // `PARITY_FIELD_ABSENT` fires per cell besides.
+  const respell = !mixed && (publishedVocabulary.instants > 0 || currentVocabulary.instants > 0);
   const publishedRows = respell ? withReadableStart(snapshot.rows) : snapshot.rows;
   const currentExportRows = respell ? withReadableStart(currentRows) : currentRows;
 

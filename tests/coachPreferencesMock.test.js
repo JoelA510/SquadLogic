@@ -34,18 +34,26 @@ const call = (db, name, params, user, now = NOW) =>
     newId: () => `pref-${++seq}`,
   });
 
-const request = (db, value, user = 'admin-user') =>
-  call(
-    db,
-    'request_coach_practice_preference',
-    {
-      p_coach_id: COACH,
-      p_dimension: 'weekday',
-      p_level: 'must_keep',
-      p_value: value,
-    },
-    user
-  );
+// A 'requested' row, as an admin's import will write one (Phase D); no RPC creates it any more.
+const request = (db, value, user = 'admin-user') => {
+  const row = {
+    id: `pref-${++seq}`,
+    organization_id: ORG,
+    coach_id: COACH,
+    dimension: 'weekday',
+    level: 'must_keep',
+    value,
+    status: 'requested',
+    requested_by: user,
+    requested_at: NOW.toISOString(),
+    decided_by: null,
+    decided_at: null,
+    effective_from: null,
+    effective_to: null,
+  };
+  db.coach_practice_preferences.push(row);
+  return { data: row, error: null };
+};
 
 const approvedFor = (db) =>
   db.coach_practice_preferences.filter(
@@ -90,11 +98,17 @@ describe('mock coach preference RPCs', () => {
     expect(db.coach_practice_preferences).toHaveLength(0);
   });
 
-  it('refuses a request by anyone who is not an admin of the coach’s organization (42501)', () => {
+  it('has no request RPC: the mock leaves it unhandled, as the database does since 20261104010000', () => {
     const db = freshDb();
-    expect(request(db, 'MON', 'other-user').error?.code).toBe('42501');
-    expect(request(db, 'MON', 'coach-user').error?.code).toBe('42501');
-    expect(request(db, 'MON', 'admin-user').error).toBeNull();
+    expect(
+      call(
+        db,
+        'request_coach_practice_preference',
+        { p_coach_id: COACH, p_dimension: 'weekday', p_level: 'must_keep', p_value: 'MON' },
+        'admin-user'
+      )
+    ).toBeNull();
+    expect(db.coach_practice_preferences).toHaveLength(0);
   });
 
   it('approve supersedes the prior approved row: one approved per (coach, dimension)', () => {
@@ -172,23 +186,24 @@ describe('mock coach preference RPCs', () => {
     expect(decide({ p_decision: 'reject', p_level: 'dont_care' }).error?.code).toBe('22023');
     expect(decide({ p_decision: 'reject' }).data.status).toBe('rejected');
     expect(decide({ p_decision: 'approve' }).error?.code).toBe('22023');
-    expect(request(db, 'Monday').error?.code).toBe('23514');
-    expect(
+    const set = (params) =>
       call(
         db,
-        'request_coach_practice_preference',
-        {
-          p_coach_id: COACH,
-          p_dimension: 'venue',
-          p_level: 'must_keep',
-          p_value: '22222222-2222-4222-8222-222222222222',
-        },
+        'admin_set_coach_practice_preference',
+        { p_coach_id: COACH, ...params },
         'admin-user'
-      ).error?.code
-    ).toBe('23503');
+      );
     expect(
-      call(db, 'request_coach_practice_preference', { p_coach_id: COACH }, 'admin-user').error?.code
-    ).toBe('23502');
+      set({ p_dimension: 'weekday', p_level: 'must_keep', p_value: 'Monday' }).error?.code
+    ).toBe('23514');
+    expect(
+      set({
+        p_dimension: 'venue',
+        p_level: 'must_keep',
+        p_value: '22222222-2222-4222-8222-222222222222',
+      }).error?.code
+    ).toBe('23503');
+    expect(set({}).error?.code).toBe('23502');
     expect(db.coach_practice_preferences.every((row) => row.organization_id === ORG)).toBe(true);
   });
 

@@ -427,7 +427,7 @@ begin
         false,
         'active'
     )
-    on conflict (email) do update set
+    on conflict (organization_id, email) do update set
         player_id = excluded.player_id,
         full_name = excluded.full_name,
         phone = excluded.phone,
@@ -453,7 +453,7 @@ begin
         false,
         'active'
     )
-    on conflict (email) do update set
+    on conflict (organization_id, email) do update set
         player_id = excluded.player_id,
         full_name = excluded.full_name,
         phone = excluded.phone,
@@ -479,7 +479,7 @@ begin
         false,
         'active'
     )
-    on conflict (email) do update set
+    on conflict (organization_id, email) do update set
         player_id = excluded.player_id,
         full_name = excluded.full_name,
         phone = excluded.phone,
@@ -505,7 +505,7 @@ begin
         false,
         'active'
     )
-    on conflict (email) do update set
+    on conflict (organization_id, email) do update set
         player_id = excluded.player_id,
         full_name = excluded.full_name,
         phone = excluded.phone,

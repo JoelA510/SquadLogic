@@ -13,8 +13,8 @@
 --      assignment. A trigger rather than unregistering the actions, so the
 --      smoke also runs on a database that already holds such audit rows;
 --   3. a caller with no user (the service role) is refused 42501 by the
---      no-actor guard on both RPCs, and a coach of the organization -- a
---      member, not an admin -- is refused 42501 by the admin check on both;
+--      no-actor guard on both RPCs, and a signed-in user who is not a member (a
+--      coach, before 20261104010000) is refused 42501 by the admin check on both;
 --      none of them writes a run, a team or a game (plan section 1.1, inverted);
 --   4. both functions are still SECURITY DEFINER with search_path=public,
 --      executable by authenticated and service_role and not by anon.
@@ -65,8 +65,7 @@ BEGIN
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (id, name, slug) VALUES (v_org, 'Smoke Org Save', 'smoke-org-save');
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'),
-        (v_org, v_coach, 'coach');
+        (v_org, v_admin, 'admin');   -- v_coach: signed in, no membership (no coach role since 20261104010000)
     INSERT INTO public.season_settings (id, organization_id, name) VALUES (v_season, v_org, 'Smoke Save Season');
     INSERT INTO public.divisions (id, organization_id, season_settings_id, name)
         VALUES (v_div, v_org, v_season, 'Smoke Save U10');
@@ -187,7 +186,7 @@ BEGIN
     END IF;
     RAISE NOTICE 'a team save naming its season only as season_id still records the season in its audit row';
 
-    -- (3) The refusals: no user, then a coach. Each must be 42501 with its own
+    -- (3) The refusals: no user, then a signed-in non-member. Each must be 42501 with its own
     --     message, and none may write.
     SELECT count(*) INTO v_runs_before FROM public.scheduler_runs WHERE organization_id = v_org;
     SELECT count(*) INTO v_games_before FROM public.game_assignments WHERE organization_id = v_org;
@@ -227,7 +226,7 @@ BEGIN
         GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
     IF v_code IS DISTINCT FROM '42501' OR v_msg NOT LIKE 'caller is not an admin of organization%' THEN
-        RAISE EXCEPTION 'a coach''s game save was not refused as a non-admin: % %', v_code, v_msg;
+        RAISE EXCEPTION 'a non-member''s game save was not refused as a non-admin: % %', v_code, v_msg;
     END IF;
     v_refusals := v_refusals + 1;
     -- The game save's later check, reached when only the season names the
@@ -239,7 +238,7 @@ BEGIN
         GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
     IF v_code IS DISTINCT FROM '42501' OR v_msg NOT LIKE 'caller is not an admin of organization%' THEN
-        RAISE EXCEPTION 'a coach''s game save naming only the season was not refused as a non-admin: % %', v_code, v_msg;
+        RAISE EXCEPTION 'a non-member''s game save naming only the season was not refused as a non-admin: % %', v_code, v_msg;
     END IF;
     v_refusals := v_refusals + 1;
     BEGIN
@@ -251,7 +250,7 @@ BEGIN
         GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
     IF v_code IS DISTINCT FROM '42501' OR v_msg NOT LIKE 'caller is not an admin of organization%' THEN
-        RAISE EXCEPTION 'a coach''s team save was not refused as a non-admin: % %', v_code, v_msg;
+        RAISE EXCEPTION 'a non-member''s team save was not refused as a non-admin: % %', v_code, v_msg;
     END IF;
     v_refusals := v_refusals + 1;
 
@@ -260,7 +259,7 @@ BEGIN
        OR (SELECT count(*) FROM public.teams WHERE organization_id = v_org) <> v_teams_before THEN
         RAISE EXCEPTION 'a refused save still wrote a run, a game assignment or a team';
     END IF;
-    RAISE NOTICE 'the service role (no user) is refused 42501 by both saves, and a coach by both admin checks: % of 5 refusals, nothing written', v_refusals;
+    RAISE NOTICE 'the service role (no user) is refused 42501 by both saves, and a non-member by both admin checks: % of 5 refusals, nothing written', v_refusals;
 
     -- (4) The posture is unchanged.
     IF (SELECT count(*) FROM pg_proc p

@@ -622,10 +622,9 @@ engine conventions), and the demo league is teamed end to end.
 - **A lead is not a coach.** `toGeneratorPlayer` no longer makes a synthetic `coach-<id>` from a
   willing-to-coach answer; it emits `isCoachingLead: true` (only with Coaching Interest on, as B1
   emits buddy fields only with Buddy Requests on) and `years_played`, and the admin's `rating`
-  when the record holds one. A coach the import row names (`coach_email`, `coach_id`) still
-  anchors as before: `PLAYER_IMPORT_KEYS` keeps no such column, so in production only
-  `coach_team_requests` links do, and the mock and tests keep their coach-email rows. B4's coach
-  count follows: a lead adds no team to the advice (`teamingConfigurationAdvice.test.jsx`).
+  when the record holds one. (A coach the import row names (`coach_email`, `coach_id`) anchored as
+  before at B6; since 2026-10-27 only `coach_team_requests` links do: decision 8a below.) B4's
+  coach count follows: a lead adds no team to the advice (`teamingConfigurationAdvice.test.jsx`).
 - **The lead comes from the record.** The durable read (`DURABLE_PLAYER_FIELDS`, beside R5's
   `natural_age`) now selects `willing_to_coach`, `years_played` and `rating`, and
   `withDurableIdentity` puts them over the import row, as it does names: the stored flag is what
@@ -775,19 +774,22 @@ plan is the rule-14 plan for them. No migration, no new persistence, no dependen
    move in the roster editor shows) or why they are not placed, and "They are on the same team." or
    "They are not on the same team." Two children who name each other as buddies are one unit and are
    not listed; three are always listed. Nothing is paired automatically.
-4. **(8a) Only a `coach_team_requests` link anchors a team: not built; an open question for the
-   owner.** The change would leave production with no way to anchor a team. Nothing writes
-   `coach_team_requests`: a search of the whole repository (`grep -rI coach_team_requests`, which
-   matches the table's migration, its policy, a cascade, a comment, the mock's delete when a
-   coach is dropped and the Teams page's read) finds no `INSERT`, in SQL, an Edge Function, the
-   frontend or the mock, and `2026-10-22-admin-focus.md` records the table as having "no writer
-   today" (_statically reviewed_). The coach import is described as resolving coach-to-child
-   links into it (`gotsport-import-contract.md`), but no code does. A coach named on the import
-   row (`coach_email`, `coach_id`) is therefore still the only anchor a league can have, and
-   stays as it was. If the owner wants only links to anchor, a writer comes first (the coach
-   import, or an admin screen to link a coach to a child). The flags of items 2 and 3 work for
-   either kind of coach: a coach a row names is labelled by the row's text, a linked coach by
-   their name on file.
+4. **(8a) Only a `coach_team_requests` link anchors a team: built (2026-10-27, with the admin-only
+   change, `docs/changes/2026-10-27-admin-only.md`, S7 and S8).** This was an open question
+   because nothing wrote `coach_team_requests` (_statically reviewed_ at `9128db9`: no `INSERT` in
+   SQL, an Edge Function, the frontend or the mock), so removing the row-named coach would have
+   left production with no way to anchor a team. The owner approved removing it with the writer:
+   the coach import's optional `Child Registration ID` column names the coach's children, and
+   `finalize_coach_import_job` writes one link per id that matches a player of the organization
+   (`gotsport-import-contract.md`, "A coach's children"). `toGeneratorPlayer` no longer reads
+   `coach_id`, `coachId`, `coach_email` or `Coach Email` from a row, so a coach an import row
+   names anchors nothing (`tests/teamAnalysisEligibility.test.jsx`). Consequences, stated: the
+   overview's recommended team count no longer counts head coaches (`derivePrograms` sets
+   `coachCount` 0; the links are read at generation, which still makes a team for each
+   coach whose child is eligible: `tests/teamingConfigurationAdvice.test.jsx`); and the flags of
+   items 2 and 3 name a linked coach by their name on file (a row's text no longer labels a
+   coach). The season fixture suite passes unchanged (_executed_: the 22 test files that read
+   `fixtures/season-2026/`, 1,185 tests).
 5. **(8b) No change:** lead compensation does not weigh the custom attribute weights.
 6. **(8c) Spread Coaching Leads is shown but disabled, with the reason, while Coaching Interest is
    off.** `FEATURE_CATALOG` entries may carry `requires` (a flag key); the settings page disables

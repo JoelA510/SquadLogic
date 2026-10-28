@@ -111,7 +111,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 8.9 PR3 other', 'smoke-org-89-pr3-other')
         RETURNING id INTO v_other_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach'), (v_other_org, v_outsider, 'admin');
+        (v_org, v_admin, 'admin'), (v_other_org, v_outsider, 'admin');  -- v_coach: signed in, no membership (no coach role since 20261104010000)
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'Coordinate Park')
         RETURNING id INTO v_loc;
     INSERT INTO public.locations (organization_id, name) VALUES (v_other_org, 'Elsewhere Park')
@@ -133,7 +133,7 @@ BEGIN
     END IF;
     RAISE NOTICE 'coordinates: 40.1250/-75.1250 stored as 40.1300/-75.1300 -- rounded to 2 decimals, set_by the admin';
 
-    -- ---- (b) a coach and another organisation's admin are refused ---------
+    -- ---- (b) a signed-in non-member and another organisation's admin are refused ----
     v_refused := 0;
     PERFORM set_config('request.jwt.claim.sub', v_coach::text, true);
     BEGIN
@@ -155,7 +155,7 @@ BEGIN
     IF (SELECT latitude FROM public.locations WHERE id = v_other_loc) IS DISTINCT FROM 41.50 THEN
         RAISE EXCEPTION '(b) the other organisation''s admin could not set their own venue';
     END IF;
-    RAISE NOTICE 'coordinates: a coach and another organisation''s admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue';
+    RAISE NOTICE 'coordinates: a signed-in non-member and another organisation''s admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue';
 
     -- ---- (c) a half pair is refused, by the RPC and by the table ----------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);

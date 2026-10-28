@@ -40,6 +40,20 @@ Feature: Ingestion Hardening for CSV Imports
     When I roll back the coach CSV import
     Then the imported coach should be removed from the coach database
 
+  # S7 of docs/changes/2026-10-27-admin-only.md: players first, then the coaches, whose file names
+  # their children by registration id. That a link anchors a team on the Teams page is held by
+  # tests/teamAnalysisEligibility.test.jsx; here, the import's own account of what it linked.
+  Scenario: A coach import links the coach to a child and reports an id that matches no player
+    Given I upload a GotSport player CSV file of four children with registration ids
+    When I apply the player CSV import
+    And I upload a coach CSV file that names one of those children and one unknown id
+    And I apply the coach CSV import
+    Then the import log reports 1 child link written and the unknown registration id
+
+  Scenario: The coach import says players are imported before coaches
+    When I choose the coach import
+    Then the page says to import players first
+
   Scenario: Applying and rolling back a field slot CSV import
     Given I upload a valid field slot CSV file
     When I apply the field slot CSV import

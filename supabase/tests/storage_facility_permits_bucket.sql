@@ -1,20 +1,18 @@
 -- RLS invariant: the `facility-permits` storage bucket (20261102010000) is private, takes only
--- an admin's upload under a real permit's folder, and shows a coach only the LIVE file of a
--- permit that concerns a field their team plays or practises on.
+-- an admin's upload under a real permit's folder, and shows it to an admin only (since
+-- 20261104010000 a coach, who no longer signs in, reads no permit file).
 --
 -- Callers (Org A unless noted): Alice admin (fixture); Bob admin of Org B (fixture); Charlie a
--- coach-role member with no team (fixture); Cora current coach of A-Team (a game at Pitch 1);
--- Otto current coach of A2 (a practice at Pitch 3); Quin current coach of A4 (Pitch 4, no
--- permit); Finn, whose A-Team assignment ended yesterday; anon.
+-- signed-in non-member (fixture); Cora, on a coach record as current coach of A-Team (a game at
+-- Pitch 1), Otto of A2 (a practice at Pitch 3), Quin of A4 (Pitch 4, no permit) and Finn, whose
+-- A-Team assignment ended yesterday, signed in and members of nothing; anon.
 --
 --   * an admin uploads <org>/<permit>/<uuid>.<ext> for a permit that exists in that organization;
---     a coach, another organization's admin, anon, and a demo organization's admin are refused;
+--     a non-member, another organization's admin, anon, and a demo organization's admin are refused;
 --   * a name that is not exactly that shape (no folder, a non-UUID folder, a permit that does not
 --     exist, a wrong extension, a missing level) is refused with 42501, never 22P02 (a cast);
---   * an admin reads every object, replaced ones included; a coach reads only the live file of a
---     permit they may read (Cora: Pitch 1's; Otto: Pitch 3's) and never a replaced or orphaned
---     file; a coach of a team scheduled elsewhere, a former coach, a coach with no team, another
---     organization's admin and anon read none;
+--   * an admin reads every object, replaced ones included; Cora and Otto, whose teams are scheduled
+--     on permitted fields, Quin, Finn, Charlie, another organization's admin and anon read none;
 --   * an update, even by an admin, changes nothing, and there is no UPDATE policy;
 --   * the policies are exactly an admin INSERT and DELETE and a SELECT, for authenticated. The
 --     DELETE is held from pg_policies only: Supabase's storage.protect_delete() refuses every
@@ -39,22 +37,16 @@ INSERT INTO public.profiles (id, email, full_name) VALUES
     ('e1000000-0000-4000-8000-000000000004', 'otto@test.local', 'Otto'),
     ('e1000000-0000-4000-8000-000000000005', 'quin@test.local', 'Quin')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000002', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000003', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000004', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000005', 'coach')
-ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
 INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
     ('aaaaaaaa-0000-0000-0000-0000000000a2', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'A2'),
     ('aaaaaaaa-0000-0000-0000-0000000000a3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'A3'),
     ('aaaaaaaa-0000-0000-0000-0000000000a4', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'A4');
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
-    ('e2000000-0000-4000-8000-000000000002', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000002', 'Cora', 'cora@test.local', 'active'),
-    ('e2000000-0000-4000-8000-000000000003', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000003', 'Finn', 'finn@test.local', 'active'),
-    ('e2000000-0000-4000-8000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000004', 'Otto', 'otto@test.local', 'active'),
-    ('e2000000-0000-4000-8000-000000000005', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000005', 'Quin', 'quin@test.local', 'active');
+INSERT INTO public.coaches (id, organization_id, full_name, email, status) VALUES
+    ('e2000000-0000-4000-8000-000000000002', 'a1111111-1111-1111-1111-111111111111', 'Cora', 'cora@test.local', 'active'),
+    ('e2000000-0000-4000-8000-000000000003', 'a1111111-1111-1111-1111-111111111111', 'Finn', 'finn@test.local', 'active'),
+    ('e2000000-0000-4000-8000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'Otto', 'otto@test.local', 'active'),
+    ('e2000000-0000-4000-8000-000000000005', 'a1111111-1111-1111-1111-111111111111', 'Quin', 'quin@test.local', 'active');
 INSERT INTO public.team_coach_assignments
     (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
 VALUES
@@ -135,7 +127,7 @@ SELECT throws_ok($$INSERT INTO storage.objects (bucket_id, name) VALUES ('facili
 
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
 SELECT throws_ok($$INSERT INTO storage.objects (bucket_id, name) VALUES ('facility-permits', 'a1111111-1111-1111-1111-111111111111/f6000000-0000-4000-8000-00000000000a/c0000000-0000-4000-8000-000000000017.pdf')$$,
-    '42501', NULL, 'a coach cannot upload');
+    '42501', NULL, 'a signed-in non-member on a coach record cannot upload');
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT throws_ok($$INSERT INTO storage.objects (bucket_id, name) VALUES ('facility-permits', 'a1111111-1111-1111-1111-111111111111/f6000000-0000-4000-8000-00000000000a/c0000000-0000-4000-8000-000000000018.pdf')$$,
     '42501', NULL, 'another organization''s admin cannot upload under Org A''s permit');
@@ -163,16 +155,16 @@ SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility
           'an admin reads every Org A object: the four seeded and the two they uploaded, replaced and orphaned files included');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
 SELECT is((SELECT array_agg(right(name, 40) ORDER BY name) FROM storage.objects WHERE bucket_id = 'facility-permits'),
-          ARRAY['c0000000-0000-4000-8000-000000000002.pdf'], 'Cora reads the live file for Pitch 1 only: not the replaced one, not Pitch 3''s, not the orphan');
+          NULL, 'Cora, the current coach of the team playing at Pitch 1, reads no file');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
 SELECT is((SELECT array_agg(right(name, 40) ORDER BY name) FROM storage.objects WHERE bucket_id = 'facility-permits'),
-          ARRAY['c0000000-0000-4000-8000-000000000003.pdf'], 'Otto reads the live file for Pitch 3 only');
+          NULL, 'Otto, whose team practises at Pitch 3, reads no file');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
-SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits'), 0, 'Quin, whose team is scheduled elsewhere, reads none');
+SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits'), 0, 'Quin reads none');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000003"}';
 SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits'), 0, 'a former coach reads none');
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits'), 0, 'a coach-role member with no team reads none');
+SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits'), 0, 'Charlie, a member of nothing, reads none');
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits'), 0, 'another organization''s admin reads none');
 SET LOCAL role = 'anon';
@@ -202,8 +194,8 @@ SELECT is((SELECT array_agg(
                     ELSE 'neither: ' || coalesce(qual, with_check)
                 END ORDER BY cmd)
              FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname LIKE 'facility-permits%'),
-          ARRAY['DELETE admin', 'INSERT admin, not a demo', 'SELECT admin or scheduled coach'],
-          'an admin removes and uploads (not for a demo); an admin or a coach of a scheduled field reads');
+          ARRAY['DELETE admin', 'INSERT admin, not a demo', 'SELECT admin'],
+          'an admin removes, uploads (not for a demo) and reads, and no coach arm remains');
 
 RESET role;
 SELECT is((SELECT count(*)::int FROM storage.objects WHERE bucket_id = 'facility-permits' AND name LIKE 'd4000000-%'), 0, 'the demo upload that was refused is not there');

@@ -31,24 +31,28 @@
 --    ten tables, and the repo read policies production lacks removed --
 --    the six tables' member SELECT and (the worst case the drift report
 --    allows) both facility member SELECTs.
--- 3. Positive control: under that drift a non-admin member CAN insert into
---    teams and fields. Without this, the refusals below could come from a
---    missing grant rather than from RLS, and prove nothing.
+-- 3. Positive control: under that drift org A's admin CAN insert into teams
+--    and fields (the broad ALL policy admits every member, and since
+--    20261104010000 every member is an admin; organization_members_role_check
+--    is left in place, so there is no plainer member to run it as). Without
+--    this, the refusals below could come from a missing grant rather than
+--    from RLS, and prove nothing.
 -- 4. The reconcile runs -- the function the migration ran, not a copy -- and
---    the catalogue and a non-admin member's session are checked: the broad
---    policy gone everywhere, every dropped read policy back, no member-gated
---    write policy on any of the 12 tables, member inserts into teams, fields
---    and practice_slots refused by RLS, updates and deletes reaching no row,
---    and reads of teams and practice_slots limited to the member's own org.
+--    the catalogue and two sessions are checked: the broad policy gone
+--    everywhere, every dropped read policy back, no member-gated write policy
+--    on any of the 12 tables; the same admin's direct inserts into teams,
+--    fields and practice_slots refused by RLS, updates and deletes reaching
+--    no row, and reads limited to org A; a signed-in user who belongs to no
+--    organization (the "outsider") reads nothing and is refused the same.
 -- 5. Catalogue-wide, SEMANTICALLY: every non-SELECT policy in `public` is
---    evaluated as that plain member against a row of their own org that is
---    not their own; only allowlisted policies may come out true. A fresh
---    table with a member-gated ALL policy must be caught by this AND by the
---    reconcile's own (text-level) end-state check.
--- 6. scheduler_runs: a member reads their own org's runs only and cannot
---    write; an admin session can still INSERT and UPDATE (the path the
---    SECURITY INVOKER persist_practice_schedule takes -- 20260924000000's
---    smoke runs that writer itself as an admin on this same build).
+--    evaluated as the outsider against a row of org A; none may come out
+--    true. A fresh table whose write policy any signed-in user satisfies
+--    must be caught by this, and a member-gated ALL policy on an unlisted
+--    table by the reconcile's own (text-level) end-state check.
+-- 6. scheduler_runs: the outsider reads none and cannot write; an admin
+--    session can still INSERT and UPDATE (the path the SECURITY INVOKER
+--    persist_practice_schedule takes -- 20260924000000's smoke runs that
+--    writer itself as an admin on this same build).
 
 BEGIN;
 
@@ -63,7 +67,7 @@ DECLARE
                                    'import_jobs','imports','organization_schemas',
                                    'schedule_evaluations'];
     c_prod_missing text[][] := ARRAY[
-        ['coaches', 'coaches_select_admin_or_self'],  -- since 20261021020000
+        ['coaches', 'coaches_select_admin'],  -- coaches_select_admin_or_self from 20261021020000, renamed by 20261104010000
         ['teams', 'Teams: members access'],
         ['game_assignments', 'Game Assignments: members access'],
         ['imports', 'Imports: members access'],
@@ -72,7 +76,7 @@ DECLARE
         ['practice_slots', 'Practice Slots: members select'],
         ['field_subunits', 'Field Subunits: members select']
     ];
-    v_member uuid := 'a0a0a0a0-0000-4000-8000-000000000927';
+    v_member uuid := 'a0a0a0a0-0000-4000-8000-000000000927';   -- the outsider: signed in, a member of nothing
     v_admin uuid := 'a0a0a0a0-0000-4000-8000-000000000928';
     v_run_a uuid;
     v_pol record;
@@ -200,14 +204,17 @@ BEGIN
     END IF;
     RAISE NOTICE 'the policies 20261018030000 replaced, put back, are dropped by the reconcile';
 
-    -- ---- seed: two orgs, one non-admin member of org A ----------------------
+    -- ---- seed: two orgs, an admin of org A, and an outsider -----------------
     INSERT INTO auth.users (id, email, raw_user_meta_data)
       VALUES (v_member, 'rls-drift-coach@example.test', jsonb_build_object('password_length', 16));
     INSERT INTO public.profiles (id, email) VALUES (v_member, 'rls-drift-coach@example.test')
       ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('RLS Drift Org A', 'rls-drift-org-a') RETURNING id INTO v_org_a;
     INSERT INTO public.organizations (name, slug) VALUES ('RLS Drift Org B', 'rls-drift-org-b') RETURNING id INTO v_org_b;
-    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org_a, v_member, 'coach');
+    -- **A plain, non-admin member cannot exist any more**: organization_members_role_check admits only
+    -- admin, staff and tenant_admin since 20261104010000, and all three are admins; the check stays
+    -- in place. v_member is therefore signed in and belongs to nothing (no organization_members row),
+    -- which is the only user below the admins that production can hold.
     INSERT INTO auth.users (id, email, raw_user_meta_data)
       VALUES (v_admin, 'rls-drift-admin@example.test', jsonb_build_object('password_length', 16));
     INSERT INTO public.profiles (id, email) VALUES (v_admin, 'rls-drift-admin@example.test')
@@ -259,9 +266,11 @@ BEGIN
         RAISE EXCEPTION 'the drift replay did not take: % broad policies (want 10), % of 8 read policies were there to drop', v_n, v_m;
     END IF;
 
-    -- ---- 3. positive control: under the drift a member CAN write ------------
+    -- ---- 3. positive control: under the drift, org A's admin CAN write -------
     -- Each write is undone by raising inside its own block, so the control
     -- leaves no row behind.
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
     FOREACH t IN ARRAY ARRAY['teams', 'fields'] LOOP
         v_ok := false;
         BEGIN
@@ -277,10 +286,12 @@ BEGIN
         END;
         RESET ROLE;
         IF NOT v_ok THEN
-            RAISE EXCEPTION 'control: under the production drift a member could not insert into % -- the refusals below would prove nothing', t;
+            RAISE EXCEPTION 'control: under the production drift org A''s admin could not insert into % -- the refusals below would prove nothing', t;
         END IF;
     END LOOP;
-    RAISE NOTICE 'production drift replayed: 10 broad ALL policies, 8 read policies removed; a non-admin member could insert into teams and fields';
+    PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_member, 'role', 'authenticated')::text, true);
+    RAISE NOTICE 'production drift replayed: 10 broad ALL policies, 8 read policies removed; org A''s admin could insert into teams and fields';
 
     -- ---- 4. the reconcile, the function the migration ran -------------------
     v_res := public.reconcile_prod_rls_drift();
@@ -303,10 +314,13 @@ BEGIN
     END LOOP;
 
     -- ---- catalogue-wide, semantically: every non-SELECT policy in public ----
-    -- Each policy's clauses are evaluated as the plain member (auth.uid() is
-    -- set above) against a row of the policy's own table whose every uuid
-    -- column is org A's id: in the member's org, and not their own row. The
-    -- universe is pg_policies itself, not a list.
+    -- Each policy's clauses are evaluated as the outsider (auth.uid() is set
+    -- above: signed in, a member of nothing) against a row of the policy's own
+    -- table whose every uuid column is org A's id: a row of an organization
+    -- the caller is not in. The universe is pg_policies itself, not a list.
+    -- (Before 20261104010000 this was a plain member of org A; none exists
+    -- now, every member being an admin, so what is left to prove is tenant
+    -- isolation: no write policy is satisfied from outside the organization.)
     -- LIMIT, stated rather than implied: non-uuid columns are NULL and no
     -- parent rows exist, so a gate reached THROUGH another table (e.g.
     -- EXISTS (SELECT 1 FROM teams t WHERE t.id = team_id AND
@@ -331,16 +345,10 @@ BEGIN
         v_examined := v_examined + 1;
         IF v_sat THEN
             v_hits := v_hits || (v_pol.tablename || ': ' || v_pol.policyname);
-            IF NOT EXISTS (SELECT 1 FROM public.rls_member_write_allowlist() a
-                            WHERE a.tablename = v_pol.tablename AND a.policyname = v_pol.policyname) THEN
-                RAISE EXCEPTION 'a plain member can satisfy write policy "%" on public.% and it is not allowlisted', v_pol.policyname, v_pol.tablename;
-            END IF;
         END IF;
     END LOOP;
-    -- The evaluator must be able to say yes: the allowlisted telemetry insert
-    -- IS member-satisfiable, so an evaluator that always said false fails here.
-    IF v_examined < 20 OR v_hits <> ARRAY['telemetry_log: Insert telemetry for own organization'] THEN
-        RAISE EXCEPTION 'the semantic census examined % write policies and found member-satisfiable %; want >= 20 and exactly the telemetry insert', v_examined, v_hits;
+    IF v_examined < 20 OR cardinality(v_hits) <> 0 THEN
+        RAISE EXCEPTION 'the semantic census examined % write policies and found satisfiable by an outsider %; want >= 20 and none', v_examined, v_hits;
     END IF;
     -- Every allowlist entry must name a real policy, or it outlives its gap.
     SELECT count(*) INTO v_n FROM public.rls_member_write_allowlist() a
@@ -349,12 +357,13 @@ BEGIN
     IF v_n <> 0 THEN
         RAISE EXCEPTION '% allowlist entry(ies) name no write policy', v_n;
     END IF;
-    -- Negative control, on the same evaluator: a fresh member-writable table.
+    -- Negative control, on the same evaluator: a fresh table whose write policy any signed-in
+    -- user satisfies. The evaluator must be able to say yes, or "none" above examined nothing.
     v_sat := NULL;
     BEGIN
         CREATE TABLE public.__rls_drift_probe (id uuid PRIMARY KEY, organization_id uuid NOT NULL);
-        CREATE POLICY "probe member write" ON public.__rls_drift_probe FOR ALL TO authenticated
-            USING (is_org_member(organization_id));
+        CREATE POLICY "probe signed-in write" ON public.__rls_drift_probe FOR ALL TO authenticated
+            USING (auth.uid() IS NOT NULL);
         EXECUTE format('SELECT COALESCE((%s), false) FROM jsonb_populate_record(NULL::public.__rls_drift_probe, $1) AS __rls_drift_probe',
                        (SELECT qual FROM pg_policies WHERE tablename = '__rls_drift_probe'))
            INTO v_sat USING jsonb_build_object('id', v_org_a, 'organization_id', v_org_a);
@@ -362,11 +371,11 @@ BEGIN
     EXCEPTION WHEN SQLSTATE 'P0928' THEN NULL;
     END;
     IF v_sat IS DISTINCT FROM true THEN
-        RAISE EXCEPTION 'negative control: the semantic census did not flag a member-gated ALL policy';
+        RAISE EXCEPTION 'negative control: the semantic census did not flag a write policy any signed-in user satisfies';
     END IF;
-    RAISE NOTICE 'semantic census: % write policies in public evaluated as a plain member; member-satisfiable exactly %, allowlisted; a planted member-writable table is flagged', v_examined, v_hits;
+    RAISE NOTICE 'semantic census: % write policies in public evaluated as a signed-in outsider on an org A row; satisfiable by none; a planted any-signed-in-user write policy is flagged', v_examined;
 
-    -- ---- 5. a non-admin member's session ------------------------------------
+    -- ---- 5. the outsider's session, and org A's admin as the control ------------
     FOREACH t IN ARRAY ARRAY['teams', 'fields', 'practice_slots'] LOOP
         v_err := NULL;
         BEGIN
@@ -384,7 +393,7 @@ BEGIN
         END;
         RESET ROLE;
         IF v_err IS NULL OR v_err NOT LIKE 'new row violates row-level security policy%' THEN
-            RAISE EXCEPTION 'a non-admin member''s insert into % was not refused by RLS (error: %)', t, COALESCE(v_err, 'none -- it succeeded');
+            RAISE EXCEPTION 'an outsider''s insert into % was not refused by RLS (error: %)', t, COALESCE(v_err, 'none -- it succeeded');
         END IF;
     END LOOP;
 
@@ -399,14 +408,62 @@ BEGIN
       INTO v_slots_own, v_slots_other FROM public.practice_slots;
     RESET ROLE;
     IF v_rows <> 0 OR v_n <> 0 THEN
-        RAISE EXCEPTION 'a non-admin member updated % and deleted % team row(s)', v_rows, v_n;
+        RAISE EXCEPTION 'an outsider updated % and deleted % team row(s)', v_rows, v_n;
     END IF;
-    IF v_seen_own <> 1 OR v_seen_other <> 0 THEN
-        RAISE EXCEPTION 'a member read % team(s) in their org (want 1) and % elsewhere (want 0)', v_seen_own, v_seen_other;
+    IF v_seen_own <> 0 OR v_seen_other <> 0 THEN
+        RAISE EXCEPTION 'an outsider read % team(s) of org A and % of org B (want 0 and 0)', v_seen_own, v_seen_other;
     END IF;
-    IF v_slots_own <> 1 OR v_slots_other <> 0 THEN
-        RAISE EXCEPTION 'a member read % practice slot(s) in their org (want 1) and % elsewhere (want 0)', v_slots_own, v_slots_other;
+    IF v_slots_own <> 0 OR v_slots_other <> 0 THEN
+        RAISE EXCEPTION 'an outsider read % practice slot(s) of org A and % of org B (want 0 and 0)', v_slots_own, v_slots_other;
     END IF;
+
+    -- Org A's admin reads their own org only.
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    SET LOCAL ROLE authenticated;
+    SELECT count(*) FILTER (WHERE organization_id = v_org_a), count(*) FILTER (WHERE organization_id <> v_org_a)
+      INTO v_seen_own, v_seen_other FROM public.teams;
+    SELECT count(*) FILTER (WHERE organization_id = v_org_a), count(*) FILTER (WHERE organization_id <> v_org_a)
+      INTO v_slots_own, v_slots_other FROM public.practice_slots;
+    RESET ROLE;
+    IF v_seen_own <> 1 OR v_seen_other <> 0 OR v_slots_own <> 1 OR v_slots_other <> 0 THEN
+        RAISE EXCEPTION 'the admin read % team(s) and % practice slot(s) of org A (want 1 and 1) and % and % elsewhere (want 0 and 0)',
+            v_seen_own, v_slots_own, v_seen_other, v_slots_other;
+    END IF;
+    -- The control, as the admin: the very inserts that succeeded under the drift are refused now
+    -- (no client write policy is left on these tables; the writes go through RPCs), and an update
+    -- and a delete reach no row.
+    FOREACH t IN ARRAY ARRAY['teams', 'fields', 'practice_slots'] LOOP
+        v_err := NULL;
+        BEGIN
+            SET LOCAL ROLE authenticated;
+            IF t = 'teams' THEN
+                INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org_a, v_div_a, 'Drift Admin Team');
+            ELSIF t = 'fields' THEN
+                INSERT INTO public.fields (organization_id, location_id, name) VALUES (v_org_a, v_loc_a, 'Drift Admin Field');
+            ELSE
+                INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time)
+                  VALUES (v_org_a, v_field_a, 'tue', '17:00', '18:00');
+            END IF;
+        EXCEPTION WHEN insufficient_privilege THEN
+            GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+        END;
+        RESET ROLE;
+        IF v_err IS NULL OR v_err NOT LIKE 'new row violates row-level security policy%' THEN
+            RAISE EXCEPTION 'org A''s admin''s direct insert into % was not refused by RLS after the reconcile (error: %)', t, COALESCE(v_err, 'none -- it succeeded');
+        END IF;
+    END LOOP;
+    SET LOCAL ROLE authenticated;
+    UPDATE public.teams SET name = 'Drift Admin Renamed' WHERE id = v_team_a;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    DELETE FROM public.teams WHERE id = v_team_a;
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RESET ROLE;
+    IF v_rows <> 0 OR v_n <> 0 THEN
+        RAISE EXCEPTION 'org A''s admin updated % and deleted % team row(s) directly after the reconcile', v_rows, v_n;
+    END IF;
+    PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_member, 'role', 'authenticated')::text, true);
     -- The other org's rows exist; the zero above is RLS, not an empty table.
     SELECT count(*) INTO v_n FROM public.teams WHERE organization_id = v_org_b;
     SELECT count(*) INTO v_m FROM public.practice_slots WHERE organization_id = v_org_b;
@@ -424,7 +481,7 @@ BEGIN
     END;
     RESET ROLE;
     IF v_err IS NULL OR v_err NOT LIKE 'new row violates row-level security policy%' THEN
-        RAISE EXCEPTION 'a non-admin member''s insert into scheduler_runs was not refused by RLS (error: %)', COALESCE(v_err, 'none -- it succeeded');
+        RAISE EXCEPTION 'an outsider''s insert into scheduler_runs was not refused by RLS (error: %)', COALESCE(v_err, 'none -- it succeeded');
     END IF;
     SET LOCAL ROLE authenticated;
     UPDATE public.scheduler_runs SET status = 'failed' WHERE id = v_run_a;
@@ -432,8 +489,8 @@ BEGIN
     SELECT count(*) FILTER (WHERE organization_id = v_org_a), count(*) FILTER (WHERE organization_id <> v_org_a)
       INTO v_seen_own, v_seen_other FROM public.scheduler_runs;
     RESET ROLE;
-    IF v_rows <> 0 OR v_seen_own <> 1 OR v_seen_other <> 0 THEN
-        RAISE EXCEPTION 'scheduler_runs as a member: updated % (want 0), read % own (want 1) and % other (want 0)', v_rows, v_seen_own, v_seen_other;
+    IF v_rows <> 0 OR v_seen_own <> 0 OR v_seen_other <> 0 THEN
+        RAISE EXCEPTION 'scheduler_runs as an outsider: updated % (want 0), read % of org A and % of org B (want 0 and 0)', v_rows, v_seen_own, v_seen_other;
     END IF;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SET LOCAL ROLE authenticated;
@@ -445,11 +502,11 @@ BEGIN
     IF v_rows <> 1 THEN
         RAISE EXCEPTION 'an admin updated % scheduler_runs row(s) (want 1)', v_rows;
     END IF;
-    RAISE NOTICE 'scheduler_runs: a member reads 1 own-org run and 0 of org B, and cannot insert or update; an admin session inserts and updates';
+    RAISE NOTICE 'scheduler_runs: an outsider reads none of org A or org B and cannot insert or update; an admin session inserts and updates';
 
     RAISE NOTICE 'reconciled over the production drift: broad ALL policy gone from all 10 tables, 8 read policies restored, no unallowlisted member write policy in public';
-    RAISE NOTICE 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows';
-    RAISE NOTICE 'non-admin member after reconcile: reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B''s';
+    RAISE NOTICE 'after reconcile: direct inserts into teams, fields and practice_slots refused by RLS for org A''s admin, who could write teams and fields under the drift, and for an outsider; update and delete reached 0 rows';
+    RAISE NOTICE 'after reconcile: org A''s admin reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B''s; an outsider reads none';
 END;
 $smoke$;
 

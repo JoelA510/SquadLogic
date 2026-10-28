@@ -65,18 +65,19 @@ SELECT is(
   'anon executes no SECURITY DEFINER function in public (submit_registration is gone)'
 );
 
--- The permit RPCs and the policy helpers behind them (20261102010000): signed-in callers only.
+-- The permit RPCs (20261102010000): signed-in callers only. The three coach policy helpers they
+-- had were dropped by 20261104010000.
 SELECT ok(
   NOT has_function_privilege('anon', 'public.admin_create_facility_permit(uuid,text,text,date,date,text,uuid[],uuid[])', 'EXECUTE')
   AND NOT has_function_privilege('anon', 'public.admin_update_facility_permit(uuid,uuid,text,text,date,date,text,uuid[],uuid[])', 'EXECUTE')
   AND NOT has_function_privilege('anon', 'public.admin_set_facility_permit_file(uuid,uuid,text,text)', 'EXECUTE')
   AND NOT has_function_privilege('anon', 'public.admin_delete_facility_permit(uuid,uuid)', 'EXECUTE')
   AND NOT has_function_privilege('anon', 'public.get_facility_permits(uuid)', 'EXECUTE')
-  AND NOT has_function_privilege('anon', 'public.coach_covers_permit_scope(uuid,uuid,uuid)', 'EXECUTE')
-  AND NOT has_function_privilege('anon', 'public.coach_reads_facility_permit(uuid)', 'EXECUTE')
-  AND NOT has_function_privilege('anon', 'public.coach_reads_facility_permit_file(uuid,text)', 'EXECUTE')
+  AND to_regprocedure('public.coach_covers_permit_scope(uuid,uuid,uuid)') IS NULL
+  AND to_regprocedure('public.coach_reads_facility_permit(uuid)') IS NULL
+  AND to_regprocedure('public.coach_reads_facility_permit_file(uuid,text)') IS NULL
   AND has_function_privilege('authenticated', 'public.get_facility_permits(uuid)', 'EXECUTE'),
-  'anon cannot execute the permit RPCs or their policy helpers; authenticated keeps the read'
+  'anon cannot execute the permit RPCs, the coach policy helpers are gone; authenticated keeps the read'
 );
 
 -- The import finalizers (replaced by 20261022010000) keep their grants.

@@ -130,29 +130,27 @@ function createDefaultConfig() {
 }
 
 /**
- * The programs of an import, with the players and the head coaches each holds. A coach is
- * counted by the rule generation uses (`toGeneratorPlayer`'s `coachId`), once per distinct
- * coach, as the generator counts them. It is the import's count, not the run's: coaches the
- * `coach_team_requests` links add at generation are not known here, and a coach whose child is
- * not eligible for the division, or is waitlisted, anchors no team (Phase B2), as the registered
- * players are counted here and the eligible ones by the generator.
+ * The programs of an import, with the players each holds. The head coaches are not counted here:
+ * since the admin-only change (owner decision 8a, 2026-10-27) only a `coach_team_requests` link
+ * anchors a team, and the links are read at generation, not with the import's rows. So the
+ * overview's recommended team count is the registered players' (`coachCount` 0); generation
+ * itself makes a team for each coach whose child is eligible for the division, and one whose
+ * child is not eligible, or is waitlisted, anchors no team (Phase B2).
  */
 function derivePrograms(rows) {
   const grouped = new Map();
 
-  rows.forEach((row, sourceIndex) => {
+  rows.forEach((row) => {
     const id = resolveDivisionId(row);
     const name = String(resolveDivisionName(row)).trim() || id;
-    const current = grouped.get(id) || { id, name, playerCount: 0, coachIds: new Set() };
+    const current = grouped.get(id) || { id, name, playerCount: 0 };
     current.playerCount += 1;
-    const { coachId } = toGeneratorPlayer(row, sourceIndex, id);
-    if (coachId) current.coachIds.add(coachId);
     grouped.set(id, current);
   });
 
-  return Array.from(grouped.values()).map(({ coachIds, ...program }) => ({
+  return Array.from(grouped.values()).map((program) => ({
     ...program,
-    coachCount: coachIds.size,
+    coachCount: 0,
     totalPlayers: program.playerCount,
   }));
 }
@@ -348,6 +346,8 @@ const YEARS_PLAYED_KEYS = ['years_played', 'Years Played', 'yearsPlayed'];
 const WAITLIST_KEYS = ['waitlist', 'waitlisted'];
 const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
 const LOOKUP_CHUNK = 200;
+/** The coach statuses `admin_assign_team_coach` accepts, and so the ones whose child links anchor a team. */
+const ANCHORING_COACH_STATUSES = ['active', 'pending-confirmation'];
 const LOOKUP_CONCURRENCY = 8;
 
 /**
@@ -469,6 +469,38 @@ async function readCoachNames(organizationId, coachIds) {
   return names;
 }
 
+/**
+ * The ids, of the coaches given, that may anchor a team: those `admin_assign_team_coach` would
+ * assign a team to, status `active` or `pending-confirmation` (20260503050000). A link of a coach
+ * who is `inactive` or `interested` stays on file -- the coach import writes it whatever the
+ * status, so re-activating the coach restores the anchor -- but teaming does not read it. Not
+ * guarded, as the link read above it is not (Phase B3): a refused read stops the run.
+ * @param {string} organizationId
+ * @param {string[]} coachIds
+ * @returns {Promise<Set<string>>}
+ */
+async function readAnchoringCoachIds(organizationId, coachIds) {
+  const anchoring = new Set();
+  for (let start = 0; start < coachIds.length; start += LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from('coaches')
+      .select('id, status')
+      .eq('organization_id', organizationId)
+      .in('id', coachIds.slice(start, start + LOOKUP_CHUNK));
+    if (error) {
+      throw new Error(
+        `Could not read the coaches' status, so teams were not generated: ${
+          error.message || 'the read was refused'
+        }.`
+      );
+    }
+    for (const row of data || []) {
+      if (ANCHORING_COACH_STATUSES.includes(row.status)) anchoring.add(String(row.id));
+    }
+  }
+  return anchoring;
+}
+
 /** A roster entry buddy requests are matched against: identity only. */
 function toBuddyRosterEntry(row, id, division) {
   return {
@@ -495,8 +527,9 @@ function parseYearsPlayed(value) {
  * A generator player from an import row (the durable player's fields over it). With
  * `coachingLeads` (the Coaching Interest flag) a player whose parent volunteers to coach is a
  * coaching lead, `isCoachingLead` (Phase B6). A lead is not a coach: only a coach linked to a
- * child through `coach_team_requests` anchors a team (`prepareTeamingInput`), or a coach the
- * row names. With `waitlist` (the
+ * child through `coach_team_requests` anchors a team (`prepareTeamingInput`); a coach the row
+ * names (`coach_id`, `coach_email`) does not (owner decision 8a, 2026-10-27: the coach import
+ * writes the links, from the children it names). With `waitlist` (the
  * Waitlist flag) a player the row marks as waitlisted carries `status: 'waitlist'`, which the
  * generator seats nowhere and leaves out of the league-wide averages.
  */
@@ -521,7 +554,6 @@ function toGeneratorPlayer(
   const skillRating = normalizeSkillRating(
     firstNonEmpty(row, ['skillRating', 'skill_rating', 'Skill Rating', 'skill_tier', 'Skill Tier'])
   );
-  const coachId = firstNonEmpty(row, ['coach_id', 'coachId', 'coach_email', 'Coach Email']);
   const isWaitlisted = waitlist && WAITLIST_KEYS.some((key) => parseBooleanLike(row?.[key]));
   const isCoachingLead =
     coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
@@ -554,7 +586,6 @@ function toGeneratorPlayer(
     ...(skillRating !== undefined ? { skillRating } : {}),
     ...(Number.isFinite(rating) ? { rating } : {}),
     ...(yearsPlayed !== undefined ? { years_played: yearsPlayed } : {}),
-    ...(coachId ? { coachId: String(coachId) } : {}),
     ...(isWaitlisted ? { status: 'waitlist' } : {}),
     ...(isCoachingLead ? { isCoachingLead: true } : {}),
     ...(buddyRequests ? buddyFieldsOf(row) : {}),
@@ -1202,9 +1233,15 @@ export default function TeamAnalysisPage() {
           }.`
         );
       }
+      // Only a coach who is active or pending confirmation anchors a team; an inactive coach's
+      // child is placed like any other player and the team is left needing a coach.
+      const anchoringCoachIds = await readAnchoringCoachIds(currentOrganization.id, [
+        ...new Set((coachLinks || []).map((link) => String(link.coach_id))),
+      ]);
       const coachesById = new Map();
       for (const link of coachLinks || []) {
         if (!link.player_id) continue;
+        if (!anchoringCoachIds.has(String(link.coach_id))) continue;
         const entry = coachesById.get(link.coach_id) || {
           id: link.coach_id,
           children: [],

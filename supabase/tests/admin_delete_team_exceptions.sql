@@ -74,8 +74,8 @@ INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES
     ('d8000000-0000-4000-8000-0000000000b1', 'd8000000-0000-4000-8000-00000000aa01', 'a1111111-1111-1111-1111-111111111111'),
     ('d8000000-0000-4000-8000-0000000000b2', 'd8000000-0000-4000-8000-00000000aa03', 'a1111111-1111-1111-1111-111111111111');
 UPDATE public.players SET team_id = 'd8000000-0000-4000-8000-0000000000b1' WHERE id = 'd8000000-0000-4000-8000-00000000aa01';
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status)
-VALUES ('d8000000-0000-4000-8000-0000000000c9', 'a1111111-1111-1111-1111-111111111111', NULL, 'Del Coach', 'del-coach@test.local', 'active');
+INSERT INTO public.coaches (id, organization_id, full_name, email, status)
+VALUES ('d8000000-0000-4000-8000-0000000000c9', 'a1111111-1111-1111-1111-111111111111', 'Del Coach', 'del-coach@test.local', 'active');
 INSERT INTO public.team_coach_assignments
     (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
 VALUES ('a1111111-1111-1111-1111-111111111111', 'd8000000-0000-4000-8000-0000000000b1', 'd8000000-0000-4000-8000-0000000000c9',
@@ -92,7 +92,7 @@ SELECT ok(
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok($$SELECT public.admin_delete_team('d8000000-0000-4000-8000-0000000000b1')$$, '42501', NULL,
-                 'a coach cannot delete a team');
+                 'a signed-in non-member cannot delete a team');
 RESET ROLE;
 SELECT ok(EXISTS (SELECT 1 FROM public.teams WHERE id = 'd8000000-0000-4000-8000-0000000000b1')
           AND (SELECT count(*) FROM public.practice_exceptions WHERE team_id = 'd8000000-0000-4000-8000-0000000000b1') = 2

@@ -9,19 +9,22 @@
 --     to fire on a planted function first); `guardian.linked` keeps its
 --     `audit_actions` row;
 --   * the people tables: an admin reads every player and roster row directly;
---     a current coach, a coach of another team and a member with no coaching
---     role read none; each table has exactly one read policy, the admin one;
---   * the roster read: an admin gets every column; the team's current coach
---     gets every player's name and jersey number and nothing else (no gender,
---     years played, rating or coaching interest; since 20261025010000 the read
---     has no guardian contact column at all, and docs/sql/20261025010000_smoke.sql
---     checks no read a coach can call returns one); a coach of another team
---     and a member with no coaching role are refused 42501;
---   * the staff read and the calendar token admit the admin and the team's
---     current coach only;
---   * the roles: `parent` and `player` are refused as a member's role and an
---     invite's (23514, the CHECKs) and by `create_org_invite` and
---     `admin_change_member_role` (22023); a coach invite is still minted;
+--     a signed-in user who is not a member reads none; each table has exactly
+--     one read policy, the admin one;
+--   * the roster read: an admin gets every column (since 20261025010000 the
+--     read has no guardian contact column at all, and
+--     docs/sql/20261025010000_smoke.sql checks no read returns one); a
+--     non-member is refused 42501;
+--   * the staff read and the calendar token admit an admin only;
+--   * the roles: `parent`, `player` and (since 20261104010000) `coach` are
+--     refused as a member's role and an invite's (23514, the CHECKs) and by
+--     `create_org_invite` and `admin_change_member_role` (22023); a staff
+--     invite is minted;
+--
+-- **Since 20261104010000 no coach signs in**: the current-coach arm of the
+-- reads, the coach persona and the coach invite went; the persona that was a
+-- coach member is a signed-in user with no membership, and the one member left
+-- is staff.
 --   * the posture of the replaced functions: SECURITY DEFINER with
 --     search_path=public, EXECUTE for authenticated and not anon.
 --
@@ -123,9 +126,8 @@ $$;
 DO $$
 DECLARE
     v_admin uuid := gen_random_uuid();
-    v_cu uuid := gen_random_uuid();      -- current coach of team A
-    v_ou uuid := gen_random_uuid();      -- current coach of team B
-    v_m uuid := gen_random_uuid();       -- a member with no coaching role
+    v_ou uuid := gen_random_uuid();      -- signed in, a member of no organization
+    v_m uuid := gen_random_uuid();       -- a staff member
     v_org uuid;
     v_s uuid;
     v_d uuid;
@@ -143,25 +145,24 @@ DECLARE
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
         (v_admin, 'r3-admin@example.test', '{"password_length": 16}', now()),
-        (v_cu, 'r3-coach@example.test', '{"password_length": 16}', now()),
         (v_ou, 'r3-other@example.test', '{"password_length": 16}', now()),
         (v_m, 'r3-member@example.test', '{"password_length": 16}', now());
     INSERT INTO public.profiles (id, email) VALUES
-        (v_admin, 'r3-admin@example.test'), (v_cu, 'r3-coach@example.test'),
+        (v_admin, 'r3-admin@example.test'),
         (v_ou, 'r3-other@example.test'), (v_m, 'r3-member@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org R3', 'smoke-org-r3')
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_cu, 'coach'), (v_org, v_ou, 'coach'), (v_org, v_m, 'coach');
+        (v_org, v_admin, 'admin'), (v_org, v_m, 'staff');
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'R3 Fall') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'R3 U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'R3 A') RETURNING id INTO v_ta;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'R3 B') RETURNING id INTO v_tb;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
-        VALUES (v_org, v_cu, 'Coach A', 'r3-coach@example.test', 'active') RETURNING id INTO v_c;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status)
-        VALUES (v_org, v_ou, 'Coach B', 'r3-other@example.test', 'active') RETURNING id INTO v_o;
+    INSERT INTO public.coaches (organization_id, full_name, email, status)
+        VALUES (v_org, 'Coach A', 'r3-coach@example.test', 'active') RETURNING id INTO v_c;
+    INSERT INTO public.coaches (organization_id, full_name, email, status)
+        VALUES (v_org, 'Coach B', 'r3-other@example.test', 'active') RETURNING id INTO v_o;
     INSERT INTO public.team_coach_assignments
         (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
     VALUES (v_org, v_ta, v_c, 'lead', public.team_local_today(v_ta) - 10, NULL, 'smoke', NULL),
@@ -196,57 +197,31 @@ BEGIN
     RESET ROLE;
     RAISE NOTICE 'admin: 2 of 2 players and roster rows read directly; the roster read returns every column';
 
-    -- ── The team's current coach ───────────────────────────────────────────
-    PERFORM set_config('request.jwt.claim.sub', v_cu::text, true);
+    -- ── A signed-in user who is not a member ───────────────────────────────
+    PERFORM set_config('request.jwt.claim.sub', v_ou::text, true);
     SET LOCAL ROLE authenticated;
     IF (SELECT count(*) FROM public.players WHERE organization_id = v_org)
-       + (SELECT count(*) FROM public.team_players WHERE organization_id = v_org) <> 0 THEN
-        RESET ROLE; RAISE EXCEPTION 'a coach read a player or roster row directly';
+       + (SELECT count(*) FROM public.team_players WHERE organization_id = v_org) <> 0
+       OR EXISTS (SELECT 1 FROM public.team_calendar_tokens WHERE team_id = v_ta) THEN
+        RESET ROLE; RAISE EXCEPTION 'a non-member read a player, roster row or token';
     END IF;
-    SELECT string_agg(r.first_name || ' ' || r.last_name || ':' || r.jersey_number, ',' ORDER BY r.first_name),
-           count(*) FILTER (WHERE r.gender IS NOT NULL OR r.years_played IS NOT NULL OR r.rating IS NOT NULL
-                                  OR r.willing_to_coach IS NOT NULL)
-      INTO v_t, v_n FROM public.get_team_roster(v_ta) r;
-    IF v_t IS DISTINCT FROM 'Pia One:7,Rex Two:9' OR v_n <> 0 THEN
-        RESET ROLE; RAISE EXCEPTION 'the coach''s roster read is not names only: % (% row(s) with more)', coalesce(v_t, 'nothing'), v_n;
-    END IF;
-    IF (SELECT count(*) FROM public.get_team_staff(v_ta)) <> 1 THEN
-        RESET ROLE; RAISE EXCEPTION 'the current coach did not read the team''s staff';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.team_calendar_tokens WHERE team_id = v_ta)
-       OR EXISTS (SELECT 1 FROM public.team_calendar_tokens WHERE team_id = v_tb) THEN
-        RESET ROLE; RAISE EXCEPTION 'the coach did not read exactly their team''s calendar token';
-    END IF;
+    BEGIN
+        PERFORM * FROM public.get_team_roster(v_ta);
+    EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
+    END;
+    BEGIN
+        PERFORM * FROM public.get_team_staff(v_ta);
+    EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
+    END;
     RESET ROLE;
-    RAISE NOTICE 'coach roster: 2 of 2 players with name and jersey number, and none with a gender, years played, rating or coaching interest; no direct player or roster read';
-
-    -- ── A coach of another team, and a member with no coaching role ────────
-    FOREACH v_t IN ARRAY ARRAY[v_ou::text, v_m::text] LOOP
-        PERFORM set_config('request.jwt.claim.sub', v_t, true);
-        SET LOCAL ROLE authenticated;
-        IF (SELECT count(*) FROM public.players WHERE organization_id = v_org)
-           + (SELECT count(*) FROM public.team_players WHERE organization_id = v_org) <> 0
-           OR EXISTS (SELECT 1 FROM public.team_calendar_tokens WHERE team_id = v_ta) THEN
-            RESET ROLE; RAISE EXCEPTION 'a caller with no tie to team A read its players or token';
-        END IF;
-        BEGIN
-            PERFORM * FROM public.get_team_roster(v_ta);
-        EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
-        END;
-        BEGIN
-            PERFORM * FROM public.get_team_staff(v_ta);
-        EXCEPTION WHEN insufficient_privilege THEN v_denied := v_denied + 1;
-        END;
-        RESET ROLE;
-    END LOOP;
-    IF v_denied <> 4 THEN
-        RAISE EXCEPTION 'only % of 4 roster and staff reads were refused to callers with no tie to the team', v_denied;
+    IF v_denied <> 2 THEN
+        RAISE EXCEPTION 'only % of 2 roster and staff reads were refused to a non-member', v_denied;
     END IF;
-    RAISE NOTICE 'refused: a coach of another team and a member with no coaching role, roster and staff 4 of 4 42501; neither reads a player, roster row or the token';
+    RAISE NOTICE 'refused: a signed-in non-member, roster and staff 2 of 2 42501; reads no player, roster row or the token';
 
     -- ── The roles ──────────────────────────────────────────────────────────
     v_denied := 0;
-    FOREACH v_role IN ARRAY ARRAY['parent', 'player'] LOOP
+    FOREACH v_role IN ARRAY ARRAY['parent', 'player', 'coach'] LOOP
         BEGIN
             UPDATE public.organization_members SET role = v_role WHERE organization_id = v_org AND profile_id = v_m;
         EXCEPTION WHEN check_violation THEN v_denied := v_denied + 1;
@@ -257,14 +232,14 @@ BEGIN
         EXCEPTION WHEN check_violation THEN v_denied := v_denied + 1;
         END;
     END LOOP;
-    IF v_denied <> 4 THEN
-        RAISE EXCEPTION 'only % of 4 parent and player member and invite writes were refused by the CHECKs', v_denied;
+    IF v_denied <> 6 THEN
+        RAISE EXCEPTION 'only % of 6 parent, player and coach member and invite writes were refused by the CHECKs', v_denied;
     END IF;
 
     v_denied := 0;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SET LOCAL ROLE authenticated;
-    FOREACH v_role IN ARRAY ARRAY['parent', 'player'] LOOP
+    FOREACH v_role IN ARRAY ARRAY['parent', 'player', 'coach'] LOOP
         BEGIN
             PERFORM public.create_org_invite(v_org, v_role);
         EXCEPTION WHEN SQLSTATE '22023' THEN v_denied := v_denied + 1;
@@ -274,19 +249,19 @@ BEGIN
         EXCEPTION WHEN SQLSTATE '22023' THEN v_denied := v_denied + 1;
         END;
     END LOOP;
-    SELECT i.code INTO v_code FROM public.create_org_invite(v_org, 'coach') i;
+    SELECT i.code INTO v_code FROM public.create_org_invite(v_org, 'staff') i;
     RESET ROLE;
-    IF v_denied <> 4 THEN
-        RAISE EXCEPTION 'only % of 4 parent and player invites and role changes were refused 22023', v_denied;
+    IF v_denied <> 6 THEN
+        RAISE EXCEPTION 'only % of 6 parent, player and coach invites and role changes were refused 22023', v_denied;
     END IF;
     IF v_code IS NULL OR NOT EXISTS (SELECT 1 FROM public.organization_invites
-                                      WHERE code = v_code AND organization_id = v_org AND role = 'coach') THEN
-        RAISE EXCEPTION 'a coach invite was not minted';
+                                      WHERE code = v_code AND organization_id = v_org AND role = 'staff') THEN
+        RAISE EXCEPTION 'a staff invite was not minted';
     END IF;
-    IF (SELECT role FROM public.organization_members WHERE organization_id = v_org AND profile_id = v_m) <> 'coach' THEN
+    IF (SELECT role FROM public.organization_members WHERE organization_id = v_org AND profile_id = v_m) <> 'staff' THEN
         RAISE EXCEPTION 'a refused role change still changed the member''s role';
     END IF;
-    RAISE NOTICE 'roles: parent and player refused by both CHECKs 4 of 4 (23514) and by create_org_invite and admin_change_member_role 4 of 4 (22023); a coach invite is minted';
+    RAISE NOTICE 'roles: parent, player and coach refused by both CHECKs 6 of 6 (23514) and by create_org_invite and admin_change_member_role 6 of 6 (22023); a staff invite is minted';
 END;
 $$;
 

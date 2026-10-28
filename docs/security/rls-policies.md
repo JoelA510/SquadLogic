@@ -9,16 +9,20 @@ This document describes the **implemented** Row Level Security (RLS) strategy fo
 SquadLogic uses Supabase Auth with the organization roles stored in the `organization_members`
 table (`organization_members_role_check`):
 
-| Role    | Description                                                                                                                                                                                       |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin` | Full access to all organization data. Can manage users, import data, and run schedulers.                                                                                                          |
-| `coach` | Their own teams' schedule and roster names, their divisions' teams and coaches (names), and their practice preferences. No scheduling, score entry, standings or lighting since `20261028010000`. |
-| `staff` | An admin: `is_org_admin()` admits staff since `20261020030000`.                                                                                                                                   |
+| Role    | Description                                                                              |
+| ------- | ---------------------------------------------------------------------------------------- |
+| `admin` | Full access to all organization data. Can manage users, import data, and run schedulers. |
+| `staff` | An admin: `is_org_admin()` admits staff since `20261020030000`.                          |
 
-`tenant_admin` is also an admin to `is_org_admin()`, and is never invited or assigned. There is no
-`parent` or `player` role since `20261024010000` (the guardian view was removed; plan
-`docs/changes/2026-10-22-admin-focus.md`, R3): both role checks, `create_org_invite` and
-`admin_change_member_role` refuse them.
+`tenant_admin` is also an admin to `is_org_admin()`, and is never invited or assigned. **Only league
+admins sign in.** There is no `parent` or `player` role since `20261024010000` (the guardian view was
+removed; plan `docs/changes/2026-10-22-admin-focus.md`, R3) and no `coach` role since `20261104010000`
+(plan `docs/changes/2026-10-27-admin-only.md`): the member check admits `admin`, `staff` and
+`tenant_admin`, the invite check `admin` and `staff`, and `create_org_invite` and
+`admin_change_member_role` refuse any other role (22023). A coach is a row in `coaches` that admins
+manage (imported data); no coach signs in, and `coaches` has no `user_id` or `profile_id`
+(`20261104020000`). Because every member is therefore an admin, `is_org_member()` is an admin test
+by construction; `supabase/tests/admin_only.sql` pins the role list so that stays true.
 
 Roles are defined in `frontend/src/constants/permissions.js` and enforced via:
 
@@ -109,55 +113,45 @@ pull request that brings either back (`docs/operations/ci-cd.md`, "Supabase advi
 
 ## Server-side reads (Phase A3)
 
-Who may read people's data is the access table in `docs/changes/2026-10-20-phase-a-privacy.md`
-(A3). Admins and staff read the tables directly. Everyone else reads through definer functions
-that apply the table (migration `20261021010000`; pgTAP `supabase/tests/server_side_reads.sql`):
+Who may read people's data was the access table in `docs/changes/2026-10-20-phase-a-privacy.md` (A3);
+since `20261104010000` every row of it that admitted a coach is gone, and only admins and staff read.
+Admins and staff read the tables directly, and the roster and staff reads for a team (migrations
+`20261021010000`, `20261104010000`; pgTAP `supabase/tests/server_side_reads.sql`):
 
-| Function                                | Admits                                                  | Returns                                                                                                                                                                                                 |
-| --------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_team_roster(team)`                 | admins, staff; a current coach of the team              | names and jersey number; balance fields to admins and staff only (since `20261024010000`: a coach reads names only; since `20261025010000`: no guardian contacts)                                       |
-| `get_team_staff(team)`                  | the same                                                | every current coach's name and role, and status to admins and staff (no phone or email since `20261025010000`)                                                                                          |
-| `get_my_coached_team_ids(org)`          | any member                                              | the teams the caller currently coaches                                                                                                                                                                  |
-| `admin_get_coached_team_ids(org, user)` | admins, staff                                           | the teams another member currently coaches (an admin's role preview)                                                                                                                                    |
-| `get_my_division_teams(org)`            | any member (returns nothing to one who coaches no team) | every team of each division where the caller currently coaches a team: division, team, its current coaches' names (lead first), and whether the caller coaches it; no contact column (`20261028010000`) |
-| `admin_get_division_teams(org, user)`   | admins, staff                                           | the same for another member (an admin's role preview)                                                                                                                                                   |
+| Function                | Admits        | Returns                                                                                                |
+| ----------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `get_team_roster(team)` | admins, staff | the team's players: names, jersey number, gender, years played, rating, coaching interest; no contacts |
+| `get_team_staff(team)`  | admins, staff | the team's current coaches: name, role and status (no phone or email since `20261025010000`)           |
 
-"Current coach" is a `team_coach_assignments` row of the caller's linked coach (`coaches.user_id`,
-set by `link_my_coach_record()`) whose inclusive window holds today in the team's season timezone
-(`team_local_today()`, UTC when unset). There is no guardian since `20261024010000`, which
-dropped `profile_players`, `link_my_guardian_records()`, `is_team_guardian()` and
-`guardian_contacts_view()` and retired the `guardian_contact_sharing` setting. A refused call
-raises 42501, the same for a team that does not exist.
+A coach is "current" when a `team_coach_assignments` row of theirs has an inclusive window that holds today
+in the team's season timezone (`team_local_today()`, UTC when unset); that is data an admin reads, not a
+sign-in. A refused call (a non-admin, another organization's admin, an unknown team) raises 42501. There is no
+guardian since `20261024010000` and no coach caller since `20261104010000`: the coached-team and
+division-team reads, `link_my_coach_record()` and the role preview that used them are dropped.
 
-**No read a coach can call returns an email or phone** (`20261025010000`, R4 of
-`docs/changes/2026-10-22-admin-focus.md`): the contact card (`set_my_contact_card()` and its
-`profiles` columns), `get_coach_directory()` and the `coach_directory` setting are gone, and
-`get_organization_members()`, which returns every member's sign-in email, admits admins and staff
-only. The only functions `authenticated` may execute whose result names an email, phone, contact
-or guardian column are `get_organization_members` and `get_settings_audit_log`, both admin-only;
-the migration's end-state check, its smoke and `supabase/tests/contact_surfaces_removed.sql` hold
-the catalogue to that (a function returning `jsonb` or a bare `record` is not seen). Admins read a
-coach's sign-in email from `coaches` directly, on the Coaches page.
+**No read returns an email or phone to a non-admin** (`20261025010000`, R4 of
+`docs/changes/2026-10-22-admin-focus.md`): the contact card, `get_coach_directory()` and the
+`coach_directory` setting are gone, and `get_organization_members()`, which returns every member's sign-in
+email, admits admins and staff only. The only functions `authenticated` may execute whose result names an
+email, phone, contact or guardian column are `get_organization_members` and `get_settings_audit_log`, both
+admin-only; the migration's end-state check, its smoke and `supabase/tests/contact_surfaces_removed.sql` hold
+the catalogue to that (a function returning `jsonb` or a bare `record` is not seen). Admins read a coach's
+email from `coaches` directly, on the Coaches page; it is the coach import's key and an admin's contact, not a
+sign-in (unique per organization, stored lower-case and trimmed).
 
-Since `20261021020000` (A3b) those functions are the only non-admin path. A member who is not an
-admin or staff reads `coaches` and `team_coach_assignments` only for their own coach record (only
-while a member), and `staging_players` and `staging_import_rows` not at all. Since
-`20261024010000`, `players` and `team_players` are read by admins and staff only
-(`players_select_admin`, `team_players_select_admin`; until then a guardian read their own
-children): row security chooses rows, not columns, so a coach reads their team's players'
-names through `get_team_roster` instead. A team's calendar feed token lives in
-`team_calendar_tokens`, readable by admins and staff and the team's current coaches;
-`rotate_calendar_token` admits admins, staff and a current coach. `update_game_score` admits admins
-and staff only, and only while the organization's `score_entry` setting is on (55000 while it is
-off; since `20261028010000`, R6 of `docs/changes/2026-10-22-admin-focus.md`: until then it
-admitted anyone for a game of a team they currently coach). No coach requests or withdraws a
-lighting override since then: `request_practice_lighting_override` is dropped and
-`withdraw_practice_lighting_override` admits admins and staff; the lighting read policy still
-shows a slot's coaches its rows. A coach's one remaining write is their practice preference
-(`request_coach_practice_preference`, kept by decision 4), besides their team's calendar token. The
-migration refuses to commit if any other `SELECT` or `ALL` policy is left on one of these tables,
-since Postgres would OR it with the narrowed one. Pinned by `supabase/tests/rls_policy_matrix.sql`
-and `supabase/tests/restricted_reads.sql`.
+The reads that had a coach arm are admin reads (`is_org_admin(organization_id)`) since `20261104010000`:
+`coaches` (`coaches_select_admin`, the only read policy on the table), `team_coach_assignments`,
+`team_calendar_tokens` (an admin reads and `rotate_calendar_token` rotates the feed token; the calendar
+subscription links stay, admin-only), `coach_practice_preferences`, `practice_lighting_overrides`,
+`facility_permits`, `facility_permit_scopes` and the `facility-permits` storage objects. `players` and
+`team_players` are read by admins and staff only (`20261024010000`), and `staging_players` and
+`staging_import_rows` likewise. `update_game_score` admits admins and staff only, and only while the
+organization's `score_entry` setting is on (`20261028010000`). No coach requests anything: the coach
+preference request RPC and the lighting request RPC are dropped; admins record preferences
+(`admin_set_coach_practice_preference`) and decide them. The migration refuses to commit if any other
+`SELECT` or `ALL` policy is left on `coaches`, since Postgres would OR it with the narrowed one, and
+`reconcile_prod_rls_drift()` holds that too. Pinned by `supabase/tests/rls_policy_matrix.sql`,
+`supabase/tests/restricted_reads.sql` and `supabase/tests/admin_only.sql`.
 
 ## Organization Scoping
 
@@ -181,11 +175,11 @@ Every data table has a direct `organization_id` column (either native or backfil
 Both buckets are private, and their `storage.objects` policies scope every object to the
 organization named by the first folder of its path (`<organization_id>/...`):
 
-| Bucket        | Who may                                                                                                                 | Migration                          |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `raw-imports` | Members read and upload under their organization's folder; no delete                                                    | `20260421001043`, `20260602010000` |
-| `exports`     | Members read (`is_org_member`); admins upload and remove (`is_org_admin`), under their organization's folder; no update | `20261017000000`                   |
-| `facility-permits` | Admins read, upload and remove, under `<organization>/<permit>/<uuid>.<ext>` for a permit that exists there (no upload for a demo organization); a coach reads only the live file of a permit for a field their team plays or practises on; no update | `20261102010000` |
+| Bucket             | Who may                                                                                                                                                    | Migration                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `raw-imports`      | Members read and upload under their organization's folder; no delete                                                                                       | `20260421001043`, `20260602010000` |
+| `exports`          | Members read (`is_org_member`); admins upload and remove (`is_org_admin`), under their organization's folder; no update                                    | `20261017000000`                   |
+| `facility-permits` | Admins read, upload and remove, under `<organization>/<permit>/<uuid>.<ext>` for a permit that exists there (no upload for a demo organization); no update | `20261102010000`, `20261104010000` |
 
 Only an administrator uploads or removes exports, as only an administrator reaches the Exports page
 and records the publication baseline beside the upload. The admin DELETE makes a publish all or
@@ -197,10 +191,10 @@ not a UUID. The Exports page's "Upload to Storage" builds its paths with `export
 policy. Retention, if wanted, runs as the service role. pgTAP:
 `supabase/tests/storage_exports_bucket.sql`.
 
-`facility-permits` (private; 10 MiB; PDF, JPEG, PNG) holds permit documents. The coach SELECT asks
-`coach_reads_facility_permit_file`, which is true only for an object that is some permit's current
-`file_path` and whose permit concerns a field where a team the caller currently coaches has a game or
-practice, so a replaced or orphaned file is no coach's to read. The two tables (`facility_permits`,
+`facility-permits` (private; 10 MiB; PDF, JPEG, PNG) holds permit documents. Its SELECT policy is
+admin-only (an object's first folder is the organization, and the name must be
+`<organization>/<permit>/<uuid>.<ext>`); until `20261104010000` it also admitted a coach of a team scheduled
+on a permitted field, through `coach_reads_facility_permit_file`, which is dropped. The two tables (`facility_permits`,
 `facility_permit_scopes`) have one SELECT policy each and no write policy; the five permit RPCs write.
 Files open by a signed link made on tap (120 s). pgTAP: `supabase/tests/facility_permits.sql` and
 `supabase/tests/storage_facility_permits_bucket.sql`.

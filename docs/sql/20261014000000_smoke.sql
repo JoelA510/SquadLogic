@@ -30,7 +30,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org Refused', 'smoke-org-refused')
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role)
-        VALUES (v_org, v_member, 'coach');
+        VALUES (v_org, v_member, 'staff');
 
     -- (a) As the caller -- what the Edge Functions now do -- the row lands and
     --     is attributed to the caller.

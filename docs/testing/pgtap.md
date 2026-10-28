@@ -109,7 +109,7 @@ a new test that needs known identities.
 | ------------------------- | -------------------------------------- |
 | Alice (admin of Org A)    | `11111111-1111-1111-1111-111111111111` |
 | Bob (admin of Org B)      | `22222222-2222-2222-2222-222222222222` |
-| Charlie (coach of Org A)  | `33333333-3333-3333-3333-333333333333` |
+| Charlie (no membership)   | `33333333-3333-3333-3333-333333333333` |
 | Org A                     | `a1111111-1111-1111-1111-111111111111` |
 | Org B                     | `b2222222-2222-2222-2222-222222222222` |
 | A-Team (Org A)            | `aaaaaaaa-0000-0000-0000-000000000001` |
@@ -121,7 +121,7 @@ a new test that needs known identities.
 | -------------------------------------------------- | ------------------------------------------------------------------------- |
 | `rls_cross_org_isolation.sql`                      | Alice (Org A) cannot SELECT Org B's teams.                                |
 | `rls_anonymous_gate.sql`                           | `anon` role reads zero rows from organizations, teams, players, audit_log, organization_members. |
-| `rls_admin_vs_coach.sql`                           | `audit_log` is readable by Alice (admin) and blocked for Charlie (coach). |
+| `rls_admin_vs_coach.sql`                           | `audit_log` is readable by Alice (admin) and blocked for Charlie (a non-member). |
 | `rls_service_role_bypass.sql`                      | `service_role` sees every team across every org.                          |
 | `rls_import_efficiency_metrics_view.sql`           | The `security_invoker = on` view is org-scoped for its caller.            |
 | `rls_policy_matrix.sql`                            | Seven personas' SELECT, INSERT, UPDATE, cross-organization move and DELETE on the 26 tables the advisors flag, against a literal expected table (`docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2). |

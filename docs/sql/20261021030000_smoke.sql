@@ -6,7 +6,8 @@
 --     exception: the live one is withdrawn and audited, both are archived onto
 --     their run, each series is audited practice.cancelled, every player on
 --     the team loses the team id, and team.deleted records the counts;
---   * a coach is refused 42501 and nothing changes;
+--   * a signed-in user who is not a member (a coach, before 20261104010000) is refused 42501
+--     and nothing changes;
 --   * while that delete is open, a second session's exception insert for the
 --     team waits on it (55P03 at a 1s lock timeout); the same session writes an
 --     untouched team's exception at once.
@@ -43,7 +44,7 @@ BEGIN
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org DT', 'smoke-org-dt') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach');
+        (v_org, v_admin, 'admin');   -- v_coach: signed in, no membership (no coach role since 20261104010000)
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'DT Fall') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'DT U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'DT Deleted') RETURNING id INTO v_t;
@@ -99,7 +100,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', (SELECT id FROM dt_ids WHERE name = 'coach')::text, true);
     BEGIN
         PERFORM public.admin_delete_team(v_t);
-        RAISE EXCEPTION 'a coach deleted a team';
+        RAISE EXCEPTION 'a non-member deleted a team';
     EXCEPTION WHEN insufficient_privilege THEN
         NULL;
     END;
@@ -107,7 +108,7 @@ BEGIN
        OR (SELECT count(*) FROM public.practice_exceptions WHERE team_id = v_t AND withdrawn_at IS NULL) <> 1 THEN
         RAISE EXCEPTION 'the refused delete changed something';
     END IF;
-    RAISE NOTICE 'a coach is refused 42501 and nothing changes';
+    RAISE NOTICE 'a signed-in non-member is refused 42501 and nothing changes';
 
     PERFORM set_config('request.jwt.claim.sub', (SELECT id FROM dt_ids WHERE name = 'admin')::text, true);
     PERFORM public.admin_delete_team(v_t);

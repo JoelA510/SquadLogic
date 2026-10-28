@@ -8,7 +8,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(15);
+SELECT plan(16);
 
 -- Org A: a season with two teams, a second season with one, three slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -194,21 +194,39 @@ SELECT throws_ok(
     '42501', NULL,
     'closes naming another season''s row is refused 42501');
 
+-- No member is a non-admin any more (organization_members_role_check admits admin, staff and
+-- tenant_admin, all admins, since 20261104010000), so the writer's refusals are the ones a user who
+-- is not an admin of the season's organization can reach: Charlie, signed in with no membership,
+-- and Bob, an admin of another organization.
+
+SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok(
     $$ SELECT public.persist_practice_schedule(
-           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa',
+                              'organization_id', 'a1111111-1111-1111-1111-111111111111'),
            (SELECT p FROM v3_payload),
            unlock => jsonb_build_array(jsonb_build_object(
                'assignment_id', 'a1111111-1111-1111-1111-000000006609', 'reason', 'coach'))) $$,
     '42501', NULL,
-    'a coach''s unlock is refused 42501');
+    'a signed-in non-member''s unlock is refused 42501');
 SELECT throws_ok(
     $$ SELECT public.persist_practice_schedule(
-           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa',
+                              'organization_id', 'a1111111-1111-1111-1111-111111111111'),
            (SELECT p FROM v3_payload)) $$,
     '42501', NULL,
-    'a non-admin ordinary save is refused 42501');
+    'a signed-in non-member''s ordinary save is refused 42501');
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT throws_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa',
+                              'organization_id', 'a1111111-1111-1111-1111-111111111111'),
+           (SELECT p FROM v3_payload),
+           unlock => jsonb_build_array(jsonb_build_object(
+               'assignment_id', 'a1111111-1111-1111-1111-000000006609', 'reason', 'coach'))) $$,
+    '42501', NULL,
+    'another organization''s admin''s unlock is refused 42501');
 
 SELECT * FROM finish();
 ROLLBACK;

@@ -10,7 +10,7 @@
 --   * **no read a coach can call returns an email or phone**: the catalogue of
 --     every function `authenticated` may execute, by its result columns and
 --     the columns of a table it returns rows of, holds exactly the two
---     admin-only reads, and a coach of the organization is refused both;
+--     admin-only reads, and a signed-in user with no membership is refused both;
 --   * the staff read gives the team's current coach names and roles; an admin
 --     still reads every member's sign-in email; a patch naming
 --     `guardian_contacts` is refused 22023.
@@ -69,8 +69,8 @@ SELECT ok(
     EXISTS (SELECT 1 FROM pg_proc p
              WHERE p.oid = 'public.get_team_staff(uuid)'::regprocedure
                AND regexp_replace(regexp_replace(p.prosrc, '--[^\n]*', '', 'g'), '''[^'']*''', '', 'g')
-                   ~ '\mis_current_team_coach\M'),
-    'control: the scan reads real bodies (get_team_staff calls is_current_team_coach)'
+                   ~ '\mis_org_admin\M'),
+    'control: the scan reads real bodies (get_team_staff calls is_org_admin)'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.audit_actions WHERE action = 'profile.contact_card_updated'),
@@ -100,10 +100,11 @@ SELECT is(
     'the only functions a signed-in caller may execute that return a contact column are the two admin reads'
 );
 
--- Charlie, a coach of Org A, is the current lead coach of A-Team.
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status)
+-- Charlie, signed in with no membership (a coach of Org A before 20261104010000), is refused the
+-- admin reads below. R4 Coach is the current lead coach of A-Team (data: no coach signs in).
+INSERT INTO public.coaches (id, organization_id, full_name, email, status)
 VALUES ('a1111111-0000-4000-8000-0000000004c1', 'a1111111-1111-1111-1111-111111111111',
-        '33333333-3333-3333-3333-333333333333', 'R4 Coach', 'r4-coach@test.local', 'active');
+        'R4 Coach', 'r4-coach@test.local', 'active');
 INSERT INTO public.team_coach_assignments
     (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via)
 VALUES ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001',
@@ -115,18 +116,16 @@ SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok(
     $$SELECT * FROM public.get_organization_members('a1111111-1111-1111-1111-111111111111')$$,
-    '42501', NULL, 'a coach is refused the member list and its emails'
+    '42501', NULL, 'a non-member is refused the member list and its emails'
 );
 SELECT throws_ok(
     $$SELECT * FROM public.get_settings_audit_log('a1111111-1111-1111-1111-111111111111')$$,
     'P0001', 'Access denied. Organization admin role required.',
-    'a coach is refused the settings audit log and its actor emails'
+    'a non-member is refused the settings audit log and its actor emails'
 );
-SELECT is(
-    (SELECT array_agg(s.full_name || ':' || s.role || ':' || coalesce(s.status, '-'))
-       FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') s),
-    ARRAY['R4 Coach:lead:-'],
-    'the current coach reads the staff''s name and role, no status'
+SELECT throws_ok(
+    $$SELECT * FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001')$$,
+    '42501', NULL, 'a non-member is refused the staff read'
 );
 SELECT ok(
     NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proargnames) a
@@ -141,14 +140,14 @@ SELECT ok(
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(
     (SELECT m.email FROM public.get_organization_members('a1111111-1111-1111-1111-111111111111') m
-      WHERE m.profile_id = '33333333-3333-3333-3333-333333333333'),
-    'charlie@test.local',
+      WHERE m.profile_id = '11111111-1111-1111-1111-111111111111'),
+    'alice@test.local',
     'an admin reads a member''s sign-in email in the member list'
 );
 SELECT is(
     (SELECT c.email FROM public.coaches c WHERE c.id = 'a1111111-0000-4000-8000-0000000004c1'),
     'r4-coach@test.local',
-    'an admin reads a coach''s sign-in email on the coach row (the Coaches page)'
+    'an admin reads a coach''s email on the coach row (the Coaches page)'
 );
 SELECT is(
     (SELECT array_agg(s.full_name || ':' || s.role || ':' || s.status)

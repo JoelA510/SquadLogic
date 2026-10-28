@@ -7,14 +7,15 @@
 --      helpers are no client's; the bucket is private with its limits and its three policies; the
 --      CHECK constraints are there.
 --   2. The writer, as an admin: a permit is recorded with its scopes and one audit row; each
---      refusal (dates, no scope, another organization's field) writes none; a coach, and another
---      organization's admin, are refused.
---   3. The coach read: a coach of a team with a game at the field reads the permit through the RPC
---      and the tables; a coach of a team scheduled elsewhere reads none; a direct write by a
---      signed-in user is refused.
+--      refusal (dates, no scope, another organization's field) writes none; a signed-in user who
+--      is not a member (a coach, before 20261104010000), and another organization's admin, are
+--      refused.
+--   3. The reads: only an admin of the organization reads a permit, through the RPC and the tables
+--      (a non-member, who plays at the field, is refused and reads none; so is another
+--      organization's admin); a direct write by a signed-in user is refused.
 --   4. The file: an object that was never uploaded is refused, a recorded one is attached, a second
---      replaces it and returns the first; the bucket's policies let an admin upload, refuse a coach,
---      and show a coach the live file and not the replaced one.
+--      replaces it and returns the first; the bucket's policies let an admin upload and read, refuse
+--      a non-member and show them nothing.
 --   5. admin_delete_field lists the permit it unlinks, and the permit stays when the delete is
 --      confirmed; deleting a permit returns its file path.
 --
@@ -89,8 +90,8 @@ $$;
 DO $$
 DECLARE
     v_admin uuid := gen_random_uuid();
-    v_cora uuid := gen_random_uuid();
-    v_quin uuid := gen_random_uuid();
+    v_cora uuid := gen_random_uuid();   -- signed in, no membership; their team plays at Pitch 1
+    v_quin uuid := gen_random_uuid();   -- signed in, no membership; their team plays at Pitch 2
     v_other uuid := gen_random_uuid();
     v_org uuid;
     v_other_org uuid;
@@ -104,8 +105,6 @@ DECLARE
     v_f1 uuid;
     v_f2 uuid;
     v_f_other uuid;
-    v_coach_c uuid;
-    v_coach_q uuid;
     v_slot uuid;
     v_permit uuid;
     v_res jsonb;
@@ -144,9 +143,15 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM pg_proc p
          WHERE p.pronamespace = 'public'::regnamespace
-           AND p.proname IN ('org_local_today', 'coach_field_ids_of', 'facility_permit_json', 'facility_permit_status', 'facility_permit_check')
+           AND p.proname IN ('org_local_today', 'facility_permit_json', 'facility_permit_status', 'facility_permit_check')
            AND (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))) <> 0 THEN
         RAISE EXCEPTION 'an internal permit helper is callable by a client role';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                AND (proname IN ('coach_field_ids_of', 'coach_covers_permit_scope', 'coach_reads_facility_permit',
+                                 'coach_reads_facility_permit_file')
+                     OR (proname = 'facility_permit_json' AND pronargs <> 2))) THEN
+        RAISE EXCEPTION 'a coach permit helper (or the three-argument permit view) is back: no coach signs in (20261104010000)';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM storage.buckets WHERE id = 'facility-permits' AND public IS NOT TRUE AND file_size_limit = 10485760
                     AND allowed_mime_types @> ARRAY['application/pdf', 'image/jpeg', 'image/png'] AND cardinality(allowed_mime_types) = 3) THEN
@@ -178,25 +183,18 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Permit Org', 'smoke-permit-org') RETURNING id INTO v_org;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Permit Other', 'smoke-permit-other') RETURNING id INTO v_other_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_cora, 'coach'), (v_org, v_quin, 'coach'), (v_other_org, v_other, 'admin');
+        (v_org, v_admin, 'admin'), (v_other_org, v_other, 'admin');
     INSERT INTO public.season_settings (organization_id, name, status) VALUES (v_org, 'Permit 2026', 'active') RETURNING id INTO v_season;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_season, 'Permit U10') RETURNING id INTO v_division;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_division, 'Permit Cora') RETURNING id INTO v_team_c;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_division, 'Permit Quin') RETURNING id INTO v_team_q;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_division, 'Permit Rival') RETURNING id INTO v_team_x;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status) VALUES
-        (v_org, v_cora, 'Smoke Cora', 'permit-cora@example.test', 'active') RETURNING id INTO v_coach_c;
-    INSERT INTO public.coaches (organization_id, user_id, full_name, email, status) VALUES
-        (v_org, v_quin, 'Smoke Quin', 'permit-quin@example.test', 'active') RETURNING id INTO v_coach_q;
-    INSERT INTO public.team_coach_assignments (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via) VALUES
-        (v_org, v_team_c, v_coach_c, 'lead', public.team_local_today(v_team_c) - 30, NULL, 'smoke', NULL),
-        (v_org, v_team_q, v_coach_q, 'lead', public.team_local_today(v_team_q) - 30, NULL, 'smoke', NULL);
     INSERT INTO public.locations (organization_id, name, lighting_available) VALUES (v_org, 'Smoke Permit Park', false) RETURNING id INTO v_venue;
     INSERT INTO public.locations (organization_id, name, lighting_available) VALUES (v_other_org, 'Smoke Other Park', false) RETURNING id INTO v_other_venue;
     INSERT INTO public.fields (organization_id, location_id, name, active) VALUES (v_org, v_venue, 'Smoke Pitch 1', true) RETURNING id INTO v_f1;
     INSERT INTO public.fields (organization_id, location_id, name, active) VALUES (v_org, v_venue, 'Smoke Pitch 2', true) RETURNING id INTO v_f2;
     INSERT INTO public.fields (organization_id, location_id, name, active) VALUES (v_other_org, v_other_venue, 'Smoke Other Pitch', true) RETURNING id INTO v_f_other;
-    -- Cora's team plays at Pitch 1; Quin's at Pitch 2.
+    -- A team plays at Pitch 1 and another at Pitch 2 (the bookings that make a field delete ask first).
     INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index) VALUES (v_org, v_f1, current_date + 7, 1) RETURNING id INTO v_slot;
     INSERT INTO public.games (organization_id, game_slot_id, home_team_id, away_team_id) VALUES (v_org, v_slot, v_team_c, v_team_x);
     INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index) VALUES (v_org, v_f2, current_date + 7, 1) RETURNING id INTO v_slot;
@@ -234,8 +232,8 @@ BEGIN
         RAISE EXCEPTION 'a refusal wrote a permit or an audit row';
     END IF;
 
-    FOREACH v_def IN ARRAY ARRAY['coach', 'other'] LOOP
-        PERFORM pg_temp.act(CASE v_def WHEN 'coach' THEN v_cora ELSE v_other END, 'authenticated');
+    FOREACH v_def IN ARRAY ARRAY['non-member', 'other'] LOOP
+        PERFORM pg_temp.act(CASE v_def WHEN 'non-member' THEN v_cora ELSE v_other END, 'authenticated');
         BEGIN
             PERFORM public.admin_create_facility_permit(v_org, 'X', NULL, v_today, v_today, NULL, ARRAY[]::uuid[], ARRAY[v_f1]);
             RAISE EXCEPTION 'the % was allowed to create a permit', v_def;
@@ -243,25 +241,33 @@ BEGIN
         END;
     END LOOP;
     RESET ROLE;
-    RAISE NOTICE 'writer: a permit is recorded trimmed with its status and one audit row; wrong dates, no scope and another organization''s field are refused (22023) and write nothing; a coach and another organization''s admin are refused (42501)';
+    RAISE NOTICE 'writer: a permit is recorded trimmed with its status and one audit row; wrong dates, no scope and another organization''s field are refused (22023) and write nothing; a signed-in non-member and another organization''s admin are refused (42501)';
 
-    -- ---- 3. the coach read ---------------------------------------------------
-    PERFORM pg_temp.act(v_cora, 'authenticated');
+    -- ---- 3. the reads --------------------------------------------------------
+    PERFORM pg_temp.act(v_admin, 'authenticated');
     IF jsonb_array_length(public.get_facility_permits(v_org) -> 'permits') <> 1
-       OR (SELECT count(*) FROM public.facility_permits) <> 1 THEN
-        RAISE EXCEPTION 'the coach whose team plays at the field did not read its permit';
+       OR (SELECT count(*) FROM public.facility_permits) <> 1
+       OR (SELECT count(*) FROM public.facility_permit_scopes) <> 1 THEN
+        RAISE EXCEPTION 'the admin did not read the permit and its scope';
     END IF;
+    FOREACH v_def IN ARRAY ARRAY['cora', 'quin'] LOOP
+        PERFORM pg_temp.act(CASE v_def WHEN 'cora' THEN v_cora ELSE v_quin END, 'authenticated');
+        BEGIN
+            PERFORM public.get_facility_permits(v_org);
+            RAISE EXCEPTION 'a non-member (%) read the permits through the RPC', v_def;
+        EXCEPTION WHEN insufficient_privilege THEN NULL;
+        END;
+        IF (SELECT count(*) FROM public.facility_permits) <> 0
+           OR (SELECT count(*) FROM public.facility_permit_scopes) <> 0 THEN
+            RAISE EXCEPTION 'a non-member (%) read a permit table', v_def;
+        END IF;
+    END LOOP;
+    PERFORM pg_temp.act(v_cora, 'authenticated');
     BEGIN
         INSERT INTO public.facility_permits (organization_id, issuer, valid_from, valid_to) VALUES (v_org, 'Direct', v_today, v_today);
         RAISE EXCEPTION 'a direct insert was allowed';
     EXCEPTION WHEN insufficient_privilege THEN NULL;
     END;
-    PERFORM pg_temp.act(v_quin, 'authenticated');
-    IF jsonb_array_length(public.get_facility_permits(v_org) -> 'permits') <> 0
-       OR (SELECT count(*) FROM public.facility_permits) <> 0
-       OR (SELECT count(*) FROM public.facility_permit_scopes) <> 0 THEN
-        RAISE EXCEPTION 'the coach whose team is scheduled elsewhere read a permit';
-    END IF;
     PERFORM pg_temp.act(v_other, 'authenticated');
     BEGIN
         PERFORM public.get_facility_permits(v_org);
@@ -269,7 +275,7 @@ BEGIN
     EXCEPTION WHEN insufficient_privilege THEN NULL;
     END;
     RESET ROLE;
-    RAISE NOTICE 'coach read: the coach of a team with a game at the field reads the permit, the coach of a team scheduled elsewhere reads none, another organization''s admin is refused, and a direct insert is refused';
+    RAISE NOTICE 'reads: the admin reads the permit and its scope, a signed-in non-member whose team plays at the field and one whose team plays elsewhere are refused (42501) and read no table row, another organization''s admin is refused, and a direct insert is refused';
 
     -- ---- 4. the file ---------------------------------------------------------
     v_path1 := v_org || '/' || v_permit || '/' || gen_random_uuid() || '.pdf';
@@ -281,7 +287,7 @@ BEGIN
     EXCEPTION WHEN invalid_parameter_value THEN NULL;
     END;
     RESET ROLE;
-    IF pg_temp.upload(v_cora, v_path1) <> '42501' THEN RAISE EXCEPTION 'a coach was allowed to upload'; END IF;
+    IF pg_temp.upload(v_cora, v_path1) <> '42501' THEN RAISE EXCEPTION 'a non-member was allowed to upload'; END IF;
     IF pg_temp.upload(v_other, v_path1) <> '42501' THEN RAISE EXCEPTION 'another organization''s admin was allowed to upload'; END IF;
     IF pg_temp.upload(v_admin, v_path1) <> 'ok' OR pg_temp.upload(v_admin, v_path2) <> 'ok' THEN
         RAISE EXCEPTION 'an admin was refused an upload under a real permit''s folder';
@@ -301,14 +307,14 @@ BEGIN
     IF v_res ->> 'previous_path' IS DISTINCT FROM v_path1 THEN RAISE EXCEPTION 'the replace did not return the first path: %', v_res; END IF;
     RESET ROLE;
     IF pg_temp.visible(v_admin, v_org::text) <> 2 THEN RAISE EXCEPTION 'an admin did not read both objects'; END IF;
-    IF pg_temp.visible(v_cora, v_org::text) <> 1 THEN RAISE EXCEPTION 'the coach did not read exactly the live file'; END IF;
-    IF pg_temp.visible(v_quin, v_org::text) <> 0 OR pg_temp.visible(v_other, v_org::text) <> 0 THEN
-        RAISE EXCEPTION 'a coach scheduled elsewhere, or another organization''s admin, read an object';
+    IF pg_temp.visible(v_cora, v_org::text) <> 0 OR pg_temp.visible(v_quin, v_org::text) <> 0
+       OR pg_temp.visible(v_other, v_org::text) <> 0 THEN
+        RAISE EXCEPTION 'a non-member, or another organization''s admin, read an object';
     END IF;
     PERFORM pg_temp.act(NULL, 'anon');
     IF (SELECT count(*) FROM storage.objects WHERE bucket_id = 'facility-permits') <> 0 THEN RAISE EXCEPTION 'anon read an object'; END IF;
     RESET ROLE;
-    RAISE NOTICE 'file: a missing object is refused, an admin uploads and attaches, a replace returns the first path, the coach reads the live file and not the replaced one, and a coach, another organization''s admin and anon are refused';
+    RAISE NOTICE 'file: a missing object is refused, an admin uploads and attaches, a replace returns the first path, an admin reads both objects, and a signed-in non-member, another organization''s admin and anon are refused and read none';
 
     -- ---- 5. delete -----------------------------------------------------------
     PERFORM pg_temp.act(v_admin, 'authenticated');

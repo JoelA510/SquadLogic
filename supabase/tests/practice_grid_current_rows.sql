@@ -24,7 +24,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(51);
+SELECT plan(52);
 
 -- Org A: two fresh seasons, one per shape, four teams each, five slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -621,15 +621,18 @@ SELECT throws_like(
         || ' is locked%',
     'prompt W8b: ... naming H''s current Friday series');
 
--- 31. W8f: a member who is not an org admin cannot unlock, even with a reason,
--- and it is the unlock gate (:280-284) that refuses: the writer's general
--- admin check raises 42501 too, with another message, so the message is what
--- tells the two apart.
+-- 31. W8f: a user who is not an admin of the season's organization cannot unlock, even with a
+-- reason. Since 20261104010000 no member is a non-admin (organization_members_role_check admits
+-- admin, staff and tenant_admin, all admins), so the refusals reachable are a signed-in user with no
+-- membership (Charlie) and another organization's admin (Bob); the membership check refuses first,
+-- with its own message, before the unlock gate.
+SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-SELECT throws_like(
+SELECT throws_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
-                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3',
+                              'organization_id', 'a1111111-1111-1111-1111-111111111111'),
            pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
                                        'a1111111-1111-1111-1111-000000007782',
                                        'a1111111-1111-1111-1111-0000000077a2', '2026-10-20'),
@@ -643,8 +646,29 @@ SELECT throws_like(
                         FROM public.practice_assignments
                        WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
                          AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
-    'unlock requires an org admin with a uid to audit%',
-    'prompt W8f: a non-admin member''s unlock is refused by the unlock gate');
+    '42501', NULL,
+    'prompt W8f: a signed-in non-member''s unlock is refused 42501');
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT throws_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3',
+                              'organization_id', 'a1111111-1111-1111-1111-111111111111'),
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007782',
+                                       'a1111111-1111-1111-1111-0000000077a2', '2026-10-20'),
+           unlock => (SELECT jsonb_build_array(jsonb_build_object(
+                          'assignment_id', id,
+                          'reason', 'grid override a1111111-1111-1111-1111-0000000077cb: field-change'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5'),
+           closes => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
+    '42501', NULL,
+    'prompt W8f: another organization''s admin''s unlock is refused 42501');
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
 -- 32. W8a: with `unlock` and `closes` naming exactly the replaced current

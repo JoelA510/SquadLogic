@@ -38,6 +38,8 @@ const ALLOWED = new Set([
   'packages/core/src/facility/index.js',
   'packages/core/src/facility/permits.js',
   'supabase/migrations/20261102010000_facility_permits.sql',
+  // the admin-only migration replaces the permit writers and get_facility_permits (no coach arm)
+  'supabase/migrations/20261104010000_admin_only.sql',
 ]);
 
 // What reads a permit: the tables, the RPC, the hooks and the core helpers. In JavaScript the tables

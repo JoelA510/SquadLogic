@@ -39,7 +39,8 @@ const IMPORT_TYPES = Object.freeze(['players', 'coaches', 'fields', 'field_avail
 const COMPLETED_IMPORT_STATUSES = new Set(['completed', 'completed_with_warnings']);
 const IMPORT_TYPE_TOOLTIPS = {
   players: 'Requires first name, last name, and date of birth columns.',
-  coaches: 'Requires full name (or first and last name) and email columns.',
+  coaches:
+    'Requires full name (or first and last name) and email columns. An optional Child Registration ID column links each coach to their children. Import players first.',
   fields: 'Requires location, name, type, start, and end columns.',
   field_availability:
     'Requires season_label, location, name, available_from, and available_until columns.',
@@ -763,7 +764,7 @@ export default function ImportPanel({ onImport }) {
                   </div>
                   <p className="text-xs text-text-muted">
                     {type === 'players' && 'Upload player registration data'}
-                    {type === 'coaches' && 'Upload coach assignments'}
+                    {type === 'coaches' && 'Upload coaches (after the players)'}
                     {type === 'fields' && 'Upload field configurations'}
                     {type === 'field_availability' &&
                       'Upload seasonal availability metadata (not schedule slots)'}
@@ -792,6 +793,13 @@ export default function ImportPanel({ onImport }) {
                 <>
                   Seasonal availability metadata — not finalized schedule slots. No explicit
                   day/time slots were provided; schedule slots were not created.
+                </>
+              ) : importType === 'coaches' ? (
+                <>
+                  <span className="text-text-primary">Import players first.</span> A Child
+                  Registration ID column (one or more ids separated by ; or ,) links each coach to
+                  their children; an id that matches no player is listed and skipped. Download a
+                  template with the expected columns and an example row.
                 </>
               ) : (
                 <>

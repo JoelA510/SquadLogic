@@ -104,14 +104,9 @@ const REGISTRY = {
     class: 'series-only',
     why: 'X9: a hash of the schedule; it already covers exception ids and withdrawn_at',
   },
-  'sql:caller_coaches_practice_slot': {
-    class: 'series-only',
-    why: 'Found by this census, not in the plan: slot membership for lighting overrides (as X8)',
-  },
-  'sql:coach_field_ids_of': {
-    class: 'series-only',
-    why: "C1 (20261102010000): which fields a coach's teams practise on, from the assignment's slot; it makes no dated practice",
-  },
+  // `caller_coaches_practice_slot` and `coach_field_ids_of` were readers until 20261104010000
+  // dropped them with the coach's sign-in (plan docs/changes/2026-10-27-admin-only.md): the scan
+  // honours the DROP, and an entry here would be stale.
   'sql:rollback_field_import_job': {
     class: 'series-only',
     why: 'X12: an existence check before a field-import rollback',

@@ -43,6 +43,8 @@ const state = vi.hoisted(() => ({
   coachLinks: [],
   /** @type {any[]} the `coaches` rows */
   coaches: [],
+  /** @type {any} the error the `coaches` reads return */
+  coachesError: null,
   /** @type {any} the organization's stored feature flags, parsed by the schema */
   storedFlags: {},
   pipelineThrows: false,
@@ -104,6 +106,9 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
             ? { data: null, error: state.coachLinksError }
             : { data: state.coachLinks, error: null }
         );
+      }
+      if (table === 'coaches' && state.coachesError) {
+        return createChainMock({ data: null, error: state.coachesError });
       }
       const rows =
         table === 'players' ? state.durablePlayers : table === 'coaches' ? state.coaches : [];
@@ -538,6 +543,7 @@ function resetOwnerDecisionState() {
   state.pipelineThrows = false;
   state.coachLinks = [];
   state.coaches = [];
+  state.coachesError = null;
   state.storedFlags = {};
   seedImport();
 }
@@ -620,34 +626,47 @@ describe('TeamAnalysisPage :: the waitlist (owner, 2026-10-27)', () => {
   });
 });
 
-describe('TeamAnalysisPage :: a coach the import row names (kept as it was)', () => {
-  // Owner, 2026-10-27, item 8a: whether only `coach_team_requests` links should anchor a team
-  // was NOT built, because nothing in production writes that table. The row's coach still
-  // anchors, and the review labels such a coach by the text the row holds.
+describe('TeamAnalysisPage :: a coach the import row names (owner decision 8a, 2026-10-27)', () => {
+  // Only a `coach_team_requests` link anchors a team: the coach import writes one for each child
+  // it names (20261104010000). A coach an import row names (`coach_email`, `coach_id`) anchors
+  // nothing, and the page reads no such column.
   beforeEach(resetOwnerDecisionState);
   afterEach(resetOwnerDecisionState);
 
-  it('still anchors a team, as before', async () => {
+  it('anchors no team, and its child is placed like any other', async () => {
     state.rows = state.rows.map((r) =>
-      r.external_registration_id === 'REG-10' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
+      r.external_registration_id === 'REG-10'
+        ? { ...r, coach_email: 'row.coach@coaches.test', coach_id: 'row-coach-id' }
+        : r
     );
     await generate();
     const results = stagedResults();
-    expect(teamOfPlayer(results, 10).coachId).toBe('row.coach@coaches.test');
+    const coachIds = teamsOf(results).map((team) => team.coachId);
+    expect(coachIds).not.toContain('row.coach@coaches.test');
+    expect(coachIds).not.toContain('row-coach-id');
+    expect(teamOfPlayer(results, 10)).toBeTruthy();
   });
 
-  it('is flagged by that text when their only child is held out, with no coaches read', async () => {
+  it('leaves a linked coach anchoring beside a row that names another', async () => {
+    state.rows = state.rows.map((r) =>
+      r.external_registration_id === 'REG-11' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
+    );
+    state.coachLinks = [link(COACH_A, 10)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
+    await generate();
+    const results = stagedResults();
+    const coachIds = teamsOf(results).map((team) => team.coachId);
+    expect(coachIds).toContain(COACH_A);
+    expect(coachIds).not.toContain('row.coach@coaches.test');
+    expect(teamOfPlayer(results, 10).coachId).toBe(COACH_A);
+  });
+
+  it('is not flagged: a row that names a coach whose child is held out says nothing', async () => {
     state.rows = state.rows.map((r) =>
       r.external_registration_id === 'REG-1' ? { ...r, coach_email: 'row.coach@coaches.test' } : r
     );
-    state.coaches = [{ id: COACH_A, full_name: 'Not This One' }];
     await generate();
-    const results = stagedResults();
-    expect(teamsOf(results).map((team) => team.coachId)).not.toContain('row.coach@coaches.test');
-    expect(results.coachNamesById).toBeUndefined();
-    expect(screen.getByText(/has no team to anchor in this division/)).toHaveTextContent(
-      'Coach row.coach@coaches.test has no team to anchor in this division: Kid1 Placeholder1, their only child in it, is not eligible for the division.'
-    );
+    expect(screen.queryByText(/has no team to anchor in this division/)).toBeNull();
   });
 });
 
@@ -658,7 +677,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
   it('shows a coach whose only child is blocked, flagged, with the reason', async () => {
     // Kid1 is the seed's play-down (blocked); their coach has no other child, so no team.
     state.coachLinks = [link(COACH_A, 1)];
-    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
     await generate();
 
     const results = stagedResults();
@@ -695,7 +714,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
       r.external_registration_id === 'REG-10' ? { ...r, waitlist: 'yes' } : r
     );
     state.coachLinks = [link(COACH_A, 10)];
-    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
     await generate();
 
     expect(teamsOf(stagedResults()).map((team) => team.coachId)).not.toContain(COACH_A);
@@ -706,7 +725,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
 
   it('says "name not loaded" rather than leave the coach out when the name is not found', async () => {
     state.coachLinks = [link(COACH_A, 1)];
-    state.coaches = [];
+    state.coaches = [{ id: COACH_A, full_name: '', status: 'active' }];
     await generate();
     expect(
       screen.getByText(/A coach \(name not loaded\) has no team to anchor/)
@@ -715,7 +734,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
 
   it('a coach with a blocked child and a placed one anchors a team: not "no team", but a sibling flag, apart', async () => {
     state.coachLinks = [link(COACH_A, 1), link(COACH_A, 10)];
-    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
     await generate();
 
     const results = stagedResults();
@@ -732,7 +751,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
     // The generator's behaviour for a coach linked to two children of one division: both are
     // coach-anchored units, so both are seated on the coach's one team.
     state.coachLinks = [link(COACH_A, 10), link(COACH_A, 11)];
-    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
     await generate();
 
     const results = stagedResults();
@@ -763,7 +782,7 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
       }
     }
     state.coachLinks = [link(COACH_A, 10), link(COACH_A, 11)];
-    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach' }];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
     await generate();
 
     expect(
@@ -777,12 +796,77 @@ describe('TeamAnalysisPage :: a coach and their children, on the review (owner, 
   it('flags each coach on their own: two coaches with two children each', async () => {
     state.coachLinks = [link(COACH_A, 10), link(COACH_A, 11), link(COACH_B, 12), link(COACH_B, 13)];
     state.coaches = [
-      { id: COACH_A, full_name: 'Casey Coach' },
-      { id: COACH_B, full_name: 'Robin Coach' },
+      { id: COACH_A, full_name: 'Casey Coach', status: 'active' },
+      { id: COACH_B, full_name: 'Robin Coach', status: 'active' },
     ];
     await generate();
     const group = within(reviewList('Coaches with more than one child')).getAllByRole('listitem');
     expect(group).toHaveLength(2);
     expect(group.map((li) => li.textContent).join('\n')).toMatch(/Casey Coach.*\n.*Robin Coach/);
+  });
+});
+
+describe('TeamAnalysisPage :: only an active or pending coach anchors a team (admin_assign_team_coach rule)', () => {
+  beforeEach(resetOwnerDecisionState);
+  afterEach(resetOwnerDecisionState);
+
+  it.each(['inactive', 'interested'])(
+    'ignores the links of a coach whose status is %s: their child is placed like any other and the team needs a coach',
+    async (status) => {
+      // Kid10 is the seed's eligible child. The link stays on file (the import writes it whatever
+      // the coach's status), but teaming does not read it.
+      state.coachLinks = [link(COACH_A, 10)];
+      state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status }];
+      await generate();
+
+      const results = stagedResults();
+      expect(teamsOf(results).map((team) => team.coachId)).not.toContain(COACH_A);
+      expect(teamOfPlayer(results, 10)).toBeTruthy();
+      const coverage = results.coachCoverageByDivision.U10;
+      expect(coverage.teamsWithoutCoach).toBe(coverage.totalTeams);
+      expect(coverage.teamsWithCoach).toBe(0);
+      expect(coverage.needsAdditionalCoaches).toBe(true);
+      expect(screen.getByText(/0\/\d+ teams have a coach/)).toBeInTheDocument();
+      // A coach who anchors nothing is not flagged for it either.
+      expect(screen.queryByText(/has no team to anchor/)).not.toBeInTheDocument();
+    }
+  );
+
+  it('ignores an inactive coach beside an active one: only the active coach anchors', async () => {
+    state.coachLinks = [link(COACH_A, 10), link(COACH_B, 12)];
+    state.coaches = [
+      { id: COACH_A, full_name: 'Casey Coach', status: 'inactive' },
+      { id: COACH_B, full_name: 'Robin Coach', status: 'active' },
+    ];
+    await generate();
+
+    const results = stagedResults();
+    const coachIds = teamsOf(results).map((team) => team.coachId);
+    expect(coachIds).toContain(COACH_B);
+    expect(coachIds).not.toContain(COACH_A);
+    expect(teamOfPlayer(results, 12).coachId).toBe(COACH_B);
+    expect(teamOfPlayer(results, 10).coachId).not.toBe(COACH_A);
+  });
+
+  it('anchors for a coach pending confirmation, as admin_assign_team_coach would assign one', async () => {
+    state.coachLinks = [link(COACH_A, 10)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'pending-confirmation' }];
+    await generate();
+    expect(teamOfPlayer(stagedResults(), 10).coachId).toBe(COACH_A);
+  });
+
+  it('a refused coaches read shows the error and stages no review', async () => {
+    state.coachLinks = [link(COACH_A, 10)];
+    state.coaches = [{ id: COACH_A, full_name: 'Casey Coach', status: 'active' }];
+    state.coachesError = { message: 'permission denied for table coaches' };
+    const button = await clickGenerate();
+    expect(
+      await screen.findByText(
+        "Could not read the coaches' status, so teams were not generated: permission denied for table coaches."
+      )
+    ).toBeInTheDocument();
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText('Team Review Pending')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(REVIEW_KEY)).toBeNull();
   });
 });

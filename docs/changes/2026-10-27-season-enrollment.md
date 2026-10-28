@@ -216,6 +216,23 @@ under "For the owner"). Migration `20261109010000_season_rollover.sql`.
   change, and the revision is taken from the same snapshot as the data. The first batch of a file replaces
   a stamp (validating again refreshes it); a later batch keeps the first's. A job with no stamp (a coach
   or field job, or one made before this migration) is never refused.
+- **Every writer of the rule takes the season lock** (Codex, round four): the guard triggers on `season_settings`
+  and `divisions` (and the revision trigger, for a delete) take `pg_advisory_xact_lock('season:' || org)`, the
+  lock the finalizer and the rollover RPCs take, before they look at players or a pending import and before
+  they raise the revision, so an uncommitted band or window change from any path (`upsert_division_for_import`
+  included, which is not replaced) cannot interleave with a finalization that read the revision. The lock is
+  reentrant for the RPCs that already hold it. Order: a finalizer holds the job row, then the lock; a rollover
+  RPC the lock, then season rows; a direct write to `season_settings` or `divisions` has its row, then the
+  lock, so such a write racing a rollover RPC can deadlock on that pair, and Postgres aborts one (40P01);
+  the finalizer's own division inserts carry no window and return before the lock. pgTAP shows each path takes
+  the lock by reading `pg_locks` in a fresh organization (a true two-session race cannot run inside one
+  pgTAP transaction); the smoke does the same for a cutoff write.
+- **A completed season's timezone is fixed** (`season_settings_completed_guard`): the calendar feed expands a
+  season's occurrences in it. The RPC and a direct write meet one trigger (signed-in callers); the control in
+  Settings is disabled with a note. The master export reads a completed season's TIME TBD list without a rebuild.
+- **A division the file has no registrants in is a program when its rules take players from the file**: the
+  Teams page places the file's rows against every division of the season and lists a division that gets any
+  (id: the division's own, count: the incoming players); generating it seats them.
 - **A division's band is part of the rule.** The guard on `divisions` also covers `min_age`, `max_age` and a
   name that supplies the band, but only for a division that bears a window (a division with none does not
   move an age): once the season has players (`season_has_players`) or while an import is pending

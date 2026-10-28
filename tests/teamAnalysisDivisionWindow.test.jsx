@@ -109,6 +109,16 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
           ? { data: null, error: state.bulkError }
           : { data: params.p_player_ids.length, error: null };
       }
+      // The real writer returns the whole stored row: a division that bears a window comes back as
+      // itself (its id, band and window), not as a fresh one.
+      const storedWindowed =
+        name === 'admin_upsert_division_settings'
+          ? state.divisionRows.find(
+              (stored) =>
+                String(stored.id) === String(params.p_division_id) && stored.birthdate_start
+            )
+          : null;
+      if (storedWindowed) return { data: { ...storedWindowed, name: params.p_name }, error: null };
       return name === 'admin_upsert_division_settings'
         ? {
             data: {
@@ -143,7 +153,6 @@ vi.mock('../frontend/src/components/TeamPersistencePanel.jsx', () => ({
   ),
 }));
 vi.mock('../frontend/src/components/TeamOverviewPanel.jsx', () => stub('team-overview'));
-vi.mock('../frontend/src/components/teaming/ProgramOverview.jsx', () => stub('program-overview'));
 vi.mock('../frontend/src/components/teaming/TeamingConfiguration.jsx', () =>
   stub('teaming-config')
 );
@@ -300,6 +309,29 @@ describe('a window on a division the file has no registrants in', () => {
     expect(entry).toMatchObject({ naturalAge: 4, playedDivisionName: 'U4' });
     // The rest of U3 is untouched.
     expect(seatedIn(results, 'U3')).toContain(idOf(2));
+  });
+
+  it('lists that division as a program with the incoming player, and generating it seats them', async () => {
+    render(
+      <MemoryRouter>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    // The file has only U3 registrants; U4 is a program because a window takes one of them.
+    const u4 = await screen.findByRole('button', { name: /^U4/ });
+    expect(u4.closest('tr')).toHaveTextContent(/U4\s*1/);
+    const u3 = screen.getByRole('button', { name: /^U3/ });
+    expect(u3.closest('tr')).toHaveTextContent(/U3\s*9/);
+    fireEvent.click(u4);
+    const button = await screen.findByRole('button', { name: /Generate Teams/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await screen.findByText('Team Review Pending');
+    const results = stagedResults();
+    const u4Id = state.divisionRows.find((r) => r.name === 'U4').id;
+    expect(seatedIn(results, u4Id)).toEqual([idOf(1)]);
   });
 
   it('POSITIVE CONTROL: with no window on that division, the same registrant stays in U3', async () => {

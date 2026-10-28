@@ -166,6 +166,50 @@ function derivePrograms(rows) {
   }));
 }
 
+/**
+ * The divisions a player's age is counted against (E3b): one for each program of the file, with the
+ * rules saved for it (the selected program's from `savedDivision`, the others' from their division
+ * rows), then every other division of the season, however few registrants the file has in it (none,
+ * for a U4 that only takes older 2-year-olds): a window is the season's rule, and a player whose birth
+ * date is in one belongs there, as the import counted their age. A division row is a program's when
+ * the program is its id or name, so the same division is never described twice.
+ *
+ * @returns {{ divisionDescriptors: Array<Object>, otherDescriptors: Array<Object> }}
+ */
+function buildDivisionDescriptors({ programs, divisionRows, selectedProgramKey, savedDivision }) {
+  const programRowIds = new Set();
+  const programDescriptors = programs.map((program) => {
+    const programKey = String(program.id);
+    const row =
+      selectedProgramKey !== null && programKey === selectedProgramKey
+        ? savedDivision
+        : findDivisionRowForProgram(program, divisionRows ?? []);
+    if (row?.id) programRowIds.add(String(row.id));
+    return {
+      id: programKey,
+      name: program.name,
+      min_age: row?.min_age ?? null,
+      max_age: row?.max_age ?? null,
+      gender_policy: row?.gender_policy ?? null,
+      // A birth date in a division's window counts as that division's age (E3b).
+      birthdate_start: row?.birthdate_start ?? null,
+      birthdate_end: row?.birthdate_end ?? null,
+    };
+  });
+  const otherDescriptors = (divisionRows ?? [])
+    .filter((row) => row?.id && !programRowIds.has(String(row.id)))
+    .map((row) => ({
+      id: String(row.id),
+      name: row.name,
+      min_age: row.min_age ?? null,
+      max_age: row.max_age ?? null,
+      gender_policy: row.gender_policy ?? null,
+      birthdate_start: row.birthdate_start ?? null,
+      birthdate_end: row.birthdate_end ?? null,
+    }));
+  return { divisionDescriptors: [...programDescriptors, ...otherDescriptors], otherDescriptors };
+}
+
 function positiveIntegerOrFallback(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -805,7 +849,63 @@ export default function TeamAnalysisPage() {
   const canEditTeams = canManageTeams && isEditMode;
 
   const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
-  const basePrograms = useMemo(() => derivePrograms(importedPlayerRows), [importedPlayerRows]);
+  const fileProgramsBase = useMemo(() => derivePrograms(importedPlayerRows), [importedPlayerRows]);
+  // The divisions of the season the file has no registrants in but whose rules take players from it
+  // (a U4 whose birth-date window holds a U3 registrant): programs too, with the players that would
+  // play there, so they can be seen and generated. Their id is the division's own, which is the id
+  // the age placement gives them, so a player placed in one is seated by its program.
+  const seasonYearSetting = currentSeasonSetting?.season_year;
+  const cutoffModeSetting = currentSeasonSetting?.age_cutoff_mode;
+  const cutoffMonthSetting = currentSeasonSetting?.age_cutoff_month;
+  const cutoffDaySetting = currentSeasonSetting?.age_cutoff_day;
+  const destinationPrograms = useMemo(() => {
+    if (!divisionRows || divisionRows.length === 0 || importedPlayerRows.length === 0) return [];
+    const { divisionDescriptors, otherDescriptors } = buildDivisionDescriptors({
+      programs: fileProgramsBase,
+      divisionRows,
+      selectedProgramKey: null,
+      savedDivision: null,
+    });
+    if (otherDescriptors.length === 0) return [];
+    const { players: placed } = applyPlayUpEligibility({
+      players: importedPlayerRows.map((row, sourceIndex) => ({
+        ...toGeneratorPlayer(row, sourceIndex, resolveDivisionId(row)),
+        id: `row-${sourceIndex}`,
+      })),
+      divisions: divisionDescriptors,
+      seasonYear: seasonYearSetting,
+      cutoffMode: cutoffModeSetting,
+      cutoffMonth: cutoffMonthSetting,
+      cutoffDay: cutoffDaySetting,
+    });
+    const incoming = new Map();
+    for (const player of placed) {
+      incoming.set(String(player.division), (incoming.get(String(player.division)) ?? 0) + 1);
+    }
+    return otherDescriptors
+      .filter((descriptor) => incoming.get(descriptor.id) > 0)
+      .map((descriptor) => ({
+        id: descriptor.id,
+        name: String(descriptor.name),
+        playerCount: incoming.get(descriptor.id),
+        coachCount: 0,
+        totalPlayers: incoming.get(descriptor.id),
+        incoming: true,
+      }));
+  }, [
+    divisionRows,
+    importedPlayerRows,
+    fileProgramsBase,
+    seasonYearSetting,
+    cutoffModeSetting,
+    cutoffMonthSetting,
+    cutoffDaySetting,
+  ]);
+  const basePrograms = useMemo(
+    () => [...fileProgramsBase, ...destinationPrograms],
+    [fileProgramsBase, destinationPrograms]
+  );
+
   const reviewStorageKey = useMemo(
     () => getTeamReviewStorageKey(currentOrganization?.id, currentSeasonSetting?.id),
     [currentOrganization?.id, currentSeasonSetting?.id]
@@ -1285,7 +1385,9 @@ export default function TeamAnalysisPage() {
       const rowsForProgram = importedPlayerRows
         .map((row, sourceIndex) => ({ row, sourceIndex }))
         .filter(({ row }) => resolveDivisionId(row) === selectedProgramKey);
-      if (rowsForProgram.length === 0) {
+      // A division the file has no registrants in has none of its own: its players are the ones its
+      // rules take from the other programs, placed below.
+      if (rowsForProgram.length === 0 && !selectedProgram.incoming) {
         throw new Error(`No imported players found for ${selectedProgram.name}.`);
       }
 
@@ -1409,40 +1511,12 @@ export default function TeamAnalysisPage() {
       // Every program of the import is a division a player may play in: the selected program
       // takes its band from the saved row, the others from their division rows (the age band
       // and gender), else from the program's name.
-      const programRowIds = new Set();
-      const programDescriptors = programs.map((program) => {
-        const programKey = String(program.id);
-        const row =
-          programKey === selectedProgramKey
-            ? savedDivision
-            : findDivisionRowForProgram(program, divisionRows ?? []);
-        if (row?.id) programRowIds.add(String(row.id));
-        return {
-          id: programKey,
-          name: program.name,
-          min_age: row?.min_age ?? null,
-          max_age: row?.max_age ?? null,
-          gender_policy: row?.gender_policy ?? null,
-          // A birth date in a division's window counts as that division's age (E3b).
-          birthdate_start: row?.birthdate_start ?? null,
-          birthdate_end: row?.birthdate_end ?? null,
-        };
+      const { divisionDescriptors } = buildDivisionDescriptors({
+        programs,
+        divisionRows,
+        selectedProgramKey,
+        savedDivision,
       });
-      // The season's other divisions too, however few registrants the file has in them (none, for a
-      // U4 that only takes older 2-year-olds): a window is the season's rule, and a player whose
-      // birth date is in one belongs there, as the import counted their age.
-      const otherDescriptors = (divisionRows ?? [])
-        .filter((row) => row?.id && !programRowIds.has(String(row.id)))
-        .map((row) => ({
-          id: String(row.id),
-          name: row.name,
-          min_age: row.min_age ?? null,
-          max_age: row.max_age ?? null,
-          gender_policy: row.gender_policy ?? null,
-          birthdate_start: row.birthdate_start ?? null,
-          birthdate_end: row.birthdate_end ?? null,
-        }));
-      const divisionDescriptors = [...programDescriptors, ...otherDescriptors];
       // Who plays in this program: everyone who registered in it except a player who plays in
       // their own age division (a play-up nobody requested, a play-down), plus those who
       // registered elsewhere and play here. Placed first, on the file and the records alone, so

@@ -676,6 +676,9 @@ RESET role;
 CREATE TEMP TABLE stamp_div ON COMMIT DROP AS
     SELECT d.id FROM public.divisions d WHERE d.season_settings_id = (SELECT s1 FROM stampd) ORDER BY d.id LIMIT 1;
 GRANT SELECT ON stamp_div TO PUBLIC;
+-- The copy carries whatever windows the source season's divisions had (the fixture gives one a
+-- window), and division ids are random, so clear them: exactly one division bears a window.
+UPDATE public.divisions SET birthdate_start = NULL, birthdate_end = NULL WHERE season_settings_id = (SELECT s1 FROM stampd);
 UPDATE public.divisions SET min_age = 4, max_age = 4, birthdate_start = '2023-01-01', birthdate_end = '2024-07-31'
  WHERE id = (SELECT id FROM stamp_div);
 SELECT is((SELECT age_rule_revision FROM public.import_jobs WHERE id = (SELECT j1 FROM stamp_jobs)), NULL,

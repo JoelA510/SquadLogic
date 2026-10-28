@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useTheme } from '../../../contexts/ThemeContext.jsx';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 import { supabase } from '../../../lib/supabaseClient.js';
 import ProgramsSection from './ProgramsSection.jsx';
+import SeasonsSection from './SeasonsSection.jsx';
 
 /**
  * The zones this control offers by name.
@@ -29,7 +29,6 @@ const SEASON_TIMEZONE_OPTIONS = Object.freeze([
 ]);
 
 export default function SeasonModule() {
-  const { currentSeason, updateCurrentSeason, availableSeasons } = useTheme();
   // **`season_settings.timezone`, not the ThemeContext copy.** That copy is
   // localStorage-backed and ThemeContext's own header calls it legacy state
   // slated for removal. Until GAP-30 it was the only thing this control wrote,
@@ -44,8 +43,7 @@ export default function SeasonModule() {
   const { currentOrganization, currentSeasonSetting, refetchOrgs } = useOrganization();
   const timezone = currentSeasonSetting?.timezone ?? '';
 
-  const [seasonFormat, setSeasonFormat] = useState('single');
-  const [localCurrentSeason, setLocalCurrentSeason] = useState(currentSeason);
+  const [seasonFormat, setSeasonFormat] = useState(/** @type {'single' | 'dual'} */ ('single'));
   const [timezoneError, setTimezoneError] = useState(null);
   const [timezoneSaving, setTimezoneSaving] = useState(false);
 
@@ -106,63 +104,6 @@ export default function SeasonModule() {
             <div className="font-medium mb-1">Dual Year</div>
             <div className="text-xs">e.g., &quot;2025-2026&quot;</div>
           </button>
-        </div>
-      </div>
-
-      <div>
-        <label
-          htmlFor="current-season-label"
-          className="block text-sm font-medium text-text-secondary mb-2"
-        >
-          Current Season Label
-        </label>
-        <div className="space-y-3">
-          <div className="relative">
-            <input
-              id="current-season-label"
-              type="text"
-              value={localCurrentSeason}
-              onChange={(e) => setLocalCurrentSeason(e.target.value)}
-              onBlur={async () => {
-                updateCurrentSeason(localCurrentSeason);
-                const orgId = currentOrganization?.id;
-                if (orgId) {
-                  await supabase.rpc('record_audit_event', {
-                    p_organization_id: orgId,
-                    p_action: 'settings.season_updated',
-                    p_metadata: {
-                      season: localCurrentSeason,
-                    },
-                  });
-                }
-              }}
-              className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
-              placeholder={seasonFormat === 'single' ? '2025' : '2025-2026'}
-            />
-            {availableSeasons.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {availableSeasons.map((season) => (
-                  <button
-                    key={season}
-                    type="button"
-                    aria-pressed={localCurrentSeason === season}
-                    aria-label={`Select ${season} as current season`}
-                    onClick={() => {
-                      setLocalCurrentSeason(season);
-                      updateCurrentSeason(season);
-                    }}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                      localCurrentSeason === season
-                        ? 'bg-brand-glow border-brand-400 text-text-primary'
-                        : 'bg-bg-surface text-text-muted border-border-subtle hover:bg-bg-surface-hover'
-                    }`}
-                  >
-                    {season}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -251,6 +192,8 @@ export default function SeasonModule() {
           />
         </div>
       </div>
+
+      <SeasonsSection seasonFormat={seasonFormat} />
 
       <ProgramsSection />
     </div>

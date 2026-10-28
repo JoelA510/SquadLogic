@@ -1,9 +1,9 @@
 // Imports carry their season (Phase E1; migration 20261101010000; plan
 // docs/changes/2026-10-22-phase-e-seasons.md, point 5). The mock twin: `create_import_job` fixes
-// the season (the active one; another organization's, a draft and a completed one are refused:
-// players are organization-level, so an import into another season would move a live player into
-// its divisions), and `finalize_import_job` and `finalize_field_import_job` read the job's season,
-// not "the active one first, then the newest", and refuse one that is no longer the active season.
+// the season (the active one; another organization's and a completed one are refused; since E3b,
+// migration 20261109010000, a draft takes a player or coach import because a player belongs to one
+// season, while a field import stays with the active season), and `finalize_import_job` and
+// `finalize_field_import_job` read the job's season, not "the active one first, then the newest".
 // And the browser's call: the season is sent only when it is not the active one, so a call for
 // the active season has the shape it always had.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -87,15 +87,28 @@ describe('create_import_job (mock)', () => {
     expect(data.season_settings_id).toBe(MOCK_SEASON_ID);
   });
 
-  it("refuses another organization's season (42501), a draft and a completed one (22023) and creates no job", async () => {
+  it("refuses another organization's season (42501) and a completed one (22023) and creates no job", async () => {
     const before = getMockData('import_jobs').length;
     expect((await make({ p_season_settings_id: OTHER })).error?.code).toBe('42501');
-    const draft = await make({ p_season_settings_id: DRAFT });
-    expect(draft.error?.code).toBe('22023');
-    expect(draft.error?.details).toBe('season_not_active');
     const done = await make({ p_season_settings_id: DONE });
     expect(done.error?.code).toBe('22023');
     expect(done.error?.details).toBe('season_completed');
+    expect(getMockData('import_jobs')).toHaveLength(before);
+  });
+
+  it('makes a player or coach job for a draft season, and refuses a field job for it', async () => {
+    const players = await make({ p_season_settings_id: DRAFT });
+    expect(players.error).toBeNull();
+    expect(players.data.season_settings_id).toBe(DRAFT);
+    const coaches = await make({ p_season_settings_id: DRAFT, p_import_type: 'coaches' });
+    expect(coaches.error).toBeNull();
+    expect(coaches.data.season_settings_id).toBe(DRAFT);
+    const before = getMockData('import_jobs').length;
+    for (const type of ['fields', 'field_availability']) {
+      const refused = await make({ p_season_settings_id: DRAFT, p_import_type: type });
+      expect(refused.error?.code, type).toBe('22023');
+      expect(refused.error?.details, type).toBe('season_not_active');
+    }
     expect(getMockData('import_jobs')).toHaveLength(before);
   });
 });
@@ -118,20 +131,27 @@ describe('finalize_import_job (mock)', () => {
     return job;
   };
 
-  it('refuses a job whose season is a draft (22023, season_not_active): no player moves, no division is made', async () => {
+  it("finalizes a job whose season is a draft into the draft: the player and its division are the draft's", async () => {
     const job = seedJobFor(DRAFT);
     stage(job.id, PLAYER('IS-1'));
     const { error } = await supabase.rpc('finalize_import_job', {
       p_import_job_id: job.id,
       p_validation_errors: [],
     });
-    expect(error?.code).toBe('22023');
-    expect(error?.details).toBe('season_not_active');
-    expect(getMockData('players').some((p) => p.external_registration_id === 'IS-1')).toBe(false);
-    expect(getMockData('divisions').some((d) => d.season_settings_id === DRAFT)).toBe(false);
+    expect(error).toBeNull();
+    expect(
+      getMockData('players')
+        .filter((p) => p.external_registration_id === 'IS-1')
+        .map((p) => p.season_settings_id)
+    ).toEqual([DRAFT]);
+    expect(
+      getMockData('divisions')
+        .filter((d) => d.name === 'U10B')
+        .map((d) => d.season_settings_id)
+    ).toEqual([DRAFT]);
   });
 
-  it('refuses a job made for the active season once another season is the active one', async () => {
+  it('keeps a job made for the active season on that season once another season is the active one', async () => {
     const { data: job } = await make();
     stage(job.id, PLAYER('IS-5'));
     const seasons = getMockData('season_settings').map((s) => {
@@ -144,8 +164,12 @@ describe('finalize_import_job (mock)', () => {
       p_import_job_id: job.id,
       p_validation_errors: [],
     });
-    expect(error?.details).toBe('season_not_active');
-    expect(getMockData('players').some((p) => p.external_registration_id === 'IS-5')).toBe(false);
+    expect(error).toBeNull();
+    expect(
+      getMockData('players')
+        .filter((p) => p.external_registration_id === 'IS-5')
+        .map((p) => p.season_settings_id)
+    ).toEqual([MOCK_SEASON_ID]);
   });
 
   it('refuses a fields job for a draft season (22023)', async () => {

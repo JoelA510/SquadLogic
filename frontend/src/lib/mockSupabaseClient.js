@@ -25,6 +25,7 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
+import { completedSeasonRefusal, handleSeasonRpc } from './mockSeasons.js';
 import {
   activeSeasonOf,
   coachTeamSeasonRefusal,
@@ -856,9 +857,10 @@ const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
  *   excludeSlotId?: string|null }} probe
  */
 /**
- * 20261101010000: an import goes only to the organization's active season (players are
- * organization-level and divisions season-level, so a draft import would move a live player
- * into the draft's divisions until enrolment is season-scoped). Mirrors the SQL refusal.
+ * 20261101010000: a field import goes only to the organization's active season (fields and
+ * locations are organization-level). Since 20261109010000 a draft season takes a player or coach
+ * import, as players and coaches belong to one season; this is the refusal that remains. Mirrors
+ * the SQL refusal.
  */
 function seasonNotActiveError(seasonId, status, noun) {
   return {
@@ -2574,6 +2576,12 @@ export const mockSupabase = {
       if (programs) {
         if (!programs.error) saveDB(db);
         return programs;
+      }
+      // Seasons rolled over (migration 20261109010000): the four season writers, refusals included.
+      const seasons = handleSeasonRpc(db, name, params, { currentUserId, isOrgAdmin });
+      if (seasons) {
+        if (!seasons.error) saveDB(db);
+        return seasons;
       }
       // Field and venue permits (migration 20261102010000): the five RPCs, refusals included.
       const permits = handleFacilityPermitRpc(db, name, params, {
@@ -4501,9 +4509,12 @@ export const mockSupabase = {
             },
           };
         }
-        // Players are organization-level and a division season-level: an import into another
-        // season would move a live player into its divisions, so only the active season takes one.
-        if (named.status !== 'active') {
+        // 20261109010000: the active season or a draft takes a player or coach import; a field
+        // import stays with the active season.
+        if (
+          named.status !== 'active' &&
+          (named.status !== 'draft' || (importType !== 'players' && importType !== 'coaches'))
+        ) {
           return { data: null, error: seasonNotActiveError(named.id, named.status, 'season') };
         }
         jobSeasonId = named.id;
@@ -5023,6 +5034,9 @@ export const mockSupabase = {
       if (rejected) {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
+      // 20261109010000: a completed season is read-only.
+      const readOnly = completedSeasonRefusal(db, [player]);
+      if (readOnly) return readOnly;
       const patch = { ...(p_patch || {}) };
       const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
       // Mirror admin_update_player: changing division invalidates the team
@@ -5095,6 +5109,11 @@ export const mockSupabase = {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
       const ids = (p_player_ids || []).map(String);
+      const bulkReadOnly = completedSeasonRefusal(
+        db,
+        (db.players || []).filter((player) => ids.includes(String(player.id)))
+      );
+      if (bulkReadOnly) return bulkReadOnly;
       let count = 0;
       (db.players || []).forEach((player) => {
         if (ids.includes(String(player.id))) {
@@ -5190,6 +5209,8 @@ export const mockSupabase = {
       const ids = (p_player_ids || []).map(String);
       const before = (db.players || []).length;
       const doomedPlayers = (db.players || []).filter((player) => ids.includes(String(player.id)));
+      const deleteReadOnly = completedSeasonRefusal(db, doomedPlayers);
+      if (deleteReadOnly) return deleteReadOnly;
       db.players = (db.players || []).filter((player) => !ids.includes(String(player.id)));
       markMockDeleted(
         db,
@@ -5258,12 +5279,6 @@ export const mockSupabase = {
             message: `Season ${seasonRow.id} is completed and takes no import`,
             details: 'season_completed',
           },
-        };
-      }
-      if (seasonRow && seasonRow.status !== 'active') {
-        return {
-          data: null,
-          error: seasonNotActiveError(seasonRow.id, seasonRow.status, 'Season'),
         };
       }
 
@@ -5707,12 +5722,6 @@ export const mockSupabase = {
           `Season ${coachSeason.id} is completed and takes no import`,
           'season_completed'
         );
-      }
-      if (coachSeason.status !== 'active') {
-        return {
-          data: null,
-          error: seasonNotActiveError(coachSeason.id, coachSeason.status, 'Season'),
-        };
       }
 
       const validationErrors = Array.isArray(p_validation_errors) ? p_validation_errors : [];
@@ -7194,6 +7203,8 @@ export const mockSupabase = {
         };
       }
       const orgId = [...orgIds][0];
+      const coachDeleteReadOnly = completedSeasonRefusal(db, targets);
+      if (coachDeleteReadOnly) return coachDeleteReadOnly;
       const member = (db.organization_members || []).find(
         (item) =>
           String(item.organization_id) === orgId &&
@@ -7293,6 +7304,8 @@ export const mockSupabase = {
       if (!coach) {
         return { data: null, error: { message: 'Coach not found in organization' } };
       }
+      const coachStatusReadOnly = completedSeasonRefusal(db, [coach]);
+      if (coachStatusReadOnly) return coachStatusReadOnly;
 
       const assignedTeamCount = (db.teams || []).filter(
         (team) =>
@@ -7955,6 +7968,17 @@ export const mockSupabase = {
               dob: rest.date_of_birth,
               seasonYear: importSeasonRow?.season_year ?? null,
               cutoffMode: importSeasonRow?.age_cutoff_mode ?? null,
+              cutoffMonth: importSeasonRow?.age_cutoff_month ?? null,
+              cutoffDay: importSeasonRow?.age_cutoff_day ?? null,
+              // As the Edge Function does (20261109010000): the season's divisions with a
+              // birth-date window, so a birth date in one counts as that division's age.
+              divisions: (getDB().divisions || []).filter(
+                (division) =>
+                  importSeasonRow &&
+                  String(division.season_settings_id) === String(importSeasonRow.id) &&
+                  division.birthdate_start &&
+                  division.birthdate_end
+              ),
             });
             row = naturalAge === null ? rest : { ...rest, natural_age: String(naturalAge) };
           }

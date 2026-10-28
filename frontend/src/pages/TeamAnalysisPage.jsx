@@ -1413,6 +1413,9 @@ export default function TeamAnalysisPage() {
           min_age: row?.min_age ?? null,
           max_age: row?.max_age ?? null,
           gender_policy: row?.gender_policy ?? null,
+          // A birth date in a division's window counts as that division's age (E3b).
+          birthdate_start: row?.birthdate_start ?? null,
+          birthdate_end: row?.birthdate_end ?? null,
         };
       });
       // Who plays in this program: everyone who registered in it except a player who plays in
@@ -1421,6 +1424,8 @@ export default function TeamAnalysisPage() {
       // the players of other programs are only read in when they land here.
       const seasonYear = currentSeasonSetting?.season_year;
       const cutoffMode = currentSeasonSetting?.age_cutoff_mode;
+      const cutoffMonth = currentSeasonSetting?.age_cutoff_month;
+      const cutoffDay = currentSeasonSetting?.age_cutoff_day;
       const everyone = [...generatorPlayers, ...others.map((entry) => entry.player)];
       const playsHere = new Set(
         applyPlayUpEligibility({
@@ -1428,6 +1433,8 @@ export default function TeamAnalysisPage() {
           divisions: divisionDescriptors,
           seasonYear,
           cutoffMode,
+          cutoffMonth,
+          cutoffDay,
         })
           .players.filter((player) => String(player.division) === selectedProgramKey)
           .map((player) => String(player.id))
@@ -1451,6 +1458,8 @@ export default function TeamAnalysisPage() {
         divisions: divisionDescriptors,
         seasonYear,
         cutoffMode,
+        cutoffMonth,
+        cutoffDay,
       });
       // The pipeline places each player in the division they play in; this run seats the ones
       // who play in this program. The rest of the registrants are in the listing only.
@@ -1613,6 +1622,8 @@ export default function TeamAnalysisPage() {
     currentSeasonSetting?.id,
     currentSeasonSetting?.season_year,
     currentSeasonSetting?.age_cutoff_mode,
+    currentSeasonSetting?.age_cutoff_month,
+    currentSeasonSetting?.age_cutoff_day,
     authUser,
     importedPlayerRows,
     persistenceSnapshot,

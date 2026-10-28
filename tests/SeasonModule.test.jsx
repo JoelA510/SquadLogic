@@ -9,7 +9,6 @@ const { MOCK_ORG_ID, MOCK_SEASON_ID } = await vi.hoisted(
 );
 
 const mocks = vi.hoisted(() => ({
-  updateCurrentSeason: vi.fn(),
   updateTimezone: vi.fn(),
   rpc: vi.fn(),
   refetchOrgs: vi.fn(),
@@ -18,16 +17,6 @@ const mocks = vi.hoisted(() => ({
     currentOrganization: { id: MOCK_ORG_ID },
     currentSeasonSetting: { id: MOCK_SEASON_ID, organization_id: MOCK_ORG_ID, timezone: null },
   },
-}));
-
-vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
-  useTheme: () => ({
-    currentSeason: '2025',
-    updateCurrentSeason: mocks.updateCurrentSeason,
-    availableSeasons: ['2025', '2026'],
-    timezone: 'America/Los_Angeles',
-    updateTimezone: mocks.updateTimezone,
-  }),
 }));
 
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
@@ -48,9 +37,13 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 
-// The Programs section (Phase E2) reads and writes through its own hook and has its own tests
-// (tests/programsSection.test.jsx); this suite is about the season's format, label and clock.
+// The Programs section (Phase E2) and the Seasons section (E3b) read and write through their own
+// hooks and have their own tests (tests/programsSection.test.jsx, tests/seasonsSection.test.jsx);
+// this suite is about the season's format and clock.
 vi.mock('../frontend/src/components/settings/modules/ProgramsSection.jsx', () => ({
+  default: () => null,
+}));
+vi.mock('../frontend/src/components/settings/modules/SeasonsSection.jsx', () => ({
   default: () => null,
 }));
 
@@ -77,7 +70,7 @@ describe('SeasonModule', () => {
     };
   });
 
-  it('exposes season format and quick-select choices with pressed state', () => {
+  it('exposes the season naming format with pressed state', () => {
     render(<SeasonModule />);
 
     const formatGroup = screen.getByRole('group', { name: 'Season Naming Format' });
@@ -94,13 +87,10 @@ describe('SeasonModule', () => {
     expect(dualYear).toHaveAttribute('aria-pressed', 'true');
     expect(singleYear).toHaveAttribute('aria-pressed', 'false');
 
-    const season2026 = screen.getByRole('button', { name: 'Select 2026 as current season' });
-    expect(season2026).toHaveAttribute('aria-pressed', 'false');
-
-    fireEvent.click(season2026);
-
-    expect(season2026).toHaveAttribute('aria-pressed', 'true');
-    expect(mocks.updateCurrentSeason).toHaveBeenCalledWith('2026');
+    // E3b: the free-text "Current Season Label" and its quick-select pills are gone; the season's
+    // name is written by the audited season RPCs (Settings > Season > Seasons).
+    expect(screen.queryByLabelText('Current Season Label')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /as current season/ })).not.toBeInTheDocument();
   });
 });
 

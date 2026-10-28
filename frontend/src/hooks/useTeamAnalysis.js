@@ -41,6 +41,8 @@ export function useTeamAnalysis() {
           dob: player['Birthdate'],
           seasonYear,
           cutoffMode: currentSeasonSetting?.age_cutoff_mode,
+          cutoffMonth: currentSeasonSetting?.age_cutoff_month,
+          cutoffDay: currentSeasonSetting?.age_cutoff_day,
         });
         if (!group) {
           errors.push({
@@ -74,7 +76,12 @@ export function useTeamAnalysis() {
         errors,
       };
     },
-    [currentSeasonSetting?.season_year, currentSeasonSetting?.age_cutoff_mode]
+    [
+      currentSeasonSetting?.season_year,
+      currentSeasonSetting?.age_cutoff_mode,
+      currentSeasonSetting?.age_cutoff_month,
+      currentSeasonSetting?.age_cutoff_day,
+    ]
   );
 
   // Process imported data into programs and errors (Memoized)

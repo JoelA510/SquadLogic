@@ -86,6 +86,8 @@
 
 import { SCHEDULE_EXPORT_COLUMNS, SCHEDULE_EXPORT_HEADERS } from '../outputGeneration.js';
 
+import { PUBLICATION_TBD } from '../reserve/reasonCodes.js';
+
 import { checkParity } from './parity.js';
 import {
   PUBLICATION_REASON,
@@ -99,13 +101,17 @@ import { DEFAULT_PARITY_KEY_FIELDS, PARITY_FIELD, parityRowsFromExportRows } fro
  * The identity of a row in a per-team export artifact.
  *
  * `DEFAULT_PARITY_KEY_FIELDS` plus `participant`, derived from the constant
- * rather than retyped so a change to the default key reaches here.
+ * rather than retyped so a change to the default key reaches here, plus `ordinal`: a TIME TBD row
+ * has no date, so two of one team (two practices missing, two games against one opponent) share
+ * every other field, and the ordinal (1, 2, ... in the artifact's order, `null` on a dated row) is
+ * what makes "2 TBD then, 1 now" a row removed and not a `PARITY_KEY_AMBIGUOUS`.
  *
  * @type {ReadonlyArray<string>}
  */
 export const BASELINE_KEY_FIELDS = Object.freeze([
   ...DEFAULT_PARITY_KEY_FIELDS,
   PARITY_FIELD.PARTICIPANT,
+  PARITY_FIELD.ORDINAL,
 ]);
 
 /**
@@ -233,10 +239,15 @@ function utcWallReading(cell) {
  */
 function startVocabulary(rows) {
   let instants = 0;
+  let tbd = 0;
   for (const row of rows) {
-    if (utcWallReading(row[SCHEDULE_EXPORT_HEADERS.START]) !== null) instants += 1;
+    const cell = row[SCHEDULE_EXPORT_HEADERS.START];
+    if (utcWallReading(cell) !== null) instants += 1;
+    // `TIME TBD` is no vocabulary at all: it is the same token whichever producer wrote it, so a
+    // schedule that lists a missing practice is not "a mixture" of two time vocabularies.
+    else if (cell === PUBLICATION_TBD.TIME) tbd += 1;
   }
-  return { instants, other: rows.length - instants };
+  return { instants, other: rows.length - instants - tbd };
 }
 
 /**
@@ -256,6 +267,29 @@ function withReadableStart(rows) {
     const reading = utcWallReading(row[SCHEDULE_EXPORT_HEADERS.START]);
     return reading === null ? { ...row } : { ...row, [SCHEDULE_EXPORT_HEADERS.START]: reading };
   });
+}
+
+/**
+ * A row the artifact declares TIME TBD has a time that is **declared**, not missing.
+ *
+ * The generic reader leaves such a row's `startMinutes` `null`, and a compared `null` is
+ * `PARITY_FIELD_ABSENT` at blocking: right for a row whose time could not be read, wrong for a
+ * published artifact that says in as many words that the time is not set. A baseline that lists
+ * a missing practice (the master export does since Phase D, E) would otherwise be unreadable as a
+ * verdict whenever one exists. Here the token itself is the value, so two TIME TBD rows agree on
+ * their status, a TIME TBD row against a row with a time differs (a kickoff was set, or lost), and
+ * a TIME TBD row never pairs with a dated one at all (their `date` key fields differ). The rows
+ * with an `ordinal` are exactly the TIME TBD rows `parityRowsFromExportRows` numbered.
+ *
+ * @param {import('./types.js').ParityRow[]} rows
+ * @returns {import('./types.js').ParityRow[]}
+ */
+function withDeclaredTbdTime(rows) {
+  return rows.map((row) =>
+    row.ordinal === null || row.ordinal === undefined
+      ? row
+      : { ...row, startMinutes: PUBLICATION_TBD.TIME }
+  );
 }
 
 /**
@@ -323,11 +357,15 @@ export function checkBaselineParity(input) {
     subject,
     published: {
       label: publishedLabel,
-      rows: parityRowsFromExportRows(publishedRows, { sourceLabel: publishedLabel }),
+      rows: withDeclaredTbdTime(
+        parityRowsFromExportRows(publishedRows, { sourceLabel: publishedLabel })
+      ),
     },
     current: {
       label: currentLabel,
-      rows: parityRowsFromExportRows(currentExportRows, { sourceLabel: currentLabel }),
+      rows: withDeclaredTbdTime(
+        parityRowsFromExportRows(currentExportRows, { sourceLabel: currentLabel })
+      ),
     },
     keyFields: BASELINE_KEY_FIELDS,
     comparedFields: BASELINE_COMPARED_FIELDS,

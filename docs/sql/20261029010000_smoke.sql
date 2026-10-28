@@ -62,7 +62,8 @@ BEGIN
                              'finalize_field_import_job', 'rollback_field_import_job')) <> 4 THEN
         RAISE EXCEPTION 'expected exactly one of each of the 4 writers the posture check reads (the old settings signature included)';
     END IF;
-    IF to_regprocedure('public.admin_upsert_division_settings(uuid, uuid, uuid, text, integer, integer, integer, integer, integer, integer, boolean)') IS NULL THEN
+    -- 20261105010000 added p_practices_per_week and p_practice_minutes after p_plays_games.
+    IF to_regprocedure('public.admin_upsert_division_settings(uuid, uuid, uuid, text, integer, integer, integer, integer, integer, integer, boolean, integer, integer)') IS NULL THEN
         RAISE EXCEPTION 'the settings writer does not take plays_games';
     END IF;
     IF has_function_privilege('authenticated', 'public.practice_slot_conflicts(uuid, uuid, uuid, public.day_of_week, time, time, date, date, uuid, integer)', 'EXECUTE')

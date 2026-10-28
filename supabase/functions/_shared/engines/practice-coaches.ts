@@ -32,6 +32,8 @@ export interface TimeWindow extends LiveDays {
   endSec: number;
   teamId?: string;
   slotId?: string;
+  /** The practice unit that placed it (Phase D PR B); absent on fixed occupancy. */
+  unitId?: string;
   /** A new placement's window (the search may move it); absent on fixed occupancy. */
   placed?: boolean;
 }
@@ -39,6 +41,8 @@ export interface TimeWindow extends LiveDays {
 /** One holder of a slot's capacity (a locked row, a relocation, a new placement), on its dates. */
 export interface SlotOccupant extends LiveDays {
   teamId: string;
+  /** The practice unit that placed it (Phase D PR B); absent on a locked row or relocation. */
+  unitId?: string;
   /** A new placement (the search may move it); absent on a locked row or relocation. */
   placed?: boolean;
 }
@@ -97,6 +101,21 @@ export interface PreparedTeam extends CoachedTeam {
   divisionId?: string | null;
   /** The divisions holding a reserved slot in the run (D2); absent: none. */
   reservedDivisionIds?: ReadonlySet<string>;
+  /**
+   * The team's division's practice length in minutes (`divisions.practice_minutes`, Phase D PR B),
+   * loaded from the store; `null` or absent: any slot length.
+   */
+  practiceMinutes?: number | null;
+}
+
+/**
+ * One practice a team already holds, on the dates it is live (weekly, on its slot's weekday):
+ * a locked row, or a unit the search has placed. Two of a team's practices may not share a
+ * weekday on a shared date, so a new one is judged against these (Phase D PR B).
+ */
+export interface TeamHold extends LiveDays {
+  /** The unit that placed it (the search may move it); absent on a locked row. */
+  unitId?: string;
 }
 
 /**
@@ -112,6 +131,21 @@ export function reservationRefuses(
   const teamDivision = idOrNull(team.divisionId);
   if (slotDivision !== null) return slotDivision !== teamDivision;
   return teamDivision !== null && (team.reservedDivisionIds?.has(teamDivision) ?? false);
+}
+
+/**
+ * Whether the division's practice length refuses `slot` to `team` (Phase D PR B): a practice
+ * takes a slot of exactly its length, read off the slot's wall window in seconds. No length set
+ * (`practiceMinutes` null or absent) refuses nothing. The twin of the writer's `length` rule
+ * (`practice_new_auto_row_refusals`, 20261105010000).
+ */
+export function practiceLengthRefuses(
+  team: Pick<PreparedTeam, 'practiceMinutes'>,
+  slot: Pick<DatedCandidate, 'startSec' | 'endSec'>
+): boolean {
+  const minutes = team.practiceMinutes;
+  if (minutes === null || minutes === undefined) return false;
+  return slot.endSec - slot.startSec !== minutes * 60;
 }
 
 /**
@@ -194,14 +228,19 @@ export function conflictPairKey(
 /**
  * Whether a NEW placement of `team` on `slot` is legal (M4.8, plan §3.2). Refused when:
  *
- * 0. a division reservation refuses the slot to the team (D2, `reservationRefuses`);
+ * 0. a division reservation refuses the slot to the team (D2, `reservationRefuses`), or the
+ *    division sets a practice length and the slot is not exactly that long (Phase D PR B:
+ *    `endSec - startSec`, the dated reading, against `practiceMinutes * 60`);
  * 1. the candidate has no live date (the slot has none from today on, plan Q3);
  * 2. the slot's busiest live date inside the candidate's span, with the candidate added, would
  *    exceed `slotCapacity` -- occupants are clipped to the candidate's span, so two holders that
  *    meet only before it starts do not count against it (capacity is a peak per date, never a
  *    count of rows); or
  * 3. any coach on the team holds a window that shares a live date with the candidate and whose
- *    wall window overlaps the slot's.
+ *    wall window overlaps the slot's; or
+ * 4. the team already holds a practice on the same weekday on a shared date (`teamHolds`, Phase
+ *    D PR B): a team's practices fall on different weekdays, whatever their times. Absent
+ *    `teamHolds` judges nothing (a caller that does not track the team's own rows).
  *
  * `slotCapacity` is each slot's capacity, not what remains of it.
  *
@@ -216,9 +255,11 @@ export function checkHardConstraints(
   slot: DatedCandidate,
   coachAssignments: Map<string, TimeWindow[]>,
   slotOccupants: Map<string, LiveDays[]>,
-  slotCapacity: Map<string, number>
+  slotCapacity: Map<string, number>,
+  teamHolds?: ReadonlyMap<string, readonly LiveDays[]>
 ): boolean {
   if (reservationRefuses(team, slot)) return false;
+  if (practiceLengthRefuses(team, slot)) return false;
   const span = slot.span;
   if (span === null) return false;
   const live: LiveDays[] = [span];
@@ -233,6 +274,9 @@ export function checkHardConstraints(
       if (!(held.startSec < slot.endSec && slot.startSec < held.endSec)) continue;
       if (sharedLiveDates(held, span).count > 0) return false;
     }
+  }
+  for (const held of teamHolds?.get(team.id) ?? []) {
+    if (sharedLiveDates(held, span).count > 0) return false;
   }
   return true;
 }

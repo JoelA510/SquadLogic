@@ -1228,3 +1228,95 @@ test('apply-time metrics apply the exceptions the same save writes on new rows (
   // None sent: unchanged.
   assert.equal(run([]).coachConflicts[0].sharedDates, 15);
 });
+
+// ---- Phase D PR B (B3): a run's report counts practices, not teams ----------
+//
+// `unassigned` used to be filtered to teams holding no applied assignment, so a team given one of
+// its two practices vanished from the report and its missing practice was never recorded. One
+// entry is now one missing practice; a team whose division wants several carries that count
+// (`target`) on each entry.
+
+const applyRun = (assignments, unassigned) =>
+  buildPracticeRunResults({
+    assignments,
+    unassigned,
+    teams: SAMPLE_TEAMS,
+    slots: SAMPLE_SLOTS,
+    exceptions: [],
+    schoolDayEnd: undefined,
+    timezone: 'UTC',
+  });
+const missing = (teamId, n, extra = {}) => ({
+  teamId,
+  unitId: `${teamId}#${n}`,
+  reason: 'not-enough-days',
+  target: 2,
+  ...extra,
+});
+
+test('a team given 1 of its 2 practices keeps an entry for the one it lacks', () => {
+  const results = applyRun(
+    [
+      { teamId: 'team-1', slotId: 'slot-early-mon' },
+      { teamId: 'team-2', slotId: 'slot-wed' },
+    ],
+    [missing('team-1', 2)]
+  );
+  assert.deepEqual(results.unassigned, [missing('team-1', 2)]);
+  assert.deepEqual(results.practiceShortfall, [
+    { teamId: 'team-1', target: 2, applied: 1, missing: 1, reasons: ['not-enough-days'] },
+  ]);
+  // The metrics count teams: team-1 holds a practice, so it is not a team needing manual
+  // assignment, and its missing one is not double counted there.
+  assert.equal(results.summary.unassignedTeams, 2);
+  assert.deepEqual(
+    results.unassignedByReason.map((r) => [r.reason, r.count]),
+    []
+  );
+});
+
+test('a team given none of its 2 practices has both entries, and counts once in the metrics', () => {
+  const results = applyRun(
+    [{ teamId: 'team-2', slotId: 'slot-wed' }],
+    [missing('team-1', 1), missing('team-1', 2)]
+  );
+  assert.equal(results.unassigned.length, 2);
+  assert.deepEqual(results.practiceShortfall, [
+    { teamId: 'team-1', target: 2, applied: 0, missing: 2, reasons: ['not-enough-days'] },
+  ]);
+  assert.deepEqual(
+    results.unassignedByReason.map((r) => [r.reason, r.count, r.teamIds]),
+    [['not-enough-days', 1, ['team-1']]]
+  );
+});
+
+test('a practice the operator assigned since the run leaves the report, and the rest stay', () => {
+  const fresh = (entries, assigned) =>
+    applyRun(
+      assigned.map((slotId) => ({ teamId: 'team-1', slotId })),
+      entries
+    );
+  const three = [missing('team-1', 1, { target: 3 }), missing('team-1', 2, { target: 3 })];
+  // Holding 1 of 3: both missing entries stay (3 - 1 = 2).
+  assert.equal(fresh(three, ['slot-wed']).unassigned.length, 2);
+  // Hand-assigned a second: one entry goes (3 - 2 = 1 still missing).
+  const second = fresh(three, ['slot-wed', 'slot-early-mon']);
+  assert.equal(second.unassigned.length, 1);
+  assert.equal(second.practiceShortfall[0].missing, 1);
+  // Hand-assigned the third: nothing is missing and there is no shortfall.
+  const third = fresh(three, ['slot-wed', 'slot-early-mon', 'slot-late-mon']);
+  assert.deepEqual(third.unassigned, []);
+  assert.equal('practiceShortfall' in third, false);
+});
+
+test('a team that wants one practice a week is filtered as it always was', () => {
+  const results = applyRun(
+    [{ teamId: 'team-1', slotId: 'slot-early-mon' }],
+    [
+      { teamId: 'team-1', reason: 'no-slot-available' },
+      { teamId: 'team-4', reason: 'no-slot-available' },
+    ]
+  );
+  assert.deepEqual(results.unassigned, [{ teamId: 'team-4', reason: 'no-slot-available' }]);
+  assert.equal('practiceShortfall' in results, false);
+});

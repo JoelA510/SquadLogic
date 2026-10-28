@@ -119,16 +119,30 @@ function resolveSameSaveExceptions({ assignments, exceptions, slots }) {
  * carry neither key and no `summary`, and the panel's existing gate renders
  * no card for them -- which is the honest answer, not a normalised guess.
  *
- * `unassigned` is filtered to teams that really have no slot in the applied
- * schedule. The auto-scheduler's list goes stale the moment the operator
+ * `unassigned` is filtered to the practices that are still missing from the
+ * applied schedule. The auto-scheduler's list goes stale the moment the operator
  * hand-assigns one of those teams, and persisting it unfiltered would
  * manufacture exactly the total-vs-breakdown divergence the panel exists to
  * report: reasons accounting for a team the card no longer counts.
  *
+ * **One entry is one missing practice** (Phase D PR B). It used to be one team,
+ * and the filter dropped a team that held any applied assignment, so a team
+ * given one of its two practices vanished from the report and its missing
+ * practice was never recorded. A team whose division wants several practices a
+ * week carries that count on each of its entries (`target`, set by the
+ * auto-scheduler for those teams only): of its entries, as many are kept as it
+ * is still short of (`target` less the assignments applied for it), so a
+ * practice the operator hand-assigns since the run leaves the report. A team
+ * with no `target` is the old rule: dropped once it holds any assignment. The
+ * metrics engine below is still handed one entry per team with NO assignment,
+ * because its `unassignedTeams` and `unassignedByReason` count teams; the
+ * per-practice list is `unassigned`, and `practiceShortfall` says "1 of 2" per
+ * team.
+ *
  * @param {Object} params
  * @param {Array<{teamId: any, slotId: any, source?: string}>} params.assignments
  *   The assignments being persisted, in persistence shape.
- * @param {Array<{teamId: any, reason?: string}>} [params.unassigned]
+ * @param {Array<{teamId: any, reason?: string, target?: number}>} [params.unassigned]
  *   Manual-follow-up entries from the scheduler, before filtering.
  * @param {Array<Object>} params.teams - Scheduler teams (the roster).
  * @param {Array<Object>} params.slots - Scheduler slots.
@@ -162,16 +176,57 @@ export function buildPracticeRunResults({
   optimization = null,
 }) {
   const appliedAssignments = Array.isArray(assignments) ? assignments : [];
-  const assignedTeamIds = new Set(
-    appliedAssignments.map((assignment) => String(assignment?.teamId))
-  );
-  const stillUnassigned = (Array.isArray(unassigned) ? unassigned : []).filter(
-    (entry) => entry && !assignedTeamIds.has(String(entry.teamId))
-  );
+  const appliedByTeam = new Map();
+  for (const assignment of appliedAssignments) {
+    const id = String(assignment?.teamId);
+    appliedByTeam.set(id, (appliedByTeam.get(id) ?? 0) + 1);
+  }
+  // Per team, how many entries of a team that wants several practices a week are still wanted.
+  const keptOfTeam = new Map();
+  const stillUnassigned = (Array.isArray(unassigned) ? unassigned : []).filter((entry) => {
+    if (!entry) return false;
+    const teamId = String(entry.teamId);
+    const applied = appliedByTeam.get(teamId) ?? 0;
+    const target = Number.isInteger(entry.target) && entry.target > 1 ? entry.target : 1;
+    if (target === 1) return applied === 0;
+    const kept = keptOfTeam.get(teamId) ?? 0;
+    if (kept >= target - applied) return false;
+    keptOfTeam.set(teamId, kept + 1);
+    return true;
+  });
+  // The engine counts teams: a team that holds nothing, once however many practices it lacks.
+  const teamLevelUnassigned = [];
+  const seenSeveral = new Set();
+  for (const entry of stillUnassigned) {
+    const teamId = String(entry.teamId);
+    if ((appliedByTeam.get(teamId) ?? 0) > 0) continue;
+    if (Number.isInteger(entry.target) && entry.target > 1) {
+      if (seenSeveral.has(teamId)) continue;
+      seenSeveral.add(teamId);
+    }
+    teamLevelUnassigned.push(entry);
+  }
+  // "1 of 2" per team that still lacks practices: from the entries, which carry the count.
+  const shortfallByTeam = new Map();
+  for (const entry of stillUnassigned) {
+    if (!(Number.isInteger(entry.target) && entry.target > 1)) continue;
+    const teamId = String(entry.teamId);
+    const line = shortfallByTeam.get(teamId) ?? {
+      teamId: entry.teamId,
+      target: entry.target,
+      applied: appliedByTeam.get(teamId) ?? 0,
+      missing: 0,
+      reasons: [],
+    };
+    line.missing += 1;
+    if (entry.reason && !line.reasons.includes(entry.reason)) line.reasons.push(entry.reason);
+    shortfallByTeam.set(teamId, line);
+  }
 
   const base = {
     assignments: appliedAssignments,
     unassigned: stillUnassigned,
+    ...(shortfallByTeam.size > 0 ? { practiceShortfall: [...shortfallByTeam.values()] } : {}),
     optimization,
     edgeEvaluation,
   };
@@ -199,7 +254,7 @@ export function buildPracticeRunResults({
         : null;
     const report = evaluatePracticeSchedule({
       assignments: sameSave ? sameSave.assignments : appliedAssignments,
-      unassigned: stillUnassigned,
+      unassigned: teamLevelUnassigned,
       teams: Array.isArray(teams) ? teams : [],
       slots: Array.isArray(slots) ? slots : [],
       exceptions: sameSave ? [...(exceptions ?? []), ...sameSave.exceptions] : exceptions,

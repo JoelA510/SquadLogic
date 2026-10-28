@@ -1,6 +1,6 @@
 /**
  * The auto-scheduler's daylight post-pass (8.9 PR 6; plan §3 "Auto-scheduler
- * post-pass", decisions D2, D4, D5, D6, D8, D11).
+ * post-pass", decisions D2, D4, D5, D6, D11; D8's truncation was replaced by a flag, 2026-10-27).
  *
  * ## The rule, as the Edge enforces it
  *
@@ -29,14 +29,15 @@
  *
  * ## What it changes, and what it never touches
  *
- * Only placements this run produced. For each, the slot's weekly occurrences
- * from the season's today (the page's `newPlacementRange` start) to the slot's
- * `effectiveUntil` are judged in date order; the first date past the limit
- * truncates the placement there (D8): it keeps `[.., date - 1]` as
- * `effectiveUntil` and the remainder `[date, effectiveUntil]` becomes TIME TBD
- * with reason {@link DAYLIGHT_TBD_REASON} and the date. When the first
- * occurrence is already past the limit nothing remains, so the placement is
- * withdrawn and the team is unplaced with that reason.
+ * **Past sunset is flagged, never blocked (owner, 2026-10-27; every league).** It used to
+ * truncate a placement at its first date past the limit and make the remainder TIME TBD
+ * (D8), or withdraw the placement when its first date was past. It no longer changes a
+ * placement at all: only placements this run produced are judged, the slot's weekly
+ * occurrences from the season's today (the page's `newPlacementRange` start) to the slot's
+ * `effectiveUntil` in date order, and the first date past the limit is reported in
+ * `pastSunset` with its reason ({@link DAYLIGHT_TBD_REASON}, the date, when the practice
+ * ends and the limit it passes) while the placement is kept whole. The admin sees the
+ * warning and decides.
  *
  * **Locked rows are never changed** (3b ruling 2). One that runs past sunset is
  * reported in `lockedPastSunset` with a proposed fix (`applied: false`); the
@@ -51,19 +52,15 @@
  * `lightingOverrideOccurrencesExempt`, never in the lit counter nor in
  * `occurrencesExamined`. **Declared, not enforced:** an override has no
  * lights-off time (plan default 4), so an exempt date is exempt however late
- * the practice ends. A covered date AFTER a non-exempt date that truncates is
- * part of the TIME TBD remainder -- D8 keeps one contiguous range per
- * placement, so there is no gap to keep it in -- and is counted in
- * `lightingOverrideOccurrencesInTimeTbd` rather than silently lost (for a
- * locked row, in the proposed remainder: `lockedRowOccurrencesLightingInProposedTbd`).
+ * the practice ends. A covered date after a locked row's first date past sunset is
+ * counted in `lockedRowOccurrencesLightingInProposedTbd` (the row's proposed remainder).
  * An override that exempted no date of the run is counted in
  * `lightingOverridesUnused` (core's `lightingOverridesUnused`). A venue with no
  * coordinates whose every date is exempt is not reported unknown: nothing on
  * it was judged (core: an exempt occurrence is never unknown).
  *
  * **Declared, not optimised (D11).** The search does not steer toward slots
- * that survive the season: the pass truncates what the search chose, and a
- * withdrawn placement's capacity is not offered to another team.
+ * that end in daylight: the pass flags what the search chose.
  *
  * Import-free apart from its siblings, so Vitest can execute it directly.
  */
@@ -81,10 +78,12 @@ import { lightingOverrideCovers, type LightingOverride } from './practice-lighti
 export const PRACTICE_SUNSET_MARGIN_MINUTES = 0;
 
 /**
- * A TIME TBD remainder's, or a withdrawn placement's, reason: core
+ * The reason a placement past sunset is flagged with: core
  * `PRACTICE_TBD_REASON.PAST_SUNSET` (`practice/repair.js`), spelled
- * identically -- one reason for one cause, whichever path finds it.
- * `tests/autoSchedulerDaylight.test.js` pins the two equal.
+ * identically -- one reason for one cause, whichever path finds it. (Since the
+ * owner's 2026-10-27 ruling it labels a warning, not a TIME TBD remainder; the
+ * stored `tbd_reason` value is unchanged.) `tests/autoSchedulerDaylight.test.js`
+ * pins the two equal.
  */
 export const DAYLIGHT_TBD_REASON = 'past-sunset';
 
@@ -580,8 +579,10 @@ const earlier = (a: string | null, b: string | null) =>
 export interface DaylightPlacement {
   teamId: string;
   slotId: string;
+  /** The practice unit, when it differs from the team id (Phase D PR B). */
+  unitId?: string;
   source: 'auto';
-  /** Set only when the pass truncated the placement: its last date (D8). */
+  /** Set only on a placement a caller already ended early; the pass never sets it. */
   effectiveUntil?: string;
 }
 
@@ -589,8 +590,6 @@ export interface DaylightUnplaced {
   teamId: string;
   reason: string;
   dimensions?: string[];
-  /** For {@link DAYLIGHT_TBD_REASON}: the first date past sunset. */
-  date?: string;
 }
 
 export interface DaylightLockedRow {
@@ -600,17 +599,19 @@ export interface DaylightLockedRow {
   effectiveDateRange?: string | null;
 }
 
-export interface DaylightTimeTbd extends PastSunset {
+/**
+ * A new placement that runs past sunset on unlit ground: kept whole, flagged. `date` (from
+ * {@link PastSunset}) is the first such date; `endMinutes` is when the practice ends and
+ * `limitMinutes` the latest it may end by that day.
+ */
+export interface DaylightPastSunset extends PastSunset {
   teamId: string;
   slotId: string;
-  /** The remainder, inclusive: `from` is the first date past sunset. */
-  from: string;
-  until: string;
+  /** The practice unit, when it differs from the team id. */
+  unitId?: string;
   reason: typeof DAYLIGHT_TBD_REASON;
   code: typeof DAYLIGHT_CODE.PRACTICE_PAST_SUNSET;
   marginMinutes: number;
-  /** `true` when nothing remained before `from`, so the placement was withdrawn. */
-  withdrawn: boolean;
 }
 
 export interface DaylightUnknown {
@@ -649,15 +650,13 @@ export interface DaylightReport {
     occurrencesWithinDaylight: number;
     daylightUnknownOccurrences: number;
     daylightUnknownPlacements: number;
-    placementsTruncated: number;
-    placementsWithdrawn: number;
+    /** New placements with a date past sunset: kept whole and flagged in `pastSunset`. */
+    placementsPastSunset: number;
     lockedRowsExamined: number;
     lockedRowsPastSunset: number;
     lockedRowsUnknown: number;
     /** New placements' dates an approved lighting override exempted: not judged, kept. */
     lightingOverrideOccurrencesExempt: number;
-    /** Covered dates after a non-exempt truncation, so inside a TIME TBD remainder (D8). */
-    lightingOverrideOccurrencesInTimeTbd: number;
     /** Locked rows' dates an approved lighting override exempted. */
     lockedRowOccurrencesLightingExempt: number;
     /** Covered dates after a locked row's first past sunset: inside its proposed remainder. */
@@ -665,16 +664,15 @@ export interface DaylightReport {
     /** Overrides handed in that exempted no date of any placement or locked row. */
     lightingOverridesUnused: number;
   };
-  timeTbd: DaylightTimeTbd[];
+  pastSunset: DaylightPastSunset[];
   unknown: DaylightUnknown[];
   lockedPastSunset: LockedPastSunset[];
 }
 
 /**
  * Judge every new placement and every locked row against daylight. Returns
- * the placements (truncated or withdrawn where past sunset; the SAME objects
- * where not), the unplaced list with each withdrawn team appended, and the
- * report. Locked rows are read, never returned.
+ * the placements and the unplaced list UNCHANGED -- past sunset is flagged,
+ * never blocked -- and the report. Locked rows are read, never returned.
  */
 export function applyDaylightPostPass<P extends DaylightPlacement, U extends DaylightUnplaced>(
   params: {
@@ -683,8 +681,8 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
     locked: DaylightLockedRow[];
   } & DaylightContext
 ): {
-  placements: Array<P | (P & { effectiveUntil: string })>;
-  unassigned: Array<U | DaylightUnplaced>;
+  placements: P[];
+  unassigned: U[];
   report: DaylightReport;
 } {
   const { slots, venues, timeZone, today } = params;
@@ -700,18 +698,16 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
       occurrencesWithinDaylight: 0,
       daylightUnknownOccurrences: 0,
       daylightUnknownPlacements: 0,
-      placementsTruncated: 0,
-      placementsWithdrawn: 0,
+      placementsPastSunset: 0,
       lockedRowsExamined: 0,
       lockedRowsPastSunset: 0,
       lockedRowsUnknown: 0,
       lightingOverrideOccurrencesExempt: 0,
-      lightingOverrideOccurrencesInTimeTbd: 0,
       lockedRowOccurrencesLightingExempt: 0,
       lockedRowOccurrencesLightingInProposedTbd: 0,
       lightingOverridesUnused: 0,
     },
-    timeTbd: [],
+    pastSunset: [],
     unknown: [],
     lockedPastSunset: [],
   };
@@ -727,8 +723,7 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
     exemptedOn.set(slotId, set);
   };
 
-  const placements: Array<P | (P & { effectiveUntil: string })> = [];
-  const withdrawn: DaylightUnplaced[] = [];
+  const placements: P[] = [];
   // A new placement's span depends on its slot alone, so each slot is judged
   // once however many teams it holds.
   const bySlot = new Map<string, SeriesVerdict>();
@@ -790,32 +785,19 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
         occurrences: judged.unknownDates.length,
       });
     }
-    if (!past) {
-      placements.push(placement);
-      continue;
-    }
-    meta.lightingOverrideOccurrencesInTimeTbd += judged.dates.filter(
-      (date) => date > past.date && covered(placement.slotId, date)
-    ).length;
-    const nothingLeft = past.date === judged.dates[0];
-    report.timeTbd.push({
+    // Past sunset: kept whole, flagged with the reason (never truncated or withdrawn).
+    placements.push(placement);
+    if (!past) continue;
+    meta.placementsPastSunset += 1;
+    report.pastSunset.push({
       teamId: placement.teamId,
       slotId: placement.slotId,
-      from: past.date,
-      until: (slot as DaylightSlot).effectiveUntil as string,
+      ...(placement.unitId !== undefined ? { unitId: placement.unitId } : {}),
       reason: DAYLIGHT_TBD_REASON,
       code: DAYLIGHT_CODE.PRACTICE_PAST_SUNSET,
       marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,
-      withdrawn: nothingLeft,
       ...past,
     });
-    if (nothingLeft) {
-      meta.placementsWithdrawn += 1;
-      withdrawn.push({ teamId: placement.teamId, reason: DAYLIGHT_TBD_REASON, date: past.date });
-    } else {
-      meta.placementsTruncated += 1;
-      placements.push({ ...placement, effectiveUntil: addDays(past.date, -1) });
-    }
   }
 
   // Locked rows: judged, reported, never changed.
@@ -887,5 +869,5 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
       )
   ).length;
 
-  return { placements, unassigned: [...params.unassigned, ...withdrawn], report };
+  return { placements, unassigned: params.unassigned, report };
 }

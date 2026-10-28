@@ -383,3 +383,61 @@ describe('A division plays games, or is practice only (D2)', () => {
     expect('p_plays_games' in page.saves[0]).toBe(false);
   });
 });
+
+/*
+ * Phase D PR B: the division's practice settings, offered once the division's settings were read
+ * (the config carries `practicesPerWeek`). Every expectation is the table's check (0 to 7 whole
+ * practices; a length of 15 to 240 minutes, or none for any slot length), restated here.
+ */
+describe('TeamingConfiguration practice settings', () => {
+  it('offers neither field for a division whose settings were not read (older database)', () => {
+    renderPanel({ ...limits, teamCountOverride: 3 });
+    expect(screen.queryByLabelText('Practices per week')).toBeNull();
+    expect(screen.queryByLabelText('Practice length (minutes)')).toBeNull();
+  });
+
+  it('shows the stored values and sends an edit through onUpdate, by label', () => {
+    const onUpdate = renderPanel({
+      ...limits,
+      teamCountOverride: 3,
+      practicesPerWeek: 2,
+      practiceMinutes: 60,
+    });
+    const count = screen.getByLabelText('Practices per week');
+    const length = screen.getByLabelText('Practice length (minutes)');
+    expect(count).toHaveValue(2);
+    expect(length).toHaveValue(60);
+    fireEvent.change(count, { target: { value: '3' } });
+    expect(onUpdate).toHaveBeenCalledWith('u10-boys', { practicesPerWeek: 3 });
+  });
+
+  it('an empty length is "any slot length", and the button clears a set one', () => {
+    const onUpdate = renderPanel({
+      ...limits,
+      teamCountOverride: 3,
+      practicesPerWeek: 1,
+      practiceMinutes: 90,
+    });
+    const clear = screen.getByRole('button', { name: 'Any length' });
+    expect(clear).toBeEnabled();
+    fireEvent.click(clear);
+    expect(onUpdate).toHaveBeenCalledWith('u10-boys', { practiceMinutes: null });
+  });
+
+  it('says in text, not colour alone, when a value is outside what the table allows', () => {
+    renderPanel({ ...limits, teamCountOverride: 3, practicesPerWeek: 9, practiceMinutes: 10 });
+    expect(screen.getByLabelText('Practices per week')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Practice length (minutes)')).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    );
+    expect(screen.getByText('Enter a whole number from 0 to 7.')).toBeInTheDocument();
+    expect(screen.getByText('Enter 15 to 240 minutes, or choose Any length.')).toBeInTheDocument();
+  });
+
+  it('keeps the fields while the count is cleared to retype it', () => {
+    renderPanel({ ...limits, teamCountOverride: 3, practicesPerWeek: '', practiceMinutes: null });
+    expect(screen.getByLabelText('Practices per week')).toHaveValue(null);
+    expect(screen.getByLabelText('Practices per week')).toHaveAttribute('aria-invalid', 'true');
+  });
+});

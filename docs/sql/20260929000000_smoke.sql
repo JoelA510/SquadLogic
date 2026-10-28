@@ -90,20 +90,21 @@ BEGIN
     INSERT INTO public.fields (organization_id, location_id, name, active)
       VALUES (v_org, v_loc, 'P67 Pitch', true) RETURNING id INTO v_field;
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P67 Fall') RETURNING id INTO v_s;
-    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'P67 U10') RETURNING id INTO v_d;
+    -- 3 practices a week: the team below holds three rows (20261105010000's writer gate counts them).
+    INSERT INTO public.divisions (organization_id, season_settings_id, name, practices_per_week) VALUES (v_org, v_s, 'P67 U10', 3) RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P67 Team') RETURNING id INTO v_t;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P67 Team Two') RETURNING id INTO v_t2;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_m1;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_w;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m2;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '18:30', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m3;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_m1;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_w;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_m2;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'mon', '18:30', '19:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_m3;
     -- Monday 18:00-19:00: TOUCHES Monday 17:00-18:00 at 18:00 and shares no minute with it.
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '18:00', '19:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_m4;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'mon', '18:00', '19:00', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_m4;
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -150,14 +151,16 @@ BEGIN
         RAISE NOTICE 'time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged';
     END IF;
 
-    -- (c) a Monday slot at non-overlapping minutes: accepted.
+    -- (c) a Monday slot at non-overlapping minutes: accepted. Sent as a manual row: the writer's gate
+    -- (20261105010000) refuses a second AUTO practice of a team on one weekday, and this case is about
+    -- the minute test, which every new row meets whatever its source.
     v_state := NULL;
     BEGIN
         PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
             jsonb_build_array(
                 jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
                 jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m3, 'effective_date_range', c_r)));
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m3, 'effective_date_range', c_r, 'source', 'manual')));
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
@@ -185,7 +188,7 @@ BEGIN
                 jsonb_build_object('team_id', v_t,  'practice_slot_id', v_w,  'effective_date_range', c_r),
                 jsonb_build_object('team_id', v_t,  'practice_slot_id', v_m3, 'effective_date_range', c_r),
                 jsonb_build_object('team_id', v_t2, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t2, 'practice_slot_id', v_m4, 'effective_date_range', c_r)));
+                jsonb_build_object('team_id', v_t2, 'practice_slot_id', v_m4, 'effective_date_range', c_r, 'source', 'manual')));
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
     END;
@@ -258,15 +261,15 @@ BEGIN
         v_t := v_t || v_id;
     END LOOP;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d2, 'P66 Team 9 (other season)') RETURNING id INTO v_t9;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sa;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'wed', '17:00', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sb;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'fri', '17:00', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sc;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sa;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'wed', '17:00', '18:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sb;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'fri', '17:00', '18:30', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sc;
     -- Wednesday 18:00-19:00: clashes in time with slot B (Wednesday 17:00-18:30).
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'wed', '18:00', '19:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_sd;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
+      VALUES (v_org, v_field, 'wed', '18:00', '19:00', '2026-09-01', '2026-11-30', 10) RETURNING id INTO v_sd;
     INSERT INTO public.practice_assignments (organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source)
       VALUES (v_org, v_t9, v_sa, v_sa, c_r::daterange, 'auto') RETURNING id INTO v_r9;
 

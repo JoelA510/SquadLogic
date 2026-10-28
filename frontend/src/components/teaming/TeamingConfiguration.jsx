@@ -42,6 +42,22 @@ export default function TeamingConfiguration({
   });
   const { recommendedTeamCount, fitRange, warnings } = assessment;
 
+  // Phase D PR B: the practice settings the database holds (its checks: 0 to 7, 15 to 240). The
+  // fields are offered once the division's settings were read (the key exists), and stay while the
+  // count is cleared to retype it; a cleared count is invalid, never sent.
+  const hasPracticeSettings = Boolean(config) && 'practicesPerWeek' in config;
+  const practicesInvalid =
+    hasPracticeSettings &&
+    !(
+      Number.isInteger(config.practicesPerWeek) &&
+      config.practicesPerWeek >= 0 &&
+      config.practicesPerWeek <= 7
+    );
+  const minutesInvalid =
+    hasPracticeSettings &&
+    config.practiceMinutes != null &&
+    !(config.practiceMinutes >= 15 && config.practiceMinutes <= 240);
+
   const useRecommended = () => {
     handleNumberChange('teamCountOverride', recommendedTeamCount);
     // The button goes away once applied; keep keyboard focus on the field it changed.
@@ -230,6 +246,77 @@ export default function TeamingConfiguration({
                   and its teams still practise. Saved with the rules.
                 </p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {hasPracticeSettings && (
+          <div className="pt-4 border-t border-border-subtle space-y-4">
+            <div>
+              <label
+                htmlFor="division-practices-per-week"
+                className="block text-sm font-medium text-text-secondary mb-2"
+              >
+                Practices per week
+              </label>
+              <input
+                id="division-practices-per-week"
+                type="number"
+                min="0"
+                max="7"
+                step="1"
+                className="w-full bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 text-text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                value={config.practicesPerWeek ?? ''}
+                onChange={(e) => handleNumberChange('practicesPerWeek', e.target.value)}
+                aria-describedby="division-practices-per-week-hint"
+                aria-invalid={practicesInvalid || undefined}
+              />
+              <p
+                id="division-practices-per-week-hint"
+                className={`text-xs mt-1 ${practicesInvalid ? 'text-status-error-text' : 'text-text-muted'}`}
+              >
+                {practicesInvalid
+                  ? 'Enter a whole number from 0 to 7.'
+                  : 'How many practices each team gets, each on a different weekday. 0 gives none. Saved with the rules.'}
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="division-practice-minutes"
+                className="block text-sm font-medium text-text-secondary mb-2"
+              >
+                Practice length (minutes)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="division-practice-minutes"
+                  type="number"
+                  min="15"
+                  max="240"
+                  step="5"
+                  placeholder="Any slot length"
+                  className="flex-1 bg-bg-surface border border-border-subtle rounded-lg px-3 py-2 text-text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  value={config.practiceMinutes ?? ''}
+                  onChange={(e) => handleNumberChange('practiceMinutes', e.target.value)}
+                  aria-describedby="division-practice-minutes-hint"
+                  aria-invalid={minutesInvalid || undefined}
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => handleNumberChange('practiceMinutes', '')}
+                  disabled={config.practiceMinutes == null}
+                >
+                  Any length
+                </Button>
+              </div>
+              <p
+                id="division-practice-minutes-hint"
+                className={`text-xs mt-1 ${minutesInvalid ? 'text-status-error-text' : 'text-text-muted'}`}
+              >
+                {minutesInvalid
+                  ? 'Enter 15 to 240 minutes, or choose Any length.'
+                  : 'A practice takes a slot of exactly this length. Empty: any slot length.'}
+              </p>
             </div>
           </div>
         )}

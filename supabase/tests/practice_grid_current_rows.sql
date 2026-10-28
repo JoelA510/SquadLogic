@@ -60,27 +60,31 @@ VALUES ('a1111111-1111-1111-1111-000000007770', 'a1111111-1111-1111-1111-1111111
 INSERT INTO public.fields (id, organization_id, location_id, name)
 VALUES ('a1111111-1111-1111-1111-000000007771', 'a1111111-1111-1111-1111-111111111111',
         'a1111111-1111-1111-1111-000000007770', 'Grid Pitch');
-INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+-- Capacity 4: several teams of the seasons below share a slot, and the writer (20261105010000)
+-- refuses a new auto row that takes a slot past its capacity.
+INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
 VALUES
     ('a1111111-1111-1111-1111-0000000077a1', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-000000007771', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+     'a1111111-1111-1111-1111-000000007771', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30', 4),
     ('a1111111-1111-1111-1111-0000000077a2', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-000000007771', 'tue', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+     'a1111111-1111-1111-1111-000000007771', 'tue', '17:00', '18:00', '2026-09-01', '2026-11-30', 4),
     ('a1111111-1111-1111-1111-0000000077a3', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-000000007771', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+     'a1111111-1111-1111-1111-000000007771', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30', 4),
     ('a1111111-1111-1111-1111-0000000077a4', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-000000007771', 'thu', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+     'a1111111-1111-1111-1111-000000007771', 'thu', '17:00', '18:00', '2026-09-01', '2026-11-30', 4),
     ('a1111111-1111-1111-1111-0000000077a5', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-000000007771', 'fri', '17:00', '18:00', '2026-09-01', '2026-11-30');
+     'a1111111-1111-1111-1111-000000007771', 'fri', '17:00', '18:00', '2026-09-01', '2026-11-30', 4);
 
 -- Shape 3 (the override prompt, docs/PLAN_GRID_OVERRIDE_PROMPT.md W8): a third
 -- season. Team G practises on two weekdays; Team H has a closed series and a
 -- current one; Team I is never touched.
 INSERT INTO public.season_settings (id, organization_id, name)
 VALUES ('a1111111-1111-1111-1111-0000000077b3', 'a1111111-1111-1111-1111-111111111111', 'Grid Override');
-INSERT INTO public.divisions (id, organization_id, season_settings_id, name)
+-- Two practices a week: Team G practises on two weekdays, and the writer (20261105010000) refuses a
+-- new auto row that takes a team past its division's count.
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week)
 VALUES ('a1111111-1111-1111-1111-0000000077d3', 'a1111111-1111-1111-1111-111111111111',
-        'a1111111-1111-1111-1111-0000000077b3', 'Grid U14');
+        'a1111111-1111-1111-1111-0000000077b3', 'Grid U14', 2);
 INSERT INTO public.teams (id, organization_id, division_id, name)
 VALUES
     ('a1111111-1111-1111-1111-000000007781', 'a1111111-1111-1111-1111-111111111111',

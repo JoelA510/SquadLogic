@@ -457,15 +457,19 @@ describe('daylight', () => {
     assert.equal(tbd.cause_kind, PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT);
   });
 
-  it('a past-sunset TIME TBD keeps cause_kind retirement; daylight is only the reason', () => {
-    const { written } = run(RETIREMENT, {
+  it('a past-sunset candidate is kept and flagged; a TIME TBD keeps cause_kind retirement', () => {
+    const { written, result } = run(RETIREMENT, {
       rows: { daylight: { timeZone: 'America/New_York', sunsets: SUNSETS } },
     });
     const reasons = written.plan.exceptions.map((e) => [e.tbd_reason, e.cause_kind]);
-    assert.deepEqual(reasons, [
-      ['past-sunset', 'retirement'],
-      ['past-sunset', 'retirement'],
-    ]);
+    // Past sunset is flagged, never blocked (owner, 2026-10-27): T1 keeps its re-home past the
+    // 16:40 sunset, with the reason; the one series left over is TIME TBD for contention, not daylight.
+    assert.deepEqual(reasons, [['contended', 'retirement']]);
+    assert.deepEqual(
+      result.rehomed.map((entry) => [entry.assignmentId, entry.daylightPastSunset?.date]),
+      [[A1, '2026-10-19']]
+    );
+    assert.ok(result.daylight.candidatesFlaggedPastSunset > 0);
     assert.ok(written.payload, 'a tail retirement window was refused');
   });
 });
@@ -627,8 +631,9 @@ describe('payload contract', () => {
     const parsed = schema.safeParse({ closes: [], exceptions: refused.exceptions });
     assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
     exceptions += refused.exceptions.length;
-    // Meta: the schema judged relocated and TIME TBD entries.
-    assert.ok(exceptions >= 5, `only ${exceptions} exceptions validated`);
+    // Meta: the schema judged relocated and TIME TBD entries (one fewer than before past sunset
+    // was flagged instead of refused: that series is now re-homed, not TIME TBD).
+    assert.ok(exceptions >= 4, `only ${exceptions} exceptions validated`);
     // And it can fail: an exception naming both rows is refused.
     const both = {
       ...refused.exceptions[0],

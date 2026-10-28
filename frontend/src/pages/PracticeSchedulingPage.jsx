@@ -49,7 +49,6 @@ import {
   gridOverrideUnlock,
   samePruneSet,
 } from '../utils/gridOverridePrompt.js';
-import { buildDaylightExceptions } from '../utils/daylightExceptions.js';
 import {
   describePracticeLockRefusal,
   parsePracticeLockRefusal,
@@ -726,8 +725,26 @@ export default function PracticeSchedulingPage() {
     // unchanged, plus those placements -- which is also the payload an
     // ordinary save must carry for the v3 writer to have nothing to refuse.
     const placements = autoScheduler.result.assignments ?? [];
-    const lockedTeamIds = new Set(seasonRows.map(getAssignmentTeamId));
-    const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
+    // A team may be given more practices than it holds when its division wants several a week
+    // (Phase D PR B): the function says how many each wants (`practices.teams`), one when it says
+    // nothing. A team given more than that, counting the rows it already has, is a clash.
+    const targetOf = new Map(
+      (autoScheduler.result.practices?.teams ?? []).map((entry) => [entry.teamId, entry.target])
+    );
+    const heldCount = new Map();
+    for (const row of seasonRows) {
+      const id = getAssignmentTeamId(row);
+      heldCount.set(id, (heldCount.get(id) ?? 0) + 1);
+    }
+    const newCount = new Map();
+    for (const placement of placements) {
+      newCount.set(placement.teamId, (newCount.get(placement.teamId) ?? 0) + 1);
+    }
+    const clash = placements.find(
+      (placement) =>
+        (heldCount.get(placement.teamId) ?? 0) + (newCount.get(placement.teamId) ?? 0) >
+        (targetOf.get(placement.teamId) ?? 1)
+    );
     // Each new placement is dated from the date the solver judged it from
     // (M4.8 Q7), else this page's own clock.
     const pageToday = seasonCalendarDate(Date.now(), timezone);
@@ -755,7 +772,10 @@ export default function PracticeSchedulingPage() {
         })
       : [];
     const refusal = clash
-      ? `The scheduler proposed a practice for team ${clash.teamId}, which already has one. ` +
+      ? `The scheduler proposed a practice for team ${clash.teamId}, which already has ` +
+        ((targetOf.get(clash.teamId) ?? 1) === 1
+          ? 'one. '
+          : `its ${targetOf.get(clash.teamId)} practices a week. `) +
         'Assigned practices are locked, so nothing was staged.'
       : !seasonToday
         ? "Today's date on the season's clock is unknown, so new practices cannot be dated."
@@ -1168,25 +1188,8 @@ export default function PracticeSchedulingPage() {
       return;
     }
 
-    // 8.9 PR 6b (plan D13 a): each truncated placement's dark remainder is
-    // recorded as a daylight TIME TBD exception on its new row, one per
-    // `daylight.timeTbd` entry the run reported as not withdrawn. An entry
-    // with no staged placement refuses the Apply rather than being dropped.
-    const daylightTbd = buildDaylightExceptions({
-      daylight: autoScheduler.result?.daylight,
-      assignments: persistenceAssignments,
-      slots: schedulerSlots,
-    });
-    if (daylightTbd.unmatched.length > 0) {
-      refuse(
-        `The daylight check made ${daylightTbd.unmatched
-          .map((entry) => teamById.get(entry.teamId)?.name ?? entry.teamId)
-          .join(', ')} ` +
-          'TIME TBD from a date past sunset, and the staged schedule no longer holds that ' +
-          'placement, so it cannot be recorded. Run the auto-scheduler again.'
-      );
-      return;
-    }
+    // A placement past sunset on unlit ground is kept whole and only flagged (owner, 2026-10-27):
+    // the auto-scheduler no longer cuts it short, so Apply records no daylight TIME TBD exception.
 
     const runId = autoScheduler.result?.runId ?? practice?.runId ?? undefined;
     const now = new Date().toISOString();
@@ -1358,9 +1361,6 @@ export default function PracticeSchedulingPage() {
       // Unread is not none: without a complete read the run records no
       // metrics and the Apply status says why (`metricsUnavailable`).
       exceptions: seasonExceptions.loaded ? seasonExceptions.rows : null,
-      // The daylight TIME TBD this same save records on the rows it inserts,
-      // so the run's report describes the schedule it commits.
-      sameSaveExceptions: daylightTbd.exceptions,
       schoolDayEnd,
       timezone,
       edgeEvaluation: autoScheduler.result?.evaluation ?? null,
@@ -1368,16 +1368,15 @@ export default function PracticeSchedulingPage() {
     });
 
     try {
-      // Only a save with daylight exceptions or an accepted override carries
-      // a repair body: without one the Edge sends the v2 argument set (#461).
-      // The assignments are the staged payload either way; an override's
-      // replaced series are ended on yesterday through `closes`.
+      // Only a save with an accepted override carries a repair body: without
+      // one the Edge sends the v2 argument set (#461). The assignments are the
+      // staged payload either way; an override's replaced series are ended on
+      // yesterday through `closes`.
       const persist =
-        daylightTbd.exceptions.length > 0 || unlock.length > 0
+        unlock.length > 0
           ? (request) =>
               persistPracticeRepair({
                 ...request,
-                exceptions: daylightTbd.exceptions,
                 unlock,
                 closes,
                 ...(baseFingerprint ? { baseFingerprint } : {}),
@@ -1824,6 +1823,7 @@ export default function PracticeSchedulingPage() {
             onCancel={cancelAutoScheduler}
             onReset={resetAutoScheduler}
             disabled={schedulerDisabled}
+            teamNames={Object.fromEntries(schedulerTeams.map((team) => [team.id, team.name]))}
           />
 
           {schedulerReadinessMessage && (

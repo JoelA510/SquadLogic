@@ -37,6 +37,9 @@ BEGIN
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin');
+    -- An import needs a season to add to (20261108010000).
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'PU Season', 'active');
     INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by) VALUES
         (v_job1, v_org, 'registration', 'smoke/pu-1.csv', 'processing', v_admin),
         (v_job2, v_org, 'registration', 'smoke/pu-2.csv', 'processing', v_admin);

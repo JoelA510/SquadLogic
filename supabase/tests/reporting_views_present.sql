@@ -9,6 +9,8 @@
 --     `view_league_standings.division` and `season_settings_id` last: both
 --     pages read them with `select('*')`, and the Standings page orders and
 --     groups by `division` and filters on `season_settings_id`;
+--     `view_org_metrics` also ends with `season_settings_id` (20261108010000:
+--     one row per season; supabase/tests/season_enrollment.sql counts them);
 --   * authenticated can SELECT from both;
 --   * as Org A's admin: exactly one metrics row, Org A's, with its team and
 --     member counts (the Reports page's Active Teams), only Org A's team in
@@ -36,8 +38,9 @@ SELECT ok(coalesce((SELECT reloptions @> ARRAY['security_invoker=true'] FROM pg_
 SELECT is(
     (SELECT array_agg(attname::text ORDER BY attnum) FROM pg_attribute
       WHERE attrelid = to_regclass('public.view_org_metrics') AND attnum > 0 AND NOT attisdropped),
-    ARRAY['organization_id', 'organization_name', 'total_players', 'total_teams', 'total_users'],
-    'view_org_metrics columns, in order, are what the Reports page reads');
+    ARRAY['organization_id', 'organization_name', 'total_players', 'total_teams', 'total_users',
+          'season_settings_id'],
+    'view_org_metrics columns, in order, are what the Reports page reads, the season last (20261108010000)');
 SELECT is(
     (SELECT array_agg(attname::text ORDER BY attnum) FROM pg_attribute
       WHERE attrelid = to_regclass('public.view_league_standings') AND attnum > 0 AND NOT attisdropped),

@@ -38,7 +38,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(106);
+SELECT plan(107);
 
 -- ── 0. Setup (as the test's own superuser role) ─────────────────────────────
 -- Anonymous visitors V1-V6 and a real user, Dave. The password-length trigger asks every new auth user
@@ -114,6 +114,18 @@ SELECT is(
        FROM public.players WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'demoA')),
     ARRAY[1259, 128]::bigint[],
     'the demo league is 1,259 players on 128 teams'
+);
+-- 20261108010000: a player and a coach belong to a season; the demo's are its one (active) season.
+SELECT is(
+    (SELECT array[
+        (SELECT count(*) FROM public.players p WHERE p.organization_id = o AND p.season_settings_id = s),
+        (SELECT count(*) FROM public.players p WHERE p.organization_id = o),
+        (SELECT count(*) FROM public.coaches c WHERE c.organization_id = o AND c.season_settings_id = s),
+        (SELECT count(*) FROM public.coaches c WHERE c.organization_id = o)
+     ] FROM (SELECT x.id AS o, (SELECT ss.id FROM public.season_settings ss WHERE ss.organization_id = x.id AND ss.status = 'active') AS s
+               FROM t_ids x WHERE x.name = 'demoA') y),
+    ARRAY[1259, 1259, 251, 251]::bigint[],
+    'every demo player and coach is in the demo''s active season'
 );
 -- The team run the Teams, Practices and Games pages read their teams from (the practice auto-scheduler
 -- is disabled without teams): one completed run of the season holding all 128 teams.

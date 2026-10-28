@@ -49,13 +49,14 @@ BEGIN
     SELECT string_agg(attname, ',' ORDER BY attnum) INTO v_standings
       FROM pg_attribute
      WHERE attrelid = 'public.view_league_standings'::regclass AND attnum > 0 AND NOT attisdropped;
-    IF v_org IS DISTINCT FROM 'organization_id,organization_name,total_players,total_teams,total_users' THEN
+    -- Run at head: 20261108010000 appended the season (one row per season of an organization).
+    IF v_org IS DISTINCT FROM 'organization_id,organization_name,total_players,total_teams,total_users,season_settings_id' THEN
         RAISE EXCEPTION 'view_org_metrics columns are %', v_org;
     END IF;
     IF v_standings IS DISTINCT FROM 'team_id,organization_id,team_name,division_id,games_played,wins,losses,draws,goals_for,goals_against,goal_differential,points,division,season_settings_id' THEN
         RAISE EXCEPTION 'view_league_standings columns are %', v_standings;
     END IF;
-    RAISE NOTICE 'columns: view_org_metrics 5 and view_league_standings 14, in the definitive schema''s order with division and season_settings_id last';
+    RAISE NOTICE 'columns: view_org_metrics 6 and view_league_standings 14, in the definitive schema''s order with division and season_settings_id last';
 END;
 $$;
 

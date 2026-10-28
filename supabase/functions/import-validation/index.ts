@@ -33,7 +33,12 @@ import {
   withDeclaredColumns,
   withoutBirthKeys,
 } from '../_shared/import-allowlist.ts';
-import { importNaturalAge, importSeason } from '../_shared/natural-age.ts';
+import {
+  importNaturalAge,
+  importSeason,
+  type ImportSeason,
+  type WindowedDivision,
+} from '../_shared/natural-age.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
 
 // --- Constants ---
@@ -661,17 +666,34 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // active one: Phase E1), with that season's cutoff.
   // The file's birth date is read for it here and never staged: the staged
   // row carries the age, and the browser keeps the date for the session.
-  let season: { season_year?: number | null; age_cutoff_mode?: string | null } | null = null;
+  let season: ImportSeason | null = null;
+  // The season's divisions with a birthdate window (Phase E3b): a birth date in one counts as
+  // that division's age. Read for the season the import adds to, and only when it has any.
+  let windowedDivisions: WindowedDivision[] = [];
   if (body.import_type === 'players') {
     const { data: seasons, error: seasonError } = await serviceClient
       .from('season_settings')
-      .select('id, status, season_year, age_cutoff_mode')
+      .select('id, status, season_year, age_cutoff_mode, age_cutoff_month, age_cutoff_day')
       .eq('organization_id', body.organization_id);
     if (seasonError) {
       await logFailure(logCtx, 'Season lookup failed', seasonError);
       return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);
     }
     season = importSeason(seasons ?? [], jobSeasonId);
+    if (season?.id) {
+      const { data: divisionRows, error: divisionError } = await serviceClient
+        .from('divisions')
+        .select('name, min_age, max_age, birthdate_start, birthdate_end')
+        .eq('organization_id', body.organization_id)
+        .eq('season_settings_id', season.id)
+        .not('birthdate_start', 'is', null)
+        .not('birthdate_end', 'is', null);
+      if (divisionError) {
+        await logFailure(logCtx, 'Division window lookup failed', divisionError);
+        return jsonResponse({ status: 'error', message: 'Division window lookup failed' }, 500);
+      }
+      windowedDivisions = (divisionRows ?? []) as WindowedDivision[];
+    }
   }
 
   for (let i = 0; i < body.rows.length; i++) {
@@ -715,6 +737,9 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         dob: rest['date_of_birth'],
         seasonYear: season?.season_year ?? null,
         cutoffMode: season?.age_cutoff_mode ?? null,
+        cutoffMonth: season?.age_cutoff_month ?? null,
+        cutoffDay: season?.age_cutoff_day ?? null,
+        divisions: windowedDivisions,
       });
       normalizedRow = naturalAge === null ? rest : { ...rest, natural_age: String(naturalAge) };
     }

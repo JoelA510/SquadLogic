@@ -96,6 +96,147 @@ describe('the natural age, core and Edge copies', () => {
   });
 });
 
+/**
+ * Phase E3b (docs/changes/2026-10-27-season-enrollment.md, C3): the custom cutoff day and a
+ * division's birth-date window are read by both copies, on a corpus written here.
+ */
+describe('the custom cutoff and division windows, core and Edge copies', () => {
+  const CUTOFFS = [
+    [undefined, undefined],
+    [9, 1],
+    [8, 1],
+    [1, 1],
+    [2, 29],
+    [3, 1],
+    [12, 31],
+    [13, 1],
+    [2, 30],
+    [4, 31],
+    [null, null],
+    [9, undefined],
+  ];
+  const MODES = ['school_year_aug_jul', 'birth_year', 'custom', 'lunar', undefined];
+  const WINDOWS = [
+    undefined,
+    null,
+    [],
+    [
+      {
+        name: 'U4',
+        min_age: 4,
+        max_age: 4,
+        birthdate_start: '2024-01-01',
+        birthdate_end: '2024-07-31',
+      },
+    ],
+    [{ name: 'U4 Coed', birthdate_start: '2024-01-01', birthdate_end: '2024-07-31' }],
+    [{ name: 'Little', birthdate_start: '2024-01-01', birthdate_end: '2024-07-31' }],
+    [{ name: 'U4', birthdate_start: '2024-01-01' }],
+    [
+      {
+        name: 'U4',
+        min_age: 4,
+        max_age: 4,
+        birthdate_start: '2015-06-01',
+        birthdate_end: '2016-12-31',
+      },
+      { name: 'U11-U12', birthdate_start: '2014-01-01', birthdate_end: '2016-03-01' },
+      {
+        name: 'U3',
+        min_age: 3,
+        max_age: 3,
+        birthdate_start: '2016-01-01',
+        birthdate_end: '2016-12-31',
+      },
+    ],
+    [
+      {
+        name: 'U10',
+        min_age: '10',
+        max_age: '10',
+        birthdate_start: 'not a date',
+        birthdate_end: '2016-12-31',
+      },
+    ],
+  ];
+  const DOBS = [
+    undefined,
+    'not a date',
+    '2024-03-15',
+    '2024-01-01',
+    '2024-07-31',
+    '2023-12-31',
+    '2016-02-29',
+    '2016-02-28',
+    '2016-03-01',
+    '2016-08-31',
+    '2016-09-01',
+    '2016-12-31',
+    '2015-07-04',
+    '2017-02-28',
+  ];
+
+  it('agree on every cutoff day, mode, window list and birth date of the corpus', () => {
+    let compared = 0;
+    let windowed = 0;
+    const changedByWindow = new Set();
+    for (const mode of MODES) {
+      for (const [cutoffMonth, cutoffDay] of CUTOFFS) {
+        for (const divisions of WINDOWS) {
+          for (const dob of DOBS) {
+            const params = {
+              ageGroup: '7',
+              dob,
+              seasonYear: 2026,
+              cutoffMode: mode,
+              cutoffMonth,
+              cutoffDay,
+              divisions,
+            };
+            const expected = core.importNaturalAge(params);
+            expect(edge.importNaturalAge(params), JSON.stringify(params)).toBe(expected);
+            const standard = core.computeAgeNumber(dob, 2026, mode, {
+              month: cutoffMonth,
+              day: cutoffDay,
+            });
+            expect(
+              edge.computeAgeNumber(dob, 2026, mode, { month: cutoffMonth, day: cutoffDay }),
+              JSON.stringify(params)
+            ).toBe(standard);
+            if (standard !== null) {
+              const w = core.windowedAgeNumber(dob, standard, divisions);
+              expect(edge.windowedAgeNumber(dob, standard, divisions), JSON.stringify(params)).toBe(
+                w
+              );
+              if (w !== null) {
+                windowed += 1;
+                if (w !== standard) changedByWindow.add(`${mode}/${dob}`);
+              }
+            }
+            compared += 1;
+          }
+        }
+      }
+    }
+    expect(compared).toBe(MODES.length * CUTOFFS.length * WINDOWS.length * DOBS.length);
+    // Not vacuous: windows held dates, and moved ages the cutoff alone would have given.
+    expect(windowed).toBeGreaterThan(100);
+    expect(changedByWindow.size).toBeGreaterThan(5);
+  });
+
+  it('agree on the calendar days a custom cutoff accepts', () => {
+    for (const month of [0, 1, 2, 4, 12, 13, '9', 'x', null, undefined, 2.5]) {
+      for (const day of [0, 1, 28, 29, 30, 31, 32, '1', null, undefined]) {
+        expect(edge.cutoffMonthDay(month, day), `${month}/${day}`).toBe(
+          core.cutoffMonthDay({ month, day })
+        );
+      }
+    }
+    expect(core.cutoffMonthDay({ month: 2, day: 29 })).toBe(229);
+    expect(core.cutoffMonthDay({ month: 4, day: 31 })).toBeNull();
+  });
+});
+
 describe("the season an import's ages are counted in", () => {
   it("is the one finalize_import_job attaches divisions to: the job's season, else the active one", () => {
     const seasons = [

@@ -135,6 +135,8 @@ function breakPlayedApartPairs(players) {
  * @param {Array<Object>} [params.coaches] - imported coaches with child links
  * @param {number} params.seasonYear
  * @param {string} [params.cutoffMode]
+ * @param {number|null} [params.cutoffMonth] - the season's custom cutoff month
+ * @param {number|null} [params.cutoffDay] - and day
  * @param {Array<Object>|Object} [params.divisions] - every division of the league: a player
  *   who plays in their own age division is placed in the one that holds their natural age.
  * @param {Array<Object>} [params.roster] - every imported player (id, division, names,
@@ -150,6 +152,8 @@ export function prepareTeamingInput({
   divisions = [],
   seasonYear,
   cutoffMode,
+  cutoffMonth,
+  cutoffDay,
   buddyRule = BUDDY_RULES.MUTUAL,
 }) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
@@ -189,6 +193,8 @@ export function prepareTeamingInput({
     divisions,
     seasonYear,
     cutoffMode,
+    cutoffMonth,
+    cutoffDay,
   });
   const apart = breakPlayedApartPairs(playUp.players);
   const requestsAfterPlay = buddyRequests.map((outcome) =>

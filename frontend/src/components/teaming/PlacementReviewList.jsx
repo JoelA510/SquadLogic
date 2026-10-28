@@ -13,7 +13,8 @@ const NOT_PLACED_REASONS = {
 
 /** Why a player cannot be placed, in words (`applyPlayUpEligibility`). */
 const BLOCKED_PLACEMENTS = {
-  no_division: 'No suitable division in this import (the same gender or co-ed) holds a player of their age.',
+  no_division:
+    'No suitable division in this import (the same gender or co-ed) holds a player of their age.',
 };
 
 function eligibilityText(placement, reviewReason) {

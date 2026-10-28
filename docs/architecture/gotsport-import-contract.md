@@ -174,16 +174,18 @@ import into (22023, `season_missing`). An import into a draft leaves the active
 season's rows untouched, to the last column.
 
 A season's **age rule** (the cutoff, the season year and its divisions'
-birth-date windows) is fixed while a player import into it is waiting to be
+birth-date windows and the age bands of those that bear one) is fixed while a player import into it is waiting to be
 applied (22023, `import_pending`) and once it has players (`season_has_players`):
 the import stages each row's natural age under the rule in force, so the rule
 does not move between the staging and the apply. Finish or cancel the pending
 import first.
 
-The validation stamps a player file's job with a fingerprint of that rule **before it reads the
-rule**, and `finalize_import_job` refuses, under the season lock, a job whose stamp is no longer the
-season's rule (22023, `age_rule_changed`): a change between the validation's read and its first
-staged row has nothing pending to refuse, and this is what catches it. Validate the file again.
+The validation reads that rule once, with the season's `age_rule_revision` (a number that goes up on
+every change that moves an age, and never goes back), and stamps the player file's job with the
+revision; it counts every age from what that one read returned. `finalize_import_job` refuses, under the
+season lock, a job whose stamp is no longer the season's revision (22023, `age_rule_changed`): a change
+between the validation's read and its first staged row has nothing pending to refuse, and a change
+that was reversed still shows. Validate the file again.
 
 A **completed** season is read-only for a signed-in caller, players and coaches
 included (22023, `season_completed`): no patch, delete or insert by an admin,

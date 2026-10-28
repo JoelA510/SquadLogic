@@ -201,17 +201,28 @@ under "For the owner"). Migration `20261109010000_season_rollover.sql`.
   unfinished registration job of the season (a legacy job with no season counts for the active one) with
   staged rows not yet promoted; cancelling a job fails it, which ends it, and a coach-only job stages no
   player rows. Ages are never recomputed: the rule waits instead.
-  **The window the pending check cannot see** (Codex, second round on #680): `import-validation` reads the
-  rule and only then stages its first row, and a change between the two finds nothing pending. So the
-  validation first stamps the job (`stamp_import_job_age_rule`, service role; `import_jobs.age_rule_fingerprint`)
-  with `season_age_rule_fingerprint(season)`, a digest of the cutoff mode, month, day, season year and each
-  window-bearing division's id, window and band; `finalize_import_job` takes the season lock and refuses a
-  stamped job whose stamp is not the season's rule now (22023, `age_rule_changed`), leaving the job to be
-  validated again. A fingerprint rather than a version counter: nothing else has to remember to bump it, a
-  change to a windowed division's band is covered, and the stamp is taken before the read, so a change in
-  between can only make it stale (a refusal), never make it match a rule the ages were not counted under. The
-  first batch of a file replaces a stamp (validating again refreshes it); a later batch keeps the first's. A
-  job with no stamp (a coach or field job, or one made before this migration) is never refused.
+  **The window the pending check cannot see** (Codex, rounds two and three on #680): `import-validation` reads
+  the rule and only then stages its first row, so a change between the two finds nothing pending, and a
+  change followed by its reversal (A, B, A) leaves a rule that looks the same. So `season_settings` carries
+  an `age_rule_revision` that only goes up, bumped by a trigger on every change that moves an age (the cutoff
+  mode, month, day, the season year, and a window-bearing division's window, `min_age`/`max_age` or, where a
+  band column is empty and the name supplies the band, its name; a window-bearing division arriving or
+  going). One service-role RPC, `import_age_rule(org, job, restart)`, returns the rule the validation needs
+  (the season's year, cutoff and its window-bearing divisions) with the revision from one statement, and
+  stamps the job with the season and that revision; the Edge Function counts every age from what it
+  returned and reads nothing of its own. `finalize_import_job` takes the season lock and refuses a stamped
+  job whose season and revision are not the season's now (22023, `age_rule_changed`), leaving the job to be
+  validated again. A revision rather than a digest of the values: a digest cannot tell A, B, A from no
+  change, and the revision is taken from the same snapshot as the data. The first batch of a file replaces
+  a stamp (validating again refreshes it); a later batch keeps the first's. A job with no stamp (a coach
+  or field job, or one made before this migration) is never refused.
+- **A division's band is part of the rule.** The guard on `divisions` also covers `min_age`, `max_age` and a
+  name that supplies the band, but only for a division that bears a window (a division with none does not
+  move an age): once the season has players (`season_has_players`) or while an import is pending
+  (`import_pending`), the change is refused. `upsert_division_for_import` is left as it is and meets the
+  trigger: a call that names no band (the coed transition's) changes nothing, and one that moves the band
+  of a window-bearing division in such a season is refused loudly rather than ignored, since silently
+  keeping the old band would hide that the admin's request did nothing.
 - **Guard widening.** `create_import_job`, `finalize_import_job` and `finalize_coach_import_job` allow the
   active season or a draft and refuse a completed one; `finalize_field_import_job` (organization-level
   locations and fields) and a field job for a draft stay active-only.

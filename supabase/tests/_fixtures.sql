@@ -16,7 +16,8 @@
 --
 --   Alice    11111111-1111-1111-1111-111111111111   admin of Org A
 --   Bob      22222222-2222-2222-2222-222222222222   admin of Org B
---   Charlie  33333333-3333-3333-3333-333333333333   coach of Org A
+--   Charlie  33333333-3333-3333-3333-333333333333   signed in, a member of no organization
+--                                                    (a coach of Org A until 20261104010000 removed that role)
 --
 --   Org A    a1111111-1111-1111-1111-111111111111
 --   Org B    b2222222-2222-2222-2222-222222222222
@@ -71,13 +72,13 @@ ON CONFLICT (id) DO NOTHING;
 -- 3. Organization members
 --    Alice   -> admin @ Org A
 --    Bob     -> admin @ Org B
---    Charlie -> coach @ Org A
+--    Charlie -> no membership (no coach role exists since 20261104010000: only league
+--               admins sign in, so the fixtures' "not an admin" persona is a stranger)
 -- ──────────────────────────────────────────────────────────────
 INSERT INTO public.organization_members (organization_id, profile_id, role)
 VALUES
     ('a1111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', 'admin'),
-    ('b2222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222', 'admin'),
-    ('a1111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', 'coach')
+    ('b2222222-2222-2222-2222-222222222222', '22222222-2222-2222-2222-222222222222', 'admin')
 ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
 -- ──────────────────────────────────────────────────────────────

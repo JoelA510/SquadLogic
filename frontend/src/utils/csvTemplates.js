@@ -31,8 +31,11 @@ export const CSV_TEMPLATES = {
     filename: 'squadlogic-players-template.csv',
   },
   coaches: {
-    headers: ['Full Name', 'Email', 'Willing to Coach'],
-    example: ['Alex Smith', 'coach@example.com', 'yes'],
+    // Child Registration ID is optional: the registration ids (as the players import has them) of
+    // the coach's children, separated by ; or ,. It is what anchors the coach's team (S7), so import
+    // players first.
+    headers: ['Full Name', 'Email', 'Willing to Coach', 'Child Registration ID'],
+    example: ['Alex Smith', 'coach@example.com', 'yes', 'GS-1001; GS-1003'],
     filename: 'squadlogic-coaches-template.csv',
   },
   fields: {

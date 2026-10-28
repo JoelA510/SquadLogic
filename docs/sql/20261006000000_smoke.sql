@@ -118,7 +118,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org Heat other', 'smoke-org-heat-other')
         RETURNING id INTO v_other_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach'), (v_other_org, v_outsider, 'admin');
+        (v_org, v_admin, 'admin'), (v_other_org, v_outsider, 'admin');  -- v_coach: signed in, no membership (no coach role since 20261104010000)
 
     -- ---- (a) the admin writes; label and url are stored trimmed ------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -134,7 +134,7 @@ BEGIN
     END IF;
     RAISE NOTICE 'the admin set category 2 with one link, stored trimmed, updated_by the admin';
 
-    -- ---- (b) a coach and another organisation's admin are refused ----------
+    -- ---- (b) a signed-in non-member and another organisation's admin are refused ----------
     v_refused := 0;
     FOREACH v_caller IN ARRAY ARRAY[v_coach, v_outsider] LOOP
         PERFORM set_config('request.jwt.claim.sub', v_caller::text, true);
@@ -147,9 +147,9 @@ BEGIN
     END LOOP;
     SELECT * INTO v_row FROM public.organization_heat_settings WHERE organization_id = v_org;
     IF v_refused <> 2 OR v_row.threshold_category <> 2 THEN
-        RAISE EXCEPTION 'a coach and another organisation''s admin: % of 2 refused 42501, category now %', v_refused, v_row.threshold_category;
+        RAISE EXCEPTION 'a non-member and another organisation''s admin: % of 2 refused 42501, category now %', v_refused, v_row.threshold_category;
     END IF;
-    RAISE NOTICE 'a coach and another organisation''s admin were each refused 42501, 2 of 2, and the settings are unchanged';
+    RAISE NOTICE 'a signed-in non-member and another organisation''s admin were each refused 42501, 2 of 2, and the settings are unchanged';
 
     -- ---- (c) invalid categories are refused 22023 --------------------------
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -240,17 +240,17 @@ BEGIN
     END IF;
     RAISE NOTICE 'every accepted heat settings write audited -- 2 of 2, the first created with before null and after category 2, the clear updated from category 2 to 1 with no links';
 
-    -- ---- (g) members read their own organisation only ----------------------
+    -- ---- (g) an admin reads their own organisation only ----------------------
     PERFORM set_config('request.jwt.claim.sub', v_outsider::text, true);
     PERFORM public.admin_set_org_heat_settings(v_other_org, 3, '[]'::jsonb);
     SET LOCAL ROLE authenticated;
-    PERFORM set_config('request.jwt.claim.sub', v_coach::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SELECT count(*) INTO v_n FROM public.organization_heat_settings;
     RESET ROLE;
     IF v_n <> 1 THEN
-        RAISE EXCEPTION 'a coach of one organisation reads % heat settings rows; expected only their own (1)', v_n;
+        RAISE EXCEPTION 'an admin of one organisation reads % heat settings rows; expected only their own (1)', v_n;
     END IF;
-    RAISE NOTICE 'a coach reads their own organisation''s heat settings and not the other organisation''s (1 of 2 rows visible)';
+    RAISE NOTICE 'an admin reads their own organisation''s heat settings and not the other organisation''s (1 of 2 rows visible)';
 END;
 $$;
 

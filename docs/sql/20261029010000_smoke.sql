@@ -19,7 +19,7 @@
 --     changing only it changes it;
 --   * the reservation writer: an admin sets and clears one (one audit row
 --     each, before and after), a repeat changes and audits nothing, a
---     division of another organization is refused 22023, a coach and another
+--     division of another organization is refused 22023, a signed-in non-member and another
 --     organization's admin 42501, nothing written;
 --   * the fields CSV: a practice row's Division reserves its slot, named in
 --     the season the import attaches to (a same-named division of another
@@ -116,7 +116,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('D2 Smoke Org', 'd2-smoke-org') RETURNING id INTO v_org;
     INSERT INTO public.organizations (name, slug) VALUES ('D2 Smoke Other', 'd2-smoke-other') RETURNING id INTO v_other;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach'), (v_other, v_outsider, 'admin');
+        (v_org, v_admin, 'admin'), (v_other, v_outsider, 'admin');   -- v_coach: signed in, no membership (no coach role since 20261104010000)
     -- Two seasons: last year's (completed) also has a U4, which a practice
     -- row's Division must not reach.
     INSERT INTO public.season_settings (organization_id, name, status, season_start)
@@ -240,7 +240,7 @@ BEGIN
         RESET ROLE;
     END LOOP;
     IF v_refused <> 3 OR (SELECT division_id FROM public.practice_slots WHERE id = v_slot) IS DISTINCT FROM v_u4 THEN
-        RAISE EXCEPTION 'the reservation writer refused % of 3 (another organization''s division 22023, a coach and an outside admin 42501), or the reservation moved', v_refused;
+        RAISE EXCEPTION 'the reservation writer refused % of 3 (another organization''s division 22023, a signed-in non-member and an outside admin 42501), or the reservation moved', v_refused;
     END IF;
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -253,7 +253,7 @@ BEGIN
               AND metadata -> 'previous' ->> 'name' = 'U4' AND metadata -> 'current' ->> 'division_id' IS NULL) <> 1 THEN
         RAISE EXCEPTION 'an admin''s clear was not stored and audited with U4 before it';
     END IF;
-    RAISE NOTICE 'reservation writer: an admin set and cleared one, audited once each with the before and after; the repeat changed nothing; another organization''s division 22023, a coach and an outside admin 42501, 3 of 3, nothing written';
+    RAISE NOTICE 'reservation writer: an admin set and cleared one, audited once each with the before and after; the repeat changed nothing; another organization''s division 22023, a signed-in non-member and an outside admin 42501, 3 of 3, nothing written';
 
     -- ---- The fields CSV ----------------------------------------------------
     INSERT INTO public.import_jobs (organization_id, job_type, storage_path, status, total_rows)

@@ -8,7 +8,7 @@
 --     check that only looked for an absent key cannot pass on an empty row;
 --   * the file name still forms the job's `storage_path`, sanitised as before
 --     (`/`, `\` and `:` become `_`), because the import reads that path back;
---   * a coach of the organization (a member, not an admin) is still refused
+--   * a signed-in user who is not a member (a coach, before 20261104010000) is still refused
 --     with 42501 and no job is created;
 --   * the function is still SECURITY DEFINER with search_path=public, callable
 --     by `authenticated` and not by `anon`.
@@ -42,8 +42,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org Import', 'smoke-org-import')
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'),
-        (v_org, v_coach, 'coach');
+        (v_org, v_admin, 'admin');   -- v_coach: signed in, no membership (no coach role since 20261104010000)
 
     -- (a) The admin's import: one import.started row, no file name in it.
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -75,7 +74,7 @@ BEGIN
     END IF;
     RAISE NOTICE 'the job''s storage_path still carries the sanitised file name (imports/<caller>/.._spring_players.csv)';
 
-    -- (c) A coach is still refused, and nothing is created.
+    -- (c) A signed-in non-member is still refused, and nothing is created.
     SELECT count(*) INTO v_jobs_before FROM public.import_jobs WHERE organization_id = v_org;
     PERFORM set_config('request.jwt.claim.sub', v_coach::text, true);
     v_code := NULL;
@@ -85,12 +84,12 @@ BEGIN
         GET STACKED DIAGNOSTICS v_code = RETURNED_SQLSTATE;
     END;
     IF v_code IS DISTINCT FROM '42501' THEN
-        RAISE EXCEPTION 'a coach''s create_import_job was not refused 42501 (got %)', coalesce(v_code, 'success');
+        RAISE EXCEPTION 'a non-member''s create_import_job was not refused 42501 (got %)', coalesce(v_code, 'success');
     END IF;
     IF (SELECT count(*) FROM public.import_jobs WHERE organization_id = v_org) <> v_jobs_before THEN
-        RAISE EXCEPTION 'a refused coach import still created a job';
+        RAISE EXCEPTION 'a refused non-member import still created a job';
     END IF;
-    RAISE NOTICE 'a coach''s create_import_job is refused 42501 and creates no job';
+    RAISE NOTICE 'a signed-in non-member''s create_import_job is refused 42501 and creates no job';
 
     -- (d) The posture is unchanged.
     IF NOT (SELECT p.prosecdef AND COALESCE(p.proconfig, '{}') <@ ARRAY['search_path=public','TimeZone=UTC'] AND 'search_path=public' = ANY (COALESCE(p.proconfig, '{}'))

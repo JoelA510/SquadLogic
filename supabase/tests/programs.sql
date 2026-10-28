@@ -98,11 +98,11 @@ SELECT throws_ok(
 
 -- ── 2. Who reads and writes the table ──────────────────────────────────────
 SET LOCAL role = 'authenticated';
-SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(
     (SELECT count(*)::int FROM public.programs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'),
     3,
-    'a coach of Org A reads Org A''s programs (one default per season)'
+    'an admin of Org A reads Org A''s programs (one default per season)'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.programs WHERE organization_id = 'b2222222-2222-2222-2222-222222222222'),
@@ -418,28 +418,29 @@ SELECT is(
     12,
     'twelve successful writes so far, twelve audit rows (every refusal above wrote none)'
 );
+-- The ids the refusals name, read while still an admin (a non-member reads no program).
+SELECT id AS junior_id FROM public.programs WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1' AND name = 'Junior' \gset
+SELECT id AS default_id FROM public.programs WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1' AND is_default \gset
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok(
     $$SELECT public.admin_upsert_program('a1111111-1111-1111-1111-111111111aaa', NULL, 'Coach made')$$,
     '42501', NULL,
-    'a coach cannot create a program'
+    'a signed-in non-member cannot create a program'
 );
 SELECT throws_ok(
     $$SELECT public.admin_set_division_program('a1111111-1111-1111-1111-11111111d701', NULL)$$,
     '42501', NULL,
-    'a coach cannot move a division'
+    'a non-member cannot move a division'
 );
 SELECT throws_ok(
-    $$SELECT public.admin_delete_program((SELECT id FROM public.programs WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1' AND name = 'Junior'))$$,
+    format($q$SELECT public.admin_delete_program(%L)$q$, :'junior_id'),
     '42501', NULL,
-    'a coach cannot delete a program'
+    'a non-member cannot delete a program'
 );
 SELECT throws_ok(
-    $$SELECT public.admin_merge_programs(
-        (SELECT id FROM public.programs WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1' AND name = 'Junior'),
-        (SELECT id FROM public.programs WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111111d1' AND is_default))$$,
+    format($q$SELECT public.admin_merge_programs(%L, %L)$q$, :'junior_id', :'default_id'),
     '42501', NULL,
-    'a coach cannot merge programs'
+    'a non-member cannot merge programs'
 );
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT throws_ok(
@@ -457,7 +458,7 @@ SELECT is(
     (SELECT count(*)::int FROM public.audit_log WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'
         AND action IN ('program.upserted', 'program.deleted', 'program.merged', 'division.program_changed')),
     12,
-    'the refusals by a coach and another organization''s admin wrote no audit row'
+    'the refusals by a non-member and another organization''s admin wrote no audit row'
 );
 
 -- ── 8. A completed season''s program cannot be changed through any writer ───

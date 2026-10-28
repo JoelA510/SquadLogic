@@ -111,16 +111,17 @@ SELECT throws_ok(
     'database rejects division organization/season organization mismatch'
 );
 
--- Charlie is a coach in Org A. He can read but cannot update/insert settings.
+-- Charlie is signed in with no membership (a coach in Org A until 20261104010000). He can neither
+-- read nor update/insert settings.
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 
 SELECT ok(
-    EXISTS (
+    NOT EXISTS (
         SELECT 1
           FROM public.divisions
          WHERE id = 'a1111111-1111-1111-1111-11111111abcd'
     ),
-    'Org A coach can still read his org division'
+    'a signed-in non-member cannot read Org A''s division'
 );
 
 SELECT lives_ok(
@@ -129,9 +130,10 @@ SELECT lives_ok(
            SET max_roster_size = 99
          WHERE id = 'a1111111-1111-1111-1111-11111111abcd'
     $$,
-    'Org A coach cannot update division constraints'
+    'a non-member cannot update division constraints'
 );
 
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT results_eq(
     $$
         SELECT max_roster_size
@@ -139,9 +141,10 @@ SELECT results_eq(
          WHERE id = 'a1111111-1111-1111-1111-11111111abcd'
     $$,
     $$ VALUES (14) $$,
-    'coach update is filtered by RLS and leaves admin-owned constraints unchanged'
+    'a non-member''s update is filtered by RLS and leaves admin-owned constraints unchanged (read by an admin)'
 );
 
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok(
     $$
         INSERT INTO public.divisions (
@@ -159,7 +162,7 @@ SELECT throws_ok(
     $$,
     '42501',
     NULL,
-    'Org A coach cannot insert division constraints'
+    'a non-member cannot insert division constraints'
 );
 
 SELECT * FROM finish();

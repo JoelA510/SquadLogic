@@ -166,8 +166,7 @@ export function summarizePlacementReview(results) {
       ? results.coachNamesById
       : {};
   // A coach linked through `coach_team_requests` is a `coaches` row (a UUID) with a name on file.
-  // A coach the import row names (`coach_email`) is only that text, which is how the admin
-  // knows them, so it labels itself.
+  // An id that is not a UUID (a caller's own label) labels itself.
   const coachNameOf = (coachId) => {
     if (typeof coachNames[coachId] === 'string' && coachNames[coachId].trim()) {
       return coachNames[coachId].trim();

@@ -10,12 +10,11 @@
 --     `team_players` each have one SELECT policy, `is_org_admin`, and an admin
 --     still reads both (the admin arm the old admin-or-guardian policies held
 --     was not dropped with them);
---   * `get_team_roster` no longer returns `is_my_child`; the calendar token
---     and `get_team_staff` admit the team's current coach, and refuse a member
---     who coaches no team;
---   * the role checks admit admin, coach, staff (and tenant_admin for a
---     member) and nothing else; `admin_change_member_role` refuses `parent`
---     (22023).
+--   * `get_team_roster` no longer returns `is_my_child`; the calendar token,
+--     `get_team_roster` and `get_team_staff` admit an admin and refuse a
+--     signed-in user with no membership (a coach, before 20261104010000);
+--   * the role checks admit admin, staff (and tenant_admin for a member) and
+--     nothing else; `admin_change_member_role` refuses `parent` (22023).
 -- Run as `authenticated` with a JWT sub where a caller matters.
 
 BEGIN;
@@ -48,14 +47,14 @@ SELECT is(
     'no public function or policy names a dropped guardian object'
 );
 -- Positive control for the scan above: the same pattern finds a real body
--- that names the current-coach helper, so it reads real bodies. (It read
+-- that names the admin helper, so it reads real bodies. (It read
 -- get_coach_directory's call of org_flag until 20261025010000 dropped the
 -- directory.)
 SELECT ok(
     EXISTS (SELECT 1 FROM pg_proc p
              WHERE p.oid = 'public.get_team_roster(uuid)'::regprocedure
-               AND regexp_replace(p.prosrc, '--[^\n]*', '', 'g') ~ '\mis_current_team_coach\M'),
-    'control: the scan reads real bodies (get_team_roster calls is_current_team_coach)'
+               AND regexp_replace(p.prosrc, '--[^\n]*', '', 'g') ~ '\mis_org_admin\M'),
+    'control: the scan reads real bodies (get_team_roster calls is_org_admin)'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.audit_actions WHERE action = 'guardian.linked'),
@@ -78,9 +77,9 @@ INSERT INTO public.players (id, organization_id, first_name, last_name) VALUES
 INSERT INTO public.team_players (team_id, player_id, organization_id) VALUES
     ('aaaaaaaa-0000-0000-0000-000000000001', 'a1111111-0000-4000-8000-0000000003a1',
      'a1111111-1111-1111-1111-111111111111');
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status)
+INSERT INTO public.coaches (id, organization_id, full_name, email, status)
 VALUES ('a1111111-0000-4000-8000-0000000003c1', 'a1111111-1111-1111-1111-111111111111',
-        '33333333-3333-3333-3333-333333333333', 'R3 Coach', 'r3-coach@test.local', 'active');
+        'R3 Coach', 'r3-coach@test.local', 'active');
 INSERT INTO public.team_coach_assignments
     (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via)
 VALUES ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001',
@@ -99,45 +98,35 @@ SELECT is(
     (SELECT count(*)::int FROM public.players WHERE organization_id = 'a1111111-1111-1111-1111-111111111111')
     + (SELECT count(*)::int FROM public.team_players WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'),
     0,
-    'the team''s current coach reads no player or roster row directly'
+    'Charlie, signed in with no membership, reads no player or roster row directly'
 );
 
 -- ── 3. The roster, staff and calendar token reads ─────────────────────────
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is(
     (SELECT array_agg(r.first_name || ' ' || r.last_name) FROM public.get_team_roster('aaaaaaaa-0000-0000-0000-000000000001') r),
     ARRAY['Rhea Three'],
-    'the current coach reads the roster''s names'
+    'an admin reads the roster''s names'
 );
 SELECT is(
     (SELECT count(*)::int FROM public.team_calendar_tokens WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
     1,
-    'the current coach reads the team''s calendar token'
+    'an admin reads the team''s calendar token'
 );
 SELECT is(
     (SELECT array_agg(s.full_name) FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001') s),
     ARRAY['R3 Coach'],
-    'the current coach reads the team''s staff'
+    'an admin reads the team''s staff'
 );
--- Any other member of Org A: Dee, a coach-role member who coaches no team.
-RESET role;
-INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-    ('a1111111-0000-4000-8000-0000000003d1', 'r3-dee@test.local', '{"password_length": 12}')
-ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.profiles (id, email, full_name) VALUES
-    ('a1111111-0000-4000-8000-0000000003d1', 'r3-dee@test.local', 'Dee')
-ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-    ('a1111111-1111-1111-1111-111111111111', 'a1111111-0000-4000-8000-0000000003d1', 'coach');
-SET LOCAL role = 'authenticated';
-SET LOCAL "request.jwt.claims" TO '{"sub":"a1111111-0000-4000-8000-0000000003d1"}';
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT is(
     (SELECT count(*)::int FROM public.team_calendar_tokens WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
     0,
-    'a member who coaches no team reads no calendar token'
+    'a signed-in non-member reads no calendar token'
 );
 SELECT throws_ok(
     $$SELECT * FROM public.get_team_staff('aaaaaaaa-0000-0000-0000-000000000001')$$,
-    '42501', NULL, 'a member who coaches no team is refused the staff'
+    '42501', NULL, 'a signed-in non-member is refused the staff'
 );
 RESET role;
 SELECT ok(
@@ -152,25 +141,25 @@ SELECT ok(
 SELECT is(
     (SELECT pg_get_constraintdef(oid) FROM pg_constraint
       WHERE conrelid = 'public.organization_members'::regclass AND conname = 'organization_members_role_check'),
-    'CHECK ((role = ANY (ARRAY[''admin''::text, ''coach''::text, ''staff''::text, ''tenant_admin''::text])))',
-    'a member is an admin, a coach, staff or a tenant_admin'
+    'CHECK ((role = ANY (ARRAY[''admin''::text, ''staff''::text, ''tenant_admin''::text])))',
+    'a member is an admin, staff or a tenant_admin'
 );
 SELECT is(
     (SELECT pg_get_constraintdef(oid) FROM pg_constraint
       WHERE conrelid = 'public.organization_invites'::regclass AND conname = 'organization_invites_role_check'),
-    'CHECK ((role = ANY (ARRAY[''admin''::text, ''coach''::text, ''staff''::text])))',
-    'an invite is for an admin, a coach or staff'
+    'CHECK ((role = ANY (ARRAY[''admin''::text, ''staff''::text])))',
+    'an invite is for an admin or staff'
 );
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT throws_ok(
     $$SELECT public.admin_change_member_role('a1111111-1111-1111-1111-111111111111',
-                                              '33333333-3333-3333-3333-333333333333', 'parent')$$,
+                                              '11111111-1111-1111-1111-111111111111', 'parent')$$,
     '22023', NULL, 'an admin cannot make a member a parent'
 );
 SELECT lives_ok(
-    $$SELECT * FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'coach')$$,
-    'an admin still invites a coach'
+    $$SELECT * FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'staff')$$,
+    'an admin still invites staff'
 );
 RESET role;
 

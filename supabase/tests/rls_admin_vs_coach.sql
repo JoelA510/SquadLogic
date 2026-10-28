@@ -1,5 +1,6 @@
--- RLS invariant: `audit_log` is readable by org admins but NOT by coaches
--- of the same org. The audit trail often contains security-sensitive
+-- RLS invariant: `audit_log` is readable by org admins but NOT by a signed-in
+-- user who is not a member (Charlie, who was a coach member of Org A until
+-- 20261104010000 removed the coach role). The audit trail often contains security-sensitive
 -- metadata (who invited whom, settings changes, export events) and must
 -- stay gated to org admins.
 --
@@ -22,8 +23,7 @@ SELECT ok(
     'Alice (admin of Org A) can read audit_log'
 );
 
--- Charlie is a coach of the same Org A → should see zero audit_log rows
--- even though he's a member of the org.
+-- Charlie is signed in and a member of no organization → zero audit_log rows.
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT is(
     (SELECT COUNT(*) FROM public.audit_log)::int,

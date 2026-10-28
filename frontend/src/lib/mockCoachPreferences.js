@@ -1,13 +1,13 @@
 /**
- * Mock arms for the three coach practice preference RPCs of migration
- * `20260927000000_coach_practice_preferences.sql` (Phase 8.6 PR 3b, PR 2).
+ * Mock arms for the two coach practice preference RPCs that remain of migration
+ * `20260927000000_coach_practice_preferences.sql` (Phase 8.6 PR 3b, PR 2): decide and set. The
+ * request RPC went with the coach's sign-in (20261104010000).
  *
  * **Refusals included, not just the happy path** (LESSONS_LEARNED #13): a mock
  * looser than the database lets a defect the database would refuse pass every
  * test. Mirrored here, with the SQL's error codes:
  *   - 23502 required arguments;
- *   - 42501 a request, decide or set by a non-admin (or on an unknown row / coach; no coach
- *     signs in, so the database's coach-themself arm of a request is not mirrored);
+ *   - 42501 a decide or set by a non-admin (or on an unknown row / coach);
  *   - 22023 a decision other than approve/reject, deciding a row that is not
  *     `requested`, a rejection carrying a level or value, a stale approval;
  *   - 23503 a venue that is not a location of the coach's organization, and
@@ -26,8 +26,10 @@
 
 import { ADMIN_ROLES } from '../constants/permissions.js';
 
+// `request_coach_practice_preference` is not here: no coach signs in, so migration 20261104010000
+// dropped it (docs/changes/2026-10-27-admin-only.md); a 'requested' row arrives with an admin's
+// import (Phase D), and the mock's tests insert one.
 export const COACH_PREFERENCE_RPCS = Object.freeze([
-  'request_coach_practice_preference',
   'admin_decide_coach_practice_preference',
   'admin_set_coach_practice_preference',
 ]);
@@ -129,47 +131,6 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
     }
     return prior ?? null;
   };
-
-  if (name === 'request_coach_practice_preference') {
-    if (!p.p_coach_id || !p.p_dimension || !p.p_level) {
-      return fail('23502', 'p_coach_id, p_dimension and p_level are required');
-    }
-    const coach = coachById(p.p_coach_id);
-    const orgId = coach?.organization_id ?? null;
-    // Admin-only here: no coach signs in (docs/changes/2026-10-27-admin-only.md). The database's
-    // own twin still admits the coach's account until its server change drops that arm.
-    if (!orgId || !isOrgAdmin(orgId)) {
-      return fail(
-        '42501',
-        'Access denied: only an admin of the coach’s organization requests a coach practice preference'
-      );
-    }
-    const value = normValue(p.p_value);
-    const refused =
-      venueRefusal(db, orgId, p.p_dimension, value) || checkRow(p.p_dimension, p.p_level, value);
-    if (refused) return refused;
-    const row = {
-      id: newId(),
-      organization_id: orgId,
-      coach_id: String(p.p_coach_id),
-      dimension: p.p_dimension,
-      level: p.p_level,
-      value,
-      status: 'requested',
-      requested_by: currentUserId,
-      requested_at: now.toISOString(),
-      decided_by: null,
-      decided_at: null,
-      effective_from: null,
-      effective_to: null,
-    };
-    table.push(row);
-    const { id, organization_id, coach_id, dimension, level, status } = row;
-    return {
-      data: { id, organization_id, coach_id, dimension, level, value, status },
-      error: null,
-    };
-  }
 
   if (name === 'admin_decide_coach_practice_preference') {
     if (!p.p_preference_id || !p.p_decision) {

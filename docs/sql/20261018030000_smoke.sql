@@ -203,7 +203,7 @@ BEGIN
     END IF;
     RAISE NOTICE 'the 23 tables carry 76 policies (85 from the rewrite, 3 from 20261019010000, less the 8 of the two tables 20261022020000 dropped, the 1 of the table 20261024010000 dropped and the 3 20261101010000 dropped from season_settings): on each of the 17 split tables an admin INSERT, UPDATE and DELETE policy and no FOR ALL';
 
-    -- ---- seed: one organization, a member, an admin and a tenant_admin ------
+    -- ---- seed: one organization, a signed-in non-member, an admin and a tenant_admin ------
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_member, 'rls-rewrite-coach@example.test', jsonb_build_object('password_length', 16)),
         (v_admin, 'rls-rewrite-admin@example.test', jsonb_build_object('password_length', 16)),
@@ -215,13 +215,13 @@ BEGIN
       ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('RLS Rewrite Org', 'rls-rewrite-org') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_member, 'coach'), (v_org, v_admin, 'admin'), (v_org, v_tenant, 'tenant_admin');
+        (v_org, v_admin, 'admin'), (v_org, v_tenant, 'tenant_admin');   -- v_member: signed in, no membership (no coach role since 20261104010000)
     INSERT INTO public.players (organization_id, first_name, last_name)
         VALUES (v_org, 'Rewrite', 'Smoke') RETURNING id INTO v_player;
     INSERT INTO public.season_settings (organization_id, name)
         VALUES (v_org, 'Rewrite Season') RETURNING id INTO v_season;
 
-    -- ---- 3a. players, as the member -----------------------------------------
+    -- ---- 3a. players, as a signed-in user who is not a member ---------------
     PERFORM set_config('request.jwt.claim.sub', v_member::text, true);
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_member, 'role', 'authenticated')::text, true);
     SET LOCAL ROLE authenticated;
@@ -230,14 +230,14 @@ BEGIN
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     RESET ROLE;
     IF v_n <> 0 OR v_rows <> 0 THEN
-        RAISE EXCEPTION 'players as a member: read % (want 0), updated % (want 0)', v_n, v_rows;
+        RAISE EXCEPTION 'players as a non-member: read % (want 0), updated % (want 0)', v_n, v_rows;
     END IF;
     SET LOCAL ROLE authenticated;
     DELETE FROM public.players WHERE id = v_player;
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     RESET ROLE;
     IF v_rows <> 0 THEN
-        RAISE EXCEPTION 'players as a member: deleted % (want 0)', v_rows;
+        RAISE EXCEPTION 'players as a non-member: deleted % (want 0)', v_rows;
     END IF;
     v_err := NULL;
     BEGIN
@@ -248,7 +248,7 @@ BEGIN
     END;
     RESET ROLE;
     IF v_err IS NULL OR v_err NOT LIKE 'new row violates row-level security policy%' THEN
-        RAISE EXCEPTION 'players as a member: the insert was not refused by RLS (error: %)', COALESCE(v_err, 'none -- it succeeded');
+        RAISE EXCEPTION 'players as a non-member: the insert was not refused by RLS (error: %)', COALESCE(v_err, 'none -- it succeeded');
     END IF;
 
     -- ---- 3b. players, as the admin ------------------------------------------
@@ -303,7 +303,7 @@ BEGIN
         RAISE EXCEPTION 'season_settings as an admin: updated % (want 0: the season RPCs are the writers)', v_rows;
     END IF;
 
-    RAISE NOTICE 'players: a member reads nothing and cannot insert, update or delete; an admin reads, inserts, updates and deletes';
+    RAISE NOTICE 'players: a non-member reads nothing and cannot insert, update or delete; an admin reads, inserts, updates and deletes';
     RAISE NOTICE 'season_settings: a tenant_admin reads and updates nothing; an admin updates nothing either (no write policy)';
 END;
 $smoke$;

@@ -6,16 +6,17 @@
 --   * the `exports` bucket exists and is private;
 --   * its policies are exactly a members' SELECT, an admins' INSERT and an
 --     admins' DELETE, all TO authenticated (no UPDATE);
---   * an admin of organization A uploads under A's folder; a coach of A (a
---     member, not an admin) is refused with 42501, and still reads both of
---     A's objects, as the admin does;
+--   * an admin of organization A uploads under A's folder and reads both of
+--     A's objects; a signed-in user with no membership (a coach, before
+--     20261104010000 removed that role) is refused an upload with 42501 and
+--     reads none;
 --   * an admin of organization B reads none of A's objects and cannot upload
 --     under A's folder;
 --   * a name with no folder, a non-UUID folder, or another organization's
 --     folder is refused with 42501 (RLS), never 22P02 (a cast error);
 --   * an update by A's own admin changes nothing (no policy);
 --   * the anonymous role reads nothing and cannot upload;
---   * a delete by A's coach, by B's admin or by the anonymous role removes
+--   * a delete by that user, by B's admin or by the anonymous role removes
 --     nothing, and one by A's admin removes the one file it names. That part
 --     runs only where SQL deletes reach the policies: on Supabase,
 --     `storage.protect_delete()` refuses every SQL delete on storage.objects
@@ -115,7 +116,7 @@ $$;
 DO $$
 DECLARE
     v_admin_a uuid := gen_random_uuid();
-    v_coach_a uuid := gen_random_uuid();
+    v_stranger_a uuid := gen_random_uuid();   -- signed in, a member of no organization
     v_admin_b uuid := gen_random_uuid();
     v_org_a uuid;
     v_org_b uuid;
@@ -145,11 +146,11 @@ BEGIN
 
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin_a, 'exports-admin-a@example.test', '{"password_length": 16}'),
-        (v_coach_a, 'exports-coach-a@example.test', '{"password_length": 16}'),
+        (v_stranger_a, 'exports-stranger-a@example.test', '{"password_length": 16}'),
         (v_admin_b, 'exports-admin-b@example.test', '{"password_length": 16}');
     INSERT INTO public.profiles (id, email) VALUES
         (v_admin_a, 'exports-admin-a@example.test'),
-        (v_coach_a, 'exports-coach-a@example.test'),
+        (v_stranger_a, 'exports-stranger-a@example.test'),
         (v_admin_b, 'exports-admin-b@example.test')
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Exports A', 'smoke-exports-a')
@@ -158,23 +159,22 @@ BEGIN
         RETURNING id INTO v_org_b;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org_a, v_admin_a, 'admin'),
-        (v_org_a, v_coach_a, 'coach'),
         (v_org_b, v_admin_b, 'admin');
 
-    -- 3. A's admin uploads under A's folder; A's coach, a member but not an
-    --    admin, is refused.
+    -- 3. A's admin uploads under A's folder; a signed-in user with no membership is refused.
     v_res := pg_temp.exports_upload(v_admin_a, v_org_a || '/master-schedule-smoke.csv');
     IF v_res <> 'ok' THEN RAISE EXCEPTION 'A''s admin could not upload under A''s folder: %', v_res; END IF;
     v_res := pg_temp.exports_upload(v_admin_a, v_org_a || '/teams/team-smoke.csv');
     IF v_res <> 'ok' THEN RAISE EXCEPTION 'A''s admin could not upload a team file under A''s folder: %', v_res; END IF;
-    v_res := pg_temp.exports_upload(v_coach_a, v_org_a || '/teams/planted-by-coach.csv');
-    IF v_res <> '42501' THEN RAISE EXCEPTION 'A''s coach uploading under A''s folder gave % (want 42501: only admins upload)', v_res; END IF;
+    v_res := pg_temp.exports_upload(v_stranger_a, v_org_a || '/teams/planted-by-stranger.csv');
+    IF v_res <> '42501' THEN RAISE EXCEPTION 'a non-member uploading under A''s folder gave % (want 42501: only admins upload)', v_res; END IF;
 
-    -- 4. Both read both; B's admin reads none of them.
-    IF pg_temp.exports_visible(v_admin_a, v_org_a::text) <> 2
-       OR pg_temp.exports_visible(v_coach_a, v_org_a::text) <> 2 THEN
-        RAISE EXCEPTION 'A''s members do not read A''s 2 exports (admin %, coach %)',
-            pg_temp.exports_visible(v_admin_a, v_org_a::text), pg_temp.exports_visible(v_coach_a, v_org_a::text);
+    -- 4. A's admin reads both; the non-member and B's admin read none of them.
+    IF pg_temp.exports_visible(v_admin_a, v_org_a::text) <> 2 THEN
+        RAISE EXCEPTION 'A''s admin does not read A''s 2 exports (read %)', pg_temp.exports_visible(v_admin_a, v_org_a::text);
+    END IF;
+    IF pg_temp.exports_visible(v_stranger_a, v_org_a::text) <> 0 THEN
+        RAISE EXCEPTION 'a non-member reads % of A''s exports', pg_temp.exports_visible(v_stranger_a, v_org_a::text);
     END IF;
     IF pg_temp.exports_visible(v_admin_b, v_org_a::text) <> 0 THEN
         RAISE EXCEPTION 'B''s admin reads % of A''s exports', pg_temp.exports_visible(v_admin_b, v_org_a::text);
@@ -182,7 +182,7 @@ BEGIN
     IF pg_temp.exports_visible(v_admin_b, '') <> 0 THEN
         RAISE EXCEPTION 'B''s admin reads % exports in all', pg_temp.exports_visible(v_admin_b, '');
     END IF;
-    RAISE NOTICE 'A''s admin uploaded 2 under A''s folder and A''s coach was refused 42501; both read 2 of 2; B''s admin read 0';
+    RAISE NOTICE 'A''s admin uploaded 2 under A''s folder and read 2 of 2; a non-member was refused 42501 and read 0; B''s admin read 0';
 
     -- 5-6. Refusals: another organization's folder, no folder, a non-UUID folder.
     v_res := pg_temp.exports_upload(v_admin_b, v_org_a || '/planted-by-b.csv');
@@ -224,8 +224,8 @@ BEGIN
                   AND t.tgfoid = ANY (SELECT oid FROM pg_proc WHERE proname = 'protect_delete')) THEN
         RAISE NOTICE 'deletes not tried in SQL: storage.protect_delete() refuses them here; the catalog check holds the DELETE policy';
     ELSE
-        v_res := pg_temp.exports_delete(v_coach_a, v_org_a || '/master-schedule-smoke.csv');
-        IF v_res <> '0' THEN RAISE EXCEPTION 'A''s coach deleting A''s export gave % (want 0 rows)', v_res; END IF;
+        v_res := pg_temp.exports_delete(v_stranger_a, v_org_a || '/master-schedule-smoke.csv');
+        IF v_res <> '0' THEN RAISE EXCEPTION 'a non-member deleting A''s export gave % (want 0 rows)', v_res; END IF;
         v_res := pg_temp.exports_delete(v_admin_b, v_org_a || '/master-schedule-smoke.csv');
         IF v_res <> '0' THEN RAISE EXCEPTION 'B''s admin deleting A''s export gave % (want 0 rows)', v_res; END IF;
         v_res := pg_temp.exports_delete(NULL, v_org_a || '/master-schedule-smoke.csv');
@@ -238,7 +238,7 @@ BEGIN
             RAISE EXCEPTION 'after the deletes A''s exports are not exactly the master: %',
                 (SELECT array_agg(name ORDER BY name) FROM storage.objects WHERE bucket_id = 'exports');
         END IF;
-        RAISE NOTICE 'deletes by A''s coach, B''s admin and the anonymous role removed 0 rows each; A''s admin removed the 1 file it named, and only that one';
+        RAISE NOTICE 'deletes by a non-member, B''s admin and the anonymous role removed 0 rows each; A''s admin removed the 1 file it named, and only that one';
     END IF;
 END;
 $$;

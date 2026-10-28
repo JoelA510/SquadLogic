@@ -18,8 +18,11 @@
 --        this migration.
 --   W15  a member who is not an admin reads the same practice_exceptions rows as
 --        an admin; a non-member reads none. The member was a parent until
---        20261024010000 (R3) removed that role; it is now a coach who coaches
---        no team.
+--        20261024010000 (R3) removed that role, then a coach who coaches no team
+--        until 20261104010000 removed that one: every member is an admin now, so
+--        the member here is a staff member (staff are admins, 20261020030000) and
+--        the claim is that the member-wide read admits the organization's people
+--        and nobody else.
 -- Every subject set is enumerated from the rows this file SEEDS, never from
 -- what a call or a read returned. Every name and id is synthetic.
 
@@ -53,7 +56,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org D12', 'smoke-org-d12') RETURNING id INTO v_org;
     -- The outsider is a member of no organisation at all.
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-      (v_org, c_admin, 'admin'), (v_org, c_member, 'coach');
+      (v_org, c_admin, 'admin'), (v_org, c_member, 'staff');
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'D12 Park') RETURNING id INTO v_loc;
     INSERT INTO public.fields (organization_id, location_id, name, active)
       VALUES (v_org, v_loc, 'D12 Pitch', true) RETURNING id INTO v_field;
@@ -152,7 +155,7 @@ BEGIN
             cardinality(v_admin_ids), cardinality(v_seeded), cardinality(v_member_ids),
             v_member_ids IS NOT DISTINCT FROM v_admin_ids, v_outsider_n;
     END IF;
-    RAISE NOTICE 'exception reads: a member who coaches no team read % of % seeded rows, the same set as the admin; a non-member read %',
+    RAISE NOTICE 'exception reads: a staff member read % of % seeded rows, the same set as the admin; a non-member read %',
         cardinality(v_member_ids), cardinality(v_seeded), v_outsider_n;
 END;
 $$;

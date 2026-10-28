@@ -41,6 +41,8 @@ describe('the import allowlist, browser and Edge copies', () => {
   });
 
   const DROPPED_PLAYER = [
+    // The coach import's link to a coach's children (S7) is not a player column.
+    'child_registration_id',
     'email',
     'contact_email',
     'phone',
@@ -100,6 +102,7 @@ describe('the import allowlist, browser and Edge copies', () => {
     'status',
     'can_coach_multiple_teams',
     'certifications',
+    'child_registration_id',
   ];
 
   it.each(DROPPED_PLAYER)('both copies drop the player key %j', (key) => {
@@ -285,6 +288,18 @@ describe('the header alias maps', () => {
     expect(Object.keys(EDGE).length).toBeGreaterThan(150);
     expect(EDGE["can you coach for this player's team?"]).toBe('willing_to_coach');
     expect(EDGE['guardian 1 email address']).toBe('guardian_1_email');
+  });
+
+  it("name a coach's children by registration id in both copies, and leave Player ID to the player import", () => {
+    for (const header of ['child registration id', 'child id', 'child_registration_id']) {
+      expect(EDGE[header]).toBe('child_registration_id');
+      expect(BROWSER_ALIASES[header]).toBe('child_registration_id');
+      expect(browser.canonicalImportKey(header)).toBe('child_registration_id');
+    }
+    // A player file's `Player ID` is a registration-id column (player_id), so it is not aliased.
+    expect(EDGE['player id']).toBeUndefined();
+    expect(BROWSER_ALIASES['player id']).toBeUndefined();
+    expect(browser.canonicalImportKey('Player ID')).toBe('player id');
   });
 
   it('agree on every header that reaches an allowlisted key', () => {

@@ -110,7 +110,7 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 64 B', 'smoke-org-64-b')
       RETURNING id INTO v_orgb;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-      (v_org, v_admin, 'admin'), (v_org, v_member, 'coach'), (v_orgb, v_admb, 'admin');
+      (v_org, v_admin, 'admin'), (v_orgb, v_admb, 'admin');  -- v_member: signed in, no membership (no coach role since 20261104010000)
     INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'P64 Park') RETURNING id INTO v_loc;
     INSERT INTO public.locations (organization_id, name) VALUES (v_orgb, 'P64 B Park') RETURNING id INTO v_locb;
     INSERT INTO public.fields (organization_id, location_id, name, active)
@@ -300,21 +300,21 @@ BEGIN
     v_refused := false;
     BEGIN
         PERFORM public.persist_practice_schedule(
-            jsonb_build_object('id', v_r4, 'season_settings_id', v_s1),
+            jsonb_build_object('id', v_r4, 'organization_id', v_org, 'season_settings_id', v_s1),
             jsonb_build_array(jsonb_build_object('team_id', v_t[1], 'practice_slot_id', v_sa, 'effective_date_range', c_r)));
     EXCEPTION WHEN insufficient_privilege THEN v_refused := true;
     END;
-    IF NOT v_refused THEN RAISE EXCEPTION 'a non-admin member was allowed to save a practice schedule'; END IF;
+    IF NOT v_refused THEN RAISE EXCEPTION 'a non-member was allowed to save a practice schedule'; END IF;
     -- The case only the RPC's own admin check refuses: with no row to insert,
-    -- the write policy is never consulted, RLS turns the member's prune into
+    -- the write policy is never consulted, RLS turns the caller's prune into
     -- a silent zero-row DELETE, and the save would report success.
     v_refused := false;
     BEGIN
         PERFORM public.persist_practice_schedule(
-            jsonb_build_object('id', v_r4, 'season_settings_id', v_s1), '[]'::jsonb, allow_empty => true);
+            jsonb_build_object('id', v_r4, 'organization_id', v_org, 'season_settings_id', v_s1), '[]'::jsonb, allow_empty => true);
     EXCEPTION WHEN insufficient_privilege THEN v_refused := true;
     END;
-    IF NOT v_refused THEN RAISE EXCEPTION 'a non-admin member''s empty save was accepted: its prune was silently a no-op'; END IF;
+    IF NOT v_refused THEN RAISE EXCEPTION 'a non-member''s empty save was accepted: its prune was silently a no-op'; END IF;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     SELECT count(*) INTO v_n FROM public.practice_assignments WHERE organization_id = v_org;
     IF v_n <> v_before THEN

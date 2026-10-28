@@ -15,7 +15,7 @@
 --     team, its game and its series are gone, the exception is withdrawn on
 --     the record, and `team.deleted` carries no RSVP or chat counter but one
 --     for every table the cascade from `teams` empties (read off the
---     catalogue, not the function); a coach is refused 42501;
+--     catalogue, not the function); a signed-in non-member (a coach, before 20261104010000) is refused 42501;
 --   * `reconcile_prod_rls_drift()` runs on the head chain: it creates and
 --     drops nothing and verifies its 19 policies, none on a dropped table;
 --   * the posture of the two replaced functions is what it was:
@@ -135,7 +135,7 @@ BEGIN
         ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org R2', 'smoke-org-r2') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-        (v_org, v_admin, 'admin'), (v_org, v_coach, 'coach');
+        (v_org, v_admin, 'admin');   -- v_coach: signed in, no membership (no coach role since 20261104010000)
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'R2 Fall') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'R2 U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'R2 Deleted') RETURNING id INTO v_t;
@@ -159,7 +159,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_coach::text, true);
     BEGIN
         PERFORM public.admin_delete_team(v_t);
-        RAISE EXCEPTION 'a coach deleted a team';
+        RAISE EXCEPTION 'a non-member deleted a team';
     EXCEPTION WHEN insufficient_privilege THEN
         NULL;
     END;
@@ -211,7 +211,7 @@ BEGIN
     IF v_missing IS NOT NULL THEN
         RAISE EXCEPTION 'team.deleted has no counter for: %', v_missing;
     END IF;
-    RAISE NOTICE 'admin_delete_team: a coach is refused 42501; an admin deletes the team, its game and series, the live exception is withdrawn on the record, and team.deleted counts each of the % cascading tables and no RSVP or chat table', v_cascades;
+    RAISE NOTICE 'admin_delete_team: a signed-in non-member is refused 42501; an admin deletes the team, its game and series, the live exception is withdrawn on the record, and team.deleted counts each of the % cascading tables and no RSVP or chat table', v_cascades;
 END;
 $$;
 

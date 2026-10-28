@@ -1,7 +1,8 @@
 -- pgTAP: game score updates are org-scoped, role-scoped, and audited.
 -- Since 20261028010000 (plan docs/changes/2026-10-22-admin-focus.md, R6)
 -- score entry is an admin function behind the league's `score_entry`
--- setting: a coach scores nothing, and an admin only while it is on.
+-- setting: a coach scores nothing, and an admin only while it is on. Since 20261104010000 no coach
+-- signs in: the persona that was a coach (Charlie) is a signed-in user with no membership.
 
 BEGIN;
 
@@ -168,7 +169,7 @@ RESET ROLE;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333","app_metadata":{"role":"coach"}}';
 
--- 20261028010000: no coach scores; this one coaches neither team.
+-- 20261028010000: no coach scores; Charlie is no member at all.
 SELECT throws_ok(
     $$
         SELECT public.update_game_score(
@@ -180,13 +181,13 @@ SELECT throws_ok(
     $$,
     '42501',
     NULL,
-    'an Org A coach who coaches neither team is refused'
+    'a signed-in non-member is refused'
 );
 
 RESET ROLE;
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status)
+INSERT INTO public.coaches (id, organization_id, full_name, email, status)
 VALUES ('c3333333-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111',
-        '33333333-3333-3333-3333-333333333333', 'Charlie Coach-A', 'charlie@test.local', 'active');
+        'Charlie Coach-A', 'charlie@test.local', 'active');
 INSERT INTO public.team_coach_assignments
     (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
 VALUES ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001',
@@ -206,9 +207,10 @@ SELECT throws_ok(
     $$,
     '42501',
     NULL,
-    'the home team''s current coach is refused: score entry is an admin''s'
+    'a non-member is refused even when the home team''s current coach record carries their name: score entry is an admin''s'
 );
 
+RESET ROLE;
 SELECT is(
     (
         SELECT score_home
@@ -216,10 +218,9 @@ SELECT is(
         WHERE id = 'a1111111-1111-1111-1111-00000000aa01'
     )::int,
     2,
-    'the coach''s attempt leaves the score as the admin entered it'
+    'the attempt leaves the score as the admin entered it'
 );
 
-RESET ROLE;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222","app_metadata":{"role":"admin"}}';
 

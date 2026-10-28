@@ -2,8 +2,8 @@
 -- scoped to the organization named by each object's first folder.
 --
 --   * an admin of Org A (Alice) uploads under A's folder and reads A's
---     exports; a coach of Org A (Charlie, a member but not an admin) is
---     refused an upload and still reads them;
+--     exports; Charlie (signed in, a member of nothing since 20261104010000
+--     removed the coach role) is refused an upload and reads none;
 --   * a member of Org B (Bob, admin) reads none of A's exports and cannot
 --     upload under A's folder;
 --   * a name with no folder, or a folder that is not a UUID, is refused with
@@ -16,7 +16,7 @@
 --     refuses every SQL delete on storage.objects, whatever the policies say,
 --     so a delete cannot be tried here. The real-backend E2E removes files
 --     through the Storage API, and the harness smoke tries the deletes
---     (an admin may, a coach and the other org's admin may not);
+--     (an admin may, a non-member and the other org's admin may not);
 --   * the anonymous role reads nothing and cannot upload.
 --
 -- The objects are inserted into `storage.objects` directly, as the caller,
@@ -39,7 +39,7 @@ SELECT is(
     'the exports bucket exists and is private'
 );
 
--- ── 2. Org A's admin uploads; Org A's coach is refused, and reads ────────
+-- ── 2. Org A's admin uploads; a non-member is refused, and reads none ────────
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
@@ -62,14 +62,14 @@ SELECT throws_ok(
       VALUES ('exports', 'a1111111-1111-1111-1111-111111111111/teams/planted-by-coach.csv')$$,
     '42501',
     NULL,
-    'an Org A coach (a member, not an admin) cannot upload under Org A''s folder'
+    'a signed-in non-member cannot upload under Org A''s folder'
 );
 
 SELECT is(
     (SELECT COUNT(*) FROM storage.objects
       WHERE bucket_id = 'exports' AND name LIKE 'a1111111-1111-1111-1111-111111111111/%')::int,
-    2,
-    'an Org A coach reads both of Org A''s exports'
+    0,
+    'a signed-in non-member reads none of Org A''s exports'
 );
 
 -- ── 3. Org B's admin: no read, no write under A's folder ──────────────────
@@ -146,7 +146,7 @@ SELECT is(
 );
 
 -- Which helper each one checks against the organization folder: the admin
--- helper for the writes (so a coach and another org's admin cannot delete or
+-- helper for the writes (so a non-member and another org's admin cannot delete or
 -- upload), the member helper for the read.
 SELECT is(
     (SELECT array_agg(

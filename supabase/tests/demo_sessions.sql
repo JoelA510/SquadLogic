@@ -38,7 +38,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(107);
+SELECT plan(106);
 
 -- ── 0. Setup (as the test's own superuser role) ─────────────────────────────
 -- Anonymous visitors V1-V6 and a real user, Dave. The password-length trigger asks every new auth user
@@ -374,13 +374,8 @@ SELECT throws_ok(
     $$SELECT public.admin_delete_coaches(ARRAY[(SELECT id FROM t_ids WHERE name = 'coach1')])$$,
     '42501', NULL, 'no coach is deleted'
 );
-SELECT lives_ok($$SELECT public.link_my_coach_record()$$, 'link_my_coach_record runs for an anonymous caller');
 RESET role;
-SELECT is(
-    (SELECT count(*)::int FROM public.coaches WHERE user_id IS NOT NULL OR profile_id IS NOT NULL),
-    0,
-    'and links no coach record: it matches a confirmed email, which an anonymous user does not have'
-);
+SELECT ok(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'link_my_coach_record'), 'no function links a sign-in to a coach record (20261104010000)');
 SELECT throws_ok(
     $$UPDATE public.coaches SET full_name = 'Typed' WHERE id = (SELECT id FROM t_ids WHERE name = 'coach1')$$,
     '42501', NULL, 'the fence holds for the table''s owner too: a coach''s name is read-only whoever writes'
@@ -412,8 +407,7 @@ SELECT is(
         AND p.proname <> ALL (ARRAY[
             -- refused by the calls above
             'admin_create_player', 'admin_delete_players', 'admin_update_player', 'admin_bulk_update_players',
-            'apply_player_patch', 'admin_delete_coaches', 'admin_update_coach_status', 'link_my_coach_record',
-            -- roster-structural: touches only team_id, which a demo may change
+            'apply_player_patch', 'admin_delete_coaches', 'admin_update_coach_status', -- roster-structural: touches only team_id, which a demo may change
             'admin_delete_team',
             -- the seed's own copy: it writes the league before the organization is marked a demo
             'start_demo_session',
@@ -426,8 +420,7 @@ SELECT is(
 SELECT is(
     (SELECT count(*)::int FROM unnest(ARRAY[
             'admin_create_player', 'admin_delete_players', 'admin_update_player', 'admin_bulk_update_players',
-            'apply_player_patch', 'admin_delete_coaches', 'admin_update_coach_status', 'link_my_coach_record',
-            'admin_delete_team', 'start_demo_session', 'finalize_import_job', 'finalize_coach_import_job',
+            'apply_player_patch', 'admin_delete_coaches', 'admin_update_coach_status', 'admin_delete_team', 'start_demo_session', 'finalize_import_job', 'finalize_coach_import_job',
             'rollback_coach_import_job'
          ]) n
       WHERE NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -487,7 +480,7 @@ SELECT throws_ok(
     'an anonymous visitor cannot create an organization'
 );
 SELECT throws_ok(
-    $$SELECT public.create_org_invite((SELECT id FROM t_ids WHERE name = 'demoA'), 'coach', interval '7 days')$$,
+    $$SELECT public.create_org_invite((SELECT id FROM t_ids WHERE name = 'demoA'), 'staff', interval '7 days')$$,
     '42501', 'A demo visitor cannot invite anyone',
     'nor mint an invite, not even for their own demo'
 );
@@ -497,7 +490,7 @@ SELECT lives_ok(
     'control: a signed-in user who is not anonymous creates one'
 );
 SELECT lives_ok(
-    $$SELECT set_config('t.code', (SELECT code FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'coach', interval '7 days') LIMIT 1), true)$$,
+    $$SELECT set_config('t.code', (SELECT code FROM public.create_org_invite('a1111111-1111-1111-1111-111111111111', 'staff', interval '7 days') LIMIT 1), true)$$,
     'control: an admin mints an invite for a real organization'
 );
 SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000a1","role":"authenticated","is_anonymous":true}';
@@ -561,40 +554,36 @@ SELECT is(
           -- requires one
           'start_demo_session',
           -- allowed: gated by the caller's membership of an organization (an anonymous visitor belongs to one,
-          -- their demo, and the helpers below end it at expiry), coach-scoped, or pure
+          -- their demo, and the helpers below end it at expiry), or pure
         'admin_assign_team_coach', 'admin_bulk_update_players', 'admin_cancel_game_assignment', 'admin_cancel_practice_assignment',
         'admin_change_member_role', 'admin_create_field', 'admin_create_field_blackout', 'admin_create_location',
         'admin_create_player', 'admin_decide_coach_practice_preference', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
         'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_program', 'admin_delete_team',
-        'admin_get_coached_team_ids', 'admin_get_division_teams', 'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
+        'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
         'admin_retire_field', 'admin_retire_field_subunit', 'admin_retire_location', 'admin_select_field_availability_scenario',
         'admin_set_coach_practice_preference', 'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
         'admin_set_practice_slot_division', 'admin_set_season_timezone', 'admin_unretire_field', 'admin_unretire_field_subunit',
         'admin_unretire_location', 'admin_update_coach_status', 'admin_update_field', 'admin_update_field_blackout',
         'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
-        'apply_player_patch', 'caller_coaches_practice_slot', 'cancel_ready_import_job', 'create_import_job',
+        'apply_player_patch', 'cancel_ready_import_job', 'create_import_job',
         'enact_lock_cause_row', 'enact_practice_recommendation', 'enforce_field_retirement_deactivates', 'fail_import_job',
         'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_field_availability_import_job',
         'finalize_field_import_job', 'finalize_import_job', 'finalize_onboarding', 'generate_invite_code',
-        'get_field_availability_scenarios', 'get_latest_team_runs_per_division', 'get_my_coached_team_ids', 'get_my_division_teams',
-        'get_organization_members', 'get_reserved_keys', 'get_settings_audit_log', 'get_team_roster',
+        'get_field_availability_scenarios', 'get_latest_team_runs_per_division', 'get_organization_members', 'get_reserved_keys', 'get_settings_audit_log', 'get_team_roster',
         'get_team_staff', 'import_normalize_capacity_basis', 'import_normalize_field_availability_approval_status', 'import_normalize_field_availability_record_status',
         'import_normalize_format_code', 'import_normalize_requirement_status', 'import_payload_text', 'import_text_to_bool',
         'import_text_to_date', 'import_text_to_day_of_week', 'import_text_to_jsonb_array', 'import_text_to_positive_int',
-        'import_text_to_time', 'is_current_team_coach', 'is_demo_org', 'is_org_admin',
-        'is_org_member', 'link_my_coach_record', 'log_telemetry_event', 'mark_import_job_ready_to_apply',
+        'import_text_to_time', 'is_demo_org', 'is_org_admin',
+        'is_org_member', 'log_telemetry_event', 'mark_import_job_ready_to_apply',
         'materialize_import_buddy_pairs', 'min_uuid', 'persist_evaluation_run', 'persist_game_schedule',
         'persist_practice_schedule', 'persist_team_schedule', 'practice_new_auto_row_refusals', 'practice_schedule_fingerprint', 'publication_baseline_document_problem',
-        'record_audit_event', 'refuse_publication_baseline_mutation', 'refuse_publication_baseline_truncate', 'request_coach_practice_preference',
-        'revoke_org_invite', 'rollback_coach_import_job', 'rollback_field_availability_import_job', 'rollback_field_import_job',
+        'record_audit_event', 'refuse_publication_baseline_mutation', 'refuse_publication_baseline_truncate', 'revoke_org_invite', 'rollback_coach_import_job', 'rollback_field_availability_import_job', 'rollback_field_import_job',
         'rotate_calendar_token', 'sanitize_player_patch', 'team_coach_assignment_drift', 'trigger_set_timestamp',
         'update_game_score', 'update_import_job_progress', 'update_org_feature_flags', 'upsert_division_for_import',
         'validate_custom_attributes', 'withdraw_practice_lighting_override',
-        -- 20261102010000: permits. The five are gated by the membership helpers or the caller's own coach
-        -- record; the three coach_* are policy helpers that ask only about the caller.
+        -- 20261102010000: permits, gated by the membership helpers.
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
-        'admin_update_facility_permit', 'coach_covers_permit_scope', 'coach_reads_facility_permit',
-        'coach_reads_facility_permit_file', 'get_facility_permits'
+        'admin_update_facility_permit', 'get_facility_permits'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -606,53 +595,43 @@ SELECT is(
         'admin_change_member_role', 'admin_create_field', 'admin_create_field_blackout', 'admin_create_location',
         'admin_create_player', 'admin_decide_coach_practice_preference', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
         'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_program', 'admin_delete_team',
-        'admin_get_coached_team_ids', 'admin_get_division_teams', 'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
+        'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
         'admin_retire_field', 'admin_retire_field_subunit', 'admin_retire_location', 'admin_select_field_availability_scenario',
         'admin_set_coach_practice_preference', 'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
         'admin_set_practice_slot_division', 'admin_set_season_timezone', 'admin_unretire_field', 'admin_unretire_field_subunit',
         'admin_unretire_location', 'admin_update_coach_status', 'admin_update_field', 'admin_update_field_blackout',
         'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
-        'apply_player_patch', 'caller_coaches_practice_slot', 'cancel_ready_import_job', 'create_import_job',
+        'apply_player_patch', 'cancel_ready_import_job', 'create_import_job',
         'enact_lock_cause_row', 'enact_practice_recommendation', 'enforce_field_retirement_deactivates', 'fail_import_job',
         'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_field_availability_import_job',
         'finalize_field_import_job', 'finalize_import_job', 'finalize_onboarding', 'generate_invite_code',
-        'get_field_availability_scenarios', 'get_latest_team_runs_per_division', 'get_my_coached_team_ids', 'get_my_division_teams',
-        'get_organization_members', 'get_reserved_keys', 'get_settings_audit_log', 'get_team_roster',
+        'get_field_availability_scenarios', 'get_latest_team_runs_per_division', 'get_organization_members', 'get_reserved_keys', 'get_settings_audit_log', 'get_team_roster',
         'get_team_staff', 'import_normalize_capacity_basis', 'import_normalize_field_availability_approval_status', 'import_normalize_field_availability_record_status',
         'import_normalize_format_code', 'import_normalize_requirement_status', 'import_payload_text', 'import_text_to_bool',
         'import_text_to_date', 'import_text_to_day_of_week', 'import_text_to_jsonb_array', 'import_text_to_positive_int',
-        'import_text_to_time', 'is_current_team_coach', 'is_demo_org', 'is_org_admin',
-        'is_org_member', 'link_my_coach_record', 'log_telemetry_event', 'mark_import_job_ready_to_apply',
+        'import_text_to_time', 'is_demo_org', 'is_org_admin',
+        'is_org_member', 'log_telemetry_event', 'mark_import_job_ready_to_apply',
         'materialize_import_buddy_pairs', 'min_uuid', 'persist_evaluation_run', 'persist_game_schedule',
         'persist_practice_schedule', 'persist_team_schedule', 'practice_new_auto_row_refusals', 'practice_schedule_fingerprint', 'publication_baseline_document_problem',
-        'record_audit_event', 'refuse_publication_baseline_mutation', 'refuse_publication_baseline_truncate', 'request_coach_practice_preference',
-        'revoke_org_invite', 'rollback_coach_import_job', 'rollback_field_availability_import_job', 'rollback_field_import_job',
+        'record_audit_event', 'refuse_publication_baseline_mutation', 'refuse_publication_baseline_truncate', 'revoke_org_invite', 'rollback_coach_import_job', 'rollback_field_availability_import_job', 'rollback_field_import_job',
         'rotate_calendar_token', 'sanitize_player_patch', 'team_coach_assignment_drift', 'trigger_set_timestamp',
         'update_game_score', 'update_import_job_progress', 'update_org_feature_flags', 'upsert_division_for_import',
         'validate_custom_attributes', 'withdraw_practice_lighting_override',
-        -- 20261102010000: permits. The five are gated by the membership helpers or the caller's own coach
-        -- record; the three coach_* are policy helpers that ask only about the caller.
+        -- 20261102010000: permits, gated by the membership helpers.
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
-        'admin_update_facility_permit', 'coach_covers_permit_scope', 'coach_reads_facility_permit',
-        'coach_reads_facility_permit_file', 'get_facility_permits'
+        'admin_update_facility_permit', 'get_facility_permits'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'
 );
 SELECT is(
     (SELECT array_agg(name ORDER BY name) FROM t_client_fns
-      WHERE definer AND body !~ '\m(is_org_admin|is_org_member|is_current_team_coach)\M'
+      WHERE definer AND body !~ '\m(is_org_admin|is_org_member)\M'
         AND name <> ALL (ARRAY[
             -- the gates themselves, and what asks no organization question
             'is_org_admin', 'is_org_member', 'is_demo_org', 'start_demo_session',
             -- fenced above
             'initialize_new_tenant', 'redeem_org_invite',
-            -- coach-scoped: they match the caller to a coach record, and an anonymous user has none
-            'caller_coaches_practice_slot', 'get_my_coached_team_ids', 'get_my_division_teams',
-            'link_my_coach_record',
-            -- permit policy helpers (20261102010000): they ask whether the CALLER's own coached fields
-            -- cover a scope, and an anonymous user coaches nothing
-            'coach_covers_permit_scope', 'coach_reads_facility_permit', 'coach_reads_facility_permit_file',
             -- reads organization_members itself (declared in the migration: after expiry it still writes the
             -- doomed demo's own evaluation rows until the purge)
             'persist_evaluation_run'

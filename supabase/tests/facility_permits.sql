@@ -1,22 +1,18 @@
 -- pgTAP: field and venue permits (migration 20261102010000; plan
--- docs/changes/2026-10-22-phase-c-permits.md, C1, with the owner's rules of 2026-10-26 and the
--- coach narrowing admin-focus R6 decided).
+-- docs/changes/2026-10-22-phase-c-permits.md, C1, with the owner's rules of 2026-10-26; the
+-- coach read was removed by 20261104010000: only league admins sign in).
 --
 -- Every caller against every surface, both directions. Org A unless noted:
 --   Alice   admin (fixture)            Bob    admin of Org B only (fixture)
---   Charlie a coach-role member who coaches no team (fixture; the old "parent" cell, since there
---           is no parent role since 20261024010000)
---   Sid     staff                      Cora   current lead coach of A-Team (game at Pitch 1)
---   Finn    A-Team assistant until yesterday
---   Otto    current lead coach of A2 (a practice at Pitch 3, another venue)
---   Quin    current coach of A4 (a game at Pitch 4, where no permit is)
+--   Charlie signed in, a member of no organization (fixture)
+--   Sid     staff                      Cora, Finn, Otto, Quin  signed in, members of no organization
+--           (they were coaches whose teams play or practise at the fields below; the games and the
+--           practice stay, as the bookings that make a field delete ask first)
 --   anon
 -- Fields: Pitch 1 and Pitch 2 at Permit Park, Pitch 3 at Far Park, Pitch 4 at Bare Park, Pitch 5
 -- (no game or practice; the boundary permits sit on it).
 -- Permits: P1 Pitch 1; P2 Permit Park; P3 Pitch 3; P4 Pitch 1 and Pitch 3; P5 Pitch 2.
--- So Cora reads P1, P2, P4 (P4's Pitch 1 scope only); Otto reads P3 and P4 (its Pitch 3 scope
--- only); Quin, who coaches a team scheduled elsewhere, reads none; P5 is at Cora's venue but not
--- her field.
+-- So an admin or staff member reads all five, and nobody else reads any.
 --
 -- Fixtures state every column they rely on: real Supabase differs from the harness in defaults.
 
@@ -25,7 +21,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(100);
+SELECT plan(98);
 
 -- ── Fixtures, as the owner ─────────────────────────────────────────────────
 INSERT INTO auth.users (id, email, raw_user_meta_data, email_confirmed_at) VALUES
@@ -43,11 +39,7 @@ INSERT INTO public.profiles (id, email, full_name) VALUES
     ('e1000000-0000-4000-8000-000000000005', 'quin@test.local', 'Quin')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000001', 'staff'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000002', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000003', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000004', 'coach'),
-    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000005', 'coach')
+    ('a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000001', 'staff')
 ON CONFLICT (organization_id, profile_id) DO NOTHING;
 
 -- Org A's season keeps a calendar day that differs from the UTC date at this very moment: UTC+14
@@ -62,24 +54,6 @@ INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
     ('aaaaaaaa-0000-0000-0000-0000000000a3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'A3'),
     ('aaaaaaaa-0000-0000-0000-0000000000a4', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'A4');
 
-INSERT INTO public.coaches (id, organization_id, user_id, full_name, email, status) VALUES
-    ('e2000000-0000-4000-8000-000000000002', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000002', 'Cora', 'cora@test.local', 'active'),
-    ('e2000000-0000-4000-8000-000000000003', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000003', 'Finn', 'finn@test.local', 'active'),
-    ('e2000000-0000-4000-8000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000004', 'Otto', 'otto@test.local', 'active'),
-    ('e2000000-0000-4000-8000-000000000005', 'a1111111-1111-1111-1111-111111111111', 'e1000000-0000-4000-8000-000000000005', 'Quin', 'quin@test.local', 'active');
-INSERT INTO public.team_coach_assignments
-    (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
-VALUES
-    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001', 'e2000000-0000-4000-8000-000000000002', 'lead',
-     public.team_local_today('aaaaaaaa-0000-0000-0000-000000000001') - 30, NULL, 'pgtap', NULL),
-    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-000000000001', 'e2000000-0000-4000-8000-000000000003', 'assistant',
-     public.team_local_today('aaaaaaaa-0000-0000-0000-000000000001') - 30,
-     public.team_local_today('aaaaaaaa-0000-0000-0000-000000000001') - 1, 'pgtap', 'pgtap'),
-    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'e2000000-0000-4000-8000-000000000004', 'lead',
-     public.team_local_today('aaaaaaaa-0000-0000-0000-0000000000a2') - 30, NULL, 'pgtap', NULL),
-    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000a4', 'e2000000-0000-4000-8000-000000000005', 'lead',
-     public.team_local_today('aaaaaaaa-0000-0000-0000-0000000000a4') - 30, NULL, 'pgtap', NULL);
-
 INSERT INTO public.locations (id, organization_id, name, lighting_available) VALUES
     ('f1000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111', 'Permit Park', false),
     ('f1000000-0000-4000-8000-000000000002', 'a1111111-1111-1111-1111-111111111111', 'Far Park', false),
@@ -93,7 +67,7 @@ INSERT INTO public.fields (id, organization_id, location_id, name, active) VALUE
     ('f1000000-0000-4000-8000-000000000015', 'a1111111-1111-1111-1111-111111111111', 'f1000000-0000-4000-8000-000000000003', 'Pitch 5', true),
     ('f1000000-0000-4000-8000-00000000001b', 'b2222222-2222-2222-2222-222222222222', 'f1000000-0000-4000-8000-00000000000b', 'B Pitch', true);
 
--- A-Team plays A3 at Pitch 1; A4 plays A3 at Pitch 4; A2 practises at Pitch 3.
+-- A-Team plays A3 at Pitch 1; A4 plays A3 at Pitch 4; A2 practises at Pitch 3 (bookings).
 INSERT INTO public.game_slots (id, organization_id, field_id, slot_date, week_index) VALUES
     ('f2000000-0000-4000-8000-000000000001', 'a1111111-1111-1111-1111-111111111111', 'f1000000-0000-4000-8000-000000000011', current_date + 7, 1),
     ('f2000000-0000-4000-8000-000000000004', 'a1111111-1111-1111-1111-111111111111', 'f1000000-0000-4000-8000-000000000014', current_date + 7, 1);
@@ -170,16 +144,16 @@ SELECT throws_ok($$SELECT public.admin_create_facility_permit(NULL, 'X', NULL, c
 -- Each writer refuses a caller who is not an admin of the organization, with 42501.
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
 SELECT throws_ok($$SELECT public.admin_create_facility_permit('a1111111-1111-1111-1111-111111111111', 'X', NULL, current_date, current_date, NULL, ARRAY[]::uuid[], ARRAY['f1000000-0000-4000-8000-000000000011']::uuid[])$$,
-    '42501', NULL, 'a current coach cannot create a permit');
+    '42501', NULL, 'a signed-in non-member (Cora) cannot create a permit');
 SELECT throws_ok(format($$SELECT public.admin_update_facility_permit('a1111111-1111-1111-1111-111111111111', %L, 'X', NULL, current_date, current_date, NULL, ARRAY[]::uuid[], ARRAY['f1000000-0000-4000-8000-000000000011']::uuid[])$$, (SELECT id FROM t_ids WHERE name = 'P1')),
-    '42501', NULL, 'a current coach cannot update a permit');
+    '42501', NULL, 'nor update a permit');
 SELECT throws_ok(format($$SELECT public.admin_set_facility_permit_file('a1111111-1111-1111-1111-111111111111', %L, 'x', 'x.pdf')$$, (SELECT id FROM t_ids WHERE name = 'P1')),
-    '42501', NULL, 'a current coach cannot attach a file');
+    '42501', NULL, 'nor attach a file');
 SELECT throws_ok(format($$SELECT public.admin_delete_facility_permit('a1111111-1111-1111-1111-111111111111', %L)$$, (SELECT id FROM t_ids WHERE name = 'P1')),
-    '42501', NULL, 'a current coach cannot delete a permit');
+    '42501', NULL, 'nor delete a permit');
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
 SELECT throws_ok($$SELECT public.admin_create_facility_permit('a1111111-1111-1111-1111-111111111111', 'X', NULL, current_date, current_date, NULL, ARRAY[]::uuid[], ARRAY['f1000000-0000-4000-8000-000000000011']::uuid[])$$,
-    '42501', NULL, 'a coach-role member with no team cannot create a permit');
+    '42501', NULL, 'a second non-member (Charlie) cannot create a permit');
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT throws_ok($$SELECT public.admin_create_facility_permit('a1111111-1111-1111-1111-111111111111', 'X', NULL, current_date, current_date, NULL, ARRAY[]::uuid[], ARRAY['f1000000-0000-4000-8000-000000000011']::uuid[])$$,
     '42501', NULL, 'another organization''s admin cannot create a permit here');
@@ -224,24 +198,20 @@ SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000001"
 SELECT is((SELECT count(*)::int FROM public.facility_permits), 5, 'staff read every permit, as an admin does');
 
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
-SELECT is((SELECT array_agg(issuer ORDER BY issuer) FROM public.facility_permits),
-          ARRAY['Both Parks', 'Parks Dept One', 'Parks Dept Two'],
-          'Cora, whose team plays at Pitch 1, reads the permits for Pitch 1, for its venue, and the one that covers both: not Pitch 2''s, not Pitch 3''s');
-SELECT is((SELECT count(*)::int FROM public.facility_permit_scopes), 3,
-          'and only the scopes that concern her: Pitch 1, Permit Park, and Both Parks'' Pitch 1 (not its Pitch 3)');
+SELECT is((SELECT count(*)::int FROM public.facility_permits), 0,
+          'Cora, signed in with no membership (once a coach of a team at a field a permit names), reads no permit');
+SELECT is((SELECT count(*)::int FROM public.facility_permit_scopes), 0, 'and no scope');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
-SELECT is((SELECT array_agg(issuer ORDER BY issuer) FROM public.facility_permits),
-          ARRAY['Both Parks', 'Far Parks'],
-          'Otto, whose team practises at Pitch 3, reads the permits that name it');
-SELECT is((SELECT count(*)::int FROM public.facility_permit_scopes), 2, 'and only the two scopes that concern him');
+SELECT is((SELECT count(*)::int FROM public.facility_permits), 0,
+          'Otto, signed in with no membership (once a coach of a team at a field a permit names), reads no permit');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
 SELECT is((SELECT count(*)::int FROM public.facility_permits), 0,
-          'Quin, a current coach whose team is scheduled elsewhere (Pitch 4, no permit), reads no permit');
-SELECT is((SELECT count(*)::int FROM public.facility_permit_scopes), 0, 'and no scope');
+          'Quin, signed in with no membership (once a coach of a team at a field a permit names), reads no permit');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000003"}';
-SELECT is((SELECT count(*)::int FROM public.facility_permits), 0, 'a coach whose assignment ended yesterday reads none');
+SELECT is((SELECT count(*)::int FROM public.facility_permits), 0,
+          'Finn, signed in with no membership (once a coach of a team at a field a permit names), reads no permit');
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-SELECT is((SELECT count(*)::int FROM public.facility_permits), 0, 'a coach-role member with no team reads none');
+SELECT is((SELECT count(*)::int FROM public.facility_permits), 0, 'Charlie, a member of no organization, reads none');
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT is((SELECT count(*)::int FROM public.facility_permits), 0, 'another organization''s admin reads none');
 SELECT is((SELECT count(*)::int FROM public.facility_permit_scopes), 0, 'nor any scope');
@@ -258,19 +228,15 @@ SELECT is(public.get_facility_permits('a1111111-1111-1111-1111-111111111111') ->
           'the RPC judges on the organization''s own day, not the UTC date');
 SELECT is((public.get_facility_permits('a1111111-1111-1111-1111-111111111111') ->> 'lead_days')::int, 30, 'the warning lead time is 30 days');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
-SELECT is((SELECT array_agg(p ->> 'issuer' ORDER BY p ->> 'issuer')
-             FROM jsonb_array_elements(public.get_facility_permits('a1111111-1111-1111-1111-111111111111') -> 'permits') p),
-          ARRAY['Both Parks', 'Parks Dept One', 'Parks Dept Two'], 'a coach reads the permits for her team''s fields through the RPC');
-SELECT is((SELECT jsonb_array_length(p -> 'scopes')
-             FROM jsonb_array_elements(public.get_facility_permits('a1111111-1111-1111-1111-111111111111') -> 'permits') p
-            WHERE p ->> 'issuer' = 'Both Parks'), 1, 'a permit that also covers another field shows her only her scope');
+SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'Cora, a non-member, is refused');
+SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000004"}';
+SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'Otto, a non-member, is refused');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000005"}';
-SELECT is(jsonb_array_length(public.get_facility_permits('a1111111-1111-1111-1111-111111111111') -> 'permits'), 0,
-          'a coach of a team scheduled elsewhere gets an empty list, not an error');
+SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'Quin, a non-member, is refused');
 SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000003"}';
-SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'a former coach is refused');
+SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'Finn, a non-member, is refused');
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'a coach-role member with no team is refused');
+SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'Charlie, a non-member, is refused');
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT throws_ok($$SELECT public.get_facility_permits('a1111111-1111-1111-1111-111111111111')$$, '42501', NULL, 'another organization''s admin is refused');
 SELECT throws_ok($$SELECT public.get_facility_permits(NULL)$$, '23502', NULL, 'a missing organization is refused');
@@ -361,10 +327,10 @@ SELECT is(jsonb_array_length(public.admin_update_facility_permit('a1111111-1111-
               ARRAY[]::uuid[], ARRAY['f1000000-0000-4000-8000-000000000011', 'f1000000-0000-4000-8000-000000000013']::uuid[]) -> 'scopes'),
           2, 'P4 covers Pitch 1 and Pitch 3 again');
 
--- ── 9. The coach reads the file, and the coach's file path ─────────────────
-SET LOCAL "request.jwt.claims" TO '{"sub":"e1000000-0000-4000-8000-000000000002"}';
+-- ── 9. The admin reads the file's name and path ────────────────────────────
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 SELECT is((SELECT p -> 'file' ->> 'name' FROM jsonb_array_elements(public.get_facility_permits('a1111111-1111-1111-1111-111111111111') -> 'permits') p WHERE p ->> 'issuer' = 'Parks Dept One'),
-          'Scan.png', 'a coach is given the live file''s name and path');
+          'Scan.png', 'an admin is given the live file''s name and path');
 
 -- ── 10. A retired field reads as retired ───────────────────────────────────
 RESET role;
@@ -415,13 +381,14 @@ SELECT is((SELECT array_agg(tablename || ':' || cmd || ':' || array_to_string(ro
              FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('facility_permits', 'facility_permit_scopes')),
           ARRAY['facility_permit_scopes:SELECT:authenticated', 'facility_permits:SELECT:authenticated'],
           'each table has exactly one policy: a SELECT for authenticated, no write policy');
-SELECT ok(NOT has_function_privilege('authenticated', 'public.coach_field_ids_of(uuid,uuid)', 'EXECUTE')
-          AND NOT has_function_privilege('authenticated', 'public.org_local_today(uuid)', 'EXECUTE')
-          AND NOT has_function_privilege('authenticated', 'public.facility_permit_json(uuid,date,boolean)', 'EXECUTE'),
+SELECT ok(NOT has_function_privilege('authenticated', 'public.org_local_today(uuid)', 'EXECUTE')
+          AND NOT has_function_privilege('authenticated', 'public.facility_permit_json(uuid,date)', 'EXECUTE'),
           'the internal helpers are no client''s to call');
 SELECT ok(NOT has_function_privilege('anon', 'public.get_facility_permits(uuid)', 'EXECUTE')
-          AND NOT has_function_privilege('anon', 'public.coach_reads_facility_permit(uuid)', 'EXECUTE'),
-          'anon executes neither the read nor a policy helper');
+          AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                           AND (proname LIKE 'coach\_%permit%' ESCAPE '\' OR proname = 'coach_field_ids_of'
+                                OR (proname = 'facility_permit_json' AND pronargs <> 2))),
+          'anon executes not the read, and no coach policy helper or three-argument permit view exists (20261104010000)');
 
 -- A permit blocks nothing (owner, 2026-10-26): no import, scheduling, publish or export function reads
 -- a permit table. The only functions whose bodies name one are the permit RPCs and their helpers, and
@@ -433,8 +400,7 @@ SELECT is(
       WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
         AND p.prosrc ~ 'facility_permit(s|_scopes)'),
     ARRAY['admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_delete_field',
-          'admin_set_facility_permit_file', 'admin_update_facility_permit',
-          'coach_reads_facility_permit', 'coach_reads_facility_permit_file', 'facility_permit_json',
+          'admin_set_facility_permit_file', 'admin_update_facility_permit', 'facility_permit_json',
           'get_facility_permits'],
     'the only functions that read a permit table are the permit RPCs, their helpers and admin_delete_field'
 );

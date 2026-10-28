@@ -2,7 +2,7 @@
  * The TIME TBD list: practices a team is still short of and games the scheduler could not place
  * (Phase D, E; plan `docs/changes/2026-10-27-phase-d-scheduling.md`, section E).
  *
- * **Where the list lives.** `public.schedule_tbd` (migration `20261107010000`), a table of its own
+ * **Where the list lives.** `public.schedule_tbd` (migration `20261108020000`), a table of its own
  * and not rows in `practice_assignments` / `game_assignments`: a row there is read as a held
  * practice by the lock loader, the writer's prune, `teams_without_practice` and the metrics, and a
  * reader that missed one would count a missing practice as a held one. `persist_practice_schedule`

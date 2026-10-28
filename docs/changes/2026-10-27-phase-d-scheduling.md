@@ -464,7 +464,7 @@ Each PR runs the season fixture suite and the full Definition of Done.
 
 ## Build notes: PR E (2026-10-28)
 
-- **Built:** E1 and E2 in migration `20261107010000`: the `schedule_tbd` table (admin-only RLS), the
+- **Built:** E1 and E2 in migration `20261108020000`: the `schedule_tbd` table (admin-only RLS), the
   admin read `get_schedule_tbd(season)`, `persist_practice_schedule` and `persist_game_schedule`
   replaced behind their md5, `admin_delete_team` replaced to count `schedule_tbd_deleted` (the table
   cascades from teams, and the delete's pgTAP and smoke walk the catalogue for a counter per cascading

@@ -2,7 +2,7 @@
  * The TIME TBD list's vocabulary and boundaries (Phase D, E; `packages/core/src/scheduleTbd.js`).
  *
  * The reasons are spelled in three places: core's lists, the table's CHECK in migration
- * `20261107010000_schedule_tbd.sql`, and the game writer's list of reasons it accepts. Each is
+ * `20261108020000_schedule_tbd.sql`, and the game writer's list of reasons it accepts. Each is
  * compared to core's in both directions, so a reason added in one fails here until the others
  * have it. The Zod schemas are the boundaries: the RPC's rows coming in, and the entries the game
  * page sends to be recorded.
@@ -25,8 +25,8 @@ import {
 import { scheduleGames } from '../packages/core/src/gameScheduling.js';
 
 const read = (file) => readFileSync(path.join(process.cwd(), file), 'utf8');
-const MIGRATION = read('supabase/migrations/20261107010000_schedule_tbd.sql');
-const REVERT = read('docs/sql/20261107010000_revert.sql');
+const MIGRATION = read('supabase/migrations/20261108020000_schedule_tbd.sql');
+const REVERT = read('docs/sql/20261108020000_revert.sql');
 
 /** The quoted words of the first `IN ( ... )` list after a marker. */
 function listAfter(text, marker) {
@@ -126,8 +126,8 @@ describe('the migration is guarded and reversible', () => {
 
   it('is written for the next version after the highest on main and has a smoke, a revert and pgTAP', () => {
     for (const file of [
-      'docs/sql/20261107010000_smoke.sql',
-      'docs/sql/20261107010000_revert.sql',
+      'docs/sql/20261108020000_smoke.sql',
+      'docs/sql/20261108020000_revert.sql',
       'supabase/tests/schedule_tbd.sql',
     ]) {
       assert.ok(read(file).length > 1000, `${file} is missing or empty`);

@@ -1,5 +1,5 @@
 /**
- * Mock arm for `get_schedule_tbd` (migration `20261107010000_schedule_tbd.sql`), refusals included
+ * Mock arm for `get_schedule_tbd` (migration `20261108020000_schedule_tbd.sql`), refusals included
  * (LESSONS_LEARNED #13), with the SQL's error codes:
  *   - 23502 no season id;
  *   - 42501 a season that does not exist, or one whose organization the caller does not administer

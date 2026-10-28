@@ -1,4 +1,4 @@
--- pgTAP: the TIME TBD list (Phase D, E; migration 20261107010000; plan
+-- pgTAP: the TIME TBD list (Phase D, E; migration 20261108020000; plan
 -- docs/changes/2026-10-27-phase-d-scheduling.md, section E, E1).
 --
 -- `schedule_tbd` holds the practices a team is still short of and the games the scheduler could not

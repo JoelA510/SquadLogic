@@ -189,8 +189,8 @@ M56="$REPO/supabase/migrations/20261106010000_play_up_requested.sql"
 # practice list from the roster), so the plants that aimed at the writer's body in $M55 are re-aimed
 # here: $M55's body is superseded and a plant there would be dead. $M55 keeps the plants on the
 # settings writer and on the gate's helper, which it still defines.
-M57="$REPO/supabase/migrations/20261107010000_schedule_tbd.sql"
-R57="$REPO/docs/sql/20261107010000_revert.sql"
+M57="$REPO/supabase/migrations/20261108020000_schedule_tbd.sql"
+R57="$REPO/docs/sql/20261108020000_revert.sql"
 # E3a: players and coaches belong to one season (the two season columns, their keys and triggers, the
 # player and coach finalizers, the buddy materializer, the player patch, admin_create_player with a
 # season, the demo start, view_org_metrics per season), and the revert. The plants that aimed at the
@@ -3982,7 +3982,7 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
 # **admin_delete_team takes its exceptions, RSVPs and players' team ids with it
 # (20261021030000).** One plant per claim the smoke prints. 20261022030000
 # (R2) replaces admin_delete_team without RSVPs, so the plants on the delete are
-# aimed at that copy ($M39), the live definition until 20261107010000 (Phase D, E) replaced it
+# aimed at that copy ($M39), the live definition until 20261108020000 (Phase D, E) replaced it
 # again to count the TIME TBD rows its cascade takes, since when they are aimed at $M57; the three RSVP plants (the
 # opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
 # game lock) went with the RSVP function and table.
@@ -4857,7 +4857,7 @@ plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
   "smoke 20261105010000"
 
 
-# Phase D, E: the TIME TBD list. The smoke 20261107010000 must go red for each. The first and the
+# Phase D, E: the TIME TBD list. The smoke 20261108020000 must go red for each. The first and the
 # tenancy one were run by hand in a scratch cluster (smoke red at "A2 (an ended series only) is not
 # listed", and at "the tenancy trigger let in another organization's team"); the others had their
 # anchors resolved and were not run.
@@ -4871,7 +4871,7 @@ plant "M57 an ended series counts as a held practice" "$M57" \
                         AND (upper_inf(pa.effective_date_range)
                              OR upper(pa.effective_date_range) > CURRENT_DATE)))" \
   "               AND true" \
-  "smoke 20261107010000"
+  "smoke 20261108020000"
 
 plant "M57 the tenancy trigger lets another organization's team in" "$M57" \
   " SET search_path TO 'public'
@@ -4885,14 +4885,14 @@ BEGIN
     RETURN NEW;
     IF NOT EXISTS (SELECT 1 FROM public.season_settings ss
                     WHERE ss.id = NEW.season_settings_id AND ss.organization_id = NEW.organization_id) THEN" \
-  "smoke 20261107010000"
+  "smoke 20261108020000"
 
 plant "M57 get_schedule_tbd admits any signed-in user" "$M57" \
   "    IF v_org IS NULL OR NOT public.is_org_admin(v_org) THEN
         RAISE EXCEPTION 'Access denied: the TIME TBD list is read by an administrator of the season''s organization'" \
   "    IF v_org IS NULL OR false THEN
         RAISE EXCEPTION 'Access denied: the TIME TBD list is read by an administrator of the season''s organization'" \
-  "smoke 20261107010000"
+  "smoke 20261108020000"
 
 # Admin only (20261104010000; plan docs/changes/2026-10-27-admin-only.md, S5). Three plants were run
 # against the real harness when it was written; each failed the named check. The re-aimed plants

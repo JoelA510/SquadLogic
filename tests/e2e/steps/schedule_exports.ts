@@ -146,7 +146,7 @@ Then(
 );
 
 /**
- * The TIME TBD list as the writers leave it (migration 20261107010000): the mock persists no
+ * The TIME TBD list as the writers leave it (migration 20261108020000): the mock persists no
  * schedule through the SQL, so the rows `get_schedule_tbd` reads are seeded here, as the real-backend
  * project's writers would leave them. Team A (t1) is two practices short; the game t2 v t1 is not placed.
  */

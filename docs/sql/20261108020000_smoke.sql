@@ -1,4 +1,4 @@
--- Smoke checks for 20261107010000_schedule_tbd.sql
+-- Smoke checks for 20261108020000_schedule_tbd.sql
 --
 -- Run on the database built to head, in DO blocks that clean up after themselves.
 -- `prelude.sql` stubs `auth.uid()` from `request.jwt.claim.sub`, so the writers run as a real

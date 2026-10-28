@@ -650,6 +650,112 @@ describe('a player import in progress fixes the rule (mock of season_has_pending
   });
 });
 
+describe('a file is checked under one rule (mock of the age-rule stamp and age_rule_changed)', () => {
+  let draftId;
+  let jobId;
+  const validate = (rows, row_offset) =>
+    supabase.functions.invoke('import-validation', {
+      body: {
+        import_type: 'players',
+        organization_id: MOCK_ORG_ID,
+        rows,
+        import_job_id: jobId,
+        row_offset,
+      },
+    });
+  const player = (n) => ({
+    first_name: `Zed${n}`,
+    last_name: 'Stamp',
+    date_of_birth: '2018-05-01',
+    external_registration_id: `ST-${n}`,
+  });
+  const job = () => getMockData('import_jobs').find((j) => j.id === jobId);
+  const cutoff = (month) =>
+    rpc('admin_update_draft_season', {
+      p_season_id: draftId,
+      p_patch: { age_cutoff_mode: 'custom', age_cutoff_month: month, age_cutoff_day: 1 },
+    });
+  const finalize = () =>
+    rpc('finalize_import_job', { p_import_job_id: jobId, p_validation_errors: [] });
+  beforeEach(async () => {
+    draftId = (await create()).data.id;
+    ({
+      data: { id: jobId },
+    } = await rpc('create_import_job', {
+      p_organization_id: MOCK_ORG_ID,
+      p_import_type: 'players',
+      p_file_name: 'stamp.csv',
+      p_season_settings_id: draftId,
+    }));
+  });
+
+  it('stamps the job on the first batch, keeps the stamp on a later one, and takes a new one when the file is validated again', async () => {
+    expect(job().age_rule_fingerprint ?? null).toBeNull();
+    await validate([], 0);
+    const first = job().age_rule_fingerprint;
+    expect(first).toBeTruthy();
+    expect((await cutoff(3)).error).toBeNull();
+    await validate([], 5000);
+    expect(job().age_rule_fingerprint).toBe(first);
+    await validate([], 0);
+    expect(job().age_rule_fingerprint).not.toBe(first);
+  });
+
+  it('refuses a file whose rule changed between the stamp and the first staged row, and applies it once validated again', async () => {
+    await validate([], 0); // the stamp, taken before the rule is read
+    expect((await cutoff(3)).error).toBeNull(); // nothing is staged yet, so the rule changes
+    await validate([player(1)], 1); // a later batch: staged under the new rule, the stamp stays
+    const refused = await finalize();
+    expect(refused.error).toMatchObject({ code: '22023', details: 'age_rule_changed' });
+    expect(getMockData('players').filter((p) => p.season_settings_id === draftId)).toHaveLength(0);
+    expect(job().status).toBe('importing');
+
+    await validate([player(1)], 0); // validated again
+    const applied = await finalize();
+    expect(applied.error).toBeNull();
+    expect(applied.data.inserted_players).toBe(1);
+  });
+
+  it('applies a file whose rule did not change, and a job with no stamp whatever the rule did', async () => {
+    await validate([player(1)], 0);
+    expect((await finalize()).error).toBeNull();
+
+    const { data: legacy } = await rpc('create_import_job', {
+      p_organization_id: MOCK_ORG_ID,
+      p_import_type: 'players',
+      p_file_name: 'legacy.csv',
+      p_season_settings_id: (await create({ p_name: 'Legacy Draft', p_season_year: 2029 })).data.id,
+    });
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      staging_players: [
+        ...getMockData('staging_players'),
+        {
+          id: 'ms-legacy',
+          organization_id: MOCK_ORG_ID,
+          import_job_id: legacy.id,
+          source_row_number: 1,
+          raw_payload: {},
+          normalized_payload: {
+            first_name: 'Old',
+            last_name: 'File',
+            external_registration_id: 'LG-1',
+          },
+          validation_errors: [],
+        },
+      ],
+    });
+    expect(
+      getMockData('import_jobs').find((j) => j.id === legacy.id).age_rule_fingerprint ?? null
+    ).toBeNull();
+    const result = await rpc('finalize_import_job', {
+      p_import_job_id: legacy.id,
+      p_validation_errors: [],
+    });
+    expect(result.error).toBeNull();
+  });
+});
+
 describe('a completed season is read-only for its schedule (mock of the schedule triggers)', () => {
   const TEAM = 'ms-team-old';
   const LIVE_TEAM = 'ms-team-live';

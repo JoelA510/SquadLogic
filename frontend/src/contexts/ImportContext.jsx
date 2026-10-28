@@ -35,6 +35,9 @@ import { isAdminRole } from '../constants/permissions.js';
 
 const MAX_ROWS = 10000;
 const MAX_COLS = 1200;
+/** The database refused to apply a file whose ages were counted under a rule the season has since changed. */
+const AGE_RULE_CHANGED_TEXT =
+  "The season's age rules changed since this file was checked; validate it again.";
 const canDeferImport = (type) =>
   type === 'coaches' || type === 'fields' || type === 'field_availability';
 
@@ -815,7 +818,11 @@ export function ImportProvider({ children }) {
                 );
 
                 if (finalizeError) {
-                  throw new Error(finalizeError.message || 'Import finalization failed');
+                  throw new Error(
+                    finalizeError.details === 'age_rule_changed'
+                      ? AGE_RULE_CHANGED_TEXT
+                      : finalizeError.message || 'Import finalization failed'
+                  );
                 }
 
                 persistenceResult = finalizeResult;

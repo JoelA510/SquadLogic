@@ -161,6 +161,82 @@ export function completedSeasonRefusal(db, rows) {
   return null;
 }
 
+/**
+ * Mirrors `season_age_rule_fingerprint`: the age rule that counts a natural age in the season (cutoff
+ * mode, month, day, season year, and each division with both window ends: id, window, band, and its
+ * name when the band columns are empty). A string compared for equality, not a digest.
+ * @param {any} db
+ * @param {string} seasonId
+ * @returns {string|null}
+ */
+export function seasonAgeRuleFingerprint(db, seasonId) {
+  const season = seasonOf(db, seasonId);
+  if (!season) return null;
+  const windows = (db.divisions || [])
+    .filter((d) => same(d.season_settings_id, season.id) && d.birthdate_start && d.birthdate_end)
+    .map((d) => [
+      String(d.id),
+      d.birthdate_start,
+      d.birthdate_end,
+      d.min_age ?? null,
+      d.max_age ?? null,
+      d.min_age == null || d.max_age == null ? (d.name ?? null) : null,
+    ])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return JSON.stringify({
+    mode: season.age_cutoff_mode ?? null,
+    month: season.age_cutoff_month ?? null,
+    day: season.age_cutoff_day ?? null,
+    year: season.season_year ?? null,
+    windows,
+  });
+}
+
+/** The season a registration job adds to: its own, else (a legacy job) the organization's active one. */
+function jobSeasonOf(db, job) {
+  return (db.season_settings || []).find(
+    (s) =>
+      same(s.organization_id, job.organization_id) &&
+      (job.season_settings_id ? same(s.id, job.season_settings_id) : s.status === 'active')
+  );
+}
+
+/**
+ * Mirrors `stamp_import_job_age_rule` (the import-validation Edge Function calls it before it reads the
+ * rule): the registration job takes its season's fingerprint. `restart` (the first batch of a file)
+ * replaces an earlier stamp; otherwise the first stamp stands.
+ * @param {any} db
+ * @param {string} jobId
+ * @param {boolean} restart
+ * @returns {string|null}
+ */
+export function stampJobAgeRule(db, jobId, restart) {
+  const job = (db.import_jobs || []).find((j) => same(j.id, jobId));
+  if (!job || job.job_type !== 'registration') return null;
+  const season = jobSeasonOf(db, job);
+  if (!season) return null;
+  const fingerprint = seasonAgeRuleFingerprint(db, season.id);
+  if (restart || job.age_rule_fingerprint == null) job.age_rule_fingerprint = fingerprint;
+  return fingerprint;
+}
+
+/**
+ * The refusal `finalize_import_job` gives a job whose stamp is not its season's rule any more
+ * (22023, `age_rule_changed`), or null; a job with no stamp is never refused.
+ * @param {any} db
+ * @param {{ age_rule_fingerprint?: string|null }} job
+ * @param {{ id: string }} season
+ */
+export function ageRuleChangedRefusal(db, job, season) {
+  if (job.age_rule_fingerprint == null) return null;
+  if (job.age_rule_fingerprint === seasonAgeRuleFingerprint(db, season.id)) return null;
+  return fail(
+    '22023',
+    `The age rules of season ${season.id} changed since this file was checked; validate it again`,
+    'age_rule_changed'
+  );
+}
+
 /** The tables whose `season_schedule_readonly_when_completed` trigger the mock mirrors. */
 const SCHEDULE_TABLES = [
   'teams',

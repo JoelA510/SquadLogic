@@ -25,7 +25,13 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
-import { completedSeasonRefusal, handleSeasonRpc, scheduleWriteRefusal } from './mockSeasons.js';
+import {
+  ageRuleChangedRefusal,
+  completedSeasonRefusal,
+  handleSeasonRpc,
+  scheduleWriteRefusal,
+  stampJobAgeRule,
+} from './mockSeasons.js';
 import {
   activeSeasonOf,
   coachTeamSeasonRefusal,
@@ -5314,6 +5320,9 @@ export const mockSupabase = {
           },
         };
       }
+      // The ages were counted under the rule stamped on the job when the file was validated.
+      const ageRuleRefused = ageRuleChangedRefusal(db, job, seasonRow);
+      if (ageRuleRefused) return ageRuleRefused;
 
       const deriveDivision = (payload) => {
         const ageText = String(payload.age_group ?? payload['age group'] ?? payload.age ?? '');
@@ -7974,6 +7983,12 @@ export const mockSupabase = {
         // As the Edge Function does (R5): a player's natural age is counted in the season the
         // finalizer attaches divisions to (the mock's active one), and no birth key is staged.
         // E1: the season the job adds to (its own, else the organization's active one).
+        // Before the rule is read, the job is stamped with it (the Edge Function does the same).
+        if (body.import_type === 'players' && body.import_job_id) {
+          const stampDb = getDB();
+          stampJobAgeRule(stampDb, body.import_job_id, (body.row_offset || 0) === 0);
+          saveDB(stampDb);
+        }
         const importJobRow = (getDB().import_jobs || []).find(
           (item) => String(item.id) === String(body.import_job_id)
         );

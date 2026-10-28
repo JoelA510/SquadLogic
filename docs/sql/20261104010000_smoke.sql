@@ -141,10 +141,16 @@ BEGIN
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE') AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 8 THEN RAISE EXCEPTION 'only % of the 8 replaced definers kept their pin and grants', v_n; END IF;
 
-    SELECT string_agg(conname, ',' ORDER BY conname) INTO v_def FROM pg_constraint
-     WHERE conrelid = 'public.coaches'::regclass AND contype IN ('u', 'c')
-       AND conname IN ('coaches_email_key', 'coaches_organization_id_email_key', 'coaches_email_normalised');
-    IF v_def IS DISTINCT FROM 'coaches_email_normalised,coaches_organization_id_email_key' THEN
+    -- Run at head: 20261108010000 made the per-organization key a per-season unique index.
+    SELECT string_agg(k, ',' ORDER BY k) INTO v_def FROM (
+        SELECT conname::text AS k FROM pg_constraint
+         WHERE conrelid = 'public.coaches'::regclass AND contype IN ('u', 'c')
+           AND conname IN ('coaches_email_key', 'coaches_organization_id_email_key', 'coaches_email_normalised')
+        UNION ALL
+        SELECT c.relname::text FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE i.indrelid = 'public.coaches'::regclass AND i.indisunique
+           AND c.relname = 'coaches_organization_season_email_key') x;
+    IF v_def IS DISTINCT FROM 'coaches_email_normalised,coaches_organization_season_email_key' THEN
         RAISE EXCEPTION 'the coach email keys are %', v_def;
     END IF;
     IF NOT ('child_registration_id' = ANY (public.import_allowed_keys('coaches')))
@@ -171,6 +177,8 @@ BEGIN
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin'), (v_other_org, v_other, 'admin');
     INSERT INTO public.season_settings (organization_id, name, status) VALUES (v_org, 'AO 2026', 'active') RETURNING id INTO v_season;
+    -- A coach belongs to a season (20261108010000).
+    INSERT INTO public.season_settings (organization_id, name, status) VALUES (v_other_org, 'AO Other 2026', 'active');
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_season, 'AO U10') RETURNING id INTO v_division;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_division, 'AO Team') RETURNING id INTO v_team;
     INSERT INTO public.locations (organization_id, name, lighting_available) VALUES (v_org, 'AO Park', false) RETURNING id INTO v_venue;

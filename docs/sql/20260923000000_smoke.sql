@@ -162,8 +162,8 @@ BEGIN
       VALUES ('Smoke Org 8.8', 'smoke-org-88') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role)
       VALUES (v_org, v_admin, 'admin');
-    INSERT INTO public.season_settings (organization_id, name)
-      VALUES (v_org, 'Assignment Season') RETURNING id INTO v_season;
+    INSERT INTO public.season_settings (organization_id, name, status)
+      VALUES (v_org, 'Assignment Season', 'active') RETURNING id INTO v_season;
     INSERT INTO public.divisions (organization_id, season_settings_id, name)
       VALUES (v_org, v_season, 'Assignment Division') RETURNING id INTO v_div;
     INSERT INTO public.coaches (organization_id, full_name, email, status, can_coach_multiple_teams)

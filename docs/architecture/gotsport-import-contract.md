@@ -129,8 +129,8 @@ another adds it to the finalizer and the allowlist together.
 
 An optional column names the coach's children by **player registration id**,
 one or more, separated by `;` or `,` (`GS-1001; GS-1003`). Import the players
-first: the finalizer matches each id to a player of the **same organization**
-by `players.external_registration_id`, and writes one `coach_team_requests` row
+first: the finalizer matches each id to a player of the **same organization and
+season** by `players.external_registration_id`, and writes one `coach_team_requests` row
 per match (`coach_id`, `player_id`, `slot` in the order the file lists them; a
 repeated id counts once). Rules:
 
@@ -138,7 +138,7 @@ repeated id counts once). Rules:
   matches (a re-import corrects them); a file **without** it leaves the coach's
   links alone. Nothing else writes `coach_team_requests`.
 - An id that matches no player here (not imported yet, mistyped, or another
-  organization's) writes nothing and is **never fatal**: the result lists it
+  season's or organization's) writes nothing and is **never fatal**: the result lists it
   (`unmatched_child_ids`, at most 200, with their count in
   `unmatched_child_id_count`), the job completes with warnings, and the import
   screen names the first ten and says to import players first.
@@ -150,9 +150,24 @@ repeated id counts once). Rules:
   `import_allowed_keys('coaches')`), with the aliases `child registration id`
   and `child id` (`Player ID` is **not** aliased: a player file uses it as a
   registration-id column).
-- A coach is one row per organization and email (`UNIQUE (organization_id,
-email)`, stored lower-case and trimmed): the same address in another
-  organization is another coach, never a conflict.
+- A coach is one row per organization, season and email (a unique index on
+  `(organization_id, season_settings_id, lower(email))`, stored lower-case and
+  trimmed): the same address in another season or organization is another
+  coach, never a conflict.
+
+### Players and coaches belong to one season (`20261108010000`)
+
+Every player and coach row has a `season_settings_id`, and an import adds to
+the season its job was made for (the active one; a draft season takes imports
+in E3b). **The import matches existing rows in that season only**: a
+registration id, or a coach email, that another season holds is a new row in
+this one, and nothing is read from or written to the other season's row. Nothing
+carries over from one season to the next, so years of experience and skill
+level come from the new season's own registration and evaluations. A division
+named by id from another season matches nothing (the row's division is left
+empty and counted as unmatched); buddy requests and a coach's child ids reach
+players of the job's season only. An organization with no season has nothing to
+import into (22023, `season_missing`).
 
 > **Duplicate headers:** the coach export repeats `Playing Up` and
 > `Preferred Co-Coach` once per coached player. A PapaParse `transformHeader`

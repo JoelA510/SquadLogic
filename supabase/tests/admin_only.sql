@@ -217,12 +217,19 @@ SELECT is(
 SELECT cmp_ok(
     (SELECT count(*)::int FROM pg_constraint WHERE conrelid = 'public.coaches'::regclass AND contype = 'f'),
     '>=', 1, 'control: coaches still has its organization foreign key');
+-- 20261108010000 made the per-organization key a per-season one (a unique index on
+-- (organization_id, season_settings_id, lower(email))); the normalising check stays.
 SELECT is(
-    (SELECT array_agg(conname::text ORDER BY conname::text) FROM pg_constraint
-      WHERE conrelid = 'public.coaches'::regclass AND contype IN ('u', 'c')
-        AND conname IN ('coaches_organization_id_email_key', 'coaches_email_key', 'coaches_email_normalised')),
-    ARRAY['coaches_email_normalised', 'coaches_organization_id_email_key'],
-    'the coach email is unique per organization and stored normalised; the global key is gone');
+    (SELECT array_agg(k ORDER BY k) FROM (
+        SELECT conname::text AS k FROM pg_constraint
+         WHERE conrelid = 'public.coaches'::regclass AND contype IN ('u', 'c')
+           AND conname IN ('coaches_organization_id_email_key', 'coaches_email_key', 'coaches_email_normalised')
+        UNION ALL
+        SELECT c.relname::text FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+         WHERE i.indrelid = 'public.coaches'::regclass AND i.indisunique
+           AND c.relname = 'coaches_organization_season_email_key') x),
+    ARRAY['coaches_email_normalised', 'coaches_organization_season_email_key'],
+    'the coach email is unique per organization and season and stored normalised; the global and per-organization keys are gone');
 
 SELECT * FROM finish();
 ROLLBACK;

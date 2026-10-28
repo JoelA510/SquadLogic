@@ -57,28 +57,51 @@ function KPI({ icon: Icon, tone, label, value, sub = null }) {
   );
 }
 
+const HOME_NOT_LOADED = Object.freeze({
+  players: [],
+  teams: [],
+  divisions: [],
+  games: [],
+  practices: [],
+  audit: [],
+  loaded: false,
+});
+
 function useHomeData() {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, seasonSettingsLoading } = useOrganization();
   const orgId = currentOrganization?.id;
-  const [data, setData] = useState({
-    players: [],
-    teams: [],
-    divisions: [],
-    games: [],
-    practices: [],
-    audit: [],
-    loaded: false,
-  });
+  const seasonId = currentSeasonSetting?.id;
+  const [data, setData] = useState(/** @type {any} */ (HOME_NOT_LOADED));
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!orgId) return;
+      if (!orgId || seasonSettingsLoading) return;
+      // The season (or organization) just left is not shown while this one loads.
+      setData(HOME_NOT_LOADED);
       try {
-        const [players, teams, divisions, games, practices, auditRes] = await Promise.all([
-          fetchAllPages(() => supabase.from('players').select('*').eq('organization_id', orgId)),
+        // The players and divisions of the season the header shows (20261108010000); teams are
+        // the season's through their division. With no season there are none to count.
+        const [players, allTeams, divisions, games, practices, auditRes] = await Promise.all([
+          seasonId
+            ? fetchAllPages(() =>
+                supabase
+                  .from('players')
+                  .select('*')
+                  .eq('organization_id', orgId)
+                  .eq('season_settings_id', seasonId)
+              )
+            : [],
           fetchAllPages(() => supabase.from('teams').select('*').eq('organization_id', orgId)),
-          fetchAllPages(() => supabase.from('divisions').select('*').eq('organization_id', orgId)),
+          seasonId
+            ? fetchAllPages(() =>
+                supabase
+                  .from('divisions')
+                  .select('*')
+                  .eq('organization_id', orgId)
+                  .eq('season_settings_id', seasonId)
+              )
+            : [],
           fetchAllPages(() =>
             supabase
               .from('games')
@@ -102,6 +125,8 @@ function useHomeData() {
         // the dashboard, unlike the primary reads where partial data would
         // corrupt the KPIs.
         if (auditRes.error) logger.error('[Home] audit feed load failed:', auditRes.error);
+        const seasonDivisionIds = new Set(divisions.map((division) => String(division.id)));
+        const teams = allTeams.filter((team) => seasonDivisionIds.has(String(team.division_id)));
         setData({
           players,
           teams,
@@ -119,7 +144,7 @@ function useHomeData() {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, seasonId, seasonSettingsLoading]);
 
   return data;
 }

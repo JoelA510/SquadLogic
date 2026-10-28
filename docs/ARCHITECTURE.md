@@ -410,7 +410,7 @@ CREATE TABLE IF NOT EXISTS public.coaches (
 ```
 
 Coach identity was keyed on a **globally unique email**; since `20261104010000` and `20261104020000`
-it is one row per organization and email (`UNIQUE (organization_id, email)`, stored lower-case), and
+it is one row per organization, season and email (`20261108010000`: a unique index on `(organization_id, season_settings_id, lower(email))`, stored lower-case; a coach row belongs to one season, as a player row does), and
 `profile_id` and `user_id` are gone: no coach signs in. `coach_team_requests`
 (`20260530000000_age_cutoff_division_bands_canonical_fields.sql:64-84`) links a coach to up to N
 children via a `slot` integer, mirroring the corpus's `Coach Slot` column:

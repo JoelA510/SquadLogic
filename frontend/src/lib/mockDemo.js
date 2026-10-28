@@ -199,6 +199,7 @@ export function handleDemoRpc(
       db.coaches.push({
         id: coachId,
         organization_id: orgId,
+        season_settings_id: seasonId,
         full_name: `Coach ${SLICE.lastNames[(teamNumber - 1) % SLICE.lastNames.length]}`,
         email: `coach${teamNumber}-${orgId.slice(0, 6)}@example.test`,
         status: 'active',
@@ -221,6 +222,7 @@ export function handleDemoRpc(
         db.players.push({
           id: mockId(),
           organization_id: orgId,
+          season_settings_id: seasonId,
           team_id: teamId,
           division_id: divisionId,
           first_name: scaled

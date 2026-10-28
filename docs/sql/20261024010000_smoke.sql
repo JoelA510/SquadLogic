@@ -155,7 +155,7 @@ BEGIN
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin'), (v_org, v_m, 'staff');
-    INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'R3 Fall') RETURNING id INTO v_s;
+    INSERT INTO public.season_settings (organization_id, name, status) VALUES (v_org, 'R3 Fall', 'active') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'R3 U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'R3 A') RETURNING id INTO v_ta;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'R3 B') RETURNING id INTO v_tb;

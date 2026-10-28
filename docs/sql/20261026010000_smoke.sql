@@ -98,6 +98,9 @@ BEGIN
     FOR v_left IN SELECT unnest(ARRAY['0', '26']) LOOP
         BEGIN
             INSERT INTO public.organizations (name, slug) VALUES ('R5 Check', 'r5-check');
+            -- A player belongs to a season (20261108010000): the check below is the one that refuses.
+            INSERT INTO public.season_settings (organization_id, name, status)
+            SELECT id, 'R5 Check', 'active' FROM public.organizations WHERE slug = 'r5-check';
             INSERT INTO public.players (organization_id, first_name, last_name, natural_age)
             SELECT id, 'Check', 'Age', v_left::smallint FROM public.organizations WHERE slug = 'r5-check';
             RAISE EXCEPTION USING ERRCODE = 'P1027', MESSAGE = 'the check took ' || v_left;
@@ -138,6 +141,8 @@ BEGIN
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin');
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'R5 Season', 'active');
     INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by) VALUES
         (v_job1, v_org, 'registration', 'smoke/r5-1.csv', 'processing', v_admin),
         (v_job2, v_org, 'registration', 'smoke/r5-2.csv', 'processing', v_admin);

@@ -91,6 +91,9 @@ BEGIN
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin');
+    -- A player and a coach belong to a season (20261108010000).
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'R0 Season', 'active');
     -- Declared fields of every type the import parses: string, number, date.
     INSERT INTO public.organization_schemas (organization_id, entity_type, schema_definition) VALUES
         (v_org, 'coach', '{"shirt_size": "string", "years_coached": "number", "cert_date": "date"}'::jsonb),

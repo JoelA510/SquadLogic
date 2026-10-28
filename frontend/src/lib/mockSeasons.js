@@ -161,35 +161,13 @@ export function completedSeasonRefusal(db, rows) {
   return null;
 }
 
-/**
- * Mirrors `season_age_rule_fingerprint`: the age rule that counts a natural age in the season (cutoff
- * mode, month, day, season year, and each division with both window ends: id, window, band, and its
- * name when the band columns are empty). A string compared for equality, not a digest.
- * @param {any} db
- * @param {string} seasonId
- * @returns {string|null}
- */
-export function seasonAgeRuleFingerprint(db, seasonId) {
+/** The season's `age_rule_revision` (0 until it is first bumped). */
+const revisionOf = (season) => Number(season?.age_rule_revision ?? 0);
+
+/** Mirrors the revision bump: the season's age rule changed in a way that moves a natural age. */
+function bumpAgeRuleRevision(db, seasonId) {
   const season = seasonOf(db, seasonId);
-  if (!season) return null;
-  const windows = (db.divisions || [])
-    .filter((d) => same(d.season_settings_id, season.id) && d.birthdate_start && d.birthdate_end)
-    .map((d) => [
-      String(d.id),
-      d.birthdate_start,
-      d.birthdate_end,
-      d.min_age ?? null,
-      d.max_age ?? null,
-      d.min_age == null || d.max_age == null ? (d.name ?? null) : null,
-    ])
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  return JSON.stringify({
-    mode: season.age_cutoff_mode ?? null,
-    month: season.age_cutoff_month ?? null,
-    day: season.age_cutoff_day ?? null,
-    year: season.season_year ?? null,
-    windows,
-  });
+  if (season) season.age_rule_revision = revisionOf(season) + 1;
 }
 
 /** The season a registration job adds to: its own, else (a legacy job) the organization's active one. */
@@ -202,39 +180,103 @@ function jobSeasonOf(db, job) {
 }
 
 /**
- * Mirrors `stamp_import_job_age_rule` (the import-validation Edge Function calls it before it reads the
- * rule): the registration job takes its season's fingerprint. `restart` (the first batch of a file)
- * replaces an earlier stamp; otherwise the first stamp stands.
+ * Mirrors `import_age_rule`: the rule a player file is counted under (the job's season, else the
+ * organization's active one), its window-bearing divisions and its revision, read together; with a job
+ * it stamps the job with the season and that revision (`restart`, the first batch of a file, replaces an
+ * earlier stamp; otherwise the first stamp stands). The caller counts ages from what this returns.
  * @param {any} db
- * @param {string} jobId
+ * @param {string} organizationId
+ * @param {string|null} jobId
  * @param {boolean} restart
- * @returns {string|null}
+ * @returns {{ season: any, divisions: any[], revision: number } | null}
  */
-export function stampJobAgeRule(db, jobId, restart) {
-  const job = (db.import_jobs || []).find((j) => same(j.id, jobId));
-  if (!job || job.job_type !== 'registration') return null;
-  const season = jobSeasonOf(db, job);
+export function ageRuleForImport(db, organizationId, jobId, restart) {
+  const job = jobId ? (db.import_jobs || []).find((j) => same(j.id, jobId)) : null;
+  const season = job
+    ? jobSeasonOf(db, job)
+    : (db.season_settings || []).find(
+        (s) => same(s.organization_id, organizationId) && s.status === 'active'
+      );
   if (!season) return null;
-  const fingerprint = seasonAgeRuleFingerprint(db, season.id);
-  if (restart || job.age_rule_fingerprint == null) job.age_rule_fingerprint = fingerprint;
-  return fingerprint;
+  const rule = {
+    season: {
+      id: season.id,
+      status: season.status,
+      season_year: season.season_year ?? null,
+      age_cutoff_mode: season.age_cutoff_mode ?? null,
+      age_cutoff_month: season.age_cutoff_month ?? null,
+      age_cutoff_day: season.age_cutoff_day ?? null,
+    },
+    divisions: (db.divisions || [])
+      .filter((d) => same(d.season_settings_id, season.id) && d.birthdate_start && d.birthdate_end)
+      .map((d) => ({ ...d })),
+    revision: revisionOf(season),
+  };
+  if (job && job.job_type === 'registration' && (restart || job.age_rule_revision == null)) {
+    job.age_rule_season_id = season.id;
+    job.age_rule_revision = rule.revision;
+  }
+  return rule;
 }
 
 /**
- * The refusal `finalize_import_job` gives a job whose stamp is not its season's rule any more
- * (22023, `age_rule_changed`), or null; a job with no stamp is never refused.
- * @param {any} db
- * @param {{ age_rule_fingerprint?: string|null }} job
- * @param {{ id: string }} season
+ * The refusal `finalize_import_job` gives a job whose stamp is not its season's revision now
+ * (22023, `age_rule_changed`), a change and its reversal included, or null; a job with no stamp is
+ * never refused.
+ * @param {any} _db
+ * @param {{ age_rule_season_id?: string|null, age_rule_revision?: number|null }} job
+ * @param {{ id: string, age_rule_revision?: number|null }} season
  */
-export function ageRuleChangedRefusal(db, job, season) {
-  if (job.age_rule_fingerprint == null) return null;
-  if (job.age_rule_fingerprint === seasonAgeRuleFingerprint(db, season.id)) return null;
+export function ageRuleChangedRefusal(_db, job, season) {
+  if (job.age_rule_revision == null) return null;
+  if (
+    same(job.age_rule_season_id, season.id) &&
+    Number(job.age_rule_revision) === revisionOf(season)
+  ) {
+    return null;
+  }
   return fail(
     '22023',
     `The age rules of season ${season.id} changed since this file was checked; validate it again`,
     'age_rule_changed'
   );
+}
+
+/**
+ * Mirrors `divisions_window_guard` for a change to an existing division's band: on a division that
+ * bears a window, a changed `min_age`/`max_age` (or name, where a band column is empty) is refused once
+ * the season has players (`season_has_players`) or while a player import is pending (`import_pending`);
+ * an allowed change raises the season's age-rule revision. Returns the refusal, or null (the caller
+ * then applies the change). `next` has the values after the change.
+ * @param {any} db
+ * @param {any} division
+ * @param {{ min_age?: number|null, max_age?: number|null, name?: string }} next
+ */
+export function divisionBandRefusal(db, division, next) {
+  if (!(division.birthdate_start && division.birthdate_end)) return null;
+  const bandChanged =
+    (division.min_age ?? null) !== (next.min_age ?? null) ||
+    (division.max_age ?? null) !== (next.max_age ?? null);
+  const nameSupplies =
+    (next.name ?? division.name) !== division.name &&
+    [division.min_age, division.max_age, next.min_age, next.max_age].some((v) => v == null);
+  if (!bandChanged && !nameSupplies) return null;
+  if (seasonHasPlayers(db, division.season_settings_id)) {
+    return fail(
+      '22023',
+      `Season ${division.season_settings_id} has players: a division's birth-date window or age band cannot change`,
+      'season_has_players'
+    );
+  }
+  if (seasonHasPendingImport(db, division.season_settings_id)) {
+    return fail(
+      '22023',
+      `Season ${division.season_settings_id} has a player import in progress: finish or cancel it before a division's birth-date window or age band changes`,
+      'import_pending'
+    );
+  }
+  bumpAgeRuleRevision(db, division.season_settings_id);
+  return null;
 }
 
 /** The tables whose `season_schedule_readonly_when_completed` trigger the mock mirrors. */
@@ -523,6 +565,9 @@ function updateDraftSeason(db, p, c) {
     return fail('23505', `a season named "${next.name}" already exists`);
   }
 
+  if (Object.keys(changed).some((key) => CUTOFF_KEYS.includes(key))) {
+    next.age_rule_revision = revisionOf(old) + 1;
+  }
   Object.assign(old, next, { updated_at: (c.now ?? new Date()).toISOString() });
   audit(db, c, old.organization_id, 'season.updated', 'season_settings', old.id, {
     status: old.status,
@@ -575,6 +620,7 @@ function setWindow(db, p, c) {
   const before = { start: division.birthdate_start ?? null, end: division.birthdate_end ?? null };
   division.birthdate_start = start;
   division.birthdate_end = end;
+  bumpAgeRuleRevision(db, division.season_settings_id);
   division.updated_at = (c.now ?? new Date()).toISOString();
   audit(db, c, division.organization_id, 'division.window_changed', 'division', division.id, {
     season_settings_id: division.season_settings_id,

@@ -650,7 +650,7 @@ describe('a player import in progress fixes the rule (mock of season_has_pending
   });
 });
 
-describe('a file is checked under one rule (mock of the age-rule stamp and age_rule_changed)', () => {
+describe('a file is checked under one rule (mock of import_age_rule and age_rule_changed)', () => {
   let draftId;
   let jobId;
   const validate = (rows, row_offset) =>
@@ -670,6 +670,8 @@ describe('a file is checked under one rule (mock of the age-rule stamp and age_r
     external_registration_id: `ST-${n}`,
   });
   const job = () => getMockData('import_jobs').find((j) => j.id === jobId);
+  const season = () => getMockData('season_settings').find((s) => s.id === draftId);
+  // The draft copies the active season's custom cutoff, September 1.
   const cutoff = (month) =>
     rpc('admin_update_draft_season', {
       p_season_id: draftId,
@@ -689,20 +691,22 @@ describe('a file is checked under one rule (mock of the age-rule stamp and age_r
     }));
   });
 
-  it('stamps the job on the first batch, keeps the stamp on a later one, and takes a new one when the file is validated again', async () => {
-    expect(job().age_rule_fingerprint ?? null).toBeNull();
+  it('stamps the job with the season and its revision on the first batch, keeps it on a later one, and takes a new one when the file is validated again', async () => {
+    expect(job().age_rule_revision ?? null).toBeNull();
     await validate([], 0);
-    const first = job().age_rule_fingerprint;
-    expect(first).toBeTruthy();
+    const first = job().age_rule_revision;
+    expect(first).toBe(Number(season().age_rule_revision ?? 0));
+    expect(job().age_rule_season_id).toBe(draftId);
     expect((await cutoff(3)).error).toBeNull();
+    expect(Number(season().age_rule_revision)).toBe(first + 1);
     await validate([], 5000);
-    expect(job().age_rule_fingerprint).toBe(first);
+    expect(job().age_rule_revision).toBe(first);
     await validate([], 0);
-    expect(job().age_rule_fingerprint).not.toBe(first);
+    expect(job().age_rule_revision).toBe(first + 1);
   });
 
   it('refuses a file whose rule changed between the stamp and the first staged row, and applies it once validated again', async () => {
-    await validate([], 0); // the stamp, taken before the rule is read
+    await validate([], 0); // the stamp, taken with the rule read
     expect((await cutoff(3)).error).toBeNull(); // nothing is staged yet, so the rule changes
     await validate([player(1)], 1); // a later batch: staged under the new rule, the stamp stays
     const refused = await finalize();
@@ -714,6 +718,18 @@ describe('a file is checked under one rule (mock of the age-rule stamp and age_r
     const applied = await finalize();
     expect(applied.error).toBeNull();
     expect(applied.data.inserted_players).toBe(1);
+  });
+
+  it('refuses a file whose rule was changed and changed back (A, B, A): the values look the same, the revision does not', async () => {
+    await validate([], 0);
+    const before = { ...season() };
+    expect((await cutoff(3)).error).toBeNull();
+    expect((await cutoff(9)).error).toBeNull();
+    expect(season().age_cutoff_month).toBe(before.age_cutoff_month);
+    expect(season().age_cutoff_mode).toBe(before.age_cutoff_mode);
+    expect(Number(season().age_rule_revision)).toBe(Number(before.age_rule_revision ?? 0) + 2);
+    await validate([player(1)], 1);
+    expect((await finalize()).error).toMatchObject({ code: '22023', details: 'age_rule_changed' });
   });
 
   it('applies a file whose rule did not change, and a job with no stamp whatever the rule did', async () => {
@@ -746,13 +762,86 @@ describe('a file is checked under one rule (mock of the age-rule stamp and age_r
       ],
     });
     expect(
-      getMockData('import_jobs').find((j) => j.id === legacy.id).age_rule_fingerprint ?? null
+      getMockData('import_jobs').find((j) => j.id === legacy.id).age_rule_revision ?? null
     ).toBeNull();
     const result = await rpc('finalize_import_job', {
       p_import_job_id: legacy.id,
       p_validation_errors: [],
     });
     expect(result.error).toBeNull();
+  });
+
+  it('moves the revision with a window, and refuses a band change on a window-bearing division once the season has players or an import is pending', async () => {
+    const u4 = getMockData('divisions').find(
+      (d) => d.season_settings_id === draftId && d.name === 'MS U4'
+    );
+    const bandCall = (extra) =>
+      rpc('upsert_division_for_import', {
+        p_organization_id: MOCK_ORG_ID,
+        p_season_settings_id: draftId,
+        p_name: 'MS U4',
+        ...extra,
+      });
+    const revision = () => Number(season().age_rule_revision ?? 0);
+    const r0 = revision();
+    // No window: the band moves freely and the revision does not.
+    expect((await bandCall({ p_min_age: 4, p_max_age: 5 })).error).toBeNull();
+    expect(revision()).toBe(r0);
+    // A window goes on (the writer bumps), then the band bears on ages.
+    expect(
+      (
+        await rpc('admin_set_division_birthdate_window', {
+          p_division_id: u4.id,
+          p_birthdate_start: '2023-01-01',
+          p_birthdate_end: '2024-07-31',
+        })
+      ).error
+    ).toBeNull();
+    expect(revision()).toBe(r0 + 1);
+    expect((await bandCall({})).error).toBeNull(); // asks for no change
+    expect(revision()).toBe(r0 + 1);
+    expect((await bandCall({ p_min_age: 4, p_max_age: 4 })).error).toBeNull();
+    expect(revision()).toBe(r0 + 2);
+
+    // A pending import fixes the band.
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      staging_players: [
+        {
+          id: 'ms-band',
+          organization_id: MOCK_ORG_ID,
+          import_job_id: jobId,
+          source_row_number: 1,
+          raw_payload: {},
+          normalized_payload: {},
+          validation_errors: [],
+        },
+      ],
+    });
+    expect((await bandCall({ p_max_age: 6 })).error).toMatchObject({
+      code: '22023',
+      details: 'import_pending',
+    });
+    // Players fix it too.
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      staging_players: [],
+      players: [
+        ...getMockData('players'),
+        {
+          id: 'ms-band-p',
+          organization_id: MOCK_ORG_ID,
+          season_settings_id: draftId,
+          first_name: 'B',
+          last_name: 'P',
+        },
+      ],
+    });
+    expect((await bandCall({ p_max_age: 6 })).error).toMatchObject({
+      code: '22023',
+      details: 'season_has_players',
+    });
+    expect(revision()).toBe(r0 + 2);
   });
 });
 

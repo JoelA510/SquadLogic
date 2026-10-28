@@ -70,7 +70,14 @@ describe('ImportContext :: the season changed its age rule after the file was ch
           ...window.__MOCK_DB__,
           season_settings: getMockData('season_settings').map((s) =>
             s.id === season.id
-              ? { ...s, age_cutoff_mode: 'custom', age_cutoff_month: 3, age_cutoff_day: 1 }
+              ? {
+                  ...s,
+                  age_cutoff_mode: 'custom',
+                  age_cutoff_month: 3,
+                  age_cutoff_day: 1,
+                  // what the trigger on the real table does for a change that moves an age
+                  age_rule_revision: Number(s.age_rule_revision ?? 0) + 1,
+                }
               : s
           ),
         });

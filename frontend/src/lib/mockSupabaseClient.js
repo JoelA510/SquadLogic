@@ -29,8 +29,9 @@ import {
   ageRuleChangedRefusal,
   completedSeasonRefusal,
   handleSeasonRpc,
+  ageRuleForImport,
+  divisionBandRefusal,
   scheduleWriteRefusal,
-  stampJobAgeRule,
 } from './mockSeasons.js';
 import {
   activeSeasonOf,
@@ -5020,7 +5021,8 @@ export const mockSupabase = {
     }
 
     if (name === 'upsert_division_for_import') {
-      const { p_organization_id, p_season_settings_id, p_name, p_gender } = params || {};
+      const { p_organization_id, p_season_settings_id, p_name, p_gender, p_min_age, p_max_age } =
+        params || {};
       // 20261101010000: a completed season is history; no import adds to it.
       const upsertSeason = (db.season_settings || []).find(
         (item) => String(item.id) === String(p_season_settings_id)
@@ -5039,9 +5041,21 @@ export const mockSupabase = {
       let division = db.divisions.find(
         (item) =>
           String(item.organization_id) === String(p_organization_id) &&
+          String(item.season_settings_id) === String(p_season_settings_id) &&
           String(item.name).toLowerCase() === String(p_name).toLowerCase()
       );
       if (division) {
+        // 20261109010000: the band of a division that bears a window is part of the age rule, fixed
+        // once the season has players or while an import is pending (refused, never ignored); the
+        // arguments left out change nothing (COALESCE).
+        const nextBand = {
+          min_age: p_min_age ?? division.min_age ?? null,
+          max_age: p_max_age ?? division.max_age ?? null,
+        };
+        const bandRefusal = divisionBandRefusal(db, division, nextBand);
+        if (bandRefusal) return bandRefusal;
+        division.min_age = nextBand.min_age;
+        division.max_age = nextBand.max_age;
         if (p_gender) division.gender_policy = p_gender;
       } else {
         division = {
@@ -7983,22 +7997,20 @@ export const mockSupabase = {
         // As the Edge Function does (R5): a player's natural age is counted in the season the
         // finalizer attaches divisions to (the mock's active one), and no birth key is staged.
         // E1: the season the job adds to (its own, else the organization's active one).
-        // Before the rule is read, the job is stamped with it (the Edge Function does the same).
-        if (body.import_type === 'players' && body.import_job_id) {
-          const stampDb = getDB();
-          stampJobAgeRule(stampDb, body.import_job_id, (body.row_offset || 0) === 0);
-          saveDB(stampDb);
+        // As the Edge Function does: the rule and its revision come from one read, which also
+        // stamps the job; the ages below are counted from what it returned and nothing else.
+        let ageRule = null;
+        if (body.import_type === 'players') {
+          const ruleDb = getDB();
+          ageRule = ageRuleForImport(
+            ruleDb,
+            body.organization_id,
+            body.import_job_id ?? null,
+            (body.row_offset || 0) === 0
+          );
+          saveDB(ruleDb);
         }
-        const importJobRow = (getDB().import_jobs || []).find(
-          (item) => String(item.id) === String(body.import_job_id)
-        );
-        const importSeasonRow = (getDB().season_settings || []).find(
-          (item) =>
-            String(item.organization_id) === String(body.organization_id) &&
-            (importJobRow?.season_settings_id
-              ? String(item.id) === String(importJobRow.season_settings_id)
-              : item.status === 'active')
-        );
+        const importSeasonRow = ageRule?.season ?? null;
         filterImportRows(
           body.import_type,
           canonicalizeForUpload(body.import_type, body.rows || []),
@@ -8030,13 +8042,7 @@ export const mockSupabase = {
               cutoffDay: importSeasonRow?.age_cutoff_day ?? null,
               // As the Edge Function does (20261109010000): the season's divisions with a
               // birth-date window, so a birth date in one counts as that division's age.
-              divisions: (getDB().divisions || []).filter(
-                (division) =>
-                  importSeasonRow &&
-                  String(division.season_settings_id) === String(importSeasonRow.id) &&
-                  division.birthdate_start &&
-                  division.birthdate_end
-              ),
+              divisions: ageRule?.divisions ?? [],
             });
             row = naturalAge === null ? rest : { ...rest, natural_age: String(naturalAge) };
           }

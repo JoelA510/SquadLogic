@@ -33,6 +33,7 @@ import {
 } from '../supabase/functions/_shared/engines/practice-coaches.js';
 import {
   classifyTeamsForRun,
+  outsideHoldsFor,
   planTeamsForRun,
 } from '../supabase/functions/_shared/engines/practice-lock.js';
 import {
@@ -74,15 +75,16 @@ const team = (id, coach, settings = {}) => ({
 });
 
 /**
- * @param {{ teams: any[], slots: any[], locked?: any[], unitsNeeded?: Record<string, number>, placeable?: string[] }} args
+ * @param {{ teams: any[], slots: any[], locked?: any[], unitsNeeded?: Record<string, number>, placeable?: string[], outsideHolds?: any[] }} args
  */
-async function run({ teams, slots, locked = [], unitsNeeded, placeable }) {
+async function run({ teams, slots, locked = [], unitsNeeded, placeable, outsideHolds }) {
   return runPracticeOptimizer({
     teams,
     slots,
     locked,
     placeableTeamIds: placeable ?? teams.map((t) => t.id),
     ...(unitsNeeded ? { unitsNeeded } : {}),
+    ...(outsideHolds ? { outsideHolds } : {}),
     dating: dating(slots),
     config: CONFIG,
   });
@@ -168,6 +170,85 @@ describe('two practices a week land on two different weekdays', () => {
     assert.deepEqual(result.placements.map((p) => [unitIdOf(p), p.slotId]).sort(), [
       ['t#1', 'mon-a'],
       ['t#2', 'tue-a'],
+    ]);
+  });
+
+  it('a saved row on a slot OUTSIDE the run still holds its weekday', async () => {
+    // The team holds a Tuesday practice on a slot this run does not carry (another revision's, say).
+    // A second Tuesday slot comes first in the order; the writer would refuse it at the apply.
+    const slots = [slot('tue-b', 1, 19), slot('wed', 2, 17)];
+    const t = team('t', 'c-t', { practicesPerWeek: 2 });
+    const locked = [
+      {
+        assignmentId: 'row',
+        teamId: 't',
+        slotId: 'tue-out',
+        effectiveDateRange: null,
+      },
+    ];
+    const hold = {
+      teamId: 't',
+      firstDate: '2026-09-08',
+      lastDate: '2026-11-24',
+      effectiveDateRange: null,
+    };
+    const blind = await run({ teams: [t], slots, locked, unitsNeeded: { t: 1 } });
+    assert.deepEqual(
+      blind.placements.map((p) => p.slotId),
+      ['tue-b'],
+      'control: without the hold the second Tuesday is the natural pick, so the case is not vacuous'
+    );
+    const result = await run({
+      teams: [t],
+      slots,
+      locked,
+      unitsNeeded: { t: 1 },
+      outsideHolds: [hold],
+    });
+    assert.deepEqual(
+      result.placements.map((p) => p.slotId),
+      ['wed']
+    );
+    assert.deepEqual(result.unassigned, []);
+  });
+
+  it('outsideHoldsFor dates the rows outside the run for teams needing several, and names the rest', () => {
+    const rows = [
+      { id: 'r1', teamId: 'a', slotId: 'in-run', effectiveDateRange: null, assignedVia: 'auto' },
+      {
+        id: 'r2',
+        teamId: 'a',
+        slotId: 'out',
+        effectiveDateRange: '[2026-09-01,2026-12-01)',
+        assignedVia: 'auto',
+      },
+      { id: 'r3', teamId: 'b', slotId: 'gone', effectiveDateRange: null, assignedVia: 'auto' },
+      { id: 'r4', teamId: 'b', slotId: null, effectiveDateRange: null, assignedVia: 'auto' },
+      { id: 'r5', teamId: 'c', slotId: 'gone', effectiveDateRange: null, assignedVia: 'auto' },
+    ];
+    const stored = new Map([
+      ['out', { firstDate: '2026-09-08', validUntil: '2026-11-24' }],
+      ['in-run', { firstDate: '2026-09-09', validUntil: '2026-11-25' }],
+    ]);
+    const { holds, unchecked } = outsideHoldsFor(
+      rows,
+      new Set(['in-run']),
+      stored,
+      new Set(['a', 'b'])
+    );
+    assert.deepEqual(holds, [
+      {
+        teamId: 'a',
+        firstDate: '2026-09-08',
+        lastDate: '2026-11-24',
+        effectiveDateRange: '[2026-09-01,2026-12-01)',
+      },
+    ]);
+    // b's rows cannot be dated (a slot the store did not return; a row with no slot); c needs one
+    // practice, so its row is not examined at all.
+    assert.deepEqual(unchecked, [
+      { teamId: 'b', slotId: 'gone' },
+      { teamId: 'b', slotId: null },
     ]);
   });
 

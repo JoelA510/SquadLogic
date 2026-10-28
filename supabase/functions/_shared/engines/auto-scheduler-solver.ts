@@ -465,6 +465,19 @@ function wholeValidity(slot: DatedSchedulerSlot): LiveDays | null {
 }
 
 /**
+ * A saved row whose slot is not in the run, with that slot's dating read from the store (Phase D
+ * PR B): the team's weekday hold, never its capacity. `effectiveDateRange` null is the slot's whole
+ * validity, as for a row inside the run.
+ */
+export interface OutsideHold {
+  teamId: string;
+  /** The first date on the slot's weekday, and its last date: `YYYY-MM-DD`. */
+  firstDate: string;
+  lastDate: string;
+  effectiveDateRange: string | null;
+}
+
+/**
  * Every locked row, one at a time, each on its own live dates (M4.8, plan
  * §3.3). Iterating the list -- not a team-keyed collection -- is what keeps a
  * two-row team's both slots occupied. Then every live relocation, on its
@@ -475,7 +488,8 @@ export function buildLockedOccupancy(
   teamsById: Map<string, SchedulerTeam>,
   slotsById: Map<string, DatedSchedulerSlot>,
   relocated: LoadedRelocation[],
-  liveFrom: string
+  liveFrom: string,
+  outsideHolds: readonly OutsideHold[] = []
 ): BaseOccupancy {
   const today = calendarDayNumber(liveFrom);
   if (today === null) throw new TypeError(`liveFrom ${String(liveFrom)} is not a date`);
@@ -538,6 +552,22 @@ export function buildLockedOccupancy(
       continue;
     }
     hold(row.teamId, slot, span, true);
+  }
+  // A saved row on a slot outside the run still holds its weekday: a team that needs two
+  // practices and already has a Tuesday one must not be given a second Tuesday (the writer's gate
+  // would refuse the apply). Only the team's own holds are read from it, not the slot's capacity.
+  for (const outside of outsideHolds) {
+    const firstDay = calendarDayNumber(outside.firstDate);
+    const lastDay = calendarDayNumber(outside.lastDate);
+    if (firstDay === null || lastDay === null) continue;
+    let span = assignmentLiveSpan({ firstDay, lastDay, range: outside.effectiveDateRange });
+    // Q2: an unreadable range holds the slot's whole validity.
+    if (span.status === LIVE_SPAN_STATUS.UNREADABLE)
+      span = assignmentLiveSpan({ firstDay, lastDay });
+    if (span.status !== LIVE_SPAN_STATUS.LIVE) continue;
+    const held = teamHolds.get(outside.teamId) ?? [];
+    held.push({ first: span.first, last: span.last });
+    teamHolds.set(outside.teamId, held);
   }
   // One unit per (row, slot): a row has at most one live window at a time
   // (the table's EXCLUDE constraint), so two windows of one row moved onto
@@ -1136,6 +1166,12 @@ export async function runPracticeOptimizer(params: {
   relocated?: LoadedRelocation[];
   placeableTeamIds: string[];
   /**
+   * Saved rows on slots outside the run, dated from the store (Phase D PR B): they hold their
+   * team's weekday, so a team needing several practices is never given a second one on a weekday
+   * it already practises. Built by `outsideHoldsFor` (`practice-lock.ts`).
+   */
+  outsideHolds?: OutsideHold[];
+  /**
    * How many practices each placeable team still needs (its division's count less the rows it
    * holds; Phase D PR B), by team id. A team it does not name needs one, which is the solver
    * before practices per division. Computed server-side from the store, never from the body.
@@ -1195,7 +1231,14 @@ export async function runPracticeOptimizer(params: {
   const slots = dateSchedulerSlots(params.slots, params.dating);
   const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotsById = new Map(slots.map((s) => [s.id, s]));
-  const base = buildLockedOccupancy(locked, teamsById, slotsById, params.relocated ?? [], liveFrom);
+  const base = buildLockedOccupancy(
+    locked,
+    teamsById,
+    slotsById,
+    params.relocated ?? [],
+    liveFrom,
+    params.outsideHolds ?? []
+  );
   const rand = createPRNG(cfg.seed);
 
   const seed = generateGreedySeed(base, teams, units, slots, gate);

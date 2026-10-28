@@ -324,6 +324,11 @@ export type VenueDaylightLoad =
       venues: Map<string, VenueDaylight>;
       /** Every run slot, keyed by its id, as the store holds it. */
       slots: Map<string, StoredSlot>;
+      /**
+       * Every practice slot of the organization the store returned, run or not: a saved row on a
+       * slot outside the run still holds its weekday (Phase D PR B), and only its dating is read.
+       */
+      allSlots: Map<string, StoredSlot>;
       fieldsLoaded: number;
     }
   | { ok: false; code: 'VENUE_DAYLIGHT_UNREADABLE'; message: string };
@@ -429,7 +434,7 @@ export async function loadVenueDaylight(
         `lighting is unknown: ${unread.slice(0, 5).join(', ')}`,
     };
   }
-  return { ok: true, venues, slots, fieldsLoaded: read.rows.length };
+  return { ok: true, venues, slots, allSlots: storedById, fieldsLoaded: read.rows.length };
 }
 
 // ---------------------------------------------------------------------------

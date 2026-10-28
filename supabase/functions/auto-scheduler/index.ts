@@ -114,7 +114,9 @@ import {
   crossCheckLockedAssignments,
   describeLockMismatch,
   loadSeasonPracticeLock,
+  outsideHoldsFor,
   planTeamsForRun,
+  TEAM_HOLDS_UNREADABLE,
   TIME_TBD_EXCLUDED_REASON,
 } from '../_shared/engines/practice-lock.ts';
 import {
@@ -532,6 +534,55 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       );
     }
 
+    // 5e-ter. THE WEEKDAYS A TEAM ALREADY PRACTISES ON (Phase D PR B). A team that needs several
+    //     practices must not be given one on a weekday a saved row of its own already holds, and a
+    //     saved row may sit on a slot outside this run. Those rows are dated from the store (the
+    //     organization's slots the venue read already returned); a hold that cannot be dated
+    //     refuses the run, naming the team, rather than running blind to it and having the
+    //     writer's weekday rule refuse the apply. Only teams needing more than one practice are
+    //     examined, so a run at one a week reads and refuses nothing it did not before.
+    const outside = outsideHoldsFor(
+      lock.rows,
+      new Set(anchored.rows.map((s) => s.id)),
+      venueDaylight.allSlots,
+      new Set(
+        Object.keys(classification.unitsNeeded).filter(
+          (teamId) => classification.targets[teamId] > 1
+        )
+      )
+    );
+    if (outside.unchecked.length > 0) {
+      const teamIds = [...new Set(outside.unchecked.map((u) => u.teamId))].sort();
+      logRequest(
+        logCtx,
+        'error',
+        'Auto-scheduler refused: a team weekday hold could not be dated',
+        {
+          orgId: input.organizationId,
+          seasonSettingsId,
+          teamCount: teamIds.length,
+        }
+      );
+      await recordAuditNow(auditClient, logCtx, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: { reason: TEAM_HOLDS_UNREADABLE, teamIds: teamIds.slice(0, 20) },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            `${teamIds.length} team(s) need more than one practice and already hold a practice ` +
+            'whose slot could not be read, so the weekdays they are free on are unknown. The run ' +
+            `was refused rather than scheduled blind to them: ${teamIds.slice(0, 5).join(', ')}`,
+          code: TEAM_HOLDS_UNREADABLE,
+          teamIds,
+        },
+        422
+      );
+    }
+
     // 5f. PORTABLE LIGHTING (8.9 D14 PR C). Approved overrides on the run's
     //     slots, loaded as the caller through RLS -- never from the body
     //     (W25). A failed read refuses (W26): it never runs as if there were
@@ -683,6 +734,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // season-wide like a locked row's own slot.
       relocated: lock.relocations,
       placeableTeamIds: classification.placeable,
+      outsideHolds: outside.holds,
       unitsNeeded: classification.unitsNeeded,
       preferenceGate: preferences.gate,
       daylight: {

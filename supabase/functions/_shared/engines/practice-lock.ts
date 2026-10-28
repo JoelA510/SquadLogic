@@ -81,6 +81,9 @@ export interface LockCrossCheck {
 /** Why a roster team is not offered to an ordinary run. */
 export const TIME_TBD_EXCLUDED_REASON = 'time-tbd-series';
 
+/** The refusal code when a team's saved practice cannot be dated (Phase D PR B). */
+export const TEAM_HOLDS_UNREADABLE = 'TEAM_HOLDS_UNREADABLE';
+
 function sortedUnique(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
 }
@@ -263,6 +266,54 @@ export function planTeamsForRun(
     else plan.noPractices.push(teamId);
   }
   return plan;
+}
+
+/**
+ * The saved rows of teams that need more than one practice and whose slot is not in the run, each
+ * with that slot's dating from the store (Phase D PR B). They hold the team's weekday: the solver
+ * must not give a team that already practises on a Tuesday a second Tuesday, or the writer's gate
+ * refuses the apply. `unchecked` names the teams whose hold cannot be dated -- a row with no slot,
+ * a slot the store did not return, or one without readable dates -- so the run is refused for
+ * them rather than run blind. Only teams in `needing` are examined: a team needing one practice
+ * has no second to misplace, so a run at one a week reads and refuses nothing it did not before.
+ */
+export function outsideHoldsFor(
+  rows: readonly LoadedPracticeRow[],
+  runSlotIds: ReadonlySet<string>,
+  stored: ReadonlyMap<string, { firstDate: string | null; validUntil: string | null }>,
+  needing: ReadonlySet<string>
+): {
+  holds: Array<{
+    teamId: string;
+    firstDate: string;
+    lastDate: string;
+    effectiveDateRange: string | null;
+  }>;
+  unchecked: Array<{ teamId: string; slotId: string | null }>;
+} {
+  const holds: Array<{
+    teamId: string;
+    firstDate: string;
+    lastDate: string;
+    effectiveDateRange: string | null;
+  }> = [];
+  const unchecked: Array<{ teamId: string; slotId: string | null }> = [];
+  for (const row of rows) {
+    if (!needing.has(row.teamId)) continue;
+    if (row.slotId !== null && runSlotIds.has(row.slotId)) continue;
+    const slot = row.slotId === null ? undefined : stored.get(row.slotId);
+    if (!slot || slot.firstDate === null || slot.validUntil === null) {
+      unchecked.push({ teamId: row.teamId, slotId: row.slotId });
+      continue;
+    }
+    holds.push({
+      teamId: row.teamId,
+      firstDate: slot.firstDate,
+      lastDate: slot.validUntil,
+      effectiveDateRange: row.effectiveDateRange,
+    });
+  }
+  return { holds, unchecked };
 }
 
 // ---------------------------------------------------------------------------

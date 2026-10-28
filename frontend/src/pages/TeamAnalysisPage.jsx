@@ -6,6 +6,8 @@ import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import { useImport } from '../contexts/ImportContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
+import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TeamOverviewPanel from '../components/TeamOverviewPanel.jsx';
 import ProgramOverview from '../components/teaming/ProgramOverview.jsx';
@@ -242,10 +244,12 @@ function findDivisionRowForProgram(program, divisionRows) {
 
 /** The division columns the teaming rules read (`plays_games` is added when it exists, D2;
  *  `program_id` when it exists, E2). The age band and gender are what a player's own age division
- *  is found by (play-up by request). */
+ *  is found by (play-up by request), and the birth-date window takes every player born in it as
+ *  the division's age (E3b), so a division with a window counts as the import counted it. */
 const DIVISION_SETTING_COLUMNS =
   'id, organization_id, season_settings_id, name, max_roster_size, min_roster_size, ' +
-  'target_team_size, team_count_override, min_teams, max_teams, min_age, max_age, gender_policy';
+  'target_team_size, team_count_override, min_teams, max_teams, min_age, max_age, gender_policy, ' +
+  'birthdate_start, birthdate_end';
 
 function configFromDivisionRow(divisionRow) {
   const defaults = createDefaultConfig();
@@ -791,9 +795,13 @@ export default function TeamAnalysisPage() {
   const [renamedTeams, setRenamedTeams] = useState({});
   const loadedReviewKeyRef = useRef(null);
   const navigate = useNavigate();
+  // A completed season is history: no teams are generated, edited or saved in it (the database
+  // refuses the write too, `season_completed`).
+  const seasonReadOnly = useSeasonReadOnly();
   const canManageTeams =
-    permissions.includes(PERMISSIONS.MANAGE_ALL_TEAMS) ||
-    permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+    !seasonReadOnly &&
+    (permissions.includes(PERMISSIONS.MANAGE_ALL_TEAMS) ||
+      permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION));
   const canEditTeams = canManageTeams && isEditMode;
 
   const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
@@ -2013,6 +2021,7 @@ export default function TeamAnalysisPage() {
       className={`animate-fadeIn space-y-8 w-full ${canEditTeams ? '' : 'max-w-[65ch] mx-auto'}`}
     >
       <DataErrorBanner message={dataError} />
+      <SeasonReadOnlyNote />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {stagedReview ? placementAnnouncement : ''}
       </p>
@@ -2135,6 +2144,7 @@ export default function TeamAnalysisPage() {
               size="lg"
               onClick={handleGenerateTeams}
               disabled={
+                seasonReadOnly ||
                 isActuallyGenerating ||
                 divisionRows === null ||
                 validationErrors.some((error) => error.type !== 'generation')

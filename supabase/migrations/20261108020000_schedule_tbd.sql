@@ -285,14 +285,26 @@ BEGIN
       FROM public.teams t
       JOIN public.divisions d ON d.id = t.division_id
       CROSS JOIN LATERAL (
-            SELECT count(*)::integer AS n
-              FROM public.practice_assignments pa
-             WHERE pa.team_id = t.id
-               AND pa.organization_id = v_org_id
-               AND (pa.effective_date_range IS NULL
-                    OR (NOT isempty(pa.effective_date_range)
-                        AND (upper_inf(pa.effective_date_range)
-                             OR upper(pa.effective_date_range) > CURRENT_DATE)))
+            -- A team's held practices: the most fragments of its live series that are in force on one
+            -- day, taken over the days its fragments start (no earlier than today). The repair adapter
+            -- splits a series in two (the old one closed, its successor from the retirement date): the
+            -- two never overlap and are one practice, where counting every unexpired row said two. An
+            -- ended series is not live. A series that has not started yet counts from its start.
+            WITH live AS (
+                SELECT pa.effective_date_range AS r
+                  FROM public.practice_assignments pa
+                 WHERE pa.team_id = t.id
+                   AND pa.organization_id = v_org_id
+                   AND (pa.effective_date_range IS NULL
+                        OR (NOT isempty(pa.effective_date_range)
+                            AND (upper_inf(pa.effective_date_range)
+                                 OR upper(pa.effective_date_range) > CURRENT_DATE)))
+            ), starts AS (
+                SELECT DISTINCT GREATEST(COALESCE(lower(l.r), CURRENT_DATE), CURRENT_DATE) AS d FROM live l
+            )
+            SELECT COALESCE(max(x.n), 0)::integer AS n
+              FROM (SELECT (SELECT count(*) FROM live l WHERE l.r IS NULL OR l.r @> s.d) AS n
+                      FROM starts s) x
            ) held
       LEFT JOIN LATERAL (
             SELECT e.value->>'reason' AS reason
@@ -352,9 +364,15 @@ BEGIN
         RAISE EXCEPTION 'p_season_settings_id is required'
             USING ERRCODE = '23502';
     END IF;
+    -- The refresh audits a change, and an audit row needs an actor: a caller with no user -- the service
+    -- role -- is refused before anything is read or written (as persist_game_schedule refuses it).
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'refresh_schedule_tbd_practices needs a signed-in caller to audit a change'
+            USING ERRCODE = '42501';
+    END IF;
     SELECT ss.organization_id INTO v_org FROM public.season_settings ss WHERE ss.id = p_season_settings_id;
     -- A season that does not exist and a season of another organization read alike.
-    IF v_org IS NULL OR (COALESCE(auth.role(), '') <> 'service_role' AND NOT public.is_org_admin(v_org)) THEN
+    IF v_org IS NULL OR NOT public.is_org_admin(v_org) THEN
         RAISE EXCEPTION 'Access denied: the TIME TBD list is refreshed by an administrator of the season''s organization'
             USING ERRCODE = '42501';
     END IF;
@@ -390,23 +408,19 @@ BEGIN
           FULL JOIN (SELECT (e->>'team_id')::uuid AS team_id, (e->>'missing_count')::int AS missing_count, e->>'reason' AS reason
                        FROM jsonb_array_elements(v_after) e) a
             ON a.team_id = b.team_id;
-        -- record_audit_event writes auth.uid(); a service-role caller has none and is not audited here
-        -- (the list is derived data and the change is visible in the table).
-        IF auth.uid() IS NOT NULL THEN
-            PERFORM public.record_audit_event(
-                v_org,
-                'schedule_tbd.refreshed',
-                'season_settings',
-                p_season_settings_id,
-                jsonb_build_object(
-                    'season_settings_id', p_season_settings_id,
-                    'before_rows', jsonb_array_length(v_before),
-                    'after_rows', jsonb_array_length(v_after),
-                    'added', v_added,
-                    'removed', v_removed,
-                    'changed', v_changed)
-            );
-        END IF;
+        PERFORM public.record_audit_event(
+            v_org,
+            'schedule_tbd.refreshed',
+            'season_settings',
+            p_season_settings_id,
+            jsonb_build_object(
+                'season_settings_id', p_season_settings_id,
+                'before_rows', jsonb_array_length(v_before),
+                'after_rows', jsonb_array_length(v_after),
+                'added', v_added,
+                'removed', v_removed,
+                'changed', v_changed)
+        );
     END IF;
 
     RETURN jsonb_build_object(

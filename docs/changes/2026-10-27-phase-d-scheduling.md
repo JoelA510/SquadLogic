@@ -515,6 +515,14 @@ Each PR runs the season fixture suite and the full Definition of Done.
   review's "revoke it from authenticated": that is what the guard stands in for, and the pgTAP
   (`supabase/tests/schedule_tbd.sql`) and the smoke hold that a direct call is refused with the labels
   unchanged, and the harness plant `M57 the practice sync accepts a direct client call` the smoke.
+- **Held practices are concurrent coverage (changed after review, Codex P1):** the sync counted every
+  unexpired row, but the repair adapter splits a series (the old closed, its successor from the
+  retirement date), so one practice read as two and a missing practice was dropped. A team's held count is
+  now the most fragments of its live series in force on one day, over the days its fragments start (no
+  earlier than today); an ended series is still not live and a series not yet started counts.
+- **The refresh needs a user (changed after review, Codex P1):** it audits a change and an audit row needs
+  an actor, so a caller with no `auth.uid()` (the service role) is refused 42501 before anything is read or
+  written, as `persist_game_schedule` refuses it. The sync inherits this when reached from the refresh.
 - **Dates in the pgTAP and the smoke are relative to `CURRENT_DATE`** (Codex, P2): the sync counts a series
   as held only while it has not ended, so a fixed live range turned both red on 2026-12-01.
 - **Not done (stated):** the per-team page downloads and the calendar feed (out of scope above); the

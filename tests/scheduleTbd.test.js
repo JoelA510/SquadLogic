@@ -263,6 +263,15 @@ describe('the labels-taking sync is not a client entry point (migration text)', 
     );
   });
 
+  it('counts held practices as concurrent coverage, and refuses a caller with no user before any write', () => {
+    assert.ok(sync.includes('l.r @> s.d'));
+    assert.ok(sync.includes('GREATEST(COALESCE(lower(l.r), CURRENT_DATE), CURRENT_DATE)'));
+    const uid = refresh.indexOf('IF auth.uid() IS NULL THEN');
+    assert.ok(uid > 0);
+    assert.ok(uid < refresh.indexOf('pg_advisory_xact_lock'));
+    assert.ok(!refresh.includes("'service_role'"));
+  });
+
   it('the refresh audits in its own transaction, only when the rows changed, and the action is registered', () => {
     assert.ok(refresh.includes('IF v_changed_any THEN'));
     assert.ok(refresh.includes("'schedule_tbd.refreshed'"));

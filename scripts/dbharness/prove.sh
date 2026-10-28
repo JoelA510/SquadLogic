@@ -4866,11 +4866,20 @@ plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
 #   - the tenancy trigger lets a row name another organization's team;
 #   - the admin read lets any signed-in user read the list.
 plant "M57 an ended series counts as a held practice" "$M57" \
-  "               AND (pa.effective_date_range IS NULL
-                    OR (NOT isempty(pa.effective_date_range)
-                        AND (upper_inf(pa.effective_date_range)
-                             OR upper(pa.effective_date_range) > CURRENT_DATE)))" \
-  "               AND true" \
+  "                   AND (pa.effective_date_range IS NULL
+                        OR (NOT isempty(pa.effective_date_range)
+                            AND (upper_inf(pa.effective_date_range)
+                                 OR upper(pa.effective_date_range) > CURRENT_DATE)))" \
+  "                   AND true" \
+  "smoke 20261108020000"
+
+# A series the repair adapter split (the old closed, its successor from the retirement date) is one
+# practice: the held count is the most fragments in force on one day, not every unexpired row. The plant
+# makes every live fragment count, which lists no missing practice for a team with one split practice of
+# two a week; the smoke must go red at "a split series".
+plant "M57 a split series counts as two practices" "$M57" \
+  "FROM live l WHERE l.r IS NULL OR l.r @> s.d" \
+  "FROM live l WHERE l.r IS NULL OR true" \
   "smoke 20261108020000"
 
 plant "M57 the tenancy trigger lets another organization's team in" "$M57" \

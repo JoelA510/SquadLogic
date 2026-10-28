@@ -18,7 +18,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(70);
+SELECT plan(74);
 
 -- ---- the roster this test schedules (as the table owner, before any role is set) ---------------
 -- Org A, season aaa: U8 wants 2 a week, U6 wants none, U10 (the fixture's) wants 1.
@@ -555,6 +555,79 @@ SELECT is(
     'and writes no second audit row'
 );
 RESET role;
+
+-- ---- a team's held practices: concurrent coverage, not a count of rows ---------------------------------
+-- The repair adapter splits a series in two (the old one closed, its successor from the retirement date).
+-- The fragments never overlap; counting every unexpired row said two practices where the team has one.
+-- U8 wants 2 a week. All dates are relative to today; the rows are written as the table owner, as the
+-- repair does.
+INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+    ('aaaaaaaa-0000-0000-0000-0000000000c1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111d0008', 'TBD Split'),
+    ('aaaaaaaa-0000-0000-0000-0000000000c2', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111d0008', 'TBD Concurrent'),
+    ('aaaaaaaa-0000-0000-0000-0000000000c3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111d0008', 'TBD Future'),
+    ('aaaaaaaa-0000-0000-0000-0000000000c4', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111d0008', 'TBD Split Pair');
+INSERT INTO public.practice_assignments (organization_id, team_id, practice_slot_id, effective_date_range, source) VALUES
+    -- Split: one practice, closed ten days from now and continued from then.
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c1', 'a1111111-1111-1111-1111-1111111500a1',
+        daterange(CURRENT_DATE - 30, CURRENT_DATE + 10, '[)'), 'auto'),
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c1', 'a1111111-1111-1111-1111-1111111500a1',
+        daterange(CURRENT_DATE + 10, CURRENT_DATE + 60, '[]'), 'auto'),
+    -- Two genuinely concurrent series: two practices.
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c2', 'a1111111-1111-1111-1111-1111111500a1',
+        daterange(CURRENT_DATE - 30, CURRENT_DATE + 60, '[]'), 'auto'),
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c2', 'a1111111-1111-1111-1111-1111111500a2',
+        daterange(CURRENT_DATE - 30, CURRENT_DATE + 60, '[]'), 'auto'),
+    -- A series that has not started yet: it counts (one of two).
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c3', 'a1111111-1111-1111-1111-1111111500a1',
+        daterange(CURRENT_DATE + 5, CURRENT_DATE + 60, '[]'), 'auto'),
+    -- Two practices, one of them split: still two, so none missing.
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c4', 'a1111111-1111-1111-1111-1111111500a1',
+        daterange(CURRENT_DATE - 30, CURRENT_DATE + 10, '[)'), 'auto'),
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c4', 'a1111111-1111-1111-1111-1111111500a1',
+        daterange(CURRENT_DATE + 10, CURRENT_DATE + 60, '[]'), 'auto'),
+    ('a1111111-1111-1111-1111-111111111111', 'aaaaaaaa-0000-0000-0000-0000000000c4', 'a1111111-1111-1111-1111-1111111500a2',
+        daterange(CURRENT_DATE - 30, CURRENT_DATE + 60, '[]'), 'auto');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa');
+SELECT results_eq(
+    $$ SELECT t.name, s.missing_count::int, (s.detail->>'held')::int
+         FROM public.schedule_tbd s JOIN public.teams t ON t.id = s.team_id
+        WHERE s.kind = 'practice' AND t.name LIKE 'TBD %' AND t.name IN ('TBD Split', 'TBD Concurrent', 'TBD Future', 'TBD Split Pair')
+        ORDER BY t.name $$,
+    $$ VALUES ('TBD Future', 1, 1), ('TBD Split', 1, 1) $$,
+    'a split series at 2 a week lists one missing practice; a series not started yet counts; two concurrent series and a split pair list none'
+);
+SELECT is(
+    (SELECT count(*)::int FROM public.schedule_tbd WHERE team_id IN
+        ('aaaaaaaa-0000-0000-0000-0000000000c2', 'aaaaaaaa-0000-0000-0000-0000000000c4')),
+    0,
+    'two concurrent series (and a pair with one half split) hold their two practices: not listed'
+);
+
+-- ---- a caller with no user cannot refresh -----------------------------------------------------------
+-- The refresh audits a change and an audit row needs an actor. A new team with nothing scheduled is what a
+-- refresh WOULD list, so a refused call that left it unlisted is a call that wrote nothing.
+RESET role;
+INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+    ('aaaaaaaa-0000-0000-0000-0000000000c5', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111d0008', 'TBD Unlisted');
+CREATE TEMP TABLE svc_before AS SELECT count(*)::int AS rows,
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed') AS audits FROM public.schedule_tbd;
+SET LOCAL role = 'service_role';
+SET LOCAL "request.jwt.claims" TO '{"role":"service_role"}';
+SELECT throws_ok(
+    $$ SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa') $$,
+    '42501', 'refresh_schedule_tbd_practices needs a signed-in caller to audit a change',
+    'a service-role call with no user is refused for want of a user to audit, before anything changes'
+);
+RESET role;
+SELECT results_eq(
+    $$ SELECT (SELECT count(*)::int FROM public.schedule_tbd),
+              (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+              (SELECT count(*)::int FROM public.schedule_tbd WHERE team_id = 'aaaaaaaa-0000-0000-0000-0000000000c5') $$,
+    $$ SELECT rows, audits, 0 FROM svc_before $$,
+    'and the refused call listed nothing and wrote no audit row'
+);
 
 SELECT * FROM finish();
 ROLLBACK;

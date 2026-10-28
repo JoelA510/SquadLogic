@@ -21,6 +21,8 @@
 --      shortfall as not-scheduled-yet, keeps the saved label and run of the team it already had, and writes
 --      one `schedule_tbd.refreshed` audit row with the counts; a stranger and another organization's admin
 --      are refused; a season with no assignments at all is listed in full.
+--   2c. A team's held practices are concurrent coverage: a series split in two (never overlapping) is one
+--      practice; a caller with no user (the service role) is refused by the refresh.
 --   3. The game list, through the real `persist_game_schedule`: a save whose results carry
 --      `unscheduled` replaces the season's list; each bad entry (a reason off the list, one team on
 --      both sides, a team of another organization) is refused and changes nothing; a save with no
@@ -138,6 +140,7 @@ DECLARE
     v_raised boolean;
     v_json jsonb;
     v_run uuid;
+    v_split uuid;
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin, 'tbd-admin@example.test', '{"password_length": 16}'),
@@ -314,6 +317,48 @@ BEGIN
     END LOOP;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     RAISE NOTICE 'refresh: a member of no organization and another organization''s admin are each refused 42501';
+
+    -- ---- 2c. held practices are concurrent coverage, not a count of rows ------------------------------
+    -- The repair adapter splits a series in two (the old one closed, its successor from the retirement
+    -- date). The two never overlap and are one practice: a team of a division at 2 a week with one split
+    -- practice is missing one, where counting every unexpired row said it was missing none. (As the owner,
+    -- as the repair writes; dates relative to today.)
+    RESET ROLE;
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_div2, 'TBD Split') RETURNING id INTO v_split;
+    INSERT INTO public.practice_assignments (organization_id, team_id, practice_slot_id, effective_date_range, source) VALUES
+        (v_org, v_split, v_mon, daterange(CURRENT_DATE - 30, CURRENT_DATE + 10, '[)'), 'auto'),
+        (v_org, v_split, v_mon, daterange(CURRENT_DATE + 10, CURRENT_DATE + 60, '[]'), 'auto');
+    SET LOCAL ROLE authenticated;
+    PERFORM public.refresh_schedule_tbd_practices(v_season);
+    IF NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_split AND missing_count = 1 AND (detail->>'held')::int = 1) THEN
+        RAISE EXCEPTION 'a split series (two fragments that never overlap, 2 a week wanted) is not listed as missing 1 of 2: %',
+            (SELECT jsonb_agg(to_jsonb(s)) FROM public.schedule_tbd s WHERE s.team_id = v_split);
+    END IF;
+    RESET ROLE;
+    DELETE FROM public.teams WHERE id = v_split;
+    SET LOCAL ROLE authenticated;
+    PERFORM public.refresh_schedule_tbd_practices(v_season);
+    RAISE NOTICE 'refresh: a split series at 2 a week is missing one practice (held 1), not none';
+
+    -- A caller with no user (the service role) is refused: the refresh audits a change.
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    SET LOCAL ROLE service_role;
+    v_raised := false;
+    BEGIN
+        PERFORM public.refresh_schedule_tbd_practices(v_season);
+    EXCEPTION WHEN insufficient_privilege THEN
+        v_raised := true;
+        v_msg := SQLERRM;
+    END;
+    RESET ROLE;
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    IF NOT v_raised THEN RAISE EXCEPTION 'a caller with no user refreshed the list'; END IF;
+    IF v_msg NOT LIKE '%needs a signed-in caller to audit a change%' THEN
+        RAISE EXCEPTION 'a caller with no user was refused for another reason: %', v_msg;
+    END IF;
+    SET LOCAL ROLE authenticated;
+    RAISE NOTICE 'refresh: a service-role call with no user is refused 42501';
 
     -- ---- 3. the game list --------------------------------------------------------------------
     PERFORM public.persist_game_schedule(

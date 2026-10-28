@@ -4,6 +4,7 @@ import Button from '../ui/Button.jsx';
 import Modal from '../ui/Modal.jsx';
 import DataErrorBanner from '../ui/DataErrorBanner.jsx';
 import { supabase } from '../../lib/supabaseClient.js';
+import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { fetchAllPages } from '../../lib/pagedFetch.js';
 import { logger } from '../../lib/logger.js';
 import {
@@ -47,18 +48,23 @@ const LOADING_CONTEXT = Object.freeze({
   loading: true,
 });
 
-function useReviewContext(orgId) {
+function useReviewContext(orgId, seasonId) {
   const [state, setState] = useState(LOADING_CONTEXT);
 
   useEffect(() => {
-    if (!orgId) return undefined;
+    if (!orgId || !seasonId) return undefined;
     let cancelled = false;
     (async () => {
       // An org switch must not leave the previous org's coaches actionable (a
       // "Set" on one would write to that org) or feed its roster to the preview.
       setState(LOADING_CONTEXT);
       const [coachResult, locationResult] = await Promise.all([
-        supabase.from('coaches').select('id, full_name').eq('organization_id', orgId),
+        // The coaches of the season the header shows (20261108010000).
+        supabase
+          .from('coaches')
+          .select('id, full_name')
+          .eq('organization_id', orgId)
+          .eq('season_settings_id', seasonId),
         supabase.from('locations').select('id, name').eq('organization_id', orgId),
       ]);
       let previewError = null;
@@ -106,7 +112,7 @@ function useReviewContext(orgId) {
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, seasonId]);
 
   return state;
 }
@@ -257,8 +263,14 @@ DecisionDialog.propTypes = {
  * each coach's preferences in force (set directly).
  */
 export default function AdminPreferenceReview({ orgId, toast }) {
-  const context = useReviewContext(orgId);
-  const { rows, loading, error, refresh } = useCoachPracticePreferences(orgId);
+  const { currentSeasonSetting } = useOrganization();
+  const context = useReviewContext(orgId, currentSeasonSetting?.id ?? null);
+  const {
+    rows: allRows,
+    loading: rowsLoading,
+    error,
+    refresh,
+  } = useCoachPracticePreferences(orgId);
   const [dialog, setDialog] = useState(/** @type {any} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string|null} */ (null));
   const date = useMemo(() => localIsoDate(), []);
@@ -275,6 +287,14 @@ export default function AdminPreferenceReview({ orgId, toast }) {
     (coachId) => coachNames.get(String(coachId)) ?? `Coach ${coachId}`,
     [coachNames]
   );
+  // The table has no season of its own: a request is the season's through its coach (coaches
+  // belong to one season, 20261108010000), so another season's requests are not listed or
+  // actionable. Until the season's coaches are read there is nothing to match against.
+  const rows = useMemo(
+    () => allRows.filter((row) => coachNames.has(String(row.coach_id))),
+    [allRows, coachNames]
+  );
+  const loading = rowsLoading || context.loading;
   const approvedRows = useMemo(() => rows.filter((row) => row.status === 'approved'), [rows]);
   const pending = rows.filter((row) => row.status === 'requested');
 

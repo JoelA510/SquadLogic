@@ -46,6 +46,9 @@ BEGIN
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin');
+    -- An import needs a season to add to (20261108010000).
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'Nomed Season', 'active');
     -- Since 20261022010000 an import keeps only declared custom attributes, so
     -- the organization declares the one this smoke expects to survive.
     INSERT INTO public.organization_schemas (organization_id, entity_type, schema_definition) VALUES

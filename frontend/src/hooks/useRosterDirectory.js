@@ -8,7 +8,8 @@ const IDLE = { status: 'idle', key: null, players: null, coaches: null, error: n
 
 /**
  * The people a roster names: every durable player (id to name and rating) and every coach (id
- * to name) of the active organization, for the manual roster editor.
+ * to name) of the season the header shows (20261108010000: both belong to one season), for the
+ * manual roster editor.
  *
  * ## Why this exists
  *
@@ -39,14 +40,15 @@ const IDLE = { status: 'idle', key: null, players: null, coaches: null, error: n
  * }}
  */
 export function useRosterDirectory({ enabled }) {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting } = useOrganization();
   const orgId = currentOrganization?.id ?? null;
+  const seasonId = currentSeasonSetting?.id ?? null;
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState(IDLE);
-  const key = orgId ? `${orgId}|${attempt}` : null;
+  const key = orgId && seasonId ? `${orgId}|${seasonId}|${attempt}` : null;
 
   useEffect(() => {
-    if (!enabled || !orgId || !key) return undefined;
+    if (!enabled || !orgId || !seasonId || !key) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -56,9 +58,14 @@ export function useRosterDirectory({ enabled }) {
               .from('players')
               .select('id, first_name, last_name, rating')
               .eq('organization_id', orgId)
+              .eq('season_settings_id', seasonId)
           ),
           fetchAllPages(() =>
-            supabase.from('coaches').select('id, full_name').eq('organization_id', orgId)
+            supabase
+              .from('coaches')
+              .select('id, full_name')
+              .eq('organization_id', orgId)
+              .eq('season_settings_id', seasonId)
           ),
         ]);
         if (cancelled) return;
@@ -95,14 +102,14 @@ export function useRosterDirectory({ enabled }) {
     return () => {
       cancelled = true;
     };
-  }, [enabled, orgId, key]);
+  }, [enabled, orgId, seasonId, key]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   // A result for another organization or attempt is never served.
   const current = state.key === key;
   const status = /** @type {'idle' | 'loading' | 'ready' | 'error'} */ (
-    !enabled || !orgId ? 'idle' : current ? state.status : 'loading'
+    !enabled || !orgId || !seasonId ? 'idle' : current ? state.status : 'loading'
   );
   const players = current && state.players ? state.players : EMPTY_PLAYERS;
   const coaches = current && state.coaches ? state.coaches : EMPTY_COACHES;

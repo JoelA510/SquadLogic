@@ -26,6 +26,15 @@ import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { defaultProgramOf, handleProgramRpc, normalizePrograms } from './mockPrograms.js';
 import {
+  activeSeasonOf,
+  coachTeamSeasonRefusal,
+  enrollmentRefusal,
+  importSeasonMissing,
+  importSeasonOf,
+  normalizeEnrollment,
+  playerPatchSeasonRefusal,
+} from './mockEnrollment.js';
+import {
   createMockStorage,
   handleFacilityPermitRpc,
   permitsUnlinkedBy,
@@ -237,6 +246,7 @@ const initialMockData = {
       first_name: 'Alex',
       last_name: 'Smith',
       organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       division_id: 'u8-div-id',
       gender: 'm',
@@ -252,6 +262,7 @@ const initialMockData = {
       first_name: 'Jamie',
       last_name: 'Jones',
       organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       division_id: 'u8-div-id',
       gender: 'f',
@@ -266,6 +277,7 @@ const initialMockData = {
     {
       id: 'mock-coach-id',
       organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       full_name: 'Mock Coach',
       email: 'coach@example.com',
       phone: '555-0101',
@@ -277,6 +289,7 @@ const initialMockData = {
     {
       id: 'c2',
       organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       full_name: 'Casey Rivera',
       email: 'casey.rivera@example.com',
       phone: '555-0102',
@@ -288,6 +301,7 @@ const initialMockData = {
     {
       id: 'coach-lead-1',
       organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       full_name: 'Morgan Reyes',
       email: 'morgan.reyes@example.com',
       phone: '555-0103',
@@ -575,7 +589,13 @@ const initialMockData = {
     },
   ],
   view_org_metrics: [
-    { organization_id: MOCK_ORG_ID, total_players: 150, total_teams: 12, total_users: 25 },
+    {
+      organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
+      total_players: 150,
+      total_teams: 12,
+      total_users: 25,
+    },
   ],
 };
 
@@ -693,6 +713,8 @@ const getDB = () => {
   // 20261101020000's two triggers: every season has its default program, every division is in a
   // program of its own season.
   normalizePrograms(db);
+  // 20261108010000's two fill triggers: a player and a coach row are in a season.
+  normalizeEnrollment(db);
   return db;
 };
 
@@ -5027,6 +5049,9 @@ export const mockSupabase = {
           };
         }
       }
+      // 20261108010000 (apply_player_patch): a division or team outside the player's season.
+      const seasonRefusal = playerPatchSeasonRefusal(db, player, patch);
+      if (seasonRefusal) return seasonRefusal;
       Object.assign(player, patch, { updated_at: new Date().toISOString() });
       // Mirror apply_player_patch: team_players is the relational roster
       // source of truth, kept in sync with the denormalized team_id.
@@ -5094,15 +5119,55 @@ export const mockSupabase = {
     }
 
     if (name === 'admin_create_player') {
-      const { p_organization_id, p_fields } = params || {};
+      const { p_organization_id, p_fields, p_season_settings_id } = params || {};
       const rejected = rejectedPlayerPatchField(p_fields);
       if (rejected) {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
+      // 20261108010000: a player belongs to one season. None named is the active season; a named
+      // one must be this organization's and not completed.
+      let season;
+      if (p_season_settings_id) {
+        season = (db.season_settings || []).find(
+          (item) =>
+            String(item.id) === String(p_season_settings_id) &&
+            String(item.organization_id) === String(p_organization_id)
+        );
+        if (!season) {
+          return {
+            data: null,
+            error: {
+              code: '42501',
+              message: `season ${p_season_settings_id} does not belong to organization ${p_organization_id}`,
+            },
+          };
+        }
+        if (season.status === 'completed') {
+          return enrollmentRefusal(
+            `season ${season.id} is completed and takes no new player`,
+            'season_completed'
+          );
+        }
+      } else {
+        season = activeSeasonOf(db, p_organization_id);
+        if (!season) {
+          return enrollmentRefusal(
+            `Organization ${p_organization_id} has no active season to add a player to`,
+            'season_missing'
+          );
+        }
+      }
+      const seasonRefusal = playerPatchSeasonRefusal(
+        db,
+        { season_settings_id: season.id },
+        p_fields || {}
+      );
+      if (seasonRefusal) return seasonRefusal;
       const now = new Date().toISOString();
       const player = {
         id: mockId(),
         organization_id: p_organization_id,
+        season_settings_id: season.id,
         first_name: p_fields?.first_name || 'New',
         last_name: p_fields?.last_name || 'Player',
         status: p_fields?.status || 'pending',
@@ -5117,7 +5182,7 @@ export const mockSupabase = {
         id: mockId(),
         organization_id: p_organization_id,
         action: 'player.created',
-        metadata: { fields: p_fields },
+        metadata: { fields: p_fields, season_settings_id: season.id },
         created_at: now,
       });
       saveDB(db);
@@ -5186,13 +5251,9 @@ export const mockSupabase = {
       const waitlistEnabled = orgRow?.feature_flags?.waitlist !== false;
       // 20261101010000: the job's own season, else (a job made before jobs carried one) the
       // organization's active season; a completed season takes no import.
-      const seasonRow = (db.season_settings || []).find(
-        (item) =>
-          String(item.organization_id) === String(job.organization_id) &&
-          (job.season_settings_id
-            ? String(item.id) === String(job.season_settings_id)
-            : item.status === 'active')
-      );
+      const seasonRow = importSeasonOf(db, job);
+      // 20261108010000: a player belongs to one season, so an import needs one to add to.
+      if (!seasonRow) return importSeasonMissing(job.organization_id);
       if (seasonRow?.status === 'completed') {
         return {
           data: null,
@@ -5245,13 +5306,23 @@ export const mockSupabase = {
           payload.player_id ||
           null;
         const derived = deriveDivision(payload);
+        // 20261108010000: every division match is in the destination season, an explicit id
+        // from another season included (it matches nothing).
         let division = (db.divisions || []).find(
           (item) =>
             String(item.organization_id) === String(job.organization_id) &&
+            String(item.season_settings_id) === String(seasonRow.id) &&
             [String(payload.division_name || '').toLowerCase(), derived?.name?.toLowerCase()]
               .filter(Boolean)
               .includes(String(item.name).toLowerCase())
         );
+        if (!division && payload.division_id) {
+          division = (db.divisions || []).find(
+            (item) =>
+              String(item.id) === String(payload.division_id) &&
+              String(item.season_settings_id) === String(seasonRow.id)
+          );
+        }
         if (!division && derived && seasonRow) {
           division = {
             id: mockId(),
@@ -5271,6 +5342,7 @@ export const mockSupabase = {
           db.players.find(
             (player) =>
               String(player.organization_id) === String(job.organization_id) &&
+              String(player.season_settings_id) === String(seasonRow.id) &&
               String(player.external_registration_id) === String(externalId)
           );
         const willingToCoach = [
@@ -5328,7 +5400,8 @@ export const mockSupabase = {
         };
         const basePlayer = {
           organization_id: job.organization_id,
-          division_id: division?.id || payload.division_id || existing?.division_id || null,
+          season_settings_id: seasonRow.id,
+          division_id: division?.id || existing?.division_id || null,
           first_name: payload.first_name,
           last_name: payload.last_name,
           preferred_name: payload.preferred_name || payload.nickname || null,
@@ -5467,11 +5540,14 @@ export const mockSupabase = {
           ),
         };
       });
+      // 20261108010000: a registration id names a player of the job's season only.
+      const jobSeasonRow = importSeasonOf(db, job);
       const matchedSources = promotedPayloads
         .map((source) => {
           const player = (db.players || []).find(
             (item) =>
               String(item.organization_id) === String(job.organization_id) &&
+              String(item.season_settings_id) === String(jobSeasonRow?.id) &&
               normalizeKey(item.external_registration_id) === source.externalKey
           );
           if (!player || (!source.buddyRequestKey && !source.mutualCodeKey)) return null;
@@ -5627,6 +5703,22 @@ export const mockSupabase = {
         return { data: null, error: { message: 'Import job not found' } };
       }
 
+      // 20261108010000: a coach row belongs to one season, as a player row does.
+      const coachSeason = importSeasonOf(db, job);
+      if (!coachSeason) return importSeasonMissing(job.organization_id);
+      if (coachSeason.status === 'completed') {
+        return enrollmentRefusal(
+          `Season ${coachSeason.id} is completed and takes no import`,
+          'season_completed'
+        );
+      }
+      if (coachSeason.status !== 'active') {
+        return {
+          data: null,
+          error: seasonNotActiveError(coachSeason.id, coachSeason.status, 'Season'),
+        };
+      }
+
       const validationErrors = Array.isArray(p_validation_errors) ? p_validation_errors : [];
       const now = new Date().toISOString();
       const stagedRows = (db.staging_import_rows || []).filter(
@@ -5686,6 +5778,7 @@ export const mockSupabase = {
         const existing = db.coaches.find(
           (coach) =>
             String(coach.organization_id) === String(job.organization_id) &&
+            String(coach.season_settings_id) === String(coachSeason.id) &&
             String(coach.email || '').toLowerCase() === email
         );
         const hasChildColumn = Object.hasOwn(payload, 'child_registration_id');
@@ -5746,6 +5839,7 @@ export const mockSupabase = {
           const coach = {
             id: mockId(),
             organization_id: job.organization_id,
+            season_settings_id: coachSeason.id,
             full_name: fullName,
             email,
             phone: null,
@@ -5800,6 +5894,7 @@ export const mockSupabase = {
               .filter(
                 (item) =>
                   String(item.organization_id) === String(job.organization_id) &&
+                  String(item.season_settings_id) === String(coachSeason.id) &&
                   String(item.external_registration_id) === registrationId
               )
               .sort((a, b) =>
@@ -7293,6 +7388,9 @@ export const mockSupabase = {
             error: { message: 'Coach must be active or pending-confirmation before assignment' },
           };
         }
+        // 20261108010000: a team's coach is of the team's season.
+        const coachSeasonRefusal = coachTeamSeasonRefusal(db, p_coach_id, p_team_id);
+        if (coachSeasonRefusal) return coachSeasonRefusal;
 
         const otherAssignments = (db.teams || []).filter(
           (item) =>

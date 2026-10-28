@@ -8,6 +8,7 @@ import Button from '../components/ui/Button.jsx';
 import Badge from '../components/ui/Badge.jsx';
 import { useToast } from '../components/ui/ToastHost.jsx';
 import { usePlayersData } from '../hooks/usePlayersData.js';
+import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName, divisionFilters } from '../utils/divisions.js';
@@ -61,6 +62,17 @@ export default function PlayersPage() {
 
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(() => new Set());
+  // The rows selected belong to the season they were selected in: a bulk Waitlist or Delete after
+  // a switch must not carry them to the season now shown (20261108010000).
+  const { currentSeasonSetting } = useOrganization();
+  const seasonId = currentSeasonSetting?.id ?? null;
+  const [selectionSeason, setSelectionSeason] = useState(seasonId);
+  if (selectionSeason !== seasonId) {
+    // Adjusted while rendering (React's way to reset state when a value changes), so the first
+    // render of the new season never holds the old selection.
+    setSelectionSeason(seasonId);
+    setSelected(new Set());
+  }
   const [divisionFilter, setDivisionFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -253,7 +265,9 @@ export default function PlayersPage() {
 
   if (loading) return <LoadingScreen />;
 
-  const selectedIds = [...selected];
+  // Only players on the page: a selection can never name a row that is not shown.
+  const shownIds = new Set(players.map((player) => player.id));
+  const selectedIds = [...selected].filter((id) => shownIds.has(id));
 
   const bulkPatch = async (patch, message) => {
     report(await bulkUpdatePlayers(selectedIds, patch), message);

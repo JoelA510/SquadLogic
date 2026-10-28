@@ -60,9 +60,11 @@ BEGIN
                 AND (coalesce(qual, '') || coalesce(with_check, '')) ~ 'user_id') THEN
         RAISE EXCEPTION 'a policy on coaches names user_id';
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                    WHERE conrelid = 'public.coaches'::regclass AND conname = 'coaches_organization_id_email_key') THEN
-        RAISE EXCEPTION 'the per-organization coach key is missing';
+    -- Run at head: 20261108010000 made the per-organization key a per-season unique index.
+    IF NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+                    WHERE i.indrelid = 'public.coaches'::regclass AND i.indisunique
+                      AND c.relname = 'coaches_organization_season_email_key') THEN
+        RAISE EXCEPTION 'the per-season coach key is missing';
     END IF;
 
     -- A coach is written and read without either column.
@@ -70,6 +72,8 @@ BEGIN
     INSERT INTO public.profiles (id, email) VALUES (v_admin, 'dl-admin@example.test') ON CONFLICT DO NOTHING;
     INSERT INTO public.organizations (name, slug) VALUES ('Smoke Drop Link', 'smoke-drop-link') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org, v_admin, 'admin');
+    -- A coach belongs to a season (20261108010000).
+    INSERT INTO public.season_settings (organization_id, name, status) VALUES (v_org, 'DL Season', 'active');
     INSERT INTO public.coaches (organization_id, full_name, email, status) VALUES (v_org, 'DL Coach', 'dl-coach@example.test', 'active');
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);

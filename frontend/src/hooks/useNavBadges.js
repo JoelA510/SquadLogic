@@ -6,7 +6,8 @@ import { REFRESH_TOPICS, subscribeRefresh } from '../lib/refreshBus.js';
 const EMPTY = { players: null, coaches: null, teams: null };
 
 /**
- * Lightweight per-org counts for the side-nav badges. Asks the server to count
+ * Lightweight counts for the side-nav badges: the players and coaches of the season the header
+ * shows (20261108010000), the teams of the organization. Asks the server to count
  * (`{ count: 'exact', head: true }`: no rows come back), because counting the
  * rows returned is capped by the server's row limit (`max_rows = 1000`) and a
  * league of 1,259 players read "1000". Null means "no badge" (loading, error,
@@ -14,10 +15,12 @@ const EMPTY = { players: null, coaches: null, teams: null };
  * topic (e.g. player add/delete).
  */
 export function useNavBadges() {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting } = useOrganization();
   const orgId = currentOrganization?.id;
-  // Keyed by org so a stale org's counts never render after switching.
-  const [state, setState] = useState({ orgId: null, badges: EMPTY });
+  const seasonId = currentSeasonSetting?.id ?? null;
+  // Keyed by org and season so a stale one's counts never render after switching.
+  const [state, setState] = useState({ key: null, badges: EMPTY });
+  const key = orgId ? `${orgId}|${seasonId}` : null;
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(
@@ -29,12 +32,14 @@ export function useNavBadges() {
     if (!orgId) return undefined;
     let cancelled = false;
 
-    const countRows = async (table) => {
+    const countRows = async (table, seasonScoped = false) => {
       try {
-        const { count, error } = await supabase
+        let query = supabase
           .from(table)
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', orgId);
+        if (seasonScoped) query = query.eq('season_settings_id', seasonId);
+        const { count, error } = await query;
         // An unanswered count is no badge, never a wrong number.
         if (error || typeof count !== 'number') return null;
         return count || null;
@@ -45,19 +50,20 @@ export function useNavBadges() {
 
     (async () => {
       const [players, coaches, teams] = await Promise.all([
-        countRows('players'),
-        countRows('coaches'),
+        // No season shown (none yet, or still loading): no people badge, never a wrong number.
+        seasonId ? countRows('players', true) : null,
+        seasonId ? countRows('coaches', true) : null,
         countRows('teams'),
       ]);
       if (!cancelled) {
-        setState({ orgId, badges: { players, coaches, teams } });
+        setState({ key, badges: { players, coaches, teams } });
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [orgId, refreshTick]);
+  }, [orgId, seasonId, key, refreshTick]);
 
-  return state.orgId === orgId ? state.badges : EMPTY;
+  return state.key === key ? state.badges : EMPTY;
 }

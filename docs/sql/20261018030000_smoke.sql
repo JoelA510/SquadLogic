@@ -216,10 +216,11 @@ BEGIN
     INSERT INTO public.organizations (name, slug) VALUES ('RLS Rewrite Org', 'rls-rewrite-org') RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin'), (v_org, v_tenant, 'tenant_admin');   -- v_member: signed in, no membership (no coach role since 20261104010000)
+    -- A player belongs to a season (20261108010000): the season comes first and is the active one.
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'Rewrite Season', 'active') RETURNING id INTO v_season;
     INSERT INTO public.players (organization_id, first_name, last_name)
         VALUES (v_org, 'Rewrite', 'Smoke') RETURNING id INTO v_player;
-    INSERT INTO public.season_settings (organization_id, name)
-        VALUES (v_org, 'Rewrite Season') RETURNING id INTO v_season;
 
     -- ---- 3a. players, as a signed-in user who is not a member ---------------
     PERFORM set_config('request.jwt.claim.sub', v_member::text, true);

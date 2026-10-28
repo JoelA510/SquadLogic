@@ -218,7 +218,8 @@ export function planBulkCoachStatus(rows = [], selectedIds = new Set(), nextStat
  * admin RPCs; selection enables bulk status changes.
  */
 export default function CoachesPage() {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, seasonSettingsLoading } = useOrganization();
+  const seasonId = currentSeasonSetting?.id ?? null;
   const { can, PERMISSIONS } = usePermission();
   const { genderModel } = useFeatures();
   const toast = useToast();
@@ -250,7 +251,11 @@ export default function CoachesPage() {
     const requestId = latestRequestRef.current + 1;
     latestRequestRef.current = requestId;
 
-    if (!currentOrganization?.id) {
+    // A coach row belongs to one season (20261108010000): the page lists the season the header
+    // shows. With none (an organization with no season yet), there is nothing to list; while it
+    // loads, the page keeps what it has.
+    if (seasonSettingsLoading) return;
+    if (!currentOrganization?.id || !seasonId) {
       setCoaches([]);
       setDivisions([]);
       setTeams([]);
@@ -269,11 +274,13 @@ export default function CoachesPage() {
             'id, organization_id, full_name, email, phone, status, import_source, last_imported_at, can_coach_multiple_teams, created_at'
           )
           .eq('organization_id', currentOrganization.id)
+          .eq('season_settings_id', seasonId)
           .order('full_name', { ascending: true }),
         supabase
           .from('divisions')
           .select('id, name, organization_id')
           .eq('organization_id', currentOrganization.id)
+          .eq('season_settings_id', seasonId)
           .order('name', { ascending: true }),
         supabase
           .from('teams')
@@ -300,7 +307,9 @@ export default function CoachesPage() {
 
       setCoaches(coachResult.data || []);
       setDivisions(divisionResult.data || []);
-      setTeams(teamResult.data || []);
+      // Teams carry no season of their own: they are the season's through their division.
+      const seasonDivisionIds = new Set((divisionResult.data || []).map((d) => String(d.id)));
+      setTeams((teamResult.data || []).filter((t) => seasonDivisionIds.has(String(t.division_id))));
       // An unreadable coaching record is NOT an empty one: null makes the
       // preview say "could not be computed" instead of "no effect".
       setAssignmentRows(assignmentResult.error ? null : assignmentResult.data || []);
@@ -320,7 +329,7 @@ export default function CoachesPage() {
         setLoading(false);
       }
     }
-  }, [currentOrganization?.id]);
+  }, [currentOrganization?.id, seasonId, seasonSettingsLoading]);
 
   useEffect(() => {
     setLoading(true);
@@ -330,7 +339,7 @@ export default function CoachesPage() {
   useEffect(() => {
     setSelected(new Set());
     setManageCoachId(null);
-  }, [currentOrganization?.id]);
+  }, [currentOrganization?.id, seasonId]);
 
   const allRows = useMemo(
     () => buildCoachReviewRows({ coaches, divisions, teams }),

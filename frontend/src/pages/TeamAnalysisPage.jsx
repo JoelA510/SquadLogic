@@ -445,14 +445,19 @@ function withDurableIdentity(row, durable) {
 /**
  * Durable players by id and by external registration id, in chunks (a long `in` list is a
  * long URL), at most eight requests at a time. A refused read throws.
+ * Players belong to one season (20261108010000), and a registration id is unique within a
+ * season only, so both lookups are of the season the run is for.
  * @param {string} organizationId
+ * @param {string} seasonId
  * @param {{ ids?: string[], externalIds?: string[], divisionId?: string | null }} keys
  *   `divisionId` narrows the external-id lookup to one division.
  */
 async function fetchDurablePlayers(
   organizationId,
+  seasonId,
   { ids = [], externalIds = [], divisionId = null }
 ) {
+  if (!seasonId) throw new Error('Select a season before looking up its players.');
   const queries = [];
   for (let start = 0; start < ids.length; start += LOOKUP_CHUNK) {
     const chunk = ids.slice(start, start + LOOKUP_CHUNK);
@@ -461,6 +466,7 @@ async function fetchDurablePlayers(
         .from('players')
         .select(DURABLE_PLAYER_FIELDS)
         .eq('organization_id', organizationId)
+        .eq('season_settings_id', seasonId)
         .in('id', chunk)
     );
   }
@@ -470,7 +476,8 @@ async function fetchDurablePlayers(
       const query = supabase
         .from('players')
         .select(DURABLE_PLAYER_FIELDS)
-        .eq('organization_id', organizationId);
+        .eq('organization_id', organizationId)
+        .eq('season_settings_id', seasonId);
       return (divisionId ? query.eq('division_id', divisionId) : query).in(
         'external_registration_id',
         chunk
@@ -495,10 +502,11 @@ async function fetchDurablePlayers(
  * says "name not loaded": the flag stands without the name, and a name is not worth stopping
  * a run for.
  * @param {string} organizationId
+ * @param {string} seasonId coaches belong to one season (20261108010000): the run's
  * @param {string[]} coachIds
  * @returns {Promise<Record<string, string>>}
  */
-async function readCoachNames(organizationId, coachIds) {
+async function readCoachNames(organizationId, seasonId, coachIds) {
   /** @type {Record<string, string>} */
   const names = {};
   for (let start = 0; start < coachIds.length; start += LOOKUP_CHUNK) {
@@ -506,6 +514,7 @@ async function readCoachNames(organizationId, coachIds) {
       .from('coaches')
       .select('id, full_name')
       .eq('organization_id', organizationId)
+      .eq('season_settings_id', seasonId)
       .in('id', coachIds.slice(start, start + LOOKUP_CHUNK));
     if (error) {
       logger.error('[TeamAnalysis] coach names could not be read:', error);
@@ -525,17 +534,20 @@ async function readCoachNames(organizationId, coachIds) {
  * who is `inactive` or `interested` stays on file -- the coach import writes it whatever the
  * status, so re-activating the coach restores the anchor -- but teaming does not read it. Not
  * guarded, as the link read above it is not (Phase B3): a refused read stops the run.
+ * A coach of another season anchors nothing here: coaches belong to one season (20261108010000).
  * @param {string} organizationId
+ * @param {string} seasonId
  * @param {string[]} coachIds
  * @returns {Promise<Set<string>>}
  */
-async function readAnchoringCoachIds(organizationId, coachIds) {
+async function readAnchoringCoachIds(organizationId, seasonId, coachIds) {
   const anchoring = new Set();
   for (let start = 0; start < coachIds.length; start += LOOKUP_CHUNK) {
     const { data, error } = await supabase
       .from('coaches')
       .select('id, status')
       .eq('organization_id', organizationId)
+      .eq('season_settings_id', seasonId)
       .in('id', coachIds.slice(start, start + LOOKUP_CHUNK));
     if (error) {
       throw new Error(
@@ -1173,8 +1185,8 @@ export default function TeamAnalysisPage() {
       const { ids, externalIds } = collectPlayerLookupKeys(rowsForProgram);
       const selectedDivisionKey = String(selectedDivisionId || '');
       const [byIdRows, byExternalRows] = await Promise.all([
-        fetchDurablePlayers(currentOrganization.id, { ids }),
-        fetchDurablePlayers(currentOrganization.id, {
+        fetchDurablePlayers(currentOrganization.id, currentSeasonSetting?.id, { ids }),
+        fetchDurablePlayers(currentOrganization.id, currentSeasonSetting?.id, {
           externalIds,
           divisionId: selectedDivisionId,
         }),
@@ -1233,7 +1245,13 @@ export default function TeamAnalysisPage() {
 
       return { generatorPlayers, generationRows };
     },
-    [buddyRequestsEnabled, coachingInterestEnabled, waitlistEnabled, currentOrganization?.id]
+    [
+      buddyRequestsEnabled,
+      coachingInterestEnabled,
+      waitlistEnabled,
+      currentOrganization?.id,
+      currentSeasonSetting?.id,
+    ]
   );
 
   const handleGenerateTeams = useCallback(async () => {
@@ -1282,7 +1300,11 @@ export default function TeamAnalysisPage() {
         .filter(({ sourceIndex }) => !programIndexBySource.has(sourceIndex));
       const otherDurable =
         otherEntries.length > 0
-          ? await fetchDurablePlayers(currentOrganization.id, collectPlayerLookupKeys(otherEntries))
+          ? await fetchDurablePlayers(
+              currentOrganization.id,
+              currentSeasonSetting?.id,
+              collectPlayerLookupKeys(otherEntries)
+            )
           : [];
       const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
       const otherByExternalId = new Map(
@@ -1359,9 +1381,11 @@ export default function TeamAnalysisPage() {
       }
       // Only a coach who is active or pending confirmation anchors a team; an inactive coach's
       // child is placed like any other player and the team is left needing a coach.
-      const anchoringCoachIds = await readAnchoringCoachIds(currentOrganization.id, [
-        ...new Set((coachLinks || []).map((link) => String(link.coach_id))),
-      ]);
+      const anchoringCoachIds = await readAnchoringCoachIds(
+        currentOrganization.id,
+        currentSeasonSetting?.id,
+        [...new Set((coachLinks || []).map((link) => String(link.coach_id)))]
+      );
       const coachesById = new Map();
       for (const link of coachLinks || []) {
         if (!link.player_id) continue;
@@ -1505,12 +1529,16 @@ export default function TeamAnalysisPage() {
       const coverage = result.coachCoverageByDivision?.[selectedProgramKey] ?? null;
       // The review names the coaches it flags (no team to anchor, more than one child); the run
       // holds ids only, so their names are kept with it.
-      const coachNamesById = await readCoachNames(currentOrganization.id, [
-        ...new Set([
-          ...coachIdsNamedByReview(summarizePlacementReview(result)),
-          ...coachIdsNamedByPlayUp(summarizePlayUpReview(result)),
-        ]),
-      ]);
+      const coachNamesById = await readCoachNames(
+        currentOrganization.id,
+        currentSeasonSetting?.id,
+        [
+          ...new Set([
+            ...coachIdsNamedByReview(summarizePlacementReview(result)),
+            ...coachIdsNamedByPlayUp(summarizePlayUpReview(result)),
+          ]),
+        ]
+      );
       const now = new Date().toISOString();
       const snapshot = buildTeamReviewSnapshot({
         generatedResult:

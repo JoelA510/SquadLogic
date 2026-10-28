@@ -33,7 +33,10 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
 });
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1', settings: {} } }),
+  useOrganization: () => ({
+    currentOrganization: { id: 'org-1', settings: {} },
+    currentSeasonSetting: { id: 'season-1' },
+  }),
 }));
 
 describe('EnterpriseDashboard attribute picker', () => {

@@ -126,6 +126,9 @@ BEGIN
         RETURNING id INTO v_other_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin'), (v_other_org, v_outsider, 'admin');
+    -- A coach belongs to a season (20261108010000), so the organization has an active one.
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'PR1 Season', 'active');
     INSERT INTO public.coaches (organization_id, full_name, email, status)
         VALUES (v_org, 'Coach A', 'cpp-a@example.test', 'active') RETURNING id INTO v_a;
     INSERT INTO public.coaches (organization_id, full_name, email, status)

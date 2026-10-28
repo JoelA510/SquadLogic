@@ -13,7 +13,6 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { createChainMock } from './helpers/index.js';
 import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -35,6 +34,8 @@ const state = vi.hoisted(() => ({
   rows: [],
   /** @type {any[]} */
   durablePlayers: [],
+  /** The reads the page made: the table and the equality filters each carried. */
+  reads: /** @type {Array<{ table: string, eqs: Array<[string, unknown]> }>} */ ([]),
 }));
 
 vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
@@ -82,8 +83,27 @@ vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: (table) =>
-      createChainMock({ data: table === 'players' ? state.durablePlayers : [], error: null }),
+    // Every builder method returns the same builder; awaiting it records the read.
+    from: (table) => {
+      const eqs = [];
+      const result = { data: table === 'players' ? state.durablePlayers : [], error: null };
+      const builder = new Proxy(
+        {},
+        {
+          get: (_target, method) => {
+            if (method === 'then') {
+              return (resolve, reject) => {
+                state.reads.push({ table, eqs });
+                return Promise.resolve(result).then(resolve, reject);
+              };
+            }
+            if (method === 'eq') return (column, value) => (eqs.push([column, value]), builder);
+            return () => builder;
+          },
+        }
+      );
+      return builder;
+    },
     rpc: async (name, params) =>
       name === 'admin_upsert_division_settings'
         ? {
@@ -183,6 +203,17 @@ describe('TeamAnalysisPage :: coaching leads', () => {
     cleanup();
     sessionStorage.clear();
     state.storedFlags = {};
+  });
+
+  it('looks players up in the season shown only (a registration id is unique within a season)', async () => {
+    seedImport(12, [2]);
+    state.reads.length = 0;
+    await generate();
+    const lookups = state.reads.filter((read) => read.table === 'players');
+    expect(lookups.length).toBeGreaterThan(0);
+    for (const lookup of lookups) {
+      expect(lookup.eqs).toContainEqual(['season_settings_id', IDS.season]);
+    }
   });
 
   it('a lead with no linked coach does not anchor a team', async () => {

@@ -136,6 +136,9 @@ BEGIN
         RETURNING id INTO v_org;
     INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
         (v_org, v_admin, 'admin');
+    -- A player belongs to a season (20261108010000).
+    INSERT INTO public.season_settings (organization_id, name, status)
+        VALUES (v_org, 'R1 Season', 'active');
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
 

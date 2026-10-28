@@ -132,14 +132,17 @@ AS $function$
           JOIN public.teams t ON t.id = pa.team_id
          WHERE pa.organization_id = p_organization_id
            AND pa.practice_slot_id IS NOT NULL
-           AND pa.effective_date_range IS NOT NULL
+           -- A NULL range is the slot's whole validity (the solver's reading, `assignmentLiveSpan`);
+           -- an empty one holds nothing.
+           AND (pa.effective_date_range IS NULL OR NOT isempty(pa.effective_date_range))
            AND (pa.id = ANY (p_assignment_ids)
                 OR pa.team_id IN (SELECT j.team_id FROM public.practice_assignments j WHERE j.id = ANY (p_assignment_ids))
                 OR pa.practice_slot_id IN (SELECT j.practice_slot_id FROM public.practice_assignments j WHERE j.id = ANY (p_assignment_ids)))
     ), bounded AS (
         -- The weekly dates a row is live on run from the first to the last date on its weekday
-        -- inside [lo, hi]: its range, cut to the slot's validity. A run unbounded at the top is
-        -- read as a year.
+        -- inside [lo, hi]: its range, cut to the slot's validity (a NULL range, or an end it does
+        -- not have, is the slot's own: LEAST and GREATEST skip a NULL). A slot unbounded at the top
+        -- is read as a year.
         SELECT s.*,
                GREATEST(lower(s.rng), s.valid_from) AS lo,
                COALESCE(LEAST(upper(s.rng) - 1, s.valid_until),
@@ -147,7 +150,7 @@ AS $function$
           FROM scoped s
     ), dated AS (
         SELECT b.id, b.team_id, b.practice_slot_id, b.day_of_week, b.start_time, b.end_time,
-               b.capacity, b.slot_division, b.team_division,
+               b.capacity, b.slot_division, b.team_division, b.dow,
                b.lo + ((b.dow - extract(isodow FROM b.lo)::int + 7) % 7) AS first_day,
                b.hi - ((extract(isodow FROM b.hi)::int - b.dow + 7) % 7) AS last_day
           FROM bounded b
@@ -194,16 +197,19 @@ AS $function$
        AND o.first_day <= j.last_day AND j.first_day <= o.last_day
     UNION ALL
     SELECT j.id, j.team_id, j.practice_slot_id, 'count'::text,
-           format('the team holds %s practices at once, its division''s count is %s', pk.peak, j.practices_per_week)
+           format('the team holds %s practices in one week, its division''s count is %s', pk.peak, j.practices_per_week)
       FROM judged j
      CROSS JOIN LATERAL (
+         -- A scheduling week is Monday to Sunday: the practices a team has in it are the rows with
+         -- a date on their weekday in that week, so a Monday and a Wednesday row of one week count
+         -- two though no date is shared. Weeks are those the judged row is live in.
          SELECT max(q.n) AS peak
            FROM (SELECT (SELECT count(*) FROM live o
                           WHERE o.team_id = j.team_id
-                            AND o.first_day <= p.first_day AND p.first_day <= o.last_day) AS n
-                   FROM live p
-                  WHERE p.team_id = j.team_id
-                    AND p.first_day BETWEEN j.first_day AND j.last_day) q) pk
+                            AND w.ws::date + (o.dow - 1) BETWEEN o.first_day AND o.last_day) AS n
+                   FROM generate_series(date_trunc('week', j.first_day::timestamp),
+                                        date_trunc('week', j.last_day::timestamp),
+                                        interval '7 days') AS w(ws)) q) pk
      WHERE pk.peak > j.practices_per_week;
 $function$;
 

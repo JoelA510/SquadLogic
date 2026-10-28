@@ -8,7 +8,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(28);
+SELECT plan(29);
 
 -- Org A: a season with two teams, a second season with one, three slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -95,6 +95,16 @@ VALUES
      'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Five'),
     ('a1111111-1111-1111-1111-000000006606', 'a1111111-1111-1111-1111-111111111111',
      'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Six');
+-- A division that gives no practice (0 a week) and a team in it; and a U9 team with no row at all.
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week, practice_minutes)
+VALUES ('a1111111-1111-1111-1111-0000000066c3', 'a1111111-1111-1111-1111-111111111111',
+        'a1111111-1111-1111-1111-0000000066b3', 'V3 Gate U0', 0, NULL);
+INSERT INTO public.teams (id, organization_id, division_id, name)
+VALUES
+    ('a1111111-1111-1111-1111-000000006607', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c3', 'Gate U0 Seven'),
+    ('a1111111-1111-1111-1111-000000006608', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066c2', 'Gate U9 Eight');
 INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity, division_id)
 VALUES
     ('a1111111-1111-1111-1111-0000000066aa', 'a1111111-1111-1111-1111-111111111111',
@@ -403,6 +413,24 @@ SELECT lives_ok(
                                   'practice_slot_id', 'a1111111-1111-1111-1111-0000000066ac',
                                   'effective_date_range', '[2026-11-23,2026-11-24)'))) $$,
     'a Sunday and the next Monday, in two scheduling weeks, are accepted for a division of 1 a week');
+
+-- A team in a division that gives no practice is not "left without one" by a save: only the U9 team
+-- with no row is listed (control), and the 0-a-week team is not.
+SELECT is(
+    (SELECT array_agg(e->>'team_name' ORDER BY e->>'team_name')
+       FROM jsonb_array_elements(
+           (public.persist_practice_schedule(
+               jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-0000000066b3'),
+               (SELECT jsonb_agg(jsonb_build_object('team_id', team_id, 'practice_slot_id', practice_slot_id,
+                                                    'effective_date_range', effective_date_range::text,
+                                                    'source', source::text, 'assigned_via', assigned_via))
+                  FROM public.practice_assignments
+                 WHERE effective_date_range IS NOT NULL
+                   AND team_id IN (SELECT t.id FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
+                                    WHERE d.season_settings_id = 'a1111111-1111-1111-1111-0000000066b3')))
+            ->'teams_without_practice')) e),
+    ARRAY['Gate U9 Eight'],
+    'a save lists the U9 team with no row as without a practice, and not the team of a 0-a-week division');
 
 -- 9. Scope and admin controls.
 SELECT throws_ok(

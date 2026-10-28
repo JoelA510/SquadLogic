@@ -3,7 +3,7 @@
 -- Puts back the three replaced functions as they stood after 20261108010000 (create_import_job,
 -- finalize_import_job and finalize_coach_import_job: the active season only takes an import; each
 -- checked by the md5 of its text at the end), drops the four season writers, the catalogues, the
--- three guard triggers and the completed-season triggers with their functions, the two cutoff
+-- three guard triggers (with the pending-import helper) and the completed-season triggers on the people and schedule tables with their functions, the two cutoff
 -- columns and the `custom` mode, and unregisters the four audit actions while no audit row uses
 -- them.
 --
@@ -39,13 +39,21 @@ UPDATE public.season_settings
 ALTER TABLE public.season_settings ENABLE TRIGGER season_settings_cutoff_guard;
 
 -- The triggers, then their functions.
+DROP TRIGGER teams_readonly_when_completed ON public.teams;
+DROP TRIGGER team_players_readonly_when_completed ON public.team_players;
+DROP TRIGGER team_coach_assignments_readonly_when_completed ON public.team_coach_assignments;
+DROP TRIGGER practice_assignments_readonly_when_completed ON public.practice_assignments;
+DROP TRIGGER practice_exceptions_readonly_when_completed ON public.practice_exceptions;
+DROP TRIGGER game_assignments_readonly_when_completed ON public.game_assignments;
 DROP TRIGGER players_readonly_when_completed ON public.players;
 DROP TRIGGER coaches_readonly_when_completed ON public.coaches;
 DROP TRIGGER divisions_window_guard ON public.divisions;
 DROP TRIGGER season_settings_cutoff_guard ON public.season_settings;
+DROP FUNCTION public.season_schedule_readonly_when_completed();
 DROP FUNCTION public.season_rows_readonly_when_completed();
 DROP FUNCTION public.divisions_window_guard();
 DROP FUNCTION public.season_settings_cutoff_guard();
+DROP FUNCTION public.season_has_pending_player_import(uuid);
 
 -- The writers and the catalogues.
 DROP FUNCTION public.admin_create_season_from(uuid, text, integer, date, date);

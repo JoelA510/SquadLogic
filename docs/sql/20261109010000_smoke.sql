@@ -8,7 +8,8 @@
 --     on #666); once the draft has players its cutoff and a division's window cannot change;
 --   * activating the draft completes the old active season (exactly one season is active), a
 --     completed season cannot be activated again and is read-only for a signed-in admin
---     (a player patch is refused);
+--     (a player patch and a team write are refused);
+--   * while a player import into a draft is unfinished its cutoff cannot change (import_pending);
 --   * the season lock: while one session holds an activation open, a second session's activation or
 --     rollover in the same organization waits (55P03 at a 1s lock timeout) and another
 --     organization's is written at once.
@@ -51,6 +52,7 @@ BEGIN
     INSERT INTO public.players (organization_id, division_id, first_name, last_name, external_registration_id, natural_age)
         VALUES (v_org, v_d1, 'Smoke', 'Active', 'SR-1', 10);
     INSERT INTO public.coaches (organization_id, full_name, email) VALUES (v_org, 'Smoke Coach', 'sr-coach@example.test');
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'Smoke Team');
     SELECT to_jsonb(p) INTO v_before FROM public.players p WHERE p.external_registration_id = 'SR-1';
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -87,6 +89,17 @@ BEGIN
     VALUES (v_org, v_job, 1, '{}'::jsonb,
             '{"first_name": "Smoke", "last_name": "Draft", "external_registration_id": "SR-1", "division": "Smoke U10", "natural_age": "10"}'::jsonb);
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    -- Staged rows not yet applied: the rule cannot move under them.
+    BEGIN
+        PERFORM public.admin_update_draft_season(v_s2, '{"age_cutoff_mode": "birth_year"}'::jsonb);
+        v_refused := 'allowed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_detail = PG_EXCEPTION_DETAIL;
+        v_refused := v_state || ':' || v_detail;
+    END;
+    IF v_refused <> '22023:import_pending' THEN
+        RAISE EXCEPTION 'a cutoff change with an import pending gave "%"', v_refused;
+    END IF;
     v_fin := public.finalize_import_job(v_job);
     IF (v_fin ->> 'inserted_players')::int <> 1 OR (v_fin ->> 'updated_players')::int <> 0 THEN
         RAISE EXCEPTION 'the import into the draft did not insert one new player: %', v_fin;
@@ -150,7 +163,18 @@ BEGIN
     IF v_refused <> '22023:season_completed' THEN
         RAISE EXCEPTION 'a player patch in a completed season gave "%"', v_refused;
     END IF;
-    RAISE NOTICE 'activation: one active season, the old one completed, read-only, never reactivated';
+    -- Its schedule is read-only too: a team of the completed season cannot be written.
+    BEGIN
+        UPDATE public.teams SET notes = 'late' WHERE division_id = v_d1;
+        v_refused := 'allowed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_detail = PG_EXCEPTION_DETAIL;
+        v_refused := v_state || ':' || v_detail;
+    END;
+    IF v_refused <> '22023:season_completed' THEN
+        RAISE EXCEPTION 'a team write in a completed season gave "%"', v_refused;
+    END IF;
+    RAISE NOTICE 'activation: one active season, the old one completed, read-only (people and schedules), never reactivated';
 END;
 $$;
 

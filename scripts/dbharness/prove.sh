@@ -4909,11 +4909,13 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
 
-# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Three
-# plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red):
+# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Four
+# plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red;
+# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql):
 # a draft season refused an import again; the rollover without the organization's season lock and
 # row locks (the smoke's second session then writes at once instead of timing out); and a completed
-# season writable again for a signed-in caller (the smoke's player patch is accepted).
+# season writable again for a signed-in caller (the smoke's player patch is accepted); and a
+# completed season's schedule writable again (the smoke's team write is accepted).
 plant "M59 the finalizer refuses a draft season again" "$M59" \
   "    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
   "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
@@ -4936,6 +4938,13 @@ plant "M59 a completed season is writable for a signed-in caller" "$M59" \
         -- The cascade of a deleted organization: the season may not have been removed yet." \
   "    IF v_status = 'completed' AND false THEN
         -- The cascade of a deleted organization: the season may not have been removed yet." \
+  "smoke 20261109010000"
+
+plant "M59 a completed season's schedule is writable for a signed-in caller" "$M59" \
+  "        IF v_status = 'completed' THEN
+            -- The cascade of a deleted organization: the season may not have been removed yet." \
+  "        IF v_status = 'completed' AND false THEN
+            -- The cascade of a deleted organization: the season may not have been removed yet." \
   "smoke 20261109010000"
 
 # ---------------------------------------------------------------------------

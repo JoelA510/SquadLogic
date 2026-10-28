@@ -40,6 +40,7 @@ import {
   type WindowedDivision,
 } from '../_shared/natural-age.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
+import { stampAgeRule } from '../_shared/age-rule-stamp.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -671,6 +672,17 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // that division's age. Read for the season the import adds to, and only when it has any.
   let windowedDivisions: WindowedDivision[] = [];
   if (body.import_type === 'players') {
+    // The rule these ages are counted under is stamped on the job BEFORE it is read, so a change
+    // made after this point cannot go unseen: finalization refuses a stale stamp (age_rule_changed).
+    const stampError = await stampAgeRule(serviceClient, {
+      importType: body.import_type,
+      importJobId: body.import_job_id,
+      rowOffset: body.row_offset,
+    });
+    if (stampError) {
+      await logFailure(logCtx, 'Age rule stamp failed', stampError);
+      return jsonResponse({ status: 'error', message: 'Age rule stamp failed' }, 500);
+    }
     const { data: seasons, error: seasonError } = await serviceClient
       .from('season_settings')
       .select('id, status, season_year, age_cutoff_mode, age_cutoff_month, age_cutoff_day')

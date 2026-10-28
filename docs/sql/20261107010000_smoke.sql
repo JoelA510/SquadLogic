@@ -4,7 +4,7 @@
 -- `prelude.sql` stubs `auth.uid()` from `request.jwt.claim.sub`, so the writers run as a real
 -- organization admin.
 --
---   1. Posture: the table as declared (RLS on, a read policy and a write policy for admins, closed
+--   1. Posture: the table as declared (RLS on, a select, an insert and a delete policy for admins, closed
 --      to anon, no UPDATE grant, both shape CHECKs, the two unique indexes), `get_schedule_tbd` a
 --      pinned definer for authenticated and not anon, and both writers writing the list.
 --   2. The practice list, through the real `persist_practice_schedule`: it is built from the
@@ -38,8 +38,11 @@ BEGIN
     END IF;
     SELECT count(*) INTO v_n FROM pg_policies
      WHERE schemaname = 'public' AND tablename = 'schedule_tbd' AND roles = '{authenticated}'
-       AND policyname IN ('Schedule TBD: admins select', 'Schedule TBD: admins write');
-    IF v_n <> 2 THEN RAISE EXCEPTION 'schedule_tbd does not have its two admin policies (% found)', v_n; END IF;
+       AND policyname IN ('Schedule TBD: admins select', 'Schedule TBD: admins insert', 'Schedule TBD: admins delete');
+    IF v_n <> 3 THEN RAISE EXCEPTION 'schedule_tbd does not have its three admin policies, one a command (% found)', v_n; END IF;
+    SELECT count(*) INTO v_n FROM pg_policies
+     WHERE schemaname = 'public' AND tablename = 'schedule_tbd' AND cmd IN ('ALL', 'UPDATE');
+    IF v_n <> 0 THEN RAISE EXCEPTION 'schedule_tbd has an ALL or UPDATE policy (% found)', v_n; END IF;
     IF has_table_privilege('anon', 'public.schedule_tbd', 'SELECT') THEN RAISE EXCEPTION 'anon can read schedule_tbd'; END IF;
     IF has_table_privilege('authenticated', 'public.schedule_tbd', 'UPDATE') THEN RAISE EXCEPTION 'authenticated can update schedule_tbd'; END IF;
     IF NOT (has_table_privilege('authenticated', 'public.schedule_tbd', 'SELECT')
@@ -69,7 +72,7 @@ BEGIN
        AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC']
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 2 THEN RAISE EXCEPTION 'both writers must write the list, pinned, and be closed to anon (% do)', v_n; END IF;
-    RAISE NOTICE 'posture: RLS on with an admin read and an admin write policy; closed to anon, no UPDATE grant; three CHECKs and two unique indexes; get_schedule_tbd a pinned definer (not anon); both writers write the list';
+    RAISE NOTICE 'posture: RLS on with an admin select, insert and delete policy and no ALL or UPDATE; closed to anon, no UPDATE grant; three CHECKs and two unique indexes; get_schedule_tbd a pinned definer (not anon); both writers write the list';
 END;
 $$;
 

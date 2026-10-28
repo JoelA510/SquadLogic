@@ -21,7 +21,7 @@
 --   1. `public.schedule_tbd`: organization, season, `kind` practice|game, the division, the
 --      team (practice) or home and away team and week (game), `missing_count` (practice, 1 to 7),
 --      `reason` (a closed list per kind, a CHECK), `detail`, the run that wrote it. RLS: an
---      organization admin reads and writes (only league admins sign in; the practice writer is
+--      organization admin reads, inserts and deletes (only league admins sign in; the practice writer is
 --      SECURITY INVOKER and writes as the admin, as it writes `practice_exceptions`). One row per
 --      team for practices, one per (home, away, week) for games.
 --   2. `get_schedule_tbd(season)`: the admin read the export panel uses (names included).
@@ -140,11 +140,16 @@ CREATE POLICY "Schedule TBD: admins select"
     USING (public.is_org_admin(organization_id));
 
 -- persist_practice_schedule is SECURITY INVOKER and writes as the calling admin, as it writes
--- practice_exceptions; persist_game_schedule is a definer. No grant of UPDATE: a row is replaced.
-CREATE POLICY "Schedule TBD: admins write"
-    ON public.schedule_tbd FOR ALL TO authenticated
-    USING (public.is_org_admin(organization_id))
+-- practice_exceptions; persist_game_schedule is a definer. Insert and delete are their own policies,
+-- not one FOR ALL beside the select: two permissive policies on a SELECT are what the RLS advisor
+-- (20261018030000) refuses. No policy and no grant for UPDATE: a row is replaced, never edited.
+CREATE POLICY "Schedule TBD: admins insert"
+    ON public.schedule_tbd FOR INSERT TO authenticated
     WITH CHECK (public.is_org_admin(organization_id));
+
+CREATE POLICY "Schedule TBD: admins delete"
+    ON public.schedule_tbd FOR DELETE TO authenticated
+    USING (public.is_org_admin(organization_id));
 
 REVOKE ALL ON public.schedule_tbd FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, DELETE ON public.schedule_tbd TO authenticated;

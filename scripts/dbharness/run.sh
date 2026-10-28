@@ -1324,7 +1324,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261107010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2055,6 +2055,29 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('e8000000-0000-4000-8000-00000000000a','e8000000-0000-4000-8000-0000000000e5','e8000000-0000-4000-8000-0000000000a6','e8000000-0000-4000-8000-0000000000a6','[2026-09-01,2026-11-30]','auto');" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the divisions, teams and practice rows the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261107010000's revert DESTROYS the TIME TBD list**, so its warning is the check: THREE rows (a
+  # team two practices short, another team one short, one game not placed), on two teams of one division,
+  # which the revert must leave standing. Inserted as the table owner; every name is synthetic.
+  if [ "$id" = "20261107010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e9000000-0000-4000-8000-00000000000a','TIME TBD Revert Org','time-tbd-revert-org');
+              INSERT INTO public.season_settings (id, organization_id, name, status) VALUES
+                ('e9000000-0000-4000-8000-0000000000a1','e9000000-0000-4000-8000-00000000000a','TIME TBD Active','active');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week) VALUES
+                ('e9000000-0000-4000-8000-0000000000d1','e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000a1','TBD U7',2);
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('e9000000-0000-4000-8000-0000000000e1','e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000d1','TBD T1'),
+                ('e9000000-0000-4000-8000-0000000000e2','e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000d1','TBD T2');
+              INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, home_team_id, away_team_id, week_index, missing_count, reason) VALUES
+                ('e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000a1','practice','e9000000-0000-4000-8000-0000000000d1','e9000000-0000-4000-8000-0000000000e1',NULL,NULL,NULL,2,'no-slot-available'),
+                ('e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000a1','practice','e9000000-0000-4000-8000-0000000000d1','e9000000-0000-4000-8000-0000000000e2',NULL,NULL,NULL,1,'not-scheduled-yet'),
+                ('e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000a1','game','e9000000-0000-4000-8000-0000000000d1',NULL,'e9000000-0000-4000-8000-0000000000e1','e9000000-0000-4000-8000-0000000000e2',3,NULL,'no-slot-available');" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the teams and TIME TBD rows the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3508,6 +3531,36 @@ PROBE
       else
         echo "FAIL revert ${id}: the practices-per-division revert did not restore both writers or left something of the migration"
         dump 10 $SCRATCH/harness_ppw; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261107010000" ]; then
+      # The seed planted 3 TIME TBD rows on 2 teams; the revert counts them, drops the list, and leaves the
+      # teams. The three functions it replaced are back to the bodies they had (by md5, carriage returns
+      # stripped, with their posture): the practice writer as 20261105010000 builds it, the game writer and
+      # admin_delete_team as production's.
+      if ! grep -q 'this revert DESTROYS 3 TIME TBD row(s), which the next practice save and game run rebuild' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 3 TIME TBD rows and the revert did not count them"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'TBD-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.teams WHERE organization_id = 'e9000000-0000-4000-8000-00000000000a') <> 2 THEN 'teams-lost'
+               WHEN to_regclass('public.schedule_tbd') IS NOT NULL THEN 'table-left'
+               WHEN to_regprocedure('public.get_schedule_tbd(uuid)') IS NOT NULL THEN 'read-left'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
+                      WHERE p.oid = 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)'::regprocedure)
+                    <> 'a63d385e37a7d5e71965ba0fb093b531:false:search_path=public,TimeZone=UTC' THEN 'practice-writer-wrong'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
+                      WHERE p.oid = 'public.persist_game_schedule(jsonb, jsonb)'::regprocedure)
+                    <> '1a9ad54a5c4f4f3dc71793b53b2e4f61:true:search_path=public,TimeZone=UTC' THEN 'game-writer-wrong'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
+                      WHERE p.oid = 'public.admin_delete_team(uuid)'::regprocedure)
+                    <> '4e44a5dec60c5eecae4c4e47644cd610:true:search_path=public' THEN 'delete-team-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_tbd 2>&1 && grep -q 'TBD-VERDICT:restored' $SCRATCH/harness_tbd; then
+        echo "  revert ${id}: the TIME TBD revert drops the list and its read, restores the practice writer, the game writer and admin_delete_team as they were, and leaves the teams"
+      else
+        echo "FAIL revert ${id}: the TIME TBD revert did not restore the three functions or left something of the migration"
+        dump 10 $SCRATCH/harness_tbd; STATUS=1
       fi
     fi
     if [ "$id" = "20261104010000" ]; then

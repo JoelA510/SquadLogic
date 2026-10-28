@@ -4894,6 +4894,15 @@ plant "M57 get_schedule_tbd admits any signed-in user" "$M57" \
         RAISE EXCEPTION 'Access denied: the TIME TBD list is read by an administrator of the season''s organization'" \
   "smoke 20261108020000"
 
+# The labels-taking practice sync is not a client entry point: it refuses a call whose stack does not
+# show the practice save or the refresh (a direct call with no labels would reset the saved labels and
+# write no audit row). The plant makes the stack check pass for any caller; the smoke must go red at
+# "a direct call to the practice sync ... was accepted".
+plant "M57 the practice sync accepts a direct client call" "$M57" \
+  "    IF v_ctx !~ 'PL/pgSQL function (persist_practice_schedule|refresh_schedule_tbd_practices)\\(' THEN" \
+  "    IF v_ctx !~ 'PL/pgSQL function' THEN" \
+  "smoke 20261108020000"
+
 # Admin only (20261104010000; plan docs/changes/2026-10-27-admin-only.md, S5). Three plants were run
 # against the real harness when it was written; each failed the named check. The re-aimed plants
 # above (the reconcile, the roster and staff reads, the token rotation, the finalizer, the allowlist,

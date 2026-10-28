@@ -6,14 +6,21 @@
 --
 --   1. Posture: the table as declared (RLS on, one SELECT policy for admins and no policy that writes,
 --      closed to anon, no client INSERT, UPDATE or DELETE grant, the three CHECKs, the two unique
---      indexes, the tenancy trigger), `get_schedule_tbd` and `sync_schedule_tbd_practices` pinned
---      definers for authenticated and not anon, the tenancy trigger function closed to clients, and
---      both writers writing the list.
+--      indexes, the tenancy trigger), `get_schedule_tbd`, `refresh_schedule_tbd_practices` and
+--      `sync_schedule_tbd_practices` pinned definers for authenticated and not anon (the sync with the call-stack
+--      guard that keeps a direct client call out), the audit action registered, the tenancy trigger function
+--      closed to clients, and both writers writing the list.
 --   2. The practice list, through the real `persist_practice_schedule`: it is built from the
 --      ROSTER -- a team with none of its practices is listed whatever the payload carried, a team
 --      short by one is listed with missing_count 1, a division at 0 a week and a team that holds
 --      its count are not, a row whose range has ended does not count as held; the reason is the
 --      run's own for the team, else `not-scheduled-yet`; the next save rebuilds the list.
+--   2b. The refresh (`refresh_schedule_tbd_practices`, what the export and a run that placed nothing call):
+--      a direct call to the labels-taking sync is refused and changes nothing; a refresh with nothing new
+--      reports no change and writes no audit row; after the roster's needs change it lists the new
+--      shortfall as not-scheduled-yet, keeps the saved label and run of the team it already had, and writes
+--      one `schedule_tbd.refreshed` audit row with the counts; a stranger and another organization's admin
+--      are refused; a season with no assignments at all is listed in full.
 --   3. The game list, through the real `persist_game_schedule`: a save whose results carry
 --      `unscheduled` replaces the season's list; each bad entry (a reason off the list, one team on
 --      both sides, a team of another organization) is refused and changes nothing; a save with no
@@ -69,6 +76,19 @@ BEGIN
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 1 THEN RAISE EXCEPTION 'sync_schedule_tbd_practices is not a pinned definer for authenticated and not anon'; END IF;
+    IF (SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)'::regprocedure)
+           NOT LIKE '%PG_CONTEXT%' THEN
+        RAISE EXCEPTION 'sync_schedule_tbd_practices has no call-stack guard';
+    END IF;
+    SELECT count(*) INTO v_n FROM pg_proc p
+     WHERE p.oid = 'public.refresh_schedule_tbd_practices(uuid)'::regprocedure
+       AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC']
+       AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
+    IF v_n <> 1 THEN RAISE EXCEPTION 'refresh_schedule_tbd_practices is not a pinned definer for authenticated and not anon'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'schedule_tbd.refreshed') THEN
+        RAISE EXCEPTION 'the audit action schedule_tbd.refreshed is not registered';
+    END IF;
     SELECT count(*) INTO v_n FROM pg_constraint
      WHERE conrelid = 'public.schedule_tbd'::regclass AND contype = 'c'
        AND conname IN ('schedule_tbd_kind_check', 'schedule_tbd_shape', 'schedule_tbd_reason_check');
@@ -92,7 +112,7 @@ BEGIN
        AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC']
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 2 THEN RAISE EXCEPTION 'both writers must write the list, pinned, and be closed to anon (% do)', v_n; END IF;
-    RAISE NOTICE 'posture: RLS on with one admin select policy and no policy or grant that writes; closed to anon; three CHECKs, two unique indexes and the tenancy trigger (its function closed to clients); get_schedule_tbd and the practice sync pinned definers (not anon); both writers write the list';
+    RAISE NOTICE 'posture: RLS on with one admin select policy and no policy or grant that writes; closed to anon; three CHECKs, two unique indexes and the tenancy trigger (its function closed to clients); get_schedule_tbd, the refresh and the practice sync (with its call-stack guard) pinned definers (not anon); the audit action registered; both writers write the list';
 END;
 $$;
 
@@ -108,13 +128,16 @@ DECLARE
     v_loc uuid; v_field uuid;
     v_a1 uuid; v_a2 uuid; v_b1 uuid; v_c1 uuid; v_c2 uuid; v_x1 uuid;
     v_mon uuid; v_wed uuid; v_tue uuid; v_thu uuid; v_fri uuid;
-    c_r text := '[2026-09-01,2026-11-30]';
+    -- Live ranges are relative to today: the sync counts a series as held only while it has not ended, so a
+    -- fixed range would turn this smoke red on the day it ended.
+    c_r text := '[' || (CURRENT_DATE - 30)::text || ',' || (CURRENT_DATE + 60)::text || ']';
     c_old text := '[2020-01-01,2020-02-01)';
     v_res jsonb;
     v_n integer;
     v_state text; v_msg text;
     v_raised boolean;
     v_json jsonb;
+    v_run uuid;
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin, 'tbd-admin@example.test', '{"password_length": 16}'),
@@ -146,15 +169,15 @@ BEGIN
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_div1, 'TBD C2') RETURNING id INTO v_c2;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org2, v_divx, 'TBD X1') RETURNING id INTO v_x1;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
-        VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30', 1) RETURNING id INTO v_mon;
+        VALUES (v_org, v_field, 'mon', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1) RETURNING id INTO v_mon;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
-        VALUES (v_org, v_field, 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30', 1) RETURNING id INTO v_wed;
+        VALUES (v_org, v_field, 'wed', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1) RETURNING id INTO v_wed;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
-        VALUES (v_org, v_field, 'tue', '17:00', '18:00', '2026-09-01', '2026-11-30', 1) RETURNING id INTO v_tue;
+        VALUES (v_org, v_field, 'tue', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1) RETURNING id INTO v_tue;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
-        VALUES (v_org, v_field, 'thu', '17:00', '18:00', '2026-09-01', '2026-11-30', 1) RETURNING id INTO v_thu;
+        VALUES (v_org, v_field, 'thu', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1) RETURNING id INTO v_thu;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity)
-        VALUES (v_org, v_field, 'fri', '17:00', '18:00', '2026-09-01', '2026-11-30', 1) RETURNING id INTO v_fri;
+        VALUES (v_org, v_field, 'fri', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1) RETURNING id INTO v_fri;
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -204,6 +227,93 @@ BEGIN
     SELECT count(*) INTO v_n FROM public.schedule_tbd WHERE season_settings_id = v_season AND kind = 'practice';
     IF v_n <> 2 THEN RAISE EXCEPTION 'save 2 left % practice row(s), expected 2 (A2 and C2); a list is rebuilt, never added to', v_n; END IF;
     RAISE NOTICE 'practice list: the next save rebuilds it -- A2 now missing 1 (one live practice of two), an unknown reason read as not-scheduled-yet, still two rows';
+
+    -- ---- 2b. the refresh --------------------------------------------------------------------------
+    -- Save 3: the run labels A2 no-slot-available. (A refresh has no labels of its own, so it must keep this one.)
+    PERFORM public.persist_practice_schedule(
+        jsonb_build_object('season_settings_id', v_season, 'results', jsonb_build_object('unassigned',
+            jsonb_build_array(jsonb_build_object('teamId', v_a2, 'reason', 'no-slot-available', 'target', 2)))),
+        jsonb_build_array(
+            jsonb_build_object('team_id', v_a1, 'practice_slot_id', v_mon, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_a1, 'practice_slot_id', v_wed, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_c1, 'practice_slot_id', v_fri, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_a2, 'practice_slot_id', v_tue, 'effective_date_range', c_old, 'source', 'manual'),
+            jsonb_build_object('team_id', v_a2, 'practice_slot_id', v_thu, 'effective_date_range', c_r)));
+    SELECT run_id INTO v_run FROM public.schedule_tbd WHERE team_id = v_a2;
+    IF v_run IS NULL OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a2 AND reason = 'no-slot-available') THEN
+        RAISE EXCEPTION 'save 3 did not put the run''s label and the run on A2''s row';
+    END IF;
+
+    -- The labels-taking sync is not a client entry point; a refused call changes nothing.
+    FOR v_msg IN VALUES ('a list of no labels'), ('no list at all') LOOP
+        v_raised := false;
+        BEGIN
+            PERFORM public.sync_schedule_tbd_practices(v_org, v_season, NULL, CASE v_msg WHEN 'no list at all' THEN NULL ELSE '[]'::jsonb END);
+        EXCEPTION WHEN insufficient_privilege THEN
+            v_raised := true;
+        END;
+        IF NOT v_raised THEN RAISE EXCEPTION 'a direct call to the practice sync with % was accepted', v_msg; END IF;
+    END LOOP;
+    IF NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a2 AND reason = 'no-slot-available' AND run_id = v_run) THEN
+        RAISE EXCEPTION 'a refused direct call to the practice sync changed A2''s saved label or run';
+    END IF;
+    RAISE NOTICE 'refresh: a direct call to the practice sync (with an empty list, or none) is refused 42501 and leaves the saved label and run';
+
+    -- Nothing new: no change, no audit row, the label and run kept.
+    v_json := public.refresh_schedule_tbd_practices(v_season);
+    IF (v_json->>'changed')::boolean THEN RAISE EXCEPTION 'a refresh of a current list reported a change: %', v_json; END IF;
+    SELECT count(*) INTO v_n FROM public.audit_log WHERE organization_id = v_org AND action = 'schedule_tbd.refreshed';
+    IF v_n <> 0 THEN RAISE EXCEPTION 'a refresh that changed nothing wrote % audit row(s)', v_n; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a2 AND reason = 'no-slot-available' AND run_id = v_run) THEN
+        RAISE EXCEPTION 'a refresh with nothing new replaced A2''s label or run';
+    END IF;
+
+    -- The division now wants 3 a week (as the owner): A1 is newly short, A2 now misses 2.
+    RESET ROLE;
+    UPDATE public.divisions SET practices_per_week = 3 WHERE id = v_div2;
+    SET LOCAL ROLE authenticated;
+    v_json := public.refresh_schedule_tbd_practices(v_season);
+    IF NOT (v_json->>'changed')::boolean THEN RAISE EXCEPTION 'a refresh after the roster changed reported no change: %', v_json; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a1 AND missing_count = 1 AND reason = 'not-scheduled-yet')
+       OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a2 AND missing_count = 2 AND reason = 'no-slot-available' AND run_id = v_run) THEN
+        RAISE EXCEPTION 'the refresh did not list A1 as not-scheduled-yet and keep A2''s label and run: %',
+            (SELECT jsonb_agg(to_jsonb(s)) FROM public.schedule_tbd s WHERE s.kind = 'practice' AND s.season_settings_id = v_season);
+    END IF;
+    SELECT count(*) INTO v_n FROM public.audit_log
+     WHERE organization_id = v_org AND action = 'schedule_tbd.refreshed' AND resource_type = 'season_settings' AND resource_id = v_season
+       AND (metadata->>'before_rows')::int = 2 AND (metadata->>'after_rows')::int = 3
+       AND (metadata->>'added')::int = 1 AND (metadata->>'removed')::int = 0 AND (metadata->>'changed')::int = 1;
+    IF v_n <> 1 THEN RAISE EXCEPTION 'the refresh that changed the list did not write exactly one audit row with its counts (% found)', v_n; END IF;
+    PERFORM public.refresh_schedule_tbd_practices(v_season);
+    SELECT count(*) INTO v_n FROM public.audit_log WHERE organization_id = v_org AND action = 'schedule_tbd.refreshed';
+    IF v_n <> 1 THEN RAISE EXCEPTION 'a second refresh with nothing new wrote an audit row (% in all)', v_n; END IF;
+
+    -- Back to 2 a week: A1 drops off, A2 is missing 1 again with its label.
+    RESET ROLE;
+    UPDATE public.divisions SET practices_per_week = 2 WHERE id = v_div2;
+    SET LOCAL ROLE authenticated;
+    PERFORM public.refresh_schedule_tbd_practices(v_season);
+    IF EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a1)
+       OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a2 AND missing_count = 1 AND reason = 'no-slot-available' AND run_id = v_run) THEN
+        RAISE EXCEPTION 'the refresh did not take A1 off the list and keep A2''s label and run';
+    END IF;
+    SELECT count(*) INTO v_n FROM public.audit_log WHERE organization_id = v_org AND action = 'schedule_tbd.refreshed';
+    IF v_n <> 2 THEN RAISE EXCEPTION 'the second change did not write its own audit row (% in all)', v_n; END IF;
+    RAISE NOTICE 'refresh: nothing new reports no change and no audit row; a new shortfall is listed not-scheduled-yet, the saved label and run kept, one audit row with the counts; the next refresh adds none';
+
+    -- A member of no organization, and another organization's admin, are refused.
+    FOR v_state IN VALUES ('stranger'), ('other admin') LOOP
+        PERFORM set_config('request.jwt.claim.sub', (CASE v_state WHEN 'stranger' THEN v_stranger ELSE v_other_admin END)::text, true);
+        v_raised := false;
+        BEGIN
+            PERFORM public.refresh_schedule_tbd_practices(v_season);
+        EXCEPTION WHEN insufficient_privilege THEN
+            v_raised := true;
+        END;
+        IF NOT v_raised THEN RAISE EXCEPTION 'the % refreshed the list', v_state; END IF;
+    END LOOP;
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    RAISE NOTICE 'refresh: a member of no organization and another organization''s admin are each refused 42501';
 
     -- ---- 3. the game list --------------------------------------------------------------------
     PERFORM public.persist_game_schedule(
@@ -334,6 +444,23 @@ BEGIN
     SELECT count(*) INTO v_n FROM public.schedule_tbd WHERE season_settings_id = v_season AND kind = 'game';
     IF v_n <> 0 THEN RAISE EXCEPTION 'an empty unscheduled list left % game row(s)', v_n; END IF;
     RAISE NOTICE 'game list: a save with no list left it as it was; an empty list cleared it';
+
+    -- A season with no assignments at all: a run that placed nothing never reaches the practice save, so the
+    -- refresh is what lists every practice the roster needs.
+    RESET ROLE;
+    UPDATE public.divisions SET practices_per_week = 2 WHERE id = v_divx;
+    PERFORM set_config('request.jwt.claim.sub', v_other_admin::text, true);
+    SET LOCAL ROLE authenticated;
+    PERFORM public.refresh_schedule_tbd_practices(v_season2);
+    IF NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE season_settings_id = v_season2 AND team_id = v_x1
+                    AND missing_count = 2 AND reason = 'not-scheduled-yet' AND (detail->>'held')::int = 0) THEN
+        RAISE EXCEPTION 'a season with no assignments did not list every practice of its team: %',
+            (SELECT jsonb_agg(to_jsonb(s)) FROM public.schedule_tbd s WHERE s.season_settings_id = v_season2);
+    END IF;
+    RESET ROLE;
+    DELETE FROM public.schedule_tbd WHERE team_id = v_x1;
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    RAISE NOTICE 'refresh: a season with no assignments at all is listed in full (every practice its division wants, not-scheduled-yet)';
 
     -- ---- the tenancy trigger, as the table owner (which is what the definer writers are) -----------
     RESET ROLE;

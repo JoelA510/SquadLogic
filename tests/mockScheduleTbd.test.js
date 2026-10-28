@@ -79,3 +79,28 @@ describe('the mock get_schedule_tbd', () => {
     expect(refuse({ p_season_settings_id: 'nope' })).toBe('42501');
   });
 });
+
+describe('the mock refresh_schedule_tbd_practices', () => {
+  const call = (params, ctx = { isOrgAdmin: admin }) =>
+    handleScheduleTbdRpc(db, 'refresh_schedule_tbd_practices', params, ctx);
+
+  it("refuses as the SQL does: no season 23502, a season that is not the caller's or does not exist 42501", () => {
+    expect(call({}).error.code).toBe('23502');
+    const other = call({ p_season_settings_id: 's2' });
+    const missing = call({ p_season_settings_id: 'nope' });
+    expect(other.error.code).toBe('42501');
+    expect(missing.error).toEqual(other.error);
+    expect(other.error.message).toMatch(/refreshed by an administrator/);
+    expect(call({ p_season_settings_id: 's1' }, { isOrgAdmin: () => false }).error.code).toBe(
+      '42501'
+    );
+  });
+
+  it("answers with the season's practice rows as seeded and rebuilds nothing (stated in the arm's header)", () => {
+    const before = JSON.stringify(db.schedule_tbd);
+    const { data, error } = call({ p_season_settings_id: 's1' });
+    expect(error).toBeNull();
+    expect(data).toEqual({ changed: false, practice_rows: 1, missing_practices: 2 });
+    expect(JSON.stringify(db.schedule_tbd)).toBe(before);
+  });
+});

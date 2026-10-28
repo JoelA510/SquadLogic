@@ -24,6 +24,45 @@ export async function readScheduleTbd(client, seasonSettingsId) {
 }
 
 /**
+ * Bring the season's practice list up to date, then read the whole list.
+ *
+ * `refresh_schedule_tbd_practices` rebuilds the practice rows from the roster, each division's
+ * practices a week and the saved assignments, keeping the reason of a team it already listed. The
+ * export calls it because the list is otherwise rebuilt only by a practice save, and a run that
+ * places nothing never reaches one: without the refresh the export would leave out practices the
+ * roster says are owed. **A refresh that fails is an error, never a stale list**: the caller says
+ * the files were not made, because a list that could not be brought up to date may be missing
+ * practices.
+ *
+ * @param {any} client - the supabase client
+ * @param {string} seasonSettingsId
+ * @returns {Promise<{ rows: Array<Record<string, any>>, items: Array<import('@squadlogic/core/scheduleTbd.js').ScheduleTbdItem> }>}
+ */
+export async function refreshAndReadScheduleTbd(client, seasonSettingsId) {
+  await refreshScheduleTbd(client, seasonSettingsId);
+  return readScheduleTbd(client, seasonSettingsId);
+}
+
+/**
+ * Bring the season's practice list up to date (admin only; audited when it changed). Throws when the
+ * refresh fails.
+ *
+ * @param {any} client - the supabase client
+ * @param {string} seasonSettingsId
+ * @returns {Promise<{ changed: boolean, practice_rows: number, missing_practices: number }>}
+ */
+export async function refreshScheduleTbd(client, seasonSettingsId) {
+  if (typeof client?.rpc !== 'function') {
+    throw new Error('there is no database connection to refresh the TIME TBD list with');
+  }
+  const { data, error } = await client.rpc('refresh_schedule_tbd_practices', {
+    p_season_settings_id: seasonSettingsId,
+  });
+  if (error) throw new Error(error.message || 'the TIME TBD list could not be refreshed');
+  return data;
+}
+
+/**
  * How many export rows a list gives: one per missing practice, one per unplaced game (printed for
  * both teams).
  *

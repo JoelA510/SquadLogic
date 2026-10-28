@@ -1,6 +1,7 @@
 /**
- * Mock arm for `get_schedule_tbd` (migration `20261108020000_schedule_tbd.sql`), refusals included
- * (LESSONS_LEARNED #13), with the SQL's error codes:
+ * Mock arms for `get_schedule_tbd` and `refresh_schedule_tbd_practices` (migration
+ * `20261108020000_schedule_tbd.sql`), refusals included (LESSONS_LEARNED #13), with the SQL's
+ * error codes:
  *   - 23502 no season id;
  *   - 42501 a season that does not exist, or one whose organization the caller does not administer
  *     (the two read alike, as in the SQL).
@@ -8,6 +9,11 @@
  * in the SQL's order (kind, division name, team name, week, away team name, id).
  *
  * **Not mirrored** (stated so nobody reads this as the database):
+ *   - the refresh's rebuild: `refresh_schedule_tbd_practices` is refused as the SQL refuses it, but
+ *     rebuilds nothing and writes no audit row; it answers with the list as seeded
+ *     (`changed: false`). The SQL rebuilds the practice rows from the roster, the division counts and
+ *     the saved assignments, keeps each row's reason and run, and audits a change
+ *     (`schedule_tbd.refreshed`);
  *   - the writers: the mock persists no practice or game schedule through the SQL, so
  *     `persist_practice_schedule` does not rebuild this list and `persist_game_schedule` does not
  *     record the run's unscheduled games; a test or scenario seeds `db.schedule_tbd` itself;
@@ -16,7 +22,10 @@
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()`.
  */
 
-export const SCHEDULE_TBD_RPCS = Object.freeze(['get_schedule_tbd']);
+export const SCHEDULE_TBD_RPCS = Object.freeze([
+  'get_schedule_tbd',
+  'refresh_schedule_tbd_practices',
+]);
 
 const fail = (code, message) => ({ data: null, error: { code, message } });
 
@@ -34,13 +43,31 @@ export function handleScheduleTbdRpc(db, name, params, ctx) {
   if (!SCHEDULE_TBD_RPCS.includes(name)) return null;
   const seasonId = params?.p_season_settings_id;
   if (!seasonId) return fail('23502', 'p_season_settings_id is required');
+  const refresh = name === 'refresh_schedule_tbd_practices';
 
   const season = (db.season_settings || []).find((item) => String(item.id) === String(seasonId));
   if (!season || !ctx.isOrgAdmin(season.organization_id)) {
     return fail(
       '42501',
-      "Access denied: the TIME TBD list is read by an administrator of the season's organization"
+      `Access denied: the TIME TBD list is ${refresh ? 'refreshed' : 'read'} by an administrator of the season's organization`
     );
+  }
+
+  if (refresh) {
+    const practiceRows = (db.schedule_tbd || []).filter(
+      (row) =>
+        row.kind === 'practice' &&
+        String(row.season_settings_id) === String(seasonId) &&
+        String(row.organization_id) === String(season.organization_id)
+    );
+    return {
+      data: {
+        changed: false,
+        practice_rows: practiceRows.length,
+        missing_practices: practiceRows.reduce((sum, row) => sum + (row.missing_count ?? 0), 0),
+      },
+      error: null,
+    };
   }
 
   const teamName = (id) =>

@@ -2,7 +2,8 @@
 // docs/changes/2026-10-27-phase-d-scheduling.md, section E): a practice a team is still short of and
 // a game the scheduler could not place are rows with Start TIME TBD, Field LOCATION TBD and the
 // reason, in the master CSV and XLSX, and on the page. Driven through the real panel and the real
-// mock client (`get_schedule_tbd` is its admin read); a list that cannot be read stops the files.
+// mock client (`get_schedule_tbd` is its admin read, `refresh_schedule_tbd_practices` the refresh the
+// export makes first); a list that cannot be refreshed or read stops the files.
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -173,16 +174,65 @@ describe('the master export lists what is not scheduled yet', () => {
     renderPanel();
     const status = await screen.findByTestId('output-generation-status');
     await waitFor(() => expect(status).toHaveTextContent('Generation failed'));
-    expect(status).toHaveTextContent(/not scheduled yet could not be read.*Access denied/);
+    expect(status).toHaveTextContent(/could not be brought up to date and read.*Access denied/);
+    expect(status).toHaveTextContent('No files were made');
     expect(screen.queryByText('Generated Files')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Download Master CSV' })).toBeNull();
+  });
+
+  it('refreshes the practice list, then reads it (the order matters: a run that placed nothing never reached the practice save)', async () => {
+    seedMockDb({ schedule_tbd: TBD_ROWS });
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    renderPanel();
+    await waitFor(() =>
+      expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+        'CSVs generated successfully.'
+      )
+    );
+    const calls = rpc.mock.calls.filter(
+      ([name]) => name === 'refresh_schedule_tbd_practices' || name === 'get_schedule_tbd'
+    );
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // Every read of the list is the second half of a refresh-then-read pair, for the same season.
+    calls.forEach(([name, args], index) => {
+      expect(args).toEqual({ p_season_settings_id: MOCK_SEASON_ID });
+      expect(name).toBe(index % 2 === 0 ? 'refresh_schedule_tbd_practices' : 'get_schedule_tbd');
+    });
+    expect(calls.length % 2).toBe(0);
+  });
+
+  it('a refresh that fails stops the files, says why, and never falls back to the stale list', async () => {
+    seedMockDb({ schedule_tbd: TBD_ROWS });
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    const rpc = vi.spyOn(mockSupabase, 'rpc').mockImplementation((name, args) =>
+      name === 'refresh_schedule_tbd_practices'
+        ? Promise.resolve({
+            data: null,
+            error: { code: '57014', message: 'canceling statement due to statement timeout' },
+          })
+        : real(name, args)
+    );
+    renderPanel();
+    const status = await screen.findByTestId('output-generation-status');
+    await waitFor(() => expect(status).toHaveTextContent('Generation failed'));
+    expect(status).toHaveTextContent(
+      /could not be brought up to date and read \(canceling statement due to statement timeout\)/
+    );
+    expect(status).toHaveTextContent('No files were made');
+    // The list was not read behind the failed refresh: a stale list would be a quiet omission.
+    expect(rpc.mock.calls.some(([name]) => name === 'get_schedule_tbd')).toBe(false);
+    expect(screen.queryByText('Generated Files')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download Master CSV' })).toBeNull();
+    expect(saved).toHaveLength(0);
   });
 
   it('a row that is not a TIME TBD item stops the files too', async () => {
     seedMockDb({ schedule_tbd: [{ ...TBD_ROWS[0], missing_count: null }] });
     renderPanel();
     const status = await screen.findByTestId('output-generation-status');
-    await waitFor(() => expect(status).toHaveTextContent('could not be read'));
+    await waitFor(() =>
+      expect(status).toHaveTextContent('could not be brought up to date and read')
+    );
     expect(screen.queryByText('Generated Files')).toBeNull();
   });
 

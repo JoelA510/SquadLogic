@@ -22,7 +22,11 @@ import {
   teamsWithUncorroboratedCoachIdentity,
 } from '@squadlogic/core/people/coachList.js';
 import { teamCoachFields, teamCoaches } from '../utils/teamCoaches.js';
-import { readScheduleTbd, scheduleTbdCounts, scheduleTbdNote } from '../utils/scheduleTbdClient.js';
+import {
+  refreshAndReadScheduleTbd,
+  scheduleTbdCounts,
+  scheduleTbdNote,
+} from '../utils/scheduleTbdClient.js';
 import { describeScheduleTbdReason } from '@squadlogic/core/scheduleTbd.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
@@ -537,7 +541,9 @@ export default function OutputGenerationPanel({
   const { user } = useAuth() || {};
   const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
   const seasonSettingsId = currentSeasonSetting?.id ?? null;
-  // How many TIME TBD items the season has, as read when the panel opened (or the season changed).
+  // How many TIME TBD items the season has, as refreshed and read when the panel opened (or the season
+  // changed). The refresh matters here: a run that placed nothing never reached the practice save, so
+  // without it the list could be empty while the roster still owes practices.
   const [tbdPreview, setTbdPreview] = useState({ status: 'idle', count: 0 });
   useEffect(() => {
     if (!seasonSettingsId) {
@@ -546,12 +552,12 @@ export default function OutputGenerationPanel({
     }
     let current = true;
     setTbdPreview({ status: 'loading', count: 0 });
-    readScheduleTbd(supabaseClient, seasonSettingsId).then(
+    refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId).then(
       (list) => {
         if (current) setTbdPreview({ status: 'ready', count: list.items.length });
       },
       (err) => {
-        logger.error('TIME TBD read error:', err);
+        logger.error('TIME TBD refresh/read error:', err);
         if (current) setTbdPreview({ status: 'error', count: 0 });
       }
     );
@@ -680,21 +686,21 @@ export default function OutputGenerationPanel({
 
     setTimeout(async () => {
       try {
-        // The TIME TBD list (practices a team is short of, games not placed). Read first: a list
-        // that cannot be read stops the files, because files made without it would leave those
-        // practices and games out without a word.
+        // The TIME TBD list (practices a team is short of, games not placed), brought up to date and
+        // then read. First: a list that cannot be refreshed or read stops the files, because files made
+        // without it would leave those practices and games out without a word.
         let tbd = { rows: /** @type {Array<Record<string, any>>} */ ([]), items: [] };
         if (seasonSettingsId) {
           try {
-            tbd = await readScheduleTbd(supabaseClient, seasonSettingsId);
+            tbd = await refreshAndReadScheduleTbd(supabaseClient, seasonSettingsId);
           } catch (tbdErr) {
-            logger.error('TIME TBD read error:', tbdErr);
+            logger.error('TIME TBD refresh/read error:', tbdErr);
             setGenerated(null);
             setTbdRows(null);
             clearPracticeChanges();
             setStatus('error');
             setMessage(
-              `Generation failed: the list of practices and games not scheduled yet could not be read (${tbdErr.message}), so files made now would leave them out. Reload the page to read again.`
+              `Generation failed: the list of practices and games not scheduled yet could not be brought up to date and read (${tbdErr.message}), so files made now could leave some out. No files were made. Reload the page to try again.`
             );
             return;
           }

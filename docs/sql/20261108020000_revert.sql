@@ -3,13 +3,13 @@
 -- Restores `persist_practice_schedule` (to the body 20261105010000 builds, md5 a63d385e37a7d5e71965ba0fb093b531),
 -- `persist_game_schedule` (to production's, md5 1a9ad54a5c4f4f3dc71793b53b2e4f61) and `admin_delete_team` (to production's,
 -- md5 4e44a5dec60c5eecae4c4e47644cd610), drops `get_schedule_tbd` and drops
--- `schedule_tbd`. Each restored body is checked by the md5 of its text at the end.
+-- `schedule_tbd` with `refresh_schedule_tbd_practices` and `sync_schedule_tbd_practices`. Each restored body is checked by the md5 of its text at the end.
 --
 -- **What it cannot undo.** The TIME TBD list is lost with its table (the NOTICE counts the rows);
 -- it is derived data, rebuilt from the roster by the next practice save once the migration is
 -- applied again, and by the next game run. After the revert the master export lists only what has
 -- a time, as before, so run it only together with the frontend that came with it (Phase D, E): the
--- export panel reads `get_schedule_tbd` and would refuse to generate without it.
+-- export panel calls `refresh_schedule_tbd_practices` and reads `get_schedule_tbd`, and would refuse to generate without them. The `schedule_tbd.refreshed` audit action is unregistered only if no audit row cites it (audit_log is immutable).
 
 BEGIN;
 
@@ -1248,7 +1248,14 @@ BEGIN
 END;
 $function$;
 
+DROP FUNCTION public.refresh_schedule_tbd_practices(uuid);
 DROP FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb);
+
+-- The audit action goes only if no audit row cites it: audit_log is immutable, and a row that cites an
+-- action needs the registry row (the foreign key) to stay.
+DELETE FROM public.audit_actions a
+ WHERE a.action = 'schedule_tbd.refreshed'
+   AND NOT EXISTS (SELECT 1 FROM public.audit_log l WHERE l.action = 'schedule_tbd.refreshed');
 
 REVOKE ALL ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) FROM anon;
@@ -1990,6 +1997,7 @@ BEGIN
     END LOOP;
     IF to_regclass('public.schedule_tbd') IS NOT NULL OR to_regprocedure('public.get_schedule_tbd(uuid)') IS NOT NULL
        OR to_regprocedure('public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)') IS NOT NULL
+       OR to_regprocedure('public.refresh_schedule_tbd_practices(uuid)') IS NOT NULL
        OR to_regprocedure('public.schedule_tbd_enforce_tenancy()') IS NOT NULL THEN
         RAISE EXCEPTION 'revert: the table or the read function is still there';
     END IF;

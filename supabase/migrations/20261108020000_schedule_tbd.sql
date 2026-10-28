@@ -23,7 +23,8 @@
 --      `reason` (a closed list per kind, a CHECK), `detail`, the run that wrote it. RLS: an
 --      organization admin reads (only league admins sign in). **No client writes the table**: no
 --      INSERT, UPDATE or DELETE policy or grant; the two writers are definers (the practice writer
---      is an invoker and calls `sync_schedule_tbd_practices`, a definer). A BEFORE INSERT OR UPDATE
+--      is an invoker and calls `sync_schedule_tbd_practices`, a definer that refuses any call not made by the practice save or by
+--      `refresh_schedule_tbd_practices`, the client-callable refresh, which audits only a change). A BEFORE INSERT OR UPDATE
 --      trigger refuses any row whose season, division or team belongs to another organization or
 --      season (23514), so the definer writers cannot be made to store one. One row per team for
 --      practices, one per (home, away, week) for games.
@@ -209,11 +210,14 @@ CREATE TRIGGER schedule_tbd_enforce_tenancy
     BEFORE INSERT OR UPDATE ON public.schedule_tbd
     FOR EACH ROW EXECUTE FUNCTION public.schedule_tbd_enforce_tenancy();
 
--- The practice list's writer: a definer, because no client can write the table and the practice
--- writer is an invoker. It rebuilds the season's practice rows from the roster; the only thing a caller
--- passes that reaches a row is the reason label (kept to a closed list), so there is nothing to forge
--- but the label. Callable by an admin of the organization, or the service role; the practice writer
--- calls it after its own checks.
+-- The practice list's internal writer: a definer, because no client can write the table and the practice
+-- writer is an invoker (it runs as the calling admin, so it needs EXECUTE; a role grant cannot tell it
+-- from a client). It rebuilds the season's practice rows from the roster and takes the run's reason
+-- labels (kept to a closed list), so a direct client call could replace the saved labels without an
+-- audit row. It therefore refuses any call whose stack does not show `persist_practice_schedule` or
+-- `refresh_schedule_tbd_practices` above it (PG_CONTEXT: a client cannot put a frame there), and a
+-- row it rewrites keeps its saved reason and run when the caller gives no label list (a refresh). The
+-- client-callable way to refresh the list is `refresh_schedule_tbd_practices`, below.
 CREATE FUNCTION public.sync_schedule_tbd_practices(p_organization_id uuid, p_season_settings_id uuid, p_run_id uuid, p_unassigned jsonb)
  RETURNS integer
  LANGUAGE plpgsql
@@ -226,8 +230,16 @@ DECLARE
     v_season_id uuid := p_season_settings_id;
     v_persisted_run_id uuid;
     v_tbd_reasons jsonb;
+    v_prev jsonb;
+    v_keep boolean;
+    v_ctx text;
     v_rows integer;
 BEGIN
+    GET DIAGNOSTICS v_ctx = PG_CONTEXT;
+    IF v_ctx !~ 'PL/pgSQL function (persist_practice_schedule|refresh_schedule_tbd_practices)\(' THEN
+        RAISE EXCEPTION 'sync_schedule_tbd_practices is called by the practice save and by refresh_schedule_tbd_practices only'
+            USING ERRCODE = '42501';
+    END IF;
     IF p_organization_id IS NULL OR p_season_settings_id IS NULL THEN
         RAISE EXCEPTION 'organization and season are required'
             USING ERRCODE = '23502';
@@ -246,6 +258,15 @@ BEGIN
       FROM public.scheduler_runs sr
      WHERE sr.id = p_run_id AND sr.organization_id = p_organization_id;
     v_tbd_reasons := CASE WHEN jsonb_typeof(p_unassigned) = 'array' THEN p_unassigned ELSE '[]'::jsonb END;
+    -- A call with no label list at all (refresh_schedule_tbd_practices) keeps what each team's row said before:
+    -- its reason and its run. A call with a list (the practice save) is a run's own word and replaces them.
+    v_keep := p_unassigned IS NULL;
+    SELECT COALESCE(jsonb_object_agg(s.team_id::text, jsonb_build_object('reason', s.reason, 'run_id', s.run_id)), '{}'::jsonb)
+      INTO v_prev
+      FROM public.schedule_tbd s
+     WHERE s.organization_id = v_org_id
+       AND s.season_settings_id = v_season_id
+       AND s.kind = 'practice';
     DELETE FROM public.schedule_tbd s
      WHERE s.organization_id = v_org_id
        AND s.season_settings_id = v_season_id
@@ -256,9 +277,11 @@ BEGIN
     )
     SELECT v_org_id, v_season_id, 'practice', d.id, t.id,
            (d.practices_per_week - held.n)::smallint,
-           COALESCE(why.reason, 'not-scheduled-yet'),
+           COALESCE(why.reason, CASE WHEN v_keep THEN v_prev -> t.id::text ->> 'reason' END, 'not-scheduled-yet'),
            jsonb_build_object('target', d.practices_per_week, 'held', held.n),
-           v_persisted_run_id
+           CASE WHEN v_keep AND why.reason IS NULL AND v_prev ? t.id::text
+                THEN NULLIF(v_prev -> t.id::text ->> 'run_id', '')::uuid
+                ELSE v_persisted_run_id END
       FROM public.teams t
       JOIN public.divisions d ON d.id = t.division_id
       CROSS JOIN LATERAL (
@@ -292,8 +315,114 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) FROM anon;
+-- EXECUTE for authenticated stays: persist_practice_schedule is an invoker and calls this as the admin.
+-- The stack check above is what keeps a direct client call out.
 GRANT EXECUTE ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) TO service_role;
+
+COMMENT ON FUNCTION public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb) IS
+    'Internal: rebuilds a season''s practice rows in schedule_tbd from the roster. Refuses any call not made by persist_practice_schedule or refresh_schedule_tbd_practices. 20261108020000.';
+
+-- A new audit action, registered as audit_log.action is a foreign key to audit_actions.
+INSERT INTO public.audit_actions (action) VALUES ('schedule_tbd.refreshed')
+    ON CONFLICT (action) DO NOTHING;
+
+-- The client-callable refresh: the export (and a run that placed nothing, which never reaches the
+-- practice save) brings the practice list up to date with the roster, the division counts and the saved
+-- assignments. It takes no labels and no run: every row keeps the reason and the run it had, a new row is
+-- `not-scheduled-yet`. It audits (in this transaction) only when the set of rows changed, so an export
+-- with nothing new adds no audit row.
+CREATE FUNCTION public.refresh_schedule_tbd_practices(p_season_settings_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET "TimeZone" TO 'UTC'
+AS $function$
+DECLARE
+    v_org uuid;
+    v_before jsonb;
+    v_after jsonb;
+    v_added integer;
+    v_removed integer;
+    v_changed integer;
+    v_changed_any boolean;
+BEGIN
+    IF p_season_settings_id IS NULL THEN
+        RAISE EXCEPTION 'p_season_settings_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+    SELECT ss.organization_id INTO v_org FROM public.season_settings ss WHERE ss.id = p_season_settings_id;
+    -- A season that does not exist and a season of another organization read alike.
+    IF v_org IS NULL OR (COALESCE(auth.role(), '') <> 'service_role' AND NOT public.is_org_admin(v_org)) THEN
+        RAISE EXCEPTION 'Access denied: the TIME TBD list is refreshed by an administrator of the season''s organization'
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- The same season lock as the practice save, so the two cannot interleave.
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('persist_practice_schedule:' || v_org::text || ':' || p_season_settings_id::text, 0)
+    );
+
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('team_id', s.team_id, 'missing_count', s.missing_count, 'reason', s.reason)
+                              ORDER BY s.team_id), '[]'::jsonb)
+      INTO v_before
+      FROM public.schedule_tbd s
+     WHERE s.organization_id = v_org AND s.season_settings_id = p_season_settings_id AND s.kind = 'practice';
+
+    PERFORM public.sync_schedule_tbd_practices(v_org, p_season_settings_id, NULL, NULL);
+
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('team_id', s.team_id, 'missing_count', s.missing_count, 'reason', s.reason)
+                              ORDER BY s.team_id), '[]'::jsonb)
+      INTO v_after
+      FROM public.schedule_tbd s
+     WHERE s.organization_id = v_org AND s.season_settings_id = p_season_settings_id AND s.kind = 'practice';
+
+    v_changed_any := v_before IS DISTINCT FROM v_after;
+    IF v_changed_any THEN
+        SELECT count(*) FILTER (WHERE b.team_id IS NULL),
+               count(*) FILTER (WHERE a.team_id IS NULL),
+               count(*) FILTER (WHERE a.team_id IS NOT NULL AND b.team_id IS NOT NULL
+                                  AND (a.missing_count IS DISTINCT FROM b.missing_count OR a.reason IS DISTINCT FROM b.reason))
+          INTO v_added, v_removed, v_changed
+          FROM (SELECT (e->>'team_id')::uuid AS team_id, (e->>'missing_count')::int AS missing_count, e->>'reason' AS reason
+                  FROM jsonb_array_elements(v_before) e) b
+          FULL JOIN (SELECT (e->>'team_id')::uuid AS team_id, (e->>'missing_count')::int AS missing_count, e->>'reason' AS reason
+                       FROM jsonb_array_elements(v_after) e) a
+            ON a.team_id = b.team_id;
+        -- record_audit_event writes auth.uid(); a service-role caller has none and is not audited here
+        -- (the list is derived data and the change is visible in the table).
+        IF auth.uid() IS NOT NULL THEN
+            PERFORM public.record_audit_event(
+                v_org,
+                'schedule_tbd.refreshed',
+                'season_settings',
+                p_season_settings_id,
+                jsonb_build_object(
+                    'season_settings_id', p_season_settings_id,
+                    'before_rows', jsonb_array_length(v_before),
+                    'after_rows', jsonb_array_length(v_after),
+                    'added', v_added,
+                    'removed', v_removed,
+                    'changed', v_changed)
+            );
+        END IF;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'changed', v_changed_any,
+        'practice_rows', jsonb_array_length(v_after),
+        'missing_practices', COALESCE((SELECT sum((e->>'missing_count')::int) FROM jsonb_array_elements(v_after) e), 0));
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.refresh_schedule_tbd_practices(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.refresh_schedule_tbd_practices(uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.refresh_schedule_tbd_practices(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.refresh_schedule_tbd_practices(uuid) TO service_role;
+
+COMMENT ON FUNCTION public.refresh_schedule_tbd_practices(uuid) IS
+    'Brings a season''s practice TIME TBD list up to date with the roster, the division counts and the saved assignments, keeping each row''s reason and run; audits (schedule_tbd.refreshed) only when the rows changed. Admin only (42501 otherwise). 20261108020000.';
 
 -- ---------------------------------------------------------------------------
 -- 3. The admin read.
@@ -2480,6 +2609,15 @@ BEGIN
        AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
     IF v_n <> 1 THEN RAISE EXCEPTION 'sync_schedule_tbd_practices is not a definer for authenticated and not anon'; END IF;
+    SELECT count(*) INTO v_n FROM pg_proc p
+     WHERE p.oid = to_regprocedure('public.refresh_schedule_tbd_practices(uuid)')
+       AND p.prosecdef AND p.prosrc LIKE '%schedule_tbd.refreshed%'
+       AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE');
+    IF v_n <> 1 THEN RAISE EXCEPTION 'refresh_schedule_tbd_practices is not a definer for authenticated and not anon'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'schedule_tbd.refreshed') THEN
+        RAISE EXCEPTION 'the audit action schedule_tbd.refreshed is not registered';
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.schedule_tbd'::regclass
                     AND tgname = 'schedule_tbd_enforce_tenancy' AND NOT tgisinternal) THEN
         RAISE EXCEPTION 'schedule_tbd has no tenancy trigger';

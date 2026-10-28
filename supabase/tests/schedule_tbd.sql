@@ -9,13 +9,16 @@
 -- The practice writer rebuilds the practice list FROM THE ROSTER and each division's count, never
 -- from the payload; the game writer records the run's `results.unscheduled`, each entry validated.
 -- Only an organization's admins read the list; nobody updates a row.
+--
+-- Every date here is relative to CURRENT_DATE: the sync counts a series as held only while it is live,
+-- so a fixed range would turn this test red on the day it ended.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(43);
+SELECT plan(70);
 
 -- ---- the roster this test schedules (as the table owner, before any role is set) ---------------
 -- Org A, season aaa: U8 wants 2 a week, U6 wants none, U10 (the fixture's) wants 1.
@@ -31,9 +34,9 @@ INSERT INTO public.locations (id, organization_id, name) VALUES
 INSERT INTO public.fields (id, organization_id, location_id, name, active) VALUES
     ('a1111111-1111-1111-1111-1111111100f1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100c1', 'TBD Pitch', true);
 INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until, capacity) VALUES
-    ('a1111111-1111-1111-1111-1111111500a1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100f1', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30', 1),
-    ('a1111111-1111-1111-1111-1111111500a2', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100f1', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30', 1),
-    ('a1111111-1111-1111-1111-1111111500a3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100f1', 'fri', '17:00', '18:00', '2026-09-01', '2026-11-30', 1);
+    ('a1111111-1111-1111-1111-1111111500a1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100f1', 'mon', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1),
+    ('a1111111-1111-1111-1111-1111111500a2', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100f1', 'wed', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1),
+    ('a1111111-1111-1111-1111-1111111500a3', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100f1', 'fri', '17:00', '18:00', CURRENT_DATE - 60, CURRENT_DATE + 90, 1);
 INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
     ('b2222222-2222-2222-2222-2222222d0008', 'b2222222-2222-2222-2222-222222222222', 'b2222222-2222-2222-2222-222222222bbb', 'Org B U8');
 INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
@@ -52,9 +55,9 @@ SELECT lives_ok(
                'results', jsonb_build_object('unassigned', jsonb_build_array(
                    jsonb_build_object('teamId', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'reason', 'no-slot-available', 'target', 2)))),
            jsonb_build_array(
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', '[2026-09-01,2026-11-30]'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', '[2026-09-01,2026-11-30]'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')))) $$,
     'a practice save with one team short of its two practices succeeds'
 );
 
@@ -86,9 +89,9 @@ SELECT lives_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
            jsonb_build_array(
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', '[2026-09-01,2026-11-30]'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', '[2026-09-01,2026-11-30]'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
                jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', '[2020-01-01,2020-02-01)', 'source', 'manual'))) $$,
     'a second save, with no reasons and A2 holding only a series that ended in 2020, succeeds'
 );
@@ -103,11 +106,11 @@ SELECT lives_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
            jsonb_build_array(
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', '[2026-09-01,2026-11-30]'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', '[2026-09-01,2026-11-30]'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', '[2026-09-01,2026-11-30]'),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
                jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', '[2020-01-01,2020-02-01)', 'source', 'manual'),
-               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', '[2026-09-01,2026-11-30]', 'source', 'manual'))) $$,
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']'), 'source', 'manual'))) $$,
     'a save that gives A2 one of its two practices succeeds'
 );
 SELECT results_eq(
@@ -116,6 +119,153 @@ SELECT results_eq(
     'the list is rebuilt: A2 is now missing 1, holding 1 of 2'
 );
 
+
+-- ---- refresh_schedule_tbd_practices: the export's way to bring the practice list up to date ---------
+-- (A run that placed nothing never reaches the practice writer, so the list is also rebuilt here.)
+
+SELECT is(
+    (public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa') ->> 'changed')::boolean,
+    false,
+    'a refresh of a list that is already current reports no change'
+);
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+    0,
+    'a refresh that changed nothing writes no audit row'
+);
+
+-- A run gives A2 a label; a refresh has no labels of its own, so it must keep this one and its run.
+SELECT lives_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa',
+               'results', jsonb_build_object('unassigned', jsonb_build_array(
+                   jsonb_build_object('teamId', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'reason', 'no-slot-available', 'target', 2)))),
+           jsonb_build_array(
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a1', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-000000000001', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a3', 'effective_date_range', '[2020-01-01,2020-02-01)', 'source', 'manual'),
+               jsonb_build_object('team_id', 'aaaaaaaa-0000-0000-0000-0000000000a2', 'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a2', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']'), 'source', 'manual'))) $$,
+    'a save whose run labels A2 no-slot-available succeeds'
+);
+CREATE TEMP TABLE tbd_snap AS
+    SELECT team_id, reason, run_id FROM public.schedule_tbd WHERE kind = 'practice';
+SELECT results_eq(
+    $$ SELECT reason, run_id IS NOT NULL FROM tbd_snap $$,
+    $$ VALUES ('no-slot-available', true) $$,
+    'the run''s label and the run are on the row'
+);
+SELECT is(
+    (public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa') ->> 'changed')::boolean,
+    false,
+    'a second sync of the same roster reports no change'
+);
+SELECT results_eq(
+    $$ SELECT team_id, reason, run_id FROM public.schedule_tbd WHERE kind = 'practice' $$,
+    $$ SELECT team_id, reason, run_id FROM tbd_snap $$,
+    'and it kept the label and the run'
+);
+
+-- The division now wants 3 a week: A1 is newly short, A2 now misses 2. The refresh lists both, keeps A2''s label.
+RESET role;
+UPDATE public.divisions SET practices_per_week = 3 WHERE id = 'a1111111-1111-1111-1111-1111111d0008';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT is(
+    (public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa') ->> 'changed')::boolean,
+    true,
+    'a refresh after the roster''s needs changed reports the change'
+);
+SELECT results_eq(
+    $$ SELECT t.name, s.missing_count::int, s.reason FROM public.schedule_tbd s JOIN public.teams t ON t.id = s.team_id
+        WHERE s.kind = 'practice' ORDER BY t.name $$,
+    $$ VALUES ('TBD A1', 1, 'not-scheduled-yet'), ('TBD A2', 2, 'no-slot-available') $$,
+    'A1 is newly listed as not-scheduled-yet; A2 keeps its label with its new count'
+);
+SELECT results_eq(
+    $$ SELECT run_id FROM public.schedule_tbd WHERE team_id = 'aaaaaaaa-0000-0000-0000-0000000000a2' $$,
+    $$ SELECT run_id FROM tbd_snap WHERE team_id = 'aaaaaaaa-0000-0000-0000-0000000000a2' $$,
+    'A2 keeps the run that labelled it'
+);
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+    1,
+    'the refresh that changed the list wrote one audit row'
+);
+SELECT results_eq(
+    $$ SELECT (metadata->>'before_rows')::int, (metadata->>'after_rows')::int, (metadata->>'added')::int,
+              (metadata->>'removed')::int, (metadata->>'changed')::int, resource_type
+         FROM public.audit_log WHERE action = 'schedule_tbd.refreshed' $$,
+    $$ VALUES (1, 2, 1, 0, 1, 'season_settings') $$,
+    'the audit row carries the before and after counts: one row added, one changed'
+);
+SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa');
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+    1,
+    'refreshing again with nothing new adds no audit row'
+);
+
+-- Back to 2 a week: A1 drops off, A2 is missing 1 again with its label.
+RESET role;
+UPDATE public.divisions SET practices_per_week = 2 WHERE id = 'a1111111-1111-1111-1111-1111111d0008';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa');
+SELECT results_eq(
+    $$ SELECT team_id, reason, run_id FROM public.schedule_tbd WHERE kind = 'practice' $$,
+    $$ SELECT team_id, reason, run_id FROM tbd_snap $$,
+    'a team that is no longer short drops off, and the other is back as it was, label and run kept'
+);
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+    2,
+    'the second change wrote its own audit row'
+);
+
+-- The labels-taking sync is not a client entry point: a direct call would replace the saved labels
+-- (and the run) with no audit row.
+SELECT throws_ok(
+    $$ SELECT public.sync_schedule_tbd_practices('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', NULL, '[]') $$,
+    '42501', NULL, 'a direct call to the practice sync is refused, even for the season''s own admin'
+);
+SELECT results_eq(
+    $$ SELECT team_id, reason, run_id FROM public.schedule_tbd WHERE kind = 'practice' $$,
+    $$ SELECT team_id, reason, run_id FROM tbd_snap $$,
+    'and the refused call left the saved labels as they were'
+);
+SELECT throws_ok(
+    $$ SELECT public.sync_schedule_tbd_practices('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', NULL, NULL) $$,
+    '42501', NULL, 'nor with no labels at all (which would reset them): refresh_schedule_tbd_practices is the way to that'
+);
+
+-- Who may refresh
+SELECT throws_ok(
+    $$ SELECT public.refresh_schedule_tbd_practices(gen_random_uuid()) $$,
+    '42501', NULL, 'a season that does not exist is refused like one that is not yours'
+);
+SELECT throws_ok(
+    $$ SELECT public.refresh_schedule_tbd_practices(NULL) $$,
+    '23502', NULL, 'a missing season is refused'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT throws_ok(
+    $$ SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa') $$,
+    '42501', NULL, 'another organization''s admin cannot refresh this season'
+);
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+SELECT throws_ok(
+    $$ SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa') $$,
+    '42501', NULL, 'a member of no organization cannot refresh it'
+);
+RESET role;
+SELECT ok(
+    NOT has_function_privilege('anon', 'public.refresh_schedule_tbd_practices(uuid)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)', 'EXECUTE'),
+    'anon can run neither function'
+);
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
 -- ---- the game list --------------------------------------------------------------------------------
 
@@ -306,18 +456,19 @@ SELECT throws_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
            jsonb_build_array(jsonb_build_object('team_id', 'bbbbbbbb-0000-0000-0000-0000000000b8',
-               'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', '[2026-09-01,2026-11-30]'))) $$,
+               'practice_slot_id', 'a1111111-1111-1111-1111-1111111500a1', 'effective_date_range', ('[' || (CURRENT_DATE - 30) || ',' || (CURRENT_DATE + 60) || ']')))) $$,
     '23503', NULL, 'the practice writer refuses another organization''s team (an admin cannot see it: it does not exist to them)'
 );
--- The helper cannot be pointed at another organization's season, or called by another organization's admin.
+-- The internal sync is not a client entry point (the guard speaks first; its own organization checks are
+-- there for the practice save, which runs as the admin).
 SELECT throws_ok(
     $$ SELECT public.sync_schedule_tbd_practices('a1111111-1111-1111-1111-111111111111', 'b2222222-2222-2222-2222-222222222bbb', NULL, '[]') $$,
-    '42501', NULL, 'the practice sync refuses another organization''s season'
+    '42501', NULL, 'a direct call to the practice sync for another organization''s season is refused'
 );
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
 SELECT throws_ok(
     $$ SELECT public.sync_schedule_tbd_practices('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', NULL, '[]') $$,
-    '42501', NULL, 'the practice sync refuses another organization''s admin'
+    '42501', NULL, 'a direct call to the practice sync by another organization''s admin is refused'
 );
 RESET role;
 
@@ -365,6 +516,43 @@ SELECT is(
       WHERE e->>'team_id' = 'bbbbbbbb-0000-0000-0000-0000000000b8'),
     NULL,
     'a row that names another organization''s team comes back with a NULL team name'
+);
+RESET role;
+
+-- ---- a season with no assignments at all: a run that placed nothing never reaches the practice save ----
+-- (The poisoned row above is Org B's team under Org A, and a team has one practice row: clear it first.)
+DELETE FROM public.schedule_tbd WHERE team_id = 'bbbbbbbb-0000-0000-0000-0000000000b8';
+-- Org B's U8 wants 2 a week and nothing has been scheduled for it. The refresh lists the team in full.
+UPDATE public.divisions SET practices_per_week = 2 WHERE id = 'b2222222-2222-2222-2222-2222222d0008';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT is(
+    (public.refresh_schedule_tbd_practices('b2222222-2222-2222-2222-222222222bbb') ->> 'changed')::boolean,
+    true,
+    'a refresh on a season with no assignments reports the change'
+);
+SELECT results_eq(
+    $$ SELECT t.name, s.missing_count::int, s.reason, (s.detail->>'held')::int
+         FROM public.schedule_tbd s JOIN public.teams t ON t.id = s.team_id
+        WHERE s.kind = 'practice' AND s.season_settings_id = 'b2222222-2222-2222-2222-222222222bbb'
+          AND s.team_id = 'bbbbbbbb-0000-0000-0000-0000000000b8' $$,
+    $$ VALUES ('TBD Org B team', 2, 'not-scheduled-yet', 0) $$,
+    'every practice the roster needs is listed: both of the team''s, not scheduled yet'
+);
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+    1,
+    'the change wrote one audit row, in this organization'
+);
+SELECT is(
+    (public.refresh_schedule_tbd_practices('b2222222-2222-2222-2222-222222222bbb') ->> 'changed')::boolean,
+    false,
+    'a second refresh finds nothing new'
+);
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log WHERE action = 'schedule_tbd.refreshed'),
+    1,
+    'and writes no second audit row'
 );
 RESET role;
 

@@ -3547,6 +3547,7 @@ PROBE
                WHEN to_regclass('public.schedule_tbd') IS NOT NULL THEN 'table-left'
                WHEN to_regprocedure('public.get_schedule_tbd(uuid)') IS NOT NULL THEN 'read-left'
                WHEN to_regprocedure('public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)') IS NOT NULL THEN 'sync-left'
+               WHEN to_regprocedure('public.refresh_schedule_tbd_practices(uuid)') IS NOT NULL THEN 'refresh-left'
                WHEN to_regprocedure('public.schedule_tbd_enforce_tenancy()') IS NOT NULL THEN 'trigger-function-left'
                WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',') FROM pg_proc p
                       WHERE p.oid = 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)'::regprocedure)
@@ -3559,7 +3560,7 @@ PROBE
                     <> '4e44a5dec60c5eecae4c4e47644cd610:true:search_path=public' THEN 'delete-team-wrong'
                ELSE 'restored' END;" \
          >$SCRATCH/harness_tbd 2>&1 && grep -q 'TBD-VERDICT:restored' $SCRATCH/harness_tbd; then
-        echo "  revert ${id}: the TIME TBD revert drops the list, its read, its practice sync and its tenancy trigger function, restores the practice writer, the game writer and admin_delete_team as they were, and leaves the teams"
+        echo "  revert ${id}: the TIME TBD revert drops the list, its read, its refresh, its practice sync and its tenancy trigger function, restores the practice writer, the game writer and admin_delete_team as they were, and leaves the teams"
       else
         echo "FAIL revert ${id}: the TIME TBD revert did not restore the three functions or left something of the migration"
         dump 10 $SCRATCH/harness_tbd; STATUS=1

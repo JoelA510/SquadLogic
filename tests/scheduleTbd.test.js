@@ -236,3 +236,47 @@ describe('the unscheduled games a save records', () => {
     assert.deepEqual(parseGameUnscheduled([]), []);
   });
 });
+
+describe('the labels-taking sync is not a client entry point (migration text)', () => {
+  const sync = MIGRATION.slice(
+    MIGRATION.indexOf('CREATE FUNCTION public.sync_schedule_tbd_practices'),
+    MIGRATION.indexOf('CREATE FUNCTION public.refresh_schedule_tbd_practices')
+  );
+  const refresh = MIGRATION.slice(
+    MIGRATION.indexOf('CREATE FUNCTION public.refresh_schedule_tbd_practices'),
+    MIGRATION.indexOf('CREATE FUNCTION public.get_schedule_tbd')
+  );
+
+  it('refuses any call whose stack is not the practice save or the refresh', () => {
+    assert.ok(sync.includes('GET DIAGNOSTICS v_ctx = PG_CONTEXT'));
+    assert.ok(
+      sync.includes(
+        "!~ 'PL/pgSQL function (persist_practice_schedule|refresh_schedule_tbd_practices)\\('"
+      )
+    );
+  });
+
+  it('keeps the saved reason and run only when called with no label list at all (a refresh)', () => {
+    assert.ok(sync.includes('v_keep := p_unassigned IS NULL;'));
+    assert.ok(
+      refresh.includes('sync_schedule_tbd_practices(v_org, p_season_settings_id, NULL, NULL)')
+    );
+  });
+
+  it('the refresh audits in its own transaction, only when the rows changed, and the action is registered', () => {
+    assert.ok(refresh.includes('IF v_changed_any THEN'));
+    assert.ok(refresh.includes("'schedule_tbd.refreshed'"));
+    assert.match(
+      MIGRATION,
+      /INSERT INTO public\.audit_actions \(action\) VALUES \('schedule_tbd\.refreshed'\)/
+    );
+  });
+
+  it('the revert drops the refresh and unregisters the action only if no audit row cites it', () => {
+    assert.ok(REVERT.includes('DROP FUNCTION public.refresh_schedule_tbd_practices(uuid);'));
+    assert.match(
+      REVERT,
+      /DELETE FROM public\.audit_actions a\s+WHERE a\.action = 'schedule_tbd\.refreshed'\s+AND NOT EXISTS \(SELECT 1 FROM public\.audit_log l WHERE l\.action = 'schedule_tbd\.refreshed'\)/
+    );
+  });
+});

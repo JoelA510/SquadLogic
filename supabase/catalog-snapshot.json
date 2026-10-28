@@ -143,6 +143,7 @@
     "reconcile_prod_rls_drift() returns jsonb",
     "record_audit_event(p_organization_id uuid, p_action text, p_resource_type text, p_resource_id uuid, p_metadata jsonb, p_ip_address inet) returns uuid",
     "redeem_org_invite(p_code text) returns uuid",
+    "refresh_schedule_tbd_practices(p_season_settings_id uuid) returns jsonb",
     "refuse_publication_baseline_mutation() returns trigger",
     "refuse_publication_baseline_truncate() returns trigger",
     "revoke_org_invite(p_organization_id uuid, p_invite_id uuid) returns uuid",

@@ -383,14 +383,16 @@ export function buildFieldsCsv() {
   for (const [location, field, surface] of DEMO_GRID.unlitGrounds) {
     for (const half of ['A', 'B']) {
       for (const day of DEMO_GRID.weekdays) {
-        for (const slot of DEMO_GRID.unlitSlots) add(location, field, half, day, slot, surface, true, '');
+        for (const slot of DEMO_GRID.unlitSlots)
+          add(location, field, half, day, slot, surface, true, '');
       }
     }
   }
   const [litLocation, litField, litSurface, litSlots] = DEMO_GRID.litGround;
   for (const half of ['A', 'B']) {
     for (const day of DEMO_GRID.weekdays) {
-      for (const slot of litSlots) add(litLocation, litField, half, day, slot, litSurface, true, '');
+      for (const slot of litSlots)
+        add(litLocation, litField, half, day, slot, litSurface, true, '');
     }
   }
   const { venue, ground, surface, sessions } = DEMO_GRID.u4;
@@ -420,7 +422,9 @@ export function buildDemoFacilitySql(fixtureDir = DEMO_FIXTURE_DIR) {
   const fields = load('fields.csv', fixtureDir);
   const locations = [...new Set(fields.map((f) => f.Location))].sort();
   if (locations.length > SYNTHETIC_HEAT_SITES.length) {
-    throw new Error(`${locations.length} venues but ${SYNTHETIC_HEAT_SITES.length} synthetic sites`);
+    throw new Error(
+      `${locations.length} venues but ${SYNTHETIC_HEAT_SITES.length} synthetic sites`
+    );
   }
   const fieldKeys = new Map();
   for (const f of fields) fieldKeys.set(`${f.Location}\u0001${f.Field}`, f);
@@ -436,7 +440,15 @@ export function buildDemoFacilitySql(fixtureDir = DEMO_FIXTURE_DIR) {
   for (const f of fields)
     if (f.Subunit) subunitKeys.add(`${f.Location}\u0001${f.Field}\u0001${f.Subunit}`);
   const subunitRows = [...subunitKeys].sort().map((k) => k.split('\u0001').map(lit));
-  const DAY = { Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri', Sat: 'sat', Sun: 'sun' };
+  const DAY = {
+    Mon: 'mon',
+    Tue: 'tue',
+    Wed: 'wed',
+    Thu: 'thu',
+    Fri: 'fri',
+    Sat: 'sat',
+    Sun: 'sun',
+  };
   const slotRows = fields.map((f) => {
     if (f.Type !== 'practice') throw new Error(`fields.csv row of type ${f.Type}`);
     if (!DAY[f.Day]) throw new Error(`fields.csv day ${f.Day}`);
@@ -554,7 +566,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (
       generatedRegion(migration, FACILITY_BEGIN_MARK, FACILITY_END_MARK) !== buildDemoFacilitySql()
     ) {
-      console.error('demo_seed facility rows differ from fields.csv: run node scripts/build-demo-seed.mjs');
+      console.error(
+        'demo_seed facility rows differ from fields.csv: run node scripts/build-demo-seed.mjs'
+      );
       process.exit(1);
     }
     console.log('fields.csv, the facility rows and the frozen league rows match the fixture');

@@ -1,7 +1,8 @@
 -- Revert for 20261107010000_schedule_tbd.sql
 --
--- Restores `persist_practice_schedule` (to the body 20261105010000 builds, md5 a63d385e37a7d5e71965ba0fb093b531) and
--- `persist_game_schedule` (to production's, md5 1a9ad54a5c4f4f3dc71793b53b2e4f61), drops `get_schedule_tbd` and drops
+-- Restores `persist_practice_schedule` (to the body 20261105010000 builds, md5 a63d385e37a7d5e71965ba0fb093b531),
+-- `persist_game_schedule` (to production's, md5 1a9ad54a5c4f4f3dc71793b53b2e4f61) and `admin_delete_team` (to production's,
+-- md5 4e44a5dec60c5eecae4c4e47644cd610), drops `get_schedule_tbd` and drops
 -- `schedule_tbd`. Each restored body is checked by the md5 of its text at the end.
 --
 -- **What it cannot undo.** The TIME TBD list is lost with its table (the NOTICE counts the rows);
@@ -1251,6 +1252,165 @@ REVOKE ALL ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, j
 GRANT EXECUTE ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text) TO service_role;
 
+CREATE OR REPLACE FUNCTION public.admin_delete_team(p_team_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_team public.teams%ROWTYPE;
+    v_uid uuid := auth.uid();
+    v_pa record;
+    v_row jsonb;
+    v_withdrawn jsonb;
+    v_archived jsonb;
+    v_game_ids uuid[];
+    v_player_ids uuid[];
+    v_counts jsonb;
+BEGIN
+    SELECT * INTO v_team FROM public.teams WHERE id = p_team_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'team % not found', p_team_id USING ERRCODE = 'P0002';
+    END IF;
+    IF NOT public.is_org_admin(v_team.organization_id) THEN
+        -- Production's own text, which names no organisation to a caller
+        -- outside it.
+        RAISE EXCEPTION 'Access denied' USING ERRCODE = '42501';
+    END IF;
+
+    -- 2. The practice series, as admin_cancel_practice_assignment does each.
+    --    An exception is the team's if it is on one of the team's series or
+    --    names the team: the team_id cascade would remove either.
+    WITH w AS (
+        UPDATE public.practice_exceptions pe
+           SET withdrawn_at = now(),
+               withdrawn_by = v_uid
+         WHERE (pe.team_id = p_team_id
+                OR pe.assignment_id IN (SELECT pa.id FROM public.practice_assignments pa
+                                         WHERE pa.team_id = p_team_id))
+           AND pe.withdrawn_at IS NULL
+        RETURNING pe.*
+    )
+    SELECT COALESCE(jsonb_agg(to_jsonb(w.*) ORDER BY w.id), '[]'::jsonb)
+      INTO v_withdrawn
+      FROM w;
+    FOR v_row IN SELECT value FROM jsonb_array_elements(v_withdrawn) LOOP
+        PERFORM public.record_audit_event(
+            v_team.organization_id,
+            'practice.exception_withdrawn',
+            'practice_exception',
+            (v_row->>'id')::uuid,
+            jsonb_build_object('reason', 'team_deleted', 'team_id', p_team_id,
+                               'assignment_id', v_row->'assignment_id', 'row', v_row)
+        );
+    END LOOP;
+
+    WITH gone AS (
+        DELETE FROM public.practice_exceptions pe
+         WHERE pe.team_id = p_team_id
+            OR pe.assignment_id IN (SELECT pa.id FROM public.practice_assignments pa
+                                     WHERE pa.team_id = p_team_id)
+        RETURNING pe.*
+    )
+    SELECT COALESCE(jsonb_agg(to_jsonb(gone.*) ORDER BY gone.id), '[]'::jsonb)
+      INTO v_archived
+      FROM gone;
+    UPDATE public.scheduler_runs sr
+       SET results = COALESCE(sr.results, '{}'::jsonb) || jsonb_build_object(
+               'archived_exceptions',
+               COALESCE(sr.results->'archived_exceptions', '[]'::jsonb)
+               || (SELECT jsonb_agg(e.value) FROM jsonb_array_elements(v_archived) e
+                    WHERE (e.value->>'run_id')::uuid = sr.id))
+     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e
+                      WHERE e.value->>'run_id' IS NOT NULL);
+
+    v_counts := jsonb_build_object(
+        'practice_exceptions_deleted', jsonb_array_length(v_archived),
+        'practice_assignments_deleted',
+            (SELECT count(*) FROM public.practice_assignments WHERE team_id = p_team_id)
+    );
+    FOR v_pa IN
+        SELECT pa.id, to_jsonb(pa.*) AS before
+          FROM public.practice_assignments pa
+         WHERE pa.team_id = p_team_id
+         ORDER BY pa.id
+    LOOP
+        DELETE FROM public.practice_assignments WHERE id = v_pa.id;
+        PERFORM public.record_audit_event(
+            v_team.organization_id,
+            'practice.cancelled',
+            'practice_assignments',
+            v_pa.id,
+            jsonb_build_object(
+                'reason', 'team_deleted',
+                'team_id', p_team_id,
+                'assignment_id', v_pa.id,
+                'before', v_pa.before,
+                'withdrawn_exception_ids',
+                    (SELECT COALESCE(jsonb_agg(e.value->'id'), '[]'::jsonb)
+                       FROM jsonb_array_elements(v_withdrawn) e
+                      WHERE (e.value->>'assignment_id')::uuid = v_pa.id),
+                'archived_exceptions',
+                    (SELECT COALESCE(jsonb_agg(e.value), '[]'::jsonb)
+                       FROM jsonb_array_elements(v_archived) e
+                      WHERE (e.value->>'assignment_id')::uuid = v_pa.id)
+            )
+        );
+    END LOOP;
+
+    -- 3. The team's games, held until commit, so the game ids and count
+    --    team.deleted records are the rows the cascade removes (a concurrent
+    --    write cannot move a game off the team in between). 20261022030000:
+    --    their RSVPs are gone with the table.
+    SELECT COALESCE(array_agg(g.id ORDER BY g.id), ARRAY[]::uuid[])
+      INTO v_game_ids
+      FROM (SELECT id FROM public.games
+             WHERE home_team_id = p_team_id OR away_team_id = p_team_id
+             ORDER BY id
+               FOR UPDATE) g;
+
+    -- 4. Players assigned through players.team_id (no foreign key), then the team.
+    SELECT COALESCE(array_agg(p.id ORDER BY p.id), ARRAY[]::uuid[])
+      INTO v_player_ids
+      FROM public.players p
+     WHERE p.team_id = p_team_id;
+
+    -- 5. What the cascade takes, counted before it runs.
+    v_counts := v_counts || jsonb_build_object(
+        'games_deleted', cardinality(v_game_ids),
+        'game_assignments_deleted',
+            (SELECT count(*) FROM public.game_assignments
+              WHERE home_team_id = p_team_id OR away_team_id = p_team_id),
+        'team_players_deleted',
+            (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id),
+        'team_coach_assignments_deleted',
+            (SELECT count(*) FROM public.team_coach_assignments WHERE team_id = p_team_id),
+        'team_calendar_tokens_deleted',
+            (SELECT count(*) FROM public.team_calendar_tokens WHERE team_id = p_team_id)
+    );
+
+    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);
+    DELETE FROM public.teams WHERE id = p_team_id;
+
+    PERFORM public.record_audit_event(
+        v_team.organization_id,
+        'team.deleted',
+        'teams',
+        p_team_id,
+        jsonb_build_object('name', v_team.name, 'division_id', v_team.division_id)
+            || v_counts
+            || jsonb_build_object(
+                   'game_ids', to_jsonb(v_game_ids),
+                   'player_ids_unassigned', to_jsonb(v_player_ids),
+                   'withdrawn_exception_ids',
+                       (SELECT COALESCE(jsonb_agg(e.value->'id'), '[]'::jsonb)
+                          FROM jsonb_array_elements(v_withdrawn) e),
+                   'archived_exceptions', v_archived)
+    );
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.persist_game_schedule(
     run_data jsonb,
     assignments jsonb
@@ -1811,7 +1971,8 @@ DO $check$
 DECLARE
     v_expected constant jsonb := '{
         "persist_practice_schedule(jsonb,jsonb,boolean,jsonb,jsonb,jsonb,jsonb,text)": "a63d385e37a7d5e71965ba0fb093b531",
-        "persist_game_schedule(jsonb,jsonb)": "1a9ad54a5c4f4f3dc71793b53b2e4f61"
+        "persist_game_schedule(jsonb,jsonb)": "1a9ad54a5c4f4f3dc71793b53b2e4f61",
+        "admin_delete_team(uuid)": "4e44a5dec60c5eecae4c4e47644cd610"
     }';
     v_sig text;
     v_md5 text;
@@ -1827,7 +1988,7 @@ BEGIN
     IF to_regclass('public.schedule_tbd') IS NOT NULL OR to_regprocedure('public.get_schedule_tbd(uuid)') IS NOT NULL THEN
         RAISE EXCEPTION 'revert: the table or the read function is still there';
     END IF;
-    RAISE NOTICE 'revert: both writers are back to their earlier bodies; the table and the read function are gone';
+    RAISE NOTICE 'revert: the three functions are back to their earlier bodies; the table and the read function are gone';
 END;
 $check$;
 

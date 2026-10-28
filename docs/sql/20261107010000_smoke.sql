@@ -18,6 +18,7 @@
 --      such list leaves it; an empty list clears it.
 --   4. The reads: an admin reads the list (names included) through the RPC and the table; a user
 --      who is a member of no organization is refused by the RPC and reads no row; nobody updates a row.
+--   5. Deleting a team: `team.deleted` counts the rows its cascade takes (`schedule_tbd_deleted`).
 --
 -- Every id is generated and every email is `@example.test`; there is no PII.
 
@@ -278,6 +279,18 @@ BEGIN
     END LOOP;
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     RAISE NOTICE 'reads: an admin reads 4 rows with the names through the RPC and the table and cannot update one; a member of no organization and another organization''s admin are refused by the RPC and read no row';
+
+    -- Deleting a team counts the TIME TBD rows its cascade takes (A2: its practice row and one game).
+    PERFORM public.admin_delete_team(v_a2);
+    IF NOT EXISTS (SELECT 1 FROM public.audit_log WHERE organization_id = v_org AND action = 'team.deleted'
+                    AND resource_id = v_a2 AND (metadata->>'schedule_tbd_deleted')::int = 2) THEN
+        RAISE EXCEPTION 'team.deleted does not carry schedule_tbd_deleted = 2 for A2: %',
+            (SELECT metadata FROM public.audit_log WHERE organization_id = v_org AND action = 'team.deleted' AND resource_id = v_a2);
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.schedule_tbd WHERE team_id = v_a2 OR home_team_id = v_a2 OR away_team_id = v_a2) THEN
+        RAISE EXCEPTION 'a deleted team still has TIME TBD rows';
+    END IF;
+    RAISE NOTICE 'team deletion: team.deleted carries schedule_tbd_deleted = 2 (the practice row and the game) and no row names the team afterwards';
 
     -- An empty list clears the games (as the owner).
     PERFORM public.persist_game_schedule(jsonb_build_object('season_settings_id', v_season, 'results', jsonb_build_object('unscheduled', '[]'::jsonb)), '[]'::jsonb);

@@ -15,7 +15,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(30);
+SELECT plan(32);
 
 -- ---- the roster this test schedules (as the table owner, before any role is set) ---------------
 -- Org A, season aaa: U8 wants 2 a week, U6 wants none, U10 (the fixture's) wants 1.
@@ -224,6 +224,18 @@ SELECT results_eq(
 SELECT throws_ok(
     $$ UPDATE public.schedule_tbd SET reason = 'no-slot-available' WHERE kind = 'practice' $$,
     '42501', NULL, 'nobody updates a row: there is no UPDATE grant'
+);
+
+-- Deleting a team counts the rows its cascade takes: A2's practice row and the two games it plays.
+SELECT lives_ok(
+    $$ SELECT public.admin_delete_team('aaaaaaaa-0000-0000-0000-0000000000a2') $$,
+    'an admin deletes a team that has TIME TBD rows'
+);
+SELECT is(
+    (SELECT (metadata->>'schedule_tbd_deleted')::int FROM public.audit_log
+      WHERE action = 'team.deleted' AND resource_id = 'aaaaaaaa-0000-0000-0000-0000000000a2'),
+    3,
+    'team.deleted counts the three schedule_tbd rows the cascade took (one practice row, two games)'
 );
 
 SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';

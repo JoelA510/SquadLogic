@@ -111,6 +111,36 @@ describe('PlayerRecordPage', () => {
     );
   });
 
+  // The stored play-up request (docs/changes/2026-10-27-play-up-by-request.md): an admin sets
+  // or clears it on the record, through the audited player patch.
+  it('sets and clears the play-up request through admin_update_player', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Alex Smith' });
+    expect(screen.getByRole('button', { name: /^Edit Play-up requested:/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Edit Play-up requested:/ }));
+    const select = screen.getByRole('combobox', { name: 'Play-up requested' });
+    fireEvent.change(select, { target: { value: 'true' } });
+    fireEvent.keyDown(select, { key: 'Enter' });
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith('admin_update_player', {
+        p_player_id: 'p1',
+        p_patch: { play_up_requested: true },
+      })
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit Play-up requested:/ }));
+    const again = screen.getByRole('combobox', { name: 'Play-up requested' });
+    fireEvent.change(again, { target: { value: 'false' } });
+    fireEvent.keyDown(again, { key: 'Enter' });
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith('admin_update_player', {
+        p_player_id: 'p1',
+        p_patch: { play_up_requested: false },
+      })
+    );
+  });
+
   // Guardian contacts are not stored (docs/changes/2026-10-22-admin-focus.md,
   // R4): no Guardians tab, and a contact on a stale row is shown nowhere.
   it('has no Guardians tab and shows no guardian contact', async () => {
@@ -164,6 +194,14 @@ describe('PlayerRecordPage', () => {
         expect(screen.queryByRole('button', { name: new RegExp(`^Edit ${label}:`) })).toBeNull();
       }
       expect(screen.getByText('Alex')).toBeInTheDocument();
+    });
+
+    it('offers no edit on the play-up request, which the server fence refuses too', async () => {
+      renderPage();
+      await screen.findByRole('heading', { name: 'Alex Smith' });
+      // Control: the field is shown, with its value, and only the edit is withheld.
+      expect(screen.getByText('Play-up requested')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Edit Play-up requested:/ })).toBeNull();
     });
 
     it('still offers an edit on where the player plays (control)', async () => {

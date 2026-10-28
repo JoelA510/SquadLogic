@@ -42,7 +42,6 @@ function eligibility(players, division, cutoffMode) {
     divisions: DIVISIONS.map((name) => ({ id: name, name })),
     seasonYear: SEASON_YEAR,
     cutoffMode,
-    remapBlocked: false,
   });
   return new Map(
     annotated.map((p) => [
@@ -51,7 +50,8 @@ function eligibility(players, division, cutoffMode) {
         placement: p.placement,
         naturalAge: p.naturalAge,
         needsReview: p.needsReview,
-        sanctioned: p.playUpSanctioned,
+        division: p.division,
+        requested: p.playUpRequested,
       },
     ])
   );
@@ -77,12 +77,12 @@ function compare(cutoffMode, natural, { include = () => true } = {}) {
     const byDob = rows.map(({ registration, id, dob }) => ({
       id,
       date_of_birth: dob,
-      isCoachChild: registration.playingUp,
+      play_up_requested: registration.playingUp,
     }));
     const byStored = rows.map(({ registration, id, dob }) => ({
       id,
       natural_age: natural(registration, dob, cutoffMode),
-      isCoachChild: registration.playingUp,
+      play_up_requested: registration.playingUp,
     }));
     for (const division of DIVISIONS) {
       const fromDob = eligibility(byDob, division, cutoffMode);
@@ -129,12 +129,7 @@ describe('play-up eligibility from the stored natural age equals the birth-date 
       expect(counts.compared).toBe(REGISTRATIONS.length * MONTHS.length * DIVISIONS.length);
       expect(counts.differing).toBe(0);
       // The comparison saw every kind of placement, and no player went unchecked.
-      for (const placement of [
-        PLACEMENT.IN_BAND,
-        PLACEMENT.PLAY_UP_SANCTIONED,
-        PLACEMENT.PLAY_UP_BLOCKED,
-        PLACEMENT.PLAY_DOWN_BLOCKED,
-      ]) {
+      for (const placement of [PLACEMENT.IN_BAND, PLACEMENT.PLAY_UP, PLACEMENT.PLAY_DOWN]) {
         expect(counts.byPlacement[placement], placement).toBeGreaterThan(0);
       }
       expect(counts.byPlacement[PLACEMENT.UNKNOWN] ?? 0).toBe(0);
@@ -149,8 +144,8 @@ describe('play-up eligibility from the stored natural age equals the birth-date 
     // Each registration is born on one side of the cutoff, so 7 or 5 of its months qualify.
     expect(counts.compared).toBeGreaterThanOrEqual(REGISTRATIONS.length * 5 * DIVISIONS.length);
     expect(counts.differing).toBe(0);
-    expect(counts.byPlacement[PLACEMENT.PLAY_DOWN_BLOCKED]).toBeGreaterThan(0);
-    expect(counts.byPlacement[PLACEMENT.PLAY_UP_BLOCKED]).toBeGreaterThan(0);
+    expect(counts.byPlacement[PLACEMENT.PLAY_DOWN]).toBeGreaterThan(0);
+    expect(counts.byPlacement[PLACEMENT.PLAY_UP]).toBeGreaterThan(0);
   });
 
   it('POSITIVE CONTROL: a stored natural age one year off differs from the birth date', () => {

@@ -170,10 +170,10 @@ BEGIN
     -- above, which the whole row is searched for.
     IF v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
             'shirt_size', 'YM', 'joined_on', '2024-01-02', 'team_name', 'Smoke Team',
-            'team_age', 'U10', 'team_gender', 'Girls', 'play_up', 'yes') THEN
+            'team_age', 'U10', 'team_gender', 'Girls') THEN
         RAISE EXCEPTION 'the player import wrote the wrong attributes: %', v_player.custom_attributes;
     END IF;
-    RAISE NOTICE 'player INSERT: no contact, guardian, payment or undeclared value stored; team placement, play-up and the declared fields kept';
+    RAISE NOTICE 'player INSERT: no contact, guardian, payment or undeclared value stored; team placement and the declared fields kept (the play-up column is the request, not an attribute)';
 
     -- (d) Player, UPDATE branch, over a row that already holds an undeclared key.
     UPDATE public.players
@@ -244,7 +244,7 @@ BEGIN
     SELECT * INTO v_player FROM public.players WHERE id = v_player.id;
     IF v_player.custom_attributes IS DISTINCT FROM jsonb_build_object(
             'shirt_size', 'YM', 'joined_on', '2024-01-02', 'team_name', 'Smoke Team',
-            'team_age', 'U10', 'team_gender', 'Girls', 'play_up', 'yes') THEN
+            'team_age', 'U10', 'team_gender', 'Girls') THEN
         RAISE EXCEPTION 'the purge left an undeclared player attribute: %', to_jsonb(v_player);
     END IF;
     SELECT string_agg(COALESCE(r.previous_payload::text, '') || r.applied_payload::text

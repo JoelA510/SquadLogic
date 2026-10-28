@@ -94,29 +94,27 @@ export function useConflicts(teams) {
       }
 
       // --- Age Mismatch Check ---
-      // Play-up is allowed only when sanctioned (a coaching parent or a
-      // qualifying buddy); play-down is never allowed. A sanctioned play-up is
-      // therefore not a conflict.
+      // A play-up or play-down is the admin's call (the Teams page's Play-up section lists them
+      // and the app approves or refuses nothing), so a roster that has one is flagged for a
+      // second look, never as an error. A requested play-up is not a mismatch.
       if (p1.teamId && p1.age != null) {
         const team = teams.find((t) => t && t.id === p1.teamId);
         if (team) {
-          const sanctionedPlayUp =
-            p1.playUpSanctioned === true || p1.placement === 'play_up_sanctioned';
           const playingDown = team.maxAge != null && p1.age > team.maxAge;
           const playingUp = team.minAge != null && p1.age < team.minAge;
 
           if (playingDown) {
             detected.push({
               type: 'age',
-              message: `Play-down not allowed: ${p1.name} (Age ${p1.age}) assigned to ${team.name} (U${team.maxAge})`,
-              severity: 'error',
+              message: `Play-down: ${p1.name} (Age ${p1.age}) assigned to ${team.name} (U${team.maxAge})`,
+              severity: 'warning',
               p1,
             });
-          } else if (playingUp && !sanctionedPlayUp) {
+          } else if (playingUp && p1.playUpRequested !== true) {
             detected.push({
               type: 'age',
-              message: `Unsanctioned play-up: ${p1.name} (Age ${p1.age}) assigned to ${team.name} (min U${team.minAge}) without a coaching parent or qualifying buddy`,
-              severity: 'error',
+              message: `Play-up: ${p1.name} (Age ${p1.age}) assigned to ${team.name} (min U${team.minAge}); no play-up was requested`,
+              severity: 'warning',
               p1,
             });
           }

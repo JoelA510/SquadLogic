@@ -13,11 +13,11 @@ const divisions = [
   { id: 'U10B', name: 'U10 Boys', minAge: 10, maxAge: 10, gender_policy: 'boys' },
 ];
 
-test('links coaches and sanctions a coach-child play-up in one pass', () => {
+test('links coaches and lists every play-up in one pass', () => {
   const players = [
-    // coach's child, age 9, registered up into U10B
-    { id: 'p_child', division: 'U10B', dob: '2017-05-01' },
-    // unrelated age-9 player registered up into U10B with no sanction
+    // coach's child, age 9, registered up into U10B and requested to play up
+    { id: 'p_child', division: 'U10B', dob: '2017-05-01', play_up_requested: true },
+    // unrelated age-9 player registered up into U10B, no request
     { id: 'p_other', division: 'U10B', dob: '2017-05-01' },
     // a normal in-band U10 player
     { id: 'p_inband', division: 'U10B', dob: '2016-05-01' },
@@ -40,31 +40,33 @@ test('links coaches and sanctions a coach-child play-up in one pass', () => {
   assert.equal(child.coachId, 'coachA');
   assert.equal(diagnostics.coachLinking.linkedPlayers, 1);
 
-  // Coach child playing up is sanctioned (route A).
-  assert.equal(child.placement, PLACEMENT.PLAY_UP_SANCTIONED);
+  // The requested play-up stays where it registered.
+  assert.equal(child.placement, PLACEMENT.PLAY_UP);
   assert.equal(child.division, 'U10B');
 
-  // The unrelated play-up is blocked.
-  assert.equal(other.placement, PLACEMENT.PLAY_UP_BLOCKED);
+  // The unrequested one plays in their own age division.
+  assert.equal(other.placement, PLACEMENT.PLAY_UP);
+  assert.equal(other.division, 'U9B');
 
   // In-band player untouched.
   assert.equal(inband.placement, PLACEMENT.IN_BAND);
 
-  assert.equal(diagnostics.playUp.counts.playUpSanctioned, 1);
-  assert.equal(diagnostics.playUp.counts.playUpBlocked, 1);
+  assert.equal(diagnostics.playUp.counts.playUpRequested, 1);
+  assert.equal(diagnostics.playUp.counts.playUpUnrequested, 1);
+  // The listing carries the coach link the pipeline made.
+  assert.equal(diagnostics.playUp.listing.find((e) => e.playerId === 'p_child').coachId, 'coachA');
 });
 
-test('remapBlocked=false keeps players in their registered division (single-division flow)', () => {
-  const players = [{ id: 'p_other', division: 'U10B', dob: '2017-05-01' }];
+test('players are placed across every division given, whatever they registered in', () => {
   const { players: out } = prepareTeamingInput({
-    players,
+    players: [{ id: 'p_other', division: 'U10B', dob: '2017-05-01' }],
     coaches: [],
     divisions,
     seasonYear: SEASON,
     cutoffMode: MODE,
-    remapBlocked: false,
   });
-  assert.equal(out[0].division, 'U10B');
+  assert.equal(out[0].division, 'U9B');
+  assert.equal(out[0].registeredDivision, 'U10B');
   assert.equal(out[0].needsReview, true);
 });
 
@@ -109,12 +111,16 @@ test('a reciprocal name pair arrives as mutual buddyIds and is one unit in gener
   assert.equal(teamOf('a').id, teamOf('b').id);
 });
 
-test("a coach's child named back by a play-up player sanctions the play-up (route B)", () => {
+test("a play-up player's buddy pair with a coach's child is listed with the buddy fact", () => {
   const players = [
     // the coach's child, age 10, in band in U10B
     named('child', 'Cara', 'Coach', { buddy_request: 'Pia Up' }),
-    // age 9, registered up into U10B, buddied with the coach's child
-    named('up', 'Pia', 'Up', { dob: '2017-05-01', buddy_request: 'Cara Coach' }),
+    // age 9, registered up into U10B, requested, buddied with the coach's child
+    named('up', 'Pia', 'Up', {
+      dob: '2017-05-01',
+      buddy_request: 'Cara Coach',
+      play_up_requested: true,
+    }),
   ];
   const { players: out, diagnostics } = prepareTeamingInput({
     players,
@@ -125,13 +131,40 @@ test("a coach's child named back by a play-up player sanctions the play-up (rout
   });
   const up = out.find((p) => p.id === 'up');
   assert.equal(up.buddyId, 'child');
-  assert.equal(up.placement, PLACEMENT.PLAY_UP_SANCTIONED);
-  assert.deepEqual(diagnostics.playUp.sanctionedPlayUps, [
-    { id: 'up', division: 'U10B', via: 'buddy', naturalAge: 9 },
-  ]);
+  assert.equal(up.division, 'U10B');
+  const entry = diagnostics.playUp.listing.find((e) => e.playerId === 'up');
+  assert.equal(entry.buddyId, 'child');
+  assert.equal(entry.buddyInPlayedDivision, true);
+  assert.equal(entry.coachId, null, 'the buddy is the coach’s child, not the player');
 });
 
-test("a one-way request for a coach's child sanctions nothing under the mutual rule", () => {
+test('buddies who now play in two divisions are told apart, never thrown', () => {
+  const { players: out, diagnostics } = prepareTeamingInput({
+    players: [
+      named('pal', 'Pal', 'One', { buddy_request: 'Pia Up' }),
+      // age 9, no request: plays in U9B while the buddy plays in U10B
+      named('up', 'Pia', 'Up', { dob: '2017-05-01', buddy_request: 'Pal One' }),
+    ],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+  });
+  assert.equal(out.find((p) => p.id === 'up').division, 'U9B');
+  assert.equal(out.find((p) => p.id === 'up').buddyId, undefined);
+  assert.equal(out.find((p) => p.id === 'pal').buddyId, undefined);
+  assert.deepEqual(
+    diagnostics.buddyLinking.filter((d) => d.code === 'buddy-played-apart').map((d) => d.playerIds),
+    [['pal', 'up']]
+  );
+  assert.ok(diagnostics.buddyRequests.every((r) => r.outcome === 'played-apart' && !r.honoured));
+  // The listing still says the buddy was not in the division played in.
+  assert.equal(
+    diagnostics.playUp.listing.find((e) => e.playerId === 'up').buddyInPlayedDivision,
+    false
+  );
+});
+
+test('a one-way request for a coach’s child is no link under the mutual rule', () => {
   const { players: out } = prepareTeamingInput({
     players: [
       named('child', 'Cara', 'Coach'),
@@ -142,13 +175,11 @@ test("a one-way request for a coach's child sanctions nothing under the mutual r
     seasonYear: SEASON,
     cutoffMode: MODE,
   });
-  assert.equal(out.find((p) => p.id === 'up').placement, PLACEMENT.PLAY_UP_BLOCKED);
+  assert.equal(out.find((p) => p.id === 'up').buddyId, undefined);
 });
 
-test("an honoured one-way request for a coach's child does not sanction a play-up", () => {
-  // Under one_way_best_effort the request is scored best effort, and may not land together,
-  // so it is no sanction: route B needs a pair.
-  const { players: out } = prepareTeamingInput({
+test('an honoured one-way request is dropped when the two now play in different divisions', () => {
+  const { players: out, diagnostics } = prepareTeamingInput({
     players: [
       named('child', 'Cara', 'Coach'),
       named('up', 'Pia', 'Up', { dob: '2017-05-01', buddy_request: 'Cara Coach' }),
@@ -159,9 +190,68 @@ test("an honoured one-way request for a coach's child does not sanction a play-u
     cutoffMode: MODE,
     buddyRule: 'one_way_best_effort',
   });
-  const up = out.find((p) => p.id === 'up');
-  assert.equal(up.buddyId, 'child', 'the request is honoured best effort');
-  assert.equal(up.placement, PLACEMENT.PLAY_UP_BLOCKED);
+  assert.equal(out.find((p) => p.id === 'up').buddyId, undefined);
+  assert.equal(diagnostics.buddyRequests[0].reason, 'plays-in-another-division');
+});
+
+test("an honoured one-way request is kept when both play in the coach's child's division", () => {
+  const { players: out } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach'),
+      named('up', 'Pia', 'Up', {
+        dob: '2017-05-01',
+        buddy_request: 'Cara Coach',
+        play_up_requested: true,
+      }),
+    ],
+    coaches: [{ id: 'coachA', player_id: 'child' }],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    buddyRule: 'one_way_best_effort',
+  });
+  assert.equal(out.find((p) => p.id === 'up').buddyId, 'child', 'honoured best effort');
+});
+
+test('the listing shows a buddy the run honours one-way, built from the final links', () => {
+  // The one-way link is installed after the placement, so the listing must be refreshed from the
+  // final links: it used to read "None" for a buddy the run keeps.
+  const { players: out, diagnostics } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach'),
+      named('up', 'Pia', 'Up', {
+        dob: '2017-05-01',
+        buddy_request: 'Cara Coach',
+        play_up_requested: true,
+      }),
+    ],
+    coaches: [{ id: 'coachA', player_id: 'child' }],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    buddyRule: 'one_way_best_effort',
+  });
+  assert.equal(out.find((p) => p.id === 'up').buddyId, 'child');
+  const entry = diagnostics.playUp.listing.find((e) => e.playerId === 'up');
+  assert.equal(entry.buddyId, 'child');
+  assert.equal(entry.buddyName, 'Cara Coach');
+  assert.equal(entry.buddyInPlayedDivision, true);
+});
+
+test('the listing also names a one-way buddy of the listed player who asked for them', () => {
+  const { diagnostics } = prepareTeamingInput({
+    players: [
+      named('child', 'Cara', 'Coach', { buddy_request: 'Pia Up' }),
+      named('up', 'Pia', 'Up', { dob: '2017-05-01', play_up_requested: true }),
+    ],
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    buddyRule: 'one_way_best_effort',
+  });
+  const entry = diagnostics.playUp.listing.find((e) => e.playerId === 'up');
+  assert.equal(entry.buddyId, 'child');
+  assert.equal(entry.buddyInPlayedDivision, true);
 });
 
 test('two coaching families as buddies give buddy-coach-conflict and no throw', () => {

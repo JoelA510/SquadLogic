@@ -235,9 +235,8 @@ SELECT is(
     -- those; the payment, contact and guardian values are in the catalogue
     -- scan's needles below.
     '{"custom_attributes": {"shirt_size": "YS", "joined_on": "2024-01-02", "skill": "advanced",
-                            "team_name": "R0 Team", "team_age": "U10", "team_gender": "Girls",
-                            "play_up": "yes"}}'::jsonb,
-    'the player keeps its declared field, team placement and play-up, and no contact, guardian or payment'
+                            "team_name": "R0 Team", "team_age": "U10", "team_gender": "Girls"}}'::jsonb,
+    'the player keeps its declared field and team placement, and no contact, guardian or payment (the play-up column is the request since 20261106010000, not an attribute)'
 );
 
 SELECT is(
@@ -265,7 +264,7 @@ RESET role;
 SELECT is(
     (SELECT custom_attributes FROM public.players WHERE external_registration_id = 'R0-EXT-1'),
     '{"shirt_size": "YS", "joined_on": "2024-01-02", "skill": "advanced", "team_name": "R0 Team",
-      "team_age": "U10", "team_gender": "Girls", "play_up": "yes"}'::jsonb,
+      "team_age": "U10", "team_gender": "Girls"}'::jsonb,
     'a re-import drops an undeclared key the player held and keeps the declared and the import''s own'
 );
 

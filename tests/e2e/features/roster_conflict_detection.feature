@@ -25,7 +25,7 @@ Feature: Roster Conflict Detection
   Scenario: Age mismatch
     Given a player "Jake" of age 11 is assigned to a "U8" team
     When I view the Roster Manager
-    Then I should see a conflict banner with message containing "Play-down not allowed"
+    Then I should see a conflict banner with message containing "Play-down: Jake"
 
   Scenario: Direct quick draft writes are not exposed
     Given there are 20 players in the "U10" division

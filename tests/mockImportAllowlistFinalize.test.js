@@ -76,9 +76,10 @@ describe('the mock player finalizer builds custom_attributes as the SQL does', (
       getMockData('players').find((p) => p.external_registration_id === 'REG-MOCK-1');
     expect(player().custom_attributes).toEqual({
       team_name: 'Team 9',
-      play_up: 'yes',
       coaching_answer: 'yes',
     });
+    // The play-up column is the request, not an attribute.
+    expect(player().play_up_requested).toBe(true);
 
     // A key the import does not write, planted on the stored player.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
@@ -90,9 +91,50 @@ describe('the mock player finalizer builds custom_attributes as the SQL does', (
     expect(second.updated_players).toBe(1);
     expect(player().custom_attributes).toEqual({
       team_name: 'Team 9',
-      play_up: 'yes',
       coaching_answer: 'yes',
     });
+    // A re-import with no play-up column leaves the request alone.
+    expect(player().play_up_requested).toBe(true);
+  });
+
+  it('a blank play-up cell withdraws the request; a missing column leaves it', async () => {
+    const find = () =>
+      getMockData('players').find((p) => p.external_registration_id === 'REG-PU-BLANK');
+    await importPlayers('mock-job-playup-blank-1', [
+      { ...BASE, 'Registration ID': 'REG-PU-BLANK', 'Play Up': 'yes' },
+    ]);
+    expect(find().play_up_requested).toBe(true);
+    await importPlayers('mock-job-playup-blank-2', [
+      { ...BASE, 'Registration ID': 'REG-PU-BLANK' },
+    ]);
+    expect(find().play_up_requested).toBe(true);
+    await importPlayers('mock-job-playup-blank-3', [
+      { ...BASE, 'Registration ID': 'REG-PU-BLANK', 'Play Up': '' },
+    ]);
+    expect(find().play_up_requested).toBe(false);
+  });
+
+  it('reads each spelling of the play-up column as a request, anything else as none', async () => {
+    /** @type {Array<[string, boolean]>} */
+    const spellings = [
+      ['yes', true],
+      ['TRUE', true],
+      ['1', true],
+      ['x', true],
+      ['no', false],
+      ['maybe', false],
+    ];
+    for (const [index, [value, expected]] of spellings.entries()) {
+      const externalId = `REG-PU-${index}`;
+      await importPlayers(`mock-job-playup-${index}`, [
+        { ...BASE, 'Registration ID': externalId, 'Play Up': value },
+      ]);
+      expect(
+        getMockData('players').find((p) => p.external_registration_id === externalId)
+          .play_up_requested,
+        String(value)
+      ).toBe(expected);
+    }
   });
 
   it('trims a value staged untrimmed, as a direct write to staging could leave it', async () => {

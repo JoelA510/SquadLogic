@@ -138,7 +138,7 @@ describe('summarizeTeamSizeOutcome', () => {
     const roster = [
       ...players(3, 'c', { coachId: 'coach-1' }),
       ...players(2, 'g'),
-      { id: 'old-1', division: 'U10', name: 'Too Old', placement: 'play_down_blocked' },
+      { id: 'old-1', division: 'U10', name: 'Too Old', placement: 'no_division' },
     ];
     const outcome = u10(summarizeTeamSizeOutcome(generate(roster, { maxRosterSize: 2 })));
     expect(outcome.notPlacedForCapacity).toEqual([
@@ -248,7 +248,7 @@ describe('summarizeTeamSizeOutcome', () => {
   it('checks nothing it cannot see in a division the run built no teams for', () => {
     const outcome = u10(
       summarizeTeamSizeOutcome(
-        generate([{ id: 'old-1', division: 'U10', placement: 'play_down_blocked' }], {
+        generate([{ id: 'old-1', division: 'U10', placement: 'no_division' }], {
           maxRosterSize: 10,
         })
       )

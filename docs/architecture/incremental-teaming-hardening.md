@@ -33,8 +33,10 @@ See also: [`team-generation.md`](team-generation.md) (current algorithm design),
    `toGeneratorPlayer()` (normalizes skill text → numeric, resolves division from age group,
    carries `coachId`).
 2. **Coach linking & play-up.** `packages/core/src/teamingPipeline.js` (`prepareTeamingInput`)
-   links volunteer coaches to their children (via `coachLinking.js`) and annotates play-up
-   eligibility before generation.
+   links volunteer coaches to their children (via `coachLinking.js`) and places each player in the
+   division they play in (their own age division unless a play-up was requested) and
+   lists play-ups and play-downs, and takes a coach's child's waitlisted buddy off the
+   waitlist, before generation.
 3. **Generation.** `TeamAnalysisPage` calls `generateTeams({ players, divisionConfigs, seed })`
    (frontend uses `seed`; unit tests use an injected `random`). The allocator returns teams +
    diagnostics per division (see §3).
@@ -396,12 +398,12 @@ generation omits the key entirely.
 | `capacityViolations`                            | `[{teamId, playerCount, maxRosterSize}]`        | Final rosters above cap (pre-existing or `allowOverCapAssignments`).                                                                                                                                                   |
 | `minRosterWarnings`                             | `string[]` (team ids)                           | Teams below `minRosterSize` (warning — preserved teams are never collapsed).                                                                                                                                           |
 | `structuralWarnings`                            | `string[]`                                      | e.g. snapshot-only division with no division config.                                                                                                                                                                   |
-| `eligibilityHolds`                              | `[{playerId, teamId, placement, reviewReason}]` | Phase B2: a blocked player (`play_up_blocked` / `play_down_blocked`) on a final roster. Only a preserved one can be: they stay on their reviewed team (owner decision 3) and are listed; a late one overflows.         |
+| `eligibilityHolds`                              | `[{playerId, teamId, placement, reviewReason}]` | Phase B2: a blocked player (`no_division`: no division holds their age) on a final roster. Only a preserved one can be: they stay on their reviewed team (owner decision 3) and are listed; a late one overflows.         |
 
 **Overflow reason codes** (`overflowByDivision[].reason`, machine-readable kebab-case):
 `insufficient-capacity`, `coach-capacity`, `buddy-target-capacity`, `buddy-target-locked`,
 `eligibility-blocked` (Phase B2, `docs/changes/2026-10-22-phase-b-teaming.md`: one entry per
-player whose `placement` is `play_up_blocked` or `play_down_blocked`, metadata
+player whose `placement` is `no_division`, metadata
 `{ placement, reviewReason, naturalAge, coachId }` (plus `assistantCoachId` when the player has
 one), in fresh generation and for a late player on
 a rerun; `unknown` is placed, never blocked). A blocked player leaves the pool before the team

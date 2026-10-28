@@ -12,7 +12,9 @@
  * locked player, late players).
  *
  * **The committed golden was generated on `main` before B2 changed the generator** (the commit
- * is in the file's `generatedAt`). `tests/teamGenerationEligibility.test.js` runs today's
+ * is in the file's `generatedAt`). The play-up change reshaped the annotations the real pipeline
+ * puts on a player (`withoutPipelineAnnotations`), so the `freshPipeline` scenario is compared
+ * without them, against the same committed file: the rosters are what it holds fixed. `tests/teamGenerationEligibility.test.js` runs today's
  * generator over the same scenarios and compares the serialized output byte for byte (the
  * rerun after removing B2's one new key, `eligibilityHolds`, which must be empty). Re-running
  * this script on a later tree records that tree's answer instead: do it only when a change is
@@ -97,7 +99,15 @@ function freshAnnotatedScenario() {
 /** The same kind of roster annotated by the real pipeline (birthdates, a coach link). */
 function freshPipelineScenario() {
   const players = [
-    { id: 'pl-child', division: 'U10', dob: '2017-04-01', firstName: 'Kid', lastName: 'Coach' },
+    // Age 9 in the U10 band, a coach's child who asked to play up: registered where they play.
+    {
+      id: 'pl-child',
+      division: 'U10',
+      dob: '2017-04-01',
+      firstName: 'Kid',
+      lastName: 'Coach',
+      play_up_requested: true,
+    },
     { id: 'pl-a', division: 'U10', dob: '2016-02-01', buddyId: 'pl-b' },
     { id: 'pl-b', division: 'U10', dob: '2016-09-01', buddyId: 'pl-a' },
     // No birthdate: unknown.
@@ -115,7 +125,6 @@ function freshPipelineScenario() {
     divisions: [{ id: 'U10', name: 'U10', min_age: 10, max_age: 10 }],
     seasonYear: SEASON,
     cutoffMode: 'birth_year',
-    remapBlocked: false,
   });
   return {
     players: prepared.players,
@@ -203,6 +212,39 @@ export function eligibilityGoldenScenarios() {
   };
 }
 
+/**
+ * The keys `prepareTeamingInput` annotates a player with and the play-up change (docs/changes/
+ * 2026-10-27-play-up-by-request.md) reshaped: the sanction flags went, the request came. They
+ * are not roster facts, so the pipeline scenario is compared without them: the teams, their
+ * coaches and every player in them are what the golden holds fixed.
+ */
+const PIPELINE_ANNOTATION_KEYS = new Set([
+  'placement',
+  'needsReview',
+  'reviewReason',
+  'playUpSanctioned',
+  'playUpRequested',
+  'play_up_requested',
+  'isCoachChild',
+]);
+
+/**
+ * A serialized output without the pipeline's annotation keys, at any depth.
+ * @param {any} value
+ * @returns {any}
+ */
+export function withoutPipelineAnnotations(value) {
+  if (Array.isArray(value)) return value.map(withoutPipelineAnnotations);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !PIPELINE_ANNOTATION_KEYS.has(key))
+        .map(([key, inner]) => [key, withoutPipelineAnnotations(inner)])
+    );
+  }
+  return value;
+}
+
 /** The serialized generator output of each scenario (JSON drops `undefined`, as storage does). */
 export function eligibilityGoldenOutputs() {
   return Object.fromEntries(
@@ -231,7 +273,15 @@ function main() {
         }
       }
     }
-    const same = JSON.stringify(committed.scenarios) === JSON.stringify(outputs);
+    const same =
+      JSON.stringify({
+        ...committed.scenarios,
+        freshPipeline: withoutPipelineAnnotations(committed.scenarios.freshPipeline),
+      }) ===
+      JSON.stringify({
+        ...outputs,
+        freshPipeline: withoutPipelineAnnotations(outputs.freshPipeline),
+      });
     console.log(same ? 'golden matches' : 'golden DIFFERS');
     process.exitCode = same ? 0 : 1;
     return;

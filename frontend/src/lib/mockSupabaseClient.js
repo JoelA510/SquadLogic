@@ -65,6 +65,7 @@ const PLAYER_PATCH_FIELDS = new Set([
   'years_played',
   'jersey_number',
   'willing_to_coach',
+  'play_up_requested',
   'division_id',
   'team_id',
 ]);
@@ -5286,9 +5287,9 @@ export const mockSupabase = {
           'willing',
         ].includes(String(payload.willing_to_coach || '').toLowerCase());
         const yearsText = String(payload.years_played ?? '');
-        // As the SQL (20261022010000): no contact, guardian or payment value
-        // is read; custom_attributes is the declared fields, team placement,
-        // play-up and the coaching answer.
+        // As the SQL (20261022010000, 20261106010000): no contact, guardian or payment
+        // value is read; custom_attributes is the declared fields, team placement and the
+        // coaching answer. The play-up column is the request, `play_up_requested`.
         const playerSchema = (db.organization_schemas || []).find(
           (item) =>
             String(item.organization_id) === String(job.organization_id) &&
@@ -5308,6 +5309,13 @@ export const mockSupabase = {
           'play up',
           'are you coaching so this player can play up a division?',
         ]);
+        // As the SQL: the column's presence is the key itself, since a blank cell reads as no
+        // text exactly as a missing key does.
+        const playUpPresent = [
+          'play_up',
+          'play up',
+          'are you coaching so this player can play up a division?',
+        ].some((key) => Object.prototype.hasOwnProperty.call(payload, key));
         const coachingAnswer = importPayloadText(payload, [
           'willing_to_coach',
           'coach_volunteer',
@@ -5316,7 +5324,6 @@ export const mockSupabase = {
         const customAttributes = {
           ...declaredAttributes(playerSchema?.schema_definition, payload),
           ...teamPlacement,
-          ...(playUp !== null ? { play_up: playUp } : {}),
           ...(coachingAnswer ? { coaching_answer: coachingAnswer } : {}),
         };
         const basePlayer = {
@@ -5347,6 +5354,16 @@ export const mockSupabase = {
             ...keptPlayerAttributes(playerSchema?.schema_definition, existing?.custom_attributes),
             ...customAttributes,
           },
+          // As the SQL: a present column sets the request (yes, true, y, t, 1 or x is a yes,
+          // anything else, a blank cell included, no); an absent one leaves a re-imported
+          // player's request alone.
+          ...(playUpPresent || !existing
+            ? {
+                play_up_requested: ['true', 't', 'yes', 'y', '1', 'x'].includes(
+                  String(playUp ?? '').toLowerCase()
+                ),
+              }
+            : {}),
           import_source: 'gotsport',
           last_imported_at: now,
         };

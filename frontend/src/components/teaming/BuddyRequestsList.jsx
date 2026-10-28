@@ -12,6 +12,8 @@ const UNRESOLVED_REASONS = {
   unparsed: "The request could not be read as one player's first and last name.",
   self: 'The request names the player themself.',
   'buddy-coach-conflict': "The two buddies each anchor a different head coach's team.",
+  'buddy-played-apart':
+    'The two buddies play in different divisions: a play-up or play-down put one in their own age division.',
   'buddy-code-unmatched': 'The buddy code was entered by only one player, or could not be paired.',
   'duplicate-buddy-code': 'The buddy code is shared by more than two players.',
   'cross-division-buddy': 'The buddy is in another division.',

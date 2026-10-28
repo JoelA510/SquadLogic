@@ -18,11 +18,12 @@ import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import {
   ELIGIBILITY_GOLDEN,
   eligibilityGoldenScenarios,
+  withoutPipelineAnnotations,
 } from '../scripts/generate-teaming-eligibility-golden.mjs';
 
 const GOLDEN = JSON.parse(readFileSync(path.join(process.cwd(), ELIGIBILITY_GOLDEN), 'utf8'));
 
-const BLOCKED = new Set(['play_up_blocked', 'play_down_blocked']);
+const BLOCKED = new Set([PLACEMENT.NO_DIVISION]);
 
 describe('no player blocked: the output is the golden from main, byte for byte', () => {
   const scenarios = eligibilityGoldenScenarios();
@@ -37,7 +38,13 @@ describe('no player blocked: the output is the golden from main, byte for byte',
         placements.add(player.placement ?? 'none');
       }
     }
-    expect([...placements].sort()).toEqual(['in_band', 'none', 'play_up_sanctioned', 'unknown']);
+    expect([...placements].sort()).toEqual([
+      'in_band',
+      'none',
+      'play_up',
+      'play_up_sanctioned',
+      'unknown',
+    ]);
     expect(Object.keys(GOLDEN.scenarios).sort()).toEqual(Object.keys(scenarios).sort());
   });
 
@@ -69,7 +76,11 @@ describe('no player blocked: the output is the golden from main, byte for byte',
       } else {
         expect(output.changeDiagnosticsByDivision).toBeUndefined();
       }
-      expect(JSON.stringify(output)).toBe(JSON.stringify(golden));
+      // The real pipeline's own annotations were reshaped by the play-up change; the rosters
+      // it gives the generator are not (see the script's header).
+      const compared = (value) =>
+        name === 'freshPipeline' ? withoutPipelineAnnotations(value) : value;
+      expect(JSON.stringify(compared(output))).toBe(JSON.stringify(compared(golden)));
     });
   }
 });
@@ -82,10 +93,11 @@ describe('no player blocked: the output is the golden from main, byte for byte',
 const SEASON = 2026;
 const U10 = [{ id: 'U10', name: 'U10', min_age: 10, max_age: 10 }];
 const IN_BAND_DOB = '2016-05-01'; // natural age 10
-const PLAY_DOWN_DOB = '2013-05-01'; // natural age 13: play-down, never permitted
-const PLAY_UP_DOB = '2018-05-01'; // natural age 8: play-up with no coaching parent or buddy
+// With U10 the only division, no division holds a natural age of 13 or 8: both are blocked.
+const PLAY_DOWN_DOB = '2013-05-01'; // natural age 13
+const PLAY_UP_DOB = '2018-05-01'; // natural age 8
 
-/** The page's single-division pipeline call (`remapBlocked: false`). */
+/** The pipeline call with one division: a player outside its band has no division to play in. */
 function prepare(players, coaches = []) {
   return prepareTeamingInput({
     players,
@@ -93,7 +105,6 @@ function prepare(players, coaches = []) {
     divisions: U10,
     seasonYear: SEASON,
     cutoffMode: 'birth_year',
-    remapBlocked: false,
   }).players;
 }
 
@@ -129,12 +140,12 @@ describe('fresh generation: a blocked player is not placed, and says why', () =>
     expect(TEAM_GENERATION.REASON_EligibilityBlocked).toBe('eligibility-blocked');
   });
 
-  it('a play-down and an unsanctioned play-up are in overflow with the reason, on no team', () => {
+  it('a player no division can hold is in overflow with the reason, on no team', () => {
     const input = [kid('down', PLAY_DOWN_DOB), kid('up', PLAY_UP_DOB), ...fillers(6)];
     const players = prepare(input);
     // The pipeline really blocks them (the state the page produces).
-    expect(players.find((p) => p.id === 'down').placement).toBe(PLACEMENT.PLAY_DOWN_BLOCKED);
-    expect(players.find((p) => p.id === 'up').placement).toBe(PLACEMENT.PLAY_UP_BLOCKED);
+    expect(players.find((p) => p.id === 'down').placement).toBe(PLACEMENT.NO_DIVISION);
+    expect(players.find((p) => p.id === 'up').placement).toBe(PLACEMENT.NO_DIVISION);
 
     const result = generateTeams({
       players,
@@ -147,14 +158,14 @@ describe('fresh generation: a blocked player is not placed, and says why', () =>
     const entries = eligibilityEntries(result);
     expect(entries.map((entry) => entry.players.map((p) => p.id))).toEqual([['down'], ['up']]);
     expect(entries[0].metadata).toEqual({
-      placement: 'play_down_blocked',
-      reviewReason: 'play-down is not permitted',
+      placement: 'no_division',
+      reviewReason: 'no suitable division holds natural age 13',
       naturalAge: 13,
       coachId: null,
     });
     expect(entries[1].metadata).toEqual({
-      placement: 'play_up_blocked',
-      reviewReason: 'unsanctioned play-up (no coaching parent or qualifying buddy)',
+      placement: 'no_division',
+      reviewReason: 'no suitable division holds natural age 8',
       naturalAge: 8,
       coachId: null,
     });
@@ -258,10 +269,10 @@ describe('fresh generation: a blocked player is not placed, and says why', () =>
     expect(result.overflowByDivision.U10).toEqual([]);
   });
 
-  it('a sanctioned play-up (a coaching parent) is placed on the coach’s team', () => {
-    const input = [kid('coach-up', PLAY_UP_DOB), ...fillers(3)];
+  it('a requested play-up (a coaching parent) is placed on the coach’s team', () => {
+    const input = [kid('coach-up', PLAY_UP_DOB, { play_up_requested: true }), ...fillers(3)];
     const players = prepare(input, [{ id: 'coach-y', player_id: 'coach-up' }]);
-    expect(players.find((p) => p.id === 'coach-up').placement).toBe(PLACEMENT.PLAY_UP_SANCTIONED);
+    expect(players.find((p) => p.id === 'coach-up').placement).toBe(PLACEMENT.PLAY_UP);
     const result = generateTeams({
       players,
       divisionConfigs: { U10: config('U10') },
@@ -338,14 +349,14 @@ describe('incremental generation: a rostered blocked player stays and is listed'
       {
         playerId: 'rostered-blocked',
         teamId: '0b2e0000-0000-4000-8000-0000000000a1',
-        placement: 'play_down_blocked',
-        reviewReason: 'play-down is not permitted',
+        placement: 'no_division',
+        reviewReason: 'no suitable division holds natural age 13',
       },
       {
         playerId: 'locked-blocked',
         teamId: '0b2e0000-0000-4000-8000-0000000000a2',
-        placement: 'play_up_blocked',
-        reviewReason: 'unsanctioned play-up (no coaching parent or qualifying buddy)',
+        placement: 'no_division',
+        reviewReason: 'no suitable division holds natural age 8',
       },
     ]);
     expect(eligibilityEntries(result)).toEqual([]);
@@ -366,7 +377,7 @@ describe('incremental generation: a rostered blocked player stays and is listed'
     const entries = eligibilityEntries(result);
     expect(entries).toHaveLength(1);
     expect(entries[0].players.map((p) => p.id)).toEqual(['late-blocked']);
-    expect(entries[0].metadata).toMatchObject({ placement: 'play_down_blocked', naturalAge: 13 });
+    expect(entries[0].metadata).toMatchObject({ placement: 'no_division', naturalAge: 13 });
     const changes = result.changeDiagnosticsByDivision.U10;
     expect(changes.eligibilityHolds).toEqual([]);
     expect(changes.latePlayersOverflowed).toBe(1);
@@ -406,7 +417,6 @@ describe('incremental generation: a rostered blocked player stays and is listed'
       divisions: [...U10, { id: 'U12', name: 'U12', min_age: 12, max_age: 12 }],
       seasonYear: SEASON,
       cutoffMode: 'birth_year',
-      remapBlocked: false,
     }).players;
     const result = generateTeams({
       players,
@@ -439,9 +449,9 @@ describe('review findings (B2)', () => {
     expectConserved(result, input);
   });
 
-  it('a player remapBlocked moved to their natural division is placed there', () => {
-    // A multi-division flow may remap (prepareTeamingInput's remapBlocked: true): the moved
-    // player keeps the placement judged in the division they registered in.
+  it('a play-down is placed in the player’s own age division, not held out', () => {
+    // With the league's divisions given, the pipeline moves the player to the one that holds
+    // their age; they keep the placement judged in the division they registered in.
     const input = [
       kid('moved', PLAY_DOWN_DOB),
       ...fillers(3),
@@ -452,15 +462,14 @@ describe('review findings (B2)', () => {
       divisions: [...U10, { id: 'U13', name: 'U13', min_age: 13, max_age: 13 }],
       seasonYear: SEASON,
       cutoffMode: 'birth_year',
-      remapBlocked: true,
     }).players;
     const moved = players.find((p) => p.id === 'moved');
     expect(moved).toMatchObject({ division: 'U13', registeredDivision: 'U10' });
-    expect(moved.placement).toBe(PLACEMENT.PLAY_DOWN_BLOCKED);
+    expect(moved.placement).toBe(PLACEMENT.PLAY_DOWN);
 
     const result = generateTeams({
-      players,
-      divisionConfigs: { U10: config('U10'), U13: config('U13') },
+      players: players.filter((p) => p.division === 'U13'),
+      divisionConfigs: { U13: config('U13') },
       seed: 'b2',
     });
     expect(seatedIds(result, 'U13')).toContain('moved');
@@ -475,8 +484,8 @@ describe('review findings (B2)', () => {
       seed: 'b2',
     });
     expect(eligibilityEntries(result)[0].metadata).toEqual({
-      placement: 'play_up_blocked',
-      reviewReason: 'unsanctioned play-up (no coaching parent or qualifying buddy)',
+      placement: 'no_division',
+      reviewReason: 'no suitable division holds natural age 8',
       naturalAge: 8,
       coachId: null,
       assistantCoachId: 'asst-z',

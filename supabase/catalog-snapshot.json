@@ -350,6 +350,7 @@
     "CREATE TRIGGER publication_baselines_immutable BEFORE DELETE OR UPDATE ON public.publication_baselines FOR EACH ROW EXECUTE FUNCTION refuse_publication_baseline_mutation()",
     "CREATE TRIGGER publication_baselines_no_truncate BEFORE TRUNCATE ON public.publication_baselines FOR EACH STATEMENT EXECUTE FUNCTION refuse_publication_baseline_truncate()",
     "CREATE TRIGGER schedule_tbd_enforce_tenancy BEFORE INSERT OR UPDATE ON public.schedule_tbd FOR EACH ROW EXECUTE FUNCTION schedule_tbd_enforce_tenancy()",
+    "CREATE TRIGGER schedule_tbd_readonly_when_completed BEFORE INSERT OR DELETE OR UPDATE ON public.schedule_tbd FOR EACH ROW EXECUTE FUNCTION season_schedule_readonly_when_completed()",
     "CREATE TRIGGER scheduler_runs_set_timestamp BEFORE UPDATE ON public.scheduler_runs FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",
     "CREATE TRIGGER season_settings_cutoff_guard BEFORE UPDATE OF age_cutoff_mode, age_cutoff_month, age_cutoff_day, season_year ON public.season_settings FOR EACH ROW WHEN (((old.age_cutoff_mode IS DISTINCT FROM new.age_cutoff_mode) OR (old.age_cutoff_month IS DISTINCT FROM new.age_cutoff_month) OR (old.age_cutoff_day IS DISTINCT FROM new.age_cutoff_day) OR (old.season_year IS DISTINCT FROM new.season_year))) EXECUTE FUNCTION season_settings_cutoff_guard()",
     "CREATE TRIGGER season_settings_default_program AFTER INSERT ON public.season_settings FOR EACH ROW EXECUTE FUNCTION season_settings_default_program()",

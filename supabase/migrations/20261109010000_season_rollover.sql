@@ -40,7 +40,8 @@
 --      are not recomputed: the admin finishes or cancels the import first.
 --   4. Completed seasons are read-only, players, coaches and schedules included: a trigger on each
 --      of `players`, `coaches`, `teams`, `team_players`, `team_coach_assignments`,
---      `practice_assignments`, `practice_exceptions` and `game_assignments` refuses any insert,
+--      `practice_assignments`, `practice_exceptions`, `game_assignments` and `schedule_tbd` (the TIME TBD
+--      list, 20261108020000) refuses any insert,
 --      update or delete by a signed-in caller (an RPC or a direct write; 22023, `season_completed`).
 --      Triggers, not edits to the schedule writers, so the writers stay as they are. A job with no
 --      signed-in user (the retention job, the demo purge) and a cascade from a deleted season or
@@ -504,7 +505,7 @@ CREATE TRIGGER coaches_readonly_when_completed
     FOR EACH ROW EXECUTE FUNCTION public.season_rows_readonly_when_completed();
 
 -- The schedules of a completed season, by the same rule. A row's season is its team's division's
--- (a team has no season column), or `practice_exceptions.season_settings_id`. An update is judged on
+-- (a team has no season column), or `season_settings_id` on `practice_exceptions` and `schedule_tbd`. An update is judged on
 -- the old row and the new, so a row cannot be moved out of a completed season either.
 CREATE FUNCTION public.season_schedule_readonly_when_completed()
 RETURNS trigger
@@ -527,7 +528,7 @@ BEGIN
     END IF;
     FOR v_pass IN 1 .. CASE WHEN TG_OP = 'UPDATE' THEN 2 ELSE 1 END LOOP
         v_row := to_jsonb(CASE WHEN TG_OP = 'DELETE' OR v_pass = 2 THEN OLD ELSE NEW END);
-        IF TG_TABLE_NAME = 'practice_exceptions' THEN
+        IF TG_TABLE_NAME IN ('practice_exceptions', 'schedule_tbd') THEN
             v_season := (v_row ->> 'season_settings_id')::uuid;
         ELSE
             IF TG_TABLE_NAME = 'teams' THEN
@@ -566,6 +567,9 @@ CREATE TRIGGER team_coach_assignments_readonly_when_completed
 CREATE TRIGGER practice_assignments_readonly_when_completed
     BEFORE INSERT OR UPDATE OR DELETE ON public.practice_assignments
     FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER schedule_tbd_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.schedule_tbd
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
 CREATE TRIGGER practice_exceptions_readonly_when_completed
     BEFORE INSERT OR UPDATE OR DELETE ON public.practice_exceptions
     FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
@@ -575,7 +579,7 @@ CREATE TRIGGER game_assignments_readonly_when_completed
 
 REVOKE ALL ON FUNCTION public.season_schedule_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS
-    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions and game_assignments: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261109010000.';
+    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments and schedule_tbd: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261109010000.';
 
 REVOKE ALL ON FUNCTION public.season_rows_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_rows_readonly_when_completed() IS
@@ -2149,7 +2153,7 @@ BEGIN
                    ('teams_readonly_when_completed'), ('team_players_readonly_when_completed'),
                    ('team_coach_assignments_readonly_when_completed'),
                    ('practice_assignments_readonly_when_completed'),
-                   ('practice_exceptions_readonly_when_completed'),
+                   ('practice_exceptions_readonly_when_completed'), ('schedule_tbd_readonly_when_completed'),
                    ('game_assignments_readonly_when_completed')) AS t(name)
      WHERE NOT EXISTS (SELECT 1 FROM pg_trigger g
                         WHERE g.tgname = t.name AND NOT g.tgisinternal AND g.tgenabled = 'O');

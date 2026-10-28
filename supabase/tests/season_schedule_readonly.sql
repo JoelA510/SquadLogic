@@ -5,6 +5,7 @@
 -- the team RPCs are exercised on the completed season and, with the same shape, on the active one;
 -- every table is also written directly. A call with no signed-in user (the retention job) and the
 -- cascade of a deleted organization still reach the rows.
+-- (schedule_tbd, the TIME TBD list of 20261108020000, is the seventh table.)
 -- Season O is Org A's "old" season: it is seeded and scheduled while a draft, then completed.
 
 BEGIN;
@@ -12,7 +13,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(48);
+SELECT plan(57);
 
 CREATE FUNCTION pg_temp.err(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
 DECLARE s text; d text;
@@ -120,11 +121,16 @@ SELECT 'a1111111-1111-1111-1111-0000000ff1e4', 'a1111111-1111-1111-1111-11111111
 SELECT is((SELECT count(*)::int FROM public.practice_exceptions WHERE id IN ('a1111111-1111-1111-1111-0000000ff0e4', 'a1111111-1111-1111-1111-0000000ff1e4')), 2,
     'control: a TIME TBD exception was seeded for each season');
 SELECT cmp_ok((SELECT count(*)::int FROM public.game_assignments WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'), '>=', 2, 'and a game for each');
+-- The practice saves rebuilt each season's TIME TBD list (20261108020000): a team with no practice has a row.
+SELECT cmp_ok((SELECT count(*)::int FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111100ff'), '>=', 1, 'and a TIME TBD row for the old season');
+SELECT cmp_ok((SELECT count(*)::int FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-111111111aaa'), '>=', 1, 'and for the active one');
 CREATE TEMP TABLE ids ON COMMIT DROP AS
     SELECT (SELECT id FROM public.practice_assignments WHERE team_id = 'a1111111-1111-1111-1111-0000000ff001' LIMIT 1) AS old_pa,
            (SELECT id FROM public.practice_assignments WHERE team_id = 'aaaaaaaa-0000-0000-0000-000000000001' LIMIT 1) AS live_pa,
            (SELECT id FROM public.game_assignments WHERE home_team_id = 'a1111111-1111-1111-1111-0000000ff001' LIMIT 1) AS old_ga,
-           (SELECT id FROM public.game_assignments WHERE home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001' LIMIT 1) AS live_ga;
+           (SELECT id FROM public.game_assignments WHERE home_team_id = 'aaaaaaaa-0000-0000-0000-000000000001' LIMIT 1) AS live_ga,
+           (SELECT id FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111100ff' LIMIT 1) AS old_tbd,
+           (SELECT id FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-111111111aaa' LIMIT 1) AS live_tbd;
 GRANT SELECT ON ids TO PUBLIC;
 
 -- The old season is now history.
@@ -205,6 +211,26 @@ SELECT is(pg_temp.err($$UPDATE public.teams SET notes = 'live' WHERE id = 'aaaaa
 SELECT is(pg_temp.err($$UPDATE public.practice_exceptions SET tbd_reason = 'live' WHERE id = 'a1111111-1111-1111-1111-0000000ff1e4'$$),
     'no error', 'and its TIME TBD exception');
 
+-- The TIME TBD list (schedule_tbd): rows of a completed season are history too.
+SELECT is(pg_temp.err(format($$UPDATE public.schedule_tbd SET reason = 'coach-preference' WHERE id = %L$$, (SELECT old_tbd FROM ids))),
+    '22023:season_completed', 'schedule_tbd: an update of a completed season''s row is refused');
+SELECT is(pg_temp.err(format($$DELETE FROM public.schedule_tbd WHERE id = %L$$, (SELECT old_tbd FROM ids))),
+    '22023:season_completed', 'a delete');
+SELECT is(pg_temp.err($$INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, team_id, missing_count, reason)
+        VALUES ('a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100ff', 'practice',
+                'a1111111-1111-1111-1111-1111111d0ff1', 'a1111111-1111-1111-1111-0000000ff001', 1, 'not-scheduled-yet')$$),
+    '22023:season_completed', 'an insert');
+SELECT is(pg_temp.err(format($$UPDATE public.schedule_tbd SET reason = 'coach-preference' WHERE id = %L$$, (SELECT live_tbd FROM ids))),
+    'no error', 'control: the active season''s row takes the same update');
+-- The refresh rebuilds a season's practice rows (delete and insert): refused for a completed season that has rows,
+-- allowed for the active one.
+SET LOCAL role = 'authenticated';
+SELECT is(pg_temp.err($$SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-1111111100ff')$$),
+    '22023:season_completed', 'refresh_schedule_tbd_practices is refused for the completed season');
+SELECT is(pg_temp.err($$SELECT public.refresh_schedule_tbd_practices('a1111111-1111-1111-1111-111111111aaa')$$),
+    'no error', 'and allowed for the active one');
+RESET role;
+
 -- ── Who is exempt ─────────────────────────────────────────────────────────
 SET LOCAL "request.jwt.claims" TO '{}';
 SELECT is(pg_temp.err($$UPDATE public.teams SET notes = 'retention' WHERE id = 'a1111111-1111-1111-1111-0000000ff001'$$),
@@ -213,6 +239,8 @@ SELECT is(pg_temp.err($$DELETE FROM public.practice_exceptions WHERE id = 'a1111
     'no error', 'TIME TBD exceptions too');
 SELECT is(pg_temp.err($$DELETE FROM public.practice_assignments WHERE team_id = 'a1111111-1111-1111-1111-0000000ff001'$$),
     'no error', 'and practice assignments');
+SELECT is(pg_temp.err($$DELETE FROM public.schedule_tbd WHERE season_settings_id = 'a1111111-1111-1111-1111-1111111100ff'$$),
+    'no error', 'and its TIME TBD rows');
 
 -- The cascade of a deleted organization is not blocked by a completed season.
 INSERT INTO public.organizations (id, name, slug) VALUES ('d4444444-4444-4444-4444-444444444444', 'Org D', 'org-d-readonly');
@@ -239,8 +267,8 @@ SELECT is(
     (SELECT array_agg(c.relname::text ORDER BY c.relname::text) FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
       WHERE g.tgname LIKE '%\_readonly\_when\_completed' AND NOT g.tgisinternal AND g.tgenabled = 'O'
         AND g.tgfoid = 'public.season_schedule_readonly_when_completed()'::regprocedure),
-    ARRAY['game_assignments', 'practice_assignments', 'practice_exceptions', 'team_coach_assignments', 'team_players', 'teams'],
-    'the six schedule tables carry the trigger, enabled');
+    ARRAY['game_assignments', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
+    'the seven schedule tables carry the trigger, enabled');
 SELECT is(has_function_privilege('authenticated', 'public.season_schedule_readonly_when_completed()', 'EXECUTE')
           OR has_function_privilege('anon', 'public.season_schedule_readonly_when_completed()', 'EXECUTE'), false,
     'and the trigger function is nobody''s to call');

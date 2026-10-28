@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGE_CUTOFF_MODES,
+  birthDateAge,
   cohortWindow,
   computeAgeGroup,
   computeAgeNumber,
@@ -222,6 +223,24 @@ describe('a division window takes every player born in it as that division', () 
     expect(importNaturalAge({ ...custom, ageGroup: '5', dob: 'not a date', divisions: [u4] })).toBe(
       5
     );
+  });
+
+  it('is one rule: the import, the program grouping and play-up count the same age', () => {
+    const season = { seasonYear: 2026, cutoffMode: 'school_year_aug_jul' };
+    for (const dob of ['2024-03-15', '2024-01-01', '2024-07-31', '2023-12-31', '2024-08-01']) {
+      const imported = importNaturalAge({ ...season, dob, divisions: [u4] });
+      expect(birthDateAge(dob, 2026, 'school_year_aug_jul', undefined, [u4]), dob).toBe(imported);
+      expect(computeAgeGroup({ dob, ...season, divisions: [u4] })?.ageNumber, dob).toBe(imported);
+      expect(
+        resolveNaturalAge({ dob }, 2026, 'school_year_aug_jul', { divisions: [u4] }),
+        dob
+      ).toBe(imported);
+    }
+    // Without the division the grouping falls back to the cutoff alone.
+    expect(computeAgeGroup({ dob: '2024-03-15', ...season })?.ageGroup).toBe('U2');
+    expect(computeAgeGroup({ dob: '2024-03-15', ...season, divisions: [u4] })?.ageGroup).toBe('U4');
+    expect(birthDateAge('not a date', 2026, 'birth_year', undefined, [u4])).toBeNull();
+    expect(birthDateAge('2024-03-15', Number.NaN, 'birth_year', undefined, [u4])).toBeNull();
   });
 
   it('is what play-up counts for a player the Teams page knows only by birth date', () => {

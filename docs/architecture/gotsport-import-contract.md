@@ -258,8 +258,9 @@ is at hand: the import counts a birth date inside a division's window as that
 division's age, brought into its band (`min_age`/`max_age`, else the U-numbers in
 its name), so a U4 that also takes older 2-year-olds counts them as 4; a date two
 windows hold takes the lower age, and a window with no readable band is ignored.
-The same rule counts the birth dates the Teams page keeps for the import
-session (`resolveNaturalAge`, `applyPlayUpEligibility`). Otherwise the band is
+The same rule (`birthDateAge`) counts the birth dates the Teams page keeps for
+the import session: play-up (`resolveNaturalAge`, `applyPlayUpEligibility`) and
+the program grouping (`computeAgeGroup`, `useTeamAnalysis`). Otherwise the band is
 computed from the division's `min_age`/`max_age` (which support the pilot's
 single-year and multi-year bands, e.g. U11–U12).
 

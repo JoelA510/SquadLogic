@@ -4,7 +4,19 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { logger } from '../lib/logger.js';
 import { computeAgeGroup } from '@squadlogic/core/ageGroups.js';
 
-export function useTeamAnalysis() {
+/** @type {Array<Object>} */
+const EMPTY_DIVISIONS = [];
+
+/**
+ * Programs from the imported rows' birth dates, grouped by the age group the season's rule gives
+ * them (`computeAgeGroup`, the rule the import and the play-up use): the school year, the calendar
+ * year or the custom cutoff day, and a division's own birth-date window.
+ *
+ * @param {{ divisions?: Array<Object> }} [options] - the season's divisions (their `birthdate_start`
+ *   and `birthdate_end` window and age band); a birth date inside one's window counts as that
+ *   division's age
+ */
+export function useTeamAnalysis({ divisions = EMPTY_DIVISIONS } = {}) {
   const { importedPlayers } = useImport();
   const { currentOrganization, currentSeasonSetting } = useOrganization();
   const [configs, setConfigs] = useState({}); // { programId: { targetTeamSize: 10, ... } }
@@ -43,6 +55,7 @@ export function useTeamAnalysis() {
           cutoffMode: currentSeasonSetting?.age_cutoff_mode,
           cutoffMonth: currentSeasonSetting?.age_cutoff_month,
           cutoffDay: currentSeasonSetting?.age_cutoff_day,
+          divisions,
         });
         if (!group) {
           errors.push({
@@ -81,6 +94,7 @@ export function useTeamAnalysis() {
       currentSeasonSetting?.age_cutoff_mode,
       currentSeasonSetting?.age_cutoff_month,
       currentSeasonSetting?.age_cutoff_day,
+      divisions,
     ]
   );
 

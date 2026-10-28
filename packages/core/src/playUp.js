@@ -20,10 +20,9 @@
 
 import {
   classifyPlacement,
-  computeAgeNumber,
+  birthDateAge,
   normalizeDivisionAgeBounds,
   parseGenderFromName,
-  windowedAgeNumber,
 } from './ageGroups.js';
 import { getCanonicalBuddyId } from './buddyLinking.js';
 
@@ -187,12 +186,13 @@ export function resolveNaturalAge(player, seasonYear, cutoffMode, rule = {}) {
     if (Number.isFinite(num)) return num;
   }
   const dob = player?.dob ?? player?.date_of_birth ?? player?.Birthdate ?? player?.birthdate;
-  const standard = computeAgeNumber(dob, seasonYear, cutoffMode, {
-    month: rule.cutoffMonth,
-    day: rule.cutoffDay,
-  });
-  if (standard === null) return null;
-  return windowedAgeNumber(dob, standard, rule.divisions) ?? standard;
+  return birthDateAge(
+    dob,
+    seasonYear,
+    cutoffMode,
+    { month: rule.cutoffMonth, day: rule.cutoffDay },
+    rule.divisions
+  );
 }
 
 function playerName(player) {

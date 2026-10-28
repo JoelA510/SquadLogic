@@ -164,6 +164,26 @@ export function windowedAgeNumber(dob, standardAge, divisions) {
 }
 
 /**
+ * The U-number a birth date has in a season: the age the season's cutoff gives, brought into the
+ * band of a division whose birth-date window holds the date (`windowedAgeNumber`). The one rule the
+ * import (`importNaturalAge`), the Teams page's play-up (`resolveNaturalAge`) and its program
+ * grouping (`computeAgeGroup`) all use; the Edge twin is `importNaturalAge` in
+ * `supabase/functions/_shared/natural-age.ts`.
+ *
+ * @param {Date|string|null|undefined} dob
+ * @param {number} seasonYear
+ * @param {string|null|undefined} cutoffMode
+ * @param {{ month?: unknown, day?: unknown }} [cutoff] - the `custom` mode's cutoff day
+ * @param {Array<Object>|null} [divisions] - the season's divisions (their birth-date windows and bands)
+ * @returns {number|null} null when the date is unparseable or the year is not a number
+ */
+export function birthDateAge(dob, seasonYear, cutoffMode, cutoff, divisions) {
+  const standard = computeAgeNumber(/** @type {any} */ (dob), seasonYear, cutoffMode, cutoff);
+  if (standard === null) return null;
+  return windowedAgeNumber(/** @type {any} */ (dob), standard, divisions) ?? standard;
+}
+
+/**
  * The natural age an import stores for a player (admin-focus plan R5): the one computed from the
  * file's birth date with the season's cutoff and its divisions' birthdate windows, else the age
  * group the export states. A birth date
@@ -190,13 +210,18 @@ export function importNaturalAge({
   divisions,
 } = {}) {
   if (Number.isFinite(seasonYear)) {
-    const standard = computeAgeNumber(/** @type {any} */ (dob), Number(seasonYear), cutoffMode, {
-      month: cutoffMonth,
-      day: cutoffDay,
-    });
-    const windowed =
-      standard === null ? null : windowedAgeNumber(/** @type {any} */ (dob), standard, divisions);
-    const computed = storableNaturalAge(windowed ?? standard);
+    const computed = storableNaturalAge(
+      birthDateAge(
+        /** @type {any} */ (dob),
+        Number(seasonYear),
+        cutoffMode,
+        {
+          month: cutoffMonth,
+          day: cutoffDay,
+        },
+        divisions
+      )
+    );
     if (computed !== null) return computed;
   }
   const text = ageGroup === null || ageGroup === undefined ? '' : String(ageGroup).trim();
@@ -274,11 +299,20 @@ export function divisionBirthWindow(minAge, maxAge, seasonYear, cutoffMode, cuto
  * @param {string} [params.cutoffMode]
  * @param {number|null} [params.cutoffMonth] - the `custom` mode's cutoff month
  * @param {number|null} [params.cutoffDay] - and day
+ * @param {Array<Object>|null} [params.divisions] - the season's divisions: a birth date in one's
+ *   birth-date window is that division's age (`birthDateAge`)
  * @returns {{ ageNumber: number, ageGroup: string, cohortStart: string, cohortEnd: string }|null}
  */
-export function computeAgeGroup({ dob, seasonYear, cutoffMode, cutoffMonth, cutoffDay }) {
+export function computeAgeGroup({
+  dob,
+  seasonYear,
+  cutoffMode,
+  cutoffMonth,
+  cutoffDay,
+  divisions,
+}) {
   const cutoff = { month: cutoffMonth, day: cutoffDay };
-  const ageNumber = computeAgeNumber(dob, seasonYear, cutoffMode, cutoff);
+  const ageNumber = birthDateAge(dob, seasonYear, cutoffMode, cutoff, divisions);
   if (ageNumber === null) return null;
   const { start, end } = cohortWindow(ageNumber, seasonYear, cutoffMode, cutoff);
   return {

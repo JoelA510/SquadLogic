@@ -143,6 +143,9 @@ function resolveSameSaveExceptions({ assignments, exceptions, slots }) {
  * @param {Array<{teamId: any, slotId: any, source?: string}>} params.assignments
  *   The assignments being persisted, in persistence shape.
  * @param {Array<{teamId: any, reason?: string, target?: number}>} [params.unassigned]
+ * @param {Array<string>} [params.noPracticeTeamIds] Teams whose division gives no practice and that
+ *   hold none (the function's `practices.noPractices`): they need nothing, so they are no shortfall,
+ *   not unassigned and not in the readiness counts.
  *   Manual-follow-up entries from the scheduler, before filtering.
  * @param {Array<Object>} params.teams - Scheduler teams (the roster).
  * @param {Array<Object>} params.slots - Scheduler slots.
@@ -174,6 +177,7 @@ export function buildPracticeRunResults({
   timezone,
   edgeEvaluation = null,
   optimization = null,
+  noPracticeTeamIds = [],
 }) {
   const appliedAssignments = Array.isArray(assignments) ? assignments : [];
   const appliedByTeam = new Map();
@@ -181,10 +185,20 @@ export function buildPracticeRunResults({
     const id = String(assignment?.teamId);
     appliedByTeam.set(id, (appliedByTeam.get(id) ?? 0) + 1);
   }
+  // A team whose division gives no practice needs nothing. One that nevertheless holds an applied
+  // row stays in the roster (it has a practice).
+  const noPractice = new Set(
+    (Array.isArray(noPracticeTeamIds) ? noPracticeTeamIds : []).map(String)
+  );
+  const rosterTeams = (Array.isArray(teams) ? teams : []).filter(
+    (team) => !noPractice.has(String(team?.id)) || appliedByTeam.has(String(team?.id))
+  );
   // Per team, how many entries of a team that wants several practices a week are still wanted.
   const keptOfTeam = new Map();
   const stillUnassigned = (Array.isArray(unassigned) ? unassigned : []).filter((entry) => {
     if (!entry) return false;
+    if (noPractice.has(String(entry.teamId)) && !appliedByTeam.has(String(entry.teamId)))
+      return false;
     const teamId = String(entry.teamId);
     const applied = appliedByTeam.get(teamId) ?? 0;
     const target = Number.isInteger(entry.target) && entry.target > 1 ? entry.target : 1;
@@ -255,7 +269,7 @@ export function buildPracticeRunResults({
     const report = evaluatePracticeSchedule({
       assignments: sameSave ? sameSave.assignments : appliedAssignments,
       unassigned: teamLevelUnassigned,
-      teams: Array.isArray(teams) ? teams : [],
+      teams: rosterTeams,
       slots: Array.isArray(slots) ? slots : [],
       exceptions: sameSave ? [...(exceptions ?? []), ...sameSave.exceptions] : exceptions,
       schoolDayEnd,

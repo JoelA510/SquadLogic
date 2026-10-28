@@ -25,7 +25,7 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
  *   and flagged, 2026-10-27); `effectiveDateRange` is the range the run judged it on (M4.8).
  * @property {Array<Object>} unassigned One entry per practice not placed, each with its `reason`
  *   (and `unitId` and `target` for a team whose division wants several a week).
- * @property {{ teams: Array<{ teamId: string, target: number, held: number, placed: number, missing: number }>, overTarget: Array<{ teamId: string, target: number, held: number }> }|null} [practices]
+ * @property {{ teams: Array<{ teamId: string, target: number, held: number, placed: number, missing: number }>, overTarget: Array<{ teamId: string, target: number, held: number }>, noPractices?: string[] }|null} [practices]
  *   Per team that wants several practices a week: how many it holds, was given and is missing;
  *   and the teams holding more than their division's count now. `null` from a function deployed before it.
  * @property {Object} evaluation

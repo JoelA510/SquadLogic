@@ -1034,7 +1034,13 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         // and is still missing; and the teams holding more rows than their division's count (the
         // count was lowered below saved rows: the rows stay, decision 10). `unassigned` above has
         // one entry per missing practice.
-        practices: { teams: practiceTeams, overTarget: classification.overTarget },
+        practices: {
+          teams: practiceTeams,
+          overTarget: classification.overTarget,
+          // Teams whose division gives no practice and that hold none: nothing to place, nothing
+          // missing. The page leaves them out of the run's report and the readiness counts.
+          noPractices: classification.noPractices,
+        },
         // M4.8 Q7: the date every new placement above is live from. The page
         // writes each one as `[max(slot first date, liveFrom), slot end]`, so
         // the range saved is the range this run judged, even across midnight.

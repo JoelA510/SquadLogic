@@ -1357,6 +1357,7 @@ export default function PracticeSchedulingPage() {
       assignments: persistenceAssignments,
       unassigned: autoScheduler.result?.unassigned ?? [],
       teams: schedulerTeams,
+      noPracticeTeamIds: autoScheduler.result?.practices?.noPractices ?? [],
       slots: schedulerSlots.map((slot) => ({ ...slot, ...slotDating(slot) })),
       // Unread is not none: without a complete read the run records no
       // metrics and the Apply status says why (`metricsUnavailable`).

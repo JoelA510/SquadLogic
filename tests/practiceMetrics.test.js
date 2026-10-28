@@ -1320,3 +1320,38 @@ test('a team that wants one practice a week is filtered as it always was', () =>
   assert.deepEqual(results.unassigned, [{ teamId: 'team-4', reason: 'no-slot-available' }]);
   assert.equal('practiceShortfall' in results, false);
 });
+
+test('a team whose division gives no practice is no shortfall: not unassigned, not in the roster counts', () => {
+  const run = (noPracticeTeamIds, assignments = [{ teamId: 'team-2', slotId: 'slot-wed' }]) =>
+    buildPracticeRunResults({
+      assignments,
+      unassigned: [],
+      teams: SAMPLE_TEAMS,
+      slots: SAMPLE_SLOTS,
+      exceptions: [],
+      schoolDayEnd: undefined,
+      timezone: 'UTC',
+      noPracticeTeamIds,
+    });
+  const all = run([]);
+  const skipped = run(['team-1', 'team-3']);
+  // Control: without the list the same teams are counted as needing a practice.
+  assert.equal(all.summary.totalTeams, SAMPLE_TEAMS.length);
+  assert.equal(skipped.summary.totalTeams, SAMPLE_TEAMS.length - 2);
+  assert.equal(skipped.summary.unassignedTeams, all.summary.unassignedTeams - 2);
+  // A team that nevertheless holds an applied row stays counted.
+  const held = run(['team-2']);
+  assert.equal(held.summary.totalTeams, SAMPLE_TEAMS.length);
+  // And its stale unassigned entry cannot put it back in the report.
+  const withEntry = buildPracticeRunResults({
+    assignments: [],
+    unassigned: [{ teamId: 'team-1', reason: 'no-slot-available' }],
+    teams: SAMPLE_TEAMS,
+    slots: SAMPLE_SLOTS,
+    exceptions: [],
+    schoolDayEnd: undefined,
+    timezone: 'UTC',
+    noPracticeTeamIds: ['team-1'],
+  });
+  assert.deepEqual(withEntry.unassigned, []);
+});

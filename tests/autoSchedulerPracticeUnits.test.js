@@ -212,6 +212,31 @@ describe('two practices a week land on two different weekdays', () => {
     assert.deepEqual(result.unassigned, []);
   });
 
+  it('a team in a division at 0 practices needs nothing: no shortfall, not in coverage or the report', async () => {
+    const slots = [slot('mon', 0, 17), slot('tue', 1, 17)];
+    const a = team('a', 'c-a');
+    const z = team('z', 'c-z', { practicesPerWeek: 0 });
+    const withZero = await run({ teams: [a, z], slots, placeable: ['a'], unitsNeeded: { a: 1 } });
+    const alone = await run({ teams: [a], slots, placeable: ['a'], unitsNeeded: { a: 1 } });
+    assert.deepEqual(withZero.unassigned, []);
+    // The roster the report counts is the teams that want a practice: a complete schedule is
+    // complete, not 50% because z has none.
+    const { summary } = withZero.evaluation;
+    assert.equal(summary.totalTeams, 1);
+    assert.equal(summary.unassignedTeams, 0);
+    assert.equal(withZero.bestScore, alone.bestScore);
+    // Control: the same team at the default count, and unplaced, IS counted (the filter is the
+    // setting, not "teams with no row").
+    const unplaced = await run({
+      teams: [a, team('y', 'c-y')],
+      slots: [slot('only', 0, 17)],
+      placeable: ['a', 'y'],
+      unitsNeeded: { a: 1, y: 1 },
+    });
+    assert.equal(unplaced.evaluation.summary.totalTeams, 2);
+    assert.equal(unplaced.evaluation.summary.unassignedTeams, 1);
+  });
+
   it('outsideHoldsFor dates the rows outside the run for teams needing several, and names the rest', () => {
     const rows = [
       { id: 'r1', teamId: 'a', slotId: 'in-run', effectiveDateRange: null, assignedVia: 'auto' },
@@ -621,7 +646,7 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
   it('answers the shortfall per team and the over-target teams, from the plan’s roster', () => {
     assert.match(
       source,
-      /practices: \{ teams: practiceTeams, overTarget: classification\.overTarget \},/
+      /practices: \{\s*teams: practiceTeams,\s*overTarget: classification\.overTarget,/
     );
     assert.match(source, /Object\.keys\(classification\.targets\)/);
   });

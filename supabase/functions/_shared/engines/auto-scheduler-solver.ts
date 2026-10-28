@@ -644,12 +644,21 @@ function scoreSchedule(
       return { ...p, effectiveDateRange: placementRange(slot, liveFrom, p.effectiveUntil) };
     }),
   ];
+  // **A team whose division gives no practice, and that holds none, needs nothing** (Phase D PR B):
+  // it is not a shortfall, so it is not in the evaluation's roster, and neither the coverage below
+  // nor the report counts it unassigned. One that holds a row anyway is still counted.
+  const heldTeamIds = new Set<string>();
+  for (const row of base.inRun) heldTeamIds.add(row.teamId);
+  for (const p of placements) heldTeamIds.add(p.teamId);
+  const rosterTeams = teams.filter(
+    (team) => (team.practicesPerWeek ?? 1) !== 0 || heldTeamIds.has(team.id)
+  );
   const evaluation = evaluatePracticeSchedule({
     assignments: assignments as unknown as Parameters<
       typeof evaluatePracticeSchedule
     >[0]['assignments'],
     unassigned,
-    teams: teams as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['teams'],
+    teams: rosterTeams as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['teams'],
     slots: slots.map(
       ({ id, day, start, end, capacity, firstDate, lastDate, startTime, endTime }) => ({
         id,

@@ -197,4 +197,38 @@ describe('the master export lists what is not scheduled yet', () => {
     );
     expect(rpc).not.toHaveBeenCalled();
   });
+
+  it('a season with only TIME TBD items and nothing placed still makes the files', async () => {
+    seedMockDb({ schedule_tbd: [TBD_ROWS[1]] });
+    render(<OutputGenerationPanel teams={teams} supabaseClient={mockSupabase} />);
+    const button = screen.getByRole('button', { name: 'Generate CSVs' });
+    // The empty-state gate waits for the list: once read, one item is something to export.
+    await waitFor(() => expect(screen.queryByTestId('csv-empty-reason')).toBeNull());
+    expect(button).not.toHaveAttribute('aria-disabled');
+    fireEvent.click(button);
+    const status = await screen.findByTestId('output-generation-status');
+    await waitFor(() => expect(status).toHaveTextContent('CSVs generated successfully.'));
+    expect(status).toHaveTextContent('1 game not scheduled yet is in the files as TIME TBD');
+    expect(screen.getByText('Master Schedule: 2 rows')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Download Master CSV' }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    const csv = await saved[0].blob.text();
+    const body = csv.split('\n').slice(1);
+    expect(body).toHaveLength(2);
+    expect(body.every((line) => line.includes('TIME TBD,,LOCATION TBD'))).toBe(true);
+  });
+
+  it('with nothing placed and nothing on the list there is still nothing to export', async () => {
+    render(<OutputGenerationPanel teams={teams} supabaseClient={mockSupabase} />);
+    expect(await screen.findByTestId('csv-empty-reason')).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Generate CSVs' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+        'Nothing to export yet'
+      )
+    );
+    expect(screen.queryByText('Generated Files')).toBeNull();
+  });
 });

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   practiceChangesNoteOf,
   readUnshownPracticeChanges,
@@ -537,6 +537,28 @@ export default function OutputGenerationPanel({
   const { user } = useAuth() || {};
   const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
   const seasonSettingsId = currentSeasonSetting?.id ?? null;
+  // How many TIME TBD items the season has, as read when the panel opened (or the season changed).
+  const [tbdPreview, setTbdPreview] = useState({ status: 'idle', count: 0 });
+  useEffect(() => {
+    if (!seasonSettingsId) {
+      setTbdPreview({ status: 'idle', count: 0 });
+      return undefined;
+    }
+    let current = true;
+    setTbdPreview({ status: 'loading', count: 0 });
+    readScheduleTbd(supabaseClient, seasonSettingsId).then(
+      (list) => {
+        if (current) setTbdPreview({ status: 'ready', count: list.items.length });
+      },
+      (err) => {
+        logger.error('TIME TBD read error:', err);
+        if (current) setTbdPreview({ status: 'error', count: 0 });
+      }
+    );
+    return () => {
+      current = false;
+    };
+  }, [seasonSettingsId, supabaseClient]);
   // The TIME TBD rows the files hold, as `get_schedule_tbd` returned them (null: none generated).
   const [tbdRows, setTbdRows] = useState(/** @type {Array<Record<string, any>> | null} */ (null));
   // A demo uploads nothing (the server refuses the folder, D3); downloads still work.
@@ -564,8 +586,16 @@ export default function OutputGenerationPanel({
   const csvBlocked = csvBlockedBy.length > 0;
   const emailsBlocked = emailsBlockedBy.length > 0;
   // Every source read cleanly (`csvBlocked` is false) and none holds a practice or a game.
+  // The TIME TBD list counts as something to export: a season with a game the scheduler could not
+  // place and nothing placed yet still has files to make (its rows). The list is read when the panel
+  // opens, so this gate can say so; while it is still being read, or when it could not be read, the
+  // panel does not claim there is nothing (Generate reads it again and says which).
   const nothingScheduled =
-    !csvBlocked && (practiceAssignments?.length ?? 0) === 0 && (gameAssignments?.length ?? 0) === 0;
+    !csvBlocked &&
+    (practiceAssignments?.length ?? 0) === 0 &&
+    (gameAssignments?.length ?? 0) === 0 &&
+    (tbdPreview.status === 'idle' || tbdPreview.status === 'ready') &&
+    tbdPreview.count === 0;
   // "Not read yet" and "could not be read" are different sentences, and
   // telling an operator a read failed while it is merely slow is the same
   // class of false statement this gate exists to stop.
@@ -643,13 +673,6 @@ export default function OutputGenerationPanel({
 
   const handleGenerate = () => {
     if (csvBlocked) return;
-    // The guard is the code path, not the attribute: a header-only file is not an export.
-    if (nothingScheduled) {
-      setGenerated(null);
-      setStatus('idle');
-      setMessage(NOTHING_SCHEDULED_TEXT);
-      return;
-    }
     // An XLSX failure from the previous files is not about the next ones.
     setXlsxError(null);
     setStatus('generating');
@@ -675,6 +698,20 @@ export default function OutputGenerationPanel({
             );
             return;
           }
+        }
+        setTbdPreview({ status: 'ready', count: tbd.items.length });
+        // The guard is the code path, not the attribute: a header-only file is not an export. Nothing
+        // placed and nothing on the TIME TBD list is nothing to make files from; a list with items is.
+        if (
+          (practiceAssignments?.length ?? 0) === 0 &&
+          (gameAssignments?.length ?? 0) === 0 &&
+          tbd.items.length === 0
+        ) {
+          setGenerated(null);
+          setTbdRows(null);
+          setStatus('idle');
+          setMessage(NOTHING_SCHEDULED_TEXT);
+          return;
         }
         const exportPayload = buildExportPayload({
           teams,

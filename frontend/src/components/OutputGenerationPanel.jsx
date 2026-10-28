@@ -22,6 +22,8 @@ import {
   teamsWithUncorroboratedCoachIdentity,
 } from '@squadlogic/core/people/coachList.js';
 import { teamCoachFields, teamCoaches } from '../utils/teamCoaches.js';
+import { readScheduleTbd, scheduleTbdCounts, scheduleTbdNote } from '../utils/scheduleTbdClient.js';
+import { describeScheduleTbdReason } from '@squadlogic/core/scheduleTbd.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import {
@@ -206,11 +208,13 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
   const exportTeamIds = new Set(exportTeams.map((team) => String(team.id)));
   const practiceRows = Array.isArray(practiceAssignments) ? practiceAssignments : [];
   const gameRows = Array.isArray(gameAssignments) ? gameAssignments : [];
-  // An assignment with no time is not in the master files: `generateScheduleExports`
-  // requires a start and an end (GAP-16/17/28, `reserve/publication.js`). It is
-  // counted here and said beside the files (admin focus R7), never left out
-  // without a word. (A practice row with no team is not counted: it names no
-  // team to export it under, and is not a time question.)
+  // An assignment with a broken time (no start or end) is not in the master files:
+  // `generateScheduleExports` requires both for an assignment. It is counted here and said beside
+  // the files (admin focus R7), never left out without a word. This is only a row whose time is
+  // broken: a practice a team is short of and a game that could not be placed are not assignments
+  // at all, and are listed as TIME TBD rows from the `schedule_tbd` table (Phase D, E). (A practice
+  // row with no team is not counted: it names no team to export it under, and is not a time
+  // question.)
   const untimed = {
     practices: practiceRows.filter(
       (a) => a && getAssignmentTeamId(a) && !normalizePracticeForExport(a)
@@ -249,6 +253,22 @@ export function untimedAssignmentsNote(untimed) {
   ].filter(Boolean);
   if (parts.length === 0) return null;
   return `${parts.join(' and ')} with no start or end time are not in these files. The downloads on each team's page list that team's saved schedule, with every event that has no time marked TIME TBD and its reason.`;
+}
+
+/**
+ * One line of the TIME TBD list for an admin: who, how many or which week, and why, in words.
+ *
+ * @param {Record<string, any>} row - a `get_schedule_tbd` row
+ * @returns {string}
+ */
+export function scheduleTbdLine(row) {
+  const why = describeScheduleTbdReason(row.kind, row.reason);
+  const division = row.division_name ? ` (${row.division_name})` : '';
+  if (row.kind === 'game') {
+    return `${row.home_team_name ?? 'A team'} v ${row.away_team_name ?? 'a team'}, week ${row.week_index}${division}: ${why}`;
+  }
+  const count = row.missing_count ?? 1;
+  return `${row.team_name ?? 'A team'}${division}: ${count} practice${count === 1 ? '' : 's'} not scheduled: ${why}`;
 }
 
 /**
@@ -515,7 +535,10 @@ export default function OutputGenerationPanel({
     });
   };
   const { user } = useAuth() || {};
-  const { currentOrganization } = useOrganization() || {};
+  const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
+  const seasonSettingsId = currentSeasonSetting?.id ?? null;
+  // The TIME TBD rows the files hold, as `get_schedule_tbd` returned them (null: none generated).
+  const [tbdRows, setTbdRows] = useState(/** @type {Array<Record<string, any>> | null} */ (null));
   // A demo uploads nothing (the server refuses the folder, D3); downloads still work.
   const inDemo = isDemoOrganization(currentOrganization);
   const {
@@ -632,8 +655,27 @@ export default function OutputGenerationPanel({
     setStatus('generating');
     setMessage('Generating CSVs...');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
+        // The TIME TBD list (practices a team is short of, games not placed). Read first: a list
+        // that cannot be read stops the files, because files made without it would leave those
+        // practices and games out without a word.
+        let tbd = { rows: /** @type {Array<Record<string, any>>} */ ([]), items: [] };
+        if (seasonSettingsId) {
+          try {
+            tbd = await readScheduleTbd(supabaseClient, seasonSettingsId);
+          } catch (tbdErr) {
+            logger.error('TIME TBD read error:', tbdErr);
+            setGenerated(null);
+            setTbdRows(null);
+            clearPracticeChanges();
+            setStatus('error');
+            setMessage(
+              `Generation failed: the list of practices and games not scheduled yet could not be read (${tbdErr.message}), so files made now would leave them out. Reload the page to read again.`
+            );
+            return;
+          }
+        }
         const exportPayload = buildExportPayload({
           teams,
           teamSummary,
@@ -642,11 +684,13 @@ export default function OutputGenerationPanel({
         });
         if (
           exportPayload.practiceAssignments.length === 0 &&
-          exportPayload.gameAssignments.length === 0
+          exportPayload.gameAssignments.length === 0 &&
+          tbd.items.length === 0
         ) {
           // Assignments exist but none can be written (no start or end time, or no team on
           // the export): say which, rather than hand over a file of headers.
           setGenerated(null);
+          setTbdRows(null);
           clearPracticeChanges();
           setStatus('idle');
           setMessage(
@@ -663,8 +707,10 @@ export default function OutputGenerationPanel({
           teams: exportPayload.teams,
           practiceAssignments: exportPayload.practiceAssignments,
           gameAssignments: exportPayload.gameAssignments,
+          tbdItems: tbd.items,
         });
         setGenerated(exports);
+        setTbdRows(tbd.rows);
         // Counted over the rows the CSV holds, filtered exactly as
         // `buildExportPayload` filters them, never over rows it dropped.
         const exportTeamIds = new Set(exportPayload.teams.map((team) => String(team.id)));
@@ -700,6 +746,7 @@ export default function OutputGenerationPanel({
         setMessage(
           [
             'CSVs generated successfully.',
+            scheduleTbdNote(scheduleTbdCounts(tbd.items)),
             untimedAssignmentsNote(exportPayload.untimed),
             teamsWithDisagreement.length === 0
               ? null
@@ -714,6 +761,7 @@ export default function OutputGenerationPanel({
       } catch (err) {
         logger.error('Generation error:', err);
         setStatus('error');
+        setTbdRows(null);
         // A note from an earlier run describes an export that no longer exists.
         clearPracticeChanges();
         setMessage(`Generation failed: ${err.message}`);
@@ -1028,6 +1076,34 @@ export default function OutputGenerationPanel({
                 <div>Team Schedules: {generated.perTeam.length} files</div>
               </div>
             </div>
+          )}
+
+          {generated && !csvBlocked && tbdRows && tbdRows.length > 0 && (
+            <section
+              aria-labelledby="schedule-tbd-heading"
+              data-testid="schedule-tbd-list"
+              className="bg-bg-surface rounded-lg p-4 border border-border-subtle mt-2"
+            >
+              <h3 id="schedule-tbd-heading" className="text-sm font-medium text-text-primary mb-1">
+                Not scheduled yet: listed as TIME TBD
+              </h3>
+              <p className="text-xs text-text-muted mb-2">
+                These are in the master and team files with the time and the ground marked TBD, and
+                the reason in Notes.
+              </p>
+              {/* Focusable so a keyboard user can scroll a long list (axe: scrollable-region-focusable). */}
+              <ul
+                tabIndex={0}
+                aria-label="Practices and games not scheduled yet"
+                className="text-xs text-text-muted space-y-1 max-h-64 overflow-y-auto"
+              >
+                {tbdRows.map((row) => (
+                  <li key={row.id} data-testid="schedule-tbd-row">
+                    {scheduleTbdLine(row)}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
 
           <section

@@ -31,6 +31,7 @@ import {
   permitsUnlinkedBy,
 } from './mockFacilityPermits.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
+import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
 import { handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
@@ -2587,6 +2588,9 @@ export const mockSupabase = {
         if (!reads.error) saveDB(db);
         return reads;
       }
+      // The TIME TBD list (migration 20261107010000): the admin read, refusals included.
+      const tbd = handleScheduleTbdRpc(db, name, params, { isOrgAdmin });
+      if (tbd) return tbd;
       // Heat forecast settings (migration 20261006000000), refusals included.
       const heat = handleHeatSettingsRpc(db, name, params, { currentUserId });
       if (heat) {

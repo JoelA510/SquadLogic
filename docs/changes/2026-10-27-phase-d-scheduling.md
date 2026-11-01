@@ -565,6 +565,50 @@ Each PR runs the season fixture suite and the full Definition of Done.
 - **Not run:** the real-backend scenario (F2) needs the Supabase CLI and the edge runtime; it is written and
   statically reviewed.
 
+## Build notes: PR D (2026-11-01)
+
+- **Built:** D1 to D3 and the mock E2E, no migration. `auto-scheduler` gains `prepare` and `verify` (the
+  default `solve` is byte-for-byte what it was: a body with no `mode`, or an older function that strips it);
+  `frontend/src/workers/practiceOptimizer.worker.js`; `lib/practiceOptimizerClient.js`; the hook's browser
+  path with the server as the fallback; the panel's steps, Cancel and "ran in your browser / on the server".
+  The page (`PracticeSchedulingPage.jsx`) is not touched: the hook decides, so #680's page changes do not
+  collide with this.
+- **One input object.** `index.ts` builds the run's whole input once (`solverInput`, typed
+  `PracticeSolverInput`) and the three modes use it; step 7 (the data prepare) moved above the "started"
+  audit for that. Six tests that pinned the old call site by its text were re-aimed at the object.
+- **`verify`** is `verifyPracticePlacements` in the solver module, next to the search, so it uses the
+  search's own `buildLockedOccupancy`, `seat`, `explainUnplaced` and `scoreSchedule`. The rule behind
+  `admissible` is now `hardConstraintRefusal` (`practice-coaches.ts`), which names the rule it broke
+  (`reservation`, `length`, `no-live-date`, `capacity`, `coach-conflict`, `weekday`; `must-keep` from the
+  preference gate), and `checkHardConstraints` is that function compared with `null`: one rule, said two ways.
+  A proposal can also be malformed (`unknown-practice`, `unknown-slot`, `duplicate-practice`): it is reported
+  in `verified.refused` and costs no practice. Pinned to core's `VERIFY_REFUSAL_RULE` by
+  `tests/practiceUnplacedReasons.test.js`.
+- **The digest** is SHA-256 of the canonical JSON of the solver input, its organization and its season
+  (`solver-input.ts`: sorted object keys, map entries and set members; array order kept, since it is the
+  greedy seed's order). A preference verdict that says nothing is left out of the encoding (the solver
+  treats an absent one the same). It is compared with the server's own reload; the body's copy is never read.
+- **Departures from the text above.** (1) A refused placement's practice has `reason: 'verify-refused'` and a
+  `rule`; `verify-refused` is not on `schedule_tbd`'s closed reason list (changing it is a migration), so the
+  practice writer labels that team's TIME TBD row `not-scheduled-yet`, as it does for any reason off the
+  list. (2) Cancel is `Worker.terminate()`, not a message: the search has nothing to cooperate in, and a
+  terminated worker stops at once. (3) The plan's "16.1 KB gzip without zod" was true only because zod is
+  not in the worker: it is not shared with the page. The first build was 40.9 KB; two plain functions the
+  scoring engine imported from `schemas/scoring.ts` moved to `schemas/scoring-issues.ts` (no behaviour
+  change) and the worker is 15.5 KB. (4) The browser's search keeps the page's own iteration count (1,000;
+  150 in a demo) and swaps the 8 s (1 s) budget for the 20 s wall budget, so it finishes the search the
+  server would have if it had the CPU; on the fixtures here the climb never beat the greedy seed, so the
+  worker's answer is the server's whenever the server finishes. A deeper browser search (a higher count) is
+  a one-line change in `useAutoScheduler.js` and the owner's call. (5) A browser with no `Worker` reports
+  `ranNote: 'unavailable'`, so the panel says why the server ran. (6) An older function that has never heard
+  of `prepare` strips the key and runs a whole `solve`: the page takes that run as the answer. (7) The plan
+  names three fallbacks; there are four: a `prepare` that cannot write the input down (a value the encoding
+  refuses) answers 422 `SOLVER_INPUT_UNENCODABLE`, and the page runs the server's search, so a league the
+  encoding cannot describe is still scheduled. (8) A failed `prepare` is not reported as a run that may have
+  been recorded: it writes nothing.
+- **Not run:** the real-backend scenario (needs the Supabase CLI and the edge runtime); `verify` on the
+  platform's runtime (measured under Deno 2.9.6 only: `docs/operations/edge-function-budget.md`).
+
 ## Plan-change output
 
 Size: planned (PRs, migrations, the solver, RPC shapes, an Edge Function). Departures: none.

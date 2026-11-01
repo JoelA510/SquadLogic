@@ -163,13 +163,16 @@ describe('what the page sends to the auto-scheduler', () => {
     // survived. `useAutoScheduler` is the one writer of that fetch body.
     expect(hook).toContain('/auto-scheduler');
     // The BODY, not the file: a comment naming the field it no longer sends is
-    // the point of the comment. The `body: { … }` handed to `postPersistenceRequest`
-    // (which serialises it) is the one writer; its `label:` follows it.
-    const bodyStart = hook.indexOf('body: {');
+    // the point of the comment. The `requestBody` object is the one writer of the fields
+    // (`send` hands it, with a mode's own claims, to `postPersistenceRequest`, which
+    // serialises it); its closing brace ends it.
+    const bodyStart = hook.indexOf('const requestBody = {');
     expect(bodyStart).toBeGreaterThan(-1);
-    const bodyEnd = hook.indexOf('label:', bodyStart);
+    const bodyEnd = hook.indexOf('};', bodyStart);
     expect(bodyEnd).toBeGreaterThan(bodyStart);
     const body = hook.slice(bodyStart, bodyEnd);
+    // The mode and its claims are the only other things the hook adds, and `timezone` is neither.
+    expect(hook).toContain('body: { ...requestBody, ...extra }');
     expect(body).toContain('slots,');
     expect(body).not.toMatch(/^\s*timezone,\s*$/m);
     // Control: a key it DOES still send, so the regex is known to match.

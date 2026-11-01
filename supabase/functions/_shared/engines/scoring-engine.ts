@@ -5,7 +5,7 @@ import type {
   PracticeException,
   GameAssignment,
 } from '../schemas/scoring.ts';
-import { datedSlotsIssue, undatedExceptionsIssue } from '../schemas/scoring.ts';
+import { datedSlotsIssue, undatedExceptionsIssue } from '../schemas/scoring-issues.ts';
 import { conflictPairKey, listTeamCoachIds } from './practice-coaches.ts';
 import {
   LIVE_SPAN_STATUS,

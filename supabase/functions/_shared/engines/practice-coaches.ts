@@ -226,6 +226,30 @@ export function conflictPairKey(
 }
 
 /**
+ * The rule a NEW placement of `team` on `slot` breaks, or `null` when it is legal. One word per
+ * rule, the writer's own where the writer has one (`PRACTICE_WRITER_GATE_RULE` in core) so a
+ * refusal reads the same wherever it is made. {@link checkHardConstraints} is this function
+ * compared with `null`: the search, the browser run's verification (`verify` mode of the
+ * auto-scheduler) and the tests judge one rule.
+ */
+export const HARD_CONSTRAINT_RULE = Object.freeze({
+  /** A division reservation refuses the slot to the team (D2). */
+  RESERVATION: 'reservation',
+  /** The slot is not exactly the division's practice length (Phase D PR B). */
+  LENGTH: 'length',
+  /** The slot has no live date from today on (M4.8 Q3). */
+  NO_LIVE_DATE: 'no-live-date',
+  /** The slot's busiest live date would exceed its capacity. */
+  CAPACITY: 'capacity',
+  /** A coach of the team holds an overlapping window on a shared date. */
+  COACH_CONFLICT: 'coach-conflict',
+  /** The team already practises on that weekday on a shared date (Phase D PR B). */
+  WEEKDAY: 'weekday',
+} as const);
+
+export type HardConstraintRule = (typeof HARD_CONSTRAINT_RULE)[keyof typeof HARD_CONSTRAINT_RULE];
+
+/**
  * Whether a NEW placement of `team` on `slot` is legal (M4.8, plan §3.2). Refused when:
  *
  * 0. a division reservation refuses the slot to the team (D2, `reservationRefuses`), or the
@@ -258,25 +282,40 @@ export function checkHardConstraints(
   slotCapacity: Map<string, number>,
   teamHolds?: ReadonlyMap<string, readonly LiveDays[]>
 ): boolean {
-  if (reservationRefuses(team, slot)) return false;
-  if (practiceLengthRefuses(team, slot)) return false;
+  return (
+    hardConstraintRefusal(team, slot, coachAssignments, slotOccupants, slotCapacity, teamHolds) ===
+    null
+  );
+}
+
+/** The first rule that refuses the placement, in the order {@link checkHardConstraints} lists them. */
+export function hardConstraintRefusal(
+  team: PreparedTeam,
+  slot: DatedCandidate,
+  coachAssignments: Map<string, TimeWindow[]>,
+  slotOccupants: Map<string, LiveDays[]>,
+  slotCapacity: Map<string, number>,
+  teamHolds?: ReadonlyMap<string, readonly LiveDays[]>
+): HardConstraintRule | null {
+  if (reservationRefuses(team, slot)) return HARD_CONSTRAINT_RULE.RESERVATION;
+  if (practiceLengthRefuses(team, slot)) return HARD_CONSTRAINT_RULE.LENGTH;
   const span = slot.span;
-  if (span === null) return false;
+  if (span === null) return HARD_CONSTRAINT_RULE.NO_LIVE_DATE;
   const live: LiveDays[] = [span];
   for (const held of slotOccupants.get(slot.id) ?? []) {
     const first = Math.max(held.first, span.first);
     const last = Math.min(held.last, span.last);
     if (first <= last) live.push({ first, last });
   }
-  if (peakLiveCount(live) > (slotCapacity.get(slot.id) ?? 0)) return false;
+  if (peakLiveCount(live) > (slotCapacity.get(slot.id) ?? 0)) return HARD_CONSTRAINT_RULE.CAPACITY;
   for (const coachId of team.coachIds) {
     for (const held of coachAssignments.get(coachId) ?? []) {
       if (!(held.startSec < slot.endSec && slot.startSec < held.endSec)) continue;
-      if (sharedLiveDates(held, span).count > 0) return false;
+      if (sharedLiveDates(held, span).count > 0) return HARD_CONSTRAINT_RULE.COACH_CONFLICT;
     }
   }
   for (const held of teamHolds?.get(team.id) ?? []) {
-    if (sharedLiveDates(held, span).count > 0) return false;
+    if (sharedLiveDates(held, span).count > 0) return HARD_CONSTRAINT_RULE.WEEKDAY;
   }
-  return true;
+  return null;
 }

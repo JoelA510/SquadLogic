@@ -524,10 +524,13 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     path.join(process.cwd(), 'supabase/functions/auto-scheduler/index.ts'),
     'utf8'
   );
-  const runCall = source.slice(source.indexOf('await runPracticeOptimizer({'));
+  // The run's whole input is one object (Phase D PR D), which `solve`, `prepare` and `verify` share.
+  const solverInput = source.slice(source.indexOf('const solverInput: PracticeSolverInput'));
 
   it('hands the loaded relocations to the solver', () => {
-    assert.match(runCall.slice(0, 1500), /relocated: lock\.relocations,/);
+    assert.match(solverInput.slice(0, 1500), /relocated: lock\.relocations,/);
+    // ... and the solver is given that object, not a second assembly of it.
+    assert.match(source, /runPracticeOptimizer\(\{\s*\.\.\.solverInput,/);
   });
 
   it('audits and returns the relocations held and those outside the run', () => {

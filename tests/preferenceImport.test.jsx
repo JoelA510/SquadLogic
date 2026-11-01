@@ -746,7 +746,7 @@ describe('the panel', () => {
 
     it('the file control is emptied once a file is held, so fixing the file and choosing it again fires a change', async () => {
       renderPanel();
-      const input = screen.getByLabelText('Choose a CSV file');
+      const input = /** @type {HTMLInputElement} */ (screen.getByLabelText('Choose a CSV file'));
       choose(
         'too-many.csv',
         'Coach Email,Team,Days\ncasey@example.test,U10 Hawks,Tuesday,Thursday\n'

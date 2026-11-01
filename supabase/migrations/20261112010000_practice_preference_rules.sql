@@ -822,6 +822,9 @@ BEGIN
 END;
 $function$;
 
+COMMENT ON FUNCTION public.create_import_job(uuid, text, text, uuid) IS
+  'Admin-only: start an import job for the named season (none named: the organization''s active season), fixed now. A player, coach or practice preference import may name the active season or a draft; a field import only the active season; a completed season is refused (22023, season_completed). 20261112010000 (the practice_preferences type; 20261111010000 before it).';
+
 CREATE OR REPLACE FUNCTION public.mark_import_job_ready_to_apply(p_import_job_id uuid, p_import_type text, p_validation_errors jsonb DEFAULT '[]'::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql

@@ -1,4 +1,4 @@
-import { PLACEMENT, isEligibilityBlocked } from '@squadlogic/core/playUp.js';
+import { PLACEMENT, isEligibilityBlocked, isWaitlisted } from '@squadlogic/core/playUp.js';
 import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { getCanonicalBuddyId } from '@squadlogic/core/buddyLinking.js';
 import { isRosterPlayerRow, isUuid } from './teamReviewPersistence.js';
@@ -116,7 +116,7 @@ function indexRun(results) {
  *   reviewReason: string | null, naturalAge: number | null, coachId: string | null,
  *   coachWithoutTeam: { coachId: string, name: string | null } | null }} NotPlacedEntry
  * @typedef {{ playerId: string, name: string, teamName: string | null, placement: string | null,
- *   reviewReason: string | null }} NeedsReviewEntry
+ *   reviewReason: string | null, waitlisted: boolean }} NeedsReviewEntry
  * @typedef {{ playerId: string, name: string, teamName: string | null,
  *   placement: string | null }} UncheckedEntry
  * @typedef {{ coachId: string, name: string | null, together: boolean, children: Array<{
@@ -133,9 +133,10 @@ function indexRun(results) {
  * - **Not placed:** every player in `overflowByDivision`, whatever the reason: eligibility
  *   (`eligibility-blocked`) and room (capacity, a buddy's or coach's team) alike, each with its
  *   own reason, and a reason this page has no words for kept as its code.
- * - **Needs review:** `changeDiagnosticsByDivision[div].eligibilityHolds`, and any blocked player
- *   found on a current roster that the holds do not name (enumerated from the rosters, not from
- *   the holds alone).
+ * - **Needs review:** `changeDiagnosticsByDivision[div].eligibilityHolds`, and any blocked or
+ *   waitlisted player found on a current roster that the holds do not name (enumerated from the
+ *   rosters, not from the holds alone). A waitlisted entry (`waitlisted: true`) is a player who was
+ *   on a reviewed roster before they went on the waitlist: kept there, listed, never moved.
  * - **Eligibility not checked:** each placed player whose placement is not a passed check
  *   (`unknown`, an unrecognised value, or none recorded). Only said for a division whose
  *   generated rosters (`teamsByDivision`) hold player records; a run without them cannot tell.
@@ -243,6 +244,7 @@ export function summarizePlacementReview(results) {
         teamName: teamNameOf(teamId),
         placement: hold?.placement ?? null,
         reviewReason: hold?.reviewReason ?? null,
+        waitlisted: hold?.waitlisted === true,
       });
     }
   }
@@ -255,15 +257,18 @@ export function summarizePlacementReview(results) {
     review.placedCount += 1;
     if (!review.rostersKnown) continue;
     const player = generated?.player;
-    if (player && isEligibilityBlocked(player)) {
+    // Blocked is reported before waitlisted, as the generator reports a player who is both.
+    if (player && (isEligibilityBlocked(player) || isWaitlisted(player))) {
       if (listedForReview.has(id)) continue;
       listedForReview.add(id);
+      const blocked = isEligibilityBlocked(player);
       review.needsReview.push({
         playerId: id,
         name: nameOf(id),
         teamName: teamNameOf(teamId),
-        placement: player.placement,
-        reviewReason: player.reviewReason ?? null,
+        placement: blocked ? player.placement : (player.placement ?? null),
+        reviewReason: blocked ? (player.reviewReason ?? null) : null,
+        waitlisted: !blocked,
       });
       continue;
     }

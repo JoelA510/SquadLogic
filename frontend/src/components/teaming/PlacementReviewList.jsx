@@ -26,6 +26,13 @@ function eligibilityText(placement, reviewReason) {
   return `Not eligible for this division. ${why}`;
 }
 
+/** Why a player on a reviewed roster is listed for review, and that they were left there. */
+function holdText(entry) {
+  return entry.waitlisted
+    ? 'On the waitlist, but already on the reviewed roster. Kept there; move them by hand if you agree.'
+    : `${eligibilityText(entry.placement, entry.reviewReason)} Kept on the reviewed roster; move them by hand if you agree.`;
+}
+
 function notPlacedText(entry) {
   if (entry.reason === TEAM_GENERATION.REASON_EligibilityBlocked) {
     return eligibilityText(entry.placement, entry.reviewReason);
@@ -180,9 +187,7 @@ export default function PlacementReviewList({ results }) {
                   {needsReview.map((entry) => (
                     <li key={entry.playerId}>
                       <span className="font-medium text-text-primary">{entry.name}</span>, on{' '}
-                      {entry.teamName ?? 'no team'}.{' '}
-                      {eligibilityText(entry.placement, entry.reviewReason)} Kept on the reviewed
-                      roster; move them by hand if you agree.
+                      {entry.teamName ?? 'no team'}. {holdText(entry)}
                     </li>
                   ))}
                 </ul>

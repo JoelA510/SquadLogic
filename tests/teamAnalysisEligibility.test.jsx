@@ -596,6 +596,41 @@ describe('TeamAnalysisPage :: the waitlist (owner, 2026-10-27)', () => {
     );
   });
 
+  it('on a rerun keeps a rostered player who was waitlisted since on the saved team, and lists them', async () => {
+    // Follow-ups F1, item 2. REG-12 is on the saved team (REG-1, 2 and 10 to 17 are); the stored
+    // player went on the waitlist after the roster was reviewed. Nobody moves; the review says so.
+    seedSavedTeam();
+    state.durablePlayers = state.durablePlayers.map((p) =>
+      p.external_registration_id === 'REG-12' ? { ...p, status: 'waitlist' } : p
+    );
+    await generate();
+
+    const results = stagedResults();
+    const onSaved = results.team_players
+      .filter((tp) => tp.team_id === IDS.team)
+      .map((tp) => tp.player_id);
+    expect(onSaved).toContain(durableIdOf(12));
+    expect(results.changeDiagnosticsByDivision.U10.eligibilityHolds).toEqual([
+      expect.objectContaining({ playerId: durableIdOf(1), placement: 'no_division' }),
+      {
+        playerId: durableIdOf(12),
+        teamId: IDS.team,
+        placement: 'in_band',
+        reviewReason: null,
+        waitlisted: true,
+      },
+    ]);
+    // Held, not overflowed: the waitlisted reason belongs to the players the run holds out.
+    expect(results.overflowByDivision.U10.map((e) => e.reason)).not.toContain('waitlisted');
+    const items = within(reviewList('Needs review')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toContain(
+      'Kid12 Placeholder12, on Saved Team. On the waitlist, but already on the reviewed roster. Kept there; move them by hand if you agree.'
+    );
+    // Conservation, enumerated from the import: seated or not placed, once.
+    const seated = results.team_players.map((tp) => tp.player_id);
+    expect([...seated, ...overflowIds(results)].sort()).toEqual(allDurableIds().sort());
+  });
+
   it('stages nothing when every player is waitlisted, and says so', async () => {
     state.rows = state.rows.map((r) => ({ ...r, waitlist: 'yes', date_of_birth: IN_BAND }));
     const button = await clickGenerate();

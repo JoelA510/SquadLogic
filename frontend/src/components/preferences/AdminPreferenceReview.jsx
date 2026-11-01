@@ -18,7 +18,8 @@ import {
   DIMENSION_LABEL,
   LEVEL_LABEL,
   describeRule,
-  localIsoDate,
+  databaseIsoDate,
+  previewRunDate,
   ruleOfRow,
 } from '../../utils/coachPreferencePreview.js';
 import {
@@ -357,7 +358,11 @@ export default function AdminPreferenceReview({ orgId, toast }) {
   } = useCoachPracticePreferences(orgId);
   const [dialog, setDialog] = useState(/** @type {any} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string|null} */ (null));
-  const date = useMemo(() => localIsoDate(), []);
+  // Two days, each the one its reader uses: the Add dialog's "coaches today" is the database's day (what
+  // the RPC checks); a preview judges on the auto-scheduler's run date.
+  const timeZone = currentSeasonSetting?.timezone ?? null;
+  const today = useMemo(() => databaseIsoDate(), []);
+  const date = useMemo(() => previewRunDate(new Date(), timeZone), [timeZone]);
 
   const coachNames = useMemo(
     () => new Map(context.coaches.map((coach) => [String(coach.id), coach.full_name])),
@@ -409,8 +414,8 @@ export default function AdminPreferenceReview({ orgId, toast }) {
         .filter(
           (row) =>
             String(row.coach_id) === String(coachId) &&
-            row.effective_from <= date &&
-            (row.effective_to == null || row.effective_to >= date)
+            row.effective_from <= today &&
+            (row.effective_to == null || row.effective_to >= today)
         )
         .map((row) => String(row.team_id))
     );

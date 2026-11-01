@@ -251,7 +251,9 @@ JavaScript twin of the SQL parsing, so the preview and the mock client read a ro
 - **A re-import replaces the imported rules of the teams the file names** (`status = replaced`, kept as
   history) and leaves **admin-written rules** and the imported rules of teams the file does not name
   alone. Two rows that make the same rule (the same coach, team, level, sets and window) count once
-  (`duplicate_rule_rows`).
+  (`duplicate_rule_rows`). Two files naming one team run one after the other: the finalizer takes a
+  transaction-scoped advisory lock per named team, in id order, before it replaces, so neither file
+  replaces rules the other is about to insert.
 - **The active season or a draft takes a preference file; a completed season never does** (22023,
   `season_completed`), the rule `20261111010000` set for player and coach files, in `create_import_job` and
   again in the finalizer, because a season can complete between a job's creation and its apply. A draft season

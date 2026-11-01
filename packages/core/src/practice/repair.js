@@ -844,9 +844,21 @@ export function buildPracticeRepairContext(input) {
   /**
    * One displaced series' resolved rules, or `null` when none applies: none were supplied, or
    * none is for its team, asked by one of its current coaches, in window on the day the
-   * series' window starts. `null` is what keeps a repair without rules unchanged. The series
-   * being moved is the team's live practice, so keep-current keeps what it has.
+   * series' window starts. `null` is what keeps a repair without rules unchanged. Keep-current
+   * keeps what the team's LIVE practices hold, the shared resolver's contract (the Edge loader and
+   * the accept-a-must preview pass the same set): every series of the team in force over the
+   * loss window, moved or not, and its undated ones, which occupy their ground on every date.
+   * Passing only the series being moved would make its own start the one allowed start of a team
+   * that holds several.
    */
+  /** Every live practice of a team the repair knows: its series in force over the window, and its undated ones. */
+  const livePlacementsOf = (teamId) =>
+    [...active, ...undatedOccupants]
+      .filter((other) => other.teamId === teamId)
+      .map((other) => placementOf(other))
+      // A practice on ground the graph does not hold has no venue to keep: left out (it can only narrow
+      // what keep-current allows, never widen it) rather than failing the resolver's placement contract.
+      .filter((placement) => placement.locationId !== null);
   const preferencesOf = (series) => {
     if (coachPreferences.length === 0) return null;
     const { lead, assistants } = coachesOfTeamOn(coachRows, series.teamId, series.from);
@@ -859,7 +871,7 @@ export function buildPracticeRepairContext(input) {
       teamId: series.teamId,
       coachIds: [...current].sort(),
       rules: coachPreferences,
-      current: [placementOf(series)],
+      current: livePlacementsOf(series.teamId),
       date: series.from,
     });
     for (const finding of resolution.findings) {

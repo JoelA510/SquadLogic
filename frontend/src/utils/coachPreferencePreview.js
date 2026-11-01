@@ -23,6 +23,7 @@ import {
 } from '@squadlogic/core/practice/coachPreferences.js';
 import { coachesOfTeamOn } from '@squadlogic/core/people/assignmentHistory.js';
 import { PRACTICE_REASON } from '@squadlogic/core/practice/reasonCodes.js';
+import { seasonRunDate } from '../../../supabase/functions/_shared/engines/coach-preference-load.ts';
 
 export const DIMENSION_LABEL = Object.freeze({
   weekday: 'Weekday',
@@ -101,12 +102,29 @@ export function isPreferencesBackendMissing(error) {
   return ['42P01', 'PGRST205', 'PGRST202', '42883'].includes(String(error.code ?? ''));
 }
 
-/** Today as a local `YYYY-MM-DD`, the form `team_coach_assignments` windows use. */
-export function localIsoDate(now = new Date()) {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+/**
+ * The database's day as `YYYY-MM-DD`: its `current_date`, which is UTC (every function here pins the zone).
+ * `admin_assign_team_coach` stamps an assignment with it and `admin_add_practice_preference` asks "does this
+ * coach coach the team today" on it, so the Add dialog lists the teams that day lists and no others: an
+ * admin's own calendar date can be a day behind (the evening west of UTC) or ahead (east of it).
+ *
+ * @param {Date} [now]
+ */
+export function databaseIsoDate(now = new Date()) {
+  return now.toISOString().slice(0, 10);
+}
+
+/**
+ * The date a preview judges on: the auto-scheduler's run date (`seasonRunDate`, the later of the season's
+ * calendar date and the UTC date), so an accept-a-must preview reads the roster as a run would. The season's
+ * zone is the shown season's `timezone`; with none readable the database's day is the answer, as a run
+ * with an unreadable zone would refuse rather than guess.
+ *
+ * @param {Date} [now]
+ * @param {string | null | undefined} [timeZone]
+ */
+export function previewRunDate(now = new Date(), timeZone = null) {
+  return seasonRunDate(now.getTime(), timeZone ?? null) ?? databaseIsoDate(now);
 }
 
 /**

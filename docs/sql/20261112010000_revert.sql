@@ -11,11 +11,12 @@
 -- REFUSES (55000) while it would have to guess:
 --   * an in-force rule holds more than one value in a condition (an array of two weekdays is not a
 --     scalar), or
---   * two in-force rules of one coach disagree on a dimension (the one-approved index admits one).
+--   * two in-force rules of one coach, both coming back approved (a pending request comes back a requested
+--     row, which the index does not cover), disagree on a dimension (the one-approved index admits one).
 -- Otherwise it writes each in-force rule back as one approved row per condition (keep-current becomes
--- a NULL value) and a pending requested must as a `requested` row, and it reports what is lost: the team
--- a rule was for, priorities, date windows, import provenance, and the removed and replaced history
--- rows, which are dropped. The staged rows of preference files are deleted (the old type list refuses
+-- a NULL value; a must an admin kept as a prefer stays a prefer, never a must) and a pending requested
+-- must as a `requested` row, and it reports what is lost: the team a rule was for, priorities, date
+-- windows, import provenance, and the removed and replaced history rows, which are dropped. The staged rows of preference files are deleted (the old type list refuses
 -- them, and they hold coaches' emails).
 --
 -- Nothing here touches the auth or storage schemas. Applying it to a database that never took the
@@ -44,20 +45,24 @@ BEGIN
         RAISE EXCEPTION 'refusing to revert: % in-force rule(s) hold more than one value in a condition, which the scalar shape cannot hold', v_multi
             USING ERRCODE = '55000';
     END IF;
+    -- Only rows written back as `approved` meet the one-approved index: a pending request comes back a
+    -- `requested` row and never disagrees with anything. The level compared is the one written (a must kept
+    -- as a prefer is a prefer), as in the conversion below.
     WITH flat AS (
-        SELECT p.coach_id, d.dimension, p.level, d.value
+        SELECT p.coach_id, d.dimension,
+               (p.level = 'must') AS written_must, d.value
           FROM public.coach_practice_preferences p
           CROSS JOIN LATERAL (VALUES
               ('weekday', CASE WHEN p.weekdays IS NOT NULL THEN to_jsonb(p.weekdays[1]) END, p.weekdays IS NOT NULL OR p.keep_weekday),
               ('start_time', CASE WHEN p.start_minutes IS NOT NULL THEN to_jsonb(p.start_minutes[1]) END, p.start_minutes IS NOT NULL OR p.keep_start),
               ('venue', CASE WHEN p.venue_ids IS NOT NULL THEN to_jsonb(p.venue_ids[1]::text) END, p.venue_ids IS NOT NULL OR p.keep_venue)
           ) AS d(dimension, value, present)
-         WHERE p.status = 'in_force' AND d.present
+         WHERE p.status = 'in_force' AND d.present AND p.must_decision IS DISTINCT FROM 'pending'
     )
     SELECT count(*) INTO v_disagree FROM (
         SELECT coach_id, dimension FROM flat
          GROUP BY coach_id, dimension
-        HAVING count(DISTINCT (level, value::text)) > 1
+        HAVING count(DISTINCT (written_must, value::text)) > 1
     ) x;
     IF v_disagree > 0 THEN
         RAISE EXCEPTION 'refusing to revert: % coach/dimension pair(s) hold in-force rules that disagree on level or value, and the scalar shape admits one approved row each', v_disagree
@@ -78,9 +83,13 @@ $$;
 
 -- The scalar rows, computed before the table changes shape.
 CREATE TEMP TABLE _cpp_back ON COMMIT DROP AS
-SELECT DISTINCT ON (p.coach_id, d.dimension, p.level, d.value::text)
+SELECT DISTINCT ON (p.coach_id, d.dimension, (p.level = 'must' OR p.must_decision = 'pending'),
+                    (p.must_decision = 'pending'), d.value::text)
        p.organization_id, p.coach_id, d.dimension,
-       CASE WHEN p.level = 'must' OR p.requested_level = 'must' THEN 'must_keep' ELSE 'prefer_keep' END AS level,
+       -- The EFFECTIVE level of a decided rule; only a request still pending is written back as the must it asked for
+       -- (a requested row). A must an admin kept as a prefer (kept_prefer) is a prefer: the old shape has no
+       -- way to say "declined" other than not enforcing it.
+       CASE WHEN p.level = 'must' OR p.must_decision = 'pending' THEN 'must_keep' ELSE 'prefer_keep' END AS level,
        d.value,
        CASE WHEN p.must_decision = 'pending' THEN 'requested' ELSE 'approved' END AS status,
        p.created_by, p.created_at, p.decided_by, p.decided_at
@@ -91,7 +100,8 @@ SELECT DISTINCT ON (p.coach_id, d.dimension, p.level, d.value::text)
       ('venue', CASE WHEN p.venue_ids IS NOT NULL THEN to_jsonb(p.venue_ids[1]::text) END, p.venue_ids IS NOT NULL OR p.keep_venue)
   ) AS d(dimension, value, present)
  WHERE p.status = 'in_force' AND d.present
- ORDER BY p.coach_id, d.dimension, p.level, d.value::text, p.created_at;
+ ORDER BY p.coach_id, d.dimension, (p.level = 'must' OR p.must_decision = 'pending'),
+          (p.must_decision = 'pending'), d.value::text, p.created_at;
 
 DROP TRIGGER coach_practice_preferences_readonly_when_completed ON public.coach_practice_preferences;
 COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS

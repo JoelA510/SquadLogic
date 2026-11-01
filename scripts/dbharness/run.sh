@@ -2115,7 +2115,7 @@ for id in "${REVERT_CHECKS[@]}"; do
   # **20261112010000's revert writes the rules back as scalar rows**, so it REFUSES (55000) while it would
   # have to guess: a rule holding more than one value in a condition, and two rules of one coach that disagree
   # on a dimension. Seeded: six rules in force (two of them pending musts, one accepted must) for two coaches
-  # on four teams, one date window, three priorities, and three removed/replaced history rows, with a
+  # on four teams (one of the musts kept as a prefer by the admin), one date window, three priorities, and three removed/replaced history rows, with a
   # multi-value rule first (refused), then a disagreement (refused), then both made agree. A staged
   # preference row rides on an import job, which the revert deletes. Every figure is distinct where a
   # plausible miscount would swap it, and every name is synthetic.
@@ -2143,6 +2143,7 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('ee000000-0000-4000-8000-0000000000d4','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', ARRAY['FRI'], NULL, false, 'prefer','must','pending','in_force', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000d5','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', NULL, NULL, true, 'prefer','must','pending','in_force', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000d6','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', NULL, ARRAY[1080], false, 'must','must','accepted','in_force', 'medium', NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d7','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b1', ARRAY['FRI'], NULL, false, 'prefer','must','kept_prefer','in_force', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000e1','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', ARRAY['MON'], NULL, false, 'prefer','prefer',NULL,'removed', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000e2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', NULL, ARRAY[960], false, 'prefer','prefer',NULL,'removed', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000e3','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', ARRAY['SAT'], NULL, false, 'prefer','prefer',NULL,'replaced', NULL, NULL, 'admin');
@@ -3691,12 +3692,14 @@ PROBE
       fi
     fi
     if [ "$id" = "20261112010000" ]; then
-      # The seed planted 6 rules in force (2 pending musts), 3 history rows, 4 teams, 1 window, 3 priorities.
-      if ! grep -qF 'this revert writes 6 in-force rule(s) back as scalar rows (2 pending must(s) as requested rows); it drops 3 removed/replaced history row(s) and loses the team of the rules (4 team(s)), 1 date window(s) and 3 priority(ies)' $SCRATCH/harness_rev; then
-        echo "FAIL revert ${id}: planted 6 rules in force (2 pending), 3 history rows, 4 teams, 1 window and 3 priorities, and the revert did not warn with those figures"
+      # The seed planted 7 rules in force (2 pending musts, 1 must kept as a prefer), 3 history rows, 4 teams, 1 window, 3 priorities.
+      if ! grep -qF 'this revert writes 7 in-force rule(s) back as scalar rows (2 pending must(s) as requested rows); it drops 3 removed/replaced history row(s) and loses the team of the rules (4 team(s)), 1 date window(s) and 3 priority(ies)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 7 rules in force (2 pending, 1 kept as a prefer), 3 history rows, 4 teams, 1 window and 3 priorities, and the revert did not warn with those figures"
         STATUS=1
       fi
-      # What the revert must leave: the two coaches, 5 scalar rows (3 approved, 2 requested: two rules of one
+      # A must the admin kept as a prefer comes back a prefer (approved), never an enforced must; the pending
+      # one comes back a requested must; the only approved must left is the accepted start (review of #683).
+      # What the revert must leave: the two coaches, 6 scalar rows (4 approved, 2 requested: two rules of one
       # coach on one weekday are one row), the pending keep-venue as a NULL value, the staged preference row
       # gone with its job kept, and the whole public catalogue equal to a build at 20261111010000 (read
       # 2026-10-27 with the same query: 10968167...:1643). The count is part of the verdict.
@@ -3704,9 +3707,17 @@ PROBE
                WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'ee000000-0000-4000-8000-00000000000a') <> 2
                  OR (SELECT count(*) FROM public.import_jobs WHERE id = 'ee000000-0000-4000-8000-0000000000f1') <> 1 THEN 'seed-lost'
                WHEN (SELECT count(*) FROM public.staging_import_rows WHERE import_job_id = 'ee000000-0000-4000-8000-0000000000f1') <> 0 THEN 'staged-left'
-               WHEN (SELECT count(*) FROM public.coach_practice_preferences) <> 5
-                 OR (SELECT count(*) FROM public.coach_practice_preferences WHERE status = 'approved') <> 3
+               WHEN (SELECT count(*) FROM public.coach_practice_preferences) <> 6
+                 OR (SELECT count(*) FROM public.coach_practice_preferences WHERE status = 'approved') <> 4
                  OR (SELECT count(*) FROM public.coach_practice_preferences WHERE status = 'requested') <> 2 THEN 'rows-wrong'
+               WHEN NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'weekday' AND level = 'prefer_keep'
+                                  AND value = to_jsonb('FRI'::text) AND status = 'approved'
+                                  AND coach_id = 'ee000000-0000-4000-8000-0000000000c2')
+                 OR NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'weekday' AND level = 'must_keep'
+                                  AND value = to_jsonb('FRI'::text) AND status = 'requested'
+                                  AND coach_id = 'ee000000-0000-4000-8000-0000000000c2')
+                 OR EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE level = 'must_keep' AND status = 'approved'
+                              AND dimension <> 'start_time') THEN 'kept-prefer-became-must'
                WHEN NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'weekday' AND level = 'prefer_keep'
                                   AND value = to_jsonb('TUE'::text) AND status = 'approved'
                                   AND coach_id = 'ee000000-0000-4000-8000-0000000000c1')
@@ -3742,7 +3753,7 @@ PROBE
 
 ) s) AS fp) t;" \
          >$SCRATCH/harness_rules 2>&1 && grep -q 'RULES-VERDICT:restored' $SCRATCH/harness_rules; then
-        echo "  revert ${id}: the rules revert refuses a multi-value rule and a disagreement, writes the rest back as 5 scalar rows with the pending musts requested, deletes the staged preference rows, and restores the catalogue as at 20261111010000"
+        echo "  revert ${id}: the rules revert refuses a multi-value rule and a disagreement, writes the rest back as 6 scalar rows with the pending musts requested and a kept-as-prefer must still a prefer, deletes the staged preference rows, and restores the catalogue as at 20261111010000"
       else
         echo "FAIL revert ${id}: the rules revert did not restore the catalogue as at 20261111010000, or lost the rules' data"
         dump 10 $SCRATCH/harness_rules; STATUS=1

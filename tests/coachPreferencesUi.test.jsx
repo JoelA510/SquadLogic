@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -359,6 +359,67 @@ describe('admin view', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
     expect(within(dialog).getByText(/coaches no team today/)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeDisabled();
+  });
+});
+
+describe("the day a coach 'coaches today' is the database's, not the admin's", () => {
+  // `admin_assign_team_coach` stamps an assignment with the database's `current_date` (UTC), and
+  // `admin_add_practice_preference` reads "coaches this team today" on the same date. The Add dialog must
+  // list the same teams the RPC would accept, wherever the admin's clock is.
+  const realTz = process.env.TZ;
+  afterEach(() => {
+    vi.useRealTimers();
+    if (realTz === undefined) delete process.env.TZ;
+    else process.env.TZ = realTz;
+  });
+
+  const at = (iso, tz) => {
+    process.env.TZ = tz;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(iso));
+  };
+  const openRobin = async () => {
+    asRole('admin');
+    renderPage();
+    await screen.findByTestId('admin-preferences-view');
+    fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Robin Unassigned' }));
+    return screen.findByRole('dialog', { name: 'Add a rule' });
+  };
+
+  it('west of UTC in the evening, an assignment stamped with the database date (tomorrow here) counts', async () => {
+    // 18:00 on 2026-10-01 in Los Angeles is 01:00Z on the 2nd: the RPC stamps '2026-10-02'.
+    at('2026-10-02T01:00:00Z', 'America/Los_Angeles');
+    tables.team_coach_assignments.push({
+      id: 'tca-new',
+      organization_id: ORG,
+      team_id: T1,
+      coach_id: C3,
+      role: 'lead',
+      effective_from: '2026-10-02',
+      effective_to: null,
+    });
+    const dialog = await openRobin();
+    expect(within(dialog).queryByText(/coaches no team today/)).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Team')).toHaveValue(T1);
+    expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeEnabled();
+  });
+
+  it("east of UTC after the database's day has not turned, an assignment ending on that day still counts", async () => {
+    // 12:00 on 2026-10-02 in Auckland is 23:00Z on the 1st: the RPC's `current_date` is still the 1st,
+    // and an assignment that ends on the 1st (inclusive) is current there.
+    at('2026-10-01T23:00:00Z', 'Pacific/Auckland');
+    tables.team_coach_assignments.push({
+      id: 'tca-ends',
+      organization_id: ORG,
+      team_id: T1,
+      coach_id: C3,
+      role: 'lead',
+      effective_from: '2026-09-01',
+      effective_to: '2026-10-01',
+    });
+    const dialog = await openRobin();
+    expect(within(dialog).queryByText(/coaches no team today/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeEnabled();
   });
 });
 

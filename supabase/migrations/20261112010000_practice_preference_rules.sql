@@ -1301,8 +1301,18 @@ BEGIN
     END LOOP;
 
     -- The imported rules of the teams the file names are replaced; admin rules are not.
-    SELECT COALESCE(array_agg(DISTINCT (r ->> 'team_id')::uuid), ARRAY[]::uuid[]) INTO v_teams_named
+    SELECT COALESCE(array_agg(DISTINCT (r ->> 'team_id')::uuid ORDER BY (r ->> 'team_id')::uuid), ARRAY[]::uuid[])
+      INTO v_teams_named
       FROM jsonb_array_elements(v_rules) r;
+    -- Two files naming one team (different jobs, so their job rows do not serialize them) must run one after
+    -- the other: each would otherwise replace the imported rules it can see before either inserts its own,
+    -- and both files' rules would stay in force. A transaction-scoped lock per team, taken in id order so two
+    -- overlapping files cannot wait on each other, as a statement of its own: the replacement below then reads
+    -- what the file that held the lock committed. (An advisory lock rather than a row lock on `teams`, so an
+    -- admin adding a rule to the team, whose foreign key takes a share lock on the row, is not made to wait.)
+    FOREACH v_team_id IN ARRAY v_teams_named LOOP
+        PERFORM pg_advisory_xact_lock(hashtextextended('practice_preferences:team:' || v_team_id::text, 0));
+    END LOOP;
     WITH replaced AS (
         UPDATE public.coach_practice_preferences
            SET status = 'replaced', updated_by = auth.uid(), updated_at = v_now

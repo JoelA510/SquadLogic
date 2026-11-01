@@ -5151,7 +5151,7 @@ plant "M61 the backfill copies a dont_care row" "$M61" \
 plant "R61 the rules warning stops counting teams distinctly" "$R61" \
   "count(DISTINCT team_id) FILTER (WHERE status = 'in_force')," \
   "count(team_id) FILTER (WHERE status = 'in_force')," \
-  "revert 20261112010000: planted 6 rules in force"
+  "revert 20261112010000: planted 7 rules in force"
 
 plant "R61 the revert stops refusing a rule with two values" "$R61" \
   "    IF v_multi > 0 THEN" \

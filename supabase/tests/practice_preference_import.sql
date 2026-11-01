@@ -15,7 +15,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(49);
+SELECT plan(52);
 
 -- ---- the roster (as the table owner) -----------------------------------------------------------
 -- Org A, season aaa (active): teams "Imp A1" and "Imp A2" (coach P coaches both), "Imp A3" (coach Q coaches it),
@@ -144,10 +144,37 @@ SELECT throws_ok(
 SELECT is((SELECT count(*)::int FROM public.coach_practice_preferences WHERE import_job_id = 'a1111111-1111-1111-1111-1111111b0003'), 0,
     'and wrote nothing');
 
+-- ---- overlapping files run one after the other: the teams a file names are locked -----------------------
+-- A true two-session race does not fit one transaction, so this asserts what makes the race impossible and
+-- can be read here: after a file is applied THIS backend holds a transaction-scoped advisory lock for each
+-- team the file names (and none for any other), and the source takes them in id order, before the replacement
+-- it protects. The control, before the call, is that none is held.
+CREATE FUNCTION pg_temp.team_locks_held() RETURNS text[] LANGUAGE sql AS $f$
+    SELECT COALESCE(array_agg(t.name ORDER BY t.name), ARRAY[]::text[])
+      FROM public.teams t
+     WHERE t.organization_id = 'a1111111-1111-1111-1111-111111111111'
+       AND EXISTS (
+           SELECT 1 FROM pg_locks l
+            WHERE l.locktype = 'advisory' AND l.pid = pg_backend_pid() AND l.granted AND l.objsubid = 1
+              AND l.classid = ((hashtextextended('practice_preferences:team:' || t.id::text, 0) >> 32) & 4294967295)::bigint::oid
+              AND l.objid = (hashtextextended('practice_preferences:team:' || t.id::text, 0) & 4294967295)::bigint::oid)
+$f$;
+SELECT is(pg_temp.team_locks_held(), ARRAY[]::text[], 'control: before a file is applied, no team lock is held');
+
 -- ---- file 1 ------------------------------------------------------------------------------------------
 CREATE TEMP TABLE t_result AS
 SELECT public.finalize_practice_preference_import_job('a1111111-1111-1111-1111-1111111b0001') AS r;
 GRANT SELECT ON t_result TO authenticated;
+
+SELECT is(pg_temp.team_locks_held(), ARRAY['Imp A1', 'Imp A2', 'Imp A3', 'Imp Solo']::text[],
+    'applying a file locks each team it names (the four here) and no other team');
+SELECT ok(
+    (SELECT position('pg_advisory_xact_lock' IN p.prosrc) > 0
+        AND position('pg_advisory_xact_lock' IN p.prosrc) < position('SET status = ''replaced''' IN p.prosrc)
+        AND p.prosrc ~ 'array_agg\(DISTINCT \(r ->> ''team_id''\)::uuid ORDER BY \(r ->> ''team_id''\)::uuid\)'
+        AND position('FOREACH v_team_id IN ARRAY v_teams_named' IN p.prosrc) < position('pg_advisory_xact_lock' IN p.prosrc)
+       FROM pg_proc p WHERE p.oid = 'public.finalize_practice_preference_import_job(uuid, jsonb)'::regprocedure),
+    'the teams are collected in id order and locked, in that order, before the imported rules are replaced');
 
 SELECT is((SELECT r ->> 'status' FROM t_result), 'completed_with_warnings', 'the file completes with warnings: it had rows that were not applied');
 SELECT is((SELECT (r ->> 'inserted_rules')::int FROM t_result), 4,

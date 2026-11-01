@@ -522,7 +522,7 @@ const rowsFor = (coaches, teamId = 'T') =>
  * One series for team T, Tue 17:00 on Orchard Park field 2-a, displaced by the
  * loss of field 2, and whatever inventory the case offers.
  *
- * @param {{ inventory: Array<Object>, preferences?: Array<Object>, rows?: Array<Object>, loss?: Object, extra?: Object, on?: { weekday: string, startMinutes: number } }} options
+ * @param {{ inventory: Array<Object>, preferences?: Array<Object>, rows?: Array<Object>, loss?: Object, extra?: Object, on?: { weekday: string, startMinutes: number }, alsoHolds?: Array<{ surfaceId: string, weekday: string, startMinutes: number }> }} options
  */
 function constructed({
   inventory,
@@ -531,23 +531,30 @@ function constructed({
   loss = {},
   extra = {},
   on = { weekday: 'TUE', startMinutes: 1020 },
+  alsoHolds = [],
 }) {
+  // `alsoHolds`: more live practices of team T on ground the loss does not touch, so the team holds
+  // several (what a keep-current rule keeps is every one of them).
+  const slotOf = (id, surfaceId, weekday, startMinutes) => ({
+    id,
+    surfaceId,
+    weekday,
+    startMinutes,
+    durationMinutes: 60,
+    validFrom: SEASON_FROM,
+    validUntil: SEASON_UNTIL,
+    capacity: 1,
+    revisionId: 'constructed',
+    label: null,
+    surfaceResolution: 'resolved',
+  });
   return repairPracticeLoss({
     plan: {
       slots: [
-        {
-          id: 'c-slot-0',
-          surfaceId: OP('field-2-a'),
-          weekday: on.weekday,
-          startMinutes: on.startMinutes,
-          durationMinutes: 60,
-          validFrom: SEASON_FROM,
-          validUntil: SEASON_UNTIL,
-          capacity: 1,
-          revisionId: 'constructed',
-          label: null,
-          surfaceResolution: 'resolved',
-        },
+        slotOf('c-slot-0', OP('field-2-a'), on.weekday, on.startMinutes),
+        ...alsoHolds.map((held, index) =>
+          slotOf(`c-slot-${index + 1}`, held.surfaceId, held.weekday, held.startMinutes)
+        ),
       ],
       assignments: [
         {
@@ -557,6 +564,13 @@ function constructed({
           effectiveFrom: null,
           effectiveUntil: null,
         },
+        ...alsoHolds.map((_, index) => ({
+          id: `c-asg-${index + 1}`,
+          slotId: `c-slot-${index + 1}`,
+          teamId: 'T',
+          effectiveFrom: null,
+          effectiveUntil: null,
+        })),
       ],
       source: 'constructed',
     },
@@ -589,6 +603,64 @@ const pref = (coachId, dimension, level, value = null, teamId = 'T') => {
     [keep]: value === null,
   };
 };
+
+/**
+ * Keep-current keeps what the team's LIVE practices hold, not only the series being moved (review of
+ * #683, finding 3). A team on Tue 17:00 (displaced) and Thu 18:00 (live, untouched) keeping its start
+ * may start at either; the Tuesday series moved to Tue 18:00 is a start the team already holds.
+ */
+describe('coach preferences :: keep-current reads every live practice of the team', () => {
+  const THURSDAY_1800 = { surfaceId: AP('pitch-2a'), weekday: 'THU', startMinutes: 1080 };
+  const TUESDAY_1800 = { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1080 };
+  const TUESDAY_1900 = { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1140 };
+
+  it('keep-start must: the displaced Tue 17:00 may move to Tue 18:00, a start the team holds on Thursday', () => {
+    const run = constructed({
+      inventory: [TUESDAY_1800],
+      alsoHolds: [THURSDAY_1800],
+      preferences: [pref('coach-1', 'start_time', 'must')],
+    });
+    expect(run.timeTbd).toEqual([]);
+    expect(run.rehomed.map((entry) => [entry.to.weekday, entry.to.startMinutes])).toEqual([
+      ['TUE', 1080],
+    ]);
+  });
+
+  it('control: a start neither practice holds is still refused', () => {
+    const run = constructed({
+      inventory: [TUESDAY_1900],
+      alsoHolds: [THURSDAY_1800],
+      preferences: [pref('coach-1', 'start_time', 'must')],
+    });
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd).toHaveLength(1);
+    expect(run.timeTbd[0]).toMatchObject({
+      reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
+      mustKeepDimensions: ['start_time'],
+    });
+  });
+
+  it('a live practice on ground the graph does not hold is left out of what is kept, not an error', () => {
+    const run = constructed({
+      inventory: [TUESDAY_1800],
+      alsoHolds: [{ surfaceId: 'nowhere/field-9', weekday: 'THU', startMinutes: 1080 }],
+      preferences: [pref('coach-1', 'start_time', 'must')],
+    });
+    // Its 18:00 cannot be read as a start the team holds (no venue), so only 17:00 is kept.
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({ reason: PRACTICE_TBD_REASON.COACH_PREFERENCE });
+  });
+
+  it('keep-weekday must: with Tue and Thu held, the Tuesday series may not move to Wednesday', () => {
+    const run = constructed({
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'WED', startMinutes: 1020 }],
+      alsoHolds: [THURSDAY_1800],
+      preferences: [pref('coach-1', 'weekday', 'must')],
+    });
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({ reason: PRACTICE_TBD_REASON.COACH_PREFERENCE });
+  });
+});
 
 /** Same venue, another day, same time: the day move a `weekday` preference is about. */
 const THURSDAY = { surfaceId: OP('field-3-a'), weekday: 'THU', startMinutes: 1020 };

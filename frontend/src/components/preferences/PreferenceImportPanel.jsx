@@ -143,6 +143,8 @@ export default function PreferenceImportPanel({
       );
       return;
     }
+    // Cleared once the file is held, so choosing the same file again after fixing it still fires a change.
+    if (inputRef.current) inputRef.current.value = '';
     setReading(true);
     try {
       const { default: Papa } = await import('papaparse');

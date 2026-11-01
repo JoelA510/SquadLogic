@@ -744,6 +744,17 @@ describe('the panel', () => {
       expect(screen.getByRole('button', { name: 'Import 1 rule' })).toBeEnabled();
     });
 
+    it('the file control is emptied once a file is held, so fixing the file and choosing it again fires a change', async () => {
+      renderPanel();
+      const input = screen.getByLabelText('Choose a CSV file');
+      choose(
+        'too-many.csv',
+        'Coach Email,Team,Days\ncasey@example.test,U10 Hawks,Tuesday,Thursday\n'
+      );
+      await parseErrors();
+      expect(input.value).toBe('');
+    });
+
     it('choosing a clean file after a refused one clears the refusal', async () => {
       renderPanel();
       choose(

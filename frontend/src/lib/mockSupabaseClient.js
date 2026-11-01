@@ -4857,7 +4857,9 @@ export const mockSupabase = {
       if (!job) {
         return { data: null, error: { message: 'Import job not found' } };
       }
-      if (!['coaches', 'fields', 'field_availability', 'practice_preferences'].includes(importType)) {
+      if (
+        !['coaches', 'fields', 'field_availability', 'practice_preferences'].includes(importType)
+      ) {
         return {
           data: null,
           error: {
@@ -4866,7 +4868,10 @@ export const mockSupabase = {
           },
         };
       }
-      if (['coaches', 'practice_preferences'].includes(importType) && job.job_type !== 'registration') {
+      if (
+        ['coaches', 'practice_preferences'].includes(importType) &&
+        job.job_type !== 'registration'
+      ) {
         return { data: null, error: { message: 'Import job is not registration' } };
       }
       if (importType === 'fields' && job.job_type !== 'fields') {
@@ -4927,7 +4932,9 @@ export const mockSupabase = {
       if (!job) {
         return { data: null, error: { message: 'Import job not found' } };
       }
-      if (!['coaches', 'fields', 'field_availability', 'practice_preferences'].includes(importType)) {
+      if (
+        !['coaches', 'fields', 'field_availability', 'practice_preferences'].includes(importType)
+      ) {
         return {
           data: null,
           error: {

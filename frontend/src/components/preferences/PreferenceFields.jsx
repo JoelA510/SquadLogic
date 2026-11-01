@@ -3,23 +3,22 @@ import PropTypes from 'prop-types';
 import Badge from '../ui/Badge.jsx';
 import DataErrorBanner from '../ui/DataErrorBanner.jsx';
 import {
+  DECISION_LABEL,
   LEVEL_LABEL,
-  STATUS_LABEL,
   WEEKDAY_OPTIONS,
   clockToMinutes,
   isPreferencesBackendMissing,
   minutesToClock,
 } from '../../utils/coachPreferencePreview.js';
 
-const LEVELS = ['must_keep', 'prefer_keep', 'dont_care'];
-const STATUS_TONE = {
-  requested: 'warning',
-  approved: 'success',
-  rejected: 'danger',
-  superseded: 'neutral',
+const LEVELS = ['prefer', 'must'];
+const DECISION_TONE = {
+  pending: 'warning',
+  accepted: 'success',
+  kept_prefer: 'neutral',
 };
 
-/** Level picker: the three levels, no free text. */
+/** Level picker: prefer or must, no free text. */
 export function LevelSelect({ id, value, onChange, disabled = false }) {
   return (
     <div className="field">
@@ -134,11 +133,16 @@ PreferenceValueField.propTypes = {
   disabled: PropTypes.bool,
 };
 
-export function StatusBadge({ status }) {
-  return <Badge tone={STATUS_TONE[status] || 'neutral'}>{STATUS_LABEL[status] || status}</Badge>;
+/** Where a rule stands: a requested must pending, accepted, or kept as prefer. */
+export function DecisionBadge({ decision }) {
+  return (
+    <Badge tone={DECISION_TONE[decision] || 'neutral'}>
+      {DECISION_LABEL[decision] || decision}
+    </Badge>
+  );
 }
 
-StatusBadge.propTypes = { status: PropTypes.string.isRequired };
+DecisionBadge.propTypes = { decision: PropTypes.string.isRequired };
 
 /**
  * The load-failure banner. A missing migration is named as such, so an empty
@@ -148,8 +152,8 @@ export function PreferencesLoadError({ error }) {
   if (!error) return null;
   const detail = error.message ? ` (${error.message})` : '';
   const message = isPreferencesBackendMissing(error)
-    ? `Coach practice preferences are not available on this database yet: the coach_practice_preferences migration has not been applied. Nothing can be requested or decided until it is${detail}.`
-    : `Could not load coach practice preferences${detail}.`;
+    ? `Practice preference rules are not available on this database yet: the coach_practice_preferences migration has not been applied. Nothing can be added or decided until it is${detail}.`
+    : `Could not load practice preference rules${detail}.`;
   return <DataErrorBanner message={message} />;
 }
 

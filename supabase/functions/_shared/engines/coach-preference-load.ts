@@ -181,7 +181,11 @@ export async function loadCoachPreferenceContext(
      * The practice rows the season already holds (`practice-lock.ts`, `LoadedPracticeRow`): what
      * keep-current rules keep. A row that has ended before the run date holds nothing.
      */
-    heldRows?: ReadonlyArray<{ teamId: string; slotId: string | null; effectiveDateRange: string | null }>;
+    heldRows?: ReadonlyArray<{
+      teamId: string;
+      slotId: string | null;
+      effectiveDateRange: string | null;
+    }>;
     pageSize?: number;
   }
 ): Promise<CoachPreferenceContext> {
@@ -287,7 +291,9 @@ export async function loadCoachPreferenceContext(
       weekdays: row.weekdays == null ? null : (row.weekdays as string[]),
       startMinutes: row.start_minutes == null ? null : (row.start_minutes as number[]),
       venueIds:
-        row.venue_ids == null ? null : (row.venue_ids as unknown[]).map((v) => String(v).toLowerCase()),
+        row.venue_ids == null
+          ? null
+          : (row.venue_ids as unknown[]).map((v) => String(v).toLowerCase()),
       keepWeekday: row.keep_weekday === true,
       keepStart: row.keep_start === true,
       keepVenue: row.keep_venue === true,
@@ -353,7 +359,8 @@ export async function loadCoachPreferenceContext(
     (rulesByTeam.get(teamId) ?? []).some((r) => r.keepWeekday || r.keepStart || r.keepVenue);
   for (const row of heldRows) {
     if (row.slotId === null || !keepsCurrent(row.teamId)) continue;
-    const bounds = row.effectiveDateRange === null ? null : practiceRangeBounds(row.effectiveDateRange);
+    const bounds =
+      row.effectiveDateRange === null ? null : practiceRangeBounds(row.effectiveDateRange);
     // A range that has ended before the run date holds nothing; an open or unreadable one holds.
     if (bounds !== null && bounds.last < runDate) continue;
     const placement = placementBySlot.get(row.slotId);

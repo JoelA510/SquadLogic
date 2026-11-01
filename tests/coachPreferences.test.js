@@ -135,9 +135,21 @@ describe('practice preference rules :: enumerated against an oracle', () => {
                 const candidate = candidateFor(mask);
                 const current = SERIES[held];
                 const { resolution, verdict } = judge([r], candidate, { current });
-                const expected = oracle([r], { coachIds: ['c1', 'c2'], current, date: DAY, candidate });
+                const expected = oracle([r], {
+                  coachIds: ['c1', 'c2'],
+                  current,
+                  date: DAY,
+                  candidate,
+                });
                 // The case rides in the comparison, so a red names what broke.
-                expect({ level, shape, held, mask, violated: verdict.violatedRules, breached: verdict.breachedRules }).toEqual({
+                expect({
+                  level,
+                  shape,
+                  held,
+                  mask,
+                  violated: verdict.violatedRules,
+                  breached: verdict.breachedRules,
+                }).toEqual({
                   level,
                   shape,
                   held,
@@ -151,7 +163,8 @@ describe('practice preference rules :: enumerated against an oracle', () => {
                 const unreadable = resolution.findings.filter(
                   (f) => f.code === PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE
                 ).length;
-                const wantUnreadable = shape.filter((k) => k === 'keep').length * (held === 'none' ? 1 : 0);
+                const wantUnreadable =
+                  shape.filter((k) => k === 'keep').length * (held === 'none' ? 1 : 0);
                 expect(unreadable).toBe(wantUnreadable);
                 seen.cases += 1;
                 if (verdict.mustKeepViolated) seen.violated += 1;
@@ -197,8 +210,21 @@ describe('practice preference rules :: enumerated against an oracle', () => {
               ];
               const candidate = candidateFor(mask);
               const { verdict } = judge(rules, candidate);
-              const expected = oracle(rules, { coachIds: ['c1', 'c2'], current: [], date: DAY, candidate });
-              expect({ a, b, levels, sameCoach, mask, v: verdict.violatedRules, br: verdict.breachedRules }).toEqual({
+              const expected = oracle(rules, {
+                coachIds: ['c1', 'c2'],
+                current: [],
+                date: DAY,
+                candidate,
+              });
+              expect({
+                a,
+                b,
+                levels,
+                sameCoach,
+                mask,
+                v: verdict.violatedRules,
+                br: verdict.breachedRules,
+              }).toEqual({
                 a,
                 b,
                 levels,
@@ -245,7 +271,7 @@ describe('practice preference rules :: the plan, case by case', () => {
     expect(verdict.breachedDimensions).toEqual(['weekday', 'start_time']);
   });
 
-  it('every rule in force applies: nothing supersedes anything, and two coaches\' rules both count', () => {
+  it("every rule in force applies: nothing supersedes anything, and two coaches' rules both count", () => {
     const rules = [
       rule({ id: 'a', level: 'prefer', weekdays: ['TUE'] }),
       rule({ id: 'b', level: 'prefer', startMinutes: [1080] }),
@@ -267,7 +293,7 @@ describe('practice preference rules :: the plan, case by case', () => {
     expect(verdict.breachedRules).toEqual(['p']);
   });
 
-  it('a rule is for one team: another team\'s rule, and a coach who is not on the team, ask nothing', () => {
+  it("a rule is for one team: another team's rule, and a coach who is not on the team, ask nothing", () => {
     const rules = [
       rule({ id: 'other-team', teamId: 'team-2', weekdays: ['MON'] }),
       rule({ id: 'off-roster', coachId: 'c9', weekdays: ['MON'] }),
@@ -279,19 +305,25 @@ describe('practice preference rules :: the plan, case by case', () => {
   });
 
   it('a rule applies on the days of its window, both ends included, and a window with no day to judge is refused', () => {
-    const windowed = rule({ weekdays: ['MON'], effectiveFrom: '2026-11-10', effectiveTo: '2026-11-20' });
+    const windowed = rule({
+      weekdays: ['MON'],
+      effectiveFrom: '2026-11-10',
+      effectiveTo: '2026-11-20',
+    });
     expect(judge([windowed], TUE_5, { date: '2026-11-09' }).resolution.rules).toHaveLength(0);
     expect(judge([windowed], TUE_5, { date: '2026-11-10' }).resolution.rules).toHaveLength(1);
     expect(judge([windowed], TUE_5, { date: '2026-11-20' }).resolution.rules).toHaveLength(1);
     expect(judge([windowed], TUE_5, { date: '2026-11-21' }).resolution.rules).toHaveLength(0);
     expect(ruleInWindow(rule({ weekdays: ['MON'] }), null)).toBe(true);
-    expect(() => resolveCoachPreferences(input([windowed], { date: null }))).toThrow(/no day was given/);
+    expect(() => resolveCoachPreferences(input([windowed], { date: null }))).toThrow(
+      /no day was given/
+    );
     // An open-ended window is a bound on one side only.
     const from = rule({ weekdays: ['MON'], effectiveFrom: '2026-12-01' });
     expect(judge([from], TUE_5).resolution.rules).toHaveLength(0);
   });
 
-  it('keep-current is met by any value the team\'s practices hold, and does nothing, saying so, with none', () => {
+  it("keep-current is met by any value the team's practices hold, and does nothing, saying so, with none", () => {
     const keep = [rule({ id: 'k', keepWeekday: true })];
     const held = [{ ...TUE_5 }, { ...THU_5 }];
     expect(judge(keep, TUE_5, { current: held }).verdict.mustKeepViolated).toBe(false);
@@ -316,39 +348,74 @@ describe('practice preference rules :: the plan, case by case', () => {
   });
 
   it('conflicts are found before they bite: rules of one level with nothing in common leave no practice', () => {
-    const must = judge([rule({ id: 'a', weekdays: ['TUE'] }), rule({ id: 'b', coachId: 'c2', weekdays: ['THU'] })], TUE_5);
-    const conflict = must.resolution.findings.find((f) => f.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT);
-    expect(conflict.details).toEqual({ dimension: 'weekday', level: 'must', ruleIds: ['a', 'b'], coachIds: ['c1', 'c2'] });
+    const must = judge(
+      [rule({ id: 'a', weekdays: ['TUE'] }), rule({ id: 'b', coachId: 'c2', weekdays: ['THU'] })],
+      TUE_5
+    );
+    const conflict = must.resolution.findings.find(
+      (f) => f.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT
+    );
+    expect(conflict.details).toEqual({
+      dimension: 'weekday',
+      level: 'must',
+      ruleIds: ['a', 'b'],
+      coachIds: ['c1', 'c2'],
+    });
     // No candidate meets both, whatever its weekday.
     for (const day of ['TUE', 'THU', 'WED']) {
-      expect(judge([rule({ id: 'a', weekdays: ['TUE'] }), rule({ id: 'b', weekdays: ['THU'] })], { ...TUE_5, weekday: day }).verdict.mustKeepViolated).toBe(true);
+      expect(
+        judge([rule({ id: 'a', weekdays: ['TUE'] }), rule({ id: 'b', weekdays: ['THU'] })], {
+          ...TUE_5,
+          weekday: day,
+        }).verdict.mustKeepViolated
+      ).toBe(true);
     }
     // {Tue, Thu} and {Thu} share Thursday: no conflict.
-    const shared = judge([rule({ id: 'a', weekdays: ['TUE', 'THU'] }), rule({ id: 'b', weekdays: ['THU'] })], THU_5);
+    const shared = judge(
+      [rule({ id: 'a', weekdays: ['TUE', 'THU'] }), rule({ id: 'b', weekdays: ['THU'] })],
+      THU_5
+    );
     expect(shared.resolution.findings).toEqual([]);
     // Prefer rules that cancel each other out are visible too, at their own level.
-    const prefer = judge([rule({ id: 'a', level: 'prefer', weekdays: ['TUE'] }), rule({ id: 'b', level: 'prefer', weekdays: ['THU'] })], TUE_5);
+    const prefer = judge(
+      [
+        rule({ id: 'a', level: 'prefer', weekdays: ['TUE'] }),
+        rule({ id: 'b', level: 'prefer', weekdays: ['THU'] }),
+      ],
+      TUE_5
+    );
     expect(prefer.resolution.findings.map((f) => f.details.level)).toEqual(['prefer']);
     // Three rules, pairwise sharing a value but with none shared by all three, conflict.
     const triple = judge(
-      [rule({ id: 'a', weekdays: ['TUE', 'THU'] }), rule({ id: 'b', weekdays: ['THU', 'WED'] }), rule({ id: 'c', weekdays: ['WED', 'TUE'] })],
+      [
+        rule({ id: 'a', weekdays: ['TUE', 'THU'] }),
+        rule({ id: 'b', weekdays: ['THU', 'WED'] }),
+        rule({ id: 'c', weekdays: ['WED', 'TUE'] }),
+      ],
       TUE_5
     );
     expect(triple.resolution.findings.map((f) => f.details.ruleIds)).toEqual([['a', 'b', 'c']]);
     // A must and a prefer are not compared with each other.
-    const mixed = judge([rule({ id: 'a', weekdays: ['TUE'] }), rule({ id: 'b', level: 'prefer', weekdays: ['THU'] })], TUE_5);
+    const mixed = judge(
+      [rule({ id: 'a', weekdays: ['TUE'] }), rule({ id: 'b', level: 'prefer', weekdays: ['THU'] })],
+      TUE_5
+    );
     expect(mixed.resolution.findings).toEqual([]);
   });
 
   it('coachPriority is for visibility only: it changes no verdict', () => {
     const plain = judge([rule({ level: 'prefer', weekdays: ['TUE'] })], WED_5).verdict;
-    const high = judge([rule({ level: 'prefer', weekdays: ['TUE'], coachPriority: 'high' })], WED_5).verdict;
+    const high = judge(
+      [rule({ level: 'prefer', weekdays: ['TUE'], coachPriority: 'high' })],
+      WED_5
+    ).verdict;
     expect(high).toEqual(plain);
   });
 });
 
 describe('practice preference rules :: the contract refuses what the store cannot hold', () => {
-  const refused = (over) => CoachPreferenceRuleSchema.safeParse(rule({ weekdays: ['TUE'], ...over })).success === false;
+  const refused = (over) =>
+    CoachPreferenceRuleSchema.safeParse(rule({ weekdays: ['TUE'], ...over })).success === false;
 
   it('refuses an empty set, a duplicate, an out-of-range value, keep and values together, no condition, a reversed window', () => {
     expect(refused({ weekdays: [] })).toBe(true);
@@ -371,10 +438,16 @@ describe('practice preference rules :: the contract refuses what the store canno
   });
 
   it('refuses a second rule with one id, and a placement that is not a placement', () => {
-    expect(() => resolveCoachPreferences(input([rule({ weekdays: ['TUE'] }), rule({ weekdays: ['THU'] })]))).toThrow(
-      /second rule with id r1/
-    );
-    expect(() => resolveCoachPreferences(input([rule({ weekdays: ['TUE'] })], { current: [{ weekday: 'TUE' }] }))).toThrow();
-    expect(() => judgeCoachPreferenceCandidate(resolveCoachPreferences(input([])), { weekday: 'TUE' })).toThrow();
+    expect(() =>
+      resolveCoachPreferences(input([rule({ weekdays: ['TUE'] }), rule({ weekdays: ['THU'] })]))
+    ).toThrow(/second rule with id r1/);
+    expect(() =>
+      resolveCoachPreferences(
+        input([rule({ weekdays: ['TUE'] })], { current: [{ weekday: 'TUE' }] })
+      )
+    ).toThrow();
+    expect(() =>
+      judgeCoachPreferenceCandidate(resolveCoachPreferences(input([])), { weekday: 'TUE' })
+    ).toThrow();
   });
 });

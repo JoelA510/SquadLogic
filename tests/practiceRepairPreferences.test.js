@@ -638,10 +638,7 @@ describe('coach preferences :: must is a hard candidate filter (plan §4)', () =
         { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1080 },
         { surfaceId: AP('pitch-2a'), weekday: 'TUE', startMinutes: 1020 },
       ],
-      preferences: [
-        pref('coach-1', 'start_time', 'must'),
-        pref('coach-1', 'venue', 'must'),
-      ],
+      preferences: [pref('coach-1', 'start_time', 'must'), pref('coach-1', 'venue', 'must')],
     });
     expect(run.timeTbd[0]).toMatchObject({
       reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
@@ -679,10 +676,7 @@ describe('coach preferences :: must is a hard candidate filter (plan §4)', () =
     expect(byVenue.recommendations[0].to).toBeNull();
     const byDay = constructed({
       inventory,
-      preferences: [
-        pref('coach-1', 'weekday', 'must'),
-        pref('coach-1', 'start_time', 'prefer'),
-      ],
+      preferences: [pref('coach-1', 'weekday', 'must'), pref('coach-1', 'start_time', 'prefer')],
     });
     expect(byDay.recommendations[0].to.weekday).toBe('TUE');
     // Control: with the Tuesday shape gone, must weekday leaves nothing.
@@ -853,10 +847,7 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
   it('mixed coaches, one with a value and one keeping the series: rules with nothing in common conflict', () => {
     const run = constructed({
       inventory: [same('TUE', 1080), same('THU')],
-      preferences: [
-        pref('coach-1', 'weekday', 'must', 'THU'),
-        pref('coach-2', 'weekday', 'must'),
-      ],
+      preferences: [pref('coach-1', 'weekday', 'must', 'THU'), pref('coach-2', 'weekday', 'must')],
       rows: rowsFor(['coach-1', 'coach-2']),
     });
     // coach-1 keeps THU, coach-2 keeps the series' TUE: no candidate keeps both.
@@ -986,10 +977,7 @@ describe('coach preferences :: prefer is coachPreferenceBreached, weight 100 (pl
       },
       {
         // Two coaches' rules on one dimension: two unmet rules, two breaches.
-        preferences: [
-          pref('coach-1', 'weekday', 'prefer'),
-          pref('coach-2', 'weekday', 'prefer'),
-        ],
+        preferences: [pref('coach-1', 'weekday', 'prefer'), pref('coach-2', 'weekday', 'prefer')],
         rows: rowsFor(['coach-1', 'coach-2']),
         breaches: 2,
       },
@@ -1069,7 +1057,9 @@ describe('coach preferences :: every rule of the team applies (plan §4, §6; de
           const musts = levels.filter((level) => level === 'must').length;
           const prefers = levels.filter((level) => level === 'prefer').length;
           const asked = coaches
-            .map((coachId, i) => (levels[i] === 'none' ? null : pref(coachId, dimension, levels[i])))
+            .map((coachId, i) =>
+              levels[i] === 'none' ? null : pref(coachId, dimension, levels[i])
+            )
             .filter(Boolean);
           const run = constructed({
             inventory: [candidate],

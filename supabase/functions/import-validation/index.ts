@@ -510,7 +510,13 @@ function validateRow(
 
 // --- Request Schema ---
 const ImportValidationPayload = z.object({
-  import_type: z.enum(['players', 'coaches', 'fields', 'field_availability', 'practice_preferences']),
+  import_type: z.enum([
+    'players',
+    'coaches',
+    'fields',
+    'field_availability',
+    'practice_preferences',
+  ]),
   organization_id: z.string().uuid(),
   rows: z.array(z.record(z.unknown())).max(MAX_ROWS, `Maximum ${MAX_ROWS} rows per import`),
   // `file_name` is no longer read: it went only into the audit row, and the

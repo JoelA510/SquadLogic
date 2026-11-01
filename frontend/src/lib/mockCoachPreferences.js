@@ -46,7 +46,10 @@ const fail = (code, message, details) => ({
 });
 const same = (a, b) => String(a) === String(b);
 const check = (name) =>
-  fail('23514', `new row for relation "coach_practice_preferences" violates check constraint "${name}"`);
+  fail(
+    '23514',
+    `new row for relation "coach_practice_preferences" violates check constraint "${name}"`
+  );
 
 /** A set condition: absent, or non-empty with no duplicate and no null. */
 const setOk = (values) =>
@@ -62,11 +65,15 @@ const setOk = (values) =>
  * @param {any} row
  */
 function ruleCheckRefusal(row) {
-  if (!['prefer', 'must'].includes(row.level)) return check('coach_practice_preferences_level_known');
+  if (!['prefer', 'must'].includes(row.level))
+    return check('coach_practice_preferences_level_known');
   if (!['prefer', 'must'].includes(row.requested_level)) {
     return check('coach_practice_preferences_requested_level_known');
   }
-  if (row.must_decision != null && !['pending', 'accepted', 'kept_prefer'].includes(row.must_decision)) {
+  if (
+    row.must_decision != null &&
+    !['pending', 'accepted', 'kept_prefer'].includes(row.must_decision)
+  ) {
     return check('coach_practice_preferences_must_decision_known');
   }
   if ((row.requested_level === 'must') !== (row.must_decision != null)) {
@@ -89,7 +96,8 @@ function ruleCheckRefusal(row) {
   }
   if (
     !setOk(row.start_minutes) ||
-    (row.start_minutes != null && !row.start_minutes.every((m) => Number.isInteger(m) && m >= 0 && m <= 1439))
+    (row.start_minutes != null &&
+      !row.start_minutes.every((m) => Number.isInteger(m) && m >= 0 && m <= 1439))
   ) {
     return check('coach_practice_preferences_start_minutes_valid');
   }
@@ -160,9 +168,11 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
     });
   };
   const teamById = (teamId) => (db.teams || []).find((team) => same(team.id, teamId)) ?? null;
-  const divisionOf = (team) => (db.divisions || []).find((d) => same(d.id, team?.division_id)) ?? null;
+  const divisionOf = (team) =>
+    (db.divisions || []).find((d) => same(d.id, team?.division_id)) ?? null;
   const seasonOfTeam = (team) =>
-    (db.season_settings || []).find((s) => same(s.id, divisionOf(team)?.season_settings_id)) ?? null;
+    (db.season_settings || []).find((s) => same(s.id, divisionOf(team)?.season_settings_id)) ??
+    null;
   const coachesToday = (teamId, coachId) =>
     (db.team_coach_assignments || []).some(
       (a) =>
@@ -171,8 +181,7 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
         a.effective_from <= today &&
         (a.effective_to == null || a.effective_to >= today)
     );
-  const adminDenied = (what) =>
-    fail('42501', `Access denied: only an organization admin ${what}`);
+  const adminDenied = (what) => fail('42501', `Access denied: only an organization admin ${what}`);
   const completed = (what) =>
     fail('22023', `The season of ${what} is completed and takes no change`, 'season_completed');
 
@@ -181,16 +190,25 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
     if (row.team_id) {
       const team = teamById(row.team_id);
       if (!team || !same(team.organization_id, row.organization_id)) {
-        return fail('23514', `practice preference: team ${row.team_id} does not belong to organization ${row.organization_id}`);
+        return fail(
+          '23514',
+          `practice preference: team ${row.team_id} does not belong to organization ${row.organization_id}`
+        );
       }
       const coach = (db.coaches || []).find(
         (c) => same(c.id, row.coach_id) && same(c.organization_id, row.organization_id)
       );
       if (!coach) {
-        return fail('23514', `practice preference: coach ${row.coach_id} is not a coach of organization ${row.organization_id}`);
+        return fail(
+          '23514',
+          `practice preference: coach ${row.coach_id} is not a coach of organization ${row.organization_id}`
+        );
       }
       if (!same(coach.season_settings_id, divisionOf(team)?.season_settings_id)) {
-        return fail('23514', `practice preference: coach ${row.coach_id} and team ${row.team_id} belong to different seasons`);
+        return fail(
+          '23514',
+          `practice preference: coach ${row.coach_id} and team ${row.team_id} belong to different seasons`
+        );
       }
     }
     if (row.venue_ids) {
@@ -201,7 +219,10 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
           )
       );
       if (bad.length > 0) {
-        return fail('23514', `practice preference: ${bad.length} venue(s) are not locations of organization ${row.organization_id}`);
+        return fail(
+          '23514',
+          `practice preference: ${bad.length} venue(s) are not locations of organization ${row.organization_id}`
+        );
       }
     }
     return null;
@@ -220,9 +241,11 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
   });
 
   if (name === 'admin_add_practice_preference') {
-    if (!p.p_coach_id || !p.p_team_id) return fail('23502', 'p_coach_id and p_team_id are required');
+    if (!p.p_coach_id || !p.p_team_id)
+      return fail('23502', 'p_coach_id and p_team_id are required');
     const team = teamById(p.p_team_id);
-    if (!team || !isOrgAdmin(team.organization_id)) return adminDenied('adds a practice preference');
+    if (!team || !isOrgAdmin(team.organization_id))
+      return adminDenied('adds a practice preference');
     const level = p.p_level ?? 'prefer';
     if (!['prefer', 'must'].includes(level)) {
       return fail('22023', `p_level must be prefer or must, not ${p.p_level}`);
@@ -348,11 +371,17 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
       updated_by: currentUserId,
       updated_at: now.toISOString(),
     });
-    audit(row.organization_id, 'practice_preference.must_decided', 'coach_practice_preference', row.id, {
-      decision: p.p_decision,
-      before,
-      after: { ...row },
-    });
+    audit(
+      row.organization_id,
+      'practice_preference.must_decided',
+      'coach_practice_preference',
+      row.id,
+      {
+        decision: p.p_decision,
+        before,
+        after: { ...row },
+      }
+    );
     return { data: { ...row }, error: null };
   }
 
@@ -365,7 +394,11 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
   }
   if (name === 'admin_remove_practice_preference') {
     if (seasonDone()) return completed(`practice preference ${row.id}`);
-    Object.assign(row, { status: 'removed', updated_by: currentUserId, updated_at: now.toISOString() });
+    Object.assign(row, {
+      status: 'removed',
+      updated_by: currentUserId,
+      updated_at: now.toISOString(),
+    });
     audit(row.organization_id, 'practice_preference.removed', 'coach_practice_preference', row.id, {
       before,
       after: { ...row },
@@ -384,7 +417,8 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
     ...conditionsOf(p),
     level,
     requested_level: level === 'must' ? 'must' : row.requested_level,
-    must_decision: level === 'must' ? 'accepted' : row.requested_level === 'must' ? 'kept_prefer' : null,
+    must_decision:
+      level === 'must' ? 'accepted' : row.requested_level === 'must' ? 'kept_prefer' : null,
     ...(level === 'must' || row.requested_level === 'must'
       ? { decided_by: currentUserId, decided_at: now.toISOString() }
       : {}),
@@ -410,16 +444,23 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
   const job = (db.import_jobs || []).find((item) => same(item.id, jobId));
   if (!job) return fail('P0002', `Import job ${jobId} not found`);
   if (!currentUserId || !isOrgAdmin(job.organization_id)) {
-    return fail('42501', `Access denied: user is not an admin of organization ${job.organization_id}`);
+    return fail(
+      '42501',
+      `Access denied: user is not an admin of organization ${job.organization_id}`
+    );
   }
   if (job.job_type !== 'registration') {
     return fail('22023', `Import job ${jobId} is ${job.job_type}, not registration`);
   }
-  if (job.status === 'failed') return fail('22023', `Failed import job ${jobId} cannot be finalized`);
+  if (job.status === 'failed')
+    return fail('22023', `Failed import job ${jobId} cannot be finalized`);
   const season = importSeasonOf(db, job);
   if (!season) return importSeasonMissing(job.organization_id);
   if (season.status === 'completed') {
-    return enrollmentRefusal(`Season ${season.id} is completed and takes no import`, 'season_completed');
+    return enrollmentRefusal(
+      `Season ${season.id} is completed and takes no import`,
+      'season_completed'
+    );
   }
 
   const orgId = job.organization_id;
@@ -428,7 +469,10 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
   const seasonTeams = (db.teams || []).filter(
     (team) =>
       same(team.organization_id, orgId) &&
-      same((db.divisions || []).find((d) => same(d.id, team.division_id))?.season_settings_id, season.id)
+      same(
+        (db.divisions || []).find((d) => same(d.id, team.division_id))?.season_settings_id,
+        season.id
+      )
   );
   const coachesToday = (teamId, coachId) =>
     (db.team_coach_assignments || []).some(
@@ -475,7 +519,7 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
       refuse(row, parsed.message, 'invalid');
       continue;
     }
-    const { rule } = parsed;
+    const rule = /** @type {NonNullable<typeof parsed.rule>} */ (parsed.rule);
     const coach = (db.coaches || []).find(
       (c) =>
         same(c.organization_id, orgId) &&
@@ -484,7 +528,8 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
     );
     if (!coach) {
       refuse(row, 'No coach with this email in the season', 'unknownCoach');
-      if (unknownCoaches.length < 200) unknownCoaches.push({ row: row.source_row_number, email: rule.email });
+      if (unknownCoaches.length < 200)
+        unknownCoaches.push({ row: row.source_row_number, email: rule.email });
       continue;
     }
     let teamIds;
@@ -494,7 +539,8 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
       );
       if (matches.length === 0) {
         refuse(row, 'No team with this name in the season', 'unknownTeam');
-        if (unknownTeams.length < 200) unknownTeams.push({ row: row.source_row_number, team: rule.team });
+        if (unknownTeams.length < 200)
+          unknownTeams.push({ row: row.source_row_number, team: rule.team });
         continue;
       }
       if (matches.length > 1) {
@@ -557,7 +603,11 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
       existing.status === 'in_force' &&
       named.has(String(existing.team_id))
     ) {
-      Object.assign(existing, { status: 'replaced', updated_by: currentUserId, updated_at: nowIso });
+      Object.assign(existing, {
+        status: 'replaced',
+        updated_by: currentUserId,
+        updated_at: nowIso,
+      });
       replaced.push(existing.id);
     }
   }
@@ -598,7 +648,8 @@ function finalizeImport(db, p, { currentUserId, now, newId, isOrgAdmin, audit, t
 
   const warned =
     errors.length > 0 ||
-    counts.invalid + counts.unknownCoach + counts.unknownTeam + counts.noTeam + counts.notOnTeam > 0;
+    counts.invalid + counts.unknownCoach + counts.unknownTeam + counts.noTeam + counts.notOnTeam >
+      0;
   const result = {
     status: warned ? 'completed_with_warnings' : 'completed',
     staged_rows: (db.staging_import_rows || []).filter(

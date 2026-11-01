@@ -32,7 +32,12 @@ const CONFIG = { timeBudgetMs: 20000, maxIterations: 200, seed: 7 };
 /** A weekly slot on `day` (0 = Monday 2026-09-07) at `hour`:00, one hour, at venue `loc`. */
 function slotRow(id, day, hour, loc = LOC_A) {
   return {
-    row: { id, day_of_week: DAYS[day], start_time: `${String(hour).padStart(2, '0')}:00:00`, fields: { location_id: loc } },
+    row: {
+      id,
+      day_of_week: DAYS[day],
+      start_time: `${String(hour).padStart(2, '0')}:00:00`,
+      fields: { location_id: loc },
+    },
     slot: {
       id,
       day: DAYS[day],
@@ -86,7 +91,7 @@ async function scenario({ slots: slotDefs, teams, rules, assignments, perWeek = 
     slotIds: slots.map((s) => s.id),
     heldRows: held,
   });
-  if (!context.ok) throw new Error(`the fixture's load refused: ${context.message}`);
+  if (!context.ok) throw new Error(`the fixture's load refused: ${JSON.stringify(context)}`);
   const result = await runPracticeOptimizer({
     teams: teams.map((t) => ({ ...prepareTeam(t), practicesPerWeek: perWeek })),
     slots,
@@ -99,7 +104,11 @@ async function scenario({ slots: slotDefs, teams, rules, assignments, perWeek = 
       placeable.map((id) => [id, perWeek - held.filter((row) => row.teamId === id).length])
     ),
     preferenceGate: context.gate,
-    dating: seasonLongDating(slots, toDaylightSlot, { timeZone: 'UTC', until: '2026-11-30', liveFrom: '2026-09-01' }),
+    dating: seasonLongDating(slots, toDaylightSlot, {
+      timeZone: 'UTC',
+      until: '2026-11-30',
+      liveFrom: '2026-09-01',
+    }),
     config: CONFIG,
   });
   return { context, result, slots };
@@ -164,7 +173,7 @@ describe('rules are judged per practice', () => {
     }
   });
 
-  it('two coaches\' musts with nothing in common leave no slot, and both rules are named', async () => {
+  it("two coaches' musts with nothing in common leave no slot, and both rules are named", async () => {
     const { context, result } = await scenario({
       slots: FIVE_DAYS(),
       teams: [{ id: 't1', division: 'U10', coachId: 'k1' }],
@@ -174,11 +183,18 @@ describe('rules are judged per practice', () => {
         rule('r-b', 'k2', 't1', { level: 'must', weekdays: ['THU'] }),
       ],
     });
-    assert.deepEqual(context.findings.map((f) => [f.code, f.details.ruleIds]), [
-      ['PRACTICE_COACH_PREFERENCE_CONFLICT', ['r-a', 'r-b']],
-    ]);
+    assert.deepEqual(
+      context.findings.map((f) => [f.code, f.details.ruleIds]),
+      [['PRACTICE_COACH_PREFERENCE_CONFLICT', ['r-a', 'r-b']]]
+    );
     assert.deepEqual(result.placements, []);
-    assert.deepEqual(result.unassigned.map((u) => u.rules), [['r-a', 'r-b'], ['r-a', 'r-b']]);
+    assert.deepEqual(
+      result.unassigned.map((u) => u.rules),
+      [
+        ['r-a', 'r-b'],
+        ['r-a', 'r-b'],
+      ]
+    );
   });
 
   it('prefer rules steer without refusing: the team takes the days and hours it prefers, no breach left', async () => {
@@ -207,8 +223,16 @@ describe('rules are judged per practice', () => {
       assignments,
       rules: [
         rule('r-other', 'k1', 'some-other-team', { level: 'must', weekdays: ['FRI'] }),
-        rule('r-ended', 'k1', 't1', { level: 'must', weekdays: ['FRI'], effective_to: '2026-09-30' }),
-        rule('r-later', 'k1', 't1', { level: 'must', weekdays: ['FRI'], effective_from: '2026-10-02' }),
+        rule('r-ended', 'k1', 't1', {
+          level: 'must',
+          weekdays: ['FRI'],
+          effective_to: '2026-09-30',
+        }),
+        rule('r-later', 'k1', 't1', {
+          level: 'must',
+          weekdays: ['FRI'],
+          effective_from: '2026-10-02',
+        }),
       ],
     });
     assert.equal(context.gate.verdicts.size, 0);
@@ -220,13 +244,20 @@ describe('rules are judged per practice', () => {
       slots: FIVE_DAYS(),
       teams,
       assignments,
-      rules: [rule('r-now', 'k1', 't1', { level: 'must', weekdays: ['FRI', 'WED'], effective_from: '2026-10-01', effective_to: '2026-10-01' })],
+      rules: [
+        rule('r-now', 'k1', 't1', {
+          level: 'must',
+          weekdays: ['FRI', 'WED'],
+          effective_from: '2026-10-01',
+          effective_to: '2026-10-01',
+        }),
+      ],
     });
     assert.deepEqual(weekdaysOf(slots, result, 't1'), ['fri', 'wed']);
   });
 });
 
-describe('keep-current keeps what the team\'s saved practices hold', () => {
+describe("keep-current keeps what the team's saved practices hold", () => {
   const assignments = [assignment('t1', 'k1')];
   const teams = [{ id: 't1', division: 'U10', coachId: 'k1' }];
 
@@ -245,7 +276,10 @@ describe('keep-current keeps what the team\'s saved practices hold', () => {
       rules: [rule('r-keep', 'k1', 't1', { level: 'must', keep_venue: true })],
     });
     // Venue B would be the first free slot; keeping venue A takes the Tuesday slot there.
-    assert.deepEqual(result.placements.map((p) => p.slotId), ['s-tue-a']);
+    assert.deepEqual(
+      result.placements.map((p) => p.slotId),
+      ['s-tue-a']
+    );
     assert.equal(slots.length, 3);
   });
 
@@ -257,10 +291,14 @@ describe('keep-current keeps what the team\'s saved practices hold', () => {
       perWeek: 1,
       rules: [rule('r-keep', 'k1', 't1', { level: 'must', keep_venue: true })],
     });
-    assert.deepEqual(result.placements.map((p) => p.slotId), ['s-mon-b']);
-    assert.deepEqual(context.findings.map((f) => [f.code, f.details.ruleId, f.details.dimension]), [
-      ['PRACTICE_COACH_PREFERENCE_NO_REFERENCE', 'r-keep', 'venue'],
-    ]);
+    assert.deepEqual(
+      result.placements.map((p) => p.slotId),
+      ['s-mon-b']
+    );
+    assert.deepEqual(
+      context.findings.map((f) => [f.code, f.details.ruleId, f.details.dimension]),
+      [['PRACTICE_COACH_PREFERENCE_NO_REFERENCE', 'r-keep', 'venue']]
+    );
   });
 
   it('a saved practice whose range ended before the run date holds nothing to keep', async () => {
@@ -272,7 +310,10 @@ describe('keep-current keeps what the team\'s saved practices hold', () => {
       held: [{ teamId: 't1', slotId: 's-thu-a', effectiveDateRange: '[2026-09-01,2026-09-30]' }],
       rules: [rule('r-keep', 'k1', 't1', { level: 'must', keep_venue: true })],
     });
-    assert.deepEqual(context.findings.map((f) => f.code), ['PRACTICE_COACH_PREFERENCE_NO_REFERENCE']);
+    assert.deepEqual(
+      context.findings.map((f) => f.code),
+      ['PRACTICE_COACH_PREFERENCE_NO_REFERENCE']
+    );
   });
 
   it('a saved practice on a slot the store cannot describe refuses the run', async () => {

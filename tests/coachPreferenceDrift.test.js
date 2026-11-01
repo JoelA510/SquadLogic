@@ -74,7 +74,11 @@ const sumPowers = (base, from, to) => {
   return total;
 };
 const EXPECTED_CASES =
-  3 * sumPowers(8, 0, 3) * 8 + 3 * sumPowers(8, 1, 2) * 16 + (5 ** 3 - 1) * 2 * 8 * 2 + 3 * 3 * 4 * 2 * 8 + 13;
+  3 * sumPowers(8, 0, 3) * 8 +
+  3 * sumPowers(8, 1, 2) * 16 +
+  (5 ** 3 - 1) * 2 * 8 * 2 +
+  3 * 3 * 4 * 2 * 8 +
+  13;
 
 describe('the practice-preference arms agree over the full product', () => {
   it('the product is the full product, and exercises every branch it claims to', () => {
@@ -85,15 +89,23 @@ describe('the practice-preference arms agree over the full product', () => {
     const seen = (predicate) => outcomes.some(predicate);
     expect(seen((o) => o.verdict.mustKeepViolated)).toBe(true);
     expect(
-      seen((o) => !o.verdict.mustKeepViolated && o.rules.some((r) => r.level === 'must' && r.conditions.length > 0))
+      seen(
+        (o) =>
+          !o.verdict.mustKeepViolated &&
+          o.rules.some((r) => r.level === 'must' && r.conditions.length > 0)
+      )
     ).toBe(true);
     for (const breaches of [0, 1, 2, 3]) {
       expect(seen((o) => o.verdict.preferKeepBreaches === breaches)).toBe(true);
     }
     // A breach is one per unmet rule, however many of its conditions fail.
-    expect(seen((o) => o.verdict.preferKeepBreaches === 1 && o.verdict.breachedDimensions.length > 1)).toBe(true);
+    expect(
+      seen((o) => o.verdict.preferKeepBreaches === 1 && o.verdict.breachedDimensions.length > 1)
+    ).toBe(true);
     for (const source of ['values', 'current']) {
-      expect(seen((o) => o.rules.some((r) => r.conditions.some((c) => c.source === source)))).toBe(true);
+      expect(seen((o) => o.rules.some((r) => r.conditions.some((c) => c.source === source)))).toBe(
+        true
+      );
     }
     for (const code of [
       PRACTICE_REASON.COACH_PREFERENCE_CONFLICT,
@@ -118,14 +130,17 @@ describe('the practice-preference arms agree over the full product', () => {
     }
     // The filters bite: a rule for another team or out of window is not resolved at all, a window
     // that holds the day is, and a coach who is not on the team asks nothing.
-    const byNoise = (name) => outcomes.filter((o) => o.id.startsWith('B/') && o.id.endsWith(`/${name}`));
+    const byNoise = (name) =>
+      outcomes.filter((o) => o.id.startsWith('B/') && o.id.endsWith(`/${name}`));
     for (const name of ['other-team', 'window-ended', 'window-not-started']) {
       expect(byNoise(name).length).toBeGreaterThan(0);
       expect(byNoise(name).every((o) => o.rules.length === 0)).toBe(true);
     }
     expect(byNoise('window-holds').every((o) => o.rules.length > 0)).toBe(true);
     expect(
-      outcomes.filter((o) => o.id.endsWith('/off-roster')).every((o) => o.rules.every((r) => r.id !== 'r-off'))
+      outcomes
+        .filter((o) => o.id.endsWith('/off-roster'))
+        .every((o) => o.rules.every((r) => r.id !== 'r-off'))
     ).toBe(true);
     expect(coreOutcomes.filter((o) => o.refused)).toHaveLength(13);
   });

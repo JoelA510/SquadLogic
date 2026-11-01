@@ -36,7 +36,11 @@
  * Import-free (no Deno std, no esm.sh), so Vitest can execute it directly.
  */
 
-export const COACH_PREFERENCE_DIMENSIONS = Object.freeze(['weekday', 'start_time', 'venue'] as const);
+export const COACH_PREFERENCE_DIMENSIONS = Object.freeze([
+  'weekday',
+  'start_time',
+  'venue',
+] as const);
 export type CoachPreferenceDimension = (typeof COACH_PREFERENCE_DIMENSIONS)[number];
 
 export const COACH_PREFERENCE_LEVEL = Object.freeze({
@@ -141,10 +145,16 @@ export interface PreferenceVerdict {
   breachedDimensions: CoachPreferenceDimension[];
 }
 
-const nonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+const nonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0;
 
 /** A set condition: absent (null / undefined) or a non-empty array of distinct, valid values. */
-function checkSet(rule: PreferenceRule, name: string, value: unknown, valid: (v: unknown) => boolean) {
+function checkSet(
+  rule: PreferenceRule,
+  name: string,
+  value: unknown,
+  valid: (v: unknown) => boolean
+) {
   if (value === null || value === undefined) return null;
   if (!Array.isArray(value) || value.length === 0) {
     throw new RangeError(`rule ${rule.id}: ${name} holds at least one value`);
@@ -169,22 +179,32 @@ function checkRule(rule: PreferenceRule) {
   if (rule.level !== COACH_PREFERENCE_LEVEL.MUST && rule.level !== COACH_PREFERENCE_LEVEL.PREFER) {
     throw new RangeError(`unknown preference rule level: ${String(rule.level)}`);
   }
-  const weekdays = checkSet(rule, 'weekdays', rule.weekdays, (v) => WEEKDAY_CODES.includes(v as string));
+  const weekdays = checkSet(rule, 'weekdays', rule.weekdays, (v) =>
+    WEEKDAY_CODES.includes(v as string)
+  );
   const starts = checkSet(
     rule,
     'startMinutes',
     rule.startMinutes,
     (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1439
   );
-  const venues = checkSet(rule, 'venueIds', rule.venueIds, (v) => typeof v === 'string' && LOCATION_ID.test(v));
+  const venues = checkSet(
+    rule,
+    'venueIds',
+    rule.venueIds,
+    (v) => typeof v === 'string' && LOCATION_ID.test(v)
+  );
   for (const [values, keep, name] of [
     [weekdays, rule.keepWeekday, 'weekday'],
     [starts, rule.keepStart, 'start'],
     [venues, rule.keepVenue, 'venue'],
   ] as const) {
-    if (keep !== undefined && typeof keep !== 'boolean') throw new RangeError(`rule ${rule.id}: keep ${name} is a boolean`);
+    if (keep !== undefined && typeof keep !== 'boolean')
+      throw new RangeError(`rule ${rule.id}: keep ${name} is a boolean`);
     if (values !== null && keep === true) {
-      throw new RangeError(`rule ${rule.id}: a rule holds either values or keep-current for the ${name}, not both`);
+      throw new RangeError(
+        `rule ${rule.id}: a rule holds either values or keep-current for the ${name}, not both`
+      );
     }
   }
   const conditions =
@@ -192,7 +212,11 @@ function checkRule(rule: PreferenceRule) {
     Number(starts !== null || rule.keepStart === true) +
     Number(venues !== null || rule.keepVenue === true);
   if (conditions === 0) throw new RangeError(`rule ${rule.id}: a rule has at least one condition`);
-  if (rule.coachPriority !== null && rule.coachPriority !== undefined && !PRIORITIES.includes(rule.coachPriority)) {
+  if (
+    rule.coachPriority !== null &&
+    rule.coachPriority !== undefined &&
+    !PRIORITIES.includes(rule.coachPriority)
+  ) {
     throw new RangeError(`rule ${rule.id}: an unknown priority`);
   }
   for (const date of [rule.effectiveFrom, rule.effectiveTo]) {
@@ -220,8 +244,16 @@ export function ruleInWindow(rule: PreferenceRule, date: string | null | undefin
 
 function conditionsOf(rule: PreferenceRule) {
   return [
-    { dimension: 'weekday' as const, values: rule.weekdays ?? null, keep: rule.keepWeekday === true },
-    { dimension: 'start_time' as const, values: rule.startMinutes ?? null, keep: rule.keepStart === true },
+    {
+      dimension: 'weekday' as const,
+      values: rule.weekdays ?? null,
+      keep: rule.keepWeekday === true,
+    },
+    {
+      dimension: 'start_time' as const,
+      values: rule.startMinutes ?? null,
+      keep: rule.keepStart === true,
+    },
     { dimension: 'venue' as const, values: rule.venueIds ?? null, keep: rule.keepVenue === true },
   ].filter((condition) => condition.values !== null || condition.keep);
 }
@@ -248,7 +280,8 @@ export function resolveCoachPreferences(input: {
   const seen = new Set<string>();
   for (const rule of rules) {
     checkRule(rule);
-    if (seen.has(rule.id)) throw new RangeError(`a second rule with id ${rule.id}; a rule is named by its id`);
+    if (seen.has(rule.id))
+      throw new RangeError(`a second rule with id ${rule.id}; a rule is named by its id`);
     seen.add(rule.id);
   }
 

@@ -111,7 +111,11 @@ function rule(
 
 export function enumerateCoachPreferenceProduct(): ProductCase[] {
   const cases: ProductCase[] = [];
-  const team = (coachIds: string[], rules: ProductRule[], withSeries: boolean): ProductCase['input'] => ({
+  const team = (
+    coachIds: string[],
+    rules: ProductRule[],
+    withSeries: boolean
+  ): ProductCase['input'] => ({
     teamId: 'team-1',
     coachIds,
     rules,
@@ -234,7 +238,8 @@ export function enumerateCoachPreferenceProduct(): ProductCase[] {
           for (const mask of product([0, 1] as const, 3)) {
             const candidate = { ...SERIES };
             DIMENSIONS.forEach((dimension, i) => {
-              (candidate as Record<string, unknown>)[KEY[dimension]] = REFERENCE[dimension][mask[i]];
+              (candidate as Record<string, unknown>)[KEY[dimension]] =
+                REFERENCE[dimension][mask[i]];
             });
             cases.push({
               id: `D/${first}+${second}/${levels.join('+')}/${sameCoach ? 'one-coach' : 'two-coaches'}/${mask.join('')}`,
@@ -268,7 +273,9 @@ export function enumerateCoachPreferenceProduct(): ProductCase[] {
   refuse('empty-set', [{ ...base, weekdays: [] }]);
   refuse('duplicate-value', [{ ...base, weekdays: ['TUE', 'TUE'] }]);
   refuse('unknown-weekday', [{ ...base, weekdays: ['TUESDAY'] }]);
-  refuse('minute-out-of-range', [{ ...rule('r1', 'c1', 'must', 'start_time', 'hit'), startMinutes: [1440] }]);
+  refuse('minute-out-of-range', [
+    { ...rule('r1', 'c1', 'must', 'start_time', 'hit'), startMinutes: [1440] },
+  ]);
   refuse('keep-and-values', [{ ...base, keepWeekday: true }]);
   refuse('no-condition', [{ id: 'r1', coachId: 'c1', teamId: 'team-1', level: 'must' }]);
   refuse('window-reversed', [{ ...base, effectiveFrom: '2026-11-10', effectiveTo: '2026-11-09' }]);

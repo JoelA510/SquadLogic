@@ -1,35 +1,27 @@
 /**
- * Coach practice preferences in the UI: display vocabulary, the backend-missing
- * check, and the approval-time re-judge (Phase 8.6 PR 3b, PR 2).
+ * Practice preference rules in the UI: display vocabulary, the backend-missing check, and the
+ * approval-time re-judge (Phase D C1; originally Phase 8.6 PR 3b, PR 2).
  *
- * **The re-judge composes core; it does not restate it.** Plan §4 has the
- * approval dialog show which of the coach's teams' CURRENT practice series a
- * new `must_keep` would make unsatisfiable. The rule that decides that lives in
- * `@squadlogic/core/practice/coachPreferences.js` (`resolveCoachPreferences` +
+ * **The re-judge composes core; it does not restate it.** Accepting a requested must (or adding
+ * one) shows which of the team's CURRENT practice series it would make unsatisfiable. The rule that
+ * decides that lives in `@squadlogic/core/practice/coachPreferences.js` (`resolveCoachPreferences` +
  * `judgeCoachPreferenceCandidate`) and the team's current coaches come from
- * `@squadlogic/core/people/assignmentHistory.js` (`coachesOfTeamOn`). This file
- * only enumerates inputs and reads verdicts.
+ * `@squadlogic/core/people/assignmentHistory.js` (`coachesOfTeamOn`). This file only enumerates
+ * inputs and reads verdicts.
  *
- * **Teams are enumerated from the roster** (`team_coach_assignments` rows
- * current on the day), never from the preference rows: a coach's first request
- * has no approved preference yet, so a preference-derived team list would be
- * empty and the preview would read "none" over a real conflict.
- *
- * **Why `series: null`.** Resolved against the series itself, a `must_keep`
- * keeps whatever the series already is, so every current series would pass
- * trivially. The question at approval is "does this series keep the value being
- * approved", so the value is the reference and each current series is judged
- * as a candidate against it.
+ * **The team is the rule's own** (a rule is for one team), and its current series are read from the
+ * practice rows. Each series is judged as a candidate against every rule in force for the team
+ * (a pending must in force as prefer included), with the proposed must in place of its own earlier
+ * level.
  */
 
 import {
-  COACH_PREFERENCE_LEVEL,
   CoachPreferencePlacementSchema,
-  CoachPreferenceSchema,
+  CoachPreferenceRuleSchema,
   judgeCoachPreferenceCandidate,
   resolveCoachPreferences,
 } from '@squadlogic/core/practice/coachPreferences.js';
-import { assignmentRowCovers, coachesOfTeamOn } from '@squadlogic/core/people/assignmentHistory.js';
+import { coachesOfTeamOn } from '@squadlogic/core/people/assignmentHistory.js';
 import { PRACTICE_REASON } from '@squadlogic/core/practice/reasonCodes.js';
 
 export const DIMENSION_LABEL = Object.freeze({
@@ -39,16 +31,14 @@ export const DIMENSION_LABEL = Object.freeze({
 });
 
 export const LEVEL_LABEL = Object.freeze({
-  must_keep: 'Must keep',
-  prefer_keep: 'Prefer to keep',
-  dont_care: "Don't care",
+  must: 'Must',
+  prefer: 'Prefer',
 });
 
-export const STATUS_LABEL = Object.freeze({
-  requested: 'Pending',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  superseded: 'Superseded',
+export const DECISION_LABEL = Object.freeze({
+  pending: 'Pending must',
+  accepted: 'Accepted as must',
+  kept_prefer: 'Kept as prefer',
 });
 
 export const WEEKDAY_OPTIONS = Object.freeze([
@@ -166,18 +156,58 @@ export function placementOfPracticeRow(row) {
 }
 
 /**
- * Re-judge a decision at approval time.
+ * A rule row (`coach_practice_preferences`) as core reads a rule.
+ * @param {any} row
+ */
+export function ruleOfRow(row) {
+  return CoachPreferenceRuleSchema.parse({
+    id: String(row.id),
+    coachId: String(row.coach_id),
+    teamId: String(row.team_id),
+    level: row.level,
+    weekdays: row.weekdays ?? null,
+    startMinutes: row.start_minutes ?? null,
+    venueIds: row.venue_ids ?? null,
+    keepWeekday: row.keep_weekday === true,
+    keepStart: row.keep_start === true,
+    keepVenue: row.keep_venue === true,
+    coachPriority: row.coach_priority ?? null,
+    effectiveFrom: row.effective_from ?? null,
+    effectiveTo: row.effective_to ?? null,
+  });
+}
+
+/**
+ * A rule as a reader sees it: the conditions joined by " · ", several values as "A or B".
+ * @param {any} row
+ * @param {Map<string, string>} [locationNames]
+ */
+export function describeRule(row, locationNames = new Map()) {
+  const list = (values, dimension) =>
+    values.map((value) => formatPreferenceValue(dimension, value, locationNames)).join(' or ');
+  const parts = [];
+  if (row.weekdays) parts.push(list(row.weekdays, 'weekday'));
+  else if (row.keep_weekday) parts.push('keep the current day');
+  if (row.start_minutes) parts.push(list(row.start_minutes, 'start_time'));
+  else if (row.keep_start) parts.push('keep the current start time');
+  if (row.venue_ids) parts.push(list(row.venue_ids, 'venue'));
+  else if (row.keep_venue) parts.push('keep the current venue');
+  return parts.join(' · ');
+}
+
+/**
+ * Re-judge a requested must at the moment an admin accepts it (or adds one): which of the team's
+ * current practice series it would make unsatisfiable.
  *
  * @param {Object} input
- * @param {{ coachId: string, dimension: string, level: string, value: unknown }} input.proposal -
- *   the preference as it would be in force after the decision
- * @param {any[]} input.approvedRows - `coach_practice_preferences` rows; only `approved` ones are read
+ * @param {any} input.proposal - the rule as it would be in force, in core's shape (level `must`);
+ *   its `id` names a rule already in force (replaced by this one), or is new
+ * @param {any[]} input.ruleRows - `coach_practice_preferences` rows; only `in_force` ones are read
  * @param {any[]} input.rosterRows - `team_coach_assignments` rows (the roster)
  * @param {any[]} input.practiceRows - `practice_assignments` rows with `slot` embedded
  * @param {string} input.date - `YYYY-MM-DD`
  */
-export function previewMustKeep({ proposal, approvedRows, rosterRows, practiceRows, date }) {
-  const coachId = String(proposal.coachId);
+export function previewMustKeep({ proposal, ruleRows, rosterRows, practiceRows, date }) {
   const empty = {
     applies: false,
     noReference: false,
@@ -187,76 +217,63 @@ export function previewMustKeep({ proposal, approvedRows, rosterRows, practiceRo
     teamsWithoutSeries: [],
     conflicts: [],
   };
-  if (proposal.level !== COACH_PREFERENCE_LEVEL.MUST_KEEP) return empty;
+  if (proposal.level !== 'must') return empty;
 
-  const proposed = CoachPreferenceSchema.parse({
-    coachId,
-    dimension: proposal.dimension,
-    level: proposal.level,
-    value: proposal.value ?? null,
-  });
+  const proposed = CoachPreferenceRuleSchema.parse(proposal);
+  const teamId = proposed.teamId;
+  const result = { ...empty, applies: true, teamIds: [teamId] };
 
-  // The roster, never the preferences: see the header.
-  const teamIds = [
-    ...new Set(
-      rosterRows
-        .filter((row) => String(row.coach_id) === coachId && assignmentRowCovers(row, date))
-        .map((row) => String(row.team_id))
-    ),
-  ].sort();
+  // The team's roster on the day, never the rule rows.
+  const { lead, assistants } = coachesOfTeamOn(rosterRows, teamId, date);
+  const coachIds = [...new Set([...lead, ...assistants])];
+  const inForce = ruleRows
+    .filter((row) => row.status === 'in_force' && String(row.team_id) === teamId)
+    .map(ruleOfRow);
+  const after = [...inForce.filter((rule) => rule.id !== proposed.id), proposed];
 
-  const result = { ...empty, applies: true, teamIds };
-  for (const teamId of teamIds) {
-    const { lead, assistants } = coachesOfTeamOn(rosterRows, teamId, date);
-    const coachIds = [...new Set([...lead, ...assistants])];
-    const onTeam = new Set(coachIds);
-    const inForce = approvedRows
-      .filter((row) => row.status === 'approved' && onTeam.has(String(row.coach_id)))
-      .map((row) => ({
-        coachId: String(row.coach_id),
-        dimension: row.dimension,
-        level: row.level,
-        value: row.value ?? null,
-      }));
-    const replaced = (pref) => pref.coachId === coachId && pref.dimension === proposal.dimension;
-    // After the decision: the proposal replaces this coach's approved row on the
-    // dimension (the RPC supersedes it). Before: what is in force today, so a
-    // series a co-coach's must_keep already breaks is not blamed on this one.
-    const preferences = [...inForce.filter((pref) => !replaced(pref)), proposed];
-    const resolution = resolveCoachPreferences({ coachIds, preferences, series: null });
-    const before = resolveCoachPreferences({ coachIds, preferences: inForce, series: null });
-    for (const finding of resolution.findings) {
-      if (finding.details?.dimension !== proposal.dimension) continue;
-      if (
-        finding.code === PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE &&
-        String(finding.details?.coachId) === coachId
-      ) {
-        result.noReference = true;
-      } else if (finding.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT) {
-        result.conflicts.push({ teamId, message: finding.message });
-      }
+  const series = practiceRows.filter(
+    (row) => String(row.team_id) === teamId && practiceRowIsCurrent(row, date)
+  );
+  if (series.length === 0) result.teamsWithoutSeries.push(teamId);
+  const placements = [];
+  for (const row of series) {
+    const { placement, problem } = placementOfPracticeRow(row);
+    if (!placement) result.unjudged.push({ teamId, assignmentId: String(row.id), problem });
+    else placements.push({ row, placement });
+  }
+  const resolve = (rules) =>
+    resolveCoachPreferences({
+      teamId,
+      coachIds,
+      rules,
+      current: placements.map((entry) => entry.placement),
+      date,
+    });
+  const resolution = resolve(after);
+  const before = resolve(inForce);
+
+  for (const finding of /** @type {any[]} */ (resolution.findings)) {
+    if (
+      finding.code === PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE &&
+      finding.details?.ruleId === proposed.id
+    ) {
+      result.noReference = true;
+    } else if (
+      finding.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT &&
+      finding.details?.ruleIds?.includes(proposed.id)
+    ) {
+      result.conflicts.push({ teamId, message: finding.message });
     }
-
-    const series = practiceRows.filter(
-      (row) => String(row.team_id) === teamId && practiceRowIsCurrent(row, date)
-    );
-    if (series.length === 0) result.teamsWithoutSeries.push(teamId);
-    for (const row of series) {
-      const { placement, problem } = placementOfPracticeRow(row);
-      if (!placement) {
-        result.unjudged.push({ teamId, assignmentId: String(row.id), problem });
-        continue;
-      }
-      const verdict = judgeCoachPreferenceCandidate(resolution, placement);
-      if (verdict.violatedDimensions.includes(proposal.dimension)) {
-        const already = judgeCoachPreferenceCandidate(before, placement).violatedDimensions;
-        result.unsatisfiable.push({
-          teamId,
-          assignmentId: String(row.id),
-          placement,
-          alreadyUnsatisfiable: already.includes(proposal.dimension),
-        });
-      }
+  }
+  for (const { row, placement } of placements) {
+    const verdict = judgeCoachPreferenceCandidate(resolution, placement);
+    if (verdict.violatedRules.includes(proposed.id)) {
+      result.unsatisfiable.push({
+        teamId,
+        assignmentId: String(row.id),
+        placement,
+        alreadyUnsatisfiable: judgeCoachPreferenceCandidate(before, placement).mustKeepViolated,
+      });
     }
   }
   return result;

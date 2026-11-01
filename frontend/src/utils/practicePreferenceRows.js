@@ -75,10 +75,10 @@ export function parseDate(text) {
  *
  * @param {Record<string, unknown>} payload - the row's normalized payload
  * @param {{ locations: Array<{ id: string, name: string }> }} context - the organization's locations
- * @returns {{ ok: true, rule: { email: string, team: string | null, requestedLevel: 'prefer' | 'must',
- *   weekdays: string[] | null, startMinutes: number[] | null, venueIds: string[] | null,
- *   effectiveFrom: string | null, effectiveTo: string | null, coachPriority: string | null } }
- *   | { ok: false, message: string }}
+ * @returns {{ ok: boolean, message?: string, rule?: { email: string, team: string | null,
+ *   requestedLevel: 'prefer' | 'must', weekdays: string[] | null, startMinutes: number[] | null,
+ *   venueIds: string[] | null, effectiveFrom: string | null, effectiveTo: string | null,
+ *   coachPriority: string | null } }} `ok` with the `rule`, else the reason as `message`
  */
 export function parsePreferenceRow(payload, { locations }) {
   const email = payloadText(payload, 'email')?.toLowerCase() ?? null;
@@ -91,6 +91,7 @@ export function parsePreferenceRow(payload, { locations }) {
   const toText = payloadText(payload, 'effective_to', 'valid_until');
   const priorityText = payloadText(payload, 'coach_priority')?.toLowerCase() ?? null;
 
+  /** @type {'prefer' | 'must'} */
   let requestedLevel;
   if (levelText === null) requestedLevel = 'prefer';
   else if (/(must|required|mandatory)/.test(levelText)) requestedLevel = 'must';
@@ -107,7 +108,10 @@ export function parsePreferenceRow(payload, { locations }) {
   let weekdays = null;
   if (days !== null) {
     const found = new Set();
-    for (const token of days.toLowerCase().split(LIST_SPLIT).map((t) => t.trim())) {
+    for (const token of days
+      .toLowerCase()
+      .split(LIST_SPLIT)
+      .map((t) => t.trim())) {
       if (token === '') continue;
       const code = WEEKDAY_BY_NAME[token];
       if (!code) return { ok: false, message: 'Unknown day in the days column' };
@@ -119,7 +123,10 @@ export function parsePreferenceRow(payload, { locations }) {
   let startMinutes = null;
   if (times !== null) {
     const found = new Set();
-    for (const token of times.toLowerCase().split(LIST_SPLIT).map((t) => t.trim())) {
+    for (const token of times
+      .toLowerCase()
+      .split(LIST_SPLIT)
+      .map((t) => t.trim())) {
       if (token === '') continue;
       const minutes = parseStartMinutes(token);
       if (minutes === null) {
@@ -143,7 +150,10 @@ export function parsePreferenceRow(payload, { locations }) {
         if (token === '') continue;
         const location = byName(token);
         if (!location) {
-          return { ok: false, message: 'Unknown venue: no location of this organization has that name' };
+          return {
+            ok: false,
+            message: 'Unknown venue: no location of this organization has that name',
+          };
         }
         found.add(String(location.id));
       }

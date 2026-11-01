@@ -376,8 +376,22 @@ describe('coaches', () => {
               coach_priority: 'high',
             },
             // Removed and replaced rules are history, not input.
-            { id: 'rule-b', coach_id: C2, team_id: T2, level: 'must', weekdays: ['WED'], status: 'removed' },
-            { id: 'rule-c', coach_id: C2, team_id: T2, level: 'prefer', keep_venue: true, status: 'replaced' },
+            {
+              id: 'rule-b',
+              coach_id: C2,
+              team_id: T2,
+              level: 'must',
+              weekdays: ['WED'],
+              status: 'removed',
+            },
+            {
+              id: 'rule-c',
+              coach_id: C2,
+              team_id: T2,
+              level: 'prefer',
+              keep_venue: true,
+              status: 'replaced',
+            },
             {
               id: 'rule-d',
               coach_id: C2,

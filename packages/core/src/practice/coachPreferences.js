@@ -133,10 +133,10 @@ export const CoachPreferenceRuleSchema = z
     effectiveTo: IsoDateSchema.nullable().default(null),
   })
   .superRefine((rule, ctx) => {
-    for (const [values, keep, name] of [
-      [rule.weekdays, rule.keepWeekday, 'weekday'],
-      [rule.startMinutes, rule.keepStart, 'start'],
-      [rule.venueIds, rule.keepVenue, 'venue'],
+    for (const { values, keep, name } of [
+      { values: rule.weekdays, keep: rule.keepWeekday, name: 'weekday' },
+      { values: rule.startMinutes, keep: rule.keepStart, name: 'start' },
+      { values: rule.venueIds, keep: rule.keepVenue, name: 'venue' },
     ]) {
       if (values !== null && keep) {
         ctx.addIssue({
@@ -147,9 +147,9 @@ export const CoachPreferenceRuleSchema = z
       }
     }
     const conditions =
-      (rule.weekdays !== null || rule.keepWeekday) +
-      (rule.startMinutes !== null || rule.keepStart) +
-      (rule.venueIds !== null || rule.keepVenue);
+      Number(rule.weekdays !== null || rule.keepWeekday) +
+      Number(rule.startMinutes !== null || rule.keepStart) +
+      Number(rule.venueIds !== null || rule.keepVenue);
     if (conditions === 0) {
       ctx.addIssue({ code: 'custom', message: 'a rule has at least one condition' });
     }
@@ -158,7 +158,11 @@ export const CoachPreferenceRuleSchema = z
       rule.effectiveTo !== null &&
       rule.effectiveTo < rule.effectiveFrom
     ) {
-      ctx.addIssue({ code: 'custom', path: ['effectiveTo'], message: 'the window ends before it starts' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['effectiveTo'],
+        message: 'the window ends before it starts',
+      });
     }
   });
 
@@ -236,7 +240,7 @@ export function resolveCoachPreferences(input) {
   for (const rule of rules) {
     if (rule.teamId !== teamId || !onTeam.has(rule.coachId) || !ruleInWindow(rule, date)) continue;
     const conditions = [];
-    for (const { dimension, values, keep } of conditionsOf(rule)) {
+    for (const { dimension, values } of conditionsOf(rule)) {
       if (values !== null) {
         conditions.push({ dimension, source: 'values', allowed: [...values] });
         continue;
@@ -267,11 +271,13 @@ export function resolveCoachPreferences(input) {
   // Conflicts: rules of one level whose sets for one dimension share no value.
   for (const level of LEVELS) {
     for (const dimension of DIMENSIONS) {
-      const holders = resolved.filter((rule) => rule.level === level).flatMap((rule) =>
-        rule.conditions
-          .filter((condition) => condition.dimension === dimension)
-          .map((condition) => ({ rule, condition }))
-      );
+      const holders = resolved
+        .filter((rule) => rule.level === level)
+        .flatMap((rule) =>
+          rule.conditions
+            .filter((condition) => condition.dimension === dimension)
+            .map((condition) => ({ rule, condition }))
+        );
       if (holders.length < 2) continue;
       const common = holders
         .map(({ condition }) => condition.allowed)

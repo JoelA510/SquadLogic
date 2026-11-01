@@ -8,6 +8,7 @@
  * @module utils/rosterPeople
  */
 import { teamCoachFields } from './teamCoaches.js';
+import { skillTierKey } from '../constants/skillTier.js';
 
 /** What the page prints for a roster entry it could not name. */
 export const UNKNOWN_PLAYER = 'Unknown Player';
@@ -17,9 +18,10 @@ const hasName = (name) => !PLACEHOLDER_NAMES.has(String(name ?? '').trim());
 
 /**
  * @param {any} player
- * @param {Map<string, { name: string, rating: number | null }>} people
+ * @param {Map<string, { name: string, rating: number | null, skillTier?: string | null }>} people
+ * @param {{ skillTier: boolean }} options
  */
-function withPlayerDetails(player, people) {
+function withPlayerDetails(player, people, { skillTier }) {
   const known = people.get(String(player.id));
   if (!known) return player;
   const next = { ...player };
@@ -30,11 +32,21 @@ function withPlayerDetails(player, people) {
   // on. It is also the entry's `skill` when the run carries none, marked `skillIsRating` so the
   // editor can tell a rating from a skill tier (the Skill Tier option shows only the tier).
   if (known.rating !== null) next.rating = known.rating;
-  if (!player.skill && known.rating !== null) {
+  // With the Skill Tier option on, the record's tier is the entry's skill and wins over the file's or
+  // a saved review's, as it does for the generator (`withDurableIdentity`); a null or blank one keeps
+  // what the entry had. With it off no tier is read into the entry.
+  const storedTier = skillTier ? skillTierKey(known.skillTier) : null;
+  if (storedTier) {
+    next.skill = storedTier;
+    delete next.skillIsRating;
+  } else if (!player.skill && known.rating !== null) {
     next.skill = String(known.rating);
     next.skillIsRating = true;
   }
-  return next.name === player.name && next.skill === player.skill && next.rating === player.rating
+  return next.name === player.name &&
+    next.skill === player.skill &&
+    next.rating === player.rating &&
+    next.skillIsRating === player.skillIsRating
     ? player
     : next;
 }
@@ -59,10 +71,11 @@ function withCoachNames(team, coaches) {
 
 /**
  * @param {any[]} teams
- * @param {{ players: Map<string, { name: string, rating: number | null }>, coaches: Map<string, string> }} directory
+ * @param {{ players: Map<string, { name: string, rating: number | null, skillTier?: string | null }>, coaches: Map<string, string> }} directory
+ * @param {{ skillTier?: boolean }} [options] - `skillTier`: the Skill Tier option is on
  * @returns {any[]}
  */
-export function applyRosterDirectory(teams, { players, coaches }) {
+export function applyRosterDirectory(teams, { players, coaches }, { skillTier = false } = {}) {
   let changed = false;
   const result = teams.map((team) => {
     let next = withCoachNames(team, coaches);
@@ -70,7 +83,7 @@ export function applyRosterDirectory(teams, { players, coaches }) {
     if (Array.isArray(team.players)) {
       let playersChanged = false;
       const mapped = team.players.map((player) => {
-        const withDetails = withPlayerDetails(player, players);
+        const withDetails = withPlayerDetails(player, players, { skillTier });
         if (withDetails !== player) playersChanged = true;
         return withDetails;
       });

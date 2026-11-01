@@ -332,4 +332,43 @@ describe('ImportPanel: the evaluations import', () => {
     expect(within(summary).getByText('Players updated')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /roll back/i })).not.toBeInTheDocument();
   });
+
+  // Codex, P2 on #684: after a reload the screen starts with its own default type, and only the
+  // job (what the server holds) says what is waiting. That type has to stay the screen's type through
+  // the apply for every deferred type, or what the apply produced (here, the roll back it offers)
+  // goes the moment it exists. The evaluations result itself is tested with the real provider in
+  // importPanelEvaluationsRestore.test.jsx.
+  describe('a restored deferred job keeps its own type through the apply', () => {
+    const appliedFresh = (key, type) => {
+      mocks.importState = {
+        ...mocks.importState,
+        importStatus: 'completed',
+        progress: 100,
+        [key]: { importJobId: 'job-1', persistence: { durable: true, deferred: true, result: {} } },
+        activeJob: type ? { warning_summary: { deferred_apply: { import_type: type } } } : null,
+      };
+      render(<ImportPanel onImport={vi.fn()} />);
+    };
+
+    it.each([
+      ['coaches', 'importedCoaches', /^roll back coach import$/i],
+      ['fields', 'importedFields', /^roll back field import$/i],
+      ['field_availability', 'importedFieldAvailability', /^roll back field availability import$/i],
+    ])('%s: the roll back it offers is still offered', async (type, key, name) => {
+      appliedFresh(key, type);
+      const rollback = screen.getByRole('button', { name });
+      fireEvent.click(rollback);
+      await waitFor(() => expect(mocks.rollbackImport).toHaveBeenCalledWith(type));
+    });
+
+    it('CONTROL: with no deferred job on record the screen is its own type, and offers none', () => {
+      appliedFresh('importedCoaches', null);
+      expect(screen.queryByRole('button', { name: /roll back/i })).not.toBeInTheDocument();
+    });
+
+    it('shows the evaluations result of a restored job on a fresh screen', () => {
+      appliedFresh('importedEvaluations', 'evaluations');
+      expect(screen.getByTestId('evaluation-summary')).toBeInTheDocument();
+    });
+  });
 });

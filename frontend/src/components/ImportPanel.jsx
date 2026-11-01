@@ -190,8 +190,14 @@ export default function ImportPanel({ onImport }) {
   const isComplete = COMPLETED_IMPORT_STATUSES.has(importStatus);
   const isReadyToApply = importStatus === 'ready_to_apply';
   const deferredImportType = activeJob?.warning_summary?.deferred_apply?.import_type;
+  // A deferred job's own type is the screen's type from the moment it waits for its confirm to the
+  // end of the apply. The screen's local type is only a default (players) after a reload, while the
+  // job the server holds says what is waiting; once the apply finished, the local type used to take
+  // over again and hid the evaluations result and every roll back (Codex, P2 on #684).
   const workflowImportType =
-    isReadyToApply && IMPORT_TYPES.includes(deferredImportType) ? deferredImportType : importType;
+    (isReadyToApply || isComplete) && IMPORT_TYPES.includes(deferredImportType)
+      ? deferredImportType
+      : importType;
   // E3c: an evaluations import belongs to the season its job was made for, whatever the header
   // shows after (the dry run, the apply and the SQL all read the job's). The confirmation names
   // that season; it says so when the header has moved to another one (Codex, P2 on #684).

@@ -11,7 +11,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
 import { readFileSync } from 'node:fs';
@@ -135,7 +135,14 @@ vi.mock('../frontend/src/components/teaming/ProgramOverview.jsx', () => stub('pr
 vi.mock('../frontend/src/components/teaming/TeamingConfiguration.jsx', () =>
   stub('teaming-config')
 );
-vi.mock('../frontend/src/components/teaming/RosterManager.jsx', () => stub('roster-manager'));
+// The roster editor is recorded, not drawn: the teams the page hands it are what the tests below read.
+const rosterEditor = vi.hoisted(() => ({ teams: /** @type {any[]} */ ([]) }));
+vi.mock('../frontend/src/components/teaming/RosterManager.jsx', () => ({
+  default: ({ initialTeams }) => {
+    rosterEditor.teams = initialTeams;
+    return <div data-testid="stub-roster-manager" />;
+  },
+}));
 vi.mock('../frontend/src/components/teaming/DataValidationPanel.jsx', () =>
   stub('data-validation')
 );
@@ -448,6 +455,70 @@ describe('TeamAnalysisPage :: coaching leads', () => {
     expect(byId.get(durableId(6))).toMatchObject({ rating: 4 });
     expect(byId.get(durableId(6))).not.toHaveProperty('skillRating');
     expect(calls.generateTeams[0].featureFlags.skill_tier).toBeFalsy();
+  });
+
+  // Codex, P2 on #684: the manual roster editor reads the player record's tier too (the roster
+  // directory), with the same contract as the generator: a stored tier wins over the file's, a null
+  // or blank one keeps the file's, and with the option off no tier is shown at all.
+  describe('the manual roster editor', () => {
+    // Edit Mode opens the roster editor once the roster directory has been read.
+    const openEditor = async () => {
+      await generate();
+      rosterEditor.teams = [];
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Edit Mode/ }));
+      });
+      await waitFor(() => expect(rosterEditor.teams.length).toBeGreaterThan(0));
+    };
+    /** The card the real roster editor draws for the player the page handed it. */
+    const cardOf = async (n) => {
+      const { default: RosterManager } =
+        /** @type {{ default: React.ComponentType<any> }} */
+        (await vi.importActual('../frontend/src/components/teaming/RosterManager.jsx'));
+      cleanup();
+      render(<RosterManager initialTeams={rosterEditor.teams} onTeamsChange={() => {}} />);
+      return screen.getByTestId(`player-card-${durableId(n)}`);
+    };
+
+    it("with Skill Tier on shows the record's tier over the file's, and the file's when the record has none", async () => {
+      state.storedFlags = { skill_tier: true };
+      seedImport(12, [1]);
+      state.rows[0] = { ...state.rows[0], skill_tier: 'novice' };
+      state.durablePlayers[0] = { ...state.durablePlayers[0], skill_tier: 'advanced' };
+      state.rows[1] = { ...state.rows[1], skill_tier: 'developing' };
+      state.durablePlayers[1] = { ...state.durablePlayers[1], skill_tier: null };
+      state.rows[2] = { ...state.rows[2], skill_tier: 'novice' };
+      state.durablePlayers[2] = { ...state.durablePlayers[2], skill_tier: '' };
+      await openEditor();
+      const line = async (n) => within(await cardOf(n)).getByText(/^Skill: /).textContent;
+      expect(await line(1)).toBe('Skill: advanced');
+      // No stored tier (null, blank): the entry keeps what the run saved from the file's tier, the
+      // number the generator read (developing 3, novice 1), as it showed before the option.
+      expect(await line(2)).toBe('Skill: 3');
+      expect(await line(3)).toBe('Skill: 1');
+    });
+
+    it('with Skill Tier off shows no tier line, and with Player Rating on only the rating', async () => {
+      state.storedFlags = { player_rating: true };
+      seedImport(12, [1]);
+      state.rows[0] = { ...state.rows[0], skill_tier: 'novice' };
+      state.durablePlayers[0] = { ...state.durablePlayers[0], skill_tier: 'advanced', rating: 4 };
+      await openEditor();
+      // The tier is not even read into what the page hands the editor, let alone drawn.
+      expect(JSON.stringify(rosterEditor.teams)).not.toMatch(/advanced/);
+      const card = await cardOf(1);
+      expect(within(card).getByText('Skill: 4')).toBeInTheDocument();
+      expect(within(card).queryByText(/advanced|novice/)).toBeNull();
+    });
+
+    it('with both options off shows no skill line', async () => {
+      seedImport(12, [1]);
+      state.rows[0] = { ...state.rows[0], skill_tier: 'novice' };
+      state.durablePlayers[0] = { ...state.durablePlayers[0], skill_tier: 'advanced', rating: 4 };
+      await openEditor();
+      expect(JSON.stringify(rosterEditor.teams)).not.toMatch(/advanced/);
+      expect(within(await cardOf(1)).queryByText(/Skill:/)).toBeNull();
+    });
   });
 
   it('with Coaching Interest off, marks no lead', async () => {

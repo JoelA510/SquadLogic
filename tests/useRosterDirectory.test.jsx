@@ -7,7 +7,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRosterDirectory } from '../frontend/src/hooks/useRosterDirectory.js';
 
-const mocks = vi.hoisted(() => ({ tables: {}, refuse: null }));
+const mocks = vi.hoisted(() => ({ tables: {}, refuse: null, selected: [] }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -15,7 +15,10 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       let from = 0;
       let to = Infinity;
       const builder = {
-        select: () => builder,
+        select: (columns) => {
+          mocks.selected.push([table, columns]);
+          return builder;
+        },
         eq: () => builder,
         order: () => builder,
         range: (a, b) => {
@@ -52,11 +55,13 @@ const players = (n) =>
     first_name: `First${i + 1}`,
     last_name: `Last${i + 1}`,
     rating: null,
+    skill_tier: i === n - 1 ? 'advanced' : null,
   }));
 
 describe('useRosterDirectory', () => {
   beforeEach(() => {
     mocks.refuse = null;
+    mocks.selected = [];
     mocks.tables = {
       players: players(1259),
       coaches: [
@@ -74,9 +79,24 @@ describe('useRosterDirectory', () => {
     expect(result.current.players.get('p01258')).toEqual({
       name: 'First1259 Last1259',
       rating: null,
+      skillTier: 'advanced',
+    });
+    // Most players have no stored tier: none, not a blank or a guess.
+    expect(result.current.players.get('p00000')).toEqual({
+      name: 'First1 Last1',
+      rating: null,
+      skillTier: null,
     });
     // A coach with no name is not in the map (the page counts them, never prints an id).
     expect([...result.current.coaches]).toEqual([['c1', 'Coach One']]);
+  });
+
+  it("reads the players' stored skill tier beside their names and ratings", async () => {
+    const { result } = renderHook(() => useRosterDirectory({ enabled: true }));
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const playerSelects = mocks.selected.filter(([table]) => table === 'players').map(([, c]) => c);
+    expect(playerSelects.length).toBeGreaterThan(0);
+    for (const columns of playerSelects) expect(columns).toMatch(/\bskill_tier\b/);
   });
 
   it('a refused page is an error with no rows, not the first thousand names', async () => {

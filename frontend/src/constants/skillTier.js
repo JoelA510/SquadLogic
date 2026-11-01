@@ -13,15 +13,26 @@ const SKILL_TIER_LABELS = Object.freeze({
 const SKILL_TIER_ORDER = Object.values(SKILL_TIER_LABELS);
 
 /**
+ * A tier as the table stores it (lower case), or null for none (a blank, or a word that is not a
+ * tier). What counts as a stored tier wherever one is read over a file's.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+export function skillTierKey(value) {
+  const key = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  return Object.hasOwn(SKILL_TIER_LABELS, key) ? key : null;
+}
+
+/**
  * A tier as the pages print it, or null for none (a blank, or a word that is not a tier).
  * @param {unknown} value
  * @returns {string | null}
  */
 export function skillTierLabel(value) {
-  const key = String(value ?? '')
-    .trim()
-    .toLowerCase();
-  return Object.hasOwn(SKILL_TIER_LABELS, key) ? SKILL_TIER_LABELS[key] : null;
+  const key = skillTierKey(value);
+  return key === null ? null : SKILL_TIER_LABELS[key];
 }
 
 /**

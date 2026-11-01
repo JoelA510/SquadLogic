@@ -2076,8 +2076,11 @@ export default function TeamAnalysisPage() {
   // the editor is open. The team run holds ids only; the import is one user's staging copy.
   const rosterDirectory = useRosterDirectory({ enabled: canEditTeams });
   const rosterTeams = useMemo(
-    () => applyRosterDirectory(manualTeams || activeTeams, rosterDirectory),
-    [manualTeams, activeTeams, rosterDirectory]
+    () =>
+      applyRosterDirectory(manualTeams || activeTeams, rosterDirectory, {
+        skillTier: skillTierEnabled,
+      }),
+    [manualTeams, activeTeams, rosterDirectory, skillTierEnabled]
   );
   const unnamedRosterPlayers = useMemo(
     () => (rosterDirectory.status === 'ready' ? countUnnamedPlayers(rosterTeams) : 0),

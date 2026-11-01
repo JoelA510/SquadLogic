@@ -356,3 +356,13 @@ Built as written; where the code differed from the plan or left a choice:
   `Skill Level` mapped to Rating (and Skill Tier cleared) is a rating column, not also a tier. The
   confirmation names the season the job was made for (the preview's, else the job's), and says so when
   the header now shows another; the apply and the SQL already target the job's season.
+- **Review round 2 (Codex, P2s on #684).** (1) After a reload the import screen starts with its own
+  default type (players) and only the waiting job says what it is; the job's type was honoured while it
+  waited and dropped when the apply finished, so the evaluations result (counts, the not-valid rows) and
+  the Roll Back of a coach, field or field availability import vanished the moment they existed. The
+  job's deferred type now stays the screen's type through the apply. (The preference import runs from
+  the preference review screen, not this one.) (2) The Teams page's roster editor read names and ratings
+  from `players` and the file's tier from the import; it now reads the record's `skill_tier` too and,
+  with Skill Tier on, shows it over the file's with the generator's contract (a stored tier wins, a null
+  or blank keeps the file's); with it off no tier is read into the editor. The team roster card, the
+  player page and the Players grid already read the stored tier (`tests/skillTierDisplay.test.jsx`).

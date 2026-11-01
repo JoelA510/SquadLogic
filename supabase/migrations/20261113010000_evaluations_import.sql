@@ -638,13 +638,12 @@ BEGIN
         RAISE EXCEPTION 'the staged-row type constraint lost a type it had';
     END IF;
 
+    -- Only the new list is checked here. The other arms are the smokes' and pgTAP's to hold (a plant
+    -- in one of them must reach the smoke that is aimed at it, not stop the build first).
     IF public.import_allowed_keys('evaluations') IS DISTINCT FROM ARRAY[
            'external_registration_id', 'gotsport_id', 'registration_id', 'player_id',
-           'years_played', 'skill_tier', 'skill_level', 'rating']::text[]
-       OR cardinality(public.import_allowed_keys('players')) <> 43
-       OR cardinality(public.import_allowed_keys('coaches')) <> 12
-       OR cardinality(public.import_allowed_keys('practice_preferences')) <> 18 THEN
-        RAISE EXCEPTION 'import_allowed_keys does not hold the four lists';
+           'years_played', 'skill_tier', 'skill_level', 'rating']::text[] THEN
+        RAISE EXCEPTION 'import_allowed_keys does not hold the evaluations list';
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-evaluation-rows'

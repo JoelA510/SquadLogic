@@ -64,34 +64,29 @@
  * The lost ground itself is never offered as a re-home, even outside the loss
  * minutes.
  *
- * ## Coach preferences (8.6 PR 3b plan §4)
+ * ## Coach preference rules (Phase D C1; originally 8.6 PR 3b plan §4)
  *
- * Approved preferences and the `team_coach_assignments` rows are input data
- * (`coachPreferences`, `teamCoachAssignments`); loading them is PR 9's. The
- * meaning is `practice/coachPreferences.js`'s, reused rather than restated: for
- * each displaced series, its team's CURRENT coaches are the rows that cover the
- * date the repair takes effect for that series (`coachesOfTeamOn()` on the
- * series-window's first day), strictest wins among them, and the reference is
- * the preference's `value` when it has one, else the series being moved
- * ("keep what I have").
- * Venue is the location: the facility graph's `venueId`, which must then be the
- * location id.
+ * The rules in force (`coachPreferences`: one per row of `coach_practice_preferences`, per team) and
+ * the `team_coach_assignments` rows are input data. The meaning is
+ * `practice/coachPreferences.js`'s, reused rather than restated: for each displaced series, its
+ * team's CURRENT coaches are the rows that cover the date the repair takes effect for that series
+ * (`coachesOfTeamOn()` on the series-window's first day); every rule for the team, asked by one of
+ * them and in window on that day, is judged against each candidate; keep-current keeps what the
+ * series being moved has. Venue is the location: the facility graph's `venueId`, which must then be
+ * the location id.
  *
- * - `must_keep` is a hard candidate filter, same-venue and cross-venue alike.
- *   A series that had legal same-venue candidates and has none after the
- *   filter is TIME TBD with `PRACTICE_TBD_REASON.COACH_PREFERENCE`, never
- *   dropped; `mustKeepDimensions` names what emptied its venue.
- * - **An approved `value` is honoured** (operator ruling, 2026-09-28):
- *   `must_keep weekday=TUE` on a team now on Wednesday lands only on a
- *   Tuesday, or is TIME TBD `coach-preference`. Two `must_keep` references
- *   that differ make every candidate violate the dimension, and
- *   `PRACTICE_COACH_PREFERENCE_CONFLICT` says why.
- * - `prefer_keep` is priced: each breached dimension is one
- *   `coachPreferenceBreached` in the candidate's counts, weighed by the one
- *   objective like every other term.
- * - **No preferences, no effect.** With none supplied (or none that resolve to
- *   a reference) nothing here runs and the result is byte-identical to a
- *   repair that was never handed them.
+ * - A `must` rule is a hard candidate filter, same-venue and cross-venue alike. A series that had
+ *   legal same-venue candidates and has none after the filter is TIME TBD with
+ *   `PRACTICE_TBD_REASON.COACH_PREFERENCE`, never dropped; `mustKeepDimensions` and `mustKeepRules`
+ *   name what emptied its venue.
+ * - **A rule's values are honoured** (operator ruling, 2026-09-28): a `must` for {TUE} on a team
+ *   now on Wednesday lands only on a Tuesday, or is TIME TBD `coach-preference`. Must rules with
+ *   nothing in common make every candidate violate them, and `PRACTICE_COACH_PREFERENCE_CONFLICT`
+ *   says why.
+ * - A `prefer` rule is priced: each unmet rule is one `coachPreferenceBreached` in the candidate's
+ *   counts, weighed by the one objective like every other term.
+ * - **No rules, no effect.** With none supplied (or none that applies) nothing here runs and the
+ *   result is byte-identical to a repair that was never handed them.
  *
  * ## Recommendations: two tiers, one per series-window (8.6 PR 3b plan §2)
  *
@@ -105,8 +100,8 @@
  *    occupant. It is the same search and the same `marginal()` as tier 1, so
  *    two recommendations clash by the repair's own definition or not at all:
  *    no two of them name conflicting ground at an overlapping time, and none
- *    lands on a tier-1 placement. `must_keep` filters its candidates and
- *    `prefer_keep` is priced, as in tier 1. It replaces #441's standalone
+ *    lands on a tier-1 placement. `must` filters its candidates and
+ *    `prefer` is priced, as in tier 1. It replaces #441's standalone
  *    cross-venue options and their `sharedWith`, which named competing
  *    offers instead of resolving them. A tier-2 recommendation is never
  *    placed: its series stays in `timeTbd` and out of `plan` until it is
@@ -144,7 +139,7 @@
  *   there now too. Here one series-window gets exactly one recommendation (3b plan
  *   §5, decision 5), and a candidate past sunset on some dates is that
  *   recommendation, whole, carrying its flag.
- * - **The gate runs before `must_keep`.** A series whose venue had frozen-free
+ * - **The gate runs before `must`.** A series whose venue had frozen-free
  *   candidates and every one was refused by daylight (their sunset unknown:
  *   coordinates could make one legal) is TIME TBD `sunset-unknown`, never
  *   `coach-preference` and never dropped. (It was `past-sunset` too when the
@@ -204,6 +199,7 @@
  * @module practice/repair
  */
 
+import { z } from 'zod';
 import {
   conflictingSurfacesOf,
   getSurface,
@@ -224,9 +220,9 @@ import {
   scoreObjective,
 } from '../resolve/objective.js';
 import {
-  COACH_PREFERENCE_LEVEL,
-  CoachPreferenceInputSchema,
   CoachPreferencePlacementSchema,
+  CoachPreferenceRuleSchema,
+  isInertResolution,
   judgeCoachPreferenceCandidate,
   resolveCoachPreferences,
 } from './coachPreferences.js';
@@ -255,7 +251,7 @@ export const PRACTICE_TBD_REASON = Object.freeze({
    */
   OBJECTIVE_PREFERRED_TBD: 'objective-preferred-tbd',
   /**
-   * It had legal slots at its venue, and every one of them breaks a `must_keep`
+   * It had legal slots at its venue, and every one of them breaks a `must`
    * coach preference (8.6 PR 3b plan §4).
    */
   COACH_PREFERENCE: 'coach-preference',
@@ -812,19 +808,22 @@ export function buildPracticeRepairContext(input) {
   }
 
   /* -- coach preferences (plan §4) ---------------------------------------- */
-  // The one contract for a preference, applied to the whole list: an element
-  // that is not an approved preference, or a second row for one (coach,
-  // dimension), refuses the repair here, whether or not anything is displaced.
-  const coachPreferences = CoachPreferenceInputSchema.parse({
-    coachIds: [],
-    preferences: parsed.coachPreferences ?? [],
-  }).preferences;
+  // The one contract for a rule, applied to the whole list: an element that is not a rule in
+  // force, or a second rule with one id, refuses the repair here, whether or not anything is
+  // displaced.
+  const coachPreferences = z.array(CoachPreferenceRuleSchema).parse(parsed.coachPreferences ?? []);
+  const duplicateRule = coachPreferences.find(
+    (rule, index) => coachPreferences.findIndex((other) => other.id === rule.id) !== index
+  );
+  if (duplicateRule) {
+    throw new Error(`repair: a second preference rule with id ${duplicateRule.id}`);
+  }
   const coachRows = parsed.teamCoachAssignments ?? [];
-  // Venue = location (plan §5, decision 2). Once any preference asks for
+  // Venue = location (plan §5, decision 2). Once any rule asks for
   // something, every venue must be a location id, checked here for the whole
   // graph so that the refusal does not depend on which teams happen to be
   // displaced.
-  if (coachPreferences.some((p) => p.level !== COACH_PREFERENCE_LEVEL.DONT_CARE)) {
+  if (coachPreferences.length > 0) {
     const notLocations = [
       ...new Set(Object.values(graph.surfaces).map((surface) => surface?.venueId ?? null)),
     ]
@@ -843,26 +842,25 @@ export function buildPracticeRepairContext(input) {
     locationId: venueOf(shape.surfaceId),
   });
   /**
-   * One displaced series' resolved preferences, or `null` when none applies:
-   * none were supplied, or none of its team's current coaches holds one with a
-   * reference. `null` is what keeps a repair without preferences unchanged.
+   * One displaced series' resolved rules, or `null` when none applies: none were supplied, or
+   * none is for its team, asked by one of its current coaches, in window on the day the
+   * series' window starts. `null` is what keeps a repair without rules unchanged. The series
+   * being moved is the team's live practice, so keep-current keeps what it has.
    */
   const preferencesOf = (series) => {
     if (coachPreferences.length === 0) return null;
     const { lead, assistants } = coachesOfTeamOn(coachRows, series.teamId, series.from);
     const current = new Set([...lead, ...assistants]);
-    // `dont_care` asks nothing of a candidate: resolving it yields no
-    // reference, no finding and no verdict, so a team whose current coaches
-    // hold nothing else is left exactly as a team with no preferences.
     const holds = coachPreferences.some(
-      (preference) =>
-        current.has(preference.coachId) && preference.level !== COACH_PREFERENCE_LEVEL.DONT_CARE
+      (rule) => rule.teamId === series.teamId && current.has(rule.coachId)
     );
     if (!holds) return null;
     const resolution = resolveCoachPreferences({
+      teamId: series.teamId,
       coachIds: [...current].sort(),
-      preferences: coachPreferences,
-      series: placementOf(series),
+      rules: coachPreferences,
+      current: [placementOf(series)],
+      date: series.from,
     });
     for (const finding of resolution.findings) {
       findings.push(
@@ -873,7 +871,7 @@ export function buildPracticeRepairContext(input) {
         })
       );
     }
-    return resolution.dimensions.some((entry) => entry.references.length > 0) ? resolution : null;
+    return isInertResolution(resolution) ? null : resolution;
   };
 
   /* -- candidates --------------------------------------------------------- */
@@ -911,10 +909,11 @@ export function buildPracticeRepairContext(input) {
     const same = [];
     const cross = [];
     const preferences = preferencesOf(series);
-    // Legal same-venue candidates before the `must_keep` filter, and the
+    // Legal same-venue candidates before the `must` filter, and the
     // dimensions it filtered on: what tells COACH_PREFERENCE from no slot at all.
     let sameBeforeMustKeep = 0;
     const mustKeepViolated = new Set();
+    const mustKeepRules = new Set();
     // Frozen-free same-venue candidates before the daylight gate, and what it
     // refused: what tells SUNSET_UNKNOWN from no slot at all. Candidates past
     // sunset are flagged, not refused, so they are not counted here.
@@ -981,6 +980,7 @@ export function buildPracticeRepairContext(input) {
           // Only what emptied the venue explains a COACH_PREFERENCE TIME TBD.
           if (sameVenue) {
             for (const dimension of verdict.violatedDimensions) mustKeepViolated.add(dimension);
+            for (const ruleId of verdict.violatedRules) mustKeepRules.add(ruleId);
           }
           continue;
         }
@@ -1051,6 +1051,7 @@ export function buildPracticeRepairContext(input) {
       // Legal at its venue before the filter, and nothing left after it.
       mustKeepEmptied: sameBeforeMustKeep > 0 && same.length === 0,
       mustKeepViolated: [...mustKeepViolated].sort(),
+      mustKeepRules: [...mustKeepRules].sort(),
       // Frozen-free at its venue, and every one refused by daylight.
       daylightEmptied: sameBeforeDaylight > 0 && daylightRefusedAtVenue === sameBeforeDaylight,
       daylightRefused: sameDaylightRefused,
@@ -1591,7 +1592,7 @@ export function repairPracticeLoss(input) {
         reason,
         lossReason,
         ...(reason === PRACTICE_TBD_REASON.COACH_PREFERENCE
-          ? { mustKeepDimensions: entry.mustKeepViolated }
+          ? { mustKeepDimensions: entry.mustKeepViolated, mustKeepRules: entry.mustKeepRules }
           : {}),
         ...(reason === PRACTICE_TBD_REASON.SUNSET_UNKNOWN
           ? { daylightRefused: { ...entry.daylightRefused } }

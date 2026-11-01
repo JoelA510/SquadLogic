@@ -198,14 +198,14 @@ export const CoachPreferenceInputSchema = z
 
 /** Whether a rule's window holds `date`. A bounded rule with no date to judge is refused. */
 export function ruleInWindow(rule, date) {
-  if (rule.effectiveFrom === null && rule.effectiveTo === null) return true;
+  const from = rule.effectiveFrom ?? null;
+  const to = rule.effectiveTo ?? null;
+  if (from === null && to === null) return true;
   if (date === null || date === undefined) {
-    throw new RangeError(
-      `rule ${rule.id} has a date window and no day was given to judge it on`
-    );
+    throw new RangeError(`rule ${rule.id} has a date window and no day was given to judge it on`);
   }
-  if (rule.effectiveFrom !== null && date < rule.effectiveFrom) return false;
-  if (rule.effectiveTo !== null && date > rule.effectiveTo) return false;
+  if (from !== null && date < from) return false;
+  if (to !== null && date > to) return false;
   return true;
 }
 

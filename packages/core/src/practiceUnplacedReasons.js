@@ -23,7 +23,7 @@ export const PRACTICE_UNPLACED_REASON = Object.freeze({
   NO_SLOT_AVAILABLE: 'no-slot-available',
   /** No run slot has a live date from today on (M4.8 Q3). */
   NO_LIVE_DATE: 'no-live-date',
-  /** Every legal slot breaks an approved coach `must_keep` preference. */
+  /** Every legal slot breaks an approved coach `must` preference. */
   COACH_PREFERENCE: 'coach-preference',
   /** The division sets a practice length and no slot open to it is that long. */
   PRACTICE_LENGTH: 'practice-length',

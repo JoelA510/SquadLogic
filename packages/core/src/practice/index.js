@@ -156,14 +156,16 @@ export {
 export {
   COACH_PREFERENCE_DIMENSION,
   COACH_PREFERENCE_LEVEL,
+  COACH_PREFERENCE_PRIORITY,
   CoachPreferenceDimensionSchema,
   CoachPreferenceInputSchema,
   CoachPreferenceLevelSchema,
   CoachPreferencePlacementSchema,
-  CoachPreferenceSchema,
+  CoachPreferenceRuleSchema,
+  isInertResolution,
   judgeCoachPreferenceCandidate,
   resolveCoachPreferences,
-  strictestCoachPreferenceLevel,
+  ruleInWindow,
 } from './coachPreferences.js';
 
 export { toSeason2026PracticePlan } from './adapters/season2026PracticeGrid.js';

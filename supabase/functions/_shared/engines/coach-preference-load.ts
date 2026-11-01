@@ -1,40 +1,39 @@
 /**
- * Approved coach preferences, loaded server-side for one auto-scheduler run
- * (8.6 PR 3b, PR 8; plan §4 "Deno side", §5 decision 3).
+ * Practice preference rules, loaded server-side for one auto-scheduler run (Phase D, C1;
+ * originally 8.6 PR 3b, PR 8; plan §4 "Deno side", §5 decision 3).
  *
  * **Never from the request body.** Everything here is read by the Edge
  * Function itself, AS THE CALLER through RLS (`createUserClient`), alongside
  * the season rows `practice-lock.ts` loads:
  *
  *   * `team_coach_assignments` current on the run date (the season's calendar
- *     date) -- who coaches each team, the one coach source for preferences;
- *   * `coach_practice_preferences` that are `approved`. An approved row is
- *     the one in force (the store holds one per coach and dimension, with no
- *     end; a replaced row is `superseded`) -- the contract the approval
- *     dialog's re-judge already applies. Its `effective_from` is stamped with
- *     the database's UTC `current_date`, so filtering it by the season's date
- *     would hide an evening approval in a US zone until local midnight;
+ *     date) -- who coaches each team, the one coach source for rules;
+ *   * `coach_practice_preferences` in force (`status = 'in_force'`): one row is one rule for one
+ *     team (migration `20261112010000`). A requested must is in force as `prefer` until an admin
+ *     accepts it, so the `level` read is the level to judge by. Each rule's own date window is
+ *     judged against the run date by the rule's resolver, not filtered here;
  *   * `practice_slots` (+ `fields.location_id`), only when a placeable team
- *     holds a live reference -- each candidate's weekday, local start minutes
- *     and venue, read from the store rather than from the body's slot shape.
+ *     holds a live rule condition -- each candidate's weekday, local start minutes
+ *     and venue, read from the store rather than from the body's slot shape. The same reading
+ *     gives the placements a team's saved practices hold, which is what "keep the current day,
+ *     time or venue" keeps.
  *
  * **A failed or partial read refuses the run.** It never runs as if there
- * were no preferences. RLS lets an admin read every preference row and a coach
- * only their own (plan §5 decision 9), so a coach-run would silently see a
- * subset. The loader therefore also counts the same approved rows with the
- * service-role client (a count only; no row content crosses) and refuses when
- * the caller's read saw fewer: a partial read is a failed read.
+ * were no rules. The loader also counts the same rows with the service-role
+ * client (a count only; no row content crosses) and refuses when the caller's
+ * read saw fewer: a partial read is a failed read.
  *
  * Import-free apart from its siblings, so Vitest can execute it directly.
  */
+import { practiceRangeBounds } from '../calendar/practiceExceptions.ts';
 import {
   COACH_PREFERENCE_DIMENSIONS,
   isInertResolution,
   judgeCoachPreferenceCandidate,
   resolveCoachPreferences,
-  type CoachPreference,
   type PreferenceFinding,
   type PreferencePlacement,
+  type PreferenceRule,
 } from './coach-preferences.ts';
 import { LOCK_PAGE_SIZE, readAllPages, type QueryResult } from './practice-lock.ts';
 
@@ -43,6 +42,8 @@ export interface SlotVerdict {
   mustKeepViolated: boolean;
   preferKeepBreaches: number;
   violatedDimensions: string[];
+  /** The ids of the `must` rules this slot does not meet: what a TIME TBD reason names. */
+  violatedRules: string[];
 }
 
 /**
@@ -176,10 +177,22 @@ export async function loadCoachPreferenceContext(
     runDate: string | null;
     placeableTeamIds: readonly string[];
     slotIds: readonly string[];
+    /**
+     * The practice rows the season already holds (`practice-lock.ts`, `LoadedPracticeRow`): what
+     * keep-current rules keep. A row that has ended before the run date holds nothing.
+     */
+    heldRows?: ReadonlyArray<{ teamId: string; slotId: string | null; effectiveDateRange: string | null }>;
     pageSize?: number;
   }
 ): Promise<CoachPreferenceContext> {
-  const { organizationId, runDate, placeableTeamIds, slotIds, pageSize = LOCK_PAGE_SIZE } = params;
+  const {
+    organizationId,
+    runDate,
+    placeableTeamIds,
+    slotIds,
+    heldRows = [],
+    pageSize = LOCK_PAGE_SIZE,
+  } = params;
   if (!runDate) {
     return {
       ok: false,
@@ -188,6 +201,9 @@ export async function loadCoachPreferenceContext(
     };
   }
   const inForce = `effective_to.is.null,effective_to.gte.${runDate}`;
+  const ruleColumns =
+    'id, coach_id, team_id, level, weekdays, start_minutes, venue_ids, keep_weekday, keep_start, ' +
+    'keep_venue, coach_priority, effective_from, effective_to';
 
   const assignments = await readAllPages(
     () =>
@@ -212,9 +228,9 @@ export async function loadCoachPreferenceContext(
     () =>
       userClient
         .from('coach_practice_preferences')
-        .select('id, coach_id, dimension, level, value')
+        .select(ruleColumns)
         .eq('organization_id', organizationId)
-        .eq('status', 'approved')
+        .eq('status', 'in_force')
         .order('id', { ascending: true }),
     pageSize
   );
@@ -227,13 +243,12 @@ export async function loadCoachPreferenceContext(
   }
 
   // Completeness: the same filter, counted without RLS. A caller who can see
-  // fewer rows than exist (a coach sees only their own) would otherwise run
-  // as if the rest did not exist.
+  // fewer rows than exist would otherwise run as if the rest did not exist.
   const counted = await serviceClient
     .from('coach_practice_preferences')
     .select('id', { count: 'exact', head: true })
     .eq('organization_id', organizationId)
-    .eq('status', 'approved');
+    .eq('status', 'in_force');
   if (counted.error || typeof counted.count !== 'number') {
     return {
       ok: false,
@@ -246,8 +261,8 @@ export async function loadCoachPreferenceContext(
       ok: false,
       code: 'COACH_PREFERENCES_NOT_VISIBLE',
       message:
-        `the caller can read ${preferenceRows.rows.length} of the ${counted.count} approved ` +
-        'coach preferences in force, so the run would ignore the rest',
+        `the caller can read ${preferenceRows.rows.length} of the ${counted.count} practice ` +
+        'preference rules in force, so the run would ignore the rest',
     };
   }
 
@@ -262,57 +277,46 @@ export async function loadCoachPreferenceContext(
     coachesByTeam.set(teamId, set);
   }
 
-  const preferences: CoachPreference[] = [];
+  const rules: PreferenceRule[] = [];
   for (const row of preferenceRows.rows as Array<Record<string, unknown>>) {
-    preferences.push({
+    rules.push({
+      id: String(row.id),
       coachId: String(row.coach_id),
-      dimension: String(row.dimension) as CoachPreference['dimension'],
+      teamId: String(row.team_id),
       level: String(row.level),
-      value: row.value === null || row.value === undefined ? null : (row.value as string | number),
+      weekdays: row.weekdays == null ? null : (row.weekdays as string[]),
+      startMinutes: row.start_minutes == null ? null : (row.start_minutes as number[]),
+      venueIds:
+        row.venue_ids == null ? null : (row.venue_ids as unknown[]).map((v) => String(v).toLowerCase()),
+      keepWeekday: row.keep_weekday === true,
+      keepStart: row.keep_start === true,
+      keepVenue: row.keep_venue === true,
+      coachPriority: row.coach_priority == null ? null : String(row.coach_priority),
+      effectiveFrom: row.effective_from == null ? null : String(row.effective_from),
+      effectiveTo: row.effective_to == null ? null : String(row.effective_to),
     });
   }
-
-  let resolutions: Array<{
-    teamId: string;
-    resolution: ReturnType<typeof resolveCoachPreferences>;
-  }>;
-  try {
-    resolutions = placeableTeamIds.map((teamId) => ({
-      teamId,
-      // Placeable teams have no current row (plan §3), so there is no series
-      // to keep: only a value-set preference has a reference here.
-      resolution: resolveCoachPreferences({
-        coachIds: [...(coachesByTeam.get(teamId) ?? [])],
-        preferences: preferences.filter((p) => coachesByTeam.get(teamId)?.has(p.coachId)),
-        series: null,
-      }),
-    }));
-  } catch (error) {
-    return {
-      ok: false,
-      code: 'COACH_PREFERENCES_UNREADABLE',
-      message: `coach_practice_preferences: ${(error as Error).message}`,
-    };
+  const rulesByTeam = new Map<string, PreferenceRule[]>();
+  for (const rule of rules) {
+    const list = rulesByTeam.get(rule.teamId) ?? [];
+    list.push(rule);
+    rulesByTeam.set(rule.teamId, list);
   }
-
-  const findings = resolutions.flatMap(({ teamId, resolution }) =>
-    resolution.findings.map((finding) => ({ ...finding, teamId }))
-  );
-  const constrained = resolutions.filter(({ resolution }) => !isInertResolution(resolution));
-  const base = {
+  const teamsWithRules = placeableTeamIds.filter((teamId) => rulesByTeam.has(teamId));
+  const noneConstrained = {
     ok: true as const,
-    findings,
+    findings: [] as Array<PreferenceFinding & { teamId: string }>,
     runDate,
-    preferencesLoaded: preferences.length,
+    preferencesLoaded: rules.length,
     coachAssignmentsLoaded: assignments.rows.length,
-    teamsConstrained: constrained.length,
+    teamsConstrained: 0,
+    gate: { verdicts: new Map<string, Map<string, SlotVerdict>>() },
   };
-  if (constrained.length === 0) {
-    return { ...base, gate: { verdicts: new Map() } };
-  }
+  if (teamsWithRules.length === 0) return noneConstrained;
 
-  // Candidate attributes, from the store. Every run slot must be found and
-  // readable: a slot that cannot be judged is never assumed to keep anything.
+  // Slot attributes, from the store. Every run slot must be found and readable: a slot that
+  // cannot be judged is never assumed to keep anything. They also give what a team's saved
+  // practices hold, which is what a keep-current rule keeps.
   const slotRows = await readAllPages(
     () =>
       userClient
@@ -339,6 +343,68 @@ export async function loadCoachPreferenceContext(
       placementBySlot.set(String(row.id), { weekday, startMinutes, locationId });
     }
   }
+
+  // What each team's saved practices hold: its rows that have not ended before the run date and
+  // that sit on a slot (a TIME TBD series' row has none, so it holds nothing to keep). A row on
+  // a slot that cannot be read refuses the run when the team has a keep-current rule.
+  const heldByTeam = new Map<string, PreferencePlacement[]>();
+  const heldUnreadable: string[] = [];
+  const keepsCurrent = (teamId: string) =>
+    (rulesByTeam.get(teamId) ?? []).some((r) => r.keepWeekday || r.keepStart || r.keepVenue);
+  for (const row of heldRows) {
+    if (row.slotId === null || !keepsCurrent(row.teamId)) continue;
+    const bounds = row.effectiveDateRange === null ? null : practiceRangeBounds(row.effectiveDateRange);
+    // A range that has ended before the run date holds nothing; an open or unreadable one holds.
+    if (bounds !== null && bounds.last < runDate) continue;
+    const placement = placementBySlot.get(row.slotId);
+    if (!placement) {
+      heldUnreadable.push(row.slotId);
+      continue;
+    }
+    const list = heldByTeam.get(row.teamId) ?? [];
+    list.push(placement);
+    heldByTeam.set(row.teamId, list);
+  }
+  if (heldUnreadable.length > 0) {
+    return {
+      ok: false,
+      code: 'COACH_PREFERENCES_UNREADABLE',
+      message:
+        `${heldUnreadable.length} saved practice slot(s) could not be read with a weekday, start and ` +
+        `venue, so a keep-current rule cannot be judged: ${[...new Set(heldUnreadable)].slice(0, 5).join(', ')}`,
+    };
+  }
+
+  let resolutions: Array<{
+    teamId: string;
+    resolution: ReturnType<typeof resolveCoachPreferences>;
+  }>;
+  try {
+    resolutions = teamsWithRules.map((teamId) => ({
+      teamId,
+      resolution: resolveCoachPreferences({
+        teamId,
+        coachIds: [...(coachesByTeam.get(teamId) ?? [])],
+        rules: rulesByTeam.get(teamId) ?? [],
+        current: heldByTeam.get(teamId) ?? [],
+        date: runDate,
+      }),
+    }));
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'COACH_PREFERENCES_UNREADABLE',
+      message: `coach_practice_preferences: ${(error as Error).message}`,
+    };
+  }
+
+  const findings = resolutions.flatMap(({ teamId, resolution }) =>
+    resolution.findings.map((finding) => ({ ...finding, teamId }))
+  );
+  const constrained = resolutions.filter(({ resolution }) => !isInertResolution(resolution));
+  const base = { ...noneConstrained, findings, teamsConstrained: constrained.length };
+  if (constrained.length === 0) return base;
+
   const unjudgeable = slotIds.filter((id) => !placementBySlot.has(id));
   if (unjudgeable.length > 0) {
     return {
@@ -362,6 +428,7 @@ export async function loadCoachPreferenceContext(
         mustKeepViolated: verdict.mustKeepViolated,
         preferKeepBreaches: verdict.preferKeepBreaches,
         violatedDimensions: verdict.violatedDimensions,
+        violatedRules: verdict.violatedRules,
       });
     }
     verdicts.set(teamId, bySlot);

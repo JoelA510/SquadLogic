@@ -4,7 +4,7 @@
  * the rows `import-validation` would refuse. It is the front half of the preview
  * (`practicePreferenceImportPreview.js` is the back half) and it applies, in the same order, the rules
  * the pipeline applies: the allowlist (`importAllowlist.js`), the alias map's canonical key, the Edge
- * function's `sanitizeString` and its email check (`supabase/functions/import-validation/index.ts`).
+ * function's cell cleaner (`sanitizeImportText`, the one `import-validation` calls) and its email check (`supabase/functions/import-validation/index.ts`).
  *
  * **What the preview says is what the pipeline does.** The same `filterImportRows` runs before the
  * upload (so a column the import does not read never leaves the browser), and the rows it returns here
@@ -14,31 +14,12 @@
 
 import { escapeCsvCell } from '@squadlogic/core/csv.js';
 import { canonicalImportKey, filterImportRows, isAllowedImportKey } from './importAllowlist.js';
-import { normalizeImportRow } from './importRows.js';
+import { normalizeImportRow, sanitizeImportText } from './importRows.js';
 
 export const PREFERENCE_IMPORT_TYPE = 'practice_preferences';
 
-const MAX_STRING_LENGTH = 500;
 /** The Edge function's email check, for a coach email (`validateRow`). */
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-
-/**
- * The Edge function's `sanitizeString`: tags and control characters out, trimmed, capped. The mock
- * client's cleaner is simpler; the real function is the one a preview should promise.
- * @param {unknown} value
- * @returns {string}
- */
-export function sanitizeImportText(value) {
-  if (value === null || value === undefined) return '';
-  return (
-    String(value)
-      .replace(/<[^>]*>/g, '')
-      // eslint-disable-next-line no-control-regex -- stripping control characters is the point
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-      .trim()
-      .slice(0, MAX_STRING_LENGTH)
-  );
-}
 
 /**
  * Column names a person can use in the template: each resolves, through the alias map, to a key the
@@ -136,7 +117,9 @@ export function readPreferenceFile({ headers, rows }) {
   const refused = [];
   keptRows.forEach((rawRow, index) => {
     const row = index + 1;
-    const payload = normalizeImportRow(rawRow, canonicalImportKey, sanitizeImportText);
+    const payload = normalizeImportRow(rawRow, canonicalImportKey, (value) =>
+      sanitizeImportText(value)
+    );
     const email = payload.email ?? '';
     if (email.trim() === '') {
       refused.push({ row, message: 'Missing required field: email' });

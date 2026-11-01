@@ -10,11 +10,15 @@ import { logger } from '../lib/logger.js';
  * current practice series with their slots (what a must is re-judged against).
  *
  * `error` is a failed read of the coaches or locations (the lists the screens name people and
- * places from); `previewError` a failed read of the data a re-judge or an import preview needs.
- * Neither is swallowed: the screens show them and refuse to preview over a half-loaded context.
+ * places from), with `coachesError` and `locationsError` saying which: a rule is the season's through
+ * its coach, so without the coaches **no list of rules can be built** and a screen must say it could
+ * not (never "none"), while without the locations only a venue's name is lost. `previewError` is a
+ * failed read of the data a re-judge, a conflict check or an import preview needs. None is
+ * swallowed: the screens show them and refuse to preview or check over a half-loaded context.
  *
  * @type {Readonly<{ coaches: any[], locations: any[], rosterRows: any[], teams: any[],
- *   divisions: any[], practiceRows: any[], error: any, previewError: any, loading: boolean }>}
+ *   divisions: any[], practiceRows: any[], error: any, coachesError: any, locationsError: any,
+ *   previewError: any, loading: boolean }>}
  */
 export const LOADING_CONTEXT = Object.freeze({
   coaches: [],
@@ -24,6 +28,8 @@ export const LOADING_CONTEXT = Object.freeze({
   divisions: [],
   practiceRows: [],
   error: null,
+  coachesError: null,
+  locationsError: null,
   previewError: null,
   loading: true,
 });
@@ -84,7 +90,9 @@ export function usePreferenceContext(orgId, seasonId) {
         previewError = err || { message: 'unknown error' };
       }
       if (cancelled) return;
-      const error = coachResult.error || locationResult.error || null;
+      const coachesError = coachResult.error || null;
+      const locationsError = locationResult.error || null;
+      const error = coachesError || locationsError;
       if (error) logger.error('Failed to load coaches or locations', error);
       setState({
         coaches: coachResult.data || [],
@@ -94,6 +102,8 @@ export function usePreferenceContext(orgId, seasonId) {
         divisions,
         practiceRows,
         error,
+        coachesError,
+        locationsError,
         previewError,
         loading: false,
       });

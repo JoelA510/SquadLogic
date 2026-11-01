@@ -33,8 +33,8 @@ import {
   PREFERENCE_TEMPLATE,
   preferenceTemplateCsv,
   readPreferenceFile,
-  sanitizeImportText,
 } from '../frontend/src/utils/practicePreferenceFile.js';
+import { sanitizeImportText } from '../frontend/src/utils/importRows.js';
 import { previewPracticePreferenceImport } from '../frontend/src/utils/practicePreferenceImportPreview.js';
 import {
   MAX_IMPORT_ROWS,
@@ -183,6 +183,12 @@ describe('reading a file', () => {
     expect(sanitizeImportText('  <b>Hawks</b>\u0007 ')).toBe('Hawks');
     expect(sanitizeImportText(null)).toBe('');
     expect(sanitizeImportText('x'.repeat(600))).toHaveLength(500);
+    // The cleaner is the one the Edge function and the mock use (importRowsParity holds them equal),
+    // so the staged rows of a file with nested markup are what the preview read.
+    expect(sanitizeImportText('<<script>script>')).toBe('script>');
+    expect(sanitizeImportText('<scr<script>ipt>')).toBe('ipt>');
+    // A lone bracket is data ("<1", "5 > 3") and stays.
+    expect(sanitizeImportText('<1')).toBe('<1');
   });
 });
 
@@ -340,6 +346,44 @@ describe('the preview equals what the import does', () => {
       preview.pending_musts
     );
     expect(added.every((row) => row.level === 'prefer')).toBe(true);
+  });
+
+  it('markup in a cell is cleaned the same way by the preview and by the pipeline it previews', async () => {
+    // A team written with a tag in it resolves to the team; nested or split markup is cleaned to the
+    // same text on both sides (an unknown team, named alike), never left with a bracket.
+    const csv = [
+      HEADER,
+      'casey@example.test,U10 <i></i>Hawks,prefer,Monday,,,,,',
+      'casey@example.test,<<b>b>U12 Owls,prefer,Tuesday,,,,,',
+      'casey@example.test,U12 <scr<script>ipt>Owls,prefer,Wednesday,,,,,',
+    ].join('\n');
+    const read = readPreferenceFile(parseCsv(csv));
+    const preview = previewOf(read);
+    expect(preview.rules.map((rule) => rule.teamName)).toEqual(['U10 Hawks']);
+    expect(preview.refusals.map((refusal) => refusal.team)).toEqual(['b>U12 Owls', 'U12 ipt>Owls']);
+    expect(preview.unknown_team_rows).toBe(2);
+    // No tag is left in a cell, though the lone '>' the nested markup leaves is data.
+    expect(read.staged.every(({ payload }) => !Object.values(payload).some(hasTagSpan))).toBe(true);
+
+    const run = await runPracticePreferenceImport({
+      supabase: mockSupabase,
+      organizationId: ORG,
+      seasonSettingsId: null,
+      fileName: 'markup.csv',
+      rows: read.keptRows,
+    });
+    expect(run.result.inserted_rules).toBe(preview.inserted_rules);
+    expect(run.result.unknown_team_rows).toBe(preview.unknown_team_rows);
+    expect(run.result.unknown_teams.map((item) => item.team)).toEqual(
+      preview.refusals.map((refusal) => refusal.team)
+    );
+    // What the finalizer reads is the cleaned payload: no tag reaches it, and it is what was previewed.
+    const payloads = stored().staging_import_rows.map((row) => row.normalized_payload);
+    expect(payloads).toHaveLength(3);
+    expect(payloads.every((payload) => !Object.values(payload).some(hasTagSpan))).toBe(true);
+    expect(payloads.map((payload) => payload.team)).toEqual(
+      read.staged.map(({ payload }) => payload.team)
+    );
   });
 
   it('a blank team makes one rule for each team the coach coaches, and the preview says which', () => {
@@ -504,6 +548,12 @@ describe('running an import', () => {
   });
 });
 
+/** A tag span left in `text`: a `<` with a `>` somewhere after it. */
+const hasTagSpan = (text) => {
+  const open = text.indexOf('<');
+  return open !== -1 && text.indexOf('>', open) !== -1;
+};
+
 /** Choose a CSV file in the panel's file input. */
 const choose = (name, text) => {
   const input = screen.getByLabelText('Choose a CSV file');
@@ -615,6 +665,96 @@ describe('the panel', () => {
     expect(await screen.findByTestId('preference-import-problem')).toHaveTextContent(
       'header row and no rows'
     );
+  });
+
+  describe('a file the CSV parser could not read cleanly is refused whole, with the rows named', () => {
+    const parseErrors = () => screen.findByTestId('preference-import-parse-errors');
+    const nothingSent = (rpc) => {
+      expect(rpc.mock.calls.map(([name]) => name)).not.toContain('create_import_job');
+      expect(screen.queryByTestId('preference-import-preview')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Import \d+ rules?$/ })).not.toBeInTheDocument();
+    };
+
+    it('a row with more cells than the header is named, not read as its first cells', async () => {
+      // An existing imported rule that a partial read would replace with a Tuesday-only rule.
+      db.coach_practice_preferences = [
+        ruleRow({ id: 'keep', team_id: T1, weekdays: ['MON', 'THU'], import_job_id: 'job-old' }),
+      ];
+      seed();
+      const rpc = vi.spyOn(mockSupabase, 'rpc');
+      renderPanel({ ruleRows: db.coach_practice_preferences });
+      choose(
+        'too-many.csv',
+        'Coach Email,Team,Days\ncasey@example.test,U10 Hawks,Tuesday\ncasey@example.test,U10 Hawks,Tuesday,Thursday\n'
+      );
+      const list = await parseErrors();
+      expect(list).toHaveTextContent('Row 2');
+      expect(list).toHaveTextContent('Too many fields');
+      // The message says which row and why, and quotes no cell.
+      expect(list).not.toHaveTextContent(/Thursday|casey@example\.test|Hawks/);
+      expect(list).toHaveAttribute('role', 'alert');
+      nothingSent(rpc);
+      expect(stored().coach_practice_preferences.find((r) => r.id === 'keep').status).toBe(
+        'in_force'
+      );
+      rpc.mockRestore();
+    });
+
+    it('a row with fewer cells than the header is refused too (the cells would shift)', async () => {
+      const rpc = vi.spyOn(mockSupabase, 'rpc');
+      renderPanel();
+      choose('too-few.csv', `${HEADER}\ncasey@example.test,U10 Hawks,Tuesday\n`);
+      expect(await parseErrors()).toHaveTextContent('Row 1');
+      expect(await parseErrors()).toHaveTextContent('Too few fields');
+      nothingSent(rpc);
+      rpc.mockRestore();
+    });
+
+    it('an unterminated quote is refused', async () => {
+      const rpc = vi.spyOn(mockSupabase, 'rpc');
+      renderPanel();
+      choose(
+        'quote.csv',
+        'Coach Email,Team,Days\ncasey@example.test,"U10 Hawks,Tuesday\ncasey@example.test,U12 Owls,Monday\n'
+      );
+      const list = await parseErrors();
+      expect(list).toHaveTextContent(/Quoted field unterminated/i);
+      expect(list).not.toHaveTextContent(/U10 Hawks|U12 Owls/);
+      nothingSent(rpc);
+      rpc.mockRestore();
+    });
+
+    it('lists the first twenty rows and counts the rest', async () => {
+      renderPanel();
+      const rows = Array.from({ length: 25 }, () => 'casey@example.test,U10 Hawks,Tuesday,Extra');
+      choose('many.csv', ['Coach Email,Team,Days', ...rows].join('\n'));
+      const list = await parseErrors();
+      expect(within(list).getAllByRole('listitem')).toHaveLength(20);
+      expect(list).toHaveTextContent('and 5 more');
+    });
+
+    it('the control: a clean file with quoted commas has no parse errors and previews', async () => {
+      renderPanel();
+      choose(
+        'clean.csv',
+        'Coach Email,Team,Days,Venues\ncasey@example.test,U10 Hawks,"Tuesday, Thursday","Riverside Park"\n'
+      );
+      await screen.findByTestId('preference-import-preview');
+      expect(screen.queryByTestId('preference-import-parse-errors')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Import 1 rule' })).toBeEnabled();
+    });
+
+    it('choosing a clean file after a refused one clears the refusal', async () => {
+      renderPanel();
+      choose(
+        'too-many.csv',
+        'Coach Email,Team,Days\ncasey@example.test,U10 Hawks,Tuesday,Thursday\n'
+      );
+      await parseErrors();
+      choose('clean.csv', 'Coach Email,Team,Days\ncasey@example.test,U10 Hawks,Tuesday\n');
+      await screen.findByTestId('preference-import-preview');
+      expect(screen.queryByTestId('preference-import-parse-errors')).not.toBeInTheDocument();
+    });
   });
 
   it('a file with no email column, or no day, time or venue column, says what to name', async () => {
@@ -754,6 +894,25 @@ describe('the panel', () => {
     );
     expect(screen.queryByRole('button', { name: /^Import / })).not.toBeInTheDocument();
   });
+
+  it.each([
+    ['coaches', 'coachesError'],
+    ['locations', 'locationsError'],
+  ])(
+    'a failed read of the %s is a banner and no preview, since every coach or venue would read as unknown',
+    async (_name, which) => {
+      const failure = { message: `permission denied for table ${_name}` };
+      renderPanel({
+        context: { ...panelContext(db), error: failure, [which]: failure },
+      });
+      expect(screen.getByRole('alert')).toHaveTextContent('cannot be shown');
+      choose('prefs.csv', `${HEADER}\ncasey@example.test,U10 Hawks,prefer,Monday,,,,,\n`);
+      await waitFor(() =>
+        expect(screen.queryByTestId('preference-import-preview')).not.toBeInTheDocument()
+      );
+      expect(screen.queryByRole('button', { name: /^Import / })).not.toBeInTheDocument();
+    }
+  );
 
   it('downloads the template', () => {
     URL.createObjectURL = vi.fn(() => 'blob:template');

@@ -236,19 +236,98 @@ describe('the rules list', () => {
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeDisabled();
   });
 
-  it('draws at most 200 rules and says how many more match', async () => {
-    tables.coach_practice_preferences = Array.from({ length: 205 }, (_, index) =>
-      ruleRow({
-        id: `many-${index}`,
-        weekdays: ['MON'],
-        created_at: `2026-09-01T00:00:${String(index % 60).padStart(2, '0')}Z`,
-      })
-    );
-    await openRules();
-    expect(bodyRows()).toHaveLength(200);
-    expect(screen.getByTestId('rules-count')).toHaveTextContent(
-      'Showing the first 200 of 205 rules in force; narrow the filters to see the rest.'
-    );
+  describe('more rules than are drawn at once', () => {
+    // 450 rules that share the team, the coach, the level and the priority, so no filter can narrow
+    // them: only paging reaches the rest.
+    const crowd = (count) =>
+      Array.from({ length: count }, (_, index) =>
+        ruleRow({
+          id: `many-${String(index).padStart(3, '0')}`,
+          weekdays: ['MON'],
+          start_minutes: [1000 + index],
+          created_at: `2026-09-01T00:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}Z`,
+        })
+      );
+    const rowIds = () =>
+      screen.getAllByRole('button', { name: /^Edit / }).map((b) => b.getAttribute('aria-label'));
+
+    it('draws 200 at first, says how many of how many, and offers the next page', async () => {
+      tables.coach_practice_preferences = crowd(205);
+      await openRules();
+      expect(bodyRows()).toHaveLength(200);
+      expect(screen.getByTestId('rules-count')).toHaveTextContent(
+        'Showing 200 of 205 rules in force; show more, or narrow the filters.'
+      );
+      expect(screen.getByRole('button', { name: 'Show 5 more rules' })).toBeEnabled();
+    });
+
+    it('reaches every one of 450 rules that no filter can separate, a page at a time, and the button goes with the last', async () => {
+      tables.coach_practice_preferences = crowd(450);
+      await openRules();
+      expect(bodyRows()).toHaveLength(200);
+      fireEvent.click(screen.getByRole('button', { name: 'Show 200 more rules' }));
+      expect(bodyRows()).toHaveLength(400);
+      expect(screen.getByTestId('rules-count')).toHaveTextContent(
+        'Showing 400 of 450 rules in force'
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Show 50 more rules' }));
+      expect(bodyRows()).toHaveLength(450);
+      expect(screen.getByTestId('rules-count')).toHaveTextContent(
+        'Showing 450 of 450 rules in force.'
+      );
+      expect(
+        screen.queryByRole('button', { name: /^Show \d+ more rules$/ })
+      ).not.toBeInTheDocument();
+      // Every rule is there, once, and the last can be edited.
+      expect(new Set(rowIds()).size).toBe(450);
+      fireEvent.click(bodyRows()[449].querySelector('button'));
+      expect(await screen.findByRole('dialog', { name: 'Edit a rule' })).toBeInTheDocument();
+    });
+
+    it('moves focus to the first rule the page added, so a keyboard user is not left at the top or nowhere', async () => {
+      tables.coach_practice_preferences = crowd(450);
+      await openRules();
+      const more = screen.getByRole('button', { name: 'Show 200 more rules' });
+      more.focus();
+      fireEvent.click(more);
+      expect(document.activeElement).toBe(bodyRows()[200].querySelector('button'));
+      fireEvent.click(screen.getByRole('button', { name: 'Show 50 more rules' }));
+      expect(document.activeElement).toBe(bodyRows()[400].querySelector('button'));
+    });
+
+    it('a change of filter starts again at the first page', async () => {
+      tables.coach_practice_preferences = [
+        ...crowd(450),
+        ruleRow({
+          id: 'other',
+          team_id: T2,
+          weekdays: ['SAT'],
+          created_at: '2026-10-01T00:00:00Z',
+        }),
+      ];
+      await openRules();
+      fireEvent.click(screen.getByRole('button', { name: 'Show 200 more rules' }));
+      expect(bodyRows()).toHaveLength(400);
+      choose('Team', T2);
+      expect(bodyRows()).toHaveLength(1);
+      expect(
+        screen.queryByRole('button', { name: /^Show \d+ more rules$/ })
+      ).not.toBeInTheDocument();
+      choose('Team', 'all');
+      expect(bodyRows()).toHaveLength(200);
+    });
+
+    it('with exactly one page there is no button', async () => {
+      tables.coach_practice_preferences = crowd(200);
+      await openRules();
+      expect(bodyRows()).toHaveLength(200);
+      expect(
+        screen.queryByRole('button', { name: /^Show \d+ more rules$/ })
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId('rules-count')).toHaveTextContent(
+        'Showing 200 of 200 rules in force.'
+      );
+    });
   });
 
   it('says so when there are no rules in force at all', async () => {

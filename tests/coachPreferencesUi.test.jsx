@@ -189,6 +189,17 @@ describe('admin view', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Remove .*Riverside Park$/ }));
     const dialog = await screen.findByRole('dialog', { name: 'Remove this rule' });
     expect(dialog).toHaveTextContent("Casey Coach's rule for U12 Owls: Riverside Park");
+    // Removing stops the rule applying now; it does not stop a later file from adding it again
+    // (the finalizer inserts a file's rules without excluding what was removed), so the dialog must
+    // not promise that it cannot come back, for an imported rule or any other.
+    expect(dialog).toHaveTextContent('stops applying to the scheduler at once');
+    expect(dialog).toHaveTextContent('kept in the audit trail');
+    expect(dialog).toHaveTextContent(
+      'importing a file that contains the same preference again can bring it back'
+    );
+    expect(dialog.textContent).not.toMatch(
+      /does not bring it back|cannot (come|return)|never (come|return)/i
+    );
     expect(supabase.rpc).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(supabase.rpc).not.toHaveBeenCalled();
@@ -665,6 +676,63 @@ describe('every load and compute failure is visible', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Could not load coaches or locations: permission denied for table coaches'
     );
+  });
+
+  it('with the coaches unread, the pending musts and the rules are not listed as none, and nothing is counted', async () => {
+    // A rule is the season's through its coach, so a list built without the coaches is empty: that is
+    // not "no pending musts" or "no rules in force".
+    tableErrors.coaches = { code: '42501', message: 'permission denied for table coaches' };
+    asRole('admin');
+    renderPage();
+    await screen.findByTestId('admin-preferences-view');
+    fireEvent.click(await screen.findByRole('tab', { name: /^Pending musts/ }));
+    expect(await screen.findByTestId('pending-not-read')).toHaveTextContent(
+      'could not be listed: the season’s coaches did not load'
+    );
+    expect(screen.queryByText('No pending musts.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Pending musts \(/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Pending musts/ })).not.toHaveTextContent(/\d/);
+    fireEvent.click(screen.getByRole('tab', { name: 'Rules' }));
+    expect(await screen.findByTestId('rules-not-read')).toHaveTextContent(
+      'could not be listed: the season’s coaches did not load'
+    );
+    expect(screen.queryByText('No rules in force.')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rules-count')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add a rule…' })).not.toBeInTheDocument();
+  });
+
+  it('with the roster unread, the Add dialog does not say a coach coaches no team, and the page says what did not load', async () => {
+    // The teams a coach coaches come from the roster; an empty roster read is not "no team today".
+    tableErrors.team_coach_assignments = {
+      code: '42501',
+      message: 'permission denied for table team_coach_assignments',
+    };
+    asRole('admin');
+    renderPage();
+    await screen.findByTestId('admin-preferences-view');
+    expect(await screen.findByTestId('preview-data-error')).toHaveTextContent(
+      'permission denied for table team_coach_assignments'
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Rules' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a rule…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
+    expect(within(dialog).getByTestId('add-teams-unread')).toHaveTextContent(
+      'The roster did not load, so the teams of this coach cannot be listed'
+    );
+    expect(within(dialog).queryByText(/coaches no team today/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeDisabled();
+  });
+
+  it('a failed locations read leaves the lists as they are and still says so', async () => {
+    tableErrors.locations = { code: '42501', message: 'permission denied for table locations' };
+    asRole('admin');
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'permission denied for table locations'
+    );
+    expect(screen.queryByTestId('pending-not-read')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Pending musts (1)' })).toBeInTheDocument();
   });
 
   it('a rule core cannot read says so instead of "None"', async () => {

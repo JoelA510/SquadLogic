@@ -20,7 +20,7 @@ import {
   withoutBirthKeys,
 } from '../utils/importAllowlist.js';
 import { NATURAL_AGE_MAX, NATURAL_AGE_MIN, importNaturalAge } from '@squadlogic/core/ageGroups.js';
-import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
+import { composeFullName, normalizeImportRow, sanitizeImportText } from '../utils/importRows.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
@@ -8004,10 +8004,8 @@ export const mockSupabase = {
           const lower = String(header).toLowerCase().trim();
           return aliases[lower] || lower;
         };
-        const sanitize = (value) =>
-          value === null || value === undefined
-            ? ''
-            : String(value).trim().slice(0, 500).replaceAll('<', '').replaceAll('>', '');
+        // The cleaner the Edge function calls (utils/importRows.js, twin of _shared/import-rows.ts).
+        const sanitize = (value) => sanitizeImportText(value);
 
         const validatedData = [];
         const stagedRows = [];

@@ -285,7 +285,7 @@ describe('the Conflicts tab', () => {
     );
     await screen.findByTestId('admin-preferences-view');
     fireEvent.click(screen.getByRole('tab', { name: /^Conflicts/ }));
-    return screen.findByRole('heading', { name: /^Conflicts \(/ });
+    return screen.findByRole('heading', { name: /^Conflicts/ });
   };
 
   beforeEach(() => {
@@ -365,6 +365,30 @@ describe('the Conflicts tab', () => {
     expect(note).toHaveTextContent('Conflicts could not be checked');
     expect(note).toHaveTextContent('permission denied for table team_coach_assignments');
     expect(screen.queryByTestId('conflicts-checked')).not.toBeInTheDocument();
+  });
+
+  it('never says "none" when the coaches did not load, though the roster and practices did', async () => {
+    // The rules are read, the roster and practices are read, and the coaches are not: the rules are
+    // listed by the season's coaches, so nothing could be matched and the check would have run over
+    // no team at all ("Checked 0 teams") while the conflicting musts exist.
+    tableErrors.coaches = { code: '42501', message: 'permission denied for table coaches' };
+    await open();
+    const note = screen.getByTestId('conflicts-not-checked');
+    expect(note).toHaveTextContent('Conflicts could not be checked');
+    expect(note).toHaveTextContent('permission denied for table coaches');
+    expect(screen.queryByTestId('conflicts-checked')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No conflicts/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Checked 0 teams/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('conflict-team')).not.toBeInTheDocument();
+    // The tab carries no count it could not know.
+    expect(screen.getByRole('tab', { name: /^Conflicts/ })).not.toHaveTextContent(/\d/);
+  });
+
+  it('a failed locations read does not stop the check: it needs no location', async () => {
+    tableErrors.locations = { code: '42501', message: 'permission denied for table locations' };
+    await open();
+    expect(screen.queryByTestId('conflicts-not-checked')).not.toBeInTheDocument();
+    expect(screen.getByTestId('conflict-team')).toBeInTheDocument();
   });
 
   it('lists a rule core could not read beside the conflicts', async () => {

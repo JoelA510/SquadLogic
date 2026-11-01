@@ -26,6 +26,7 @@ export default function RuleDialog({
   coaches,
   defaultCoachId = '',
   teamsOf,
+  rosterError = null,
   locations,
   previewContext,
   date,
@@ -101,7 +102,9 @@ export default function RuleDialog({
   };
 
   const idPrefix = editing ? `edit-${row.id}` : 'add';
-  const noTeam = !editing && coachId !== '' && teams.length === 0;
+  // An empty roster read is not "no team today": with the roster unread the teams cannot be listed.
+  const teamsUnread = !editing && coachId !== '' && rosterError !== null;
+  const noTeam = !editing && coachId !== '' && !teamsUnread && teams.length === 0;
 
   return (
     <Modal
@@ -169,7 +172,12 @@ export default function RuleDialog({
           </div>
         )}
 
-        {noTeam ? (
+        {teamsUnread ? (
+          <p className="text-sm m-0" data-testid="add-teams-unread">
+            The roster did not load, so the teams of this coach cannot be listed (
+            {rosterError.message || 'unknown error'}). Close this and reload the page to try again.
+          </p>
+        ) : noTeam ? (
           <p className="text-sm m-0">
             This coach coaches no team today, so there is nothing to add a rule to.
           </p>
@@ -236,6 +244,7 @@ RuleDialog.propTypes = {
     .isRequired,
   defaultCoachId: PropTypes.string,
   teamsOf: PropTypes.func.isRequired,
+  rosterError: PropTypes.shape({ message: PropTypes.string }),
   locations: PropTypes.array.isRequired,
   previewContext: PropTypes.object.isRequired,
   date: PropTypes.string.isRequired,

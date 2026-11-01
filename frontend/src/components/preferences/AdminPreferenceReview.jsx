@@ -32,8 +32,32 @@ import RulesList from './RulesList.jsx';
 
 const PANEL_ID = 'practice-preferences-panel';
 
-/** Confirm taking a rule out of force; the row stays as history, but there is no undo in the app. */
-function RemoveDialog({ row, label, onClose, onConfirm, busy }) {
+/**
+ * What a list says when the season's coaches did not load. A rule belongs to the season through its
+ * coach, so without them every list below is empty, and an empty list must not read as "none".
+ */
+function ListsNotRead({ what, error, id }) {
+  return (
+    <p className="text-sm m-0" data-testid={id}>
+      {what} could not be listed: the season’s coaches did not load (
+      {error?.message || 'unknown error'}). Reload the page to try again.
+    </p>
+  );
+}
+
+ListsNotRead.propTypes = {
+  what: PropTypes.string.isRequired,
+  error: PropTypes.shape({ message: PropTypes.string }),
+  id: PropTypes.string.isRequired,
+};
+
+/**
+ * Confirm taking a rule out of force. Removing stops the rule applying at once and the row stays as
+ * history and in the audit trail; it does **not** stop a later file from adding the same preference
+ * again (`finalize_practice_preference_import_job` inserts a file's rules without excluding what was
+ * removed), so the copy says that and does not promise the rule cannot come back.
+ */
+function RemoveDialog({ label, onClose, onConfirm, busy }) {
   return (
     <Modal
       open
@@ -53,11 +77,9 @@ function RemoveDialog({ row, label, onClose, onConfirm, busy }) {
       <div className="flex flex-col gap-2">
         <p className="text-sm m-0">{label}</p>
         <p className="text-sm text-text-muted m-0">
-          The rule stops applying to the scheduler at once. It stays in the audit trail
-          {row.source === 'import'
-            ? ', and importing a file for this team again does not bring it back'
-            : ''}
-          .
+          The rule stops applying to the scheduler at once, and the change is kept in the audit
+          trail. Removing it does not block it: importing a file that contains the same preference
+          again can bring it back.
         </p>
       </div>
     </Modal>
@@ -65,7 +87,6 @@ function RemoveDialog({ row, label, onClose, onConfirm, busy }) {
 }
 
 RemoveDialog.propTypes = {
-  row: PropTypes.object.isRequired,
   label: PropTypes.string.isRequired,
   onClose: PropTypes.func.isRequired,
   onConfirm: PropTypes.func.isRequired,
@@ -129,6 +150,8 @@ export default function AdminPreferenceReview({ orgId, toast }) {
     () => inForce.filter((row) => row.must_decision === 'pending'),
     [inForce]
   );
+  // Without the season's coaches the rows above are an empty list that only looks like "none".
+  const listsUnknown = Boolean(context.coachesError);
   const jobIds = useMemo(
     () =>
       pending
@@ -159,7 +182,12 @@ export default function AdminPreferenceReview({ orgId, toast }) {
   // The conflicts among the musts in force, from core. A data load that failed is a check that
   // could not run, and the view says that, never "no conflicts".
   const conflicts = useMemo(() => {
-    if (context.loading || context.previewError) return { checkError: context.previewError };
+    // The rules are the season's through its coaches, so with the coaches unread there is no list to
+    // check (it would be empty, "Checked 0 teams"); with the roster or practices unread there is no
+    // roster to judge by. Either way the check could not run, and it says so.
+    if (context.loading || context.coachesError || context.previewError) {
+      return { checkError: context.coachesError || context.previewError };
+    }
     try {
       return {
         result: findMustConflicts({
@@ -244,7 +272,8 @@ export default function AdminPreferenceReview({ orgId, toast }) {
     {
       id: 'pending',
       label: 'Pending musts',
-      badge: pending.length > 0 ? <Badge tone="warning">{pending.length}</Badge> : null,
+      badge:
+        !listsUnknown && pending.length > 0 ? <Badge tone="warning">{pending.length}</Badge> : null,
     },
     { id: 'rules', label: 'Rules' },
     {
@@ -277,6 +306,13 @@ export default function AdminPreferenceReview({ orgId, toast }) {
           message={`Could not load coaches or locations: ${context.error.message || 'unknown error'}.`}
         />
       )}
+      {context.previewError && (
+        <div data-testid="preview-data-error">
+          <DataErrorBanner
+            message={`Could not load the teams, rosters or practices (${context.previewError.message || 'unknown error'}): team names may show as ids, and the conflict check, the previews and the "Not applied today" notes are unavailable.`}
+          />
+        </div>
+      )}
       {jobLabels.error && (
         <DataErrorBanner
           message={`Could not read the import files the pending musts came from (${jobLabels.error.message || 'unknown error'}); they are named by date.`}
@@ -303,19 +339,27 @@ export default function AdminPreferenceReview({ orgId, toast }) {
                   id="admin-pref-pending-heading"
                   className="text-base font-bold text-text-primary mb-3"
                 >
-                  Pending musts ({pending.length})
+                  {listsUnknown ? 'Pending musts' : `Pending musts (${pending.length})`}
                 </h2>
-                <PendingMusts
-                  groups={groups}
-                  coachName={coachName}
-                  teamName={teamName}
-                  locationNames={locationNames}
-                  readOnly={readOnly}
-                  busyId={busyId}
-                  onAccept={(row) => setDialog({ mode: 'accept', row })}
-                  onKeepPrefer={keepPrefer}
-                  onAcceptAll={(jobId) => setDialog({ mode: 'acceptAll', jobId })}
-                />
+                {listsUnknown ? (
+                  <ListsNotRead
+                    what="The pending musts"
+                    error={context.coachesError}
+                    id="pending-not-read"
+                  />
+                ) : (
+                  <PendingMusts
+                    groups={groups}
+                    coachName={coachName}
+                    teamName={teamName}
+                    locationNames={locationNames}
+                    readOnly={readOnly}
+                    busyId={busyId}
+                    onAccept={(row) => setDialog({ mode: 'accept', row })}
+                    onKeepPrefer={keepPrefer}
+                    onAcceptAll={(jobId) => setDialog({ mode: 'acceptAll', jobId })}
+                  />
+                )}
               </section>
             )}
 
@@ -325,21 +369,25 @@ export default function AdminPreferenceReview({ orgId, toast }) {
                   id="admin-pref-current-heading"
                   className="text-base font-bold text-text-primary mb-3"
                 >
-                  Rules in force ({inForce.length})
+                  {listsUnknown ? 'Rules in force' : `Rules in force (${inForce.length})`}
                 </h2>
-                <RulesList
-                  rows={inForce}
-                  coachName={coachName}
-                  teamName={teamName}
-                  locationNames={locationNames}
-                  readOnly={readOnly}
-                  busyId={busyId}
-                  rosterRows={context.previewError ? null : context.rosterRows}
-                  date={date}
-                  onAdd={() => setDialog({ mode: 'add' })}
-                  onEdit={(row) => setDialog({ mode: 'edit', row })}
-                  onRemove={(row) => setDialog({ mode: 'remove', row })}
-                />
+                {listsUnknown ? (
+                  <ListsNotRead what="The rules" error={context.coachesError} id="rules-not-read" />
+                ) : (
+                  <RulesList
+                    rows={inForce}
+                    coachName={coachName}
+                    teamName={teamName}
+                    locationNames={locationNames}
+                    readOnly={readOnly}
+                    busyId={busyId}
+                    rosterRows={context.previewError ? null : context.rosterRows}
+                    date={date}
+                    onAdd={() => setDialog({ mode: 'add' })}
+                    onEdit={(row) => setDialog({ mode: 'edit', row })}
+                    onRemove={(row) => setDialog({ mode: 'remove', row })}
+                  />
+                )}
               </section>
             )}
 
@@ -349,7 +397,7 @@ export default function AdminPreferenceReview({ orgId, toast }) {
                   id="admin-pref-conflicts-heading"
                   className="text-base font-bold text-text-primary mb-3"
                 >
-                  Conflicts ({conflictCount})
+                  {conflicts.checkError ? 'Conflicts' : `Conflicts (${conflictCount})`}
                 </h2>
                 <ConflictsView
                   result={conflicts.result ?? { teamsExamined: [], conflicts: [], unreadable: [] }}
@@ -426,6 +474,7 @@ export default function AdminPreferenceReview({ orgId, toast }) {
           row={dialog.mode === 'edit' ? dialog.row : null}
           coaches={sortedCoaches}
           teamsOf={teamsOf}
+          rosterError={context.previewError}
           locations={context.locations}
           previewContext={previewContext}
           date={date}
@@ -439,7 +488,6 @@ export default function AdminPreferenceReview({ orgId, toast }) {
       {dialog?.mode === 'remove' && (
         <RemoveDialog
           key={`remove-${dialog.row.id}`}
-          row={dialog.row}
           label={ruleLabel(dialog.row)}
           busy={busyId === dialog.row.id}
           onClose={() => setDialog(null)}

@@ -24,6 +24,8 @@ const DemoImportNotice = lazy(() => import('../DemoImportNotice.jsx'));
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_COLUMNS = 1200;
+/** Parse errors listed by row before "and N more". */
+const MAX_PARSE_ERRORS_LISTED = 20;
 
 /** The counts the finalizer returns that the preview also computed, and what to call each. */
 const COMPARED = [
@@ -38,6 +40,16 @@ const COMPARED = [
   ['coach_not_on_team_rows', 'rows for a team the coach does not coach'],
   ['duplicate_rule_rows', 'repeated rows'],
 ];
+
+/**
+ * The parser's errors that mean a row was not read as written. The delimiter warning is not one:
+ * it changes no cell, and a file that really is not comma-separated is refused below for having no
+ * email column.
+ * @param {Array<{ type?: string, row?: number, message: string }> | undefined} errors
+ */
+function blockingParseErrors(errors) {
+  return (errors ?? []).filter((error) => error.type !== 'Delimiter');
+}
 
 /** Where the preview and the finalizer disagree, as words (none when they agree). */
 function differences(preview, result) {
@@ -76,6 +88,10 @@ export default function PreferenceImportPanel({
   /** @type {[any, Function]} */
   const [loaded, setLoaded] = useState(null);
   const [problem, setProblem] = useState(/** @type {string | null} */ (null));
+  // Rows the CSV parser could not read cleanly: the file is refused whole, with these named.
+  const [parseErrors, setParseErrors] = useState(
+    /** @type {Array<{ row: number | null, message: string }>} */ ([])
+  );
   const [step, setStep] = useState(/** @type {string | null} */ (null));
   const [outcome, setOutcome] = useState(/** @type {any} */ (null));
   const [reading, setReading] = useState(false);
@@ -105,6 +121,7 @@ export default function PreferenceImportPanel({
   const reset = () => {
     setLoaded(null);
     setProblem(null);
+    setParseErrors([]);
     setStep(null);
     setOutcome(null);
     if (inputRef.current) inputRef.current.value = '';
@@ -112,6 +129,7 @@ export default function PreferenceImportPanel({
 
   const readFile = async (file) => {
     setProblem(null);
+    setParseErrors([]);
     setOutcome(null);
     setLoaded(null);
     if (!file) return;
@@ -141,6 +159,17 @@ export default function PreferenceImportPanel({
                 headers.length === 0
                   ? 'The file appears to be empty or is not a comma-separated CSV. Save it as CSV (UTF-8, comma-delimited) and try again.'
                   : 'The file has a header row and no rows under it.'
+              );
+            } else if (blockingParseErrors(results.errors).length > 0) {
+              // A row the parser could not split cleanly (more or fewer cells than the header, an
+              // unterminated quote) would be read as its first cells, or shifted, and a rule with a
+              // dropped condition could replace a complete one. The whole file is refused, each row
+              // named by its number and the parser's own words (which quote no cell).
+              setParseErrors(
+                blockingParseErrors(results.errors).map((error) => ({
+                  row: typeof error.row === 'number' ? error.row + 1 : null,
+                  message: error.message,
+                }))
               );
             } else if (headers.length > MAX_COLUMNS) {
               setProblem(`The file has more than ${MAX_COLUMNS} columns.`);
@@ -322,6 +351,30 @@ export default function PreferenceImportPanel({
       {problem && (
         <div data-testid="preference-import-problem">
           <DataErrorBanner message={problem} />
+        </div>
+      )}
+      {parseErrors.length > 0 && (
+        <div
+          role="alert"
+          data-testid="preference-import-parse-errors"
+          className="text-sm field-error"
+        >
+          <p className="m-0 font-semibold">
+            The file was not read, because {parseErrors.length === 1 ? 'a row' : 'some rows'} could
+            not be split into the columns of the header. Fix{' '}
+            {parseErrors.length === 1 ? 'it' : 'them'} and choose the file again (a cell that holds
+            a comma needs quotes around it):
+          </p>
+          <ul className="m-0 pl-5">
+            {parseErrors.slice(0, MAX_PARSE_ERRORS_LISTED).map((error, index) => (
+              <li key={`${error.row}-${index}`}>
+                {error.row === null ? 'The file' : `Row ${error.row}`}: {error.message}
+              </li>
+            ))}
+          </ul>
+          {parseErrors.length > MAX_PARSE_ERRORS_LISTED && (
+            <p className="m-0">and {parseErrors.length - MAX_PARSE_ERRORS_LISTED} more</p>
+          )}
         </div>
       )}
       {context.error || context.previewError ? (

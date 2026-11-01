@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import Button from '../ui/Button.jsx';
 import Badge from '../ui/Badge.jsx';
@@ -11,8 +11,12 @@ import {
   ruleNotApplied,
 } from '../../utils/coachPreferencePreview.js';
 
-/** The most rows drawn at once; the filters narrow a longer list. */
-const RULES_SHOWN_AT_ONCE = 200;
+/**
+ * Rules drawn per page. Filters narrow a list, but an import can make hundreds of rules that share
+ * a team, a coach, a level and a priority and differ only in a time or a window, so no filter
+ * separates them: "Show more" reaches every one, a page at a time.
+ */
+const RULES_PER_PAGE = 200;
 
 const ALL = 'all';
 
@@ -33,11 +37,10 @@ function windowText(row) {
 function countText({ shown, matching, total, filtered }) {
   if (total === 0) return 'No rules in force.';
   const noun = (n) => (n === 1 ? 'rule' : 'rules');
-  const capped = matching > shown ? `the first ${shown} of ${matching}` : `${shown} of ${matching}`;
-  const tail = matching > shown ? '; narrow the filters to see the rest' : '';
+  const tail = matching > shown ? '; show more, or narrow the filters' : '';
   return filtered
-    ? `Showing ${capped} ${noun(matching)} matching the filters (${total} in force)${tail}.`
-    : `Showing ${capped} ${noun(matching)} in force${tail}.`;
+    ? `Showing ${shown} of ${matching} ${noun(matching)} matching the filters (${total} in force)${tail}.`
+    : `Showing ${shown} of ${matching} ${noun(matching)} in force${tail}.`;
 }
 
 /** Does a rule match the level filter? Must, Prefer (not a pending must), or Pending must. */
@@ -77,6 +80,15 @@ export default function RulesList({
   const [coach, setCoach] = useState(ALL);
   const [level, setLevel] = useState(ALL);
   const [priority, setPriority] = useState(ALL);
+  // Pages drawn so far; a new filter starts again at the first.
+  const [pages, setPages] = useState(1);
+  const tableRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  // The index of the first rule a "Show more" added, so focus can follow it there.
+  const revealedFrom = useRef(/** @type {number | null} */ (null));
+  const filterBy = (set) => (value) => {
+    set(value);
+    setPages(1);
+  };
 
   const teamOptions = useMemo(
     () =>
@@ -113,14 +125,28 @@ export default function RulesList({
         ),
     [rows, team, coach, level, priority, teamName, coachName]
   );
-  const shown = matching.slice(0, RULES_SHOWN_AT_ONCE);
+  const shown = matching.slice(0, pages * RULES_PER_PAGE);
+  const remaining = matching.length - shown.length;
   const filtered = team !== ALL || coach !== ALL || level !== ALL || priority !== ALL;
   const clear = () => {
     setTeam(ALL);
     setCoach(ALL);
     setLevel(ALL);
     setPriority(ALL);
+    setPages(1);
   };
+  const showMore = () => {
+    revealedFrom.current = shown.length;
+    setPages((current) => current + 1);
+  };
+  // After a page is added, focus goes to the first rule it added: the button that was pressed may
+  // be gone (it leaves with the last page), and a keyboard user should land where the new rules begin.
+  useEffect(() => {
+    if (revealedFrom.current === null) return;
+    const row = tableRef.current?.querySelectorAll('tbody tr')[revealedFrom.current];
+    revealedFrom.current = null;
+    /** @type {HTMLElement | null | undefined} */ (row?.querySelector('button'))?.focus();
+  }, [pages]);
 
   const ruleLabel = (row) =>
     `${coachName(row.coach_id)}'s rule for ${teamName(row.team_id)}: ${describeRule(row, locationNames)}`;
@@ -148,7 +174,7 @@ export default function RulesList({
             id="rules-filter-team"
             className="select"
             value={team}
-            onChange={(event) => setTeam(event.target.value)}
+            onChange={(event) => filterBy(setTeam)(event.target.value)}
           >
             <option value={ALL}>All teams</option>
             {teamOptions.map((option) => (
@@ -164,7 +190,7 @@ export default function RulesList({
             id="rules-filter-coach"
             className="select"
             value={coach}
-            onChange={(event) => setCoach(event.target.value)}
+            onChange={(event) => filterBy(setCoach)(event.target.value)}
           >
             <option value={ALL}>All coaches</option>
             {coachOptions.map((option) => (
@@ -180,7 +206,7 @@ export default function RulesList({
             id="rules-filter-level"
             className="select"
             value={level}
-            onChange={(event) => setLevel(event.target.value)}
+            onChange={(event) => filterBy(setLevel)(event.target.value)}
           >
             <option value={ALL}>All levels</option>
             <option value="must">{LEVEL_LABEL.must}</option>
@@ -194,7 +220,7 @@ export default function RulesList({
             id="rules-filter-priority"
             className="select"
             value={priority}
-            onChange={(event) => setPriority(event.target.value)}
+            onChange={(event) => filterBy(setPriority)(event.target.value)}
           >
             <option value={ALL}>Any priority</option>
             {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
@@ -225,7 +251,7 @@ export default function RulesList({
         <p className="text-sm m-0">No rules match these filters.</p>
       ) : (
         shown.length > 0 && (
-          <div className="grid-wrap">
+          <div className="grid-wrap" ref={tableRef}>
             <table className="grid">
               <caption className="sr-only">Practice preference rules in force</caption>
               <thead>
@@ -300,6 +326,15 @@ export default function RulesList({
             </table>
           </div>
         )
+      )}
+      {remaining > 0 && (
+        <div>
+          <Button variant="secondary" onClick={showMore}>
+            {`Show ${Math.min(RULES_PER_PAGE, remaining)} more ${
+              Math.min(RULES_PER_PAGE, remaining) === 1 ? 'rule' : 'rules'
+            }`}
+          </Button>
+        </div>
       )}
     </div>
   );

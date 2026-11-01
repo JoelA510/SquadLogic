@@ -293,17 +293,18 @@ describe('facility graph', () => {
     assert.equal(input.graph.surfaces[S2A].parentId, F2);
   });
 
-  it('lets a must_keep venue preference run (the repair refuses slug venues)', () => {
+  it('lets a must venue rule run (the repair refuses slug venues)', () => {
     const { adapted, result } = run(RETIREMENT, {
       rows: {
         coachPreferences: [
           {
+            id: 'rule-venue',
             coach_id: C1,
-            dimension: 'venue',
-            level: 'must_keep',
-            value: LOC_A,
-            status: 'approved',
-            effective_from: '2026-09-01',
+            team_id: T1,
+            level: 'must',
+            venue_ids: [LOC_A],
+            status: 'in_force',
+            effective_from: null,
             effective_to: null,
           },
         ],
@@ -322,12 +323,13 @@ describe('coaches', () => {
         rows: {
           coachPreferences: [
             {
+              id: 'rule-keep-weekday',
               coach_id: C2,
-              dimension: 'weekday',
-              level: 'prefer_keep',
-              value: null,
-              status: 'approved',
-              effective_from: '2026-09-01',
+              team_id: T2,
+              level: 'prefer',
+              keep_weekday: true,
+              status: 'in_force',
+              effective_from: null,
               effective_to: null,
             },
           ],
@@ -357,57 +359,74 @@ describe('coaches', () => {
     assert.deepEqual(input.coachesByTeam[T2], [C2]);
   });
 
-  it('passes only approved preferences (the Edge loader contract), undated', () => {
+  it('passes only the rules in force (the Edge loader contract), their windows untouched', () => {
     const { input, declared } = buildPracticeRepairInput(
       rowsFor(RETIREMENT, {
         rows: {
           coachPreferences: [
             {
+              id: 'rule-a',
               coach_id: C1,
-              dimension: 'weekday',
-              level: 'must_keep',
-              value: 'MON',
-              status: 'approved',
+              team_id: T1,
+              level: 'must',
+              weekdays: ['MON'],
+              status: 'in_force',
               effective_from: '2026-09-01',
               effective_to: null,
+              coach_priority: 'high',
             },
+            // Removed and replaced rules are history, not input.
+            { id: 'rule-b', coach_id: C2, team_id: T2, level: 'must', weekdays: ['WED'], status: 'removed' },
+            { id: 'rule-c', coach_id: C2, team_id: T2, level: 'prefer', keep_venue: true, status: 'replaced' },
             {
+              id: 'rule-d',
               coach_id: C2,
-              dimension: 'weekday',
-              level: 'must_keep',
-              value: 'WED',
-              status: 'requested',
+              team_id: T2,
+              level: 'prefer',
+              start_minutes: [1020, 1080],
+              venue_ids: [LOC_A.toUpperCase()],
+              keep_weekday: true,
+              status: 'in_force',
               effective_from: null,
-              effective_to: null,
-            },
-            {
-              coach_id: C2,
-              dimension: 'venue',
-              level: 'must_keep',
-              value: LOC_B,
-              status: 'superseded',
-              effective_from: '2026-09-01',
-              effective_to: '2026-10-20',
-            },
-            // Approved after the loss date: still the row in force.
-            {
-              coach_id: C2,
-              dimension: 'start_time',
-              level: 'prefer_keep',
-              value: 1020,
-              status: 'approved',
-              effective_from: '2026-11-01',
-              effective_to: null,
+              effective_to: '2026-12-01',
             },
           ],
         },
       })
     );
     assert.deepEqual(input.coachPreferences, [
-      { coachId: C1, dimension: 'weekday', level: 'must_keep', value: 'MON' },
-      { coachId: C2, dimension: 'start_time', level: 'prefer_keep', value: 1020 },
+      {
+        id: 'rule-a',
+        coachId: C1,
+        teamId: T1,
+        level: 'must',
+        weekdays: ['MON'],
+        startMinutes: null,
+        venueIds: null,
+        keepWeekday: false,
+        keepStart: false,
+        keepVenue: false,
+        coachPriority: 'high',
+        effectiveFrom: '2026-09-01',
+        effectiveTo: null,
+      },
+      {
+        id: 'rule-d',
+        coachId: C2,
+        teamId: T2,
+        level: 'prefer',
+        weekdays: null,
+        startMinutes: [1020, 1080],
+        venueIds: [LOC_A],
+        keepWeekday: true,
+        keepStart: false,
+        keepVenue: false,
+        coachPriority: null,
+        effectiveFrom: null,
+        effectiveTo: '2026-12-01',
+      },
     ]);
-    assert.deepEqual(declared.coachPreferences, { rowsRead: 4, approved: 2 });
+    assert.deepEqual(declared.coachPreferences, { rowsRead: 4, inForce: 2 });
   });
 });
 

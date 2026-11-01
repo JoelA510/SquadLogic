@@ -6302,20 +6302,24 @@ harvest(
 );
 
 harvest(
-  'resolveCoachPreferences(a prefer_keep with neither a value nor a current series)',
+  'resolveCoachPreferences(a prefer rule that keeps the current weekday of a team with no practice)',
   resolveCoachPreferences({
+    teamId: 'team-1',
     coachIds: ['coach-1'],
-    preferences: [{ coachId: 'coach-1', dimension: 'weekday', level: 'prefer_keep', value: null }],
+    rules: [
+      { id: 'rule-1', coachId: 'coach-1', teamId: 'team-1', level: 'prefer', keepWeekday: true },
+    ],
   })
 );
 
 harvest(
-  'resolveCoachPreferences(two coaches holding prefer_keep on different weekdays)',
+  'resolveCoachPreferences(two prefer rules asking for different weekdays)',
   resolveCoachPreferences({
+    teamId: 'team-1',
     coachIds: ['coach-1', 'coach-2'],
-    preferences: [
-      { coachId: 'coach-1', dimension: 'weekday', level: 'prefer_keep', value: 'TUE' },
-      { coachId: 'coach-2', dimension: 'weekday', level: 'prefer_keep', value: 'THU' },
+    rules: [
+      { id: 'rule-1', coachId: 'coach-1', teamId: 'team-1', level: 'prefer', weekdays: ['TUE'] },
+      { id: 'rule-2', coachId: 'coach-2', teamId: 'team-1', level: 'prefer', weekdays: ['THU'] },
     ],
   })
 );

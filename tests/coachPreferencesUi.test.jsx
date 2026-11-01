@@ -3,8 +3,10 @@
  *
  * Driven through the real page, hooks and core re-judge, over a fake Supabase client whose tables
  * are plain arrays. What each block proves, and the plant that turns it red, is stated beside it.
- * The screen is the admins' stopgap until the import screens (C2): pending musts, rules in force,
- * and adding a rule with one condition.
+ * C2 made it four tabs (pending musts, rules, conflicts, import); this file holds the page-level
+ * behaviour of the first two, the re-judge, the add and edit dialogs and every RPC path's refusal.
+ * Accept all is in `pendingMusts.test.jsx`, the rule list's filters in `preferenceRules.test.jsx`,
+ * the conflicts in `preferenceConflicts.test.jsx`, the import in `preferenceImport.test.jsx`.
  */
 
 import React from 'react';
@@ -17,7 +19,18 @@ import ToastHost from '../frontend/src/components/ui/ToastHost.jsx';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
 import { useAuth } from '../frontend/src/contexts/AuthContext.jsx';
-import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import {
+  C1,
+  C3,
+  LAST,
+  ORG,
+  SEASON,
+  T1,
+  T2,
+  freshTables,
+  makeFrom,
+  ruleRow,
+} from './helpers/preferenceTables.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -28,165 +41,15 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-const ORG = MOCK_ORG_ID;
-const C1 = '11111111-1111-4111-8111-111111111111';
-const C3 = '33333333-3333-4333-8333-333333333333';
-const LAST = '44444444-4444-4444-8444-444444444444';
-const T1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
-const T2 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
-const T3 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3';
-const L1 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
-
-const slot = (day, time) => ({ day_of_week: day, start_time: time, field: { location_id: L1 } });
-
-/** A rule row as the store holds it. */
-const ruleRow = (over) => ({
-  organization_id: ORG,
-  coach_id: C1,
-  team_id: T1,
-  level: 'prefer',
-  requested_level: 'prefer',
-  must_decision: null,
-  status: 'in_force',
-  source: 'import',
-  import_job_id: 'job-1',
-  weekdays: null,
-  start_minutes: null,
-  venue_ids: null,
-  keep_weekday: false,
-  keep_start: false,
-  keep_venue: false,
-  coach_priority: null,
-  effective_from: null,
-  effective_to: null,
-  created_at: '2026-09-20T10:00:00Z',
-  decided_at: null,
-  ...over,
-});
-
-/** Two current teams for C1 (T1 on Monday, T2 on Wednesday) and one ended (T3). */
-function freshTables() {
-  return {
-    // Coaches belong to one season (20261108010000): the page lists the season shown, 'season-1'.
-    coaches: [
-      { id: C1, organization_id: ORG, season_settings_id: 'season-1', full_name: 'Casey Coach' },
-      {
-        id: C3,
-        organization_id: ORG,
-        season_settings_id: 'season-1',
-        full_name: 'Robin Unassigned',
-      },
-      {
-        id: LAST,
-        organization_id: ORG,
-        season_settings_id: 'season-0',
-        full_name: 'Last Season Coach',
-      },
-    ],
-    locations: [{ id: L1, organization_id: ORG, name: 'Riverside Park' }],
-    teams: [
-      { id: T1, organization_id: ORG, name: 'U10 Hawks' },
-      { id: T2, organization_id: ORG, name: 'U12 Owls' },
-      { id: T3, organization_id: ORG, name: 'U8 Wrens' },
-    ],
-    team_coach_assignments: [
-      {
-        id: 'tca-1',
-        organization_id: ORG,
-        team_id: T1,
-        coach_id: C1,
-        role: 'lead',
-        effective_from: '2026-01-01',
-        effective_to: null,
-      },
-      {
-        id: 'tca-2',
-        organization_id: ORG,
-        team_id: T2,
-        coach_id: C1,
-        role: 'assistant',
-        effective_from: '2026-01-01',
-        effective_to: null,
-      },
-      // Ended: T3 is not a current team, so its series must not be listed.
-      {
-        id: 'tca-3',
-        organization_id: ORG,
-        team_id: T3,
-        coach_id: C1,
-        role: 'lead',
-        effective_from: '2026-01-01',
-        effective_to: '2026-02-01',
-      },
-    ],
-    practice_assignments: [
-      {
-        id: 'pa-1',
-        organization_id: ORG,
-        team_id: T1,
-        effective_date_range: null,
-        slot: slot('mon', '18:00:00'),
-      },
-      {
-        id: 'pa-2',
-        organization_id: ORG,
-        team_id: T2,
-        effective_date_range: null,
-        slot: slot('wed', '18:00:00'),
-      },
-      {
-        id: 'pa-3',
-        organization_id: ORG,
-        team_id: T3,
-        effective_date_range: null,
-        slot: slot('mon', '17:00:00'),
-      },
-    ],
-    coach_practice_preferences: [
-      // A must the file asked for, in force as prefer until accepted.
-      ruleRow({ id: 'r1', weekdays: ['WED'], requested_level: 'must', must_decision: 'pending' }),
-      // A plain prefer in force.
-      ruleRow({ id: 'r2', team_id: T2, venue_ids: [L1], created_at: '2026-09-19T10:00:00Z' }),
-    ],
-  };
-}
-
 let tables;
 /** @type {Record<string, any>} */
 let tableErrors;
-
-function builder(table) {
-  const filters = [];
-  let range = null;
-  const run = () => {
-    if (tableErrors[table]) return { data: null, error: tableErrors[table] };
-    let rows = (tables[table] || []).filter((row) =>
-      filters.every(([column, value]) => String(row[column]) === String(value))
-    );
-    if (range) rows = rows.slice(range[0], range[1] + 1);
-    return { data: rows, error: null };
-  };
-  const b = {
-    select: () => b,
-    eq: (column, value) => {
-      filters.push([column, value]);
-      return b;
-    },
-    order: () => b,
-    range: (from, to) => {
-      range = [from, to];
-      return b;
-    },
-    then: (resolve, reject) => Promise.resolve(run()).then(resolve, reject),
-  };
-  return b;
-}
 
 function asRole(role, userId = 'user-admin') {
   vi.mocked(useOrganization).mockReturnValue(
     /** @type {any} */ ({
       currentOrganization: { id: ORG },
-      currentSeasonSetting: { id: 'season-1' },
+      currentSeasonSetting: { id: SEASON, status: 'active' },
       orgMember: { role },
     })
   );
@@ -205,10 +68,18 @@ const renderPage = () =>
 beforeEach(() => {
   tables = freshTables();
   tableErrors = {};
-  vi.mocked(supabase.from).mockImplementation(/** @type {any} */ (builder));
+  vi.mocked(supabase.from).mockImplementation(
+    /** @type {any} */ ((table) => makeFrom(tables, tableErrors)(table))
+  );
   vi.mocked(supabase.rpc).mockReset();
   vi.mocked(supabase.rpc).mockResolvedValue(/** @type {any} */ ({ data: {}, error: null }));
 });
+
+const rulesTab = async () => {
+  await screen.findByTestId('admin-preferences-view');
+  fireEvent.click(screen.getByRole('tab', { name: 'Rules' }));
+  return screen.findByRole('heading', { name: /^Rules in force/ });
+};
 
 describe('admin view', () => {
   it("lists the pending musts and rules of the season shown's coaches only", async () => {
@@ -231,10 +102,29 @@ describe('admin view', () => {
     expect(screen.queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^Accept as must: / })).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Pending musts (1)' })).toBeInTheDocument();
+    await rulesTab();
     expect(screen.getByRole('heading', { name: 'Rules in force (2)' })).toBeInTheDocument();
+    expect(screen.queryByText('Last Season Coach')).not.toBeInTheDocument();
   });
 
-  it('offers accept and keep-as-prefer on a pending must, and add on each coach of the season', async () => {
+  it('opens on the pending musts when there are any and on the rules when there are none', async () => {
+    asRole('admin');
+    const { unmount } = renderPage();
+    await screen.findByRole('heading', { name: 'Pending musts (1)' });
+    expect(screen.getByRole('tab', { name: /^Pending musts/ })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    unmount();
+    tables.coach_practice_preferences = tables.coach_practice_preferences.filter(
+      (row) => row.id !== 'r1'
+    );
+    renderPage();
+    await screen.findByRole('heading', { name: 'Rules in force (1)' });
+    expect(screen.getByRole('tab', { name: 'Rules' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('offers accept and keep-as-prefer on a pending must, and one add button on the rules', async () => {
     asRole('admin');
     renderPage();
     await screen.findByTestId('admin-preferences-view');
@@ -249,8 +139,9 @@ describe('admin view', () => {
     expect(row).toBeTruthy();
     expect(within(row).getByText('Wednesday')).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: /^Keep as prefer: / })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /^Add a rule for/ })).toHaveLength(2);
-    expect(screen.getByText('Pending must')).toBeInTheDocument();
+    await rulesTab();
+    expect(screen.getAllByRole('button', { name: 'Add a rule…' })).toHaveLength(1);
+    expect(within(screen.getByRole('table')).getByText('Pending must')).toBeInTheDocument();
   });
 
   // Plant (a): enumerate the preview's series from the rule rows instead of the practice rows ->
@@ -291,28 +182,59 @@ describe('admin view', () => {
     );
   });
 
-  it('remove reaches the RPC', async () => {
+  it('remove asks first, names the rule, and reaches the RPC only when confirmed', async () => {
     asRole('admin');
     renderPage();
-    await screen.findByTestId('admin-preferences-view');
+    await rulesTab();
     fireEvent.click(screen.getByRole('button', { name: /^Remove .*Riverside Park$/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Remove this rule' });
+    expect(dialog).toHaveTextContent("Casey Coach's rule for U12 Owls: Riverside Park");
+    expect(supabase.rpc).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(supabase.rpc).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^Remove .*Riverside Park$/ }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Remove this rule' })).getByRole('button', {
+        name: 'Remove rule',
+      })
+    );
     await waitFor(() =>
       expect(supabase.rpc).toHaveBeenCalledWith('admin_remove_practice_preference', {
         p_preference_id: 'r2',
       })
     );
   });
+});
 
-  it("adds a one-value rule for one of the coach's teams, re-judging a must against that team's series", async () => {
+describe('the add and edit dialogs', () => {
+  const openAdd = async () => {
     asRole('admin');
     renderPage();
-    await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Casey Coach' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
+    await rulesTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a rule…' }));
+    return screen.findByRole('dialog', { name: 'Add a rule' });
+  };
+
+  it("adds a rule with several values for one of the coach's teams, re-judging a must against that team's series", async () => {
+    const dialog = await openAdd();
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
     fireEvent.change(within(dialog).getByLabelText('Team'), { target: { value: T2 } });
     fireEvent.change(within(dialog).getByLabelText('Level'), { target: { value: 'must' } });
-    fireEvent.change(within(dialog).getByLabelText('Value'), { target: { value: 'FRI' } });
-    // T2 practises Wednesday: a must for Friday breaks it.
+    fireEvent.click(within(dialog).getByLabelText('Friday'));
+    fireEvent.click(within(dialog).getByLabelText('Tuesday'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add a start time' }));
+    fireEvent.change(within(dialog).getByLabelText('Start time 1'), { target: { value: '18:00' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add a start time' }));
+    fireEvent.change(within(dialog).getByLabelText('Start time 2'), { target: { value: '17:00' } });
+    fireEvent.click(within(dialog).getByLabelText('North Fields'));
+    fireEvent.change(within(dialog).getByLabelText("Coach's priority"), {
+      target: { value: 'high' },
+    });
+    // The sentence reads the rule back before it is saved.
+    expect(within(dialog).getByTestId('rule-summary')).toHaveTextContent(
+      'Must practise on Tuesday or Friday, starting at 17:00 or 18:00, at North Fields, for U12 Owls.'
+    );
+    // T2 practises Wednesday: a must for Tuesday or Friday breaks it.
     expect(within(dialog).getByTestId('unsatisfiable-series')).toHaveTextContent('U12 Owls');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add rule' }));
     await waitFor(() =>
@@ -320,28 +242,29 @@ describe('admin view', () => {
         p_coach_id: C1,
         p_team_id: T2,
         p_level: 'must',
-        p_weekdays: ['FRI'],
-        p_start_minutes: null,
-        p_venue_ids: null,
+        p_weekdays: ['TUE', 'FRI'],
+        p_start_minutes: [1020, 1080],
+        p_venue_ids: ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2'],
         p_keep_weekday: false,
         p_keep_start: false,
         p_keep_venue: false,
-        p_coach_priority: null,
+        p_coach_priority: 'high',
         p_effective_from: null,
         p_effective_to: null,
       })
     );
   });
 
-  it('adds keep-current when no value is chosen, and says "None" when no series would break', async () => {
-    asRole('admin');
-    renderPage();
-    await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Casey Coach' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
+  it('adds keep-current when it is chosen, and says "None" when no series would break', async () => {
+    const dialog = await openAdd();
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
     fireEvent.change(within(dialog).getByLabelText('Level'), { target: { value: 'must' } });
+    fireEvent.click(within(dialog).getByLabelText('Keep the day it practises now'));
     // Keeping the current weekday of a team that practises: nothing it has is broken.
     expect(within(dialog).getByTestId('preview-none')).toHaveTextContent('None');
+    expect(within(dialog).getByTestId('rule-summary')).toHaveTextContent(
+      'Must practise on the day it practises now, for U10 Hawks.'
+    );
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add rule' }));
     await waitFor(() =>
       expect(supabase.rpc).toHaveBeenCalledWith(
@@ -351,14 +274,107 @@ describe('admin view', () => {
     );
   });
 
+  it('a rule with no condition says so and cannot be added', async () => {
+    const dialog = await openAdd();
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'a rule has at least one condition'
+    );
+    expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeDisabled();
+    expect(within(dialog).queryByTestId('rule-summary')).not.toBeInTheDocument();
+  });
+
+  it('a window that ends before it starts is refused in the schema’s words, before any RPC', async () => {
+    const dialog = await openAdd();
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
+    fireEvent.click(within(dialog).getByLabelText('Monday'));
+    fireEvent.change(within(dialog).getByLabelText('In force from (optional)'), {
+      target: { value: '2026-10-10' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('In force until (optional)'), {
+      target: { value: '2026-10-01' },
+    });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('the window ends before it starts');
+    expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeDisabled();
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
   it('a coach with no team today has nothing to add a rule to', async () => {
-    asRole('admin');
-    renderPage();
-    await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Robin Unassigned' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
+    const dialog = await openAdd();
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C3 } });
     expect(within(dialog).getByText(/coaches no team today/)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeDisabled();
+  });
+
+  it('edits a rule: the form holds its values, and Save sends the whole rule', async () => {
+    tables.coach_practice_preferences.push(
+      ruleRow({
+        id: 'r3',
+        team_id: T1,
+        level: 'must',
+        requested_level: 'must',
+        must_decision: 'accepted',
+        weekdays: ['MON', 'WED'],
+        start_minutes: [1080],
+        coach_priority: 'low',
+        effective_from: '2026-09-01',
+        created_at: '2026-09-18T10:00:00Z',
+      })
+    );
+    asRole('admin');
+    renderPage();
+    await rulesTab();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: "Edit Casey Coach's rule for U10 Hawks: Monday or Wednesday · 18:00",
+      })
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Edit a rule' });
+    expect(within(dialog).getByLabelText('Monday')).toBeChecked();
+    expect(within(dialog).getByLabelText('Wednesday')).toBeChecked();
+    expect(within(dialog).getByLabelText('Friday')).not.toBeChecked();
+    expect(within(dialog).getByLabelText('Start time 1')).toHaveValue('18:00');
+    expect(within(dialog).getByLabelText('Level')).toHaveValue('must');
+    expect(within(dialog).getByLabelText("Coach's priority")).toHaveValue('low');
+    expect(within(dialog).getByLabelText('In force from (optional)')).toHaveValue('2026-09-01');
+    fireEvent.click(within(dialog).getByLabelText('Wednesday'));
+    fireEvent.click(within(dialog).getByLabelText('Thursday'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save rule' }));
+    await waitFor(() =>
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_edit_practice_preference', {
+        p_preference_id: 'r3',
+        p_level: 'must',
+        p_weekdays: ['MON', 'THU'],
+        p_start_minutes: [1080],
+        p_venue_ids: null,
+        p_keep_weekday: false,
+        p_keep_start: false,
+        p_keep_venue: false,
+        p_coach_priority: 'low',
+        p_effective_from: '2026-09-01',
+        p_effective_to: null,
+      })
+    );
+  });
+
+  it('editing a pending must says that Prefer keeps it and Must accepts it, and defaults to keeping it', async () => {
+    asRole('admin');
+    renderPage();
+    await rulesTab();
+    fireEvent.click(screen.getByRole('button', { name: /^Edit .*Wednesday$/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit a rule' });
+    expect(within(dialog).getByTestId('edit-pending-note')).toHaveTextContent(
+      'Saving it as Prefer keeps it as prefer; saving it as Must accepts it'
+    );
+    expect(within(dialog).getByLabelText('Level')).toHaveValue('prefer');
+    expect(within(dialog).getByText(/came from an import file/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save rule' }));
+    await waitFor(() =>
+      expect(supabase.rpc).toHaveBeenCalledWith(
+        'admin_edit_practice_preference',
+        expect.objectContaining({ p_preference_id: 'r1', p_level: 'prefer' })
+      )
+    );
   });
 });
 
@@ -381,9 +397,11 @@ describe("the day a coach 'coaches today' is the database's, not the admin's", (
   const openRobin = async () => {
     asRole('admin');
     renderPage();
-    await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Robin Unassigned' }));
-    return screen.findByRole('dialog', { name: 'Add a rule' });
+    await rulesTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a rule…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C3 } });
+    return dialog;
   };
 
   it('west of UTC in the evening, an assignment stamped with the database date (tomorrow here) counts', async () => {
@@ -401,6 +419,7 @@ describe("the day a coach 'coaches today' is the database's, not the admin's", (
     const dialog = await openRobin();
     expect(within(dialog).queryByText(/coaches no team today/)).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText('Team')).toHaveValue(T1);
+    fireEvent.click(within(dialog).getByLabelText('Monday'));
     expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeEnabled();
   });
 
@@ -419,6 +438,7 @@ describe("the day a coach 'coaches today' is the database's, not the admin's", (
     });
     const dialog = await openRobin();
     expect(within(dialog).queryByText(/coaches no team today/)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByLabelText('Monday'));
     expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeEnabled();
   });
 });
@@ -463,32 +483,31 @@ describe('failure states', () => {
     tables.locations = [{ id: 'loc-not-a-uuid', organization_id: ORG, name: 'Legacy Park' }];
     asRole('admin');
     renderPage();
-    await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Casey Coach' }));
+    await rulesTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a rule…' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
-    fireEvent.change(within(dialog).getByLabelText('Dimension'), { target: { value: 'venue' } });
-    fireEvent.change(within(dialog).getByLabelText(/Venue/), {
-      target: { value: 'loc-not-a-uuid' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add rule' }));
-    expect(
-      await screen.findByText(/a location id is a lowercase canonical uuid/)
-    ).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
+    fireEvent.click(within(dialog).getByLabelText('Legacy Park'));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'a location id is a lowercase canonical uuid'
+    );
+    expect(within(dialog).getByRole('button', { name: 'Add rule' })).toBeDisabled();
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
 });
 
 /*
  * Every user-triggered RPC path, enumerated from the `callRpc(` call sites in
- * `useCoachPracticePreferences.js` (decide a must, add, remove), driven through the real UI with the
- * RPC refusing. Each must put the database's own message on screen AND claim no success. A catch that
- * swallows (`void err`) turns its row red.
+ * `useCoachPracticePreferences.js` (decide a must, add, edit, remove, accept all), driven through
+ * the real UI with the RPC refusing. Each must put the database's own message on screen AND claim
+ * no success. A catch that swallows (`void err`) turns its row red.
  */
 describe('every RPC path surfaces a database refusal', () => {
   const refuse = (code, message) =>
     vi
       .mocked(supabase.rpc)
       .mockResolvedValue(/** @type {any} */ ({ data: null, error: { code, message } }));
+  const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   const PATHS = [
     {
@@ -520,19 +539,36 @@ describe('every RPC path surfaces a database refusal', () => {
         expect(screen.getByRole('dialog', { name: 'Accept as must' })).toBeInTheDocument(),
     },
     {
+      path: 'accept all',
+      code: '42501',
+      message: 'Access denied: planted refusal on admin_accept_all_musts',
+      success: /rules? (is a must|are musts) now$/,
+      rpc: 'admin_accept_all_musts',
+      drive: async () => {
+        await screen.findByTestId('admin-preferences-view');
+        fireEvent.click(screen.getByRole('button', { name: /^Accept all 1/ }));
+        const dialog = await screen.findByRole('dialog', { name: 'Accept all pending musts' });
+        fireEvent.click(within(dialog).getByRole('button', { name: /^Make 1 rule a must$/ }));
+      },
+      stillThere: () =>
+        expect(
+          screen.getByRole('dialog', { name: 'Accept all pending musts' })
+        ).toBeInTheDocument(),
+    },
+    {
       path: 'remove',
       code: '22023',
       message: 'practice preference r2 is removed, not in force: planted refusal on remove',
       success: /^Rule removed$/,
       rpc: 'admin_remove_practice_preference',
       drive: async () => {
-        await screen.findByTestId('admin-preferences-view');
+        await rulesTab();
         fireEvent.click(screen.getByRole('button', { name: /^Remove .*Riverside Park$/ }));
+        const dialog = await screen.findByRole('dialog', { name: 'Remove this rule' });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Remove rule' }));
       },
       stillThere: () =>
-        expect(
-          screen.getByRole('button', { name: /^Remove .*Riverside Park$/ })
-        ).toBeInTheDocument(),
+        expect(screen.getByRole('dialog', { name: 'Remove this rule' })).toBeInTheDocument(),
     },
     {
       path: 'add',
@@ -541,18 +577,35 @@ describe('every RPC path surfaces a database refusal', () => {
       success: /^Rule added$/,
       rpc: 'admin_add_practice_preference',
       drive: async () => {
-        await screen.findByTestId('admin-preferences-view');
-        fireEvent.click(screen.getByRole('button', { name: 'Add a rule for Casey Coach' }));
+        await rulesTab();
+        fireEvent.click(screen.getByRole('button', { name: 'Add a rule…' }));
         const dialog = await screen.findByRole('dialog', { name: 'Add a rule' });
-        fireEvent.change(within(dialog).getByLabelText('Value'), { target: { value: 'FRI' } });
+        fireEvent.change(within(dialog).getByLabelText('Coach'), { target: { value: C1 } });
+        fireEvent.click(within(dialog).getByLabelText('Friday'));
         fireEvent.click(within(dialog).getByRole('button', { name: 'Add rule' }));
       },
       stillThere: () =>
         expect(screen.getByRole('dialog', { name: 'Add a rule' })).toBeInTheDocument(),
     },
+    {
+      path: 'edit',
+      code: '22023',
+      message: 'practice preference r2 is replaced, not in force: planted refusal on edit',
+      success: /^Rule saved$/,
+      rpc: 'admin_edit_practice_preference',
+      drive: async () => {
+        await rulesTab();
+        fireEvent.click(screen.getByRole('button', { name: /^Edit .*Riverside Park$/ }));
+        const dialog = await screen.findByRole('dialog', { name: 'Edit a rule' });
+        fireEvent.click(within(dialog).getByLabelText('Friday'));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Save rule' }));
+      },
+      stillThere: () =>
+        expect(screen.getByRole('dialog', { name: 'Edit a rule' })).toBeInTheDocument(),
+    },
   ];
 
-  it('the table names every RPC the hook calls and all four user paths', async () => {
+  it('the table names every RPC the hook calls and all six user paths', async () => {
     // Enumerated from the hook's source, not from this table: a new callRpc site with no row here
     // fails this test.
     const fs = await import('node:fs');
@@ -561,9 +614,9 @@ describe('every RPC path surfaces a database refusal', () => {
       'utf8'
     );
     const called = new Set([...source.matchAll(/callRpc\('([a-z_]+)'/g)].map((m) => m[1]));
-    expect(called.size).toBe(3);
+    expect(called.size).toBe(5);
     expect(new Set(PATHS.map((entry) => entry.rpc))).toEqual(called);
-    // Three sites, four paths: accepting and keeping a must are one RPC with two decisions.
+    // Five sites, six paths: accepting and keeping a must are one RPC with two decisions.
     expect([...source.matchAll(/callRpc\('/g)]).toHaveLength(PATHS.length - 1);
   });
 
@@ -574,7 +627,9 @@ describe('every RPC path surfaces a database refusal', () => {
       asRole('admin');
       renderPage();
       await entry.drive();
-      expect(await screen.findByText(entry.message)).toBeInTheDocument();
+      expect(
+        (await screen.findAllByText(new RegExp(escapeRe(entry.message)))).length
+      ).toBeGreaterThan(0);
       expect(supabase.rpc).toHaveBeenCalledWith(entry.rpc, expect.any(Object));
       expect(screen.queryByText(entry.success)).not.toBeInTheDocument();
       entry.stillThere();
@@ -632,5 +687,18 @@ describe('every load and compute failure is visible', () => {
     const dialog = await acceptDialog();
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Could not re-judge this decision');
     expect(within(dialog).queryByTestId('preview-none')).not.toBeInTheDocument();
+  });
+
+  it('a failed read of the import files is a banner and the group is named by its date', async () => {
+    tableErrors.import_jobs = { code: '42501', message: 'permission denied for table import_jobs' };
+    asRole('admin');
+    renderPage();
+    await screen.findByTestId('admin-preferences-view');
+    expect(await screen.findByText(/Could not read the import files/)).toHaveTextContent(
+      'permission denied for table import_jobs'
+    );
+    expect(
+      screen.getByRole('heading', { name: /From a preference file, imported 2026-09-20 \(1\)/ })
+    ).toBeInTheDocument();
   });
 });

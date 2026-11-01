@@ -42,6 +42,26 @@ export const DECISION_LABEL = Object.freeze({
   kept_prefer: 'Kept as prefer',
 });
 
+/**
+ * The coach's own ranking of a rule. It is shown and sorted by and never weighed: the solver and
+ * the repair read no priority (`coachPreferences.js`), and no screen here says otherwise.
+ */
+export const PRIORITY_LABEL = Object.freeze({
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+});
+
+const PRIORITY_RANK = Object.freeze({ high: 0, medium: 1, low: 2 });
+
+/**
+ * Sort key for a coach's priority: High first, then Medium, Low, and a rule with none last.
+ * @param {string | null | undefined} priority
+ */
+export function priorityRank(priority) {
+  return PRIORITY_RANK[/** @type {'high' | 'medium' | 'low'} */ (priority)] ?? 3;
+}
+
 export const WEEKDAY_OPTIONS = Object.freeze([
   { code: 'MON', label: 'Monday' },
   { code: 'TUE', label: 'Tuesday' },
@@ -211,6 +231,40 @@ export function describeRule(row, locationNames = new Map()) {
   if (row.venue_ids) parts.push(list(row.venue_ids, 'venue'));
   else if (row.keep_venue) parts.push('keep the current venue');
   return parts.join(' · ');
+}
+
+/**
+ * One rule as a sentence, for the editor to read back before it saves: "Must practise on Tuesday or
+ * Thursday, starting at 17:00 or 18:00, at Riverside Park, for U10 Hawks, from 2026-09-01 until
+ * 2026-10-15." Several values read "A or B" (any of); a keep-current condition says what it keeps.
+ *
+ * @param {any} row - the rule in the store's shape (`weekdays`, `start_minutes`, `venue_ids`,
+ *   `keep_*`, `level`, `effective_from`, `effective_to`)
+ * @param {{ teamName?: string | null, locationNames?: Map<string, string> }} [names]
+ */
+export function summarizeRule(row, { teamName = null, locationNames = new Map() } = {}) {
+  const list = (values, dimension) =>
+    values.map((value) => formatPreferenceValue(dimension, value, locationNames)).join(' or ');
+  const parts = [];
+  if (row.weekdays) parts.push(`on ${list(row.weekdays, 'weekday')}`);
+  else if (row.keep_weekday) parts.push('on the day it practises now');
+  if (row.start_minutes) parts.push(`starting at ${list(row.start_minutes, 'start_time')}`);
+  else if (row.keep_start) parts.push('at the start time it has now');
+  if (row.venue_ids) parts.push(`at ${list(row.venue_ids, 'venue')}`);
+  else if (row.keep_venue) parts.push('at the venue it has now');
+  const lead = row.level === 'must' ? 'Must practise' : 'Prefer to practise';
+  const window =
+    row.effective_from && row.effective_to
+      ? `from ${row.effective_from} until ${row.effective_to}`
+      : row.effective_from
+        ? `from ${row.effective_from}`
+        : row.effective_to
+          ? `until ${row.effective_to}`
+          : null;
+  const sentence = [parts.length > 0 ? `${lead} ${parts.join(', ')}` : lead];
+  if (teamName) sentence.push(`for ${teamName}`);
+  if (window) sentence.push(window);
+  return `${sentence.join(', ')}.`;
 }
 
 /**

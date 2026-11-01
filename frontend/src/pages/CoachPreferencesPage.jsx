@@ -7,11 +7,11 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import AdminPreferenceReview from '../components/preferences/AdminPreferenceReview.jsx';
 
 /**
- * Practice preference rules (Phase D C1; originally Phase 8.6 PR 3b, PR 2), the admins' review.
- * Coaches never sign in (docs/changes/2026-10-27-admin-only.md), so there is no request view: a
- * preference file is imported by an admin (the import screen is Phase D C2), and an admin accepts the
- * musts it asked for and adds or removes rules here. The route needs `DECIDE_PRACTICE_PREFERENCE`,
- * and the RPCs refuse a non-admin regardless of what renders.
+ * Practice preference rules (Phase D C1 and C2; originally Phase 8.6 PR 3b, PR 2), the admins' screens:
+ * the musts waiting for a decision (with Accept all for a file), every rule in force with its editor,
+ * the musts that conflict, and the import of a preference file with its preview. Coaches never sign in
+ * (docs/changes/2026-10-27-admin-only.md), so there is no request view. The route needs
+ * `DECIDE_PRACTICE_PREFERENCE`, and the RPCs refuse a non-admin regardless of what renders.
  */
 export default function CoachPreferencesPage() {
   const { currentOrganization } = useOrganization();
@@ -23,7 +23,7 @@ export default function CoachPreferencesPage() {
       header={
         <PageHeader
           title="Practice preferences"
-          subtitle="Rules for the days, start times and venues a team practises on, and the musts waiting for your decision."
+          subtitle="Rules for the days, start times and venues a team practises on: import a file, decide the musts, and see which rules conflict."
           icon={
             <span className="page-obj-icon" style={{ background: 'var(--accent-teal)' }}>
               <SlidersHorizontal size={20} aria-hidden="true" />

@@ -156,6 +156,73 @@ describe('placement review :: needs review', () => {
     const summary = summarizePlacementReview(results);
     expect(summary?.divisions[0].needsReview.map((entry) => entry.playerId)).toEqual(['h']);
   });
+
+  // Follow-ups F1, item 2: a player on a reviewed roster who went on the waitlist since.
+  const onWaitlist = (id) => ({ ...inBand(id), status: 'waitlist' });
+  const waitlistHold = (id, teamId = 'team-a') => ({
+    playerId: id,
+    teamId,
+    placement: 'in_band',
+    reviewReason: null,
+    waitlisted: true,
+  });
+
+  it('words a waitlisted player kept on a reviewed roster, apart from a blocked one', () => {
+    const results = run({
+      teamA: [blocked('h'), onWaitlist('w'), inBand('a')],
+      holds: [
+        { playerId: 'h', teamId: 'team-a', placement: 'no_division', reviewReason: null },
+        waitlistHold('w'),
+      ],
+    });
+    render(<PlacementReviewList results={results} />);
+    const summary = summarizePlacementReview(results);
+    expect(summary?.divisions[0].needsReview.map((e) => [e.playerId, e.waitlisted])).toEqual([
+      ['h', false],
+      ['w', true],
+    ]);
+    expect(placementReviewAnnouncement(summary)).toBe('Players to review: 2 players need review.');
+    expect(itemsOf('Needs review').map((item) => item.textContent)).toEqual([
+      'Player H, on Team A. Not eligible for this division. No suitable division in this import (the same gender or co-ed) holds a player of their age. Kept on the reviewed roster; move them by hand if you agree.',
+      'Player W, on Team A. On the waitlist, but already on the reviewed roster. Kept there; move them by hand if you agree.',
+    ]);
+  });
+
+  it('lists a waitlisted player found on a roster even when the holds do not name them', () => {
+    // A manual move onto a team, or a run whose holds were not kept: enumerated from the rosters.
+    const results = run({ teamA: [onWaitlist('w'), inBand('a')], holds: [] });
+    const entries = summarizePlacementReview(results)?.divisions[0].needsReview;
+    expect(entries).toEqual([
+      {
+        playerId: 'w',
+        name: 'Player W',
+        teamName: 'Team A',
+        placement: 'in_band',
+        reviewReason: null,
+        waitlisted: true,
+      },
+    ]);
+  });
+
+  it('lists a player who is both blocked and waitlisted once, as blocked', () => {
+    const both = { ...blocked('x'), status: 'waitlist' };
+    const results = run({ teamA: [both, inBand('a')], holds: [] });
+    const entries = summarizePlacementReview(results)?.divisions[0].needsReview;
+    expect(entries?.map((e) => [e.playerId, e.waitlisted, e.placement])).toEqual([
+      ['x', false, 'no_division'],
+    ]);
+  });
+
+  it('does not list a waitlisted player who is not on a roster (they are in Not placed)', () => {
+    const results = run({
+      teamA: [inBand('a')],
+      overflow: [{ players: [onWaitlist('w')], reason: 'waitlisted', metadata: { coachId: null } }],
+      holds: [],
+    });
+    const division = summarizePlacementReview(results)?.divisions[0];
+    expect(division?.needsReview).toEqual([]);
+    expect(division?.notPlaced.map((e) => e.playerId)).toEqual(['w']);
+  });
 });
 
 describe('placement review :: eligibility not checked', () => {

@@ -136,7 +136,10 @@ const teamIdOf = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-'
  * An import of placeholder players, each group in its program, read by the Teams page as the
  * newest import. One write through the sanctioned `__saveMockDB__`, whichever step calls it.
  */
-async function importPlayers(page: Page, groups: Array<{ count: number; program: string }>) {
+async function importPlayers(
+  page: Page,
+  groups: Array<{ count: number; program: string; waitlisted?: number }>
+) {
   await waitForMockClient(page);
   await page.evaluate(
     ({ groups, adminId, createdAt, mockOrgId }) => {
@@ -150,8 +153,8 @@ async function importPlayers(page: Page, groups: Array<{ count: number; program:
         if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
       }
       let next = 0;
-      const rows = groups.flatMap(({ count, program }) =>
-        Array.from({ length: count }, () => {
+      const rows = groups.flatMap(({ count, program, waitlisted = 0 }) =>
+        Array.from({ length: count }, (_, position) => {
           const index = next++;
           return {
             id: `pillar1-player-${index + 1}`,
@@ -161,6 +164,8 @@ async function importPlayers(page: Page, groups: Array<{ count: number; program:
             Gender: 'm',
             division: program,
             'Skill Rating': (index % 5) + 1,
+            // The first `waitlisted` players of the group are marked on the waitlist by the file.
+            ...(position < waitlisted ? { waitlist: 'yes' } : {}),
           };
         })
       );
@@ -191,6 +196,13 @@ Given(
   '{int} players are imported into the {string} program',
   async ({ page }, count: number, program: string) => {
     await importPlayers(page, [{ count, program }]);
+  }
+);
+
+Given(
+  '{int} players are imported into the {string} program and {int} of them are on the waitlist',
+  async ({ page }, count: number, program: string, waitlisted: number) => {
+    await importPlayers(page, [{ count, program, waitlisted }]);
   }
 );
 
@@ -269,6 +281,21 @@ Then(
     const expected = Math.ceil(players / perTeam);
     await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
     await expect(await programCell(page, program, 'Players')).toHaveText(String(players));
+  }
+);
+
+Then(
+  'the program overview shows {int} players and {int} on the waitlist for {string}, and recommends the fewest teams that hold them at {int} each',
+  async ({ page }, seatable: number, waitlisted: number, program: string, perTeam: number) => {
+    // The expectation is the step's arithmetic, never the page's output: a waitlisted player is
+    // seated on no team, so the advice is for the others. Counting everyone registered would
+    // recommend more, and the step requires the difference to be real.
+    const expected = Math.ceil(seatable / perTeam);
+    expect(expected).toBeLessThan(Math.ceil((seatable + waitlisted) / perTeam));
+    await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
+    await expect(await programCell(page, program, 'Players')).toHaveText(
+      new RegExp(`^${seatable}\\s*${waitlisted} on the waitlist$`)
+    );
   }
 );
 

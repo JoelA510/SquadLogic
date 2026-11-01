@@ -193,6 +193,9 @@ export default function TeamingConfiguration({
               <p className="text-sm text-text-secondary" data-testid="team-count-recommendation">
                 Recommended: {recommendedTeamCount} {recommendedTeamCount === 1 ? 'team' : 'teams'}{' '}
                 for {program.playerCount} players
+                {program.waitlistedCount > 0
+                  ? ` (${program.waitlistedCount} on the waitlist ${program.waitlistedCount === 1 ? 'is' : 'are'} not counted)`
+                  : ''}
                 {coachCount > 0
                   ? ` and ${coachCount} head ${coachCount === 1 ? 'coach' : 'coaches'}`
                   : ''}

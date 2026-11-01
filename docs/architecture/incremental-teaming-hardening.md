@@ -398,7 +398,12 @@ generation omits the key entirely.
 | `capacityViolations`                            | `[{teamId, playerCount, maxRosterSize}]`        | Final rosters above cap (pre-existing or `allowOverCapAssignments`).                                                                                                                                                   |
 | `minRosterWarnings`                             | `string[]` (team ids)                           | Teams below `minRosterSize` (warning — preserved teams are never collapsed).                                                                                                                                           |
 | `structuralWarnings`                            | `string[]`                                      | e.g. snapshot-only division with no division config.                                                                                                                                                                   |
-| `eligibilityHolds`                              | `[{playerId, teamId, placement, reviewReason}]` | Phase B2: a blocked player (`no_division`: no division holds their age) on a final roster. Only a preserved one can be: they stay on their reviewed team (owner decision 3) and are listed; a late one overflows.         |
+| `eligibilityHolds`                              | `[{playerId, teamId, placement, reviewReason}]` | Phase B2: a blocked player (`no_division`: no division holds their age) on a final roster. Only a preserved one can be: they stay on their reviewed team (owner decision 3) and are listed; a late one overflows.      |
+
+`eligibilityHolds` also lists a **waitlisted** player on a preserved roster (follow-ups F1,
+`docs/changes/2026-11-01-followups-f1.md`): they stay on their reviewed team, as a blocked one does, and
+the entry is `{playerId, teamId, placement, reviewReason: null, waitlisted: true}`. A player who is both
+blocked and waitlisted is listed once, as blocked, with no `waitlisted` key.
 
 **Overflow reason codes** (`overflowByDivision[].reason`, machine-readable kebab-case):
 `insufficient-capacity`, `coach-capacity`, `buddy-target-capacity`, `buddy-target-locked`,

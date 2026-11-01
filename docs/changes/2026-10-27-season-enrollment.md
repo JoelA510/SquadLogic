@@ -233,9 +233,12 @@ under "For the owner"). Migration `20261111010000_season_rollover.sql`.
   completed holds it. `update_game_score` and a direct write both meet it without replacing the function. A cascade
   from deleting an organization passes (the organization is gone; the check now covers an UPDATE too, which the
   SET NULL a deleted season makes of `games.season_id` can be). Scores & Results disables the score cells of a
-  completed season's games with a note (`DataGrid` gains `isRowReadOnly`). Deleting a season that has games fails
-  on the base as well (the games' season is set null while their teams are already gone, and the team foreign
-  key refuses): reproduced on 719a570, not changed here.
+  completed season's games with a note (`DataGrid` gains `isRowReadOnly`). Deleting a season that has games
+  failed in a pgTAP file on the base too (reproduced on 719a570) and was not changed here; follow-ups F1
+  (`docs/changes/2026-11-01-followups-f1.md`, item 1) measured it: it fails only inside the one transaction that
+  also inserted the game (Postgres re-checks the team foreign key on an update of a row its own transaction
+  inserted, and the SET NULL of `games.season_id` runs after the cascade removed the teams). A game committed
+  earlier goes with its season's teams, and no signed-in caller can delete a season at all (no policy, no RPC).
 - **A completed season's timezone is fixed** (`season_settings_completed_guard`): the calendar feed expands a
   season's occurrences in it. The RPC and a direct write meet one trigger (signed-in callers); the control in
   Settings is disabled with a note. The master export reads a completed season's TIME TBD list without a rebuild.

@@ -13,6 +13,7 @@ import {
   permitScopeText,
   permitSizeText,
 } from '../utils/permitText.js';
+import { downloadPermitFile, openPermitFile } from '../utils/permitFile.js';
 import { logger } from '../lib/logger.js';
 
 /**
@@ -41,16 +42,9 @@ export default function PermitsPage() {
   const open = async (permit) => {
     setNotice(null);
     setBusyId(permit.id);
-    // The tab is opened on the tap itself so the browser does not take it for a popup; the link is
-    // made once the answer comes (a signed link lives two minutes).
-    const tab = window.open('about:blank', '_blank');
-    if (tab) tab.opener = null;
     try {
-      const url = await signedUrl(permit.file.path);
-      if (tab) tab.location.href = url;
-      else window.location.assign(url);
+      await openPermitFile(signedUrl, permit.file);
     } catch (err) {
-      tab?.close();
       fail(err, 'The file could not be opened');
     } finally {
       setBusyId(null);
@@ -61,14 +55,7 @@ export default function PermitsPage() {
     setNotice(null);
     setBusyId(permit.id);
     try {
-      const url = await signedUrl(permit.file.path, permit.file.name);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = permit.file.name;
-      link.rel = 'noopener';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      await downloadPermitFile(signedUrl, permit.file);
     } catch (err) {
       fail(err, 'The file could not be downloaded');
     } finally {

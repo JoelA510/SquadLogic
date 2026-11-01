@@ -138,6 +138,26 @@ describe('Content-Security-Policy', () => {
     expect(directive(policy, 'script-src')).not.toContain('blob:');
   });
 
+  it("admits the practice optimizer's same-origin module worker, which no blob: or data: URL supplies", () => {
+    // Phase D PR D: the optimizer is a file Vite emits under /assets/, started from a URL on this
+    // origin. 'self' admits it; blob: (Replay's) and nothing else is needed.
+    const sameOriginWorkerAllowed = (policy) => workerSources(policy).includes("'self'");
+    expect(sameOriginWorkerAllowed(headerPolicy())).toBe(true);
+    // A policy that kept only Replay's blob: would refuse it (the run would fall back to the server).
+    const blobOnly = headerPolicy().replace("worker-src 'self' blob:", 'worker-src blob:');
+    expect(blobOnly).not.toBe(headerPolicy());
+    expect(sameOriginWorkerAllowed(blobOnly)).toBe(false);
+    // And the client starts it from a URL relative to its own module, never from blob: or data:.
+    const client = readFileSync(
+      path.join(ROOT, 'frontend/src/lib/practiceOptimizerClient.js'),
+      'utf8'
+    );
+    expect(client).toContain(
+      "new Worker(new URL('../workers/practiceOptimizer.worker.js', import.meta.url)"
+    );
+    expect(client).not.toMatch(/createObjectURL|new Blob|['"`]data:|['"`]blob:/);
+  });
+
   it('the old policy, without worker-src, refuses a blob: worker (script-src fallback)', () => {
     const old = headerPolicy()
       .split(';')

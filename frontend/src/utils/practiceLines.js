@@ -23,7 +23,7 @@ export function practiceLines(result, teamNames) {
   const reasonsByTeam = new Map();
   const settingsOnly = new Map();
   for (const entry of result?.unassigned ?? []) {
-    const reason = describeUnplacedReason(entry?.reason);
+    const reason = describeUnplacedReason(entry?.reason, entry?.rule);
     // `target` is set on the entries of a team whose division wants several practices a week.
     if (entry?.target > 1) {
       const list = reasonsByTeam.get(entry.teamId) ?? [];

@@ -31,10 +31,21 @@
  *   page's own mock store the same way (`practiceSettingsFromMock`) and the
  *   division form's save is what the run then honours;
  * - the evaluation-run RPC, the audit rows and the progress channel.
+ *
+ * **The three modes** (Phase D PR D): a body names `solve` (the default), `prepare` or `verify`
+ * exactly as `index.ts` reads it. `prepare` answers with the solver's input, encoded, and its digest;
+ * the page's Web Worker -- the real one, in Chromium -- searches it; `verify` compares the digest
+ * with the input this route builds again, refuses 409 `INPUT_CHANGED` when they differ, and
+ * otherwise answers through the Edge function's own `verifyPracticePlacements` in `solve`'s shape.
+ * So a scenario that presses the practice page's Run control now runs the search in the browser
+ * and the check on the server, the way production does.
  */
 import type { Page, Route } from '@playwright/test';
 
-import { AutoSchedulerInputSchema } from '../../../supabase/functions/_shared/schemas/auto-scheduler.js';
+import {
+  AutoSchedulerInputSchema,
+  AutoSchedulerVerifySchema,
+} from '../../../supabase/functions/_shared/schemas/auto-scheduler.js';
 import {
   anchorWallTimes,
   describeAnchorFailure,
@@ -50,15 +61,33 @@ import {
   SLOT_DATING_UNREADABLE,
   undatableSlotIds,
   unitIdOf,
+  verifyPracticePlacements,
+  type OptimizerResult,
+  type PracticeSolverInput,
 } from '../../../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import {
+  checkSolverInputDigest,
+  digestEncodedInput,
+  encodeSolverInput,
+  INPUT_CHANGED,
+} from '../../../supabase/functions/_shared/engines/solver-input.js';
 import { toDaylightSlot } from '../../../supabase/functions/_shared/engines/practice-daylight.js';
 import { seasonCalendarDate } from '../../../supabase/functions/_shared/engines/coach-preference-load.js';
 
 /** The seeded season's clock: the value `index.ts` would read from `season_settings`. */
 export const SEASON_TIMEZONE = 'America/Los_Angeles';
 
-/** Every solver call this page made, for a scenario that needs to know it ran. */
-export type EdgeSolverPage = Page & { __edgeSolverRuns?: number };
+/**
+ * Every answer this page was given with a schedule in it -- a `solve`, or a `verify` of the browser's
+ * -- for a scenario that needs to know the function ran. `__edgeSolverModes` lists the modes of every
+ * request in order; `__edgeHoldPrepare`, when a scenario sets it, is awaited before `prepare` is
+ * answered (to leave a run in progress long enough to cancel it).
+ */
+export type EdgeSolverPage = Page & {
+  __edgeSolverRuns?: number;
+  __edgeSolverModes?: string[];
+  __edgeHoldPrepare?: Promise<void>;
+};
 
 type MockRow = Record<string, unknown>;
 
@@ -97,21 +126,22 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> {
   (page as EdgeSolverPage).__edgeSolverRuns = 0;
+  (page as EdgeSolverPage).__edgeSolverModes = [];
   await page.route('**/functions/v1/auto-scheduler', async (route) => {
     if (route.request().method() === 'OPTIONS') {
       await route.fulfill({ status: 204 });
       return;
     }
 
-    const parsed = AutoSchedulerInputSchema.safeParse(
-      JSON.parse(route.request().postData() || '{}')
-    );
+    const body = JSON.parse(route.request().postData() || '{}');
+    const parsed = AutoSchedulerInputSchema.safeParse(body);
     if (!parsed.success) {
       // index.ts step 4's answer to the same body.
       await fulfillJson(route, { error: 'Validation failed', details: parsed.error.format() }, 400);
       return;
     }
     const input = parsed.data;
+    (page as EdgeSolverPage).__edgeSolverModes?.push(input.mode);
 
     // index.ts step 5b.
     // The schema's slot, as `index.ts` reads it under Deno's strict mode (this
@@ -181,8 +211,8 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       new Map(settings.teams.map((t) => [t.id, t.practicesPerWeek]))
     );
 
-    // index.ts steps 7-9.
-    const run = await runPracticeOptimizer({
+    // index.ts step 6: the run's whole input, whichever mode uses it.
+    const solverInput: PracticeSolverInput = {
       teams: settings.teams.map((t) => ({
         ...prepareTeam(t),
         practicesPerWeek: t.practicesPerWeek,
@@ -198,8 +228,62 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       placeableTeamIds: classification.placeable,
       unitsNeeded: classification.unitsNeeded,
       dating: { liveFrom, slots: datingSlots },
-      config: input.config,
-    });
+    };
+    const scope = {
+      organizationId: input.organizationId,
+      seasonSettingsId: input.seasonSettingsId ?? '',
+    };
+
+    // index.ts step 6a: prepare. Nothing is searched; the page's worker does that.
+    if (input.mode === 'prepare') {
+      const encoded = encodeSolverInput(solverInput, scope);
+      await (page as EdgeSolverPage).__edgeHoldPrepare;
+      await fulfillJson(route, {
+        mode: 'prepare',
+        digest: await digestEncodedInput(encoded),
+        input: encoded,
+        liveFrom,
+      });
+      return;
+    }
+
+    // index.ts steps 6b and 8-9: the server's own search, or its check of the worker's.
+    let run: OptimizerResult;
+    let verified: { digest: string; refused: unknown[] } | null = null;
+    if (input.mode === 'verify') {
+      const claims = AutoSchedulerVerifySchema.safeParse(body);
+      if (!claims.success) {
+        await fulfillJson(
+          route,
+          { error: 'Validation failed', details: claims.error.format() },
+          400
+        );
+        return;
+      }
+      const digestCheck = await checkSolverInputDigest(
+        encodeSolverInput(solverInput, scope),
+        claims.data.digest
+      );
+      if (!digestCheck.ok) {
+        await fulfillJson(route, { error: 'The season changed', code: INPUT_CHANGED }, 409);
+        return;
+      }
+      const checked = verifyPracticePlacements({
+        ...solverInput,
+        placements: claims.data.placements,
+      });
+      verified = { digest: claims.data.digest, refused: checked.refused };
+      run = {
+        ...checked,
+        seedScore: claims.data.browserRun.seedScore,
+        iterations: claims.data.browserRun.iterations,
+        restarts: claims.data.browserRun.restarts,
+        elapsedMs: Math.round(claims.data.browserRun.elapsedMs),
+        terminationReason: claims.data.browserRun.terminationReason,
+      };
+    } else {
+      run = await runPracticeOptimizer({ ...solverInput, config: input.config });
+    }
     (page as EdgeSolverPage).__edgeSolverRuns =
       ((page as EdgeSolverPage).__edgeSolverRuns ?? 0) + 1;
 
@@ -254,6 +338,7 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
         elapsedMs: run.elapsedMs,
         terminationReason: run.terminationReason,
       },
+      ...(verified ? { verified } : {}),
     });
   });
 }

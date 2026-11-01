@@ -13,7 +13,8 @@ citation of "AGENTS.md §11" (or the older "CLAUDE.md §11") finds its detail he
 - `frontend/src/` — the Vite + React 19 SPA (no `package.json` of its own): `components/`
   (subdirs `chrome/`, `grid/`, `scheduling/`, `setup/`, `teaming/`, `ui/`), `contexts/` (Auth,
   Import, Organization, Theme), `hooks/`, `layouts/`, `lib/` (`supabaseClient`,
-  `mockSupabaseClient`, `logger`), `pages/`, `constants/`, `utils/`.
+  `mockSupabaseClient`, `logger`), `pages/`, `constants/`, `utils/`, `workers/` (the practice
+  optimizer's Web Worker, which imports the Edge solver rather than copying it).
 - `packages/core/src/` — `@squadlogic/core`, the shared domain logic (pure JS, NO React imports):
   scheduling engines, metrics, persistence, validation, team generation.
 - `supabase/` — `functions/` (Edge Functions), `migrations/`, `seed.sql`.
@@ -47,7 +48,9 @@ config) + Prettier, knip for unused code; TypeScript checkJs/allowJs, `strict: f
 - **Where code goes:** domain logic in `packages/core/src/` (pure, framework-agnostic, no React
   imports); components in `frontend/src/components/` (feature subdirs such as `scheduling/`,
   `teaming/`, `ui/`); hooks (`use…`) in `frontend/src/hooks/`; pages in `frontend/src/pages/`;
-  contexts in `frontend/src/contexts/`; Edge Functions in `supabase/functions/<name>/index.ts`.
+  contexts in `frontend/src/contexts/`; Web Workers in `frontend/src/workers/` (a worker is its own
+  bundle: it shares no chunk with the page, so it has its own `config/bundle-budget.json` rule and
+  must not import zod or any schema file); Edge Functions in `supabase/functions/<name>/index.ts`.
 - **RBAC:** roles `admin`, `staff` and `tenant_admin`: only league admins sign in (no `parent` or
   `player` since `20261024010000`, no `coach` since `docs/changes/2026-10-27-admin-only.md`; coaches
   are imported data admins manage). `staff` are

@@ -3,6 +3,10 @@ import { supabase } from '../lib/supabaseClient.js';
 import { buildEdgeFunctionCacheKey, edgeFunctionCache } from '../lib/cache.js';
 import { API_BASE_URL, SUPABASE_URL } from '../config.js';
 import { isUnknownPersistenceOutcome, postPersistenceRequest } from '../lib/persistenceRequest.js';
+import {
+  browserOptimizerAvailable,
+  runPracticeOptimizerPath,
+} from '../lib/practiceOptimizerClient.js';
 
 // Wave 6b Task 1: 5-minute TTL for auto-scheduler runs. Rationale: an
 // optimization with identical inputs (same teams, slots, config, weights)
@@ -12,6 +16,10 @@ import { isUnknownPersistenceOutcome, postPersistenceRequest } from '../lib/pers
 // key automatically. Errors are NOT cached (so retries run fresh).
 const AUTO_SCHEDULER_TTL_MS = 300_000;
 const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
+// The request schema's defaults for a run's search settings (`_shared/schemas/auto-scheduler.ts`),
+// for a caller that names none: the browser's worker is given the same numbers the server would use.
+const DEFAULT_SEED = 42;
+const DEFAULT_MAX_ITERATIONS = 2000;
 
 /**
  * @typedef {'idle' | 'running' | 'polling' | 'completed' | 'failed'} AutoSchedulerStatus
@@ -38,6 +46,16 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
  * @property {Object|null} [approvedPreferences]
  * @property {Object|null} [daylight] The daylight post-pass's report (8.9 PR 6):
  *   `pastSunset` (kept, flagged), `unknown`, `lockedPastSunset` and counts.
+ * @property {'browser'|'server'} ranIn Where the search ran (Phase D PR D): `browser` when the page's
+ *   Web Worker searched and the server verified the result; `server` when the server searched
+ *   (`ranNote` says why the browser did not, when it did not).
+ * @property {'unavailable'|'worker-error'|'input-changed'|'prepare-failed'|null} [ranNote] Why a run
+ *   that could have been the browser's was the server's: this browser cannot run the worker, the
+ *   worker failed, the season's data changed while it searched, or the server could not hand the
+ *   data to the browser. `null` when nothing was tried first.
+ * @property {{ digest: string, refused: Array<{ teamId: string, unitId?: string, slotId: string, rule: string }> }|null} [verified]
+ *   For a browser run: what the server's check refused of the worker's placements, each also in
+ *   `unassigned` (`verify-refused`). `null` for a run the server searched.
  * @property {{ endedRows?: string[], unreadableRange?: string[] }|null} [lock] The
  *   lock as the run held it (M4.8): ended rows and rows whose saved range could
  *   not be read. `null` from a function deployed before it.
@@ -49,13 +67,19 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
 /**
  * Hook to trigger and track auto-scheduler runs.
  *
- * Calls the auto-scheduler Edge Function and subscribes to Supabase Realtime
- * on the audit_log table for live progress events (scheduler.auto_progress).
- * The subscription is cleaned up on completion, failure, or manual cancel/reset.
+ * Where the browser can run a Web Worker the search runs there, as long as it needs (a wall budget
+ * of 20 s), and the Edge Function checks the result (`prepare`, then `verify`;
+ * `lib/practiceOptimizerClient.js`). Where it cannot, or the worker fails, or the season's data
+ * changed while it searched, the Edge Function runs the search itself (`solve`, within its compute
+ * cap). The result says which ran (`ranIn`). Cancel terminates the worker and aborts the request.
+ *
+ * A server search subscribes to Supabase Realtime on the audit_log table for live progress events
+ * (scheduler.auto_progress). The subscription is cleaned up on completion, failure, or manual
+ * cancel/reset.
  *
  * @param {Object} options
  * @param {string} options.organizationId
- * @returns {{ trigger: Function, cancel: Function, status: AutoSchedulerStatus, result: AutoSchedulerResult|null, error: string|null, progress: { iteration: number, bestScore: number, elapsedMs: number }|null, reset: Function }}
+ * @returns {{ trigger: Function, cancel: Function, status: AutoSchedulerStatus, result: AutoSchedulerResult|null, error: string|null, progress: { iteration: number, bestScore: number, elapsedMs: number, phase?: 'preparing'|'searching'|'verifying'|'server' }|null, reset: Function }}
  */
 export function useAutoScheduler({ organizationId }) {
   /** @type {[AutoSchedulerStatus, Function]} */
@@ -149,40 +173,52 @@ export function useAutoScheduler({ organizationId }) {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Where the browser can run a Web Worker, the search runs there (Phase D PR D); otherwise the
+      // server runs it, exactly as before, subscribed to the run's progress.
+      const browserCapable = browserOptimizerAvailable();
+
       setStatus('running');
       setError(null);
       setResult(null);
-      setProgress({ iteration: 0, bestScore: 0, elapsedMs: 0 });
+      setProgress({
+        iteration: 0,
+        bestScore: 0,
+        elapsedMs: 0,
+        ...(browserCapable ? { phase: 'preparing' } : {}),
+      });
 
-      // --- Realtime subscription for live progress ---
-      teardownChannel();
+      // --- Realtime subscription for live progress (a search on the server) ---
+      const subscribeToProgress = () => {
+        teardownChannel();
 
-      const channel = supabase
-        .channel('auto-scheduler-progress')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'audit_log',
-            filter: `organization_id=eq.${organizationId}`,
-          },
-          (payload) => {
-            const row = payload.new;
-            if (row?.action === 'scheduler.auto_progress' && row?.metadata) {
-              const meta =
-                typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
-              setProgress({
-                iteration: meta.iteration ?? 0,
-                bestScore: meta.bestScore ?? 0,
-                elapsedMs: meta.elapsedMs ?? 0,
-              });
+        const channel = supabase
+          .channel('auto-scheduler-progress')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'audit_log',
+              filter: `organization_id=eq.${organizationId}`,
+            },
+            (payload) => {
+              const row = payload.new;
+              if (row?.action === 'scheduler.auto_progress' && row?.metadata) {
+                const meta =
+                  typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                setProgress({
+                  iteration: meta.iteration ?? 0,
+                  bestScore: meta.bestScore ?? 0,
+                  elapsedMs: meta.elapsedMs ?? 0,
+                });
+              }
             }
-          }
-        )
-        .subscribe();
+          )
+          .subscribe();
 
-      channelRef.current = channel;
+        channelRef.current = channel;
+      };
+      if (!browserCapable) subscribeToProgress();
 
       // --- Edge Function call ---
       try {
@@ -197,23 +233,23 @@ export function useAutoScheduler({ organizationId }) {
           API_BASE_URL !== DEFAULT_LOCAL_FUNCTIONS_URL || !SUPABASE_URL
             ? API_BASE_URL
             : `${SUPABASE_URL}/functions/v1`;
+        const requestBody = {
+          organizationId,
+          seasonSettingsId,
+          teams,
+          slots,
+          divisionPreferences: divisionPreferences ?? {},
+          lockedAssignments: lockedAssignments ?? [],
+          scoringWeights: scoringWeights ?? {},
+          config: config ?? {},
+        };
         // Under the persistence deadline (plan M2.5's, `lib/persistenceRequest.js`):
         // a run whose answer never comes used to spin until the user cancelled.
         // Cancel still aborts it, through the same signal.
-        const { response, result: data } = await postPersistenceRequest(
-          `${functionsBaseUrl}/auto-scheduler`,
-          {
+        const send = (extra) =>
+          postPersistenceRequest(`${functionsBaseUrl}/auto-scheduler`, {
             token,
-            body: {
-              organizationId,
-              seasonSettingsId,
-              teams,
-              slots,
-              divisionPreferences: divisionPreferences ?? {},
-              lockedAssignments: lockedAssignments ?? [],
-              scoringWeights: scoringWeights ?? {},
-              config: config ?? {},
-            },
+            body: { ...requestBody, ...extra },
             label: 'The auto-scheduler',
             // A run proposes a schedule: it records an evaluation run and its
             // audit rows, but writes no schedule, so the save's "Check the saved
@@ -221,11 +257,49 @@ export function useAutoScheduler({ organizationId }) {
             // (`/admin/analytics` lists the recorded runs.)
             bareMessages: true,
             signal: controller.signal,
-          }
-        );
+          });
 
-        if (!response.ok) {
-          throw new Error(data.error || `Server error: ${response.status}`);
+        let data = null;
+        let ranIn = 'server';
+        // A browser with no Worker at all never tried: the server's search is the answer, and the
+        // result says why.
+        let ranNote = browserCapable ? null : 'unavailable';
+        if (browserCapable) {
+          const attempt = await runPracticeOptimizerPath({
+            prepare: () => send({ mode: 'prepare' }),
+            verify: (claims) => send({ mode: 'verify', ...claims }),
+            config: {
+              seed: config?.seed ?? DEFAULT_SEED,
+              maxIterations: config?.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+            },
+            signal: controller.signal,
+            onPhase: (phase) => setProgress((prev) => ({ ...(prev ?? {}), phase })),
+            onProgress: (progress) =>
+              setProgress({
+                iteration: progress.iteration,
+                bestScore: progress.bestScore,
+                elapsedMs: progress.elapsedMs,
+                phase: 'searching',
+              }),
+          });
+          if (attempt.kind === 'verified') {
+            data = attempt.data;
+            ranIn = 'browser';
+          } else if (attempt.kind === 'server') {
+            // An older function answered `prepare` with a whole `solve`: that run is the answer.
+            data = attempt.data;
+          } else {
+            ranNote = attempt.reason;
+            setProgress({ iteration: 0, bestScore: 0, elapsedMs: 0, phase: 'server' });
+            subscribeToProgress();
+          }
+        }
+        if (!data) {
+          const { response, result: solved } = await send({});
+          if (!response.ok) {
+            throw new Error(solved.error || `Server error: ${response.status}`);
+          }
+          data = solved;
         }
 
         const resultPayload = {
@@ -260,6 +334,11 @@ export function useAutoScheduler({ organizationId }) {
           // today (ended) and rows held season-long because their saved range
           // could not be read. Carried through so the page can say so.
           lock: data.lock ?? null,
+          // Phase D PR D: where the search ran, why not in the browser when it could have, and what
+          // the server's check refused of the browser's schedule.
+          ranIn,
+          ranNote,
+          verified: data.verified ?? null,
         };
         // Wave 6b Task 1: cache the successful run. Errors are intentionally
         // NOT cached so retries after a failed run go back to the Edge Function.
@@ -282,7 +361,8 @@ export function useAutoScheduler({ organizationId }) {
         // deadline or an unreadable 2xx can follow a run that completed. Saying
         // "run it again" would invite a duplicate run and audit trail.
         setError(
-          isUnknownPersistenceOutcome(err)
+          // Not after a `prepare` that failed: it writes nothing, so there is no run to look for.
+          isUnknownPersistenceOutcome(err) && !err.recordedNothing
             ? `${err.message}, so the run may have finished and been recorded. ` +
                 'Check the latest run under Analytics before running it again.'
             : err.message || 'Auto-scheduler failed'

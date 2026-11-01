@@ -28,6 +28,12 @@
       "rationale": "Sentry Session Replay, split out of the main entry (frontend/src/lib/sentryReplay.js, plan M6): main.jsx imports it dynamically after Sentry.init and adds it with Sentry.addIntegration. Not first paint. Current 40.30 KB on @sentry/react 11.8.0 (2026-10-19; 40.19 KB, 41,159 B, on 10.76.2); cap = actual x 1.2 rounded up to the next 1,000 B. A build without VITE_SENTRY_DSN emits no such chunk, so this rule's [NO MATCH] is the gate refusing to measure a shape production does not ship: build as CI does (docs/operations/ci-cd.md)."
     },
     {
+      "match": "^assets/practiceOptimizer\\.worker-.*\\.js$",
+      "label": "practice optimizer worker",
+      "maxGzipBytes": 40000,
+      "rationale": "The browser's practice optimizer (Phase D PR D, frontend/src/workers/practiceOptimizer.worker.js): a module worker that bundles the Edge solver (supabase/functions/_shared/engines/auto-scheduler-solver.ts) with the server's compute cap off. A worker is its own bundle, so it shares nothing with the page's chunks. Not first paint: the page requests it only when a run begins (new Worker(new URL(...)) in lib/practiceOptimizerClient.js, on the practice page's lazy chunk), and a build that skipped it would fail this rule's [NO MATCH]. Measured 2026-11-01: 46,285 B raw, 15,516 B gzip (15.15 KB), as the plan's esbuild estimate said (45.1 KB raw, 16.1 KB gzip). Cap 40,000 B (39.06 KB) is the plan's (owner-approved), not actual x 1.2; it is also the guard on how that number was kept: the same worker with zod in it was 142,872 B raw and 40,944 B gzip, which this cap refuses. scoring-engine.ts reaches zod only through the two input checks it shared with schemas/scoring.ts, which now live in schemas/scoring-issues.ts; a new import of zod (or of any schema file) into the solver's graph shows up here."
+    },
+    {
       "match": "^assets/supabase-vendor-.*\\.js$",
       "label": "supabase vendor",
       "firstPaint": true,

@@ -145,6 +145,38 @@ Rolldown moved those into content-named common chunks that `index.html` preloads
 one file it still emits that Rollup did not is `rolldown-runtime-*.js`, the
 helpers the chunks share; it has its own rule. No cap was raised.
 
+## The practice optimizer worker (Phase D PR D, 2026-11-01)
+
+`frontend/src/workers/practiceOptimizer.worker.js` is a module worker that bundles the Edge solver
+(`supabase/functions/_shared/engines/auto-scheduler-solver.ts`) with the server's compute cap off.
+Vite builds it as its own chunk, `assets/practiceOptimizer.worker-<hash>.js`; a lazy rule,
+"practice optimizer worker", holds it to **40,000 B gzip** (the plan's figure). It is not first paint:
+`lib/practiceOptimizerClient.js` starts it with `new Worker(new URL(...), { type: 'module' })` only
+when a run begins, on the practice page's lazy chunk.
+
+Measured on the build CI makes (stand-in Supabase and Sentry variables), the base `719a570` against
+this change, gzip as `check:bundle` prints it:
+
+| File | Before | After |
+| --- | --- | --- |
+| main entry | 175.39 KB | 175.41 KB (+0.02 KB) |
+| main css | 20.83 KB | 20.83 KB |
+| total first paint (6 files) | 276.62 KB | 276.64 KB (+0.02 KB) |
+| `practiceOptimizer.worker-*.js` (lazy) | not emitted | 46,285 B raw, 15,516 B gzip (15.15 KB) |
+
+First paint is unchanged: the main entry is the same file, 571,912 B raw before and after, and
+differs only in the hashed names of the lazy chunks it lists (the +0.02 KB is that text compressing a
+little differently).
+
+**A worker shares nothing with the page, so it bundles its own copy of everything it imports.** The
+plan estimated the worker at 16.1 KB gzip "without zod", because zod is already in the page. The first
+build was 142,872 B raw and 40,944 B gzip, over the cap: the scoring engine reached zod through two
+plain functions (`datedSlotsIssue`, `undatedExceptionsIssue`) that lived in `schemas/scoring.ts` beside
+the request schemas. They now live in `schemas/scoring-issues.ts`, which has no zod, and `scoring.ts`
+re-exports them; the worker is 15.5 KB, as estimated. The cap leaves 2.6 times that, and refuses zod
+coming back (it adds about 25 KB). A change that makes the worker import a schema file, or any
+dependency, shows up in this rule first.
+
 ## What is measured: the build production ships, Sentry on
 
 CI builds with stand-in Supabase variables and a stand-in `VITE_SENTRY_DSN`

@@ -64,9 +64,12 @@
  */
 import { evaluatePracticeSchedule } from './scoring-engine.ts';
 import {
+  HARD_CONSTRAINT_RULE,
   checkHardConstraints,
+  hardConstraintRefusal,
   practiceLengthRefuses,
   reservationRefuses,
+  type HardConstraintRule,
   type LiveDays,
   type PreparedTeam,
   type SlotOccupant,
@@ -351,6 +354,8 @@ export interface Unplaced {
   reason: string;
   /** For `coach-preference`: the `must_keep` dimensions no legal slot kept. */
   dimensions?: string[];
+  /** For `verify-refused`: the rule the proposed placement broke ({@link VerifyRefusalRule}). */
+  rule?: string;
   /**
    * The practices a week the team's division gives it, set only for a division that wants several
    * (Phase D PR B), so the run's report can say "1 of 2" per team without the roster.
@@ -396,6 +401,34 @@ function admissible(
 ): boolean {
   if (mustKeepViolated(gate, team.id, slot.id)) return false;
   return checkHardConstraints(team, slot, coachAssignments, slotOccupants, slotCapacity, teamHolds);
+}
+
+/** The rule `verify` names for a placement an approved coach `must_keep` preference refuses. */
+export const MUST_KEEP_RULE = 'must-keep';
+
+/**
+ * The rule that refuses seating `team` on `slot`, or `null`: {@link admissible} says whether, this
+ * says which. The same two checks in the same order, so the search and the browser run's
+ * verification (`verifyPracticePlacements`) judge one rule.
+ */
+function admissibleRefusal(
+  gate: PreferenceGate,
+  team: PreparedTeam,
+  slot: DatedSchedulerSlot,
+  coachAssignments: Map<string, TimeWindow[]>,
+  slotOccupants: Map<string, SlotOccupant[]>,
+  slotCapacity: Map<string, number>,
+  teamHolds: Map<string, TeamHold[]>
+): HardConstraintRule | typeof MUST_KEEP_RULE | null {
+  if (mustKeepViolated(gate, team.id, slot.id)) return MUST_KEEP_RULE;
+  return hardConstraintRefusal(
+    team,
+    slot,
+    coachAssignments,
+    slotOccupants,
+    slotCapacity,
+    teamHolds
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1432,5 +1465,230 @@ export async function runPracticeOptimizer(params: {
     restarts: restartCount,
     elapsedMs,
     terminationReason,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Verifying a schedule found elsewhere (Phase D PR D)
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a run searches over, as `index.ts` assembles it from its own reads: the run's input
+ * without its search settings. The `prepare` mode hands this to the browser; the worker runs
+ * {@link runPracticeOptimizer} over it; the `verify` mode rebuilds it from the server's own
+ * reads and judges the worker's placements against it.
+ */
+export type PracticeSolverInput = Omit<
+  Parameters<typeof runPracticeOptimizer>[0],
+  'config' | 'requestStartedAt' | 'cpuCapMs' | 'now' | 'onProgress'
+>;
+
+/**
+ * Why a practice is unplaced when the placement proposed for it was refused by `verify`: the
+ * server's own check of a schedule the browser found. It is a TIME TBD like any other unplaced
+ * practice, carrying the rule in `rule`; it is not on the TIME TBD table's closed list, so the
+ * practice writer labels such a row `not-scheduled-yet`.
+ */
+export const VERIFY_REFUSED_REASON = 'verify-refused';
+
+/**
+ * The rules `verify` names: the search's own ({@link HARD_CONSTRAINT_RULE}, and `must-keep` for an
+ * approved coach preference), and the three ways a proposal can be malformed rather than illegal.
+ * Pinned to core's list (`VERIFY_REFUSAL_RULE`, `packages/core/src/practiceUnplacedReasons.js`) by
+ * `tests/practiceUnplacedReasons.test.js`.
+ */
+export const VERIFY_REFUSAL_RULE = Object.freeze({
+  ...HARD_CONSTRAINT_RULE,
+  MUST_KEEP: MUST_KEEP_RULE,
+  /** The proposal names a practice this run has none to place (a locked team, an unknown unit). */
+  UNKNOWN_PRACTICE: 'unknown-practice',
+  /** The proposal names a slot that is not in the run. */
+  UNKNOWN_SLOT: 'unknown-slot',
+  /** The proposal gives one practice a second slot. */
+  DUPLICATE_PRACTICE: 'duplicate-practice',
+} as const);
+
+/** A placement a browser run proposes: which practice goes in which slot. */
+export interface ProposedPlacement {
+  teamId: string;
+  slotId: string;
+  /** The practice unit, when it differs from the team id (a team that needed several). */
+  unitId?: string;
+}
+
+/** A proposed placement `verify` refused, and the rule it broke. */
+export interface VerifyRefusal {
+  teamId: string;
+  unitId?: string;
+  slotId: string;
+  rule: string;
+}
+
+/** A schedule `verifyPracticePlacements` accepted: a run's result without its search statistics. */
+export type VerifiedPlacements = Omit<
+  OptimizerResult,
+  'seedScore' | 'iterations' | 'restarts' | 'elapsedMs' | 'terminationReason'
+> & {
+  /** Every proposed placement that was refused; each also appears in `unassigned`. */
+  refused: VerifyRefusal[];
+};
+
+/**
+ * The server's check of a schedule found elsewhere (the browser's Web Worker). It never searches.
+ *
+ * It seats the proposed placements one at a time, **in sorted order** (by practice unit id, as the
+ * search sorts), through the same {@link admissibleRefusal} the search uses, over the locked
+ * occupancy built from `params` -- which the caller read itself, never from the proposal. A
+ * placement that breaks a rule is not seated and is not dropped: its practice comes back unplaced
+ * with {@link VERIFY_REFUSED_REASON} and the rule. Constraints only get tighter as placements are
+ * added, so a schedule that is legal as a whole is accepted whatever order it is sent in, and one
+ * that is not loses the same placements every time.
+ *
+ * The subject set is the run's practice units (`practiceUnitsFor`), never the proposal: a practice
+ * the proposal does not place is unplaced with the reason `explainUnplaced` gives it, so a proposal
+ * that leaves practices out cannot make them disappear. Then, as the search does, the daylight pass
+ * (past sunset is flagged, never blocked) and the scoring engine run over what was seated.
+ */
+export function verifyPracticePlacements(
+  params: PracticeSolverInput & { placements: readonly ProposedPlacement[] }
+): VerifiedPlacements {
+  const { teams, locked } = params;
+  const units = practiceUnitsFor(params.placeableTeamIds, params.unitsNeeded);
+  const unitsById = new Map(units.map((u) => [u.unitId, u]));
+  const { liveFrom } = params.dating;
+  const gate = params.preferenceGate ?? EMPTY_PREFERENCE_GATE;
+  const slots = dateSchedulerSlots(params.slots, params.dating);
+  const teamsById = new Map(teams.map((t) => [t.id, t]));
+  const slotsById = new Map(slots.map((s) => [s.id, s]));
+  const base = buildLockedOccupancy(
+    locked,
+    teamsById,
+    slotsById,
+    params.relocated ?? [],
+    liveFrom,
+    params.outsideHolds ?? []
+  );
+
+  const occupants = cloneWindows(base.slotOccupants);
+  const coachAssignments = cloneWindows(base.coachAssignments);
+  const holds = cloneWindows(base.teamHolds);
+  const seated: Placement[] = [];
+  const refused: VerifyRefusal[] = [];
+  const refusedByUnit = new Map<string, Unplaced>();
+  const proposed = new Set<string>();
+
+  const refuse = (p: ProposedPlacement, rule: string) => {
+    refused.push({
+      teamId: p.teamId,
+      ...(p.unitId !== undefined && p.unitId !== p.teamId ? { unitId: p.unitId } : {}),
+      slotId: p.slotId,
+      rule,
+    });
+    const unit = unitsById.get(unitIdOf(p));
+    // Only a practice of this run goes into the unplaced list; a proposal for a practice that is
+    // not this run's has no practice to leave unplaced, and is reported in `refused` alone.
+    if (unit && unit.teamId === p.teamId && !refusedByUnit.has(unit.unitId)) {
+      refusedByUnit.set(unit.unitId, {
+        teamId: unit.teamId,
+        ...(unit.unitId !== unit.teamId ? { unitId: unit.unitId } : {}),
+        reason: VERIFY_REFUSED_REASON,
+        rule,
+      });
+    }
+  };
+
+  const sorted = [...params.placements].sort(
+    (a, b) => unitIdOf(a).localeCompare(unitIdOf(b)) || a.slotId.localeCompare(b.slotId)
+  );
+  for (const p of sorted) {
+    const unitId = unitIdOf(p);
+    const unit = unitsById.get(unitId);
+    const team = unit ? teamsById.get(unit.teamId) : undefined;
+    if (!unit || !team || unit.teamId !== p.teamId) {
+      refuse(p, VERIFY_REFUSAL_RULE.UNKNOWN_PRACTICE);
+      continue;
+    }
+    if (proposed.has(unitId)) {
+      refuse(p, VERIFY_REFUSAL_RULE.DUPLICATE_PRACTICE);
+      continue;
+    }
+    proposed.add(unitId);
+    const slot = slotsById.get(p.slotId);
+    if (!slot) {
+      refuse(p, VERIFY_REFUSAL_RULE.UNKNOWN_SLOT);
+      continue;
+    }
+    const rule = admissibleRefusal(
+      gate,
+      team,
+      slot,
+      coachAssignments,
+      occupants,
+      base.slotCapacity,
+      holds
+    );
+    if (rule !== null) {
+      refuse(p, rule);
+      continue;
+    }
+    seat(occupants, coachAssignments, holds, team, unit, slot);
+    seated.push(placementOf(unit, slot.id));
+  }
+
+  // The practices of the run that were not seated: refused ones keep their refusal, the rest are
+  // unplaced for the reason the final schedule gives (`explainUnplaced`, as the search does).
+  const seatedUnitIds = new Set(seated.map(unitIdOf));
+  const left = units.filter((u) => !seatedUnitIds.has(u.unitId));
+  const notProposed: Unplaced[] = left
+    .filter((u) => !refusedByUnit.has(u.unitId))
+    .map((u) => ({
+      teamId: u.teamId,
+      ...(u.unitId !== u.teamId ? { unitId: u.unitId } : {}),
+      reason: NO_SLOT_REASON,
+    }));
+  const explained = new Map(
+    explainUnplaced(gate, base, seated, notProposed, units, teamsById, slotsById).map((entry) => [
+      unitIdOf(entry),
+      entry,
+    ])
+  );
+  let unassigned: Unplaced[] = left.map(
+    (u) => refusedByUnit.get(u.unitId) ?? (explained.get(u.unitId) as Unplaced)
+  );
+
+  const scoring = scoreSchedule(base, seated, unassigned, teams, slots, liveFrom);
+  let placements: Placement[] = seated;
+  let daylight: DaylightReport | null = null;
+  if (params.daylight) {
+    const pass = applyDaylightPostPass({
+      placements,
+      unassigned,
+      locked,
+      ...params.daylight,
+    });
+    daylight = pass.report;
+    placements = pass.placements;
+    unassigned = pass.unassigned;
+  }
+
+  return {
+    placements,
+    unassigned,
+    preferKeepBreaches: totalBreaches(gate, seated),
+    lockedOutsideRun: base.outsideRun,
+    relocatedOutsideRun: base.relocatedOutsideRun,
+    unreadableRange: base.unreadableRange,
+    endedRows: base.endedRows,
+    liveFrom,
+    placementRanges: Object.fromEntries(
+      placements.map((p) => [
+        unitIdOf(p),
+        placementRange(slotsById.get(p.slotId)!, liveFrom, p.effectiveUntil),
+      ])
+    ),
+    daylight,
+    evaluation: scoring.evaluation,
+    bestScore: scoring.score,
+    refused,
   };
 }

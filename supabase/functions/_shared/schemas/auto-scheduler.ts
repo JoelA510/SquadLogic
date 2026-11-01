@@ -43,7 +43,18 @@ const SlotSchema = z
 /** The optimiser's defaults, read by the field defaults and the object default alike. */
 const CONFIG_DEFAULTS = Object.freeze({ timeBudgetMs: 25000, maxIterations: 2000, seed: 42 });
 
+/**
+ * How a request uses the function (Phase D PR D). `solve`, the default, is the run it always was:
+ * the function searches, within the server's compute cap, and answers with the schedule. `prepare`
+ * loads every input as the caller and answers with the solver's input and a digest of it, for the
+ * browser's Web Worker to search; `verify` takes the worker's placements and that digest, loads
+ * everything again itself, and answers as `solve` does. A body that names no mode, or an older
+ * function that has never heard of the key (zod strips it), is `solve`.
+ */
+export const AUTO_SCHEDULER_MODES = ['solve', 'prepare', 'verify'] as const;
+
 export const AutoSchedulerInputSchema = z.object({
+  mode: z.enum(AUTO_SCHEDULER_MODES).optional().default('solve'),
   organizationId: z.string().uuid(),
   seasonSettingsId: z.string().uuid().optional(),
   teams: z.array(TeamSchema).min(1),
@@ -129,4 +140,37 @@ export const AutoSchedulerInputSchema = z.object({
     // each default, and a literal both the Deno zod (3.x) and the Node zod the
     // Vitest witnesses type-check against accept as the output type.
     .default({ ...CONFIG_DEFAULTS }),
+});
+
+/**
+ * What a `verify` request carries beyond a `solve` request's body (Phase D PR D), parsed from the
+ * same body when its `mode` is `verify`. Every key here is a claim to be checked, never an input:
+ * the lock, the preferences, the reservations, the daylight and the division settings are loaded
+ * by the function itself, so a body that carries any of its own is ignored (zod strips it; this
+ * object is not `.passthrough()`).
+ */
+export const AutoSchedulerVerifySchema = z.object({
+  /** The digest `prepare` answered with: what the worker searched. */
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** The worker's schedule: which practice goes in which slot. */
+  placements: z
+    .array(
+      z.object({
+        teamId: z.string().min(1),
+        slotId: z.string().min(1),
+        unitId: z.string().min(1).optional(),
+      })
+    )
+    .max(20_000),
+  /**
+   * What the worker reports of its own search, for the run's record and the panel. Not judged: the
+   * schedule's score is the server's own (`scoring-engine.ts`).
+   */
+  browserRun: z.object({
+    seedScore: z.number().min(0).max(1),
+    iterations: z.number().int().min(0).max(10_000_000),
+    restarts: z.number().int().min(0).max(1_000),
+    elapsedMs: z.number().min(0).max(600_000),
+    terminationReason: z.enum(['time-budget', 'max-iterations', 'wall-clock-safety']),
+  }),
 });

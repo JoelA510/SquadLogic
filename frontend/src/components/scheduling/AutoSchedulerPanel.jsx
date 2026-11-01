@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { Zap, CheckCircle, AlertTriangle, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import Button from '../ui/Button.jsx';
 import { practiceLines } from '../../utils/practiceLines.js';
+import { OPTIMIZER_WALL_BUDGET_MS } from '../../lib/practiceOptimizerClient.js';
 
 /**
  * The Edge Function stops its search at the server's compute cap (`CPU_CAP_MS` in
@@ -14,6 +15,56 @@ const CPU_CAP_REASON = 'cpu-cap';
 const CPU_CAP_NOTICE =
   "Stopped at the server's time limit. This is the best schedule found in that time; " +
   'check any unassigned teams before you apply it.';
+
+/**
+ * What a run in progress is doing, when the hook says (`progress.phase`, Phase D PR D): the search
+ * runs in this browser, and the server loads the season's data before it and checks the result
+ * after it. Absent, the panel shows the `runningLabel` it was given.
+ */
+const PHASE_LABEL = Object.freeze({
+  preparing: "Loading the season's data from the server…",
+  searching: 'Optimizing in your browser…',
+  verifying: 'The server is checking the result…',
+  server: 'Optimizing on the server…',
+});
+
+/** Why a run that could have been the browser's was the server's (`result.ranNote`). */
+const RAN_NOTE = Object.freeze({
+  unavailable: "This browser can't run the optimizer, so the server ran it.",
+  'worker-error': 'The optimizer could not finish in this browser, so the server ran it.',
+  'input-changed':
+    'The season changed while this browser was working, so the server ran it again on the new data.',
+  'prepare-failed':
+    "The server could not hand this season's data to the browser, so it ran the search itself.",
+});
+
+/** The seconds the browser's search may take at most, as the notice says them. */
+const BROWSER_LIMIT_SECONDS = OPTIMIZER_WALL_BUDGET_MS / 1000;
+
+/** Where the search ran, in words (Phase D PR D); `null` for a result that does not say. */
+function ranInNotice(result) {
+  if (result?.ranIn === 'browser') {
+    const refused = result.verified?.refused?.length ?? 0;
+    const parts = ['Ran in your browser; the server checked every placement.'];
+    if (refused > 0) {
+      parts.push(
+        refused === 1
+          ? "The server's check refused 1 placement; its practice is left unassigned."
+          : `The server's check refused ${refused} placements; their practices are left unassigned.`
+      );
+    }
+    if (result.optimization?.terminationReason === 'time-budget') {
+      parts.push(
+        `It stopped at the ${BROWSER_LIMIT_SECONDS}-second limit, so another computer could find a different schedule.`
+      );
+    }
+    return parts.join(' ');
+  }
+  if (result?.ranIn === 'server') {
+    return ['Ran on the server.', RAN_NOTE[result.ranNote]].filter(Boolean).join(' ');
+  }
+  return null;
+}
 
 /**
  * AutoSchedulerPanel — WCAG 2.2 AA compliant panel for triggering and
@@ -41,6 +92,7 @@ export default function AutoSchedulerPanel({
   const isRunning = status === 'running' || status === 'polling';
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
+  const ranIn = isCompleted && result ? ranInNotice(result) : null;
 
   return (
     <section className="glass-panel p-6" aria-label="Auto-Scheduler">
@@ -108,7 +160,9 @@ export default function AutoSchedulerPanel({
         >
           <div className="flex items-center gap-3 mb-2">
             <Loader2 size={16} className="text-text-accent animate-spin" aria-hidden="true" />
-            <span className="text-sm text-text-secondary">{runningLabel}</span>
+            <span className="text-sm text-text-secondary">
+              {PHASE_LABEL[progress.phase] ?? runningLabel}
+            </span>
           </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
@@ -200,6 +254,11 @@ export default function AutoSchedulerPanel({
           {result.optimization?.terminationReason === CPU_CAP_REASON && (
             <p className="mt-2 text-sm text-text-primary">{CPU_CAP_NOTICE}</p>
           )}
+          {ranIn && (
+            <p className="mt-2 text-sm text-text-primary" data-testid="ran-in">
+              {ranIn}
+            </p>
+          )}
           <PracticeLines result={result} teamNames={teamNames} />
         </div>
       )}
@@ -269,6 +328,7 @@ AutoSchedulerPanel.propTypes = {
     iteration: PropTypes.number,
     bestScore: PropTypes.number,
     elapsedMs: PropTypes.number,
+    phase: PropTypes.oneOf(['preparing', 'searching', 'verifying', 'server']),
   }),
   result: PropTypes.shape({
     assignments: PropTypes.array,
@@ -277,6 +337,9 @@ AutoSchedulerPanel.propTypes = {
     optimization: PropTypes.object,
     runId: PropTypes.string,
     practices: PropTypes.object,
+    ranIn: PropTypes.oneOf(['browser', 'server']),
+    ranNote: PropTypes.string,
+    verified: PropTypes.object,
   }),
   error: PropTypes.string,
   onTrigger: PropTypes.func.isRequired,

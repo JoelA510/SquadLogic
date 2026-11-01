@@ -33,8 +33,13 @@ import {
   withDeclaredColumns,
   withoutBirthKeys,
 } from '../_shared/import-allowlist.ts';
-import { importNaturalAge, importSeason } from '../_shared/natural-age.ts';
+import {
+  importNaturalAge,
+  type ImportSeason,
+  type WindowedDivision,
+} from '../_shared/natural-age.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
+import { loadImportAgeRule } from '../_shared/import-age-rule.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -574,12 +579,10 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     );
   }
 
-  // The season the job adds to (E1), read with the job: its ages are counted in that season.
-  let jobSeasonId: string | null = null;
   if (body.import_job_id) {
     const { data: job, error: jobError } = await serviceClient
       .from('import_jobs')
-      .select('id, organization_id, job_type, status, season_settings_id')
+      .select('id, organization_id, job_type, status')
       .eq('id', body.import_job_id)
       .eq('organization_id', body.organization_id)
       .maybeSingle();
@@ -618,7 +621,6 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         409
       );
     }
-    jobSeasonId = (job as { season_settings_id?: string | null }).season_settings_id ?? null;
   }
 
   // 5. Normalize headers and sanitize all rows
@@ -661,17 +663,25 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // active one: Phase E1), with that season's cutoff.
   // The file's birth date is read for it here and never staged: the staged
   // row carries the age, and the browser keeps the date for the session.
-  let season: { season_year?: number | null; age_cutoff_mode?: string | null } | null = null;
+  let season: ImportSeason | null = null;
+  // The season's divisions with a birthdate window (Phase E3b): a birth date in one counts as
+  // that division's age. Read for the season the import adds to, and only when it has any.
+  let windowedDivisions: WindowedDivision[] = [];
   if (body.import_type === 'players') {
-    const { data: seasons, error: seasonError } = await serviceClient
-      .from('season_settings')
-      .select('id, status, season_year, age_cutoff_mode')
-      .eq('organization_id', body.organization_id);
-    if (seasonError) {
-      await logFailure(logCtx, 'Season lookup failed', seasonError);
-      return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);
+    // The whole rule, and its revision, in one call that also stamps the job with that revision;
+    // the ages below are counted from what it returned and from nothing read separately, so a
+    // change made after it cannot be missed (finalization refuses a stale stamp: age_rule_changed).
+    const loaded = await loadImportAgeRule(serviceClient, {
+      organizationId: body.organization_id,
+      importJobId: body.import_job_id,
+      rowOffset: body.row_offset,
+    });
+    if (loaded.error) {
+      await logFailure(logCtx, 'Age rule lookup failed', loaded.error);
+      return jsonResponse({ status: 'error', message: 'Age rule lookup failed' }, 500);
     }
-    season = importSeason(seasons ?? [], jobSeasonId);
+    season = loaded.rule.season;
+    windowedDivisions = loaded.rule.windowedDivisions;
   }
 
   for (let i = 0; i < body.rows.length; i++) {
@@ -715,6 +725,9 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         dob: rest['date_of_birth'],
         seasonYear: season?.season_year ?? null,
         cutoffMode: season?.age_cutoff_mode ?? null,
+        cutoffMonth: season?.age_cutoff_month ?? null,
+        cutoffDay: season?.age_cutoff_day ?? null,
+        divisions: windowedDivisions,
       });
       normalizedRow = naturalAge === null ? rest : { ...rest, natural_age: String(naturalAge) };
     }

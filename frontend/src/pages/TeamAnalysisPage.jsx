@@ -6,6 +6,8 @@ import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import { useImport } from '../contexts/ImportContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
+import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TeamOverviewPanel from '../components/TeamOverviewPanel.jsx';
 import ProgramOverview from '../components/teaming/ProgramOverview.jsx';
@@ -164,6 +166,50 @@ function derivePrograms(rows) {
   }));
 }
 
+/**
+ * The divisions a player's age is counted against (E3b): one for each program of the file, with the
+ * rules saved for it (the selected program's from `savedDivision`, the others' from their division
+ * rows), then every other division of the season, however few registrants the file has in it (none,
+ * for a U4 that only takes older 2-year-olds): a window is the season's rule, and a player whose birth
+ * date is in one belongs there, as the import counted their age. A division row is a program's when
+ * the program is its id or name, so the same division is never described twice.
+ *
+ * @returns {{ divisionDescriptors: Array<Object>, otherDescriptors: Array<Object> }}
+ */
+function buildDivisionDescriptors({ programs, divisionRows, selectedProgramKey, savedDivision }) {
+  const programRowIds = new Set();
+  const programDescriptors = programs.map((program) => {
+    const programKey = String(program.id);
+    const row =
+      selectedProgramKey !== null && programKey === selectedProgramKey
+        ? savedDivision
+        : findDivisionRowForProgram(program, divisionRows ?? []);
+    if (row?.id) programRowIds.add(String(row.id));
+    return {
+      id: programKey,
+      name: program.name,
+      min_age: row?.min_age ?? null,
+      max_age: row?.max_age ?? null,
+      gender_policy: row?.gender_policy ?? null,
+      // A birth date in a division's window counts as that division's age (E3b).
+      birthdate_start: row?.birthdate_start ?? null,
+      birthdate_end: row?.birthdate_end ?? null,
+    };
+  });
+  const otherDescriptors = (divisionRows ?? [])
+    .filter((row) => row?.id && !programRowIds.has(String(row.id)))
+    .map((row) => ({
+      id: String(row.id),
+      name: row.name,
+      min_age: row.min_age ?? null,
+      max_age: row.max_age ?? null,
+      gender_policy: row.gender_policy ?? null,
+      birthdate_start: row.birthdate_start ?? null,
+      birthdate_end: row.birthdate_end ?? null,
+    }));
+  return { divisionDescriptors: [...programDescriptors, ...otherDescriptors], otherDescriptors };
+}
+
 function positiveIntegerOrFallback(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -242,10 +288,12 @@ function findDivisionRowForProgram(program, divisionRows) {
 
 /** The division columns the teaming rules read (`plays_games` is added when it exists, D2;
  *  `program_id` when it exists, E2). The age band and gender are what a player's own age division
- *  is found by (play-up by request). */
+ *  is found by (play-up by request), and the birth-date window takes every player born in it as
+ *  the division's age (E3b), so a division with a window counts as the import counted it. */
 const DIVISION_SETTING_COLUMNS =
   'id, organization_id, season_settings_id, name, max_roster_size, min_roster_size, ' +
-  'target_team_size, team_count_override, min_teams, max_teams, min_age, max_age, gender_policy';
+  'target_team_size, team_count_override, min_teams, max_teams, min_age, max_age, gender_policy, ' +
+  'birthdate_start, birthdate_end';
 
 function configFromDivisionRow(divisionRow) {
   const defaults = createDefaultConfig();
@@ -791,13 +839,73 @@ export default function TeamAnalysisPage() {
   const [renamedTeams, setRenamedTeams] = useState({});
   const loadedReviewKeyRef = useRef(null);
   const navigate = useNavigate();
+  // A completed season is history: no teams are generated, edited or saved in it (the database
+  // refuses the write too, `season_completed`).
+  const seasonReadOnly = useSeasonReadOnly();
   const canManageTeams =
-    permissions.includes(PERMISSIONS.MANAGE_ALL_TEAMS) ||
-    permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+    !seasonReadOnly &&
+    (permissions.includes(PERMISSIONS.MANAGE_ALL_TEAMS) ||
+      permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION));
   const canEditTeams = canManageTeams && isEditMode;
 
   const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
-  const basePrograms = useMemo(() => derivePrograms(importedPlayerRows), [importedPlayerRows]);
+  const fileProgramsBase = useMemo(() => derivePrograms(importedPlayerRows), [importedPlayerRows]);
+  // The divisions of the season the file has no registrants in but whose rules take players from it
+  // (a U4 whose birth-date window holds a U3 registrant): programs too, with the players that would
+  // play there, so they can be seen and generated. Their id is the division's own, which is the id
+  // the age placement gives them, so a player placed in one is seated by its program.
+  const seasonYearSetting = currentSeasonSetting?.season_year;
+  const cutoffModeSetting = currentSeasonSetting?.age_cutoff_mode;
+  const cutoffMonthSetting = currentSeasonSetting?.age_cutoff_month;
+  const cutoffDaySetting = currentSeasonSetting?.age_cutoff_day;
+  const destinationPrograms = useMemo(() => {
+    if (!divisionRows || divisionRows.length === 0 || importedPlayerRows.length === 0) return [];
+    const { divisionDescriptors, otherDescriptors } = buildDivisionDescriptors({
+      programs: fileProgramsBase,
+      divisionRows,
+      selectedProgramKey: null,
+      savedDivision: null,
+    });
+    if (otherDescriptors.length === 0) return [];
+    const { players: placed } = applyPlayUpEligibility({
+      players: importedPlayerRows.map((row, sourceIndex) => ({
+        ...toGeneratorPlayer(row, sourceIndex, resolveDivisionId(row)),
+        id: `row-${sourceIndex}`,
+      })),
+      divisions: divisionDescriptors,
+      seasonYear: seasonYearSetting,
+      cutoffMode: cutoffModeSetting,
+      cutoffMonth: cutoffMonthSetting,
+      cutoffDay: cutoffDaySetting,
+    });
+    const incoming = new Map();
+    for (const player of placed) {
+      incoming.set(String(player.division), (incoming.get(String(player.division)) ?? 0) + 1);
+    }
+    return otherDescriptors
+      .filter((descriptor) => incoming.get(descriptor.id) > 0)
+      .map((descriptor) => ({
+        id: descriptor.id,
+        name: String(descriptor.name),
+        playerCount: incoming.get(descriptor.id),
+        coachCount: 0,
+        totalPlayers: incoming.get(descriptor.id),
+        incoming: true,
+      }));
+  }, [
+    divisionRows,
+    importedPlayerRows,
+    fileProgramsBase,
+    seasonYearSetting,
+    cutoffModeSetting,
+    cutoffMonthSetting,
+    cutoffDaySetting,
+  ]);
+  const basePrograms = useMemo(
+    () => [...fileProgramsBase, ...destinationPrograms],
+    [fileProgramsBase, destinationPrograms]
+  );
+
   const reviewStorageKey = useMemo(
     () => getTeamReviewStorageKey(currentOrganization?.id, currentSeasonSetting?.id),
     [currentOrganization?.id, currentSeasonSetting?.id]
@@ -1277,7 +1385,9 @@ export default function TeamAnalysisPage() {
       const rowsForProgram = importedPlayerRows
         .map((row, sourceIndex) => ({ row, sourceIndex }))
         .filter(({ row }) => resolveDivisionId(row) === selectedProgramKey);
-      if (rowsForProgram.length === 0) {
+      // A division the file has no registrants in has none of its own: its players are the ones its
+      // rules take from the other programs, placed below.
+      if (rowsForProgram.length === 0 && !selectedProgram.incoming) {
         throw new Error(`No imported players found for ${selectedProgram.name}.`);
       }
 
@@ -1401,19 +1511,11 @@ export default function TeamAnalysisPage() {
       // Every program of the import is a division a player may play in: the selected program
       // takes its band from the saved row, the others from their division rows (the age band
       // and gender), else from the program's name.
-      const divisionDescriptors = programs.map((program) => {
-        const programKey = String(program.id);
-        const row =
-          programKey === selectedProgramKey
-            ? savedDivision
-            : findDivisionRowForProgram(program, divisionRows ?? []);
-        return {
-          id: programKey,
-          name: program.name,
-          min_age: row?.min_age ?? null,
-          max_age: row?.max_age ?? null,
-          gender_policy: row?.gender_policy ?? null,
-        };
+      const { divisionDescriptors } = buildDivisionDescriptors({
+        programs,
+        divisionRows,
+        selectedProgramKey,
+        savedDivision,
       });
       // Who plays in this program: everyone who registered in it except a player who plays in
       // their own age division (a play-up nobody requested, a play-down), plus those who
@@ -1421,6 +1523,8 @@ export default function TeamAnalysisPage() {
       // the players of other programs are only read in when they land here.
       const seasonYear = currentSeasonSetting?.season_year;
       const cutoffMode = currentSeasonSetting?.age_cutoff_mode;
+      const cutoffMonth = currentSeasonSetting?.age_cutoff_month;
+      const cutoffDay = currentSeasonSetting?.age_cutoff_day;
       const everyone = [...generatorPlayers, ...others.map((entry) => entry.player)];
       const playsHere = new Set(
         applyPlayUpEligibility({
@@ -1428,6 +1532,8 @@ export default function TeamAnalysisPage() {
           divisions: divisionDescriptors,
           seasonYear,
           cutoffMode,
+          cutoffMonth,
+          cutoffDay,
         })
           .players.filter((player) => String(player.division) === selectedProgramKey)
           .map((player) => String(player.id))
@@ -1451,6 +1557,8 @@ export default function TeamAnalysisPage() {
         divisions: divisionDescriptors,
         seasonYear,
         cutoffMode,
+        cutoffMonth,
+        cutoffDay,
       });
       // The pipeline places each player in the division they play in; this run seats the ones
       // who play in this program. The rest of the registrants are in the listing only.
@@ -1613,6 +1721,8 @@ export default function TeamAnalysisPage() {
     currentSeasonSetting?.id,
     currentSeasonSetting?.season_year,
     currentSeasonSetting?.age_cutoff_mode,
+    currentSeasonSetting?.age_cutoff_month,
+    currentSeasonSetting?.age_cutoff_day,
     authUser,
     importedPlayerRows,
     persistenceSnapshot,
@@ -2002,6 +2112,7 @@ export default function TeamAnalysisPage() {
       className={`animate-fadeIn space-y-8 w-full ${canEditTeams ? '' : 'max-w-[65ch] mx-auto'}`}
     >
       <DataErrorBanner message={dataError} />
+      <SeasonReadOnlyNote />
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {stagedReview ? placementAnnouncement : ''}
       </p>
@@ -2124,6 +2235,7 @@ export default function TeamAnalysisPage() {
               size="lg"
               onClick={handleGenerateTeams}
               disabled={
+                seasonReadOnly ||
                 isActuallyGenerating ||
                 divisionRows === null ||
                 validationErrors.some((error) => error.type !== 'generation')

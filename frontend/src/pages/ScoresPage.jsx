@@ -20,13 +20,31 @@ import LoadingScreen from '../components/LoadingScreen.jsx';
  * every caller while it is off).
  */
 export default function ScoresPage() {
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, availableSeasons } = useOrganization();
   const { genderModel } = useFeatures();
   const toast = useToast();
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const orgId = currentOrganization?.id;
+  // A completed season's scores are history (20261111010000: the database refuses the write): its
+  // games are listed and cannot be edited. A game's season is its own, else its division's.
+  const completedSeasonIds = useMemo(
+    () =>
+      new Set(
+        (availableSeasons ?? [])
+          .filter((season) => season.status === 'completed')
+          .map((season) => String(season.id))
+      ),
+    [availableSeasons]
+  );
+  const isCompletedSeasonGame = useCallback(
+    (game) => {
+      const seasonId = game?.season_id ?? game?.home_team?.division?.season_settings_id ?? null;
+      return seasonId !== null && completedSeasonIds.has(String(seasonId));
+    },
+    [completedSeasonIds]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -37,8 +55,8 @@ export default function ScoresPage() {
         const { data, error } = await supabase
           .from('games')
           .select(
-            `id, start_time, score_home, score_away,
-             home_team:home_team_id (id, name, division:divisions (name)),
+            `id, season_id, start_time, score_home, score_away,
+             home_team:home_team_id (id, name, division:divisions (name, season_settings_id)),
              away_team:away_team_id (id, name)`
           )
           .eq('organization_id', orgId)
@@ -61,6 +79,7 @@ export default function ScoresPage() {
   const persistScore = useCallback(
     async (gameId, scoreHome, scoreAway) => {
       const previous = games.find((game) => game.id === gameId);
+      if (isCompletedSeasonGame(previous)) return;
       setGames((current) =>
         current.map((game) =>
           game.id === gameId ? { ...game, score_home: scoreHome, score_away: scoreAway } : game
@@ -81,7 +100,7 @@ export default function ScoresPage() {
         toast('Failed to save score', 'warning');
       }
     },
-    [games, orgId, toast]
+    [games, orgId, toast, isCompletedSeasonGame]
   );
 
   const rows = useMemo(
@@ -146,6 +165,8 @@ export default function ScoresPage() {
     []
   );
 
+  const hasReadOnlyGames = games.some(isCompletedSeasonGame);
+
   if (loading) return <LoadingScreen />;
 
   return (
@@ -163,8 +184,18 @@ export default function ScoresPage() {
         />
       }
     >
+      {hasReadOnlyGames && (
+        <p
+          role="note"
+          data-testid="season-readonly-note"
+          className="mx-4 mt-3 rounded-lg border border-border-subtle bg-bg-surface px-4 py-2 text-sm text-text-secondary"
+        >
+          Games of a completed season are read-only: their scores are history and cannot be changed.
+        </p>
+      )}
       <DataGrid
         label="Scores grid"
+        isRowReadOnly={isCompletedSeasonGame}
         columns={columns}
         rows={rows}
         selectable={false}

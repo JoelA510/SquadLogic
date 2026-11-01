@@ -8,9 +8,11 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
  * `[data-theme='dark']` token block in index.css responds to. Light is the
  * default; no attribute is set for light so the :root tokens apply as-is.
  *
- * The league / season / timezone fields are legacy state retained from the
+ * The league / timezone fields are legacy state retained from the
  * pre-redesign provider; OrganizationContext is the canonical source for
- * org/season data and these fields are slated for removal.
+ * org/season data and these fields are slated for removal. The free-text season label that
+ * lived here went with its control (Phase E3b): a season's name is written by the audited season
+ * RPCs and the selected season is stored by id (`utils/seasonSelection.js`).
  */
 const ThemeContext = createContext(null);
 
@@ -49,15 +51,6 @@ export const ThemeProvider = ({ children }) => {
     return localStorage.getItem('squadlogic-league-name') || 'My Youth League';
   });
 
-  const [currentSeason, setCurrentSeason] = useState(() => {
-    return localStorage.getItem('squadlogic-current-season') || '2025';
-  });
-
-  const [availableSeasons, setAvailableSeasons] = useState(() => {
-    const saved = localStorage.getItem('squadlogic-available-seasons');
-    return saved ? JSON.parse(saved) : ['2025'];
-  });
-
   const [timezone, setTimezone] = useState(() => {
     return localStorage.getItem('squadlogic-timezone') || 'UTC';
   });
@@ -65,26 +58,6 @@ export const ThemeProvider = ({ children }) => {
   const updateLeagueName = (name) => {
     setLeagueName(name);
     localStorage.setItem('squadlogic-league-name', name);
-  };
-
-  const updateCurrentSeason = (season) => {
-    setCurrentSeason(season);
-    localStorage.setItem('squadlogic-current-season', season);
-
-    // Auto-add to available seasons if not present
-    if (!availableSeasons.includes(season)) {
-      const newSeasons = [...availableSeasons, season].sort();
-      setAvailableSeasons(newSeasons);
-      localStorage.setItem('squadlogic-available-seasons', JSON.stringify(newSeasons));
-    }
-  };
-
-  const addSeason = (season) => {
-    if (!availableSeasons.includes(season)) {
-      const newSeasons = [...availableSeasons, season].sort();
-      setAvailableSeasons(newSeasons);
-      localStorage.setItem('squadlogic-available-seasons', JSON.stringify(newSeasons));
-    }
   };
 
   const updateTimezone = (tz) => {
@@ -100,12 +73,8 @@ export const ThemeProvider = ({ children }) => {
         toggleThemeMode,
         leagueName,
         updateLeagueName,
-        currentSeason,
-        updateCurrentSeason,
         timezone,
         updateTimezone,
-        availableSeasons,
-        addSeason,
       }}
     >
       {children}

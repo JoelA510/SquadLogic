@@ -29,15 +29,16 @@ vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
 
 vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
   useTheme: () => ({
-    currentSeason: '2026',
-    updateCurrentSeason: vi.fn(),
-    availableSeasons: ['2026'],
     timezone: 'UTC',
     updateTimezone: vi.fn(),
   }),
 }));
 
 vi.mock('../frontend/src/components/settings/modules/ProgramsSection.jsx', () => ({
+  default: () => null,
+}));
+
+vi.mock('../frontend/src/components/settings/modules/SeasonsSection.jsx', () => ({
   default: () => null,
 }));
 
@@ -239,7 +240,7 @@ describe('audit calls name the active organization, never the profile’s', () =
     ) : null;
   }
 
-  it('Season settings: the season format buttons and the label audit Org B', async () => {
+  it('Season settings: the season format buttons audit Org B', async () => {
     const { default: SeasonModule } =
       await import('../frontend/src/components/settings/modules/SeasonModule.jsx');
     await inOrgB(
@@ -260,17 +261,8 @@ describe('audit calls name the active organization, never the profile’s', () =
       )
     );
 
-    const label = screen.getByDisplayValue('2026');
-    fireEvent.change(label, { target: { value: '2027' } });
-    fireEvent.blur(label);
-    await waitFor(() =>
-      expect(mocks.rpc).toHaveBeenCalledWith(
-        'record_audit_event',
-        expect.objectContaining({ p_organization_id: ORG_B, p_action: 'settings.season_updated' })
-      )
-    );
     const audited = mocks.rpc.mock.calls.filter(([name]) => name === 'record_audit_event');
-    expect(audited.length).toBeGreaterThanOrEqual(2);
+    expect(audited.length).toBeGreaterThanOrEqual(1);
     expect(audited.every(([, params]) => params.p_organization_id === ORG_B)).toBe(true);
     expect(audited.some(([, params]) => params.p_organization_id === PROFILE_ORG)).toBe(false);
   });

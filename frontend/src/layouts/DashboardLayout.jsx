@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation, matchPath } from 'react-router-dom';
 import TopBar from '../components/chrome/TopBar.jsx';
 import SideNav from '../components/chrome/SideNav.jsx';
+import SeasonStatusNotice from '../components/chrome/SeasonStatusNotice.jsx';
 import { FULL_BLEED_ROUTES } from '../constants/navigation.js';
 
 const COLLAPSE_KEY = 'sl-nav-collapsed';
@@ -40,6 +41,7 @@ export default function DashboardLayout() {
           // and a page-level scroll context.
           <main className="flex-1 p-4 md:p-8 overflow-y-auto">
             <div className="max-w-7xl mx-auto">
+              <SeasonStatusNotice />
               <Outlet />
             </div>
           </main>

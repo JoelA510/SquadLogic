@@ -44,7 +44,8 @@ export function orderSeasons(seasons) {
 
 /**
  * The season to show: the stored one when it is a season of this organization that the caller
- * may open (the active one, or a draft for an admin or staff member), otherwise the active season,
+ * may open (the active one, a completed one chosen to look back at, or a draft for an admin or
+ * staff member), otherwise the active season,
  * otherwise none. Never the newest.
  * @param {any[] | null | undefined} seasons the organization's seasons
  * @param {string | null | undefined} storedId the id chosen earlier
@@ -55,7 +56,13 @@ export function chooseCurrentSeason(seasons, storedId, canSeeDrafts) {
   const rows = seasons ?? [];
   if (storedId) {
     const stored = rows.find((season) => season?.id === storedId);
-    if (stored && (stored.status === 'active' || (stored.status === 'draft' && canSeeDrafts))) {
+    // A completed season is history (read-only since E3b): shown when it was chosen, never by default.
+    if (
+      stored &&
+      (stored.status === 'active' ||
+        stored.status === 'completed' ||
+        (stored.status === 'draft' && canSeeDrafts))
+    ) {
       return stored;
     }
   }

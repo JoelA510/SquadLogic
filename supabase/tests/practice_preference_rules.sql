@@ -17,7 +17,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(63);
+SELECT plan(67);
 
 -- ---- the roster (as the table owner, before any role is set) -------------------------------------
 -- Org A, season aaa (active): A-Team (the fixture's) and A2; coach C1 coaches both, C2 coaches A-Team only,
@@ -320,6 +320,31 @@ SELECT is(
 SELECT is(
     (SELECT count(*)::int FROM public.coach_practice_preferences WHERE team_id = 'aaaaaaaa-0000-0000-0000-0000000000a2'),
     0, 'and none of that team''s rules is left');
+
+-- ---- a completed season's rules are read-only (20261111010000's trigger, extended to this table) -------
+-- Written as the table owner but with a signed-in user, which is what the trigger judges: an RPC or a direct
+-- write by a signed-in caller is refused (22023, season_completed); a job with no signed-in user is not.
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT throws_like(
+    $$INSERT INTO public.coach_practice_preferences (organization_id, coach_id, team_id, weekdays, level, requested_level)
+      VALUES ('a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-0000000000c4',
+              'aaaaaaaa-0000-0000-0000-0000000000c1', ARRAY['TUE'], 'prefer', 'prefer')$$,
+    '%Season % is completed and read-only: its schedule (coach_practice_preferences) cannot be changed%',
+    'a signed-in write of a rule into a completed season is refused by the table');
+SET LOCAL "request.jwt.claims" TO '';
+SELECT lives_ok(
+    $$INSERT INTO public.coach_practice_preferences (id, organization_id, coach_id, team_id, weekdays, level, requested_level)
+      VALUES ('c0000000-0000-4000-8000-0000000000e9', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-0000000000c4',
+              'aaaaaaaa-0000-0000-0000-0000000000c1', ARRAY['TUE'], 'prefer', 'prefer')$$,
+    'control: the same write with no signed-in user (a job, the backfill) is not refused');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+SELECT throws_like(
+    $$UPDATE public.coach_practice_preferences SET weekdays = ARRAY['WED'] WHERE id = 'c0000000-0000-4000-8000-0000000000e9'$$,
+    '%Season % is completed and read-only%',
+    'and a signed-in change of a rule already in a completed season is refused');
+SELECT lives_ok(
+    $$DELETE FROM public.season_settings WHERE id = 'a1111111-1111-1111-1111-111111111ccc'$$,
+    'a signed-in caller can still delete the completed season: the rule goes with its team, not through the guard');
 
 SELECT * FROM finish();
 ROLLBACK;

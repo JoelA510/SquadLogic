@@ -61,6 +61,66 @@ describe('useTeamAnalysis', () => {
     expect(programNames).toContain('U7 Boys');
   });
 
+  it("groups a birth date inside a division's window under that division's age (E3b)", async () => {
+    // Season 2025, school year: a child born 2022-03-15 is a 3-year-old (U3). U4 takes the older
+    // 3-year-olds born January through July 2022, so that child is in U4; one born in August is U2.
+    const mockPlayers = [
+      { 'First Name': 'Cy', 'Last Name': 'Window', Birthdate: '2022-03-15', Gender: 'm' },
+      { 'First Name': 'Di', 'Last Name': 'Outside', Birthdate: '2022-09-15', Gender: 'm' },
+    ];
+    const divisions = [
+      {
+        name: 'U4 Boys',
+        min_age: 4,
+        max_age: 4,
+        birthdate_start: '2022-01-01',
+        birthdate_end: '2022-07-31',
+      },
+    ];
+    // @ts-expect-error [MOCK] - partial mock for test isolation; context return value requires more comprehensive type mapping for full coverage
+    vi.mocked(useImport).mockReturnValue({ importedPlayers: { data: mockPlayers } });
+
+    const without = renderHook(() => useTeamAnalysis());
+    await waitFor(() => expect(without.result.current.programs.length).toBeGreaterThan(0));
+    expect(without.result.current.programs.map((p) => p.name).sort()).toEqual([
+      'U2 Boys',
+      'U3 Boys',
+    ]);
+
+    const withWindow = renderHook(() => useTeamAnalysis({ divisions }));
+    await waitFor(() => expect(withWindow.result.current.programs.length).toBeGreaterThan(0));
+    expect(withWindow.result.current.programs.map((p) => p.name).sort()).toEqual([
+      'U2 Boys',
+      'U4 Boys',
+    ]);
+  });
+
+  it("uses the season's custom cutoff day", async () => {
+    // Season 2025, cutoff Sep 1: born 2016-08-31 is U9, born 2016-09-01 is U8.
+    // @ts-expect-error [MOCK] - partial mock for test isolation; context return value requires more comprehensive type mapping for full coverage
+    vi.mocked(useOrganization).mockReturnValue({
+      currentOrganization: mockOrg,
+      currentSeasonSetting: {
+        ...mockSeason,
+        age_cutoff_mode: 'custom',
+        age_cutoff_month: 9,
+        age_cutoff_day: 1,
+      },
+    });
+    // @ts-expect-error [MOCK] - partial mock for test isolation; context return value requires more comprehensive type mapping for full coverage
+    vi.mocked(useImport).mockReturnValue({
+      importedPlayers: {
+        data: [
+          { 'First Name': 'Ed', 'Last Name': 'Early', Birthdate: '2016-08-31', Gender: 'f' },
+          { 'First Name': 'Flo', 'Last Name': 'Late', Birthdate: '2016-09-01', Gender: 'f' },
+        ],
+      },
+    });
+    const { result } = renderHook(() => useTeamAnalysis());
+    await waitFor(() => expect(result.current.programs.length).toBeGreaterThan(0));
+    expect(result.current.programs.map((p) => p.name).sort()).toEqual(['U8 Girls', 'U9 Girls']);
+  });
+
   it('reports missing DOB/Gender as validation errors', async () => {
     const mockPlayers = [
       { 'First Name': 'Missing', 'Last Name': 'Data' }, // No Birthdate/Gender

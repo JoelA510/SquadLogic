@@ -21,6 +21,7 @@ const VIRTUALIZE_THRESHOLD = 60;
  * Column spec: { key, label, width?, editable?, type?: 'text'|'number'|'select',
  * options?, optionLabel?, render?, sortVal?, num?, center?, sticky?,
  * sortable?, placeholder?, onClickCell?, min?, max? }.
+ * `isRowReadOnly(row)`: a row whose editable cells cannot be edited (history: a completed season).
  *
  * Interaction: click cell → active; type/Enter/F2/dblclick → edit;
  * Enter commits+down, Tab commits+right, Esc cancels; Space toggles row
@@ -50,6 +51,7 @@ export default function DataGrid({
   toolbarRight = null,
   bulkActions = null,
   onRowClick = undefined,
+  isRowReadOnly = undefined,
   emptyText = 'No records',
   addLabel = 'Add row',
   dense = false,
@@ -118,6 +120,7 @@ export default function DataGrid({
     const col = columns[c];
     if (!col?.editable) return;
     const row = view[r];
+    if (isRowReadOnly?.(row)) return;
     setEditing({ r, c });
     setActive({ r, c: c + colOffset });
     setEditVal(initial != null ? initial : String(row[col.key] ?? ''));
@@ -297,6 +300,7 @@ export default function DataGrid({
   const renderRow = (row, r) => {
     const id = getRowId(row);
     const isSel = localSel.has(id);
+    const rowReadOnly = isRowReadOnly ? isRowReadOnly(row) : false;
     return (
       <tr
         key={id}
@@ -313,7 +317,7 @@ export default function DataGrid({
           <GridCell
             key={col.key}
             row={row}
-            col={col}
+            col={rowReadOnly && col.editable ? { ...col, editable: false } : col}
             cellProps={cellAttrs(r, c + colOffset)}
             isActive={!!active && active.r === r && active.c === c + colOffset}
             isEditing={!!editing && editing.r === r && editing.c === c}
@@ -338,9 +342,9 @@ export default function DataGrid({
             }}
             onClick={() => {
               if (col.onClickCell) col.onClickCell(row);
-              else if (onRowClick && !col.editable) onRowClick(row);
+              else if (onRowClick && !(col.editable && !rowReadOnly)) onRowClick(row);
             }}
-            onDoubleClick={() => col.editable && startEdit(r, c)}
+            onDoubleClick={() => col.editable && !rowReadOnly && startEdit(r, c)}
           />
         ))}
         {rowActions.length > 0 && (

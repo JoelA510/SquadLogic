@@ -148,7 +148,7 @@ A coach has no sign-in, so an admin imports the league's preference file or adds
 - **Only an admin writes**, through `admin_add_practice_preference`, `admin_edit_practice_preference`,
   `admin_remove_practice_preference`, `admin_decide_must_preference` and `admin_accept_all_musts(job,
   expected_count)` (which refuses when the pending count is not the one the confirmation showed); each
-  audits the rule it wrote, with its before and after where it had one (`practice_preference.*`), and a completed season takes no change. An
+  audits the rule it wrote, with its before and after where it had one (`practice_preference.*`), and a completed season takes no change (the RPCs refuse it, and the table carries E3b's completed-season read-only trigger, so any other write is refused too). An
   imported `must` is a request: in force as a prefer until an admin accepts it. The table has no write policy
   or client write grant.
 - **Judged per practice.** A rule applies to a team's practice when the coach is one of the team's current

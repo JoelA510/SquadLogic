@@ -1338,7 +1338,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261112010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -3698,8 +3698,8 @@ PROBE
       fi
       # What the revert must leave: the two coaches, 5 scalar rows (3 approved, 2 requested: two rules of one
       # coach on one weekday are one row), the pending keep-venue as a NULL value, the staged preference row
-      # gone with its job kept, and the whole public catalogue equal to a build at 20261110010000 (read
-      # 2026-10-27 with the same query: cdb60bee...:1606). The count is part of the verdict.
+      # gone with its job kept, and the whole public catalogue equal to a build at 20261111010000 (read
+      # 2026-10-27 with the same query: 10968167...:1643). The count is part of the verdict.
       if psql_cmd "SELECT 'RULES-VERDICT:' || CASE
                WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'ee000000-0000-4000-8000-00000000000a') <> 2
                  OR (SELECT count(*) FROM public.import_jobs WHERE id = 'ee000000-0000-4000-8000-0000000000f1') <> 1 THEN 'seed-lost'
@@ -3713,7 +3713,7 @@ PROBE
                  OR NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'venue' AND level = 'must_keep'
                                   AND value IS NULL AND status = 'requested'
                                   AND coach_id = 'ee000000-0000-4000-8000-0000000000c2') THEN 'rows-wrong'
-               WHEN fp = 'cdb60beec6960b5cf1e8dae59c4f4d60:1606' THEN 'restored'
+               WHEN fp = '109681677951bbb57f3769ed70c29853:1643' THEN 'restored'
                ELSE 'wrong ' || fp END
              FROM (SELECT (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
   SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
@@ -3742,9 +3742,9 @@ PROBE
 
 ) s) AS fp) t;" \
          >$SCRATCH/harness_rules 2>&1 && grep -q 'RULES-VERDICT:restored' $SCRATCH/harness_rules; then
-        echo "  revert ${id}: the rules revert refuses a multi-value rule and a disagreement, writes the rest back as 5 scalar rows with the pending musts requested, deletes the staged preference rows, and restores the catalogue as at 20261110010000"
+        echo "  revert ${id}: the rules revert refuses a multi-value rule and a disagreement, writes the rest back as 5 scalar rows with the pending musts requested, deletes the staged preference rows, and restores the catalogue as at 20261111010000"
       else
-        echo "FAIL revert ${id}: the rules revert did not restore the catalogue as at 20261110010000, or lost the rules' data"
+        echo "FAIL revert ${id}: the rules revert did not restore the catalogue as at 20261111010000, or lost the rules' data"
         dump 10 $SCRATCH/harness_rules; STATUS=1
       fi
     fi

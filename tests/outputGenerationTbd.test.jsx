@@ -13,6 +13,7 @@ import { readXlsx } from './helpers/readXlsx.js';
 
 const SEASON = vi.hoisted(() => ({
   id: /** @type {string | null} */ ('5eed5ea5-0000-4000-8000-000000000001'),
+  status: 'active',
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
@@ -22,7 +23,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: '5eed0000-0000-4000-8000-000000000001', name: 'Mock League' },
-    currentSeasonSetting: SEASON.id ? { id: SEASON.id } : null,
+    currentSeasonSetting: SEASON.id ? { id: SEASON.id, status: SEASON.status } : null,
   }),
 }));
 vi.mock('../frontend/src/lib/logger.js', () => ({
@@ -78,6 +79,7 @@ beforeEach(() => {
   delete window.__MOCK_DB__;
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
   SEASON.id = MOCK_SEASON_ID;
+  SEASON.status = 'active';
   saved = [];
   let current = null;
   URL.createObjectURL = vi.fn((blob) => {
@@ -199,6 +201,24 @@ describe('the master export lists what is not scheduled yet', () => {
       expect(name).toBe(index % 2 === 0 ? 'refresh_schedule_tbd_practices' : 'get_schedule_tbd');
     });
     expect(calls.length % 2).toBe(0);
+  });
+
+  it('on a completed season reads the list as it was kept and never asks for a rebuild (the database refuses one)', async () => {
+    SEASON.status = 'completed';
+    seedMockDb({
+      schedule_tbd: TBD_ROWS,
+      season_settings: [{ id: MOCK_SEASON_ID, organization_id: MOCK_ORG_ID, status: 'completed' }],
+    });
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    renderPanel();
+    await waitFor(() =>
+      expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+        'CSVs generated successfully.'
+      )
+    );
+    const names = rpc.mock.calls.map(([name]) => name);
+    expect(names).toContain('get_schedule_tbd');
+    expect(names).not.toContain('refresh_schedule_tbd_practices');
   });
 
   it('a refresh that fails stops the files, says why, and never falls back to the stale list', async () => {

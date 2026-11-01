@@ -20,7 +20,8 @@
 
 import {
   classifyPlacement,
-  computeAgeNumber,
+  birthDateAge,
+  compileDivisionWindows,
   normalizeDivisionAgeBounds,
   parseGenderFromName,
 } from './ageGroups.js';
@@ -174,18 +175,24 @@ function normalizeGender(value) {
  * @param {Object} player
  * @param {number} seasonYear
  * @param {string} [cutoffMode]
+ * @param {{ cutoffMonth?: number|null, cutoffDay?: number|null, divisions?: Array<Object>|import('./ageGroups.js').DivisionWindows|null }} [rule]
+ *   the season's custom cutoff and its divisions (their birthdate windows), as the import counts
+ *   an age (`importNaturalAge`): a birth date in a division's window takes that division's age
  * @returns {number|null}
  */
-export function resolveNaturalAge(player, seasonYear, cutoffMode) {
+export function resolveNaturalAge(player, seasonYear, cutoffMode, rule = {}) {
   const explicit = player?.naturalAge ?? player?.natural_age ?? player?.ageNumber;
   if (explicit !== undefined && explicit !== null && explicit !== '') {
     const num = Number(explicit);
     if (Number.isFinite(num)) return num;
   }
-  return computeAgeNumber(
-    player?.dob ?? player?.date_of_birth ?? player?.Birthdate ?? player?.birthdate,
+  const dob = player?.dob ?? player?.date_of_birth ?? player?.Birthdate ?? player?.birthdate;
+  return birthDateAge(
+    dob,
     seasonYear,
-    cutoffMode
+    cutoffMode,
+    { month: rule.cutoffMonth, day: rule.cutoffDay },
+    rule.divisions
   );
 }
 
@@ -288,18 +295,32 @@ export function withFinalBuddyFacts(listing, players, divisions) {
  * @param {Array<Object>|Object} params.divisions
  * @param {number} params.seasonYear
  * @param {string} [params.cutoffMode]
+ * @param {number|null} [params.cutoffMonth] - the season's custom cutoff month
+ * @param {number|null} [params.cutoffDay] - and day
  * @returns {{ players: Array<Object>, diagnostics: { listing: PlayUpListing[], counts: Object } }}
  */
-export function applyPlayUpEligibility({ players, divisions, seasonYear, cutoffMode }) {
+export function applyPlayUpEligibility({
+  players,
+  divisions,
+  seasonYear,
+  cutoffMode,
+  cutoffMonth,
+  cutoffDay,
+}) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
   const index = buildDivisionIndex(divisions);
+  const rule = {
+    cutoffMonth,
+    cutoffDay,
+    divisions: compileDivisionWindows(index.list.map((entry) => entry.raw)),
+  };
   const byId = new Map(players.map((player) => [String(player.id), player]));
 
   // Pass 1: where each player plays. Everyone plays in their own division unless they
   // requested to play up, and a request moves nobody out of the division they registered for.
   const decided = new Map();
   for (const player of players) {
-    const naturalAge = resolveNaturalAge(player, seasonYear, cutoffMode);
+    const naturalAge = resolveNaturalAge(player, seasonYear, cutoffMode, rule);
     const registered = resolveDivisionEntry(index, player.division);
     const raw = classifyPlacement(naturalAge, registered ?? { minAge: null, maxAge: null });
     const requested = isTruthy(player.playUpRequested ?? player.play_up_requested);

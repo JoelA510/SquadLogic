@@ -4,7 +4,7 @@
 -- coach; the one-approved index; the request/approve/supersede lifecycle), the two admin RPCs that read
 -- it, and the previous bodies of `create_import_job`, `mark_import_job_ready_to_apply`,
 -- `cancel_ready_import_job`, `import_allowed_keys` and `admin_delete_team`; it drops the five rule RPCs,
--- the preference import finalizer, the tenancy trigger and the CHECK helpers, takes `practice_preferences`
+-- the preference import finalizer, the tenancy trigger, the completed-season read-only trigger and the CHECK helpers, takes `practice_preferences`
 -- off `staging_import_rows`' type list, and puts the staged-row retention job back to coaches only.
 --
 -- **What it cannot restore, said before it runs.** A rule is richer than a scalar row, so the revert
@@ -93,6 +93,9 @@ SELECT DISTINCT ON (p.coach_id, d.dimension, p.level, d.value::text)
  WHERE p.status = 'in_force' AND d.present
  ORDER BY p.coach_id, d.dimension, p.level, d.value::text, p.created_at;
 
+DROP TRIGGER coach_practice_preferences_readonly_when_completed ON public.coach_practice_preferences;
+COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS
+  'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments, games (scores) and schedule_tbd: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261111010000.';
 DELETE FROM public.coach_practice_preferences;
 
 DROP TRIGGER coach_practice_preferences_enforce_tenancy ON public.coach_practice_preferences;
@@ -176,7 +179,7 @@ COMMENT ON COLUMN public.coach_practice_preferences.coach_id IS
   'A coaches.id, deliberately without a foreign key (the team_coach_assignments stance): deleting a coach erases their personal data and leaves this history holding an opaque id.';
 
 -- ---------------------------------------------------------------------------
--- The previous bodies, as they were at 20261110010000 (md5 checked by the forward migration).
+-- The previous bodies, as they were at 20261111010000 (md5 checked by the forward migration).
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_import_job(p_organization_id uuid, p_import_type text, p_file_name text, p_season_settings_id uuid DEFAULT NULL::uuid)
  RETURNS import_jobs
@@ -226,8 +229,11 @@ BEGIN
         RAISE EXCEPTION 'season % is completed and takes no import', p_season_settings_id
           USING ERRCODE='22023', DETAIL='season_completed';
       END IF;
-      IF v_season_status <> 'active' THEN
-        RAISE EXCEPTION 'season % is % and takes no import: only the active season does', p_season_settings_id, v_season_status
+      -- 20261111010000: the active season or a draft takes a registration or coach import (a
+      -- club prepares next season from its own registration data); a field import stays with the
+      -- active season, as finalize_field_import_job still requires.
+      IF v_season_status <> 'active' AND (v_season_status <> 'draft' OR v_job_type <> 'registration') THEN
+        RAISE EXCEPTION 'season % is % and takes no % import: only the active season does', p_season_settings_id, v_season_status, v_import_type
           USING ERRCODE='22023', DETAIL='season_not_active';
       END IF;
     END IF;

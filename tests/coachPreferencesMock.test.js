@@ -29,7 +29,11 @@ const ASSIGNED = { effective_from: '2026-08-01', effective_to: null };
 function freshDb() {
   return {
     organization_members: [{ organization_id: ORG, profile_id: 'admin-user', role: 'admin' }],
-    season_settings: [{ id: SEASON, organization_id: ORG, status: 'active' }],
+    season_settings: [
+      { id: SEASON, organization_id: ORG, status: 'active' },
+      { id: 'season-draft', organization_id: ORG, status: 'draft' },
+      { id: 'season-done', organization_id: ORG, status: 'completed' },
+    ],
     divisions: [{ id: DIVISION, organization_id: ORG, season_settings_id: SEASON }],
     teams: [
       { id: TEAM_A, organization_id: ORG, division_id: DIVISION, name: 'U10 Boys 1' },
@@ -544,6 +548,23 @@ describe('the mock client', () => {
         p_file_name: 'x.csv',
       });
       expect(unknown.error.message).toContain('invalid import type');
+      // E3b's rule (20261111010000), mirrored for the new type: the active season or a draft, never a
+      // completed one; a field file still needs the active season.
+      const forSeason = (importType, seasonId) =>
+        mockSupabase.rpc('create_import_job', {
+          p_organization_id: ORG,
+          p_import_type: importType,
+          p_file_name: `${importType}.csv`,
+          p_season_settings_id: seasonId,
+        });
+      const draftJob = await forSeason('practice_preferences', 'season-draft');
+      expect(draftJob.error).toBeNull();
+      expect(draftJob.data.season_settings_id).toBe('season-draft');
+      const completedJob = await forSeason('practice_preferences', 'season-done');
+      expect(completedJob.error.code).toBe('22023');
+      expect(completedJob.error.details).toBe('season_completed');
+      const draftFields = await forSeason('fields', 'season-draft');
+      expect(draftFields.error.details).toBe('season_not_active');
 
       const deleted = await mockSupabase.rpc('admin_delete_team', { p_team_id: TEAM_A });
       expect(deleted.error).toBeNull();

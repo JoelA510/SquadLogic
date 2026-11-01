@@ -15,7 +15,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(45);
+SELECT plan(49);
 
 -- ---- the roster (as the table owner) -----------------------------------------------------------
 -- Org A, season aaa (active): teams "Imp A1" and "Imp A2" (coach P coaches both), "Imp A3" (coach Q coaches it),
@@ -41,6 +41,8 @@ INSERT INTO public.locations (id, organization_id, name) VALUES
     ('a1111111-1111-1111-1111-1111111100c2', 'a1111111-1111-1111-1111-111111111111', 'Imp Fields, North');
 INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
     ('a1111111-1111-1111-1111-111111111ccc', 'a1111111-1111-1111-1111-111111111111', 'Org A Fall 2025', 'completed', 2025);
+INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
+    ('a1111111-1111-1111-1111-111111111ddd', 'a1111111-1111-1111-1111-111111111111', 'Org A Fall 2027 draft', 'draft', 2027);
 INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, season_settings_id) VALUES
     ('a1111111-1111-1111-1111-1111111b0001', 'a1111111-1111-1111-1111-111111111111', 'registration', 'imports/test/prefs-1.csv', 'importing', 'a1111111-1111-1111-1111-111111111aaa'),
     ('a1111111-1111-1111-1111-1111111b0002', 'a1111111-1111-1111-1111-111111111111', 'registration', 'imports/test/prefs-2.csv', 'importing', 'a1111111-1111-1111-1111-111111111aaa'),
@@ -115,6 +117,24 @@ SELECT is((SELECT status FROM public.import_jobs WHERE id = 'a1111111-1111-1111-
 SELECT lives_ok(
     $$SELECT public.cancel_ready_import_job('a1111111-1111-1111-1111-1111111b0002', 'practice_preferences')$$,
     'and can be canceled');
+
+-- ---- the active season or a draft takes a preference job; a completed season never does (E3b's rule) ---
+SELECT lives_ok(
+    $$SELECT public.create_import_job('a1111111-1111-1111-1111-111111111111', 'practice_preferences', 'draft-prefs.csv',
+                                      'a1111111-1111-1111-1111-111111111ddd')$$,
+    'a preference job opens for a draft season, as a player or coach job does');
+SELECT is(
+    (SELECT season_settings_id FROM public.import_jobs WHERE storage_path LIKE '%/draft-prefs.csv'),
+    'a1111111-1111-1111-1111-111111111ddd'::uuid, 'and it carries that season');
+SELECT throws_ok(
+    $$SELECT public.create_import_job('a1111111-1111-1111-1111-111111111111', 'practice_preferences', 'old-prefs.csv',
+                                      'a1111111-1111-1111-1111-111111111ccc')$$,
+    '22023', 'season a1111111-1111-1111-1111-111111111ccc is completed and takes no import',
+    'but not for a completed season');
+SELECT throws_ok(
+    $$SELECT public.create_import_job('a1111111-1111-1111-1111-111111111111', 'fields', 'draft-fields.csv',
+                                      'a1111111-1111-1111-1111-111111111ddd')$$,
+    '22023', NULL, 'and a field import still takes the active season only (E3b''s rule is unchanged)');
 
 -- ---- a completed season takes no import --------------------------------------------------------------
 SELECT throws_ok(

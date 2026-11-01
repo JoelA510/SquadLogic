@@ -83,8 +83,9 @@ than storing it.
 
 A player stores no birth date (R5, `20261026010000`). `import-validation` reads
 the file's birth date only to compute the player's **natural age** with the
-season's cutoff (the season `finalize_import_job` attaches the import's
-divisions to: the active one, else the latest), falling back to the age group
+season's cutoff and its divisions' birth-date windows (the season
+`finalize_import_job` adds the import to: the job's own, the active one unless
+a draft was named), falling back to the age group
 the export states (one or two digits, 1-25) when no birth date gives one; it
 stages `natural_age` and strips every birth key from both staged payloads, and
 returns the rows, birth dates included, to the browser, which keeps them for
@@ -158,8 +159,10 @@ repeated id counts once). Rules:
 ### Players and coaches belong to one season (`20261108010000`)
 
 Every player and coach row has a `season_settings_id`, and an import adds to
-the season its job was made for (the active one; a draft season takes imports
-in E3b). **The import matches existing rows in that season only**: a
+the season its job was made for (the active one, or a draft: since
+`20261111010000` a draft season takes a player or coach import, so next
+season's registrations can be loaded while this one runs; a completed season
+never does, and a field import stays with the active season). **The import matches existing rows in that season only**: a
 registration id, or a coach email, that another season holds is a new row in
 this one, and nothing is read from or written to the other season's row. Nothing
 carries over from one season to the next, so years of experience and skill
@@ -167,7 +170,28 @@ level come from the new season's own registration and evaluations. A division
 named by id from another season matches nothing (the row's division is left
 empty and counted as unmatched); buddy requests and a coach's child ids reach
 players of the job's season only. An organization with no season has nothing to
-import into (22023, `season_missing`).
+import into (22023, `season_missing`). An import into a draft leaves the active
+season's rows untouched, to the last column.
+
+A season's **age rule** (the cutoff, the season year and its divisions'
+birth-date windows and the age bands of those that bear one) is fixed while a player import into it is waiting to be
+applied (22023, `import_pending`) and once it has players (`season_has_players`):
+the import stages each row's natural age under the rule in force, so the rule
+does not move between the staging and the apply. Finish or cancel the pending
+import first.
+
+The validation reads that rule once, with the season's `age_rule_revision` (a number that goes up on
+every change that moves an age, and never goes back), and stamps the player file's job with the
+revision; it counts every age from what that one read returned. `finalize_import_job` refuses, under the
+season lock, a job whose stamp is no longer the season's revision (22023, `age_rule_changed`): a change
+between the validation's read and its first staged row has nothing pending to refuse, and a change
+that was reversed still shows. Validate the file again.
+
+A **completed** season is read-only for a signed-in caller, players and coaches
+included (22023, `season_completed`): no patch, delete or insert by an admin,
+through an RPC or a direct write; its teams, rosters, coach history, practices,
+TIME TBD exceptions and list, and games likewise. Jobs with no signed-in user (the retention job,
+the demo purge) and the cascade of a deleted organization still reach its rows.
 
 > **Duplicate headers:** the coach export repeats `Playing Up` and
 > `Preferred Co-Coach` once per coached player. A PapaParse `transformHeader`
@@ -228,10 +252,12 @@ JavaScript twin of the SQL parsing, so the preview and the mock client read a ro
   history) and leaves **admin-written rules** and the imported rules of teams the file does not name
   alone. Two rows that make the same rule (the same coach, team, level, sets and window) count once
   (`duplicate_rule_rows`).
-- **A completed season takes no import** (22023, `season_completed`), in `create_import_job` and again in the
-  finalizer, because a season can complete between a job's creation and its apply. `create_import_job` opens
-  a job only for the active season (a draft season is refused, 22023 `season_not_active`, until E3b's season
-  rollover lets one take imports); the finalizer reads the job's own season.
+- **The active season or a draft takes a preference file; a completed season never does** (22023,
+  `season_completed`), the rule `20261111010000` set for player and coach files, in `create_import_job` and
+  again in the finalizer, because a season can complete between a job's creation and its apply. A draft season
+  is where next season's rules are prepared; the finalizer reads the job's own season. A completed season's
+  rules are also read-only on the table (`coach_practice_preferences_readonly_when_completed`, the trigger
+  E3b put on the schedule tables), so no write that is not one of these RPCs can change them either.
 - **Staged rows are deleted 30 days after they were staged, once their job has finished**, by the same
   retention job as coach rows (`cleanup-staging-import-rows`), because they hold coaches' emails. The deferred
   apply (`mark_import_job_ready_to_apply`, `cancel_ready_import_job`) takes the type too.
@@ -285,20 +311,40 @@ holds it equal to the two code copies.
 
 `season_settings.age_cutoff_mode` selects how a birthdate maps to a U-band (at
 import, into the stored natural age; and in the browser during the import
-session, from the file's rows):
+session, from the file's rows). The **season year** is the year the season
+starts, `S` below:
 
 - **`school_year_aug_jul`** (default) — Aug 1 cutoff; the U(N) cohort is born
   Aug 1 (S−N−1) … Jul 31 (S−N).
 - **`birth_year`** — calendar cutoff; the U(N) cohort is born in calendar year
   S−N.
+- **`custom`** (`20261111010000`) — a cutoff month and day the club picks
+  (`age_cutoff_month`, `age_cutoff_day`), applied every season year: a player born
+  on or after the cutoff day is in the cohort one U-number younger, as with Aug 1.
+  A cutoff of Jan 1 is the calendar year, Feb 29 counts as Mar 1 in a year
+  without one, and a custom season with no usable day is read as the school year.
 
 Derivation lives in `packages/core/src/ageGroups.js` (`importNaturalAge`; its
-Edge twin is `supabase/functions/_shared/natural-age.ts`). Per-division birthdate
-windows (`divisions.birthdate_start/end`) are authoritative when set (only where a
-birth date is at hand, `isEligibleForDivision`; play-up eligibility compares the
-natural age with the band); otherwise
-the band is computed from the division's `min_age`/`max_age` (which support the
-pilot's single-year and multi-year bands, e.g. U11–U12).
+Edge twin is `supabase/functions/_shared/natural-age.ts`, held equal by
+`tests/naturalAgeParity.test.js`). **A division's own birth-date window**
+(`divisions.birthdate_start/end`, both ends) is authoritative where a birth date
+is at hand: the import counts a birth date inside a division's window as that
+division's age, brought into its band (`min_age`/`max_age`, else the U-numbers in
+its name), so a U4 that also takes older 2-year-olds counts them as 4; a date two
+windows hold takes the lower age, and a window with no readable band is ignored.
+The same rule (`birthDateAge`) counts the birth dates the Teams page keeps for
+the import session: play-up (`resolveNaturalAge`, `applyPlayUpEligibility`) and
+the program grouping (`computeAgeGroup`, `useTeamAnalysis`). Otherwise the band is
+computed from the division's `min_age`/`max_age` (which support the pilot's
+single-year and multi-year bands, e.g. U11–U12).
+
+The cutoff, the season year and a division's window are set on the Seasons page
+(Settings, Season & Calendar) by `admin_update_draft_season` and
+`admin_set_division_birthdate_window`: the year and the cutoff on a draft only,
+and **none of the three changes once the season has players**, since their stored
+ages were counted with the old rule (triggers on `season_settings` and
+`divisions`, so every writer meets them). A rollover shifts each division's window
+by the difference in season years.
 
 ## Play-up / play-down
 

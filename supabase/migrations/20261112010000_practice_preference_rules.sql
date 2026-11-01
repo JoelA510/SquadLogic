@@ -47,13 +47,16 @@
 --      by email within the job's season, team by name within the season, a blank team for a coach of
 --      several teams makes one rule per team, an unknown coach or team is listed and never created, a
 --      re-import replaces the imported rules of the teams the file names and leaves admin rules alone.
---      A season that is completed takes no import (draft seasons take one, as E3b does for players and
---      coaches; `create_import_job` still opens a job only for the active season until E3b lands).
+--      The active season or a draft takes a preference file and a completed one never does, as E3b
+--      (20261111010000) set for players and coaches: `create_import_job` is E3b's body with the new
+--      type added, and the finalizer refuses a completed season again.
 --   6. `admin_delete_team` counts the rules its cascade takes (`coach_practice_preferences_deleted`).
 --   7. The two old RPCs, `admin_decide_coach_practice_preference` and `admin_set_coach_practice_preference`,
 --      are dropped by exact signature (no CASCADE): they read the columns this drops. The request RPC went
 --      with 20261104010000.
---   8. An end-state check.
+--   8. A completed season's rules are read-only: the table joins the schedule tables E3b guards
+--      (`season_schedule_readonly_when_completed`).
+--   9. An end-state check.
 --
 -- No DDL touches the auth or storage schemas. Every drop names its object.
 --
@@ -71,13 +74,14 @@ BEGIN;
 DO $$
 DECLARE
     v_expected jsonb := '{
-        "create_import_job(uuid,text,text,uuid)": "53aed1ffa0c6cea863e60f7ceaba3b02",
+        "create_import_job(uuid,text,text,uuid)": "8fa633ffce974933fc75f25f3227f26e",
         "mark_import_job_ready_to_apply(uuid,text,jsonb)": "d52d2e864a595fa879ba72a4c1b4dd32",
         "cancel_ready_import_job(uuid,text)": "15748232fe403a2a976627ee2801f92f",
         "import_allowed_keys(text)": "974e958ba912ccb2a3fe13c4bcd484d1",
         "admin_delete_team(uuid)": "e3344d10e5d1cf60f3d0ef04f4e74504",
         "admin_decide_coach_practice_preference(uuid,text,text,jsonb)": "af9d4a75fce06aeeb69d2248b0269901",
-        "admin_set_coach_practice_preference(uuid,text,text,jsonb)": "318db46455620d3f7cba83398e668c3f"
+        "admin_set_coach_practice_preference(uuid,text,text,jsonb)": "318db46455620d3f7cba83398e668c3f",
+        "season_schedule_readonly_when_completed()": "cfc4abe75eab99cb46cbdc32e5e68d43"
     }';
     v_key text;
     v_md5 text;
@@ -800,8 +804,11 @@ BEGIN
         RAISE EXCEPTION 'season % is completed and takes no import', p_season_settings_id
           USING ERRCODE='22023', DETAIL='season_completed';
       END IF;
-      IF v_season_status <> 'active' THEN
-        RAISE EXCEPTION 'season % is % and takes no import: only the active season does', p_season_settings_id, v_season_status
+      -- 20261111010000: the active season or a draft takes a registration or coach import (a
+      -- club prepares next season from its own registration data); a field import stays with the
+      -- active season, as finalize_field_import_job still requires.
+      IF v_season_status <> 'active' AND (v_season_status <> 'draft' OR v_job_type <> 'registration') THEN
+        RAISE EXCEPTION 'season % is % and takes no % import: only the active season does', p_season_settings_id, v_season_status, v_import_type
           USING ERRCODE='22023', DETAIL='season_not_active';
       END IF;
     END IF;
@@ -931,7 +938,7 @@ SELECT cron.schedule(
 -- again (Accept all covers a file already reviewed).
 --
 -- The season is the job's own (the active season for a job made before jobs carried one). A completed
--- season takes no import; a draft season does, as E3b makes it for players and coaches.
+-- season takes no import; a draft season does, as E3b (20261111010000) made it for players and coaches.
 
 CREATE FUNCTION public.finalize_practice_preference_import_job(p_import_job_id uuid, p_validation_errors jsonb DEFAULT '[]'::jsonb)
  RETURNS jsonb
@@ -1561,7 +1568,25 @@ DROP FUNCTION public.admin_decide_coach_practice_preference(uuid, text, text, js
 DROP FUNCTION public.admin_set_coach_practice_preference(uuid, text, text, jsonb);
 
 -- ---------------------------------------------------------------------------
--- 8. The end state.
+-- 8. A completed season's rules are read-only, like its schedules (20261111010000).
+-- ---------------------------------------------------------------------------
+--
+-- The five RPCs and the finalizer already refuse a completed season; this puts the same refusal on the
+-- table, so a write that is not one of them (a definer function added later, a direct write) meets it
+-- too. The trigger function is E3b's: it finds a row's season through its `team_id` (a rule is for one
+-- team), and a rule with no team (history kept for a coach who coached none) belongs to no season and
+-- passes. A job with no signed-in user (the retention job, the backfill above) and the cascade of a
+-- deleted team, season or organization pass, as for every other table it guards.
+
+CREATE TRIGGER coach_practice_preferences_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.coach_practice_preferences
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+
+COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS
+    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments, games (scores), schedule_tbd and coach_practice_preferences: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261111010000, 20261112010000.';
+
+-- ---------------------------------------------------------------------------
+-- 9. The end state.
 -- ---------------------------------------------------------------------------
 
 DO $$
@@ -1616,6 +1641,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.coach_practice_preferences'::regclass
                     AND tgname = 'coach_practice_preferences_enforce_tenancy' AND NOT tgisinternal) THEN
         RAISE EXCEPTION 'coach_practice_preferences has no tenancy trigger';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.coach_practice_preferences'::regclass
+                    AND tgname = 'coach_practice_preferences_readonly_when_completed' AND NOT tgisinternal
+                    AND tgenabled = 'O') THEN
+        RAISE EXCEPTION 'coach_practice_preferences has no completed-season read-only trigger';
     END IF;
     IF cardinality(public.import_allowed_keys('practice_preferences')) <> 18
        OR NOT 'email' = ANY (public.import_allowed_keys('practice_preferences')) THEN

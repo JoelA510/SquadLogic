@@ -87,7 +87,14 @@ export default function ProgramOverview({
             {program.name}
           </button>
         </td>
-        <td className="p-4 text-text-secondary">{program.playerCount}</td>
+        <td className="p-4 text-text-secondary">
+          {program.playerCount}
+          {program.waitlistedCount > 0 && (
+            <span className="block text-xs text-text-muted">
+              {program.waitlistedCount} on the waitlist
+            </span>
+          )}
+        </td>
         <td className="p-4 text-text-secondary">
           {/* Generation refuses rules the advice calls blocked: no count to estimate. */}
           {program.assessment?.blocked ? '—' : program.estimatedTeams}

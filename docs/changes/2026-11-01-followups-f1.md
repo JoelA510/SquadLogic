@@ -117,10 +117,17 @@ fills; its count leaves out the waitlisted too). `assessTeamCount` and `resolveT
 are not changed: they are told the right number.
 
 **Tests** (failing first): `tests/teamingConfigurationAdvice.test.jsx` (30 rows with 6 waitlisted by
-the file: recommended is for 24, not 30, and the row says 6 on the waitlist; the record moving one
-off the waitlist and one on changes it; the option off counts all 30; a refused read falls back to the
-file's column and logs; an exact-multiple edge where one waitlisted player is the difference between
-2 and 3 teams); `tests/rosterSizing.test.js` is unchanged (the function is not).
+the file: advised for 24 (2 teams), not 30 (3), and the row says 6 on the waitlist; the record makes
+two of the file's waitlisted active, so 30 are seated and 3 teams are advised where the file alone
+would say 2; the record puts two on the waitlist that the file does not mention, so 28 are seated and 2
+teams are advised where 30 would say 3; the option off counts all 30 and reads nothing new; nobody
+waitlisted reads byte for byte as before; a refused read falls back to the file's column and logs;
+the real generator on the same rows makes the advised 2 teams); one mock E2E scenario in
+`Pillar1_Engine.feature` (100 imported, 20 waitlisted: the overview recommends 8 teams, not 10, and
+says 20 are waiting), which runs against the mock client's own `players` table rather than the unit
+tests' stand-in. `tests/rosterSizing.test.js` is unchanged (the function is not). Two defects were
+planted in the page change and each turned tests red (the effect not gated by the option; the stored
+status ignored).
 
 ## 4. Permits: Open and Download are written twice (#670)
 

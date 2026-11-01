@@ -140,7 +140,8 @@ busy state and its own error text. `FieldPermitsSection` uses the existing `perm
 sites (`FieldManagementPermits.test.jsx`, `permitsPage.test.jsx`) are the proof and are unchanged; the
 helper has its own test (the tab opens on the tap and loses its opener, is pointed at the link, is
 closed when the link fails, a blocked tab falls back to the window, the download anchor is added,
-clicked and removed even when the click throws).
+clicked and removed, and a failed link clicks nothing). The helper keeps the copies' exact steps,
+including that an anchor whose click throws is not removed (a browser's `click()` does not throw).
 
 ## 5. "An unknown sunset is still refused" (Phase D): skipped, owner decision needed
 

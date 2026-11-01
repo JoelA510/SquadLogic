@@ -12,29 +12,18 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import Badge from '../ui/Badge.jsx';
 import Button from '../ui/Button.jsx';
 import Modal from '../ui/Modal.jsx';
 import PermitDialog from './PermitDialog.jsx';
+import PermitStatusBadge from '../permits/PermitStatusBadge.jsx';
 import {
   formatPermitDate,
   permitScopeText,
+  permitSizeText,
   permitStatusText,
-  permitStatusTone,
 } from '../../utils/permitText.js';
+import { downloadPermitFile, openPermitFile } from '../../utils/permitFile.js';
 import { logger } from '../../lib/logger.js';
-
-const STATUS_ICON = {
-  expired: AlertTriangle,
-  expiring: Clock,
-  not_yet_valid: Clock,
-  valid: CheckCircle2,
-};
-
-const sizeText = (bytes) =>
-  bytes >= 1024 * 1024
-    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 /**
  * The Permits section of Field Management: the warnings, the list, and add / edit / replace file /
@@ -120,16 +109,9 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
 
   const open = async (permit) => {
     setNotice(null);
-    // The tab is opened on the tap itself so the browser does not take it for a popup; the link is
-    // made once the answer comes (a signed link lives two minutes).
-    const tab = window.open('about:blank', '_blank');
-    if (tab) tab.opener = null;
     try {
-      const url = await signedUrl(permit.file.path);
-      if (tab) tab.location.href = url;
-      else window.location.assign(url);
+      await openPermitFile(signedUrl, permit.file);
     } catch (err) {
-      tab?.close();
       fail(err, 'The file could not be opened');
     }
   };
@@ -137,14 +119,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
   const download = async (permit) => {
     setNotice(null);
     try {
-      const url = await signedUrl(permit.file.path, permit.file.name);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = permit.file.name;
-      link.rel = 'noopener';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      await downloadPermitFile(signedUrl, permit.file);
     } catch (err) {
       fail(err, 'The file could not be downloaded');
     }
@@ -272,7 +247,6 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
       ) : (
         <ul className="space-y-3" data-testid="permit-list">
           {sorted.map((permit) => {
-            const Icon = STATUS_ICON[permit.status] ?? Clock;
             const busy = busyId === permit.id;
             return (
               <li
@@ -290,9 +264,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
                       {formatPermitDate(permit.valid_from)} to {formatPermitDate(permit.valid_to)}
                     </div>
                   </div>
-                  <Badge tone={permitStatusTone(permit.status)}>
-                    <Icon size={13} aria-hidden="true" /> {permitStatusText(permit)}
-                  </Badge>
+                  <PermitStatusBadge permit={permit} />
                 </div>
 
                 <div className="text-sm text-text-secondary mt-2">
@@ -310,7 +282,7 @@ export default function FieldPermitsSection({ permitState, warnings, locations, 
                     <>
                       <span className="text-sm text-text-primary">
                         <FileText size={14} aria-hidden="true" className="permit-inline-icon" />
-                        {permit.file.name} ({sizeText(permit.file.size)})
+                        {permit.file.name} ({permitSizeText(permit.file.size)})
                       </span>
                       <Button
                         variant="secondary"

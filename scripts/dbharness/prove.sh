@@ -5025,10 +5025,10 @@ plant "M59 a completed season is writable for a signed-in caller" "$M59" \
   "smoke 20261111010000"
 
 plant "M59 a completed season's schedule is writable for a signed-in caller" "$M59" \
-  "        IF v_status = 'completed' THEN
-            -- The cascade of a deleted organization: the season may not have been removed yet." \
-  "        IF v_status = 'completed' AND false THEN
-            -- The cascade of a deleted organization: the season may not have been removed yet." \
+  "            IF v_status = 'completed' THEN
+                -- The cascade of a deleted organization: the season may not have been removed yet (a" \
+  "            IF v_status = 'completed' AND false THEN
+                -- The cascade of a deleted organization: the season may not have been removed yet (a" \
   "smoke 20261111010000"
 
 plant "M59 the finalizer applies a file whose age-rule stamp is stale" "$M59" \

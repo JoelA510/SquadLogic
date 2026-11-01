@@ -38,7 +38,7 @@ import {
   type ImportSeason,
   type WindowedDivision,
 } from '../_shared/natural-age.ts';
-import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
+import { composeFullName, normalizeImportRow, sanitizeImportText } from '../_shared/import-rows.ts';
 import { validateEvaluationRow } from '../_shared/import-evaluations.ts';
 import { loadImportAgeRule } from '../_shared/import-age-rule.ts';
 
@@ -49,16 +49,7 @@ const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // --- Sanitization ---
 function sanitizeString(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  const str = String(value);
-  return (
-    str
-      .replace(/<[^>]*>/g, '') // Strip HTML tags
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // Strip control chars
-      .trim()
-      .slice(0, MAX_STRING_LENGTH)
-  );
+  return sanitizeImportText(value, MAX_STRING_LENGTH);
 }
 
 // --- Schema Definitions ---

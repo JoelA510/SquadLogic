@@ -68,7 +68,7 @@ Feature: Every top-level route passes an automated accessibility scan
       | /exports                      | Exports                  | Nothing has been published yet          |
       | /admin/members                | Members & Roles          | Mock Admin                              |
       | /coaches                      | Coaches                  | Casey Rivera                            |
-      | /coaches/practice-preferences | Practice preferences     | Morgan Reyes                            |
+      | /coaches/practice-preferences | Practice preferences     | No rules in force.                      |
       | /schedule/practice-lighting   | Practice lighting        | Set lighting override                   |
       | /schedule/heat                | Heat forecast            | turned off for this organization        |
       | /fields                       | Field Management         | Field 1                                 |

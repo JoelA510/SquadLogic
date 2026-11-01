@@ -870,8 +870,12 @@ const LAYERS = Object.freeze([
       'strictestCoachPreferenceLevel',
     ]),
     importers: Object.freeze([
+      // Phase D C2: the rule form checks a form with the schema, and consults no judging function.
+      'frontend/src/components/preferences/RuleForm.jsx',
       'frontend/src/hooks/useCoachPracticePreferences.js',
       'frontend/src/utils/coachPreferencePreview.js',
+      // Phase D C2: the conflicts view and Accept all's confirmation judge with core.
+      'frontend/src/utils/practiceMustConflicts.js',
       'packages/core/src/practice/index.js',
       'packages/core/src/practice/repair.js',
       // 8.6 3b PR 9: reuses the location-id contract, consults nothing.
@@ -879,6 +883,7 @@ const LAYERS = Object.freeze([
     ]),
     consumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
+      'frontend/src/utils/practiceMustConflicts.js',
       'packages/core/src/practice/repair.js',
       'supabase/functions/_shared/engines/coach-preference-load.ts',
       'supabase/functions/_shared/engines/coach-preferences.ts',
@@ -888,6 +893,7 @@ const LAYERS = Object.freeze([
     ]),
     expectedProductionConsumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
+      'frontend/src/utils/practiceMustConflicts.js',
       'packages/core/src/practice/repair.js',
       'supabase/functions/_shared/engines/coach-preference-load.ts',
       'supabase/functions/_shared/engines/coach-preferences.ts',
@@ -897,6 +903,7 @@ const LAYERS = Object.freeze([
     ]),
     expectedExternalProductionConsumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
+      'frontend/src/utils/practiceMustConflicts.js',
       'supabase/functions/_shared/engines/coach-preference-load.ts',
       'supabase/functions/_shared/engines/coach-preferences.ts',
       'supabase/functions/_shared/tests/coach-preferences_test.ts',

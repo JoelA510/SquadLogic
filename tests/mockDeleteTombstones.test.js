@@ -769,6 +769,12 @@ const teamCascades = () => {
     )) {
       found.set(`${table}.${column}`, { table, column });
     }
+    // The same cascade written as a column added later (20261112010000's `team_id` on the preference rules).
+    for (const [, table, column] of sql.matchAll(
+      /ALTER TABLE(?: ONLY)?(?: IF EXISTS)? (?:public\.)?(\w+)[^;]*?ADD COLUMN(?: IF NOT EXISTS)? "?(\w+)"?\s+uuid[^,;]*?REFERENCES (?:public\.)?teams\s*\(id\)\s*ON DELETE CASCADE/gi
+    )) {
+      found.set(`${table}.${column}`, { table, column });
+    }
     for (const [, dropped] of sql.matchAll(/DROP TABLE(?: IF EXISTS)? (?:public\.)?(\w+)/gi)) {
       for (const key of [...found.keys()]) if (key.startsWith(`${dropped}.`)) found.delete(key);
     }

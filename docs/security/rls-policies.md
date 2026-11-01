@@ -147,8 +147,11 @@ subscription links stay, admin-only), `coach_practice_preferences`, `practice_li
 `team_players` are read by admins and staff only (`20261024010000`), and `staging_players` and
 `staging_import_rows` likewise. `update_game_score` admits admins and staff only, and only while the
 organization's `score_entry` setting is on (`20261028010000`). No coach requests anything: the coach
-preference request RPC and the lighting request RPC are dropped; admins record preferences
-(`admin_set_coach_practice_preference`) and decide them. The migration refuses to commit if any other
+preference request RPC and the lighting request RPC are dropped; admins record preferences as rules per team
+(`admin_add_practice_preference`, `admin_edit_practice_preference`, `admin_remove_practice_preference`,
+`admin_decide_must_preference`, `admin_accept_all_musts`, and the preference import's
+`finalize_practice_preference_import_job`, `20261112010000`; the table has no write policy and no client
+write grant, and each RPC refuses a non-admin with 42501). The migration refuses to commit if any other
 `SELECT` or `ALL` policy is left on `coaches`, since Postgres would OR it with the narrowed one, and
 `reconcile_prod_rls_drift()` holds that too. Pinned by `supabase/tests/rls_policy_matrix.sql`,
 `supabase/tests/restricted_reads.sql` and `supabase/tests/admin_only.sql`.

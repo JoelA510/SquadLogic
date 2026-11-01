@@ -338,7 +338,9 @@ Built as written; where the code differed from the plan or left a choice:
   the options; it now does so only with Skill Tier on, so a league that had a tier column in its file and
   never chose the option no longer has the tier steer its teams (a Player Rating league lost the file's tier
   as the fallback skill of an unrated player). (2) The roster editor on the Teams page printed "Skill: ..."
-  for every player (including "Unrated"); it prints it only with the option on. (3) The team roster showed no
+  for every player (including "Unrated"); it now shows the tier with Skill Tier on and the record's rating
+  with Player Rating on, each only its own (a rating the roster directory filled in as the entry's skill is
+  marked and is not read as a tier), and no line with both off. (3) The team roster showed no
   years played per player (only the average on the Balance tab); it now lists Years played on each card
   by default, as the owner's rule says, and the tier beside it when that is on. `get_team_roster` returns no
   tier, so the page reads the roster's tiers from `players` (an admin, the only reader of a roster, can);

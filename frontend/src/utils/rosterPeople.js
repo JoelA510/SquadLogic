@@ -26,8 +26,17 @@ function withPlayerDetails(player, people) {
   // The durable name wins (the Player Record page edits it there); an import's or a saved
   // review's stays only for a player the table has no name for.
   if (known.name) next.name = known.name;
-  if (!player.skill && known.rating !== null) next.skill = String(known.rating);
-  return next.name === player.name && next.skill === player.skill ? player : next;
+  // The record's rating travels as `rating`, which the roster editor shows only with Player Rating
+  // on. It is also the entry's `skill` when the run carries none, marked `skillIsRating` so the
+  // editor can tell a rating from a skill tier (the Skill Tier option shows only the tier).
+  if (known.rating !== null) next.rating = known.rating;
+  if (!player.skill && known.rating !== null) {
+    next.skill = String(known.rating);
+    next.skillIsRating = true;
+  }
+  return next.name === player.name && next.skill === player.skill && next.rating === player.rating
+    ? player
+    : next;
 }
 
 /**

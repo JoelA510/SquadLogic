@@ -4531,7 +4531,14 @@ export const mockSupabase = {
         };
       }
       if (
-        !['players', 'coaches', 'fields', 'field_availability', 'evaluations'].includes(importType)
+        ![
+          'players',
+          'coaches',
+          'fields',
+          'field_availability',
+          'practice_preferences',
+          'evaluations',
+        ].includes(importType)
       ) {
         return { data: null, error: { message: `invalid import type: ${p_import_type}` } };
       }
@@ -4566,13 +4573,13 @@ export const mockSupabase = {
             },
           };
         }
-        // 20261111010000: the active season or a draft takes a player or coach import; a field
-        // import stays with the active season. 20261113010000: an evaluations import updates a
-        // draft's players as it does the active season's.
+        // 20261111010000: the active season or a draft takes a player, coach or (20261112010000)
+        // practice preference import; a field import stays with the active season. 20261113010000:
+        // an evaluations import updates a draft's players as it does the active season's.
         if (
           named.status !== 'active' &&
           (named.status !== 'draft' ||
-            (importType !== 'players' && importType !== 'coaches' && importType !== 'evaluations'))
+            !['players', 'coaches', 'practice_preferences', 'evaluations'].includes(importType))
         ) {
           return { data: null, error: seasonNotActiveError(named.id, named.status, 'season') };
         }
@@ -4921,16 +4928,27 @@ export const mockSupabase = {
       if (!job) {
         return { data: null, error: { message: 'Import job not found' } };
       }
-      if (!['coaches', 'fields', 'field_availability', 'evaluations'].includes(importType)) {
+      if (
+        ![
+          'coaches',
+          'fields',
+          'field_availability',
+          'practice_preferences',
+          'evaluations',
+        ].includes(importType)
+      ) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, field_availability, and evaluations imports support deferred apply',
+              'Only coach, field, field_availability, practice_preferences, and evaluations imports support deferred apply',
           },
         };
       }
-      if (importType === 'coaches' && job.job_type !== 'registration') {
+      if (
+        ['coaches', 'practice_preferences'].includes(importType) &&
+        job.job_type !== 'registration'
+      ) {
         return { data: null, error: { message: 'Import job is not registration' } };
       }
       if (importType === 'evaluations' && job.job_type !== 'evaluations') {
@@ -4994,12 +5012,20 @@ export const mockSupabase = {
       if (!job) {
         return { data: null, error: { message: 'Import job not found' } };
       }
-      if (!['coaches', 'fields', 'field_availability', 'evaluations'].includes(importType)) {
+      if (
+        ![
+          'coaches',
+          'fields',
+          'field_availability',
+          'practice_preferences',
+          'evaluations',
+        ].includes(importType)
+      ) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, field_availability, and evaluations imports support deferred cancellation',
+              'Only coach, field, field_availability, practice_preferences, and evaluations imports support deferred cancellation',
           },
         };
       }
@@ -7962,6 +7988,10 @@ export const mockSupabase = {
           'schedule_tbd',
           (row) => sameTeam(row.team_id) || sameTeam(row.home_team_id) || sameTeam(row.away_team_id)
         ).length,
+        // 20261112010000: the practice preference rules the cascade takes.
+        coach_practice_preferences_deleted: cascadeDoomed('coach_practice_preferences', (row) =>
+          sameTeam(row.team_id)
+        ).length,
       };
       db.teams = (db.teams || []).filter((t) => !sameTeam(t.id));
       markMockDeleted(db, 'teams', [tombstoneKey('teams', team)]);
@@ -7992,6 +8022,7 @@ export const mockSupabase = {
         const requiredFields = {
           players: ['first_name', 'last_name', 'date_of_birth'],
           coaches: ['full_name', 'email'],
+          practice_preferences: ['email'],
           fields: ['location', 'name', 'type', 'start', 'end'],
           field_availability: [
             'season_label',

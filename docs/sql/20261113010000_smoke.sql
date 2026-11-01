@@ -13,7 +13,8 @@
 --   * it is audited as `import.completed` with the counts and no registration ids; a finished job
 --     answers a second call with its stored result;
 --   * the lifecycle accepts the type (create, ready to apply, cancel), the SQL allowlist holds it,
---     and the retention job exists.
+--     and the retention job exists; what 20261112010000 gave the same functions (preference jobs,
+--     the draft season guard, their allowlist and retention job) is still there.
 --
 -- Every id is generated, every email `@example.test`; there is no PII.
 
@@ -212,7 +213,33 @@ BEGIN
        OR NOT has_function_privilege('authenticated', 'public.finalize_evaluation_import_job(uuid,jsonb,boolean)', 'EXECUTE') THEN
         RAISE EXCEPTION 'the finalizer is not for signed-in callers only';
     END IF;
-    RAISE NOTICE 'lifecycle: created, marked ready and cancelled as evaluations; allowlist and retention job present; signed-in callers only';
+    -- What 20261112010000 gave the same four functions is still there: a preference job is a
+    -- registration job and takes the active season or a draft, its staged rows and lifecycle work,
+    -- its allowlist and its retention job are as they were, and a field job still takes only the
+    -- active season. An evaluations job takes a draft too.
+    v_job := (public.create_import_job(v_org, 'practice_preferences', 'smoke-pp.csv', v_draft)).id;
+    IF (SELECT job_type FROM public.import_jobs WHERE id = v_job) <> 'registration' THEN
+        RAISE EXCEPTION 'a preference job is not a registration job';
+    END IF;
+    INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload)
+    VALUES (v_org, v_job, 'practice_preferences', 1, '{}'::jsonb, '{"email":"coach@example.test"}'::jsonb);
+    IF (public.mark_import_job_ready_to_apply(v_job, 'practice_preferences') ->> 'staged_rows')::int <> 1
+       OR (public.cancel_ready_import_job(v_job, 'practice_preferences') ->> 'status') <> 'canceled' THEN
+        RAISE EXCEPTION 'a preference job could not be marked ready and cancelled';
+    END IF;
+    PERFORM public.create_import_job(v_org, 'evaluations', 'smoke-ev-draft.csv', v_draft);
+    v_n := 0;
+    BEGIN PERFORM public.create_import_job(v_org, 'fields', 'smoke-fields-draft.csv', v_draft);
+    EXCEPTION WHEN SQLSTATE '22023' THEN v_n := v_n + 1; END;
+    IF v_n <> 1 THEN
+        RAISE EXCEPTION 'a field import on a draft season was not refused 22023';
+    END IF;
+    IF cardinality(public.import_allowed_keys('practice_preferences')) <> 18
+       OR NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-import-rows'
+                       AND command LIKE '%practice_preferences%' AND command LIKE '%import_type = ''coaches''%') THEN
+        RAISE EXCEPTION 'the preference allowlist or its retention job is not as 20261112010000 left it';
+    END IF;
+    RAISE NOTICE 'lifecycle: created, marked ready and cancelled as evaluations; allowlist and retention job present; signed-in callers only; preference jobs, drafts and fields as 20261112010000 left them';
 END;
 $$;
 

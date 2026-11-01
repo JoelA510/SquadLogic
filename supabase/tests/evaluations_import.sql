@@ -27,7 +27,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(84);
+SELECT plan(88);
 
 -- ── Helpers ─────────────────────────────────────────────────────────────────
 -- SQLSTATE and DETAIL of the error a statement raises, 'no error' for none.
@@ -383,19 +383,40 @@ SELECT is(public.import_allowed_keys('evaluations'),
     ARRAY['external_registration_id', 'gotsport_id', 'registration_id', 'player_id', 'years_played', 'skill_tier', 'skill_level', 'rating'],
     'the SQL allowlist holds the registration id keys and the three values');
 SELECT is(cardinality(public.import_allowed_keys('players')) || '/' || cardinality(public.import_allowed_keys('coaches')) || '/'
-          || cardinality(public.import_allowed_keys('fields')), '43/12/0', 'and the other lists are as they were');
+          || cardinality(public.import_allowed_keys('fields')) || '/' || cardinality(public.import_allowed_keys('practice_preferences')),
+    '43/12/0/18', 'and the other lists, the preference import''s included, are as they were');
 SELECT is((SELECT count(*)::int FROM cron.job
             WHERE jobname = 'cleanup-staging-evaluation-rows' AND command LIKE '%import_type = ''evaluations''%'
               AND command LIKE '%j.status IN (''completed'', ''completed_with_warnings'', ''failed'')%' AND command LIKE '%30 days%'),
     1, 'a finished evaluations job''s staged rows are deleted after 30 days');
-SELECT is((SELECT command LIKE '%import_type = ''coaches''%' FROM cron.job WHERE jobname = 'cleanup-staging-import-rows'), true,
-    'and the coach retention job is the one it was');
+SELECT is((SELECT command LIKE '%import_type = ''coaches''%' AND command LIKE '%import_type = ''practice_preferences''%'
+                  AND command NOT LIKE '%evaluations%' FROM cron.job WHERE jobname = 'cleanup-staging-import-rows'), true,
+    'and the coach and preference retention job is the one 20261112010000 left');
 SELECT is((SELECT array_agg(conname::text ORDER BY conname::text) FROM pg_constraint
             WHERE conname IN ('import_jobs_job_type_check', 'staging_import_rows_import_type_check') AND pg_get_constraintdef(oid) LIKE '%evaluations%'),
     ARRAY['import_jobs_job_type_check', 'staging_import_rows_import_type_check'], 'the job type and staged-row type checks admit it');
 SELECT is((SELECT proconfig @> ARRAY['search_path=public', 'TimeZone=UTC'] AND prosecdef FROM pg_proc
             WHERE oid = 'public.finalize_evaluation_import_job(uuid,jsonb,boolean)'::regprocedure),
     true, 'the finalizer is a definer with search_path and UTC pinned');
+
+-- ── What 20261112010000 gave the same functions is still there ──────────────
+SELECT is((SELECT pg_get_constraintdef(oid) LIKE '%practice_preferences%' AND pg_get_constraintdef(oid) LIKE '%coaches%'
+                  AND pg_get_constraintdef(oid) LIKE '%field_availability%' AND pg_get_constraintdef(oid) LIKE '%evaluations%'
+             FROM pg_constraint WHERE conname = 'staging_import_rows_import_type_check'), true,
+    'the staged-row type check holds the preference type and the older ones beside evaluations');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+CREATE TEMP TABLE ppjob ON COMMIT DROP AS
+    SELECT (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'practice_preferences', 'pp.csv', 'e3c00000-0000-4000-8000-0000000000d1')).id AS id;
+GRANT SELECT ON ppjob TO PUBLIC;
+SELECT is((SELECT job_type FROM public.import_jobs WHERE id = (SELECT id FROM ppjob)), 'registration',
+    'a preference job is a registration job, and a draft season takes it');
+SELECT is((public.mark_import_job_ready_to_apply((SELECT id FROM ppjob), 'practice_preferences') ->> 'status') || '/'
+          || (public.cancel_ready_import_job((SELECT id FROM ppjob), 'practice_preferences') ->> 'status'),
+    'ready_to_apply/canceled', 'and it can be marked ready to apply and cancelled');
+SELECT is(pg_temp.err($$SELECT public.create_import_job('a1111111-1111-1111-1111-111111111111', 'fields', 'f.csv', 'e3c00000-0000-4000-8000-0000000000d1')$$),
+    '22023:season_not_active', 'a field import still takes only the active season');
+RESET role;
 
 SELECT * FROM finish();
 ROLLBACK;

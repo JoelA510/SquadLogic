@@ -81,8 +81,9 @@ export const RESOLVE_OBJECTIVE_TERM = Object.freeze({
   /** One compromise violation or compromise placement finding. */
   COMPROMISE_VIOLATION: 'compromiseViolation',
   /**
-   * One `prefer_keep` coach preference dimension a practice candidate does not
-   * keep (8.6 PR 3b plan §4): once per breached dimension, never per coach.
+   * One `prefer` practice preference rule a practice candidate does not meet
+   * (Phase D C1; 8.6 PR 3b plan §4): once per unmet rule, however many of its
+   * conditions fail, and a rule from two coaches counts twice.
    *
    * **Counted for practice series only** (see {@link coachPreferenceCountsFor}),
    * the same guard as {@link RESOLVE_OBJECTIVE_TERM.CHANGED_WEEKDAY}: a coach
@@ -139,7 +140,7 @@ export const RESOLVE_PRACTICE_QUALITY_TERMS = Object.freeze([
 ]);
 
 /**
- * The price of one breached `prefer_keep` dimension: **100, as much as a
+ * The price of one unmet `prefer` rule: **100, as much as a
  * compromise** (8.6 PR 3b plan §5, decision 1). A named constant so that the
  * decision has one home, and `tests/practiceRepairPreferences.test.js` pins it.
  */
@@ -169,7 +170,7 @@ export const COACH_PREFERENCE_BREACHED_WEIGHT = 100;
  * day counted no drift at all.
  *
  * `coachPreferenceBreached` (8.6 PR 3b, practice series only) costs one
- * compromise per breached `prefer_keep` dimension (plan §5, decision 1): a
+ * compromise per breached `prefer` dimension (plan §5, decision 1): a
  * coach's soft preference weighs as much as any other accepted compromise, and
  * never as much as moving a published time.
  *
@@ -382,7 +383,7 @@ export function isPracticeSeriesSlot(slot) {
 
 /**
  * The coach-preference term one candidate carries: `breaches` breached
- * `prefer_keep` dimensions, as `practice/coachPreferences.js`
+ * unmet `prefer` rules, as `practice/coachPreferences.js`
  * `judgeCoachPreferenceCandidate()` counts them. Counts only; weighs nothing.
  *
  * **Practice series only**, guarded exactly as {@link changeCountsFor}'s

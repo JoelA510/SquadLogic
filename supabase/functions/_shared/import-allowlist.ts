@@ -22,9 +22,10 @@
  * The finalizers apply the same rule again in SQL (migration 20261022010000),
  * because the staging tables can be written without this function.
  *
- * The evaluations import (E3c) is filtered the same way, against its own short list
- * (`EVALUATION_IMPORT_KEYS`: the registration id and the three values it sets); it declares no
- * fields of the organization's, so (c) does not apply to it.
+ * The practice preference import (Phase D C1, `PRACTICE_PREFERENCE_IMPORT_KEYS`) and the
+ * evaluations import (E3c, `EVALUATION_IMPORT_KEYS`: the registration id and the three values it
+ * sets) are filtered the same way, each against its own short list; neither declares fields of
+ * the organization's, so (c) does not apply to them.
  *
  * Twin of `frontend/src/utils/importAllowlist.js`, which filters the same
  * columns in the browser before upload; `tests/importAllowlistParity.test.js`
@@ -123,6 +124,33 @@ export const COACH_IMPORT_KEYS: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * Keys `finalize_practice_preference_import_job` reads (Phase D C1): one row is one rule. The coach by
+ * `email` (the coach import's key), the team by name (three spellings), the request level, the days,
+ * start times and venues (each a list), the window and the coach's priority. No other column of the
+ * file is kept.
+ */
+export const PRACTICE_PREFERENCE_IMPORT_KEYS: readonly string[] = Object.freeze([
+  'email',
+  'team_name',
+  'team name',
+  'team',
+  'request_level',
+  'weekdays',
+  'days',
+  'day',
+  'start_times',
+  'start_time',
+  'start',
+  'venues',
+  'location',
+  'effective_from',
+  'valid_from',
+  'effective_to',
+  'valid_until',
+  'coach_priority',
+]);
+
+/**
  * Keys `finalize_evaluation_import_job` reads (E3c): the registration id the player import
  * stored, and the three values an evaluations file can set. An evaluations file declares no
  * fields of its own: nothing else of it is kept.
@@ -148,6 +176,8 @@ const KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = Object.freeze(
   players: PLAYER_IMPORT_KEYS,
   coaches: COACH_IMPORT_KEYS,
   evaluations: EVALUATION_IMPORT_KEYS,
+  // No declared fields: a preference file has no entity in Settings, so only these keys are kept.
+  practice_preferences: PRACTICE_PREFERENCE_IMPORT_KEYS,
 });
 
 /**
@@ -162,7 +192,8 @@ export function declaredFieldKey(key: unknown): string {
 
 /**
  * The organization's declared fields that apply to the import type: those of its entity, and none
- * for a type with no entity (the evaluations import declares no fields, however it is called).
+ * for a type with no entity (the evaluations and practice preference imports declare no fields,
+ * however they are called).
  */
 function declaredFor(importType: string, declaredFields: Iterable<string>): string[] {
   return Object.prototype.hasOwnProperty.call(ALLOWLIST_ENTITY_TYPES, importType)

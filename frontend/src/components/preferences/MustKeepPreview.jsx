@@ -7,24 +7,23 @@ import {
 } from '../../utils/coachPreferencePreview.js';
 
 /**
- * The approval-time re-judge (plan §4): which of the coach's teams' CURRENT
- * practice series the decision's `must_keep` would make unsatisfiable. The
- * verdict is `previewMustKeep`, which composes the core rule; this only
- * renders it, and always says "None" explicitly rather than showing nothing.
+ * The acceptance-time re-judge (plan §4): which of the team's CURRENT practice series the
+ * rule, as a must, would make unsatisfiable. The verdict is `previewMustKeep`, which composes the
+ * core rule; this only renders it, and always says "None" explicitly rather than showing nothing.
  */
 export default function MustKeepPreview({ proposal, context, date }) {
-  const { approvedRows, rosterRows, practiceRows, teamNames, locationNames, loadError } = context;
+  const { ruleRows, rosterRows, practiceRows, teamNames, locationNames, loadError } = context;
 
   const outcome = useMemo(() => {
     if (loadError) return { error: loadError.message || 'the team and practice data did not load' };
     try {
       return {
-        preview: previewMustKeep({ proposal, approvedRows, rosterRows, practiceRows, date }),
+        preview: previewMustKeep({ proposal, ruleRows, rosterRows, practiceRows, date }),
       };
     } catch (err) {
       return { error: err?.message || String(err) };
     }
-  }, [proposal, approvedRows, rosterRows, practiceRows, date, loadError]);
+  }, [proposal, ruleRows, rosterRows, practiceRows, date, loadError]);
 
   const teamName = (teamId) => teamNames.get(teamId) ?? `Team ${teamId}`;
   const describe = (placement) =>
@@ -44,7 +43,7 @@ export default function MustKeepPreview({ proposal, context, date }) {
   } else if (!outcome.preview.applies) {
     body = (
       <p className="text-sm m-0">
-        Only a must-keep preference can make a current series unsatisfiable. This decision is{' '}
+        Only a must can make a current series unsatisfiable. This rule is{' '}
         {LEVEL_LABEL[proposal.level] || proposal.level}, so none is.
       </p>
     );
@@ -52,14 +51,9 @@ export default function MustKeepPreview({ proposal, context, date }) {
     const { preview } = outcome;
     body = (
       <>
-        {preview.teamIds.length === 0 && (
-          <p className="text-sm m-0">
-            This coach has no current team assignment, so no team&apos;s series is affected.
-          </p>
-        )}
         {preview.noReference && (
           <p className="text-sm m-0">
-            No specific value: the preference keeps each team&apos;s current series.
+            Keep-current with no practice to keep it from: this condition does nothing yet.
           </p>
         )}
         <p className="text-sm font-semibold m-0" id="must-keep-preview-list-label">
@@ -118,7 +112,7 @@ export default function MustKeepPreview({ proposal, context, date }) {
       data-testid="must-keep-preview"
     >
       <div className="card-head">
-        <h3 id="must-keep-preview-heading">Re-judged at approval</h3>
+        <h3 id="must-keep-preview-heading">Re-judged as a must</h3>
       </div>
       <div className="card-body flex flex-col gap-2">{body}</div>
     </section>
@@ -127,13 +121,13 @@ export default function MustKeepPreview({ proposal, context, date }) {
 
 MustKeepPreview.propTypes = {
   proposal: PropTypes.shape({
+    id: PropTypes.string.isRequired,
     coachId: PropTypes.string.isRequired,
-    dimension: PropTypes.string.isRequired,
+    teamId: PropTypes.string.isRequired,
     level: PropTypes.string.isRequired,
-    value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   }).isRequired,
   context: PropTypes.shape({
-    approvedRows: PropTypes.array.isRequired,
+    ruleRows: PropTypes.array.isRequired,
     rosterRows: PropTypes.array.isRequired,
     practiceRows: PropTypes.array.isRequired,
     teamNames: PropTypes.instanceOf(Map).isRequired,

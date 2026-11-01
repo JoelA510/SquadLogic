@@ -25,7 +25,7 @@
  * 5. T's duration is X's;
  * 6. `marginal(T, X, R∖{T}, coachDays(R∖{T}))` is not null — the repair's own
  *    clash definition, against every other recommendation R and the frozen plan;
- * 7. T's `must_keep` preferences hold, and the change budget holds over R with
+ * 7. T's `must` preferences hold, and the change budget holds over R with
  *    T moved;
  * 8. X is cross-venue only if T is currently TIME TBD: the objective prices a
  *    venue change at `changedSurface = 1`, so same-venue-first has to stay
@@ -33,7 +33,7 @@
  *
  * (6) and "X is one of T's candidates" are one test: a candidate list already
  * holds only shapes of T's duration, off the lost ground, clear of the frozen
- * plan and inside `must_keep`, so the `must_keep` half of (7) is read from it.
+ * plan and inside `must`, so the `must` half of (7) is read from it.
  *
  * `gain(T)` = the cost of T's current recommendation (its marginal, or
  * `tbdCost` if TIME TBD) − `marginal(T, X, …).cost`, from the one objective;

@@ -30,6 +30,24 @@ const playerNameOf = (player) =>
   player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || 'Unknown Player';
 
 /**
+ * What the skill line says for one player under the organization's options: the tier (the run's
+ * skill, else its skill rating or tier) with Skill Tier on, else the record's rating with Player
+ * Rating on; 'Unrated' when the option that is on has nothing to show.
+ * @param {any} player
+ * @param {{ tierOn: boolean, ratingOn: boolean }} options
+ */
+function skillTextOf(player, { tierOn, ratingOn }) {
+  const rating = Number.isFinite(player.rating) ? String(player.rating) : null;
+  if (tierOn) {
+    const tier = player.skillIsRating
+      ? player.skillRating || player.skill_tier
+      : player.skill || player.skillRating || player.skill_tier;
+    return tier || (ratingOn ? rating : null) || 'Unrated';
+  }
+  return ratingOn ? (rating ?? 'Unrated') : 'Unrated';
+}
+
+/**
  * One player's row: the full name and, with the Skill Tier option on, the skill (they wrap, never
  * clip), the marks, a drag handle and a Move button. The handle is its own button, so the row
  * holds no nested control and a keyboard reaches both: Space on the handle lifts the player, and
@@ -57,11 +75,16 @@ const PlayerCard = ({ player, onRequestMove }) => {
     transition,
   };
 
+  // The skill line shows the skill tier with the Skill Tier option on and the rating with Player
+  // Rating on; with both off there is no line. Each shows only its own: a rating the directory
+  // filled in as the entry's skill (`skillIsRating`) is not a tier.
   const { isEnabled } = useFeatures();
-  const showSkill = isEnabled(FEATURE_FLAGS.SKILL_TIER);
+  const tierOn = isEnabled(FEATURE_FLAGS.SKILL_TIER);
+  const ratingOn = isEnabled(FEATURE_FLAGS.PLAYER_RATING);
+  const showSkill = tierOn || ratingOn;
 
   const playerName = playerNameOf(player);
-  const playerSkill = player.skill || player.skillRating || player.skill_tier || 'Unrated';
+  const playerSkill = skillTextOf(player, { tierOn, ratingOn });
 
   return (
     // The whole row takes a pointer drag (a mouse can pick a player up anywhere, as it always

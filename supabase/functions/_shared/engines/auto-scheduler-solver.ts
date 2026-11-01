@@ -352,8 +352,10 @@ export interface Unplaced {
   /** The practice unit left unplaced, set only when it differs from the team id. */
   unitId?: string;
   reason: string;
-  /** For `coach-preference`: the `must_keep` dimensions no legal slot kept. */
+  /** For `coach-preference`: the dimensions of the `must` rules no legal slot meets. */
   dimensions?: string[];
+  /** For `coach-preference`: the ids of the `must` rules no legal slot meets (Phase D C1). */
+  rules?: string[];
   /** For `verify-refused`: the rule the proposed placement broke ({@link VerifyRefusalRule}). */
   rule?: string;
   /**
@@ -364,11 +366,11 @@ export interface Unplaced {
 }
 
 // ---------------------------------------------------------------------------
-// Coach preferences (8.6 PR 3b, PR 8; plan §5 decision 3)
+// Practice preference rules (Phase D C1; 8.6 PR 3b, PR 8; plan §5 decision 3)
 // ---------------------------------------------------------------------------
 //
-// `must_keep` is a hard filter on NEW placements: `admissible` refuses a slot
-// whose verdict is violated, everywhere the search seats a team. `prefer_keep`
+// A `must` rule is a hard filter on NEW placements: `admissible` refuses a slot
+// whose verdict is violated, everywhere the search seats a team. A `prefer` rule
 // is a lexicographic tiebreak: the greedy seed takes the legal slot with the
 // fewest breaches (slot order breaking ties, which is today's order), and the
 // climb accepts an equal-scoring move that breaches less. Locked rows are
@@ -383,7 +385,7 @@ function breachesOf(gate: PreferenceGate, teamId: string, slotId: string): numbe
   return gate.verdicts.get(teamId)?.get(slotId)?.preferKeepBreaches ?? 0;
 }
 
-/** Total `prefer_keep` breaches of a set of new placements. */
+/** Total `prefer` breaches (one per unmet rule) of a set of new placements. */
 export function totalBreaches(gate: PreferenceGate, placements: Placement[]): number {
   let total = 0;
   for (const p of placements) total += breachesOf(gate, p.teamId, p.slotId);
@@ -403,7 +405,7 @@ function admissible(
   return checkHardConstraints(team, slot, coachAssignments, slotOccupants, slotCapacity, teamHolds);
 }
 
-/** The rule `verify` names for a placement an approved coach `must_keep` preference refuses. */
+/** The rule `verify` names for a placement a `must` preference rule refuses. */
 export const MUST_KEEP_RULE = 'must-keep';
 
 /**
@@ -1008,7 +1010,7 @@ function generateGreedySeed(
     });
 
   // 3. Greedy assignment, placeable units only. Among the admissible slots
-  //    (must_keep already filtered), fewest prefer_keep breaches first, then
+  //    (a must rule already filtered), fewest prefer breaches first, then
   //    slot order -- so with no preferences this is the first legal slot.
   for (const unit of sorted) {
     if (assignedUnitIds.has(unit.unitId)) continue;
@@ -1060,7 +1062,7 @@ function generateGreedySeed(
  *     fewer weekdays than the division's practices a week: `not-enough-days`, since no choice of
  *     slots could put them on different days. Only for a division that wants several a week; one
  *     practice a week with no slot keeps the search's own reason;
- *   * legal slots before the `must_keep` filter and none after: TIME TBD `coach-preference`,
+ *   * legal slots before the `must` filter and none after: TIME TBD `coach-preference`,
  *     naming the dimensions;
  *   * otherwise the search's own reason.
  */
@@ -1122,7 +1124,12 @@ function explainUnplaced(
     const dimensions = [
       ...new Set(legal.flatMap((slot) => verdicts.get(slot.id)?.violatedDimensions ?? [])),
     ].sort();
-    return { ...entry, reason: COACH_PREFERENCE_TBD_REASON, dimensions };
+    // The rules no legal slot meets: every `must` rule refused at some legal slot. A rule some legal
+    // slot meets is not why the team has none, so a rule is named only when it left a slot out.
+    const rules = [
+      ...new Set(legal.flatMap((slot) => verdicts.get(slot.id)?.violatedRules ?? [])),
+    ].sort();
+    return { ...entry, reason: COACH_PREFERENCE_TBD_REASON, dimensions, rules };
   });
 }
 
@@ -1144,7 +1151,7 @@ export interface OptimizerResult {
    * team that needed several appears once per practice it did not get).
    */
   unassigned: Unplaced[];
-  /** `prefer_keep` breaches across the returned placements (0 with no preferences). */
+  /** `prefer` breaches (one per unmet rule) across the returned placements (0 with no rules). */
   preferKeepBreaches: number;
   /** Locked rows whose slot is not in this run (still locked). */
   lockedOutsideRun: LockedOccupant[];

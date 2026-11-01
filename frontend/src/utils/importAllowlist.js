@@ -9,8 +9,8 @@
  * `tests/importAllowlistParity.test.js` holds the two copies equal, and the key
  * lists equal to what the latest SQL finalizers read. Change both copies, and
  * the SQL, or none. Why an allowlist, and what each list holds: the Edge copy's
- * header, and docs/architecture/gotsport-import-contract.md. The evaluations import (E3c) has its
- * own short list, `EVALUATION_IMPORT_KEYS`, and no declared fields.
+ * header, and docs/architecture/gotsport-import-contract.md. The practice preference (Phase D C1)
+ * and evaluations (E3c) imports have short lists of their own and no declared fields.
  */
 import { HEADER_ALIASES } from './telemetryUtils.js';
 
@@ -105,6 +105,33 @@ export const COACH_IMPORT_KEYS = Object.freeze([
 ]);
 
 /**
+ * Keys `finalize_practice_preference_import_job` reads (Phase D C1): one row is one rule. The coach by
+ * `email` (the coach import's key), the team by name (three spellings), the request level, the days,
+ * start times and venues (each a list), the window and the coach's priority. No other column of the
+ * file is kept.
+ */
+export const PRACTICE_PREFERENCE_IMPORT_KEYS = Object.freeze([
+  'email',
+  'team_name',
+  'team name',
+  'team',
+  'request_level',
+  'weekdays',
+  'days',
+  'day',
+  'start_times',
+  'start_time',
+  'start',
+  'venues',
+  'location',
+  'effective_from',
+  'valid_from',
+  'effective_to',
+  'valid_until',
+  'coach_priority',
+]);
+
+/**
  * Keys `finalize_evaluation_import_job` reads (E3c): the registration id the player import
  * stored, and the three values an evaluations file can set. An evaluations file declares no
  * fields of its own: nothing else of it is kept.
@@ -131,6 +158,8 @@ const KEYS_BY_TYPE = Object.freeze({
   players: PLAYER_IMPORT_KEYS,
   coaches: COACH_IMPORT_KEYS,
   evaluations: EVALUATION_IMPORT_KEYS,
+  // No declared fields: a preference file has no entity in Settings, so only these keys are kept.
+  practice_preferences: PRACTICE_PREFERENCE_IMPORT_KEYS,
 });
 
 /**
@@ -146,7 +175,8 @@ export function declaredFieldKey(key) {
 
 /**
  * The organization's declared fields that apply to the import type: those of its entity, and none
- * for a type with no entity (the evaluations import declares no fields, however it is called).
+ * for a type with no entity (the evaluations and practice preference imports declare no fields,
+ * however they are called).
  * @param {string} importType
  * @param {Iterable<string>} declaredFields
  * @returns {string[]}

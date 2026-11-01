@@ -194,7 +194,7 @@ function timeToMinutes(value, what) {
  * @param {Array<Object>} rows.practiceAssignments - the season's CURRENT rows: the pre-apply snapshot
  * @param {{kind: 'blackout', blackout: Object} | {kind: 'retirement', field: Object}} rows.loss
  * @param {Array<Object>} [rows.teamCoachAssignments] - `team_coach_assignments` rows
- * @param {Array<Object>} [rows.coachPreferences] - `coach_practice_preferences` rows
+ * @param {Array<Object>} [rows.coachPreferences] - `coach_practice_preferences` rows (rules; only `in_force` ones count)
  * @param {Array<Object>} [rows.fieldClosures] - `field_closures` rows: the org's blackouts
  * @param {Array<Object>} [rows.practiceExceptions] - `practice_exceptions` rows, live and
  *   withdrawn (3b PR 11d): `id, assignment_id, window, kind, tbd_reason, practice_slot_id,
@@ -346,16 +346,25 @@ export function buildPracticeRepairInput(rows) {
     coachesByTeam[teamId] = [...new Set([...lead, ...assistants])].sort();
   }
   const preferenceRows = rows.coachPreferences ?? [];
-  // An approved row is the one in force (one per coach and dimension, a
-  // replaced row is `superseded`): the Edge loader's contract
-  // (`coach-preference-load.ts`), which does not date-filter it either.
+  // A row in force is a rule (a removed or replaced row is history): the Edge loader's contract
+  // (`coach-preference-load.ts`). The rule's own window is judged by the repair, on the day each
+  // series' window starts.
   const coachPreferences = preferenceRows
-    .filter((row) => row.status === 'approved')
+    .filter((row) => row.status === 'in_force')
     .map((row) => ({
+      id: id(row.id),
       coachId: id(row.coach_id),
-      dimension: row.dimension,
+      teamId: id(row.team_id),
       level: row.level,
-      value: row.value ?? null,
+      weekdays: row.weekdays ?? null,
+      startMinutes: row.start_minutes ?? null,
+      venueIds: row.venue_ids ? row.venue_ids.map((venue) => String(venue).toLowerCase()) : null,
+      keepWeekday: row.keep_weekday === true,
+      keepStart: row.keep_start === true,
+      keepVenue: row.keep_venue === true,
+      coachPriority: row.coach_priority ?? null,
+      effectiveFrom: row.effective_from ?? null,
+      effectiveTo: row.effective_to ?? null,
     }));
 
   /* -- daylight ------------------------------------------------------------ */
@@ -418,7 +427,7 @@ export function buildPracticeRepairInput(rows) {
               count: 0,
               note: 'no portable-lighting windows supplied: no date is exempt from the daylight limit (their table is 8.9 D14 PR B)',
             },
-      coachPreferences: { rowsRead: preferenceRows.length, approved: coachPreferences.length },
+      coachPreferences: { rowsRead: preferenceRows.length, inForce: coachPreferences.length },
       closures: closed.declared,
       exceptions: exceptionsRead.declared,
       coaches:

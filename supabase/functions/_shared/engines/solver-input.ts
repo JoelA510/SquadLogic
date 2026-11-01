@@ -20,7 +20,7 @@
  * requires equal placements.
  *
  * **A verdict that says nothing is left out.** The preference gate holds a verdict per constrained
- * team per slot; one with no `must_keep` breach, no `prefer_keep` breach and no dimension is what
+ * team per slot; one with no `must` breach, no `prefer` breach, no dimension and no rule is what
  * the solver assumes of a slot the map does not name, so it is not written. That is the whole of
  * the compaction, and the digest is over the compact form.
  *
@@ -121,7 +121,8 @@ function encodeValue(value: unknown, path: string): Json {
 const isDefaultVerdict = (verdict: SlotVerdict): boolean =>
   !verdict.mustKeepViolated &&
   verdict.preferKeepBreaches === 0 &&
-  (verdict.violatedDimensions?.length ?? 0) === 0;
+  (verdict.violatedDimensions?.length ?? 0) === 0 &&
+  (verdict.violatedRules?.length ?? 0) === 0;
 
 /** The gate without the verdicts that say nothing (see the module note). */
 function compactGate(gate: PreferenceGate): PreferenceGate {

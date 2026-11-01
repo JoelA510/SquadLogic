@@ -74,6 +74,60 @@ describe('RosterManager view', () => {
     );
   });
 
+  // The line follows two options: Skill Tier shows the tier, Player Rating shows the rating, and each
+  // shows only its own. A rating the directory filled in as the entry's skill is not a tier.
+  describe('the skill line under the organization options', () => {
+    const teams = () => [
+      {
+        id: 't1',
+        name: 'U4A',
+        division: 'U4',
+        players: [
+          { id: 'a', name: 'Tier And Rating', skill: 'advanced', rating: 4 },
+          { id: 'b', name: 'Rating Only', skill: '2', skillIsRating: true, rating: 2 },
+          { id: 'c', name: 'Nothing On File' },
+        ],
+      },
+    ];
+    const lineOf = (id) => within(screen.getByTestId(`player-card-${id}`));
+    const show = () => render(<RosterManager initialTeams={teams()} onTeamsChange={() => {}} />);
+
+    it('Player Rating on and Skill Tier off shows the rating and no tier', () => {
+      org.stored = { player_rating: true };
+      show();
+      expect(lineOf('a').getByText('Skill: 4')).toBeInTheDocument();
+      expect(lineOf('a').queryByText(/advanced/)).toBeNull();
+      expect(screen.getByTestId('player-card-a')).toHaveAttribute(
+        'aria-label',
+        'Tier And Rating, Skill: 4'
+      );
+      expect(lineOf('b').getByText('Skill: 2')).toBeInTheDocument();
+      expect(lineOf('c').getByText('Skill: Unrated')).toBeInTheDocument();
+    });
+
+    it('Skill Tier on and Player Rating off shows the tier, and a rating is not shown as one', () => {
+      org.stored = { skill_tier: true, player_rating: false };
+      show();
+      expect(lineOf('a').getByText('Skill: advanced')).toBeInTheDocument();
+      expect(lineOf('b').getByText('Skill: Unrated')).toBeInTheDocument();
+      expect(lineOf('b').queryByText('Skill: 2')).toBeNull();
+    });
+
+    it('both on shows the tier, else the rating', () => {
+      org.stored = { skill_tier: true, player_rating: true };
+      show();
+      expect(lineOf('a').getByText('Skill: advanced')).toBeInTheDocument();
+      expect(lineOf('b').getByText('Skill: 2')).toBeInTheDocument();
+      expect(lineOf('c').getByText('Skill: Unrated')).toBeInTheDocument();
+    });
+
+    it('both off shows no skill line at all', () => {
+      org.stored = {};
+      show();
+      for (const id of ['a', 'b', 'c']) expect(lineOf(id).queryByText(/Skill:/)).toBeNull();
+    });
+  });
+
   it('gives every player a named drag handle and a named Move button, and every team a heading', () => {
     render(<RosterManager initialTeams={makeTeams()} onTeamsChange={() => {}} />);
     expect(screen.getByRole('button', { name: `Drag ${longName}` })).toBeInTheDocument();

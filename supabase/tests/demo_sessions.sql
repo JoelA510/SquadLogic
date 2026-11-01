@@ -569,11 +569,11 @@ SELECT is(
           -- their demo, and the helpers below end it at expiry), or pure
         'admin_activate_season', 'admin_assign_team_coach', 'admin_bulk_update_players', 'admin_cancel_game_assignment', 'admin_cancel_practice_assignment',
         'admin_change_member_role', 'admin_create_field', 'admin_create_field_blackout', 'admin_create_location',
-        'admin_create_player', 'admin_create_season_from', 'admin_decide_coach_practice_preference', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
+        'admin_create_player', 'admin_create_season_from', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
         'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_program', 'admin_delete_team',
         'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
         'admin_retire_field', 'admin_retire_field_subunit', 'admin_retire_location', 'admin_select_field_availability_scenario',
-        'admin_set_coach_practice_preference', 'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
+        'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
         'admin_set_division_birthdate_window', 'admin_set_practice_slot_division', 'admin_set_season_timezone', 'admin_unretire_field', 'admin_unretire_field_subunit',
         'admin_unretire_location', 'admin_update_coach_status', 'admin_update_field', 'admin_update_field_blackout',
         'admin_update_draft_season', 'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
@@ -597,7 +597,10 @@ SELECT is(
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
         'admin_update_facility_permit', 'get_facility_permits',
         -- 20261108020000: the TIME TBD list, read, and its practice rows rebuilt (and the call-stack-guarded sync under it), by an admin of the organization.
-        'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices'
+        'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices',
+        -- 20261112010000: practice preference rules and their import, admin RPCs.
+        'admin_accept_all_musts', 'admin_add_practice_preference', 'admin_decide_must_preference',
+        'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -607,11 +610,11 @@ SELECT is(
           'initialize_new_tenant', 'create_org_invite', 'redeem_org_invite', 'start_demo_session',
         'admin_activate_season', 'admin_assign_team_coach', 'admin_bulk_update_players', 'admin_cancel_game_assignment', 'admin_cancel_practice_assignment',
         'admin_change_member_role', 'admin_create_field', 'admin_create_field_blackout', 'admin_create_location',
-        'admin_create_player', 'admin_create_season_from', 'admin_decide_coach_practice_preference', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
+        'admin_create_player', 'admin_create_season_from', 'admin_decide_practice_lighting_override', 'admin_delete_coaches',
         'admin_delete_field', 'admin_delete_field_blackout', 'admin_delete_players', 'admin_delete_program', 'admin_delete_team',
         'admin_merge_programs', 'admin_publish_schedule_baseline', 'admin_remove_member',
         'admin_retire_field', 'admin_retire_field_subunit', 'admin_retire_location', 'admin_select_field_availability_scenario',
-        'admin_set_coach_practice_preference', 'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
+        'admin_set_division_program', 'admin_set_location_coordinates', 'admin_set_org_heat_settings', 'admin_set_practice_lighting_override',
         'admin_set_division_birthdate_window', 'admin_set_practice_slot_division', 'admin_set_season_timezone', 'admin_unretire_field', 'admin_unretire_field_subunit',
         'admin_unretire_location', 'admin_update_coach_status', 'admin_update_field', 'admin_update_field_blackout',
         'admin_update_draft_season', 'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
@@ -635,7 +638,10 @@ SELECT is(
         'admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_set_facility_permit_file',
         'admin_update_facility_permit', 'get_facility_permits',
         -- 20261108020000: the TIME TBD list, read, and its practice rows rebuilt (and the call-stack-guarded sync under it), by an admin of the organization.
-        'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices'
+        'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices',
+        -- 20261112010000: practice preference rules and their import, admin RPCs.
+        'admin_accept_all_musts', 'admin_add_practice_preference', 'admin_decide_must_preference',
+        'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

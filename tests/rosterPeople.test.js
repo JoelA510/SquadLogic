@@ -39,7 +39,19 @@ describe('applyRosterDirectory', () => {
     expect(result.players.map((p) => p.name)).toEqual(['Avery Alder', 'Blake Birch']);
     // A rating is the skill when the run carries none; with none, the row stays unrated.
     expect(result.players.map((p) => p.skill)).toEqual(['3', undefined]);
+    // It also travels as `rating`, and the skill it filled is marked as a rating, not a tier.
+    expect(result.players.map((p) => p.rating)).toEqual([3, undefined]);
+    expect(result.players.map((p) => p.skillIsRating)).toEqual([true, undefined]);
     expect(coachLabel(result)).toBe('Coaches: Coach Elm, Coach Fern');
+  });
+
+  it('a skill the run carries is kept and is not marked as a rating, whatever the record rates', () => {
+    const [result] = applyRosterDirectory(
+      [team({ players: [{ id: 'p1', name: 'A B', skill: 'advanced' }] })],
+      directory([['p1', { name: 'A B', rating: 2 }]])
+    );
+    expect(result.players[0]).toMatchObject({ skill: 'advanced', rating: 2 });
+    expect(result.players[0].skillIsRating).toBeUndefined();
   });
 
   it('POSITIVE CONTROL: the same team without the directory reads as the owner saw it', () => {

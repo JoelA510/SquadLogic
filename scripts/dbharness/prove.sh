@@ -33,8 +33,8 @@ R10="$REPO/docs/sql/20260923000000_revert.sql"
 # #64: the practice writer that prunes superseded rows.
 M11="$REPO/supabase/migrations/20260924000000_practice_writer_prunes_superseded.sql"
 R11="$REPO/docs/sql/20260924000000_revert.sql"
-# 8.6 PR 3b PR 1: coach practice preferences.
-M13="$REPO/supabase/migrations/20260927000000_coach_practice_preferences.sql"
+# 8.6 PR 3b PR 1: coach practice preferences. Its forward migration's objects were replaced by
+# 20261112010000 ($M61): only its revert is planted.
 R13="$REPO/docs/sql/20260927000000_revert.sql"
 # The production RLS drift reconcile, whose smoke replays production's drift.
 # Its function body is replaced by 20261018030000 ($M24): aim plants there.
@@ -207,6 +207,12 @@ R59="$REPO/docs/sql/20261111010000_revert.sql"
 # grid, the solver-built schedule of U4 and U5 to U8, the demo start replaced to write it), and the revert.
 M60="$REPO/supabase/migrations/20261110010000_demo_practices.sql"
 R60="$REPO/docs/sql/20261110010000_revert.sql"
+# Phase D, C1: practice preferences are rules per team (the table's new shape and CHECKs, the five admin
+# RPCs, the preference import and its finalizer, the backfill of the old scalar rows), and the revert. The
+# plants that aimed at the bodies it replaces (create_import_job, import_allowed_keys, admin_delete_team) are
+# re-aimed here.
+M61="$REPO/supabase/migrations/20261112010000_practice_preference_rules.sql"
+R61="$REPO/docs/sql/20261112010000_revert.sql"
 # E3c: the evaluations import (years played, skill tier and rating by registration id, onto a season's
 # players), its finalizer, and the revert. It replaces create_import_job, import_allowed_keys and the two
 # deferred-apply lifecycle functions, so the plant that aimed at create_import_job's body in $M59 is
@@ -2933,36 +2939,10 @@ RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';" \
   "revert 20260924000000: the pruning writer, or a second overload, survived its own revert" \
   "(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
 
-# **8.6 PR 3b PR 1: coach practice preferences.** One plant per claim the
-# smoke's evidence prints. The three function-body anchors sit in the only
-# definition of their function (anchor_liveness: LIVE); the policy and the
-# index are not function bodies (NA).
-plant "M13 the decide RPC stops checking the caller is an org admin" "$M13" \
-  "    IF NOT FOUND OR NOT public.is_org_admin(v_row.organization_id) THEN" \
-  "    IF NOT FOUND THEN" \
-  "FAIL smoke 20260927000000"
-
-plant "M13 the read policy lets every signed-in user read every coach's preferences" "$M53" \
-  "ALTER POLICY \"Coach practice preferences: admins read\" ON public.coach_practice_preferences
-    USING (public.is_org_admin(organization_id));" \
-  "ALTER POLICY \"Coach practice preferences: admins read\" ON public.coach_practice_preferences
-    USING (true);" \
-  "FAIL smoke 20260927000000"
-
-plant "M13 the decide RPC stops auditing" "$M13" \
-  "    PERFORM public.record_audit_event(
-        v_row.organization_id,
-        'coach_preference.' || v_status," \
-  "    PERFORM jsonb_build_array(
-        v_row.organization_id,
-        'coach_preference.' || v_status," \
-  "FAIL smoke 20260927000000"
-
-plant "M13 the one-approved index stops being unique" "$M13" \
-  "CREATE UNIQUE INDEX IF NOT EXISTS coach_practice_preferences_one_approved" \
-  "CREATE INDEX IF NOT EXISTS coach_practice_preferences_one_approved" \
-  "FAIL smoke 20260927000000"
-
+# **8.6 PR 3b PR 1: coach practice preferences.** The four plants that stood here (the decide RPC's admin
+# check, the read policy, the decide audit, the one-approved index) proved claims about objects
+# 20261112010000 replaced; the rules' own plants are below ("M61 ..."). R13 stays: the revert of the
+# original migration is still checked on a database built to it.
 # Its revert destroys every preference, so the warning is the claim. The seed
 # plants 3 rows across 2 coaches; counting non-distinct coaches prints 3.
 plant "R13 the preference warning stops counting coaches distinctly" "$R13" \
@@ -4002,7 +3982,7 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
 # again to count the TIME TBD rows its cascade takes, since when they are aimed at $M57; the three RSVP plants (the
 # opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
 # game lock) went with the RSVP function and table.
-plant "M35 the delete withdraws nothing" "$M57" \
+plant "M35 the delete withdraws nothing" "$M61" \
   "                                         WHERE pa.team_id = p_team_id))
            AND pe.withdrawn_at IS NULL
         RETURNING pe.*" \
@@ -4011,12 +3991,12 @@ plant "M35 the delete withdraws nothing" "$M57" \
         RETURNING pe.*" \
   "smoke 20261021030000"
 
-plant "M35 the delete archives nothing onto the run" "$M57" \
+plant "M35 the delete archives nothing onto the run" "$M61" \
   "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "smoke 20261021030000"
 
-plant "M35 the delete audits no series" "$M57" \
+plant "M35 the delete audits no series" "$M61" \
   "            'practice.cancelled',
             'practice_assignments',
             v_pa.id," \
@@ -4025,19 +4005,19 @@ plant "M35 the delete audits no series" "$M57" \
             v_pa.id," \
   "smoke 20261021030000"
 
-plant "M35 the delete leaves players.team_id" "$M57" \
+plant "M35 the delete leaves players.team_id" "$M61" \
   "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
   "    PERFORM 1;" \
   "smoke 20261021030000"
 
-plant "M35 team.deleted records no counts" "$M57" \
+plant "M35 team.deleted records no counts" "$M61" \
   "            || v_counts
 " \
   "            || '{}'::jsonb
 " \
   "smoke 20261021030000"
 
-plant "M35 the delete lets a coach through" "$M57" \
+plant "M35 the delete lets a coach through" "$M61" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
         -- Production's own text" \
   "    IF false THEN
@@ -4233,7 +4213,7 @@ plant "M39 create_team_message is left behind" "$M39" \
   "" \
   "smoke 20261022030000"
 
-plant "M39 admin_delete_team still counts the RSVP table" "$M57" \
+plant "M39 admin_delete_team still counts the RSVP table" "$M61" \
   "        'team_players_deleted',
             (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id)," \
   "        'team_players_deleted',
@@ -5104,6 +5084,86 @@ plant "M60 the division's practice length is not copied" "$M60" \
       FROM demo_seed.divisions d;" \
   "smoke 20261110010000"
 
+# Practice preference rules (20261112010000; plan docs/changes/2026-10-26-coach-preference-rules.md, "Revised
+# 2026-10-27"; Phase D, C1). One plant per claim run.sh prints, and two on the revert. Three were run by hand
+# against a scratch cluster built with the planted migration (the add RPC's admin check, Accept all's count
+# compare, the backfill's dont_care filter); the others are resolved by PLANT_ANCHORS_ONLY=1 and were not run.
+#   - the add RPC drops its admin check: a signed-in non-member writes a rule (the smoke's 12 of 12 is 11);
+#   - Accept all stops comparing the confirmed count: it accepts a file the admin was not shown;
+#   - the table stops refusing a must nobody accepted (the "a must is a rule an admin accepted" CHECK);
+#   - the set helper stops refusing a duplicate value, so the table keeps {TUE, TUE};
+#   - the add RPC stops auditing;
+#   - a blank team expands to one team only (a coach of two teams gets one rule);
+#   - a re-import replaces admin rules too (the `source = 'import'` filter is gone);
+#   - a completed season takes a preference file;
+#   - the backfill copies a dont_care row (the migration's own count check refuses, so the stage's migration
+#     fails to apply onto the planted rows).
+plant "M61 the add RPC stops checking the caller is an org admin" "$M61" \
+  "    IF NOT FOUND OR auth.uid() IS NULL OR NOT public.is_org_admin(v_team.organization_id) THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin adds a practice preference' USING ERRCODE = '42501';" \
+  "    IF NOT FOUND OR auth.uid() IS NULL OR false THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin adds a practice preference' USING ERRCODE = '42501';" \
+  "smoke 20261112010000"
+
+plant "M61 Accept all stops comparing the confirmed count" "$M61" \
+  "    IF cardinality(v_ids) <> p_expected_count THEN" \
+  "    IF false THEN" \
+  "smoke 20261112010000"
+
+plant "M61 the table accepts a must nobody accepted" "$M61" \
+  "        CHECK ((level = 'must') = COALESCE(must_decision = 'accepted', false))," \
+  "        CHECK (true)," \
+  "smoke 20261112010000"
+
+plant "M61 the table stops refusing a duplicate value in a set" "$M61" \
+  "        AND cardinality(p_values) = (SELECT count(DISTINCT v) FROM unnest(p_values) v)" \
+  "        AND true" \
+  "smoke 20261112010000"
+
+plant "M61 the add RPC stops auditing" "$M61" \
+  "    PERFORM public.record_audit_event(
+        v_row.organization_id, 'practice_preference.added', 'coach_practice_preference', v_row.id," \
+  "    PERFORM jsonb_build_array(
+        v_row.organization_id, 'practice_preference.added', 'coach_practice_preference', v_row.id," \
+  "smoke 20261112010000"
+
+plant "M61 a blank team expands to one team only" "$M61" \
+  "                SELECT array_agg(DISTINCT a.team_id ORDER BY a.team_id) INTO v_team_ids" \
+  "                SELECT (array_agg(DISTINCT a.team_id ORDER BY a.team_id))[1:1] INTO v_team_ids" \
+  "smoke 20261112010000"
+
+plant "M61 a re-import replaces admin rules too" "$M61" \
+  "           AND source = 'import'
+           AND status = 'in_force'
+           AND team_id = ANY (v_teams_named)" \
+  "           AND status = 'in_force'
+           AND team_id = ANY (v_teams_named)" \
+  "smoke 20261112010000"
+
+plant "M61 a completed season takes a preference file" "$M61" \
+  "    IF v_season_status = 'completed' THEN
+        RAISE EXCEPTION 'Season % is completed and takes no import', v_season_settings_id" \
+  "    IF false THEN
+        RAISE EXCEPTION 'Season % is completed and takes no import', v_season_settings_id" \
+  "smoke 20261112010000"
+
+plant "M61 the backfill copies a dont_care row" "$M61" \
+  "    SELECT * FROM public.coach_practice_preferences WHERE level <> 'dont_care'" \
+  "    SELECT * FROM public.coach_practice_preferences WHERE true" \
+  "backfill 20261112010000"
+
+# Its revert drops what the rules cannot be written back as, so it says what it keeps (the warning is checked) and
+# refuses what it would have to guess (the seed plants a multi-value rule and a disagreement).
+plant "R61 the rules warning stops counting teams distinctly" "$R61" \
+  "count(DISTINCT team_id) FILTER (WHERE status = 'in_force')," \
+  "count(team_id) FILTER (WHERE status = 'in_force')," \
+  "revert 20261112010000: planted 8 rules in force"
+
+plant "R61 the revert stops refusing a rule with two values" "$R61" \
+  "    IF v_multi > 0 THEN" \
+  "    IF false THEN" \
+  "revert 20261112010000: it wrote a rule holding two weekdays back as a scalar row"
+
 # The evaluations import (20261113010000; plan docs/changes/2026-10-27-season-enrollment.md, E3c). Three
 # plants, each executed by hand against the smoke and supabase/tests/evaluations_import.sql (both red), and
 # against the mock twin with tests/mockEvaluationsImport.test.js (and, for the second, the E2E feature):
@@ -5221,10 +5281,6 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"]="R11 the superseded-row warning counts runs holding none"
   ["(checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"]="M12 teams without practice are listed from the payload, not the roster"
   ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
-  ["(checked) only an org admin decides a coach practice preference; a signed-in non-member approving is refused"]="M13 the decide RPC stops checking the caller is an org admin"
-  ["(checked) only an admin of the organisation reads its coach practice preferences: a signed-in non-member and another organisation's admin read none"]="M13 the read policy lets every signed-in user read every coach's preferences"
-  ["(checked) every coach practice preference write leaves its audit row, 5 of 5, each naming the row it wrote"]="M13 the decide RPC stops auditing"
-  ["(checked) the database refuses a second approved practice preference for one coach and dimension"]="M13 the one-approved index stops being unique"
   ["(checked) only an org admin withdraws a lighting override; its requester and another signed-in user are refused"]="M45 withdraw admits the requester again"
   ["(checked) only an org admin decides a lighting override; a signed-in non-member approving is refused, their own request or another's"]="M19 the decide RPC stops checking the caller is an org admin"
   ["(checked) the admin who requested a lighting override may not approve it; another admin may"]="M19 the requester may approve their own request"
@@ -5303,6 +5359,14 @@ declare -A CLAIM_PROVER=(
   ["(checked) only an admin reads the coach data, the permits and the roster: a signed-in non-member and another organization's admin read none and are refused each RPC (42501)"]="M53 get_facility_permits admits any signed-in user"
   ["(checked) no role admits a coach: the member and invite role checks lose it, create_org_invite and admin_change_member_role refuse it (22023), and the coach-only functions are gone"]="M53 the member role check keeps coach|M53 create_org_invite accepts the coach role"
   ["(checked) the coach import scopes a coach to its organization, links only this organization's players named by registration id, in file order, and reports the ids that match none"]="M53 the coach finalizer looks a coach up in every organization"
+  ["(checked) only an admin writes a practice preference rule or applies a preference file: a signed-in non-member and another organization's admin are refused each of the six RPCs"]="M61 the add RPC stops checking the caller is an org admin"
+  ["(checked) a must is a rule an admin accepted: the table refuses a must nobody accepted, and Accept all refuses a count that is not the confirmation's"]="M61 Accept all stops comparing the confirmed count|M61 the table accepts a must nobody accepted"
+  ["(checked) the database refuses a rule with an empty or duplicate set, a weekday or minute out of range, another organization's venue, no condition, values with keep-current, or a coach who does not coach the team"]="M61 the table stops refusing a duplicate value in a set"
+  ["(checked) every rule write leaves its audit row, 8 of 8, each naming the rule it wrote"]="M61 the add RPC stops auditing"
+  ["(checked) a preference file makes one rule per row and team (a blank team for a coach of two teams makes two), lists an unknown coach or team and creates neither, and keeps a coach's email off the job"]="M61 a blank team expands to one team only"
+  ["(checked) a re-import replaces the imported rules of the teams the file names and leaves admin rules and other teams alone"]="M61 a re-import replaces admin rules too"
+  ["(checked) a preference file is refused for a completed season"]="M61 a completed season takes a preference file"
+  ["(checked) the backfill gives each old preference row one rule per team its coach coaches today, keeps the old id on the first copy, drops a dont_care row, and keeps a pending, superseded, rejected or teamless row as history"]="M61 the backfill copies a dont_care row"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

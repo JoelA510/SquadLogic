@@ -1,17 +1,15 @@
 -- Revert for 20261113010000_evaluations_import.sql
 --
--- Puts back the four replaced functions as they stood before it (create_import_job as
--- 20261111010000 left it, import_allowed_keys as 20261104010000, mark_import_job_ready_to_apply and
--- cancel_ready_import_job as 20260522130000 with the UTC pin 20261021040000 added), each checked by
--- the md5 of its text at the end; drops finalize_evaluation_import_job and the retention job
--- `cleanup-staging-evaluation-rows`; and puts the job type and staged-row type constraints back
--- without `evaluations`.
+-- Puts back the four replaced functions as 20261112010000 (practice preferences) left them, each
+-- checked by the md5 of its text at the end; drops finalize_evaluation_import_job and the retention
+-- job `cleanup-staging-evaluation-rows`; and puts the job type and staged-row type constraints back
+-- without `evaluations` (the staged-row one keeps `practice_preferences`).
 --
 -- **What it cannot undo.** The years played, skill tiers and ratings an evaluations import wrote
 -- onto players stay on the players: they are ordinary values, editable on the Players page, and
 -- nothing records which were the import's. This revert DELETES the evaluations jobs and their
 -- staged rows (a constraint without `evaluations` cannot hold them), and the NOTICE counts them;
--- their `import.started` and `import.completed` audit rows stay.
+-- their `import.started` and `import.completed` audit rows stay. It touches no preference job or row.
 -- Run it only together with the frontend change it came with.
 
 BEGIN;
@@ -39,7 +37,7 @@ ALTER TABLE public.import_jobs ADD CONSTRAINT import_jobs_job_type_check
 
 ALTER TABLE public.staging_import_rows DROP CONSTRAINT IF EXISTS staging_import_rows_import_type_check;
 ALTER TABLE public.staging_import_rows ADD CONSTRAINT staging_import_rows_import_type_check
-    CHECK (import_type IN ('coaches', 'fields', 'field_availability'));
+    CHECK (import_type IN ('coaches', 'fields', 'field_availability', 'practice_preferences'));
 
 CREATE OR REPLACE FUNCTION public.create_import_job(p_organization_id uuid, p_import_type text, p_file_name text, p_season_settings_id uuid DEFAULT NULL::uuid)
  RETURNS import_jobs
@@ -60,7 +58,7 @@ BEGIN
     IF auth.uid() IS NULL OR p_organization_id IS NULL OR NOT public.is_org_admin(p_organization_id) THEN
       RAISE EXCEPTION 'Only organization admins can create import jobs' USING ERRCODE='42501';
     END IF;
-    IF v_import_type NOT IN ('players', 'coaches', 'fields', 'field_availability') THEN
+    IF v_import_type NOT IN ('players', 'coaches', 'fields', 'field_availability', 'practice_preferences') THEN
       RAISE EXCEPTION 'invalid import type: %', p_import_type USING ERRCODE='22023';
     END IF;
     v_file_name := regexp_replace(v_file_name, '[/\\:]+', '_', 'g');
@@ -108,14 +106,62 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.create_import_job(uuid, text, text, uuid) IS
-    'Admin-only: start an import job for the named season (none named: the organization''s active season), fixed now. A player or coach import may name the active season or a draft; a field import only the active season; a completed season is refused (22023, season_completed). 20261111010000 (was active-only since 20261101010000).';
+  'Admin-only: start an import job for the named season (none named: the organization''s active season), fixed now. A player, coach or practice preference import may name the active season or a draft; a field import only the active season; a completed season is refused (22023, season_completed). 20261112010000 (the practice_preferences type; 20261111010000 before it).';
+
+CREATE OR REPLACE FUNCTION public.mark_import_job_ready_to_apply(p_import_job_id uuid, p_import_type text, p_validation_errors jsonb DEFAULT '[]'::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET "TimeZone" TO 'UTC'
+AS $function$
+DECLARE v_job public.import_jobs%ROWTYPE; v_import_type text:=lower(NULLIF(btrim(COALESCE(p_import_type,'')),'')); v_result jsonb; v_staged_rows integer;
+BEGIN
+  IF v_import_type NOT IN ('coaches','fields','field_availability','practice_preferences') THEN RAISE EXCEPTION 'Deferred apply is only available for coach, field, field_availability, and practice_preferences imports' USING ERRCODE='22023'; END IF;
+  SELECT * INTO v_job FROM public.import_jobs WHERE id=p_import_job_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Import job % not found', p_import_job_id USING ERRCODE='P0002'; END IF;
+  IF NOT public.is_org_admin(v_job.organization_id) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE='42501'; END IF;
+  IF v_import_type IN ('coaches','practice_preferences') AND v_job.job_type<>'registration' THEN RAISE EXCEPTION 'Import job % is %, not registration', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
+  IF v_import_type='fields' AND v_job.job_type<>'fields' THEN RAISE EXCEPTION 'Import job % is %, not fields', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
+  IF v_import_type='field_availability' AND v_job.job_type<>'field_availability' THEN RAISE EXCEPTION 'Import job % is %, not field_availability', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
+  SELECT count(*) INTO v_staged_rows FROM public.staging_import_rows WHERE import_job_id=p_import_job_id AND organization_id=v_job.organization_id AND import_type=v_import_type;
+  v_result:=jsonb_build_object('status','ready_to_apply','import_type',v_import_type,'staged_rows',v_staged_rows,'validation_error_rows',jsonb_array_length(COALESCE(p_validation_errors,'[]'::jsonb)),'ready_at',now());
+  UPDATE public.import_jobs SET status='ready_to_apply', processed_rows=v_staged_rows, progress_percent=100, completed_at=NULL, error_summary=jsonb_build_object('rowErrors',COALESCE(p_validation_errors,'[]'::jsonb)), warning_summary=jsonb_set(COALESCE(warning_summary,'{}'::jsonb),'{deferred_apply}',v_result,true) WHERE id=p_import_job_id;
+  PERFORM public.record_audit_event(v_job.organization_id,'import.validated','import_job',p_import_job_id,v_result);
+  RETURN v_result;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.cancel_ready_import_job(p_import_job_id uuid, p_import_type text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+ SET "TimeZone" TO 'UTC'
+AS $function$
+DECLARE v_job public.import_jobs%ROWTYPE; v_import_type text:=lower(NULLIF(btrim(COALESCE(p_import_type,'')),'')); v_result jsonb; v_staged_rows integer;
+BEGIN
+  IF v_import_type NOT IN ('coaches','fields','field_availability','practice_preferences') THEN RAISE EXCEPTION 'Deferred apply cancellation is only available for coach, field, field_availability, and practice_preferences imports' USING ERRCODE='22023'; END IF;
+  SELECT * INTO v_job FROM public.import_jobs WHERE id=p_import_job_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Import job % not found', p_import_job_id USING ERRCODE='P0002'; END IF;
+  IF NOT public.is_org_admin(v_job.organization_id) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE='42501'; END IF;
+  IF v_import_type IN ('coaches','practice_preferences') AND v_job.job_type<>'registration' THEN RAISE EXCEPTION 'Import job % is %, not registration', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
+  IF v_import_type='fields' AND v_job.job_type<>'fields' THEN RAISE EXCEPTION 'Import job % is %, not fields', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
+  IF v_import_type='field_availability' AND v_job.job_type<>'field_availability' THEN RAISE EXCEPTION 'Import job % is %, not field_availability', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
+  SELECT count(*) INTO v_staged_rows FROM public.staging_import_rows WHERE import_job_id=p_import_job_id AND organization_id=v_job.organization_id AND import_type=v_import_type;
+  v_result:=jsonb_build_object('status','canceled','import_type',v_import_type,'staged_rows',v_staged_rows,'canceled_at',now());
+  UPDATE public.import_jobs SET status='failed',completed_at=now(),error_summary=jsonb_set(COALESCE(error_summary,'{}'::jsonb),'{deferred_apply}',v_result,true),warning_summary=jsonb_set(COALESCE(warning_summary,'{}'::jsonb),'{deferred_apply}',v_result,true) WHERE id=p_import_job_id;
+  PERFORM public.record_audit_event(v_job.organization_id,'import.canceled','import_job',p_import_job_id,v_result);
+  RETURN v_result;
+END;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.import_allowed_keys(p_import_type text)
-RETURNS text[]
-LANGUAGE sql
-IMMUTABLE
-SET search_path = public
-AS $$
+ RETURNS text[]
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public'
+AS $function$
     SELECT CASE p_import_type
         WHEN 'players' THEN ARRAY[
             'first_name', 'last_name', 'preferred_name', 'nickname', 'external_registration_id',
@@ -136,49 +182,14 @@ AS $$
             'multiple_teams', 'multi_team', 'certifications', 'certification',
             'child_registration_id', 'first_name', 'last_name'
         ]::text[]
+        WHEN 'practice_preferences' THEN ARRAY[
+            'email', 'team_name', 'team name', 'team', 'request_level', 'weekdays', 'days', 'day',
+            'start_times', 'start_time', 'start', 'venues', 'location', 'effective_from',
+            'valid_from', 'effective_to', 'valid_until', 'coach_priority'
+        ]::text[]
         ELSE ARRAY[]::text[]
     END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.mark_import_job_ready_to_apply(p_import_job_id uuid,p_import_type text,p_validation_errors jsonb DEFAULT '[]'::jsonb)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public SET timezone = 'UTC' AS $$
-DECLARE v_job public.import_jobs%ROWTYPE; v_import_type text:=lower(NULLIF(btrim(COALESCE(p_import_type,'')),'')); v_result jsonb; v_staged_rows integer;
-BEGIN
-  IF v_import_type NOT IN ('coaches','fields','field_availability') THEN RAISE EXCEPTION 'Deferred apply is only available for coach, field, and field_availability imports' USING ERRCODE='22023'; END IF;
-  SELECT * INTO v_job FROM public.import_jobs WHERE id=p_import_job_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Import job % not found', p_import_job_id USING ERRCODE='P0002'; END IF;
-  IF NOT public.is_org_admin(v_job.organization_id) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE='42501'; END IF;
-  IF v_import_type='coaches' AND v_job.job_type<>'registration' THEN RAISE EXCEPTION 'Import job % is %, not registration', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
-  IF v_import_type='fields' AND v_job.job_type<>'fields' THEN RAISE EXCEPTION 'Import job % is %, not fields', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
-  IF v_import_type='field_availability' AND v_job.job_type<>'field_availability' THEN RAISE EXCEPTION 'Import job % is %, not field_availability', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
-  SELECT count(*) INTO v_staged_rows FROM public.staging_import_rows WHERE import_job_id=p_import_job_id AND organization_id=v_job.organization_id AND import_type=v_import_type;
-  v_result:=jsonb_build_object('status','ready_to_apply','import_type',v_import_type,'staged_rows',v_staged_rows,'validation_error_rows',jsonb_array_length(COALESCE(p_validation_errors,'[]'::jsonb)),'ready_at',timezone('utc',now()));
-  UPDATE public.import_jobs SET status='ready_to_apply', processed_rows=v_staged_rows, progress_percent=100, completed_at=NULL, error_summary=jsonb_build_object('rowErrors',COALESCE(p_validation_errors,'[]'::jsonb)), warning_summary=jsonb_set(COALESCE(warning_summary,'{}'::jsonb),'{deferred_apply}',v_result,true) WHERE id=p_import_job_id;
-  PERFORM public.record_audit_event(v_job.organization_id,'import.validated','import_job',p_import_job_id,v_result);
-  RETURN v_result;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.cancel_ready_import_job(p_import_job_id uuid,p_import_type text)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public SET timezone = 'UTC' AS $$
-DECLARE v_job public.import_jobs%ROWTYPE; v_import_type text:=lower(NULLIF(btrim(COALESCE(p_import_type,'')),'')); v_result jsonb; v_staged_rows integer;
-BEGIN
-  IF v_import_type NOT IN ('coaches','fields','field_availability') THEN RAISE EXCEPTION 'Deferred apply cancellation is only available for coach, field, and field_availability imports' USING ERRCODE='22023'; END IF;
-  SELECT * INTO v_job FROM public.import_jobs WHERE id=p_import_job_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Import job % not found', p_import_job_id USING ERRCODE='P0002'; END IF;
-  IF NOT public.is_org_admin(v_job.organization_id) THEN RAISE EXCEPTION 'Access denied' USING ERRCODE='42501'; END IF;
-  IF v_import_type='coaches' AND v_job.job_type<>'registration' THEN RAISE EXCEPTION 'Import job % is %, not registration', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
-  IF v_import_type='fields' AND v_job.job_type<>'fields' THEN RAISE EXCEPTION 'Import job % is %, not fields', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
-  IF v_import_type='field_availability' AND v_job.job_type<>'field_availability' THEN RAISE EXCEPTION 'Import job % is %, not field_availability', p_import_job_id, v_job.job_type USING ERRCODE='22023'; END IF;
-  SELECT count(*) INTO v_staged_rows FROM public.staging_import_rows WHERE import_job_id=p_import_job_id AND organization_id=v_job.organization_id AND import_type=v_import_type;
-  v_result:=jsonb_build_object('status','canceled','import_type',v_import_type,'staged_rows',v_staged_rows,'canceled_at',timezone('utc',now()));
-  UPDATE public.import_jobs SET status='failed',completed_at=timezone('utc',now()),error_summary=jsonb_set(COALESCE(error_summary,'{}'::jsonb),'{deferred_apply}',v_result,true),warning_summary=jsonb_set(COALESCE(warning_summary,'{}'::jsonb),'{deferred_apply}',v_result,true) WHERE id=p_import_job_id;
-  PERFORM public.record_audit_event(v_job.organization_id,'import.canceled','import_job',p_import_job_id,v_result);
-  RETURN v_result;
-END;
-$$;
+$function$;
 
 DO $verify$
 DECLARE
@@ -187,10 +198,10 @@ DECLARE
 BEGIN
     FOR v_spec IN
         SELECT * FROM (VALUES
-            ('public.create_import_job(uuid, text, text, uuid)',        '8fa633ffce974933fc75f25f3227f26e'),
-            ('public.import_allowed_keys(text)',                        '974e958ba912ccb2a3fe13c4bcd484d1'),
-            ('public.mark_import_job_ready_to_apply(uuid, text, jsonb)', 'd52d2e864a595fa879ba72a4c1b4dd32'),
-            ('public.cancel_ready_import_job(uuid, text)',              '15748232fe403a2a976627ee2801f92f')
+            ('public.create_import_job(uuid, text, text, uuid)',        '7c70406b6d4322b2ac378e809f3f7eaf'),
+            ('public.import_allowed_keys(text)',                        '271208c50d2bbfae692fd1ea1da51774'),
+            ('public.mark_import_job_ready_to_apply(uuid, text, jsonb)', '3788e5f14ec691f07db6a033cf9157d4'),
+            ('public.cancel_ready_import_job(uuid, text)',              'c971f2091d9ce686f1e7229c96ab9560')
         ) AS s(signature, expected_md5)
     LOOP
         SELECT md5(replace(p.prosrc, E'\r', '')) INTO v_md5
@@ -199,6 +210,11 @@ BEGIN
             RAISE EXCEPTION 'revert: % is not the body it was before (md5 %)', v_spec.signature, v_md5;
         END IF;
     END LOOP;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'staging_import_rows_import_type_check'
+                    AND pg_get_constraintdef(oid) LIKE '%practice_preferences%') THEN
+        RAISE EXCEPTION 'revert: the staged-row type constraint lost practice_preferences';
+    END IF;
 
     IF to_regprocedure('public.finalize_evaluation_import_job(uuid,jsonb,boolean)') IS NOT NULL
        OR EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-evaluation-rows')
@@ -216,7 +232,7 @@ BEGIN
         RAISE EXCEPTION 'revert: a restored definer function lost its pinned settings or is open to anon';
     END IF;
 
-    RAISE NOTICE 'revert verified: the four functions are the bodies they were (md5), the finalizer, the retention job and the evaluations constraints are gone';
+    RAISE NOTICE 'revert verified: the four functions are the bodies 20261112010000 left (md5), the finalizer, the retention job and the evaluations constraints are gone';
 END;
 $verify$;
 

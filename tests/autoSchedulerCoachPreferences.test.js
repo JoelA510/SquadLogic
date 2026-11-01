@@ -1,7 +1,6 @@
 /**
- * 8.6 PR 3b PR 8 -- the auto-scheduler honours approved coach preferences
- * (plan §4 "Deno side", §5 decision 3, §6 "`must_keep` hard -> coach-preference
- * TBD").
+ * Phase D C1 (originally 8.6 PR 3b PR 8) -- the auto-scheduler honours practice preference rules
+ * (plan §4 "Deno side", §5 decision 3, §6 "`must` hard -> coach-preference TBD").
  *
  * These witnesses execute the Edge Function's own modules
  * (`_shared/engines/coach-preference-load.ts`, `auto-scheduler-solver.ts`) and
@@ -24,6 +23,7 @@ import {
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
 import { toDaylightSlot } from '../supabase/functions/_shared/engines/practice-daylight.js';
 import { seasonLongDating } from './fixtures/solverDatedCases.js';
+import { fakeClient } from './helpers/fakeSupabaseReader.js';
 import { AutoSchedulerInputSchema } from '../supabase/functions/_shared/schemas/auto-scheduler.js';
 
 const LOC_A = '00000000-0000-4000-8000-00000000000a';
@@ -51,13 +51,13 @@ const SLOTS = SLOT_ROWS.map((row, i) => ({
 // from team_coach_assignments below.
 const ROSTER = [
   { id: 't-free', division: 'U10', coachId: 'k-free' },
-  // must_keep weekday WED: only s-wed-b keeps it.
+  // must weekday WED: only s-wed-b keeps it.
   { id: 't-must-wed', division: 'U10', coachId: 'k-wed' },
-  // must_keep weekday SAT: no slot keeps it -> coach-preference.
+  // must weekday SAT: no slot keeps it -> coach-preference.
   { id: 't-must-sat', division: 'U10', coachId: 'k-sat' },
-  // prefer_keep venue B: s-wed-b is taken by t-must-wed, so s-thu-b.
+  // prefer venue B: s-wed-b is taken by t-must-wed, so s-thu-b.
   { id: 't-prefer-b', division: 'U10', coachId: 'k-venue' },
-  // Locked: holds s-mon-a. Its coach's must_keep would reject s-mon-a, and
+  // Locked: holds s-mon-a. Its coach's must would reject s-mon-a, and
   // must never touch the locked row.
   { id: 't-locked', division: 'U10', coachId: 'k-locked' },
 ];
@@ -70,15 +70,15 @@ const ASSIGNMENTS = [
   tca('t-must-sat', 'k-sat'),
   tca('t-prefer-b', 'k-venue'),
   tca('t-locked', 'k-locked'),
-  // Ended before the run date: this coach's must_keep must not apply.
+  // Ended before the run date: this coach's must must not apply.
   { ...tca('t-free', 'k-ended'), effective_to: '2026-09-15' },
 ];
 const PREFERENCES = [
-  pref('k-wed', 'weekday', 'must_keep', 'WED'),
-  pref('k-sat', 'weekday', 'must_keep', 'SAT'),
-  pref('k-venue', 'venue', 'prefer_keep', LOC_B),
-  pref('k-locked', 'weekday', 'must_keep', 'FRI'),
-  pref('k-ended', 'weekday', 'must_keep', 'SUN'),
+  rule('k-wed', 't-must-wed', { level: 'must', weekdays: ['WED'] }),
+  rule('k-sat', 't-must-sat', { level: 'must', weekdays: ['SAT'] }),
+  rule('k-venue', 't-prefer-b', { level: 'prefer', venue_ids: [LOC_B] }),
+  rule('k-locked', 't-locked', { level: 'must', weekdays: ['FRI'] }),
+  rule('k-ended', 't-free', { level: 'must', weekdays: ['SUN'] }),
 ];
 
 function tca(teamId, coachId) {
@@ -90,61 +90,23 @@ function tca(teamId, coachId) {
     effective_to: null,
   };
 }
-function pref(coachId, dimension, level, value) {
+/** A `coach_practice_preferences` row: one rule for one team, in force. */
+function rule(coachId, teamId, over) {
   return {
-    id: `p-${coachId}-${dimension}`,
+    id: `r-${coachId}`,
     coach_id: coachId,
-    dimension,
-    level,
-    value,
-    effective_from: '2026-08-01',
+    team_id: teamId,
+    level: 'prefer',
+    weekdays: null,
+    start_minutes: null,
+    venue_ids: null,
+    keep_weekday: false,
+    keep_start: false,
+    keep_venue: false,
+    coach_priority: null,
+    effective_from: null,
     effective_to: null,
-  };
-}
-
-/** @returns {any} a structural stand-in for a supabase-js client */
-function fakeClient(tables, { failOn = null, count = undefined } = {}) {
-  const calls = [];
-  return {
-    calls,
-    from(table) {
-      const call = { table, filters: [] };
-      calls.push(call);
-      const result = () =>
-        failOn === table
-          ? { data: null, error: { message: 'boom' }, count: null }
-          : { data: tables[table], error: null, count: count ?? tables[table].length };
-      const q = {
-        select(cols, options) {
-          call.select = cols;
-          call.options = options;
-          return q;
-        },
-        eq(col, val) {
-          call.filters.push(['eq', col, val]);
-          return q;
-        },
-        lte(col, val) {
-          call.filters.push(['lte', col, val]);
-          return q;
-        },
-        or(filter) {
-          call.filters.push(['or', filter]);
-          return q;
-        },
-        order() {
-          return q;
-        },
-        range(from, to) {
-          const r = result();
-          return Promise.resolve({ ...r, data: r.data ? r.data.slice(from, to + 1) : null });
-        },
-        then(resolve, reject) {
-          return Promise.resolve(result()).then(resolve, reject);
-        },
-      };
-      return q;
-    },
+    ...over,
   };
 }
 
@@ -192,21 +154,22 @@ async function run(gate) {
   });
 }
 
-describe('the loader: approved preferences, server-side, as the caller', () => {
+describe('the loader: preference rules, server-side, as the caller', () => {
   it('builds verdicts only for placeable teams a current coach constrains', async () => {
     const { context } = await load();
     assert.equal(context.ok, true);
     // Enumerated from the roster: the constrained teams are exactly those with
-    // a current coach holding a non-dont_care, value-set preference.
+    // a rule asked by one of their current coaches.
     assert.deepEqual([...context.gate.verdicts.keys()].sort(), [
       't-must-sat',
       't-must-wed',
       't-prefer-b',
     ]);
-    // The ended coach's SUN must_keep does not reach t-free; the locked team is not judged.
+    // The ended coach's SUN must does not reach t-free; the locked team is not judged.
     assert.equal(context.gate.verdicts.has('t-free'), false);
     assert.equal(context.gate.verdicts.has('t-locked'), false);
     const wed = context.gate.verdicts.get('t-must-wed');
+    assert.deepEqual(wed.get('s-mon-a').violatedRules, ['r-k-wed']);
     assert.deepEqual(
       SLOTS.filter((s) => !wed.get(s.id).mustKeepViolated).map((s) => s.id),
       ['s-wed-b']
@@ -218,11 +181,11 @@ describe('the loader: approved preferences, server-side, as the caller', () => {
     );
   });
 
-  it('reads only approved rows, in force on the run date, through the user client', async () => {
+  it('reads only the rules in force, through the user client, and leaves their windows to the resolver', async () => {
     const { user, service } = await load();
     const prefCall = user.calls.find((c) => c.table === 'coach_practice_preferences');
     assert.ok(
-      prefCall.filters.some(([op, col, v]) => op === 'eq' && col === 'status' && v === 'approved')
+      prefCall.filters.some(([op, col, v]) => op === 'eq' && col === 'status' && v === 'in_force')
     );
     assert.ok(!prefCall.filters.some(([, col]) => col === 'effective_from'));
     // The service client is used for ONE count and reads no row content.
@@ -246,7 +209,7 @@ describe('the loader: approved preferences, server-side, as the caller', () => {
     assert.equal(context.ok, false);
   });
 
-  it('a partial read (RLS showed the caller fewer rows than exist) refuses', async () => {
+  it('a partial read (RLS showed the caller fewer rules than exist) refuses', async () => {
     const { context } = await load({ service: { count: PREFERENCES.length + 1 } });
     assert.equal(context.ok, false);
     assert.equal(context.code, 'COACH_PREFERENCES_NOT_VISIBLE');
@@ -284,7 +247,7 @@ describe('the loader: approved preferences, server-side, as the caller', () => {
 });
 
 describe('the solver honours the gate', () => {
-  it('must_keep filters new placements; a team it leaves no legal slot is coach-preference TBD', async () => {
+  it('a must rule filters new placements; a team it leaves no legal slot is coach-preference TBD, naming the rule', async () => {
     const { context } = await load();
     const result = await run(context.gate);
     const placed = new Map(result.placements.map((p) => [p.teamId, p.slotId]));
@@ -293,7 +256,7 @@ describe('the solver honours the gate', () => {
     for (const teamId of PLACEABLE) {
       assert.equal(placed.has(teamId) !== unplaced.has(teamId), true, teamId);
     }
-    // No placement violates a must_keep verdict (enumerated from the roster).
+    // No placement violates a must verdict (enumerated from the roster).
     for (const teamId of PLACEABLE) {
       const slotId = placed.get(teamId);
       if (slotId)
@@ -308,19 +271,20 @@ describe('the solver honours the gate', () => {
       teamId: 't-must-sat',
       reason: 'coach-preference',
       dimensions: ['weekday'],
+      rules: ['r-k-sat'],
     });
     // Locked rows are never placed, moved or judged.
     assert.equal(placed.has('t-locked'), false);
     assert.equal(unplaced.has('t-locked'), false);
   });
 
-  it('prefer_keep is a tiebreak: fewer breaches first among feasible slots', async () => {
+  it('a prefer rule is a tiebreak: fewer breaches first among feasible slots', async () => {
     const gate = await loadGate();
     const result = await run(gate);
     const placed = new Map(result.placements.map((p) => [p.teamId, p.slotId]));
     assert.equal(placed.get('t-prefer-b'), 's-thu-b');
     assert.equal(result.preferKeepBreaches, 0);
-    // Control: the same gate without that team's prefer_keep puts it on the
+    // Control: the same gate without that team's prefer rule puts it on the
     // first free slot, at venue A -- so the tiebreak, not slot order, chose B.
     const verdicts = new Map(gate.verdicts);
     verdicts.delete('t-prefer-b');
@@ -329,7 +293,7 @@ describe('the solver honours the gate', () => {
     assert.equal(controlPlaced.get('t-prefer-b'), 's-thu-a');
   });
 
-  it('no preferences is byte-identical to no gate at all', async () => {
+  it('no rules is byte-identical to no gate at all', async () => {
     const empty = await run({ verdicts: new Map() });
     const none = await run(undefined);
     const strip = (r) => ({ ...r, elapsedMs: 0 });

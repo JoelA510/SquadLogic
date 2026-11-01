@@ -270,7 +270,7 @@ export type HardConstraintRule = (typeof HARD_CONSTRAINT_RULE)[keyof typeof HARD
  *
  * A per-coach `unavailableSlotIds` used to be read here from the request body
  * (`coachPreferences`). No client ever sent one, and a coach's availability is
- * now an approved `coach_practice_preferences` row the Edge loads itself
+ * now a `coach_practice_preferences` rule the Edge loads itself
  * (8.6 PR 3b, PR 8: `coach-preference-load.ts`), so the body path is retired
  * rather than left parsed and unread.
  */

@@ -31,7 +31,7 @@ Deno.test(
     // Meta-assertion: the digest file records how many cases core was run on,
     // so a shrunken product cannot match a digest of a smaller one by accident.
     assertEquals(cases.length, digest.cases);
-    assert(cases.length > 19000, `the product holds only ${cases.length} cases`);
+    assert(cases.length > 22000, `the product holds only ${cases.length} cases`);
     const outcomes = cases.map((c) =>
       projectOutcome(
         (input) => resolveCoachPreferences(input as Parameters<typeof resolveCoachPreferences>[0]),

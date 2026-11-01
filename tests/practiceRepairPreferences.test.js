@@ -1,7 +1,8 @@
 /**
- * Coach practice preferences in the practice repair, and the
- * `coachPreferenceBreached` objective term (8.6 PR 3b, PR 4; plan §4, §5
- * decisions 1 and 3, §6 witnesses).
+ * Practice preference rules in the practice repair, and the
+ * `coachPreferenceBreached` objective term (Phase D C1; originally 8.6 PR 3b, PR 4; plan §4, §5
+ * decisions 1 and 3, §6 witnesses). A rule is `pref(...)` below: a level, one condition (values,
+ * or keep-current when the value is null), for team `T`.
  *
  * Every subject set here is enumerated from the roster (`season.teams`, the
  * `team_coach_assignments` rows built from it), the registry (the published
@@ -9,11 +10,11 @@
  * never from a repair's output. Plants that must turn this file red, each
  * shown in the PR body:
  *
- * - (a) the `must_keep` filter removed;
+ * - (a) the `must` filter removed;
  * - (b) `PRACTICE_TBD_REASON.COACH_PREFERENCE` swapped for a generic reason;
  * - (c) the `coachPreferenceBreached` weight moved off 100;
  * - (d) the game-path guard in `coachPreferenceCountsFor()` removed;
- * - (e) strictest-wins inverted;
+ * - (e) every rule judged replaced by the first rule only;
  * - (f) a one-line tiebreak change in the repair (the byte-identical sweep);
  * - current coaches read without their dates.
  */
@@ -415,13 +416,13 @@ function resultDigest(result) {
   return createHash('sha256').update(json).digest('hex').slice(0, 16);
 }
 
-function sweep(extra) {
+function sweep(extra, g = graph) {
   const digests = {};
   const exercised = { displaced: 0, rehomed: 0, timeTbd: 0 };
   for (const surfaceId of SURFACES) {
     digests[surfaceId] = LOSSES.flatMap((loss) =>
       ['exact', 'greedy'].map((strategy) => {
-        const result = corpusRepair(surfaceId, { loss, strategy, extra });
+        const result = corpusRepair(surfaceId, { loss, strategy, extra, g });
         exercised.displaced += result.stats.displaced;
         exercised.rehomed += result.stats.rehomed;
         exercised.timeTbd += result.stats.timeTbd;
@@ -439,17 +440,6 @@ describe('coach preferences :: no preferences, byte-identical to main (plan §4,
       coachPreferences: [],
       teamCoachAssignments: ROSTER_ROWS,
     },
-    'every roster coach holding dont_care on every dimension': {
-      coachPreferences: ROSTER_COACHES.flatMap((coachId) =>
-        ['weekday', 'start_time', 'venue'].map((dimension) => ({
-          coachId,
-          dimension,
-          level: 'dont_care',
-          value: null,
-        }))
-      ),
-      teamCoachAssignments: ROSTER_ROWS,
-    },
   };
 
   for (const [name, extra] of Object.entries(variants)) {
@@ -465,11 +455,48 @@ describe('coach preferences :: no preferences, byte-identical to main (plan §4,
     }, 120_000); // 174 corpus repairs per variant: seconds alone, longer under the full suite.
   }
 
-  it('the dont_care variant really handed the repair a preference per roster coach', () => {
-    const preferences = variants['every roster coach holding dont_care on every dimension'];
-    expect(preferences.coachPreferences.length).toBe(ROSTER_COACHES.length * 3);
+  // Rules that cannot apply: one per roster row (so each displaced team's coach holds one), every one
+  // outside its window on the repair date, and one for a team that is not on the plan. They are rules
+  // in force, so the graph must be the location graph (venue = location); the sweep on that graph
+  // without them is the control, and the rules change nothing.
+  const notApplying = {
+    coachPreferences: [
+      ...ROSTER_ROWS.map((row, index) => ({
+        id: `ended-${index}`,
+        coachId: row.coach_id,
+        teamId: row.team_id,
+        level: 'must',
+        weekdays: ['MON'],
+        effectiveFrom: '2026-01-01',
+        effectiveTo: '2026-09-27',
+      })),
+      {
+        id: 'not-started',
+        coachId: ROSTER_COACHES[0],
+        teamId: ROSTER_ROWS[0].team_id,
+        level: 'must',
+        venueIds: [location(1)],
+        effectiveFrom: '2026-12-01',
+      },
+      {
+        id: 'other-team',
+        coachId: ROSTER_COACHES[0],
+        teamId: 'a-team-not-in-the-plan',
+        level: 'must',
+        weekdays: ['MON'],
+      },
+    ],
+    teamCoachAssignments: ROSTER_ROWS,
+  };
+
+  it('rules that do not apply (out of window, or for another team): every corpus loss matches the same sweep without them', () => {
+    const control = sweep({}, LOCATION_GRAPH);
+    const withRules = sweep(notApplying, LOCATION_GRAPH);
+    expect(notApplying.coachPreferences.length).toBe(ROSTER_ROWS.length + 2);
     expect(ROSTER_COACHES.length).toBeGreaterThan(0);
-  });
+    expect(withRules.exercised.displaced).toBeGreaterThan(0);
+    expect(withRules.digests).toEqual(control.digests);
+  }, 120_000);
 });
 
 /* -------------------------------------------------------------------------- */
@@ -495,7 +522,7 @@ const rowsFor = (coaches, teamId = 'T') =>
  * One series for team T, Tue 17:00 on Orchard Park field 2-a, displaced by the
  * loss of field 2, and whatever inventory the case offers.
  *
- * @param {{ inventory: Array<Object>, preferences?: Array<Object>, rows?: Array<Object>, loss?: Object, extra?: Object, on?: { weekday: string, startMinutes: number } }} options
+ * @param {{ inventory: Array<Object>, preferences?: Array<Object>, rows?: Array<Object>, loss?: Object, extra?: Object, on?: { weekday: string, startMinutes: number }, alsoHolds?: Array<{ surfaceId: string, weekday: string, startMinutes: number }> }} options
  */
 function constructed({
   inventory,
@@ -504,23 +531,30 @@ function constructed({
   loss = {},
   extra = {},
   on = { weekday: 'TUE', startMinutes: 1020 },
+  alsoHolds = [],
 }) {
+  // `alsoHolds`: more live practices of team T on ground the loss does not touch, so the team holds
+  // several (what a keep-current rule keeps is every one of them).
+  const slotOf = (id, surfaceId, weekday, startMinutes) => ({
+    id,
+    surfaceId,
+    weekday,
+    startMinutes,
+    durationMinutes: 60,
+    validFrom: SEASON_FROM,
+    validUntil: SEASON_UNTIL,
+    capacity: 1,
+    revisionId: 'constructed',
+    label: null,
+    surfaceResolution: 'resolved',
+  });
   return repairPracticeLoss({
     plan: {
       slots: [
-        {
-          id: 'c-slot-0',
-          surfaceId: OP('field-2-a'),
-          weekday: on.weekday,
-          startMinutes: on.startMinutes,
-          durationMinutes: 60,
-          validFrom: SEASON_FROM,
-          validUntil: SEASON_UNTIL,
-          capacity: 1,
-          revisionId: 'constructed',
-          label: null,
-          surfaceResolution: 'resolved',
-        },
+        slotOf('c-slot-0', OP('field-2-a'), on.weekday, on.startMinutes),
+        ...alsoHolds.map((held, index) =>
+          slotOf(`c-slot-${index + 1}`, held.surfaceId, held.weekday, held.startMinutes)
+        ),
       ],
       assignments: [
         {
@@ -530,6 +564,13 @@ function constructed({
           effectiveFrom: null,
           effectiveUntil: null,
         },
+        ...alsoHolds.map((_, index) => ({
+          id: `c-asg-${index + 1}`,
+          slotId: `c-slot-${index + 1}`,
+          teamId: 'T',
+          effectiveFrom: null,
+          effectiveUntil: null,
+        })),
       ],
       source: 'constructed',
     },
@@ -542,25 +583,102 @@ function constructed({
     ...extra,
   });
 }
-const pref = (coachId, dimension, level, value = null) => ({ coachId, dimension, level, value });
+/**
+ * A rule in force for team `T` (or `teamId`) with one condition: the values `[value]`, or
+ * keep-current when `value` is null. `level` is `must` or `prefer`.
+ */
+const RULE_FIELDS = {
+  weekday: ['weekdays', 'keepWeekday'],
+  start_time: ['startMinutes', 'keepStart'],
+  venue: ['venueIds', 'keepVenue'],
+};
+const pref = (coachId, dimension, level, value = null, teamId = 'T') => {
+  const [values, keep] = RULE_FIELDS[dimension];
+  return {
+    id: `${teamId}/${coachId}/${dimension}/${level}/${value ?? 'current'}`,
+    coachId,
+    teamId,
+    level,
+    [values]: value === null ? null : [value],
+    [keep]: value === null,
+  };
+};
+
+/**
+ * Keep-current keeps what the team's LIVE practices hold, not only the series being moved (review of
+ * #683, finding 3). A team on Tue 17:00 (displaced) and Thu 18:00 (live, untouched) keeping its start
+ * may start at either; the Tuesday series moved to Tue 18:00 is a start the team already holds.
+ */
+describe('coach preferences :: keep-current reads every live practice of the team', () => {
+  const THURSDAY_1800 = { surfaceId: AP('pitch-2a'), weekday: 'THU', startMinutes: 1080 };
+  const TUESDAY_1800 = { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1080 };
+  const TUESDAY_1900 = { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1140 };
+
+  it('keep-start must: the displaced Tue 17:00 may move to Tue 18:00, a start the team holds on Thursday', () => {
+    const run = constructed({
+      inventory: [TUESDAY_1800],
+      alsoHolds: [THURSDAY_1800],
+      preferences: [pref('coach-1', 'start_time', 'must')],
+    });
+    expect(run.timeTbd).toEqual([]);
+    expect(run.rehomed.map((entry) => [entry.to.weekday, entry.to.startMinutes])).toEqual([
+      ['TUE', 1080],
+    ]);
+  });
+
+  it('control: a start neither practice holds is still refused', () => {
+    const run = constructed({
+      inventory: [TUESDAY_1900],
+      alsoHolds: [THURSDAY_1800],
+      preferences: [pref('coach-1', 'start_time', 'must')],
+    });
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd).toHaveLength(1);
+    expect(run.timeTbd[0]).toMatchObject({
+      reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
+      mustKeepDimensions: ['start_time'],
+    });
+  });
+
+  it('a live practice on ground the graph does not hold is left out of what is kept, not an error', () => {
+    const run = constructed({
+      inventory: [TUESDAY_1800],
+      alsoHolds: [{ surfaceId: 'nowhere/field-9', weekday: 'THU', startMinutes: 1080 }],
+      preferences: [pref('coach-1', 'start_time', 'must')],
+    });
+    // Its 18:00 cannot be read as a start the team holds (no venue), so only 17:00 is kept.
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({ reason: PRACTICE_TBD_REASON.COACH_PREFERENCE });
+  });
+
+  it('keep-weekday must: with Tue and Thu held, the Tuesday series may not move to Wednesday', () => {
+    const run = constructed({
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'WED', startMinutes: 1020 }],
+      alsoHolds: [THURSDAY_1800],
+      preferences: [pref('coach-1', 'weekday', 'must')],
+    });
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({ reason: PRACTICE_TBD_REASON.COACH_PREFERENCE });
+  });
+});
 
 /** Same venue, another day, same time: the day move a `weekday` preference is about. */
 const THURSDAY = { surfaceId: OP('field-3-a'), weekday: 'THU', startMinutes: 1020 };
 
 /* -------------------------------------------------------------------------- */
-/* (a), (b) must_keep is a hard filter, and its TBD says so                    */
+/* (a), (b) must is a hard filter, and its TBD says so                    */
 /* -------------------------------------------------------------------------- */
 
-describe('coach preferences :: must_keep is a hard candidate filter (plan §4)', () => {
+describe('coach preferences :: must is a hard candidate filter (plan §4)', () => {
   it('control: without a preference the day move is taken', () => {
     const run = constructed({ inventory: [THURSDAY] });
     expect(run.rehomed.map((entry) => entry.to.weekday)).toEqual(['THU']);
   });
 
-  it('with must_keep on weekday the only candidate is refused, and the series is TIME TBD coach-preference', () => {
+  it('with must on weekday the only candidate is refused, and the series is TIME TBD coach-preference', () => {
     const run = constructed({
       inventory: [THURSDAY],
-      preferences: [pref('coach-1', 'weekday', 'must_keep')],
+      preferences: [pref('coach-1', 'weekday', 'must')],
     });
     expect(run.rehomed).toEqual([]);
     expect(run.timeTbd).toHaveLength(1);
@@ -578,7 +696,7 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
   it('keeps a candidate that keeps the day, and takes it over the cheaper day move', () => {
     const run = constructed({
       inventory: [THURSDAY, { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1290 }],
-      preferences: [pref('coach-1', 'weekday', 'must_keep')],
+      preferences: [pref('coach-1', 'weekday', 'must')],
     });
     expect(run.timeTbd).toEqual([]);
     expect(run.rehomed.map((entry) => [entry.to.weekday, entry.to.startMinutes])).toEqual([
@@ -592,23 +710,20 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
         { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1080 },
         { surfaceId: AP('pitch-2a'), weekday: 'TUE', startMinutes: 1020 },
       ],
-      preferences: [
-        pref('coach-1', 'start_time', 'must_keep'),
-        pref('coach-1', 'venue', 'must_keep'),
-      ],
+      preferences: [pref('coach-1', 'start_time', 'must'), pref('coach-1', 'venue', 'must')],
     });
     expect(run.timeTbd[0]).toMatchObject({
       reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
       mustKeepDimensions: ['start_time'],
     });
-    // must_keep venue refuses the Alder Park shape too: no recommendation.
+    // must venue refuses the Alder Park shape too: no recommendation.
     expect(run.recommendations[0].to).toBeNull();
   });
 
   it('with no legal candidate before the filter the reason stays no-legal-slot-at-venue', () => {
     const run = constructed({
       inventory: [],
-      preferences: [pref('coach-1', 'weekday', 'must_keep')],
+      preferences: [pref('coach-1', 'weekday', 'must')],
     });
     expect(run.timeTbd.map((entry) => entry.reason)).toEqual([
       PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE,
@@ -616,7 +731,7 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
     expect(run.timeTbd[0].mustKeepDimensions).toBeUndefined();
   });
 
-  it('filters tier-2 candidates too: must_keep on venue recommends none, and weekday only a same-day one', () => {
+  it('filters tier-2 candidates too: must on venue recommends none, and weekday only a same-day one', () => {
     const inventory = [
       { surfaceId: AP('pitch-2a'), weekday: 'TUE', startMinutes: 1020 },
       { surfaceId: AP('pitch-2a'), weekday: 'WED', startMinutes: 1020 },
@@ -628,21 +743,18 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
     expect(unfiltered.recommendations[0]).toMatchObject({ tier: 'cross-venue' });
     const byVenue = constructed({
       inventory,
-      preferences: [pref('coach-1', 'venue', 'must_keep')],
+      preferences: [pref('coach-1', 'venue', 'must')],
     });
     expect(byVenue.recommendations[0].to).toBeNull();
     const byDay = constructed({
       inventory,
-      preferences: [
-        pref('coach-1', 'weekday', 'must_keep'),
-        pref('coach-1', 'start_time', 'prefer_keep'),
-      ],
+      preferences: [pref('coach-1', 'weekday', 'must'), pref('coach-1', 'start_time', 'prefer')],
     });
     expect(byDay.recommendations[0].to.weekday).toBe('TUE');
-    // Control: with the Tuesday shape gone, must_keep weekday leaves nothing.
+    // Control: with the Tuesday shape gone, must weekday leaves nothing.
     const noTuesday = constructed({
       inventory: [inventory[1]],
-      preferences: [pref('coach-1', 'weekday', 'must_keep')],
+      preferences: [pref('coach-1', 'weekday', 'must')],
     });
     expect(noTuesday.recommendations[0].to).toBeNull();
   });
@@ -663,14 +775,14 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
   const conflicted = (run) =>
     run.findings.filter((f) => f.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT);
 
-  it('must_keep TUE on a team now on WED lands only on a Tuesday', () => {
+  it('must TUE on a team now on WED lands only on a Tuesday', () => {
     const inventory = [same('WED', 1080), same('TUE', 1080)];
     // Control: keeping what it has, the team stays on Wednesday.
     expect(constructed({ inventory, on: ON_WEDNESDAY }).rehomed[0].to.weekday).toBe('WED');
     const run = constructed({
       inventory,
       on: ON_WEDNESDAY,
-      preferences: [pref('coach-1', 'weekday', 'must_keep', 'TUE')],
+      preferences: [pref('coach-1', 'weekday', 'must', 'TUE')],
       rows: rowsFor(['coach-1']),
     });
     expect(run.rehomed.map((e) => [e.to.weekday, e.to.startMinutes])).toEqual([['TUE', 1080]]);
@@ -680,7 +792,7 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     const run = constructed({
       inventory: [same('WED', 1080), same('THU')],
       on: ON_WEDNESDAY,
-      preferences: [pref('coach-1', 'weekday', 'must_keep', 'TUE')],
+      preferences: [pref('coach-1', 'weekday', 'must', 'TUE')],
       rows: rowsFor(['coach-1']),
     });
     expect(run.rehomed).toEqual([]);
@@ -690,12 +802,12 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     });
   });
 
-  it('two must_keep coaches with different values conflict, breach every candidate, and go TIME TBD', () => {
+  it('two must coaches with different values conflict, breach every candidate, and go TIME TBD', () => {
     const run = constructed({
       inventory: [same('TUE', 1080), same('THU')],
       preferences: [
-        pref('coach-1', 'weekday', 'must_keep', 'TUE'),
-        pref('coach-2', 'weekday', 'must_keep', 'THU'),
+        pref('coach-1', 'weekday', 'must', 'TUE'),
+        pref('coach-2', 'weekday', 'must', 'THU'),
       ],
       rows: rowsFor(['coach-1', 'coach-2']),
     });
@@ -704,20 +816,26 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     expect(conflicted(run).map((f) => f.details)).toEqual([
       expect.objectContaining({
         dimension: 'weekday',
-        level: 'must_keep',
-        references: ['TUE', 'THU'],
+        level: 'must',
+        ruleIds: ['T/coach-1/weekday/must/TUE', 'T/coach-2/weekday/must/THU'],
+        coachIds: ['coach-1', 'coach-2'],
         assignmentId: 'c-asg-0',
         teamId: 'T',
       }),
     ]);
+    // The TIME TBD names the rules that left it no slot, not only the dimension.
+    expect(run.timeTbd[0].mustKeepRules).toEqual([
+      'T/coach-1/weekday/must/TUE',
+      'T/coach-2/weekday/must/THU',
+    ]);
   });
 
-  it('control: two must_keep coaches with the same value do not conflict', () => {
+  it('control: two must coaches with the same value do not conflict', () => {
     const run = constructed({
       inventory: [same('TUE', 1080), same('THU')],
       preferences: [
-        pref('coach-1', 'weekday', 'must_keep', 'THU'),
-        pref('coach-2', 'weekday', 'must_keep', 'THU'),
+        pref('coach-1', 'weekday', 'must', 'THU'),
+        pref('coach-2', 'weekday', 'must', 'THU'),
       ],
       rows: rowsFor(['coach-1', 'coach-2']),
     });
@@ -725,14 +843,14 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     expect(run.rehomed.map((e) => e.to.weekday)).toEqual(['THU']);
   });
 
-  it('prefer_keep with a value breaches when the candidate differs from the value', () => {
+  it('prefer with a value breaches when the candidate differs from the value', () => {
     const inventory = [same('TUE', 1080), same('THU')];
     const free = constructed({ inventory });
     // Unpreferred, the hour shift on Tuesday wins (1061 < 1241).
     expect(free.rehomed[0].to.weekday).toBe('TUE');
     const run = constructed({
       inventory,
-      preferences: [pref('coach-1', 'weekday', 'prefer_keep', 'THU')],
+      preferences: [pref('coach-1', 'weekday', 'prefer', 'THU')],
       rows: rowsFor(['coach-1']),
     });
     // Tuesday now breaches THU (1061 + 100) and still beats Thursday (1241).
@@ -742,29 +860,29 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     // The same preference held on the day it is being kept on breaches nothing.
     const kept = constructed({
       inventory: [same('THU')],
-      preferences: [pref('coach-1', 'weekday', 'prefer_keep', 'THU')],
+      preferences: [pref('coach-1', 'weekday', 'prefer', 'THU')],
       rows: rowsFor(['coach-1']),
     });
     expect(kept.rehomed[0].counts.coachPreferenceBreached).toBeUndefined();
   });
 
   // Start times are compared to the minute: every case here is 30 minutes off.
-  it('must_keep start_time 17:30 lands only on 17:30, not on the cheaper 17:00', () => {
+  it('must start_time 17:30 lands only on 17:30, not on the cheaper 17:00', () => {
     const inventory = [same('TUE', 1020), same('TUE', 1050)];
     // Control: unpreferred, the 17:00 slot keeps the published time.
     expect(constructed({ inventory }).rehomed[0].to.startMinutes).toBe(1020);
     const run = constructed({
       inventory,
-      preferences: [pref('coach-1', 'start_time', 'must_keep', 1050)],
+      preferences: [pref('coach-1', 'start_time', 'must', 1050)],
       rows: rowsFor(['coach-1']),
     });
     expect(run.rehomed.map((e) => [e.to.weekday, e.to.startMinutes])).toEqual([['TUE', 1050]]);
   });
 
-  it('must_keep start_time 17:30 with only a 17:00 candidate is TIME TBD coach-preference', () => {
+  it('must start_time 17:30 with only a 17:00 candidate is TIME TBD coach-preference', () => {
     const run = constructed({
       inventory: [same('TUE', 1020)],
-      preferences: [pref('coach-1', 'start_time', 'must_keep', 1050)],
+      preferences: [pref('coach-1', 'start_time', 'must', 1050)],
       rows: rowsFor(['coach-1']),
     });
     expect(run.rehomed).toEqual([]);
@@ -774,12 +892,12 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     });
   });
 
-  it('prefer_keep start_time 17:30 against a 17:00 candidate breaches once (+100)', () => {
+  it('prefer start_time 17:30 against a 17:00 candidate breaches once (+100)', () => {
     const inventory = [same('TUE', 1020)];
     const free = constructed({ inventory });
     const run = constructed({
       inventory,
-      preferences: [pref('coach-1', 'start_time', 'prefer_keep', 1050)],
+      preferences: [pref('coach-1', 'start_time', 'prefer', 1050)],
       rows: rowsFor(['coach-1']),
     });
     expect(run.rehomed[0].to.startMinutes).toBe(1020);
@@ -791,43 +909,46 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     const run = constructed({
       inventory: [same('TUE', 1080), same('WED', 1080), same('THU')],
       on: ON_WEDNESDAY,
-      preferences: [pref('coach-1', 'weekday', 'must_keep')],
+      preferences: [pref('coach-1', 'weekday', 'must')],
       rows: rowsFor(['coach-1']),
     });
     expect(run.rehomed.map((e) => e.to.weekday)).toEqual(['WED']);
     expect(conflicted(run)).toEqual([]);
   });
 
-  it('mixed coaches, one with a value and one null, resolve as #453 does: differing references conflict', () => {
+  it('mixed coaches, one with a value and one keeping the series: rules with nothing in common conflict', () => {
     const run = constructed({
       inventory: [same('TUE', 1080), same('THU')],
-      preferences: [
-        pref('coach-1', 'weekday', 'must_keep', 'THU'),
-        pref('coach-2', 'weekday', 'must_keep'),
-      ],
+      preferences: [pref('coach-1', 'weekday', 'must', 'THU'), pref('coach-2', 'weekday', 'must')],
       rows: rowsFor(['coach-1', 'coach-2']),
     });
     // coach-1 keeps THU, coach-2 keeps the series' TUE: no candidate keeps both.
     expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.COACH_PREFERENCE);
-    expect(conflicted(run).map((f) => f.details.references)).toEqual([['THU', 'TUE']]);
-    // Strictest wins first: a prefer_keep value under a null must_keep is outranked.
-    const outranked = constructed({
+    expect(conflicted(run).map((f) => f.details.ruleIds)).toEqual([
+      ['T/coach-1/weekday/must/THU', 'T/coach-2/weekday/must/current'],
+    ]);
+    // Every rule applies, nothing outranks anything: a prefer for THU beside a must that keeps the
+    // series' TUE is a breach on the TUE candidate, not a conflict and not outranked.
+    const both = constructed({
       inventory: [same('TUE', 1080), same('THU')],
       preferences: [
-        pref('coach-1', 'weekday', 'prefer_keep', 'THU'),
-        pref('coach-2', 'weekday', 'must_keep'),
+        pref('coach-1', 'weekday', 'prefer', 'THU'),
+        pref('coach-2', 'weekday', 'must'),
       ],
       rows: rowsFor(['coach-1', 'coach-2']),
     });
-    expect(outranked.rehomed.map((e) => e.to.weekday)).toEqual(['TUE']);
-    expect(conflicted(outranked)).toEqual([]);
+    expect(both.rehomed.map((e) => e.to.weekday)).toEqual(['TUE']);
+    expect(both.rehomed[0].counts.coachPreferenceBreached).toBe(1);
+    expect(conflicted(both)).toEqual([]);
   });
 });
 
-describe('coach preferences :: must_keep over the whole corpus, roster-enumerated (plan §6)', () => {
-  // Every roster coach holds must_keep on weekday. Every series each corpus
+describe('coach preferences :: must over the whole corpus, roster-enumerated (plan §6)', () => {
+  // Every roster coach holds must on weekday. Every series each corpus
   // loss displaces (from the plan and the graph) is judged.
-  const preferences = ROSTER_COACHES.map((coachId) => pref(coachId, 'weekday', 'must_keep'));
+  const preferences = ROSTER_ROWS.map((row) =>
+    pref(row.coach_id, 'weekday', 'must', null, row.team_id)
+  );
   const RUNS = SURFACES.map((surfaceId) => ({
     surfaceId,
     displaced: displacedBy(surfaceId),
@@ -895,13 +1016,13 @@ describe('coach preferences :: must_keep over the whole corpus, roster-enumerate
 });
 
 /* -------------------------------------------------------------------------- */
-/* (c) prefer_keep is priced at 100 per breached dimension                     */
+/* (c) prefer is priced at 100 per unmet rule                                  */
 /* -------------------------------------------------------------------------- */
 
 /** Plan §5, decision 1: the weight the operator approved. */
 const PLAN_COACH_PREFERENCE_WEIGHT = 100;
 
-describe('coach preferences :: prefer_keep is coachPreferenceBreached, weight 100 (plan §5.1)', () => {
+describe('coach preferences :: prefer is coachPreferenceBreached, weight 100 (plan §5.1)', () => {
   it('the objective table holds the approved weight, through its named constant', () => {
     expect(COACH_PREFERENCE_BREACHED_WEIGHT).toBe(PLAN_COACH_PREFERENCE_WEIGHT);
     expect(RESOLVE_OBJECTIVE_WEIGHTS[RESOLVE_OBJECTIVE_TERM.COACH_PREFERENCE_BREACHED]).toBe(
@@ -910,28 +1031,40 @@ describe('coach preferences :: prefer_keep is coachPreferenceBreached, weight 10
     expect(RESOLVE_OBJECTIVE_TERM.COACH_PREFERENCE_BREACHED).toBe('coachPreferenceBreached');
   });
 
-  it('charges exactly the weight once per breached dimension, not per coach', () => {
+  it('charges exactly the weight once per unmet rule: a rule from each coach counts, two failed conditions of one rule do not', () => {
     // Thu 18:00 at the same venue breaks weekday and start time; venue is kept.
     const inventory = [{ surfaceId: OP('field-3-a'), weekday: 'THU', startMinutes: 1080 }];
     const free = constructed({ inventory });
     const cases = [
-      { preferences: [pref('coach-1', 'venue', 'prefer_keep')], breaches: 0 },
-      { preferences: [pref('coach-1', 'weekday', 'prefer_keep')], breaches: 1 },
+      { preferences: [pref('coach-1', 'venue', 'prefer')], breaches: 0 },
+      { preferences: [pref('coach-1', 'weekday', 'prefer')], breaches: 1 },
       {
+        // Three rules, one per dimension: the two unmet ones are two breaches.
         preferences: [
-          pref('coach-1', 'weekday', 'prefer_keep'),
-          pref('coach-1', 'start_time', 'prefer_keep'),
-          pref('coach-1', 'venue', 'prefer_keep'),
+          pref('coach-1', 'weekday', 'prefer'),
+          pref('coach-1', 'start_time', 'prefer'),
+          pref('coach-1', 'venue', 'prefer'),
         ],
         breaches: 2,
       },
       {
-        // Two coaches on one dimension: still one breached dimension.
-        preferences: [
-          pref('coach-1', 'weekday', 'prefer_keep'),
-          pref('coach-2', 'weekday', 'prefer_keep'),
-        ],
+        // Two coaches' rules on one dimension: two unmet rules, two breaches.
+        preferences: [pref('coach-1', 'weekday', 'prefer'), pref('coach-2', 'weekday', 'prefer')],
         rows: rowsFor(['coach-1', 'coach-2']),
+        breaches: 2,
+      },
+      {
+        // One rule with two failed conditions is one unmet rule: one breach.
+        preferences: [
+          {
+            id: 'one-rule-two-conditions',
+            coachId: 'coach-1',
+            teamId: 'T',
+            level: 'prefer',
+            keepWeekday: true,
+            keepStart: true,
+          },
+        ],
         breaches: 1,
       },
     ];
@@ -945,7 +1078,7 @@ describe('coach preferences :: prefer_keep is coachPreferenceBreached, weight 10
     }
   });
 
-  it('is priced into the search: prefer_keep on weekday turns the day move into an hour-and-a-half shift', () => {
+  it('is priced into the search: prefer on weekday turns the day move into an hour-and-a-half shift', () => {
     // Without it: Thu 17:00 costs 1000 + 240 + 1; Tue 21:30 costs 1000 + 270 + 1.
     const inventory = [
       THURSDAY,
@@ -954,7 +1087,7 @@ describe('coach preferences :: prefer_keep is coachPreferenceBreached, weight 10
     expect(constructed({ inventory }).rehomed[0].to.weekday).toBe('THU');
     const run = constructed({
       inventory,
-      preferences: [pref('coach-1', 'weekday', 'prefer_keep')],
+      preferences: [pref('coach-1', 'weekday', 'prefer')],
     });
     expect(run.rehomed[0].to).toMatchObject({ weekday: 'TUE', startMinutes: 1290 });
   });
@@ -962,18 +1095,16 @@ describe('coach preferences :: prefer_keep is coachPreferenceBreached, weight 10
   it('prices a tier-2 recommendation through the one objective', () => {
     const inventory = [{ surfaceId: AP('pitch-2a'), weekday: 'TUE', startMinutes: 1020 }];
     const free = constructed({ inventory }).recommendations[0].objective.total;
-    const run = constructed({ inventory, preferences: [pref('coach-1', 'venue', 'prefer_keep')] });
+    const run = constructed({ inventory, preferences: [pref('coach-1', 'venue', 'prefer')] });
     expect(run.recommendations[0].tier).toBe('cross-venue');
     expect(run.recommendations[0].objective.total).toBe(free + PLAN_COACH_PREFERENCE_WEIGHT);
   });
 });
 
-/* -------------------------------------------------------------------------- */
-/* (e) Strictest wins, enumerated                                              */
+/* (e) Every rule applies, enumerated                                          */
 /* -------------------------------------------------------------------------- */
 
-const LEVELS = ['must_keep', 'prefer_keep', 'dont_care'];
-const RANK = { dont_care: 0, prefer_keep: 1, must_keep: 2 };
+const LEVELS = ['must', 'prefer', 'none'];
 
 /** Every length-n tuple over `options`. */
 function tuples(options, n) {
@@ -982,7 +1113,7 @@ function tuples(options, n) {
   return out;
 }
 
-describe('coach preferences :: strictest wins across the current coaches (plan §4, §6)', () => {
+describe('coach preferences :: every rule of the team applies (plan §4, §6; decision 1)', () => {
   it('every level combination of 0-3 coaches, for weekday and start time, matches the oracle', () => {
     const cases = [];
     for (const [dimension, candidate] of [
@@ -993,31 +1124,36 @@ describe('coach preferences :: strictest wins across the current coaches (plan �
       for (let n = 0; n <= 3; n += 1) {
         const coaches = ['coach-1', 'coach-2', 'coach-3'].slice(0, n);
         for (const levels of tuples(LEVELS, n)) {
-          // The oracle, from the plan's words alone.
-          const strictest = levels.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), 'dont_care');
+          // The oracle, from the plan's words alone: each coach's keep-the-current rule is unmet by
+          // the candidate; one unmet must leaves no slot; each unmet prefer is a breach.
+          const musts = levels.filter((level) => level === 'must').length;
+          const prefers = levels.filter((level) => level === 'prefer').length;
+          const asked = coaches
+            .map((coachId, i) =>
+              levels[i] === 'none' ? null : pref(coachId, dimension, levels[i])
+            )
+            .filter(Boolean);
           const run = constructed({
             inventory: [candidate],
-            preferences: coaches.map((coachId, i) => pref(coachId, dimension, levels[i])),
+            preferences: asked,
             rows: rowsFor(coaches.length > 0 ? coaches : ['coach-1']),
           });
           const outcome =
             run.timeTbd.length === 1
               ? run.timeTbd[0].reason
-              : run.stats.objectiveTotal - free === PLAN_COACH_PREFERENCE_WEIGHT
-                ? 'breached'
-                : run.stats.objectiveTotal === free
-                  ? 'free'
-                  : 'unexpected';
-          const expected = { must_keep: 'coach-preference', prefer_keep: 'breached' }[strictest];
-          cases.push({ dimension, levels, outcome, expected: expected ?? 'free' });
+              : run.stats.objectiveTotal === free + prefers * PLAN_COACH_PREFERENCE_WEIGHT
+                ? `breached x${prefers}`
+                : 'unexpected';
+          const expected = musts > 0 ? 'coach-preference' : `breached x${prefers}`;
+          cases.push({ dimension, levels, outcome, expected });
         }
       }
     }
     // 1 + 3 + 9 + 27 level combinations, for each of two dimensions.
     expect(cases.length).toBe(80);
-    for (const entry of cases) expect(entry.outcome).toBe(entry.expected);
+    for (const entry of cases) expect({ ...entry }).toEqual({ ...entry, outcome: entry.expected });
     expect(new Set(cases.map((c) => c.expected))).toEqual(
-      new Set(['coach-preference', 'breached', 'free'])
+      new Set(['coach-preference', 'breached x0', 'breached x1', 'breached x2', 'breached x3'])
     );
   });
 });
@@ -1027,7 +1163,7 @@ describe('coach preferences :: strictest wins across the current coaches (plan �
 /* -------------------------------------------------------------------------- */
 
 describe('coach preferences :: only coaches current on the repair date count', () => {
-  const must = [pref('coach-1', 'weekday', 'must_keep')];
+  const must = [pref('coach-1', 'weekday', 'must')];
   const row = (from, to, teamId = 'T') => ({
     team_id: teamId,
     coach_id: 'coach-1',
@@ -1121,7 +1257,7 @@ describe('coach preferences :: the repair input (plan §4)', () => {
           graph: LOCATION_GRAPH,
           loss: { surfaceIds: [OP('field-2')], from: LOSS_DATE, reason: 'r' },
           inventory: [],
-          coachPreferences: [pref('coach-1', 'weekday', 'must_keep')],
+          coachPreferences: [pref('coach-1', 'weekday', 'must')],
           ...rows,
         })
       ).toThrow(/teamCoachAssignments/);
@@ -1132,22 +1268,19 @@ describe('coach preferences :: the repair input (plan §4)', () => {
     expect(() =>
       constructed({
         inventory,
-        preferences: [{ ...pref('coach-1', 'weekday', 'must_keep'), note: 'x' }],
+        preferences: [{ ...pref('coach-1', 'weekday', 'must'), note: 'x' }],
       })
     ).toThrow();
     expect(() =>
       constructed({
         inventory,
-        preferences: [
-          pref('coach-1', 'weekday', 'must_keep'),
-          pref('coach-1', 'weekday', 'prefer_keep'),
-        ],
+        preferences: [pref('coach-1', 'weekday', 'must'), pref('coach-1', 'weekday', 'must')],
       })
-    ).toThrow(/one approved row/);
+    ).toThrow(/second preference rule with id/);
     expect(() =>
       constructed({
         inventory,
-        preferences: [pref('coach-1', 'weekday', 'must_keep')],
+        preferences: [pref('coach-1', 'weekday', 'must')],
         rows: [{ ...rowsFor(['coach-1'])[0], role: 'head' }],
       })
     ).toThrow();
@@ -1172,7 +1305,7 @@ describe('coach preferences :: the repair input (plan §4)', () => {
         graph,
         loss: { surfaceIds: [OP('field-2')], from: LOSS_DATE, reason: 'r' },
         inventory: [],
-        coachPreferences: [pref('coach-1', 'weekday', 'prefer_keep')],
+        coachPreferences: [pref('coach-1', 'weekday', 'prefer')],
         teamCoachAssignments: rowsFor(['coach-1']),
       })
     ).toThrow(/not location ids|are not/);
@@ -1183,7 +1316,7 @@ describe('coach preferences :: the repair input (plan §4)', () => {
     expect(() =>
       corpusRepair(OP('field-2'), {
         extra: {
-          coachPreferences: [pref(ROSTER_COACHES[0], 'weekday', 'prefer_keep')],
+          coachPreferences: [pref(ROSTER_COACHES[0], 'weekday', 'prefer')],
           teamCoachAssignments: ROSTER_ROWS.map((r) => ({ ...r, coach_id: ROSTER_COACHES[0] })),
         },
       })

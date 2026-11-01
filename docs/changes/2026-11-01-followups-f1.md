@@ -7,6 +7,9 @@ written before the code. Each item below was found as a leftover note in an earl
 claim was checked against `main` at `a7ae223` before anything was changed. No migration, no
 dependency, no new persistence.
 
+**Built in the same pull request:** items 2, 3 and 4. Item 1 changed two notes and no code; item 5 is
+skipped and listed for the owner.
+
 ## 1. "Deleting a season that has games fails" (#680): not a defect; nothing to fix
 
 **The claim.** `games.season_id` is `ON DELETE SET NULL` while the season's teams are already gone and

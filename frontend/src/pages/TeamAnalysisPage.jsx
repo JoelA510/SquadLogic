@@ -144,25 +144,32 @@ function createDefaultConfig() {
  * The programs of an import, with the players each holds. The head coaches are not counted here:
  * since the admin-only change (owner decision 8a, 2026-10-27) only a `coach_team_requests` link
  * anchors a team, and the links are read at generation, not with the import's rows. So the
- * overview's recommended team count is the registered players' (`coachCount` 0); generation
+ * overview's recommended team count is the seatable players' (`coachCount` 0); generation
  * itself makes a team for each coach whose child is eligible for the division, and one whose
  * child is not eligible, or is waitlisted, anchors no team (Phase B2).
+ *
+ * `playerCount` is the players generation can seat, which the advice is for: a waitlisted player
+ * is seated on no team (owner, 2026-10-27), so `waitlistedRows` (the positions in `rows` that are
+ * waitlisted, `waitlistedRowIndexes`) are counted apart, in `waitlistedCount`; `totalPlayers` is
+ * everyone registered, as it was. The not-eligible are still counted: who they are takes each
+ * player's age placed against the division rules (follow-ups F1, item 3).
  */
-function derivePrograms(rows) {
+function derivePrograms(rows, waitlistedRows = NO_WAITLISTED_ROWS) {
   const grouped = new Map();
 
-  rows.forEach((row) => {
+  rows.forEach((row, index) => {
     const id = resolveDivisionId(row);
     const name = String(resolveDivisionName(row)).trim() || id;
-    const current = grouped.get(id) || { id, name, playerCount: 0 };
-    current.playerCount += 1;
+    const current = grouped.get(id) || { id, name, playerCount: 0, waitlistedCount: 0 };
+    if (waitlistedRows.has(index)) current.waitlistedCount += 1;
+    else current.playerCount += 1;
     grouped.set(id, current);
   });
 
   return Array.from(grouped.values()).map((program) => ({
     ...program,
     coachCount: 0,
-    totalPlayers: program.playerCount,
+    totalPlayers: program.playerCount + program.waitlistedCount,
   }));
 }
 
@@ -221,16 +228,20 @@ function deriveProgramStats(program, config = {}) {
   // names, by the generator's own rule, so the overview and the settings panel agree with it.
   // Empty limits mean what they mean to the generator: no minimum, a target equal to the maximum
   // (an empty maximum is refused; the overview shows no estimate then).
-  const estimatedTeams = resolveTeamCount({
-    playerCount: program.playerCount,
-    coachCount: program.coachCount ?? 0,
-    maxRosterSize,
-    targetTeamSize: positiveIntegerOrFallback(config.targetTeamSize, null),
-    teamCountOverride: positiveIntegerOrFallback(config.teamCountOverride, null),
-    minTeams: positiveIntegerOrFallback(config.minTeams, null),
-    maxTeams: positiveIntegerOrFallback(config.maxTeams, null),
-    minRosterSize: positiveIntegerOrFallback(config.minRosterSize, null),
-  });
+  // A program whose registrants are all waitlisted has nobody to seat: generation builds no team.
+  const estimatedTeams =
+    program.playerCount === 0
+      ? 0
+      : resolveTeamCount({
+          playerCount: program.playerCount,
+          coachCount: program.coachCount ?? 0,
+          maxRosterSize,
+          targetTeamSize: positiveIntegerOrFallback(config.targetTeamSize, null),
+          teamCountOverride: positiveIntegerOrFallback(config.teamCountOverride, null),
+          minTeams: positiveIntegerOrFallback(config.minTeams, null),
+          maxTeams: positiveIntegerOrFallback(config.maxTeams, null),
+          minRosterSize: positiveIntegerOrFallback(config.minRosterSize, null),
+        });
   // The settings panel's advice, for the overview's recommended count and status: the same
   // call the panel makes, with the config as the admin left it (an empty maximum is "blocked").
   const assessment = assessTeamCount({
@@ -248,7 +259,8 @@ function deriveProgramStats(program, config = {}) {
     ...program,
     estimatedTeams,
     assessment,
-    avgRosterSize: Number((program.playerCount / estimatedTeams).toFixed(1)),
+    avgRosterSize:
+      estimatedTeams > 0 ? Number((program.playerCount / estimatedTeams).toFixed(1)) : 0,
     capacity: estimatedTeams * maxRosterSize,
   };
 }
@@ -507,6 +519,61 @@ function withDurableIdentity(row, durable, { skillTier = false } = {}) {
   return next;
 }
 
+/** Stored players by id and by external registration id, for `matchDurablePlayer`. */
+function indexDurablePlayers(durablePlayers) {
+  return {
+    byId: new Map(durablePlayers.map((player) => [String(player.id), player])),
+    byExternalId: new Map(
+      durablePlayers
+        .filter((player) => player.external_registration_id)
+        .map((player) => [String(player.external_registration_id), player])
+    ),
+  };
+}
+
+/** The stored player an import row is: by its id when that is a UUID, else by registration id. */
+function matchDurablePlayer(row, byId, byExternalId) {
+  const idCandidate = getPlayerIdCandidate(row);
+  const externalCandidate = getPlayerExternalCandidate(row);
+  return (
+    (isUuid(idCandidate) && byId.get(idCandidate)) ||
+    (externalCandidate && byExternalId.get(externalCandidate)) ||
+    null
+  );
+}
+
+/**
+ * Does the row mark a registrant as waitlisted? The one place the page decides it: what generation
+ * seats (`toGeneratorPlayer`) and what the advice counts (`waitlistedRowIndexes`) both ask here, so
+ * the two cannot disagree. The row is the file's, or the file's with the stored status over it
+ * (`withDurableIdentity`).
+ */
+function isWaitlistedRow(row) {
+  return WAITLIST_KEYS.some((key) => parseBooleanLike(row?.[key]));
+}
+
+/**
+ * The rows of the file, by position, that are waitlisted by generation's own rule: the stored
+ * player's status where a durable player matches the row (the record wins), else the file's
+ * waitlist column. With no durable players it is the file alone.
+ * @param {any[]} rows
+ * @param {any[]} [durablePlayers] - the stored players `fetchDurablePlayers` returned for the rows
+ * @returns {Set<number>}
+ */
+function waitlistedRowIndexes(rows, durablePlayers = []) {
+  const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
+  const indexes = new Set();
+  rows.forEach((row, index) => {
+    if (isWaitlistedRow(withDurableIdentity(row, matchDurablePlayer(row, byId, byExternalId)))) {
+      indexes.add(index);
+    }
+  });
+  return indexes;
+}
+
+/** No row is waitlisted: the Waitlist option is off, or the file has none. */
+const NO_WAITLISTED_ROWS = /** @type {Set<number>} */ (new Set());
+
 /**
  * Durable players by id and by external registration id, in chunks (a long `in` list is a
  * long URL), at most eight requests at a time. A refused read throws.
@@ -684,7 +751,7 @@ function toGeneratorPlayer(
   const skillRating = normalizeSkillRating(
     firstNonEmpty(row, skillTier ? SKILL_KEYS_ALL : SKILL_NUMBER_KEYS)
   );
-  const isWaitlisted = waitlist && WAITLIST_KEYS.some((key) => parseBooleanLike(row?.[key]));
+  const isWaitlisted = waitlist && isWaitlistedRow(row);
   const isCoachingLead =
     coachingLeads && COACHING_ANSWER_KEYS.some((key) => isCoachingLeadAnswer(row?.[key]));
   const yearsPlayed = parseYearsPlayed(firstNonEmpty(row, YEARS_PLAYED_KEYS));
@@ -870,7 +937,71 @@ export default function TeamAnalysisPage() {
   const canEditTeams = canManageTeams && isEditMode;
 
   const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
-  const fileProgramsBase = useMemo(() => derivePrograms(importedPlayerRows), [importedPlayerRows]);
+  // The rows that are waitlisted, for the advice (follow-ups F1, item 3). With the Waitlist option
+  // on, the stored status of the file's players is read once per import, because the record wins
+  // over the file (a buddy taken off the waitlist is active in the record while the file still
+  // marks them), as generation reads it. Until it arrives, and if it cannot be read (logged;
+  // generation re-reads and stops on a refused read), the file's own waitlist column is used.
+  const [storedWaitlist, setStoredWaitlist] = useState(
+    /** @type {null | { rows: any[], indexes: Set<number> }} */ (null)
+  );
+  // Bumped when this page changes stored statuses itself (players taken off the waitlist are made
+  // active on save), so the advice reads the record again rather than the one it read on load.
+  const [waitlistReadKey, setWaitlistReadKey] = useState(0);
+  useEffect(() => {
+    if (
+      !waitlistEnabled ||
+      importedPlayerRows.length === 0 ||
+      !currentOrganization?.id ||
+      !currentSeasonSetting?.id
+    ) {
+      setStoredWaitlist(null);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const durable = await fetchDurablePlayers(
+          currentOrganization.id,
+          currentSeasonSetting.id,
+          collectPlayerLookupKeys(
+            importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }))
+          )
+        );
+        if (!cancelled) {
+          setStoredWaitlist({
+            rows: importedPlayerRows,
+            indexes: waitlistedRowIndexes(importedPlayerRows, durable),
+          });
+        }
+      } catch (error) {
+        logger.error(
+          `[TeamAnalysis] the stored waitlist could not be read (${error?.message ?? 'the read was refused'}); the overview counts the file's waitlist column instead:`,
+          error
+        );
+        if (!cancelled) setStoredWaitlist(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    waitlistEnabled,
+    importedPlayerRows,
+    currentOrganization?.id,
+    currentSeasonSetting?.id,
+    waitlistReadKey,
+  ]);
+  const waitlistedRows = useMemo(() => {
+    if (!waitlistEnabled) return NO_WAITLISTED_ROWS;
+    return storedWaitlist?.rows === importedPlayerRows
+      ? storedWaitlist.indexes
+      : waitlistedRowIndexes(importedPlayerRows);
+  }, [waitlistEnabled, storedWaitlist, importedPlayerRows]);
+  const fileProgramsBase = useMemo(
+    () => derivePrograms(importedPlayerRows, waitlistedRows),
+    [importedPlayerRows, waitlistedRows]
+  );
   // The divisions of the season the file has no registrants in but whose rules take players from it
   // (a U4 whose birth-date window holds a U3 registrant): programs too, with the players that would
   // play there, so they can be seen and generated. Their id is the division's own, which is the id
@@ -889,10 +1020,17 @@ export default function TeamAnalysisPage() {
     });
     if (otherDescriptors.length === 0) return [];
     const { players: placed } = applyPlayUpEligibility({
-      players: importedPlayerRows.map((row, sourceIndex) => ({
-        ...toGeneratorPlayer(row, sourceIndex, resolveDivisionId(row)),
-        id: `row-${sourceIndex}`,
-      })),
+      // A waitlisted registrant would be seated nowhere, so none is counted into a division.
+      players: importedPlayerRows.flatMap((row, sourceIndex) =>
+        waitlistedRows.has(sourceIndex)
+          ? []
+          : [
+              {
+                ...toGeneratorPlayer(row, sourceIndex, resolveDivisionId(row)),
+                id: `row-${sourceIndex}`,
+              },
+            ]
+      ),
       divisions: divisionDescriptors,
       seasonYear: seasonYearSetting,
       cutoffMode: cutoffModeSetting,
@@ -909,6 +1047,7 @@ export default function TeamAnalysisPage() {
         id: descriptor.id,
         name: String(descriptor.name),
         playerCount: incoming.get(descriptor.id),
+        waitlistedCount: 0,
         coachCount: 0,
         totalPlayers: incoming.get(descriptor.id),
         incoming: true,
@@ -916,6 +1055,7 @@ export default function TeamAnalysisPage() {
   }, [
     divisionRows,
     importedPlayerRows,
+    waitlistedRows,
     fileProgramsBase,
     seasonYearSetting,
     cutoffModeSetting,
@@ -1322,22 +1462,12 @@ export default function TeamAnalysisPage() {
       ]);
       const durablePlayers = [...byIdRows, ...byExternalRows];
 
-      const byId = new Map(durablePlayers.map((player) => [String(player.id), player]));
-      const byExternalId = new Map(
-        durablePlayers
-          .filter((player) => player.external_registration_id)
-          .map((player) => [String(player.external_registration_id), player])
-      );
+      const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
       const missingRows = [];
       const generationRows = [];
 
       const generatorPlayers = rowsForProgram.map(({ row, sourceIndex }) => {
-        const idCandidate = getPlayerIdCandidate(row);
-        const externalCandidate = getPlayerExternalCandidate(row);
-        const matchedPlayer =
-          (isUuid(idCandidate) && byId.get(idCandidate)) ||
-          (externalCandidate && byExternalId.get(externalCandidate)) ||
-          null;
+        const matchedPlayer = matchDurablePlayer(row, byId, byExternalId);
         const durablePlayer =
           matchedPlayer &&
           (!selectedDivisionKey || String(matchedPlayer.division_id || '') === selectedDivisionKey)
@@ -1439,20 +1569,11 @@ export default function TeamAnalysisPage() {
               collectPlayerLookupKeys(otherEntries)
             )
           : [];
-      const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
-      const otherByExternalId = new Map(
-        otherDurable
-          .filter((player) => player.external_registration_id)
-          .map((player) => [String(player.external_registration_id), player])
-      );
+      const { byId: otherById, byExternalId: otherByExternalId } =
+        indexDurablePlayers(otherDurable);
       const others = otherEntries.map(({ row, sourceIndex }) => {
         const division = resolveDivisionId(row);
-        const idCandidate = getPlayerIdCandidate(row);
-        const externalCandidate = getPlayerExternalCandidate(row);
-        const durable =
-          (isUuid(idCandidate) && otherById.get(idCandidate)) ||
-          (externalCandidate && otherByExternalId.get(externalCandidate)) ||
-          null;
+        const durable = matchDurablePlayer(row, otherById, otherByExternalId);
         const identified = withDurableIdentity(row, durable, { skillTier: skillTierEnabled });
         const generationRow = durable
           ? {
@@ -1832,6 +1953,7 @@ export default function TeamAnalysisPage() {
       );
       return;
     }
+    setWaitlistReadKey((key) => key + 1);
     setReviewMessage(
       `${appliedMessage} ${playerIds.length} ${plural} taken off the waitlist ${playerIds.length === 1 ? 'is' : 'are'} now active.`
     );

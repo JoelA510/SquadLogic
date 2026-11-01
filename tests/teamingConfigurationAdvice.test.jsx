@@ -80,6 +80,14 @@ const page = vi.hoisted(() => ({
   divisions: [],
   /** @type {any[]} every `admin_upsert_division_settings` call's params */
   saves: [],
+  /** @type {any[]} the stored `players` rows the page's lookups return */
+  players: [],
+  /** @type {any} the error the `players` reads return */
+  playersError: null,
+  /** how many times the page read `players` */
+  playerReads: 0,
+  /** @type {any} the organization's stored feature flags, parsed by the schema */
+  flags: {},
 }));
 
 vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
@@ -97,7 +105,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
     currentOrganization: { id: IDS.organization, name: 'Test FC' },
     currentSeasonSetting: { id: IDS.season, season_year: 2026, age_cutoff_mode: 'birth_year' },
     permissions: ['manage_organization'],
-    featureFlags: FeatureFlagSchema.parse({}),
+    featureFlags: FeatureFlagSchema.parse(page.flags),
   }),
 }));
 vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
@@ -119,8 +127,17 @@ vi.mock('../frontend/src/config.js', async (importOriginal) => ({
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: (table) =>
-      createChainMock({ data: table === 'divisions' ? page.divisions : [], error: null }),
+    from: (table) => {
+      if (table === 'players') {
+        page.playerReads += 1;
+        return createChainMock(
+          page.playersError
+            ? { data: null, error: page.playersError }
+            : { data: page.players, error: null }
+        );
+      }
+      return createChainMock({ data: table === 'divisions' ? page.divisions : [], error: null });
+    },
     rpc: async (name, params) => {
       if (name !== 'admin_upsert_division_settings') return { data: null, error: null };
       page.saves.push(params);
@@ -347,6 +364,181 @@ describe('Team counts per program on the Teams page (Phase B4)', () => {
         .map((node) => node.textContent)
         .join(' ')
     ).toContain('Team sizes: 1 team under the minimum roster.');
+  });
+});
+
+/*
+ * Follow-ups F1, item 3 (docs/changes/2026-11-01-followups-f1.md): the advice counted every
+ * registered player, waitlisted ones too, while generation seats only the others. Every count is
+ * worked out here from the rows and the limits (target 12, minimum 10, maximum 14), never read
+ * back from the page; the last test of the group runs the real generator on the same rows.
+ */
+describe('The waitlisted are left out of the advice (follow-ups F1)', () => {
+  const resetWaitlistState = () => {
+    page.rows = [];
+    page.divisions = [];
+    page.saves = [];
+    page.players = [];
+    page.playersError = null;
+    page.playerReads = 0;
+    page.flags = {};
+    sessionStorage.clear();
+  };
+  beforeEach(resetWaitlistState);
+  afterEach(() => {
+    cleanup();
+    resetWaitlistState();
+    vi.restoreAllMocks();
+  });
+
+  /** The stored player of an import row, as `finalize_import_job` keeps it. */
+  const stored = (program, n, status) => ({
+    id: `${IDS.division}-player-${n}`,
+    external_registration_id: `${program}-REG-${n}`,
+    division_id: `${IDS.division}-${program}`,
+    first_name: `Kid${n}`,
+    last_name: `Placeholder${n}`,
+    status,
+  });
+
+  it('recommends for the players generation seats, and says how many are on the waitlist', async () => {
+    // Thirty registered, six marked on the waitlist by the file: 24 are seated, so
+    // ceil(24 / 12) = 2 teams. Counting all thirty gives ceil(30 / 12) = 3.
+    page.rows = importRows('U10', 30, (i) => (i < 6 ? { waitlist: 'yes' } : {}));
+    page.divisions = [savedDivision('U10')];
+    expect(Math.ceil(24 / 12)).toBe(2);
+    expect(Math.ceil(30 / 12)).toBe(3);
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players'
+      )
+    );
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      '6 on the waitlist are not counted'
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent('24');
+    expect(overviewCell('U10', 'Players')).toHaveTextContent('6 on the waitlist');
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('2');
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent('2');
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent('12');
+  });
+
+  it('takes the stored status over the file, as generation does (a buddy taken off the waitlist)', async () => {
+    // The file marks two players; the record has since made both active (taken off the waitlist and
+    // saved). Thirty are seated: ceil(30 / 12) = 3 teams, and 3 is also what the maximum roster of
+    // 14 needs (ceil(30 / 14) = 3). Reading the file alone would say 28 seated: the minimum roster of
+    // 10 allows floor(28 / 10) = 2 teams and the maximum needs ceil(28 / 14) = 2, so 2.
+    page.rows = importRows('U10', 30, (i) => (i < 2 ? { waitlist: 'yes' } : {}));
+    page.divisions = [savedDivision('U10')];
+    page.players = [stored('U10', 1, 'active'), stored('U10', 2, 'active')];
+    await renderPage();
+
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 3 teams for 30 players'
+      )
+    );
+    expect(screen.getByTestId('team-count-recommendation')).not.toHaveTextContent('waitlist');
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+  });
+
+  it('counts a player the record put on the waitlist, whatever the file says', async () => {
+    // Nobody is marked in the file; the record holds two of the thirty on the waitlist. Registered,
+    // 30 is 3 teams; seated, 28 is 2 (see above): two players are the difference.
+    page.rows = importRows('U10', 30);
+    page.divisions = [savedDivision('U10')];
+    page.players = [stored('U10', 7, 'waitlist'), stored('U10', 8, 'waitlist')];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 28 players (2 on the waitlist are not counted)'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent('2 on the waitlist');
+  });
+
+  it('a program whose registrants are all waitlisted advises no team, as generation builds none', async () => {
+    page.rows = [...importRows('U10', 12, () => ({ waitlist: 'yes' })), ...importRows('U12', 24)];
+    page.divisions = [savedDivision('U10'), savedDivision('U12')];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Status')).toHaveTextContent('All on the waitlist')
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^0\s*12 on the waitlist$/);
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(/^0$/);
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('—');
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent(/^0$/);
+    expect(overviewRow('U10')).not.toHaveTextContent('Fits the limits');
+    // The program beside it is advised as ever (24 at a target of 12 is 2 teams of 12).
+    expect(overviewCell('U12', 'Recommended')).toHaveTextContent('2');
+    expect(overviewCell('U12', 'Status')).toHaveTextContent('Fits the limits');
+  });
+
+  it('with the Waitlist option off counts every player and reads nothing new', async () => {
+    page.flags = { waitlist: false };
+    page.rows = importRows('U10', 30, (i) => (i < 6 ? { waitlist: 'yes' } : {}));
+    page.divisions = [savedDivision('U10')];
+    page.players = [stored('U10', 7, 'waitlist')];
+    await renderPage();
+
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      'Recommended: 3 teams for 30 players'
+    );
+    expect(screen.getByTestId('team-count-recommendation')).not.toHaveTextContent('waitlist');
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    // The page reads `players` at generation only; with the option off it makes no read to load.
+    expect(page.playerReads).toBe(0);
+  });
+
+  it('a program with nobody waitlisted reads exactly as before', async () => {
+    page.rows = importRows('U10', 30);
+    page.divisions = [savedDivision('U10')];
+    await renderPage();
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+  });
+
+  it('falls back to the file when the stored status cannot be read, and logs it', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    page.playersError = { message: 'permission denied for table players', code: '42501' };
+    page.rows = importRows('U10', 30, (i) => (i < 6 ? { waitlist: 'yes' } : {}));
+    page.divisions = [savedDivision('U10')];
+    await renderPage();
+
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(error.mock.calls.map((call) => call.map(String).join(' ')).join('\n')).toMatch(
+        /waitlist.*permission denied for table players/i
+      )
+    );
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      'Recommended: 2 teams for 24 players'
+    );
+  });
+
+  it('agrees with what generation makes on the same rows', async () => {
+    page.rows = importRows('U10', 30, (i) => (i < 6 ? { waitlist: 'yes' } : {}));
+    page.divisions = [savedDivision('U10')];
+    await renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players'
+      )
+    );
+    const generate = screen.getByRole('button', { name: /Generate Teams/ });
+    await waitFor(() => expect(generate).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(generate);
+    });
+    await screen.findByText('Team Review Pending');
+    expect(screen.getByText('Team review staged: 2 teams.', { exact: false })).toBeInTheDocument();
   });
 });
 

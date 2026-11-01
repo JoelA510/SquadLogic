@@ -748,10 +748,10 @@ plan is the rule-14 plan for them. No migration, no new persistence, no dependen
    "for another reason", and the "no teams" message says how many are waitlisted. **Without a
    blocked or waitlisted player the output is unchanged** (_executed_): B2's golden, byte for
    byte (`tests/teamGenerationEligibility.test.js`), and a test that holds the means over every
-   player. **Not built:** a preserved player later waitlisted stays on their reviewed roster and
-   is not listed as a hold (only a late player is held out), and the program overview's
-   recommended team count still counts the registered players, waitlisted included, as it already
-   counts the not-eligible.
+   player. **Not built here, built in follow-ups F1
+   (`docs/changes/2026-11-01-followups-f1.md`, 2026-11-01):** a preserved player later waitlisted
+   stays on their reviewed roster and is now listed as a hold, as a blocked one is, and the program
+   overview's recommended team count leaves the waitlisted out. It still counts the not-eligible.
 2. **A coach whose only child is held out is shown, flagged.** In "Players to review", "Not
    placed" (B3's list, no parallel list), a held-out player's entry whose `metadata.coachId` (a
    `coach_team_requests` link) names a coach with no team in the division's `teamsByDivision` gets

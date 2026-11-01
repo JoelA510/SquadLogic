@@ -39,6 +39,13 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
     When I switch to the dark theme on this page
     Then axe finds no serious or critical violations on "/teams" in the "dark" theme
 
+  # Follow-ups F1: a waitlisted player is seated on no team, so the overview recommends a count for
+  # the others and says how many are waiting (100 registered would recommend 10 teams, not 8).
+  Scenario: The program overview does not count the waitlisted into the recommended team count
+    Given 100 players are imported into the "U12 Boys" program and 20 of them are on the waitlist
+    When I ask the Teams page for 5 teams of at most 10 players
+    Then the program overview shows 80 players and 20 on the waitlist for "U12 Boys", and recommends the fewest teams that hold them at 10 each
+
   Scenario: Practice Scheduling
     Given these teams and coaches in "U10 Boys":
       | team  | coach        |

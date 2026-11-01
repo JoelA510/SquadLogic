@@ -291,10 +291,14 @@ SELECT is((SELECT count(*)::int FROM public.teams WHERE organization_id = 'd4444
         + (SELECT count(*)::int FROM public.games WHERE organization_id = 'd4444444-4444-4444-4444-444444444444'), 0,
     'and its teams, rosters and scores went with it');
 
--- Deleting a completed season outright still cascades through its teams and rosters. (A season that has
--- games cannot be deleted at all, before or after this migration: the games' season is set null while
--- their teams are already gone, and the foreign key on the team refuses. Reproduced on the base; a games
--- row is not part of this case.)
+-- Deleting a completed season outright still cascades through its teams and rosters. (A games row is not
+-- part of this case, and no assertion in a pgTAP file can show why. A season whose games were committed
+-- earlier, which is the only way an application has them, deletes cleanly: its teams take their games
+-- with them, and a game whose teams are in another season is kept with its season set null. Only inside
+-- the one transaction that also inserted the game, as every file here is, does the delete fail: the SET NULL
+-- of games.season_id runs after the cascade removed the game's teams, and Postgres re-checks the team
+-- foreign key on an update of a row the same transaction inserted. Measured on a scratch cluster built
+-- from the migrations, docs/changes/2026-11-01-followups-f1.md, item 1.)
 INSERT INTO public.organizations (id, name, slug) VALUES ('f7777777-7777-7777-7777-777777777701', 'Org F', 'org-f-readonly');
 DELETE FROM public.season_settings WHERE organization_id = 'f7777777-7777-7777-7777-777777777701';
 INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES

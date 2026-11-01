@@ -62,7 +62,8 @@ import {
  * Waitlist (owner, 2026-10-27): a player with `status: 'waitlist'` (`isWaitlisted`) is not seated
  * either; each is in overflow with reason `waitlisted`, metadata `{ coachId }`. The league-wide
  * averages (`globalStats`: org means and ranges) leave out every player who cannot be placed,
- * blocked or waitlisted.
+ * blocked or waitlisted. A waitlisted player already on a preserved roster stays there, as a
+ * blocked one does, and is listed in `eligibilityHolds` with `waitlisted: true` (follow-ups F1).
  *
  * Coaching leads (Phase B6, `coachingLeads.js`): a player with `isCoachingLead` is not a coach
  * and anchors no team. Once coaches' children are placed, units holding a lead are dealt to a
@@ -587,15 +588,27 @@ export function generateTeams({
         capacityViolations,
         minRosterWarnings: teamsBelowMinRoster ?? [],
         structuralWarnings,
-        // A blocked player seated on a final roster: only a preserved one can be (late blocked
-        // players overflow), and they stay (owner decision 3), listed for the admin.
+        // A blocked or waitlisted player seated on a final roster: only a preserved one can be
+        // (late ones overflow), and they stay (owner decision 3), listed for the admin. A player
+        // who is both is reported as blocked, as the overflow reports them; a waitlisted one
+        // carries `waitlisted: true`, and a blocked one is exactly the entry it always was.
         eligibilityHolds: teams.flatMap((team) =>
-          team.players.filter(isEligibilityBlocked).map((player) => ({
-            playerId: player.id,
-            teamId: team.id,
-            placement: player.placement,
-            reviewReason: player.reviewReason ?? null,
-          }))
+          team.players.filter(cannotBePlaced).map((player) =>
+            isEligibilityBlocked(player)
+              ? {
+                  playerId: player.id,
+                  teamId: team.id,
+                  placement: player.placement,
+                  reviewReason: player.reviewReason ?? null,
+                }
+              : {
+                  playerId: player.id,
+                  teamId: team.id,
+                  placement: player.placement ?? null,
+                  reviewReason: null,
+                  waitlisted: true,
+                }
+          )
         ),
       };
     }

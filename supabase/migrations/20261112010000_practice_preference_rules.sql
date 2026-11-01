@@ -898,6 +898,16 @@ AS $function$
     END;
 $function$;
 
+-- A staged preference row holds a coach's email, so it is kept as long as a staged coach row is: the
+-- retention job that deletes a finished job's staged coach rows 30 days after they were staged
+-- (20261022010000) takes the preference rows too. cron.schedule with an existing name replaces that
+-- job's command; the old condition `import_type = 'coaches'` stays in it, one arm of two.
+SELECT cron.schedule(
+    'cleanup-staging-import-rows',
+    '0 3 * * *',
+    $$ DELETE FROM public.staging_import_rows s USING public.import_jobs j WHERE j.id = s.import_job_id AND (s.import_type = 'coaches' OR s.import_type = 'practice_preferences') AND j.status IN ('completed', 'completed_with_warnings', 'failed') AND s.created_at < now() - interval '30 days' $$
+);
+
 -- One row of a preference file is one rule. Columns (after the import's header normalization; the keys are
 -- on the allowlist in the browser, in import-validation and in `import_allowed_keys` above):
 --   email                 the coach's email, the key the coach import uses. Required.
@@ -1610,6 +1620,11 @@ BEGIN
     IF cardinality(public.import_allowed_keys('practice_preferences')) <> 18
        OR NOT 'email' = ANY (public.import_allowed_keys('practice_preferences')) THEN
         RAISE EXCEPTION 'import_allowed_keys(practice_preferences) is not the 18 keys the finalizer reads';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-staging-import-rows'
+                    AND command LIKE '%practice_preferences%' AND command LIKE '%import_type = ''coaches''%'
+                    AND command LIKE '%30 days%') THEN
+        RAISE EXCEPTION 'the staged-row retention job does not take practice_preferences rows';
     END IF;
     SELECT count(*) INTO v_n FROM pg_proc p
      WHERE p.oid = to_regprocedure('public.admin_delete_team(uuid)')

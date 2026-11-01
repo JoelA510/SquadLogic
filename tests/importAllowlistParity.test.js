@@ -36,6 +36,9 @@ describe('the import allowlist, browser and Edge copies', () => {
   it('has the same lists and entity types in both copies', () => {
     expect([...edge.PLAYER_IMPORT_KEYS]).toEqual([...browser.PLAYER_IMPORT_KEYS]);
     expect([...edge.COACH_IMPORT_KEYS]).toEqual([...browser.COACH_IMPORT_KEYS]);
+    expect([...edge.PRACTICE_PREFERENCE_IMPORT_KEYS]).toEqual([
+      ...browser.PRACTICE_PREFERENCE_IMPORT_KEYS,
+    ]);
     expect({ ...edge.ALLOWLIST_ENTITY_TYPES }).toEqual({ ...browser.ALLOWLIST_ENTITY_TYPES });
     expect({ ...browser.ALLOWLIST_ENTITY_TYPES }).toEqual({ players: 'player', coaches: 'coach' });
   });
@@ -104,6 +107,67 @@ describe('the import allowlist, browser and Edge copies', () => {
     'certifications',
     'child_registration_id',
   ];
+
+  // A practice preference file (Phase D C1): the coach's email, the team, and the rule's columns.
+  const KEPT_PREFERENCE = [
+    'email',
+    'team_name',
+    'team name',
+    'team',
+    'request_level',
+    'weekdays',
+    'days',
+    'start_times',
+    'start',
+    'venues',
+    'location',
+    'effective_from',
+    'valid_until',
+    'coach_priority',
+  ];
+  const DROPPED_PREFERENCE = [
+    'full_name',
+    'first_name',
+    'last_name',
+    'phone',
+    'contact_phone',
+    'status',
+    'child_registration_id',
+    'date_of_birth',
+    'guardian_1_email',
+    'payment_status',
+    'notes',
+    'comments',
+  ];
+  it.each(KEPT_PREFERENCE)('both copies keep the preference key %j', (key) => {
+    expect(browser.isAllowedImportKey('practice_preferences', key)).toBe(true);
+    expect(edge.isAllowedImportKey('practice_preferences', key)).toBe(true);
+  });
+  it.each(DROPPED_PREFERENCE)('both copies drop the preference key %j', (key) => {
+    expect(browser.isAllowedImportKey('practice_preferences', key)).toBe(false);
+    expect(edge.isAllowedImportKey('practice_preferences', key)).toBe(false);
+  });
+  it('a preference file keeps only its own columns: no coach name, phone or note', () => {
+    const row = {
+      'Coach Email': 'c@example.com',
+      Team: 'U10 Boys 2',
+      Days: 'Tue',
+      Phone: '555',
+      Notes: 'x',
+    };
+    for (const copy of [browser, edge]) {
+      expect(
+        copy.keepAllowedColumns('practice_preferences', row, browser.canonicalImportKey, [])
+      ).toEqual({
+        'Coach Email': 'c@example.com',
+        Team: 'U10 Boys 2',
+        Days: 'Tue',
+      });
+    }
+    expect(browser.canonicalImportKey('Coach Email')).toBe('email');
+    expect(browser.canonicalImportKey('Prefer or Must')).toBe('request_level');
+    expect(browser.canonicalImportKey('Start Times')).toBe('start_times');
+  });
 
   it.each(DROPPED_PLAYER)('both copies drop the player key %j', (key) => {
     expect(browser.isAllowedImportKey('players', key)).toBe(false);
@@ -282,7 +346,11 @@ function edgeAliases() {
 
 describe('the header alias maps', () => {
   const EDGE = edgeAliases();
-  const allowed = new Set([...browser.PLAYER_IMPORT_KEYS, ...browser.COACH_IMPORT_KEYS]);
+  const allowed = new Set([
+    ...browser.PLAYER_IMPORT_KEYS,
+    ...browser.COACH_IMPORT_KEYS,
+    ...browser.PRACTICE_PREFERENCE_IMPORT_KEYS,
+  ]);
 
   it('reads the Edge map, including the long GotSport questions', () => {
     expect(Object.keys(EDGE).length).toBeGreaterThan(150);
@@ -389,6 +457,7 @@ const READERS = {
   finalize_import_job: 'players',
   materialize_import_buddy_pairs: 'players',
   finalize_coach_import_job: 'coaches',
+  finalize_practice_preference_import_job: 'practice_preferences',
   finalize_field_import_job: 'fields',
   finalize_field_availability_import_job: 'fields',
   // Reduces an unfinished job's staged payloads through import_allowed_payload;
@@ -414,7 +483,7 @@ function sqlCensus(latest) {
   const readers = [...latest].filter(([, body]) => /\bnormalized_payload\b/.test(body));
   const unclassified = readers.map(([name]) => name).filter((name) => !(name in READERS));
   /** @type {Record<string, Set<string>>} */
-  const read = { players: new Set(), coaches: new Set() };
+  const read = { players: new Set(), coaches: new Set(), practice_preferences: new Set() };
   for (const [name, body] of readers) {
     const type = READERS[name];
     if (type in read) for (const key of payloadKeysRead(body)) read[type].add(key);
@@ -449,6 +518,12 @@ describe('the allowlist equals what the latest SQL reads', () => {
       browser.COACH_IMPORT_KEYS.filter((key) => !parts.has(key)).sort()
     );
     expect([...edge.COACH_NAME_PARTS]).toEqual([...browser.COACH_NAME_PARTS]);
+  });
+
+  it('the preference finalizer reads exactly the preference allowlist', () => {
+    expect([...census.read.practice_preferences].sort()).toEqual(
+      [...browser.PRACTICE_PREFERENCE_IMPORT_KEYS].sort()
+    );
   });
 
   it('neither people finalizer stores the payload minus a denylist; both use the declared fields', () => {
@@ -521,13 +596,18 @@ describe('the SQL copy of the lists equals the code copies', () => {
   const body = latest.get('import_allowed_keys') ?? '';
 
   it('reads both arms of the latest import_allowed_keys', () => {
-    expect(Object.keys(sqlAllowedKeys(body)).sort()).toEqual(['coaches', 'players']);
+    expect(Object.keys(sqlAllowedKeys(body)).sort()).toEqual([
+      'coaches',
+      'players',
+      'practice_preferences',
+    ]);
   });
 
   it('holds the player and coach lists exactly, in order', () => {
     const lists = sqlAllowedKeys(body);
     expect(lists.players).toEqual([...browser.PLAYER_IMPORT_KEYS]);
     expect(lists.coaches).toEqual([...browser.COACH_IMPORT_KEYS]);
+    expect(lists.practice_preferences).toEqual([...browser.PRACTICE_PREFERENCE_IMPORT_KEYS]);
   });
 
   it('POSITIVE CONTROL: a key missing from the SQL copy fails', () => {

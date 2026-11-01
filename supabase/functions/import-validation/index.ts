@@ -59,6 +59,7 @@ function sanitizeString(value: unknown): string {
 const REQUIRED_FIELDS: Record<string, string[]> = {
   players: ['first_name', 'last_name', 'date_of_birth'],
   coaches: ['full_name', 'email'],
+  practice_preferences: ['email'],
   fields: ['location', 'name', 'type', 'start', 'end'],
   field_availability: [
     'season_label',
@@ -166,6 +167,38 @@ const HEADER_ALIASES: Record<string, string> = {
   'child registration id': 'child_registration_id',
   'child id': 'child_registration_id',
   child_registration_id: 'child_registration_id',
+  // The practice preference import (Phase D C1): one row is one rule. The finalizer reads these
+  // canonical keys (`team` is read as it is, `start time` and `valid from` already have aliases).
+  'coach email': 'email',
+  'request level': 'request_level',
+  'request type': 'request_level',
+  'preference level': 'request_level',
+  'prefer or must': 'request_level',
+  strength: 'request_level',
+  request_level: 'request_level',
+  days: 'weekdays',
+  weekdays: 'weekdays',
+  'practice days': 'weekdays',
+  'preferred days': 'weekdays',
+  'start times': 'start_times',
+  start_times: 'start_times',
+  'practice start times': 'start_times',
+  'preferred start times': 'start_times',
+  venues: 'venues',
+  'preferred venues': 'venues',
+  'preferred locations': 'venues',
+  'effective from': 'effective_from',
+  effective_from: 'effective_from',
+  'from date': 'effective_from',
+  from: 'effective_from',
+  'effective to': 'effective_to',
+  'effective until': 'effective_to',
+  effective_to: 'effective_to',
+  'to date': 'effective_to',
+  until: 'effective_to',
+  priority: 'coach_priority',
+  'coach priority': 'coach_priority',
+  coach_priority: 'coach_priority',
   group: 'division_name',
   division: 'division_name',
   division_name: 'division_name',
@@ -334,7 +367,7 @@ function validateRow(
     }
   }
 
-  if (importType === 'coaches' && row['email']) {
+  if ((importType === 'coaches' || importType === 'practice_preferences') && row['email']) {
     const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
     if (!emailRegex.test(row['email'])) {
       errors.push({
@@ -477,7 +510,7 @@ function validateRow(
 
 // --- Request Schema ---
 const ImportValidationPayload = z.object({
-  import_type: z.enum(['players', 'coaches', 'fields', 'field_availability']),
+  import_type: z.enum(['players', 'coaches', 'fields', 'field_availability', 'practice_preferences']),
   organization_id: z.string().uuid(),
   rows: z.array(z.record(z.unknown())).max(MAX_ROWS, `Maximum ${MAX_ROWS} rows per import`),
   // `file_name` is no longer read: it went only into the audit row, and the
@@ -639,7 +672,8 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // drop the organization's own columns without saying so.
   const allowlisted = isAllowlistedImportType(body.import_type);
   let declaredFields: string[] = [];
-  if (allowlisted) {
+  // A preference file declares no fields: its entity is not in Settings, so only its own keys stay.
+  if (allowlisted && ALLOWLIST_ENTITY_TYPES[body.import_type]) {
     const { data: schemaRow, error: schemaError } = await serviceClient
       .from('organization_schemas')
       .select('schema_definition')

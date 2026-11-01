@@ -103,6 +103,33 @@ export const COACH_IMPORT_KEYS = Object.freeze([
   ...COACH_NAME_PARTS,
 ]);
 
+/**
+ * Keys `finalize_practice_preference_import_job` reads (Phase D C1): one row is one rule. The coach by
+ * `email` (the coach import's key), the team by name (three spellings), the request level, the days,
+ * start times and venues (each a list), the window and the coach's priority. No other column of the
+ * file is kept.
+ */
+export const PRACTICE_PREFERENCE_IMPORT_KEYS = Object.freeze([
+  'email',
+  'team_name',
+  'team name',
+  'team',
+  'request_level',
+  'weekdays',
+  'days',
+  'day',
+  'start_times',
+  'start_time',
+  'start',
+  'venues',
+  'location',
+  'effective_from',
+  'valid_from',
+  'effective_to',
+  'valid_until',
+  'coach_priority',
+]);
+
 /** The import types the allowlist applies to, and the schema entity each declares fields for. */
 export const ALLOWLIST_ENTITY_TYPES = Object.freeze({
   players: 'player',
@@ -113,6 +140,8 @@ export const ALLOWLIST_ENTITY_TYPES = Object.freeze({
 const KEYS_BY_TYPE = Object.freeze({
   players: PLAYER_IMPORT_KEYS,
   coaches: COACH_IMPORT_KEYS,
+  // No declared fields: a preference file has no entity in Settings, so only these keys are kept.
+  practice_preferences: PRACTICE_PREFERENCE_IMPORT_KEYS,
 });
 
 /**

@@ -2115,7 +2115,7 @@ for id in "${REVERT_CHECKS[@]}"; do
   # **20261112010000's revert writes the rules back as scalar rows**, so it REFUSES (55000) while it would
   # have to guess: a rule holding more than one value in a condition, and two rules of one coach that disagree
   # on a dimension. Seeded: six rules in force (two of them pending musts, one accepted must) for two coaches
-  # on four teams (one of the musts kept as a prefer by the admin), one date window, three priorities, and three removed/replaced history rows, with a
+  # on four teams (two of the musts kept as a prefer by the admin, one of them beside an ordinary prefer for the same coach, weekday and value: both come back the one approved row), one date window, three priorities, and three removed/replaced history rows, with a
   # multi-value rule first (refused), then a disagreement (refused), then both made agree. A staged
   # preference row rides on an import job, which the revert deletes. Every figure is distinct where a
   # plausible miscount would swap it, and every name is synthetic.
@@ -2144,6 +2144,7 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('ee000000-0000-4000-8000-0000000000d5','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', NULL, NULL, true, 'prefer','must','pending','in_force', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000d6','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', NULL, ARRAY[1080], false, 'must','must','accepted','in_force', 'medium', NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000d7','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b1', ARRAY['FRI'], NULL, false, 'prefer','must','kept_prefer','in_force', NULL, NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d8','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b4', ARRAY['TUE'], NULL, false, 'prefer','must','kept_prefer','in_force', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000e1','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', ARRAY['MON'], NULL, false, 'prefer','prefer',NULL,'removed', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000e2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', NULL, ARRAY[960], false, 'prefer','prefer',NULL,'removed', NULL, NULL, 'admin'),
                 ('ee000000-0000-4000-8000-0000000000e3','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', ARRAY['SAT'], NULL, false, 'prefer','prefer',NULL,'replaced', NULL, NULL, 'admin');
@@ -3692,9 +3693,9 @@ PROBE
       fi
     fi
     if [ "$id" = "20261112010000" ]; then
-      # The seed planted 7 rules in force (2 pending musts, 1 must kept as a prefer), 3 history rows, 4 teams, 1 window, 3 priorities.
-      if ! grep -qF 'this revert writes 7 in-force rule(s) back as scalar rows (2 pending must(s) as requested rows); it drops 3 removed/replaced history row(s) and loses the team of the rules (4 team(s)), 1 date window(s) and 3 priority(ies)' $SCRATCH/harness_rev; then
-        echo "FAIL revert ${id}: planted 7 rules in force (2 pending, 1 kept as a prefer), 3 history rows, 4 teams, 1 window and 3 priorities, and the revert did not warn with those figures"
+      # The seed planted 8 rules in force (2 pending musts, 2 musts kept as a prefer), 3 history rows, 4 teams, 1 window, 3 priorities.
+      if ! grep -qF 'this revert writes 8 in-force rule(s) back as scalar rows (2 pending must(s) as requested rows); it drops 3 removed/replaced history row(s) and loses the team of the rules (4 team(s)), 1 date window(s) and 3 priority(ies)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 8 rules in force (2 pending, 2 kept as a prefer), 3 history rows, 4 teams, 1 window and 3 priorities, and the revert did not warn with those figures"
         STATUS=1
       fi
       # A must the admin kept as a prefer comes back a prefer (approved), never an enforced must; the pending
@@ -3718,6 +3719,8 @@ PROBE
                                   AND coach_id = 'ee000000-0000-4000-8000-0000000000c2')
                  OR EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE level = 'must_keep' AND status = 'approved'
                               AND dimension <> 'start_time') THEN 'kept-prefer-became-must'
+               WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE dimension = 'weekday' AND status = 'approved'
+                        AND coach_id = 'ee000000-0000-4000-8000-0000000000c1') <> 1 THEN 'weekday-not-one-row'
                WHEN NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'weekday' AND level = 'prefer_keep'
                                   AND value = to_jsonb('TUE'::text) AND status = 'approved'
                                   AND coach_id = 'ee000000-0000-4000-8000-0000000000c1')

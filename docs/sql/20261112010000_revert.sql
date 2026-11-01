@@ -81,27 +81,33 @@ BEGIN
 END;
 $$;
 
--- The scalar rows, computed before the table changes shape.
+-- The scalar rows, computed before the table changes shape. `must_decision` is NULL for a rule nobody asked a
+-- must for, so every test of it below is NULL-safe, and the rows are de-duplicated on the level and status
+-- they are WRITTEN with (not on the columns they were computed from): an ordinary prefer and a must kept as
+-- a prefer come back as the same approved `prefer_keep` row, and the one-approved index admits one.
 CREATE TEMP TABLE _cpp_back ON COMMIT DROP AS
-SELECT DISTINCT ON (p.coach_id, d.dimension, (p.level = 'must' OR p.must_decision = 'pending'),
-                    (p.must_decision = 'pending'), d.value::text)
-       p.organization_id, p.coach_id, d.dimension,
-       -- The EFFECTIVE level of a decided rule; only a request still pending is written back as the must it asked for
-       -- (a requested row). A must an admin kept as a prefer (kept_prefer) is a prefer: the old shape has no
-       -- way to say "declined" other than not enforcing it.
-       CASE WHEN p.level = 'must' OR p.must_decision = 'pending' THEN 'must_keep' ELSE 'prefer_keep' END AS level,
-       d.value,
-       CASE WHEN p.must_decision = 'pending' THEN 'requested' ELSE 'approved' END AS status,
-       p.created_by, p.created_at, p.decided_by, p.decided_at
-  FROM public.coach_practice_preferences p
-  CROSS JOIN LATERAL (VALUES
-      ('weekday', CASE WHEN p.weekdays IS NOT NULL THEN to_jsonb(p.weekdays[1]) END, p.weekdays IS NOT NULL OR p.keep_weekday),
-      ('start_time', CASE WHEN p.start_minutes IS NOT NULL THEN to_jsonb(p.start_minutes[1]) END, p.start_minutes IS NOT NULL OR p.keep_start),
-      ('venue', CASE WHEN p.venue_ids IS NOT NULL THEN to_jsonb(p.venue_ids[1]::text) END, p.venue_ids IS NOT NULL OR p.keep_venue)
-  ) AS d(dimension, value, present)
- WHERE p.status = 'in_force' AND d.present
- ORDER BY p.coach_id, d.dimension, (p.level = 'must' OR p.must_decision = 'pending'),
-          (p.must_decision = 'pending'), d.value::text, p.created_at;
+SELECT DISTINCT ON (w.coach_id, w.dimension, w.level, w.status, w.value::text)
+       w.organization_id, w.coach_id, w.dimension, w.level, w.value, w.status,
+       w.created_by, w.created_at, w.decided_by, w.decided_at
+  FROM (
+    SELECT p.organization_id, p.coach_id, d.dimension,
+           -- The EFFECTIVE level of a decided rule; only a request still pending is written back as the must it
+           -- asked for (a requested row). A must an admin kept as a prefer (kept_prefer) is a prefer: the old
+           -- shape has no way to say "declined" other than not enforcing it.
+           CASE WHEN p.level = 'must' OR COALESCE(p.must_decision = 'pending', false)
+                THEN 'must_keep' ELSE 'prefer_keep' END AS level,
+           d.value,
+           CASE WHEN COALESCE(p.must_decision = 'pending', false) THEN 'requested' ELSE 'approved' END AS status,
+           p.created_by, p.created_at, p.decided_by, p.decided_at
+      FROM public.coach_practice_preferences p
+      CROSS JOIN LATERAL (VALUES
+          ('weekday', CASE WHEN p.weekdays IS NOT NULL THEN to_jsonb(p.weekdays[1]) END, p.weekdays IS NOT NULL OR p.keep_weekday),
+          ('start_time', CASE WHEN p.start_minutes IS NOT NULL THEN to_jsonb(p.start_minutes[1]) END, p.start_minutes IS NOT NULL OR p.keep_start),
+          ('venue', CASE WHEN p.venue_ids IS NOT NULL THEN to_jsonb(p.venue_ids[1]::text) END, p.venue_ids IS NOT NULL OR p.keep_venue)
+      ) AS d(dimension, value, present)
+     WHERE p.status = 'in_force' AND d.present
+  ) w
+ ORDER BY w.coach_id, w.dimension, w.level, w.status, w.value::text, w.created_at;
 
 DROP TRIGGER coach_practice_preferences_readonly_when_completed ON public.coach_practice_preferences;
 COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS

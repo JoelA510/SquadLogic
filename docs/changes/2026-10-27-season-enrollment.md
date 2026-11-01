@@ -279,3 +279,39 @@ under "For the owner"). Migration `20261111010000_season_rollover.sql`.
   this", Edit (name, dates, year, cutoff presets and custom, each division's window) and Activate. The
   "Current Season Label" control and its ThemeContext state are removed.
 - **Verification** is in the PR body. Not done here, left for E3c: the evaluations import.
+
+## Build notes: E3c (2026-11-01)
+
+Built as written; where the code differed from the plan or left a choice:
+
+- **A finalizer of its own, not an extension of `finalize_import_job`.** The pipeline's convention is a
+  finalizer per type (`finalize_import_job`, `finalize_coach_import_job`, the two field ones). The player
+  finalizer creates players, rewrites identity, division and age, and is stamped with the season's age
+  rule (`age_rule_changed`); the evaluations import must create nobody and touch no age field, so none of
+  that applies to it. `finalize_evaluation_import_job(job, errors, dry_run)` in migration
+  `20261113010000_evaluations_import.sql`. It has its own `import_jobs.job_type` (`evaluations`), so the
+  other finalizers refuse its job (22023), and its staged rows are `staging_import_rows` rows of
+  `import_type = 'evaluations'` (the player rows live in `staging_players`). `create_import_job`,
+  `import_allowed_keys`, `mark_import_job_ready_to_apply` and `cancel_ready_import_job` accept the type,
+  each behind the md5 of its current text; a daily job deletes a finished job's staged rows at 30 days.
+- **Check, then confirm, always.** The plan asked for a preview with matched, unmatched and invalid counts,
+  then a confirm. An evaluations import changes players that exist, so `startImport` defers it whatever
+  the caller passes (the coach and field imports defer only on "Validate Only"). The preview is the
+  finalizer's dry run (`p_dry_run`): the same statement with its writes off, so the counts shown are the
+  counts the apply produces. The dry run is read again when the page is reloaded while a job waits.
+- **What "matched" means.** A row names a player of the job's season by registration id as text
+  (`007` is not `7`); it is matched, unmatched (listed, never created), invalid (a cell out of range, or
+  no id: the whole row is left unapplied, listed with its field and a message that quotes no value) or a
+  duplicate (the first row by row number is used). A matched row changes a player only where a value is
+  present and differs; `updated_at` moves only for a player whose value changed, so a re-import is a
+  no-op to the last column.
+- **Ranges** are the table's own: `years_played` 0 to 30, `rating` 1 to 5, `skill_tier` novice,
+  developing or advanced (migration `20260611000000` and the original schema). A numeric "Skill Level" is
+  an error that points at the Rating column; no tier is mapped to a rating.
+- **Audit** is one `import.completed` row per apply (counts, season, `import_type = 'evaluations'`),
+  with no registration ids; the unmatched, invalid and duplicate lists (at most 200 each) live on the job.
+  No rollback: the values are ordinary player fields.
+- **Not changed:** team generation, the age rule and its stamp, the player and coach finalizers.
+- **A finding for the owner.** `skill_tier` is stored (as the player import has always stored it) but the
+  Players page does not show it and the Teams page's durable select leaves it out, so only
+  `years_played` and `rating` reach teaming from the player record. See lesson 69.

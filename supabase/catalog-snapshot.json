@@ -88,6 +88,7 @@
     "field_bookings_digest(p_affected jsonb, p_limit integer) returns jsonb",
     "field_is_live_on(p_effective_to date, p_on date) returns boolean",
     "finalize_coach_import_job(p_import_job_id uuid, p_validation_errors jsonb) returns jsonb",
+    "finalize_evaluation_import_job(p_import_job_id uuid, p_validation_errors jsonb, p_dry_run boolean) returns jsonb",
     "finalize_field_availability_import_job(p_import_job_id uuid, p_validation_errors jsonb) returns jsonb",
     "finalize_field_import_job(p_import_job_id uuid, p_validation_errors jsonb) returns jsonb",
     "finalize_import_job(p_import_job_id uuid, p_validation_errors jsonb) returns jsonb",

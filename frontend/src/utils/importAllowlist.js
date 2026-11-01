@@ -9,7 +9,8 @@
  * `tests/importAllowlistParity.test.js` holds the two copies equal, and the key
  * lists equal to what the latest SQL finalizers read. Change both copies, and
  * the SQL, or none. Why an allowlist, and what each list holds: the Edge copy's
- * header, and docs/architecture/gotsport-import-contract.md.
+ * header, and docs/architecture/gotsport-import-contract.md. The evaluations import (E3c) has its
+ * own short list, `EVALUATION_IMPORT_KEYS`, and no declared fields.
  */
 import { HEADER_ALIASES } from './telemetryUtils.js';
 
@@ -103,6 +104,22 @@ export const COACH_IMPORT_KEYS = Object.freeze([
   ...COACH_NAME_PARTS,
 ]);
 
+/**
+ * Keys `finalize_evaluation_import_job` reads (E3c): the registration id the player import
+ * stored, and the three values an evaluations file can set. An evaluations file declares no
+ * fields of its own: nothing else of it is kept.
+ */
+export const EVALUATION_IMPORT_KEYS = Object.freeze([
+  'external_registration_id',
+  'gotsport_id',
+  'registration_id',
+  'player_id',
+  'years_played',
+  'skill_tier',
+  'skill_level',
+  'rating',
+]);
+
 /** The import types the allowlist applies to, and the schema entity each declares fields for. */
 export const ALLOWLIST_ENTITY_TYPES = Object.freeze({
   players: 'player',
@@ -113,6 +130,7 @@ export const ALLOWLIST_ENTITY_TYPES = Object.freeze({
 const KEYS_BY_TYPE = Object.freeze({
   players: PLAYER_IMPORT_KEYS,
   coaches: COACH_IMPORT_KEYS,
+  evaluations: EVALUATION_IMPORT_KEYS,
 });
 
 /**
@@ -124,6 +142,19 @@ const KEYS_BY_TYPE = Object.freeze({
 export function declaredFieldKey(key) {
   if (key === null || key === undefined) return '';
   return String(key).trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * The organization's declared fields that apply to the import type: those of its entity, and none
+ * for a type with no entity (the evaluations import declares no fields, however it is called).
+ * @param {string} importType
+ * @param {Iterable<string>} declaredFields
+ * @returns {string[]}
+ */
+function declaredFor(importType, declaredFields) {
+  return Object.prototype.hasOwnProperty.call(ALLOWLIST_ENTITY_TYPES, importType)
+    ? [...declaredFields]
+    : [];
 }
 
 /**
@@ -148,7 +179,7 @@ export function isAllowedImportKey(importType, canonicalKey, declaredFields = []
   if (importType === 'players' && PLAYER_BIRTH_KEYS.includes(canonicalKey)) return true;
   const identity = declaredFieldKey(canonicalKey);
   if (!identity) return false;
-  for (const field of declaredFields) {
+  for (const field of declaredFor(importType, declaredFields)) {
     if (declaredFieldKey(field) === identity) return true;
   }
   return false;
@@ -164,7 +195,7 @@ export function isAllowedImportKey(importType, canonicalKey, declaredFields = []
  * @param {Iterable<string>} [declaredFields]
  */
 export function isAllowedImportHeader(importType, header, normalizeHeader, declaredFields = []) {
-  const declared = [...declaredFields];
+  const declared = declaredFor(importType, declaredFields);
   if (isAllowedImportKey(importType, normalizeHeader(header), declared)) return true;
   const identity = declaredFieldKey(header);
   return identity !== '' && declared.some((field) => declaredFieldKey(field) === identity);
@@ -180,7 +211,7 @@ export function isAllowedImportHeader(importType, header, normalizeHeader, decla
  */
 export function keepAllowedColumns(importType, row, normalizeHeader, declaredFields = []) {
   if (!isAllowlistedImportType(importType)) return row;
-  const declared = [...declaredFields];
+  const declared = declaredFor(importType, declaredFields);
   /** @type {Record<string, unknown>} */
   const kept = {};
   for (const [key, value] of Object.entries(row ?? {})) {
@@ -212,7 +243,7 @@ export function withDeclaredColumns(
   clean = (v) => (v == null ? '' : String(v))
 ) {
   if (!isAllowlistedImportType(importType)) return normalizedRow;
-  const declared = new Set([...declaredFields].map(declaredFieldKey));
+  const declared = new Set(declaredFor(importType, declaredFields).map(declaredFieldKey));
   /** @type {Record<string, string>} */
   const out = {};
   for (const [key, value] of Object.entries(normalizedRow)) {

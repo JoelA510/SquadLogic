@@ -424,7 +424,7 @@ SELECT is(
             -- the seed's own copy: it writes the league before the organization is marked a demo
             'start_demo_session',
             -- import writers: each starts from an import job, and none can exist in a demo (section 4)
-            'finalize_import_job', 'finalize_coach_import_job', 'rollback_coach_import_job'
+            'finalize_import_job', 'finalize_coach_import_job', 'finalize_evaluation_import_job', 'rollback_coach_import_job'
         ])),
     NULL,
     'every function that writes players or coaches is tested here or declared'
@@ -433,7 +433,7 @@ SELECT is(
     (SELECT count(*)::int FROM unnest(ARRAY[
             'admin_create_player', 'admin_delete_players', 'admin_update_player', 'admin_bulk_update_players',
             'apply_player_patch', 'admin_delete_coaches', 'admin_update_coach_status', 'admin_delete_team', 'start_demo_session', 'finalize_import_job', 'finalize_coach_import_job',
-            'rollback_coach_import_job'
+            'finalize_evaluation_import_job', 'rollback_coach_import_job'
          ]) n
       WHERE NOT EXISTS (SELECT 1 FROM pg_proc p
                          WHERE p.pronamespace = 'public'::regnamespace AND p.proname = n
@@ -579,7 +579,7 @@ SELECT is(
         'admin_update_draft_season', 'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
         'apply_player_patch', 'cancel_ready_import_job', 'create_import_job',
         'enact_lock_cause_row', 'enact_practice_recommendation', 'enforce_field_retirement_deactivates', 'fail_import_job',
-        'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_field_availability_import_job',
+        'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_evaluation_import_job', 'finalize_field_availability_import_job',
         'finalize_field_import_job', 'finalize_import_job', 'finalize_onboarding', 'generate_invite_code',
         'get_field_availability_scenarios', 'get_latest_team_runs_per_division', 'get_organization_members', 'get_reserved_keys', 'get_settings_audit_log', 'get_team_roster',
         'get_team_staff', 'import_normalize_capacity_basis', 'import_normalize_field_availability_approval_status', 'import_normalize_field_availability_record_status',
@@ -617,7 +617,7 @@ SELECT is(
         'admin_update_draft_season', 'admin_update_player', 'admin_update_team', 'admin_upsert_division_settings', 'admin_upsert_organization_schema', 'admin_upsert_program',
         'apply_player_patch', 'cancel_ready_import_job', 'create_import_job',
         'enact_lock_cause_row', 'enact_practice_recommendation', 'enforce_field_retirement_deactivates', 'fail_import_job',
-        'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_field_availability_import_job',
+        'fail_stale_import_jobs', 'field_is_live_on', 'finalize_coach_import_job', 'finalize_evaluation_import_job', 'finalize_field_availability_import_job',
         'finalize_field_import_job', 'finalize_import_job', 'finalize_onboarding', 'generate_invite_code',
         'get_field_availability_scenarios', 'get_latest_team_runs_per_division', 'get_organization_members', 'get_reserved_keys', 'get_settings_audit_log', 'get_team_roster',
         'get_team_staff', 'import_normalize_capacity_basis', 'import_normalize_field_availability_approval_status', 'import_normalize_field_availability_record_status',

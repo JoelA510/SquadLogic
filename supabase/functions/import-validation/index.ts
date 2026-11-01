@@ -39,6 +39,7 @@ import {
   type WindowedDivision,
 } from '../_shared/natural-age.ts';
 import { composeFullName, normalizeImportRow } from '../_shared/import-rows.ts';
+import { validateEvaluationRow } from '../_shared/import-evaluations.ts';
 import { loadImportAgeRule } from '../_shared/import-age-rule.ts';
 
 // --- Constants ---
@@ -158,6 +159,10 @@ const HEADER_ALIASES: Record<string, string> = {
   'skill level': 'skill_tier',
   'skill tier': 'skill_tier',
   level: 'skill_tier',
+  // The evaluations import's 1-5 rating (E3c); the player import does not keep it.
+  rating: 'rating',
+  'skill rating': 'rating',
+  'player rating': 'rating',
   id: 'gotsport_id',
   pid: 'gotsport_id',
   'official id': 'gotsport_id',
@@ -350,7 +355,10 @@ function validateRow(
     }
   }
 
+  // The evaluations import judges the tier itself (`validateEvaluationRow`), with a message that
+  // points a number at the Rating column; a second error for the same cell would only repeat it.
   if (
+    importType !== 'evaluations' &&
     row['skill_tier'] &&
     !['novice', 'developing', 'advanced'].includes(row['skill_tier'].toLowerCase())
   ) {
@@ -359,6 +367,13 @@ function validateRow(
       field: 'skill_tier',
       message: `Invalid skill tier: ${row['skill_tier']}. Must be novice, developing, or advanced.`,
     });
+  }
+
+  // E3c: a registration id, and each value within its range (nothing quotes the value).
+  if (importType === 'evaluations') {
+    for (const error of validateEvaluationRow(row)) {
+      errors.push({ row: rowIndex + 1, field: error.field, message: error.message });
+    }
   }
 
   if (importType === 'fields') {
@@ -482,7 +497,7 @@ function validateRow(
 
 // --- Request Schema ---
 const ImportValidationPayload = z.object({
-  import_type: z.enum(['players', 'coaches', 'fields', 'field_availability']),
+  import_type: z.enum(['players', 'coaches', 'fields', 'field_availability', 'evaluations']),
   organization_id: z.string().uuid(),
   rows: z.array(z.record(z.unknown())).max(MAX_ROWS, `Maximum ${MAX_ROWS} rows per import`),
   // `file_name` is no longer read: it went only into the audit row, and the
@@ -604,7 +619,9 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         ? 'fields'
         : body.import_type === 'field_availability'
           ? 'field_availability'
-          : 'registration';
+          : body.import_type === 'evaluations'
+            ? 'evaluations'
+            : 'registration';
     if (job.job_type !== expectedJobType) {
       return jsonResponse(
         {
@@ -641,7 +658,8 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   // drop the organization's own columns without saying so.
   const allowlisted = isAllowlistedImportType(body.import_type);
   let declaredFields: string[] = [];
-  if (allowlisted) {
+  // The evaluations import keeps the columns of its own list and declares no fields (E3c).
+  if (allowlisted && ALLOWLIST_ENTITY_TYPES[body.import_type] !== undefined) {
     const { data: schemaRow, error: schemaError } = await serviceClient
       .from('organization_schemas')
       .select('schema_definition')

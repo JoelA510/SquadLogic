@@ -159,10 +159,12 @@ describe('ImportPanel', () => {
       'min-w-0',
       'overflow-visible'
     );
+    // Five import types (E3c added evaluations): three across on a tablet, five on a desktop.
     expect(screen.getByTestId('import-type-selector')).toHaveClass(
       'grid',
       'grid-cols-1',
-      'sm:grid-cols-4'
+      'sm:grid-cols-3',
+      'lg:grid-cols-5'
     );
 
     const notifyButton = screen.getByRole('button', { name: /notify when import completes/i });

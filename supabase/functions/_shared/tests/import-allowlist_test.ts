@@ -137,3 +137,28 @@ Deno.test('no birth key is staged, and the natural age replaces it (R5)', () => 
     2027
   );
 });
+
+Deno.test(
+  'an evaluations sheet keeps the registration id and the three values, and nothing else (E3c)',
+  () => {
+    const row = {
+      'Registration ID': '0042',
+      first_name: 'First1',
+      date_of_birth: '2016-01-01',
+      years_played: '2',
+      skill_tier: 'developing',
+      rating: '3',
+      notes: 'quick feet',
+      guardian_1_email: 'email1@example.com',
+    };
+    assertEquals(
+      keepAllowedColumns('evaluations', row, (h) =>
+        h === 'Registration ID' ? 'registration_id' : lower(h)
+      ),
+      { 'Registration ID': '0042', years_played: '2', skill_tier: 'developing', rating: '3' }
+    );
+    // It declares no fields of the organization's: a declared name is not kept, however it is called.
+    assertEquals(isAllowedImportKey('evaluations', 'shirt size', ['shirt_size']), false);
+    assertEquals(isAllowedImportHeader('evaluations', 'Shirt Size', lower, ['shirt_size']), false);
+  }
+);

@@ -21,6 +21,9 @@ emails, the child's name and birth date and the coach's own birth date were
 stored on every coach. A denylist cannot keep up with an export nobody here
 controls; an allowlist can.
 
+The evaluations import (below) is filtered the same way, against its own short list and with no
+declared fields.
+
 A column is kept when its **canonical key** (the header after the import's
 header normalization: lower-cased and trimmed, then the alias map in
 `import-validation`) is:
@@ -202,6 +205,56 @@ the demo purge) and the cascade of a deleted organization still reach its rows.
 > name is composed from `First Name` and `Last Name` when the file has no
 > full-name column. Both rules live in `_shared/import-rows.ts`
 > (`import-validation`) and its browser twin `frontend/src/utils/importRows.js`.
+
+## Evaluations import — kept fields
+
+A club often rates its players after registration, so a season's experience and skill level can
+arrive in a file of their own (`20261113010000`; plan `docs/changes/2026-10-27-season-enrollment.md`,
+C2). The file names a player by registration id and sets any of three values; it **only updates**
+the players of the season it is imported into and creates nobody.
+
+| Canonical key(s)                                                          | Stored as                          | Rule                                                                         |
+| ------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------- |
+| `external_registration_id`, `gotsport_id`, `registration_id`, `player_id` | matches `external_registration_id` | Text, leading zeros kept; the first filled key, in the player import's order |
+| `years_played`                                                            | `players.years_played`             | A whole number, 0 to 30                                                      |
+| `skill_tier`, `skill_level`                                               | `players.skill_tier`               | `novice`, `developing` or `advanced`, in any case                            |
+| `rating` (`Rating`, `Skill Rating`, `Player Rating`)                      | `players.rating`                   | A whole number, 1 to 5                                                       |
+
+Nothing else of the file is kept, at any entry (the browser, `import-validation`,
+`import_allowed_keys('evaluations')` and the finalizer, held equal by
+`tests/importAllowlistParity.test.js`), and the import declares no fields of the organization's.
+The rules for the values live in `_shared/import-evaluations.ts` and its browser twin
+`utils/importEvaluations.js` (held equal by `tests/importEvaluationsParity.test.js`), and again in
+the finalizer, because the staging table can be written without the Edge Function.
+
+- **Matching.** A row names a player of the **job's season** (the active season or a draft; a
+  completed one is refused, 22023 `season_completed`, before anything is read or written) by
+  registration id, compared as text. The same id in another season, or another organization, is
+  another player and is never read or written. A row that names no player is **unmatched**: counted,
+  listed (at most 200, with its row number) and never created.
+- **A blank cell leaves the stored value alone**, and a zero is a value (`0` years is written).
+  A value is written only when it differs from the stored one, so importing the same file again
+  changes nothing and moves no `updated_at`. A file may carry any of the three columns, and needs at
+  least one of them and an id (the screen sends a file without to the column mapper).
+- **A row is judged whole.** A cell out of range, or no registration id, makes the row **invalid**:
+  none of its cells is applied, and it is counted and listed with its field and a message that quotes
+  no value (the staged row keeps the errors). A registration id repeated in the file uses its first
+  row (lowest row number) and lists the rest as duplicates, as the player import does.
+- **Check, then confirm.** The screen validates the file, stages it, and shows the server's
+  counts from a **dry run** of the same finalizer (`finalize_evaluation_import_job(job, errors,
+true)`: the same statement with its writes switched off, so the numbers shown are the numbers the
+  apply produces) before the admin applies or cancels. There is no one-click import and no rollback:
+  the values are ordinary player fields an admin can edit.
+- **Audited.** The apply is one `import.completed` audit row with `import_type = 'evaluations'`, the
+  season and the counts, and no registration ids; the lists live on the job
+  (`warning_summary.evaluation_finalize`). A finished job answers a second call with that stored
+  result. A finished job's staged rows are deleted after 30 days
+  (`cleanup-staging-evaluation-rows`).
+- **What reads the values.** Teaming reads `years_played` and `rating` from the player record
+  (the Teams page's durable select), so they move the next team run when the Years Played and Player
+  Rating features are on. `skill_tier` is stored, as the player import has always stored it, but the Players
+  page does not show it and teaming reads it only from the registration file held in the browser
+  during an import session (the Teams page's durable select leaves it out).
 
 ## Dropped on import (never stored)
 

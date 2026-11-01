@@ -39,7 +39,10 @@ const MAX_COLS = 1200;
 const AGE_RULE_CHANGED_TEXT =
   "The season's age rules changed since this file was checked; validate it again.";
 const canDeferImport = (type) =>
-  type === 'coaches' || type === 'fields' || type === 'field_availability';
+  type === 'coaches' ||
+  type === 'evaluations' ||
+  type === 'fields' ||
+  type === 'field_availability';
 
 /**
  * The refused half of a field-import rollback, as a sentence for the log.
@@ -108,6 +111,8 @@ const ImportContext = createContext({
   setImportedPlayers: (_data) => {},
   importedCoaches: null,
   setImportedCoaches: (_data) => {},
+  importedEvaluations: null,
+  setImportedEvaluations: (_data) => {},
   importedFields: null,
   setImportedFields: (_data) => {},
   importedFieldAvailability: null,
@@ -175,6 +180,32 @@ const materializeBuddyPairsForImport = async ({ importJobId, addLog }) => {
   }
 };
 
+/**
+ * The evaluations import's dry run, kept with the validated import (E3c): the counts and the
+ * unmatched and invalid rows the confirm step shows, from the server code the apply runs. A
+ * preview that fails is shown as such, never as an empty one; the apply stays available, since
+ * the finalizer is what decides.
+ */
+const withEvaluationPreview = async (importData, addLog) => {
+  try {
+    const { previewEvaluationImportJob, describeFinalizeOutcome } =
+      await import('../utils/importDeferredActions.js');
+    const preview = await previewEvaluationImportJob({
+      supabase,
+      importJobId: importData.importJobId,
+      validationErrors: importData.validationErrors || [],
+    });
+    describeFinalizeOutcome(preview, 'evaluations').forEach(addLog);
+    return { ...importData, persistence: { ...importData.persistence, preview } };
+  } catch (err) {
+    addLog(`Could not preview the evaluations import: ${err.message}`);
+    return {
+      ...importData,
+      persistence: { ...importData.persistence, previewError: err.message },
+    };
+  }
+};
+
 export function ImportProvider({ children }) {
   const { currentOrganization, orgMember, currentSeasonSetting } = useOrganization();
   const [isImporting, setIsImporting] = useState(false);
@@ -189,6 +220,7 @@ export function ImportProvider({ children }) {
   // Multi-type state
   const [importedPlayers, setImportedPlayers] = useState(null);
   const [importedCoaches, setImportedCoaches] = useState(null);
+  const [importedEvaluations, setImportedEvaluations] = useState(null);
   const [importedFields, setImportedFields] = useState(null);
   const [importedFieldAvailability, setImportedFieldAvailability] = useState(null);
   const [importedData, setImportedData] = useState(null); // Legacy/General
@@ -212,6 +244,7 @@ export function ImportProvider({ children }) {
   const setImportDataForType = useCallback((type, data) => {
     if (type === 'players') setImportedPlayers(data);
     if (type === 'coaches') setImportedCoaches(data);
+    if (type === 'evaluations') setImportedEvaluations(data);
     if (type === 'fields') setImportedFields(data);
     if (type === 'field_availability') setImportedFieldAvailability(data);
     // `importedData` is the player import, as the reload path below reads it (only from the
@@ -231,7 +264,12 @@ export function ImportProvider({ children }) {
       setProgress(job.progress_percent || 100);
       localStorage.setItem('importStatus', 'ready_to_apply');
       if (deferredImportData) {
-        setImportDataForType(deferredImportData.persistence.ready.import_type, deferredImportData);
+        // A reload while an evaluations import waits for its confirm: the preview is read again.
+        const readyData =
+          deferredImportData.persistence.ready.import_type === 'evaluations'
+            ? await withEvaluationPreview(deferredImportData, () => {})
+            : deferredImportData;
+        setImportDataForType(readyData.persistence.ready.import_type, readyData);
       }
     },
     [setImportDataForType]
@@ -469,7 +507,10 @@ export function ImportProvider({ children }) {
 
   const startImport = useCallback(
     async (file, type = 'players', options = {}) => {
-      const deferApply = options.deferApply === true && canDeferImport(type);
+      // An evaluations import changes players that already exist, so it is always checked first
+      // and confirmed (E3c); the other deferrable types defer when the caller asks.
+      const deferApply =
+        type === 'evaluations' || (options.deferApply === true && canDeferImport(type));
       setIsImporting(true);
       setImportStatus('importing');
       setProgress(0);
@@ -551,7 +592,7 @@ export function ImportProvider({ children }) {
             // reads, team placement for players, and the fields the
             // organization declared (utils/importAllowlist.js). The Edge
             // Function and the finalizers apply the same rule again.
-            const isPrivacyFiltered = type === 'players' || type === 'coaches';
+            const isPrivacyFiltered = isAllowlistedImportType(type);
             const data = isPrivacyFiltered
               ? filterImportRows(type, canonicalizeForUpload(type, results.data), declaredFields)
               : results.data;
@@ -623,7 +664,9 @@ export function ImportProvider({ children }) {
             // Phase 5: Dynamic Ingestion Logic
             const entityType =
               type === 'players' ? 'player' : type === 'coaches' ? 'coach' : 'field';
-            const customSchema = organizationSchemas[entityType] || {};
+            // An evaluations file sets three known values and carries no custom fields.
+            const customSchema =
+              type === 'evaluations' ? {} : organizationSchemas[entityType] || {};
 
             const { mappings, isFallback, timing, needsConfirmation } = matchHeaders(
               meta.fields,
@@ -785,15 +828,20 @@ export function ImportProvider({ children }) {
                 addLog(`Validation complete. ${type} import is ready for review.`);
                 const { markDeferredImportReady } =
                   await import('../utils/importDeferredActions.js');
-                const { importData, activeJob: readyJob } = await markDeferredImportReady({
-                  supabase,
-                  job,
-                  type,
-                  fileName: file.name,
-                  totalRows: data.length,
-                  normalizedData,
-                  validationErrors,
-                });
+                const { importData: validated, activeJob: readyJob } =
+                  await markDeferredImportReady({
+                    supabase,
+                    job,
+                    type,
+                    fileName: file.name,
+                    totalRows: data.length,
+                    normalizedData,
+                    validationErrors,
+                  });
+                const importData =
+                  type === 'evaluations'
+                    ? await withEvaluationPreview(validated, addLog)
+                    : validated;
 
                 setImportDataForType(type, importData);
                 setProgress(100);
@@ -802,7 +850,7 @@ export function ImportProvider({ children }) {
                 setImportStatus('ready_to_apply');
                 localStorage.setItem('importStatus', 'ready_to_apply');
                 addLog(
-                  `${type === 'fields' ? 'Field' : type === 'field_availability' ? 'Field availability' : 'Coach'} import validated and waiting for apply.`
+                  `${type === 'fields' ? 'Field' : type === 'field_availability' ? 'Field availability' : type === 'evaluations' ? 'Evaluations' : 'Coach'} import validated and waiting for apply.`
                 );
                 return;
               }
@@ -1000,9 +1048,11 @@ export function ImportProvider({ children }) {
       const deferredState =
         type === 'coaches'
           ? importedCoaches
-          : type === 'field_availability'
-            ? importedFieldAvailability
-            : importedFields;
+          : type === 'evaluations'
+            ? importedEvaluations
+            : type === 'field_availability'
+              ? importedFieldAvailability
+              : importedFields;
       const deferredJobId = deferredState?.importJobId;
       if (!deferredJobId) {
         throw new Error('No validated import job is ready to apply');
@@ -1062,6 +1112,7 @@ export function ImportProvider({ children }) {
       addLog,
       completeImport,
       importedCoaches,
+      importedEvaluations,
       importedFieldAvailability,
       importedFields,
       setImportDataForType,
@@ -1073,9 +1124,11 @@ export function ImportProvider({ children }) {
       const deferredState =
         type === 'coaches'
           ? importedCoaches
-          : type === 'field_availability'
-            ? importedFieldAvailability
-            : importedFields;
+          : type === 'evaluations'
+            ? importedEvaluations
+            : type === 'field_availability'
+              ? importedFieldAvailability
+              : importedFields;
       const deferredJobId = deferredState?.importJobId;
       if (!deferredJobId) {
         throw new Error('No validated import job is ready to cancel');
@@ -1111,7 +1164,14 @@ export function ImportProvider({ children }) {
         throw err;
       }
     },
-    [addLog, importedCoaches, importedFieldAvailability, importedFields, setImportDataForType]
+    [
+      addLog,
+      importedCoaches,
+      importedEvaluations,
+      importedFieldAvailability,
+      importedFields,
+      setImportDataForType,
+    ]
   );
 
   const rollbackImport = useCallback(
@@ -1205,6 +1265,7 @@ export function ImportProvider({ children }) {
       setImportedData(null);
       setImportedPlayers(null);
       setImportedCoaches(null);
+      setImportedEvaluations(null);
       setImportedFields(null);
       setImportedFieldAvailability(null);
       setActiveJobId(null);
@@ -1212,6 +1273,7 @@ export function ImportProvider({ children }) {
     } else {
       if (type === 'players') setImportedPlayers(null);
       if (type === 'coaches') setImportedCoaches(null);
+      if (type === 'evaluations') setImportedEvaluations(null);
       if (type === 'fields') setImportedFields(null);
       if (type === 'field_availability') setImportedFieldAvailability(null);
     }
@@ -1250,6 +1312,7 @@ export function ImportProvider({ children }) {
   const stableSetImportedData = useCallback((data) => setImportedData(data), []);
   const stableSetImportedPlayers = useCallback((data) => setImportedPlayers(data), []);
   const stableSetImportedCoaches = useCallback((data) => setImportedCoaches(data), []);
+  const stableSetImportedEvaluations = useCallback((data) => setImportedEvaluations(data), []);
   const stableSetImportedFields = useCallback((data) => setImportedFields(data), []);
   const stableSetImportedFieldAvailability = useCallback(
     (data) => setImportedFieldAvailability(data),
@@ -1274,6 +1337,8 @@ export function ImportProvider({ children }) {
       setImportedPlayers: stableSetImportedPlayers,
       importedCoaches: maskedImportedCoaches,
       setImportedCoaches: stableSetImportedCoaches,
+      importedEvaluations,
+      setImportedEvaluations: stableSetImportedEvaluations,
       importedFields: maskedImportedFields,
       setImportedFields: stableSetImportedFields,
       importedFieldAvailability: maskedImportedFieldAvailability,
@@ -1301,6 +1366,8 @@ export function ImportProvider({ children }) {
       stableSetImportedPlayers,
       maskedImportedCoaches,
       stableSetImportedCoaches,
+      importedEvaluations,
+      stableSetImportedEvaluations,
       maskedImportedFields,
       stableSetImportedFields,
       maskedImportedFieldAvailability,

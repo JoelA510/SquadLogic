@@ -1,15 +1,17 @@
 const FINALIZE_RPC_BY_TYPE = {
   coaches: 'finalize_coach_import_job',
+  evaluations: 'finalize_evaluation_import_job',
   fields: 'finalize_field_import_job',
   field_availability: 'finalize_field_availability_import_job',
 };
-const DEFERRED_IMPORT_TYPES = new Set(['coaches', 'fields', 'field_availability']);
+const DEFERRED_IMPORT_TYPES = new Set(['coaches', 'evaluations', 'fields', 'field_availability']);
 
 const getDeferredImportTypeFromJob = (job) => {
   const deferredType = job?.warning_summary?.deferred_apply?.import_type;
   if (DEFERRED_IMPORT_TYPES.has(deferredType)) return deferredType;
   if (job?.job_type === 'fields') return 'fields';
   if (job?.job_type === 'field_availability') return 'field_availability';
+  if (job?.job_type === 'evaluations') return 'evaluations';
   return null;
 };
 
@@ -102,6 +104,7 @@ export function describeFinalizeOutcome(result, importType) {
       );
     }
   }
+  if (importType === 'evaluations') lines.push(...describeEvaluationOutcome(result));
   if (invalid > 0) {
     lines.push(
       replayable
@@ -121,6 +124,61 @@ export function describeFinalizeOutcome(result, importType) {
     );
   }
   return lines;
+}
+
+/** How many of a list's entries are named in a log line; the rest are counted. */
+const NAMED_IN_LOG = 10;
+
+/**
+ * What an evaluations finalize (or its dry run) did to the players, as log lines (E3c): who was
+ * updated, who matched nobody (listed, never created), and who repeated an id. The invalid rows
+ * are the generic line above. Counts come from the server's result, not recounted here.
+ * @param {Record<string, any> | null | undefined} result
+ * @returns {string[]}
+ */
+function describeEvaluationOutcome(result) {
+  const lines = [];
+  const dry = result?.dry_run === true;
+  const updated = Number(result?.updated_players) || 0;
+  const unchanged = Number(result?.unchanged_players) || 0;
+  const unmatched = Number(result?.unmatched_rows) || 0;
+  const duplicates = Number(result?.duplicate_rows) || 0;
+  lines.push(
+    `${updated} player(s) ${dry ? 'would be updated' : 'updated'}; ${unchanged} already had these values or had nothing to set.`
+  );
+  if (unmatched > 0) {
+    const named = (Array.isArray(result?.unmatched) ? result.unmatched : [])
+      .map((item) => item?.registration_id)
+      .filter(Boolean)
+      .slice(0, NAMED_IN_LOG);
+    const more = unmatched - named.length;
+    lines.push(
+      `${unmatched} row(s) match no player in this season and ${dry ? 'will be skipped' : 'were skipped'}; no player is created from them${named.length ? `: ${named.join(', ')}${more > 0 ? `, and ${more} more` : ''}` : ''}. Import the season's players first, then import these again.`
+    );
+  }
+  if (duplicates > 0) {
+    lines.push(
+      `${duplicates} row(s) repeat a registration id that appears earlier in the file; only the first row of each was used.`
+    );
+  }
+  return lines;
+}
+
+/**
+ * The evaluations import's dry run: the same server code as the apply, writing nothing, so the
+ * counts and the lists shown before the confirm are the ones the apply will produce.
+ * @returns {Promise<Record<string, any>>}
+ */
+export async function previewEvaluationImportJob({ supabase, importJobId, validationErrors = [] }) {
+  const { data, error } = await supabase.rpc('finalize_evaluation_import_job', {
+    p_import_job_id: importJobId,
+    p_validation_errors: validationErrors,
+    p_dry_run: true,
+  });
+  if (error) {
+    throw new Error(error.message || 'Could not preview the evaluations import');
+  }
+  return data;
 }
 
 export async function markDeferredImportReady({

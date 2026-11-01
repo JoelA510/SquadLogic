@@ -36,6 +36,7 @@ describe('the import allowlist, browser and Edge copies', () => {
   it('has the same lists and entity types in both copies', () => {
     expect([...edge.PLAYER_IMPORT_KEYS]).toEqual([...browser.PLAYER_IMPORT_KEYS]);
     expect([...edge.COACH_IMPORT_KEYS]).toEqual([...browser.COACH_IMPORT_KEYS]);
+    expect([...edge.EVALUATION_IMPORT_KEYS]).toEqual([...browser.EVALUATION_IMPORT_KEYS]);
     expect({ ...edge.ALLOWLIST_ENTITY_TYPES }).toEqual({ ...browser.ALLOWLIST_ENTITY_TYPES });
     expect({ ...browser.ALLOWLIST_ENTITY_TYPES }).toEqual({ players: 'player', coaches: 'coach' });
   });
@@ -113,6 +114,76 @@ describe('the import allowlist, browser and Edge copies', () => {
     expect(browser.isAllowedImportKey('players', key)).toBe(true);
     expect(edge.isAllowedImportKey('players', key)).toBe(true);
   });
+  // The evaluations import (E3c) keeps the registration id and the three values it sets, and
+  // nothing else: a name, a contact, a birth date or any other column of an evaluation sheet goes.
+  const DROPPED_EVALUATION = [
+    'first_name',
+    'last_name',
+    'full_name',
+    'date_of_birth',
+    'email',
+    'phone',
+    'guardian_1_email',
+    'guardian_name',
+    'payment_status',
+    'notes',
+    'coach comments',
+    'division_name',
+    'age group',
+    'waitlist',
+    'buddy_request',
+    'team name',
+    'natural_age',
+    'status',
+  ];
+  const KEPT_EVALUATION = [
+    'external_registration_id',
+    'gotsport_id',
+    'registration_id',
+    'player_id',
+    'years_played',
+    'skill_tier',
+    'skill_level',
+    'rating',
+  ];
+  it.each(DROPPED_EVALUATION)('both copies drop the evaluations key %j', (key) => {
+    expect(browser.isAllowedImportKey('evaluations', key)).toBe(false);
+    expect(edge.isAllowedImportKey('evaluations', key)).toBe(false);
+  });
+  it.each(KEPT_EVALUATION)('both copies keep the evaluations key %j', (key) => {
+    expect(browser.isAllowedImportKey('evaluations', key)).toBe(true);
+    expect(edge.isAllowedImportKey('evaluations', key)).toBe(true);
+  });
+  it('the evaluations import declares no fields of the organization: a declared name is not kept', () => {
+    for (const copy of [browser, edge]) {
+      expect(copy.isAllowlistedImportType('evaluations')).toBe(true);
+      expect(copy.isAllowedImportKey('evaluations', 'shirt size', ['shirt_size'])).toBe(false);
+      expect(Object.keys(copy.ALLOWLIST_ENTITY_TYPES)).not.toContain('evaluations');
+    }
+  });
+  it('filters a synthetic evaluation sheet to the id and the values in both copies', () => {
+    const sheet = {
+      'Registration ID': '0042',
+      'First Name': 'First1',
+      'Last Name': 'Last1',
+      'Date of Birth': '2016-01-01',
+      'Years Played': '2',
+      'Skill Tier': 'developing',
+      Rating: '3',
+      'Evaluator Comments': 'quick feet',
+      'Guardian 1 Email Address': 'email1@example.com',
+    };
+    const normalize = browser.canonicalImportKey;
+    for (const copy of [browser, edge]) {
+      expect(copy.keepAllowedColumns('evaluations', sheet, normalize, [])).toEqual({
+        'Registration ID': '0042',
+        'Years Played': '2',
+        'Skill Tier': 'developing',
+        Rating: '3',
+      });
+    }
+  });
+
   it.each(DROPPED_COACH)('both copies drop the coach key %j', (key) => {
     expect(browser.isAllowedImportKey('coaches', key)).toBe(false);
     expect(edge.isAllowedImportKey('coaches', key)).toBe(false);
@@ -282,7 +353,11 @@ function edgeAliases() {
 
 describe('the header alias maps', () => {
   const EDGE = edgeAliases();
-  const allowed = new Set([...browser.PLAYER_IMPORT_KEYS, ...browser.COACH_IMPORT_KEYS]);
+  const allowed = new Set([
+    ...browser.PLAYER_IMPORT_KEYS,
+    ...browser.COACH_IMPORT_KEYS,
+    ...browser.EVALUATION_IMPORT_KEYS,
+  ]);
 
   it('reads the Edge map, including the long GotSport questions', () => {
     expect(Object.keys(EDGE).length).toBeGreaterThan(150);
@@ -300,6 +375,14 @@ describe('the header alias maps', () => {
     expect(EDGE['player id']).toBeUndefined();
     expect(BROWSER_ALIASES['player id']).toBeUndefined();
     expect(browser.canonicalImportKey('Player ID')).toBe('player id');
+  });
+
+  it('read a rating under every header the evaluations import names it by, in both copies', () => {
+    for (const header of ['rating', 'skill rating', 'player rating']) {
+      expect(EDGE[header]).toBe('rating');
+      expect(BROWSER_ALIASES[header]).toBe('rating');
+      expect(browser.canonicalImportKey(header)).toBe('rating');
+    }
   });
 
   it('agree on every header that reaches an allowlisted key', () => {
@@ -389,6 +472,7 @@ const READERS = {
   finalize_import_job: 'players',
   materialize_import_buddy_pairs: 'players',
   finalize_coach_import_job: 'coaches',
+  finalize_evaluation_import_job: 'evaluations',
   finalize_field_import_job: 'fields',
   finalize_field_availability_import_job: 'fields',
   // Reduces an unfinished job's staged payloads through import_allowed_payload;
@@ -414,7 +498,7 @@ function sqlCensus(latest) {
   const readers = [...latest].filter(([, body]) => /\bnormalized_payload\b/.test(body));
   const unclassified = readers.map(([name]) => name).filter((name) => !(name in READERS));
   /** @type {Record<string, Set<string>>} */
-  const read = { players: new Set(), coaches: new Set() };
+  const read = { players: new Set(), coaches: new Set(), evaluations: new Set() };
   for (const [name, body] of readers) {
     const type = READERS[name];
     if (type in read) for (const key of payloadKeysRead(body)) read[type].add(key);
@@ -449,6 +533,22 @@ describe('the allowlist equals what the latest SQL reads', () => {
       browser.COACH_IMPORT_KEYS.filter((key) => !parts.has(key)).sort()
     );
     expect([...edge.COACH_NAME_PARTS]).toEqual([...browser.COACH_NAME_PARTS]);
+  });
+
+  it('the evaluations finalizer reads exactly the evaluations allowlist', () => {
+    expect([...census.read.evaluations].sort()).toEqual([...browser.EVALUATION_IMPORT_KEYS].sort());
+  });
+
+  it('POSITIVE CONTROL: an evaluations finalizer that starts reading a name or a note fails', () => {
+    const planted = new Map(latest);
+    planted.set(
+      'finalize_evaluation_import_job',
+      `${latest.get('finalize_evaluation_import_job')}
+       SELECT public.import_payload_text(sr.normalized_payload, 'first_name', 'notes');`
+    );
+    const { read } = sqlCensus(planted);
+    expect(read.evaluations.has('first_name')).toBe(true);
+    expect([...read.evaluations].sort()).not.toEqual([...browser.EVALUATION_IMPORT_KEYS].sort());
   });
 
   it('neither people finalizer stores the payload minus a denylist; both use the declared fields', () => {
@@ -520,14 +620,21 @@ describe('the SQL copy of the lists equals the code copies', () => {
   const latest = migrationBodies();
   const body = latest.get('import_allowed_keys') ?? '';
 
-  it('reads both arms of the latest import_allowed_keys', () => {
-    expect(Object.keys(sqlAllowedKeys(body)).sort()).toEqual(['coaches', 'players']);
+  it('reads every arm of the latest import_allowed_keys', () => {
+    expect(Object.keys(sqlAllowedKeys(body)).sort()).toEqual(['coaches', 'evaluations', 'players']);
   });
 
-  it('holds the player and coach lists exactly, in order', () => {
+  it('holds the player, coach and evaluations lists exactly, in order', () => {
     const lists = sqlAllowedKeys(body);
     expect(lists.players).toEqual([...browser.PLAYER_IMPORT_KEYS]);
     expect(lists.coaches).toEqual([...browser.COACH_IMPORT_KEYS]);
+    expect(lists.evaluations).toEqual([...browser.EVALUATION_IMPORT_KEYS]);
+  });
+
+  it('POSITIVE CONTROL: a key missing from the evaluations arm fails', () => {
+    const planted = body.replace(", 'rating'", '');
+    expect(planted).not.toBe(body);
+    expect(sqlAllowedKeys(planted).evaluations).not.toEqual([...browser.EVALUATION_IMPORT_KEYS]);
   });
 
   it('POSITIVE CONTROL: a key missing from the SQL copy fails', () => {

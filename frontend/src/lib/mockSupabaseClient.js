@@ -48,6 +48,8 @@ import {
   permitsUnlinkedBy,
 } from './mockFacilityPermits.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
+import { handleEvaluationImportRpc } from './mockEvaluations.js';
+import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
 import { handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
@@ -2662,6 +2664,12 @@ export const mockSupabase = {
       // The TIME TBD list (migration 20261108020000): the admin read, refusals included.
       const tbd = handleScheduleTbdRpc(db, name, params, { isOrgAdmin });
       if (tbd) return tbd;
+      // The evaluations import's finalizer (migration 20261113010000), dry run and refusals included.
+      const evaluation = handleEvaluationImportRpc(db, name, params, { isOrgAdmin, currentUserId });
+      if (evaluation) {
+        if (!evaluation.error && evaluation.data?.dry_run !== true) saveDB(db);
+        return evaluation;
+      }
       // Heat forecast settings (migration 20261006000000), refusals included.
       const heat = handleHeatSettingsRpc(db, name, params, { currentUserId });
       if (heat) {
@@ -4522,7 +4530,9 @@ export const mockSupabase = {
           error: { message: 'Only organization admins can create import jobs' },
         };
       }
-      if (!['players', 'coaches', 'fields', 'field_availability'].includes(importType)) {
+      if (
+        !['players', 'coaches', 'fields', 'field_availability', 'evaluations'].includes(importType)
+      ) {
         return { data: null, error: { message: `invalid import type: ${p_import_type}` } };
       }
       if (!fileName) {
@@ -4557,10 +4567,12 @@ export const mockSupabase = {
           };
         }
         // 20261111010000: the active season or a draft takes a player or coach import; a field
-        // import stays with the active season.
+        // import stays with the active season. 20261113010000: an evaluations import updates a
+        // draft's players as it does the active season's.
         if (
           named.status !== 'active' &&
-          (named.status !== 'draft' || (importType !== 'players' && importType !== 'coaches'))
+          (named.status !== 'draft' ||
+            (importType !== 'players' && importType !== 'coaches' && importType !== 'evaluations'))
         ) {
           return { data: null, error: seasonNotActiveError(named.id, named.status, 'season') };
         }
@@ -4579,7 +4591,9 @@ export const mockSupabase = {
           ? 'fields'
           : importType === 'field_availability'
             ? 'field_availability'
-            : 'registration';
+            : importType === 'evaluations'
+              ? 'evaluations'
+              : 'registration';
       const job = {
         id: mockId('import-job-'),
         organization_id: p_organization_id,
@@ -4907,16 +4921,20 @@ export const mockSupabase = {
       if (!job) {
         return { data: null, error: { message: 'Import job not found' } };
       }
-      if (!['coaches', 'fields', 'field_availability'].includes(importType)) {
+      if (!['coaches', 'fields', 'field_availability', 'evaluations'].includes(importType)) {
         return {
           data: null,
           error: {
-            message: 'Only coach, field, and field_availability imports support deferred apply',
+            message:
+              'Only coach, field, field_availability, and evaluations imports support deferred apply',
           },
         };
       }
       if (importType === 'coaches' && job.job_type !== 'registration') {
         return { data: null, error: { message: 'Import job is not registration' } };
+      }
+      if (importType === 'evaluations' && job.job_type !== 'evaluations') {
+        return { data: null, error: { message: 'Import job is not evaluations' } };
       }
       if (importType === 'fields' && job.job_type !== 'fields') {
         return { data: null, error: { message: 'Import job is not fields' } };
@@ -4976,14 +4994,17 @@ export const mockSupabase = {
       if (!job) {
         return { data: null, error: { message: 'Import job not found' } };
       }
-      if (!['coaches', 'fields', 'field_availability'].includes(importType)) {
+      if (!['coaches', 'fields', 'field_availability', 'evaluations'].includes(importType)) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, and field_availability imports support deferred cancellation',
+              'Only coach, field, field_availability, and evaluations imports support deferred cancellation',
           },
         };
+      }
+      if (importType === 'evaluations' && job.job_type !== 'evaluations') {
+        return { data: null, error: { message: 'Import job is not evaluations' } };
       }
       if (job.status !== 'ready_to_apply') {
         return { data: null, error: { message: `Import job is ${job.status}` } };
@@ -8069,6 +8090,18 @@ export const mockSupabase = {
               });
             }
           });
+
+          // E3c: a registration id, and each value within its range (utils/importEvaluations.js,
+          // the Edge Function's rules).
+          if (body.import_type === 'evaluations') {
+            validateEvaluationRow(row).forEach((error) => {
+              validationErrors.push({
+                row: index + 1,
+                field: error.field,
+                message: error.message,
+              });
+            });
+          }
 
           if (body.import_type === 'players' && row.date_of_birth) {
             const dob = new Date(row.date_of_birth);

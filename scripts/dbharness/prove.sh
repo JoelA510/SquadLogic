@@ -207,6 +207,12 @@ R59="$REPO/docs/sql/20261111010000_revert.sql"
 # grid, the solver-built schedule of U4 and U5 to U8, the demo start replaced to write it), and the revert.
 M60="$REPO/supabase/migrations/20261110010000_demo_practices.sql"
 R60="$REPO/docs/sql/20261110010000_revert.sql"
+# E3c: the evaluations import (years played, skill tier and rating by registration id, onto a season's
+# players), its finalizer, and the revert. It replaces create_import_job, import_allowed_keys and the two
+# deferred-apply lifecycle functions, so the plant that aimed at create_import_job's body in $M59 is
+# re-aimed here.
+M62="$REPO/supabase/migrations/20261113010000_evaluations_import.sql"
+R62="$REPO/docs/sql/20261113010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3625,7 +3631,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M26 create_import_job still audits the file name" "$M59" \
+plant "M26 create_import_job still audits the file name" "$M62" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
@@ -4529,7 +4535,7 @@ plant "M43 the sanitizer takes date_of_birth again" "$M56" \
   "                 'buddy_request', 'date_of_birth' THEN" \
   "smoke 20261026010000"
 
-plant "M43 the allowlist keeps dob" "$M53" \
+plant "M43 the allowlist keeps dob" "$M62" \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age'," \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age', 'dob'," \
   "smoke 20261026010000"
@@ -5097,6 +5103,38 @@ plant "M60 the division's practice length is not copied" "$M60" \
   "           d.practices_per_week, NULL
       FROM demo_seed.divisions d;" \
   "smoke 20261110010000"
+
+# The evaluations import (20261113010000; plan docs/changes/2026-10-27-season-enrollment.md, E3c). Three
+# plants, each executed by hand against the smoke and supabase/tests/evaluations_import.sql (both red), and
+# against the mock twin with tests/mockEvaluationsImport.test.js (and, for the second, the E2E feature):
+# a registration id matched in every season (a draft's player with the same id is rewritten); a blank cell
+# that clears the stored value (EV-2 loses its tier); and a completed season that is not refused up front
+# (the dry run proceeds).
+plant "M62 the finalizer matches a player of any season" "$M62" \
+  "              AND pl.season_settings_id = v_season_settings_id
+              AND pl.external_registration_id = r.registration_id" \
+  "              AND pl.external_registration_id = r.registration_id" \
+  "smoke 20261113010000"
+
+plant "M62 a blank cell clears the stored value" "$M62" \
+  "            skill_tier = COALESCE(u.tier_value, pl.skill_tier)," \
+  "            skill_tier = u.tier_value," \
+  "smoke 20261113010000"
+
+plant "M62 a completed season is not refused up front" "$M62" \
+  "    IF v_season_status = 'completed' THEN
+        RAISE EXCEPTION 'Season % is completed and takes no import', v_season_settings_id
+            USING ERRCODE = '22023', DETAIL = 'season_completed';
+    END IF;
+
+    -- One statement for the plan" \
+  "    IF v_season_status = 'completed' AND false THEN
+        RAISE EXCEPTION 'Season % is completed and takes no import', v_season_settings_id
+            USING ERRCODE = '22023', DETAIL = 'season_completed';
+    END IF;
+
+    -- One statement for the plan" \
+  "smoke 20261113010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

@@ -22,6 +22,10 @@
  * The finalizers apply the same rule again in SQL (migration 20261022010000),
  * because the staging tables can be written without this function.
  *
+ * The evaluations import (E3c) is filtered the same way, against its own short list
+ * (`EVALUATION_IMPORT_KEYS`: the registration id and the three values it sets); it declares no
+ * fields of the organization's, so (c) does not apply to it.
+ *
  * Twin of `frontend/src/utils/importAllowlist.js`, which filters the same
  * columns in the browser before upload; `tests/importAllowlistParity.test.js`
  * holds the two equal and holds the key lists equal to what the latest SQL
@@ -118,6 +122,22 @@ export const COACH_IMPORT_KEYS: readonly string[] = Object.freeze([
   ...COACH_NAME_PARTS,
 ]);
 
+/**
+ * Keys `finalize_evaluation_import_job` reads (E3c): the registration id the player import
+ * stored, and the three values an evaluations file can set. An evaluations file declares no
+ * fields of its own: nothing else of it is kept.
+ */
+export const EVALUATION_IMPORT_KEYS: readonly string[] = Object.freeze([
+  'external_registration_id',
+  'gotsport_id',
+  'registration_id',
+  'player_id',
+  'years_played',
+  'skill_tier',
+  'skill_level',
+  'rating',
+]);
+
 /** The import types the allowlist applies to, and the schema entity each declares fields for. */
 export const ALLOWLIST_ENTITY_TYPES: Readonly<Record<string, string>> = Object.freeze({
   players: 'player',
@@ -127,6 +147,7 @@ export const ALLOWLIST_ENTITY_TYPES: Readonly<Record<string, string>> = Object.f
 const KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = Object.freeze({
   players: PLAYER_IMPORT_KEYS,
   coaches: COACH_IMPORT_KEYS,
+  evaluations: EVALUATION_IMPORT_KEYS,
 });
 
 /**
@@ -137,6 +158,16 @@ const KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = Object.freeze(
 export function declaredFieldKey(key: unknown): string {
   if (key === null || key === undefined) return '';
   return String(key).trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * The organization's declared fields that apply to the import type: those of its entity, and none
+ * for a type with no entity (the evaluations import declares no fields, however it is called).
+ */
+function declaredFor(importType: string, declaredFields: Iterable<string>): string[] {
+  return Object.prototype.hasOwnProperty.call(ALLOWLIST_ENTITY_TYPES, importType)
+    ? [...declaredFields]
+    : [];
 }
 
 /** True when the import type is filtered by the allowlist (people, not fields). */
@@ -159,7 +190,7 @@ export function isAllowedImportKey(
   if (importType === 'players' && PLAYER_BIRTH_KEYS.includes(canonicalKey)) return true;
   const identity = declaredFieldKey(canonicalKey);
   if (!identity) return false;
-  for (const field of declaredFields) {
+  for (const field of declaredFor(importType, declaredFields)) {
     if (declaredFieldKey(field) === identity) return true;
   }
   return false;
@@ -178,7 +209,7 @@ export function isAllowedImportHeader(
   normalizeHeader: (header: string) => string,
   declaredFields: Iterable<string> = []
 ): boolean {
-  const declared = [...declaredFields];
+  const declared = declaredFor(importType, declaredFields);
   if (isAllowedImportKey(importType, normalizeHeader(header), declared)) return true;
   const identity = declaredFieldKey(header);
   return identity !== '' && declared.some((field) => declaredFieldKey(field) === identity);
@@ -196,7 +227,7 @@ export function keepAllowedColumns(
   declaredFields: Iterable<string> = []
 ): Record<string, unknown> {
   if (!isAllowlistedImportType(importType)) return row;
-  const declared = [...declaredFields];
+  const declared = declaredFor(importType, declaredFields);
   const kept: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
     if (isAllowedImportHeader(importType, key, normalizeHeader, declared)) kept[key] = value;
@@ -226,7 +257,7 @@ export function withDeclaredColumns(
   clean: (value: unknown) => string = (v) => (v == null ? '' : String(v))
 ): Record<string, string> {
   if (!isAllowlistedImportType(importType)) return normalizedRow;
-  const declared = new Set([...declaredFields].map(declaredFieldKey));
+  const declared = new Set(declaredFor(importType, declaredFields).map(declaredFieldKey));
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(normalizedRow)) {
     if (isAllowedImportKey(importType, key, declared)) out[key] = value;

@@ -311,7 +311,46 @@ Built as written; where the code differed from the plan or left a choice:
 - **Audit** is one `import.completed` row per apply (counts, season, `import_type = 'evaluations'`),
   with no registration ids; the unmatched, invalid and duplicate lists (at most 200 each) live on the job.
   No rollback: the values are ordinary player fields.
-- **Not changed:** team generation, the age rule and its stamp, the player and coach finalizers.
-- **A finding for the owner.** `skill_tier` is stored (as the player import has always stored it) but the
-  Players page does not show it and the Teams page's durable select leaves it out, so only
-  `years_played` and `rating` reach teaming from the player record. See lesson 69.
+- **Not changed:** the age rule and its stamp, the player and coach finalizers, and the generator
+  itself (`packages/core`). Only what the Teams page hands it moved (next bullet).
+- **Skill tier is an option, and reaches teaming only when it is on (Codex, P1 on #684; owner,
+  2026-10-27).** The first build stored the tier and nothing read it, so a tier-only file changed a column
+  no screen or team run used. The owner's rule: the tier does not show and is not used unless an admin
+  turns on **Skill Tier** in the organization options, at set-up ("Choose your tools") or later in
+  Settings, Features. The flag is `skill_tier` in `FEATURE_FLAGS`, a plain boolean (no schema change, no
+  migration, no key in `FEATURE_DEFAULTS`, so absent is off) with a `FEATURE_CATALOG` entry (`column: true`),
+  which is what both screens draw from. Demo and mock organizations store no flags, so both start with it off.
+  With it **on**, the tier shows on the player page, as a Tier column in the Players grid and as a line on
+  each card of the team roster, in words (novice, developing, advanced), read-only (the admin RPCs take no
+  tier; the import writes it), and the Teams page overlays the stored tier on the registration file's with the
+  contract `years_played` and `rating` have: a stored tier the generator can read replaces the file's under
+  any skill column, a null or blank leaves the file's, and it reaches the generator as `skillRating` (novice 1,
+  developing 3, advanced 5; a numeric `rating` still wins over it, `ratingOf`). With it **off**, nothing shows
+  it and teaming reads no tier: not the record's, and not the registration file's `skill_tier` / `Skill Tier`
+  either, which the page used to hand the generator whatever the options (a change to existing behaviour,
+  below). A number a row already carries as a skill rating (`skillRating`, `skill_rating`, `Skill Rating`)
+  and the Player Rating path (`rating`) are read as before. The Teams page reads the flag, not
+  `packages/core`: the generator only sees a number, so there is no core key to keep equal. Both generator
+  inputs go through `withDurableIdentity` and `toGeneratorPlayer` with the flag, so no call site is left out;
+  the select always carries `skill_tier`. The Team Builder board reads the record's `rating` and
+  `years_played` and never a tier, and is unchanged.
+- **What the option changed that already existed.** (1) Teaming used the registration file's tier whatever
+  the options; it now does so only with Skill Tier on, so a league that had a tier column in its file and
+  never chose the option no longer has the tier steer its teams (a Player Rating league lost the file's tier
+  as the fallback skill of an unrated player). (2) The roster editor on the Teams page printed "Skill: ..."
+  for every player (including "Unrated"); it prints it only with the option on. (3) The team roster showed no
+  years played per player (only the average on the Balance tab); it now lists Years played on each card
+  by default, as the owner's rule says, and the tier beside it when that is on. `get_team_roster` returns no
+  tier, so the page reads the roster's tiers from `players` (an admin, the only reader of a roster, can);
+  returning it from the RPC is a migration the owner has not asked for.
+- **Checked.** A tier-only import changes a fresh run's tier and seating only with the option on; with it off a
+  stored tier, a file tier and both together leave the generator player without a skill rating while a numeric
+  `skillRating` and the record's `rating` still count. A re-run in review, published or locked mode keeps every
+  player already on a team on it whatever their tier (`tests/teamGenerationSkillOverlayIncremental.test.js`),
+  per `docs/architecture/incremental-teaming-hardening.md`: only skill totals and where newcomers sit move.
+  The season fixtures (`fixtures/season-2026/`) feed the scheduler, not the Teams page, and did not move.
+- **Mapping and the confirmation (Codex, P2s on #684).** For an evaluations file the mapped file holds
+  only the mapped columns: a source column the admin mapped elsewhere or cleared is dropped, so
+  `Skill Level` mapped to Rating (and Skill Tier cleared) is a rating column, not also a tier. The
+  confirmation names the season the job was made for (the preview's, else the job's), and says so when
+  the header now shows another; the apply and the SQL already target the job's season.

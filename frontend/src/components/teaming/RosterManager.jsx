@@ -22,16 +22,18 @@ import Button from '../ui/Button.jsx';
 import MovePlayerDialog from './MovePlayerDialog.jsx';
 import { useConflicts } from '../../hooks/useConflicts.js';
 import { coachLabel } from '../../utils/teamCoaches.js';
+import { useFeatures } from '../../hooks/useFeatures.js';
+import { FEATURE_FLAGS } from '../../constants/featureFlags.js';
 import { findTeamOfPlayer, movePlayerToTeam, reorderWithinTeam } from '../../utils/rosterMoves.js';
 
 const playerNameOf = (player) =>
   player.name || `${player.first_name || ''} ${player.last_name || ''}`.trim() || 'Unknown Player';
 
 /**
- * One player's row: the full name and skill (they wrap, never clip), the marks, a drag handle
- * and a Move button. The handle is its own button, so the row holds no nested control and a
- * keyboard reaches both: Space on the handle lifts the player, and Move opens the dialog that
- * is the non-drag way to do the same (AGENTS.md section 9).
+ * One player's row: the full name and, with the Skill Tier option on, the skill (they wrap, never
+ * clip), the marks, a drag handle and a Move button. The handle is its own button, so the row
+ * holds no nested control and a keyboard reaches both: Space on the handle lifts the player, and
+ * Move opens the dialog that is the non-drag way to do the same (AGENTS.md section 9).
  *
  * @param {{ player: any, onRequestMove?: (player: any) => void }} props
  */
@@ -55,6 +57,9 @@ const PlayerCard = ({ player, onRequestMove }) => {
     transition,
   };
 
+  const { isEnabled } = useFeatures();
+  const showSkill = isEnabled(FEATURE_FLAGS.SKILL_TIER);
+
   const playerName = playerNameOf(player);
   const playerSkill = player.skill || player.skillRating || player.skill_tier || 'Unrated';
 
@@ -67,7 +72,7 @@ const PlayerCard = ({ player, onRequestMove }) => {
       {...listeners}
       style={style}
       data-testid={`player-card-${player.id}`}
-      aria-label={`${playerName}, Skill: ${playerSkill}${player.assignment_source === 'manual' ? ', manually assigned' : ''}${player.isCoachingLead ? ', coaching lead' : ''}${player.eligibilityNotChecked ? ', eligibility not checked' : ''}`}
+      aria-label={`${playerName}${showSkill ? `, Skill: ${playerSkill}` : ''}${player.assignment_source === 'manual' ? ', manually assigned' : ''}${player.isCoachingLead ? ', coaching lead' : ''}${player.eligibilityNotChecked ? ', eligibility not checked' : ''}`}
       className={`roster-row${isDragging ? ' dragging' : ''}`}
     >
       <button
@@ -82,7 +87,7 @@ const PlayerCard = ({ player, onRequestMove }) => {
       <div className="roster-who">
         <span className="roster-name">{playerName}</span>
         <span className="roster-detail">
-          <span>Skill: {playerSkill}</span>
+          {showSkill && <span>Skill: {playerSkill}</span>}
           {player.assignment_source === 'manual' && <Badge tone="warning">manual</Badge>}
           {/* Phase B6: a parent volunteers to coach. A mark only: a lead is not a coach. */}
           {player.isCoachingLead && (

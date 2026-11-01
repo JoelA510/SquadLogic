@@ -430,12 +430,19 @@ function buddyFieldsOf(row) {
 // rows, which keep what the file said. The stored natural age (admin-focus plan R5) is what
 // eligibility reads when a row carries no birth date: no birth date is stored.
 const DURABLE_PLAYER_FIELDS =
-  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, rating, status, play_up_requested';
+  'id, external_registration_id, division_id, first_name, last_name, preferred_name, buddy_request, mutual_buddy_code, natural_age, willing_to_coach, years_played, skill_tier, rating, status, play_up_requested';
 const IDENTITY_KEYS = ['first_name', 'last_name', 'preferred_name', 'nickname'];
 // The headers a coaching answer and years played are read from (`toGeneratorPlayer`), as
 // `canonicalImportKey` stages them and as older mock rows spell them.
 const COACHING_ANSWER_KEYS = ['willing_to_coach', 'coach_volunteer', 'Willing to Coach'];
 const YEARS_PLAYED_KEYS = ['years_played', 'Years Played', 'yearsPlayed'];
+// The headers a skill rating is read from (`toGeneratorPlayer`): a number a row already carries,
+// which is read whatever the organization's options, and the skill tier as the import stages it
+// ('skill_tier') and as older mock rows spell it, which is read only with the Skill Tier option
+// on (`toGeneratorPlayer`, `withDurableIdentity`).
+const SKILL_NUMBER_KEYS = ['skillRating', 'skill_rating', 'Skill Rating'];
+const SKILL_TIER_KEYS = ['skill_tier', 'Skill Tier'];
+const SKILL_KEYS_ALL = [...SKILL_NUMBER_KEYS, ...SKILL_TIER_KEYS];
 // The import columns a waitlisted registrant is marked by (`finalize_import_job` reads both).
 const WAITLIST_KEYS = ['waitlist', 'waitlisted'];
 const IDENTITY_CAMEL_KEYS = ['firstName', 'lastName', 'preferredName'];
@@ -449,17 +456,25 @@ const LOOKUP_CONCURRENCY = 8;
  * the import reads as a name or a request is replaced, so a request the admin cleared on the
  * record is cleared here too. The code stays the import's unless the player row holds one.
  * The teaming signals the record holds win too (Phase B6): `willing_to_coach` (what makes a
- * coaching lead, as the import stored it), `years_played` and the admin's `rating`; and the
- * waitlist: the record's `status` (an admin may have moved the player on or off the waitlist
+ * coaching lead, as the import stored it), `years_played`, `skill_tier` (the registration
+ * file's, or the evaluations import's, which writes only the record) and the admin's `rating`;
+ * and the waitlist: the record's `status` (an admin may have moved the player on or off the waitlist
  * since the file was read) replaces the file's waitlist column. So does the record's
  * `play_up_requested` for the file's play-up column: the admin may have set or cleared it.
+ * With `skillTier` (the Skill Tier option) the record's `skill_tier` wins over the file's the
+ * same way, whatever column the file's skill came in (the evaluations import writes the record
+ * and not the file); a null or blank leaves the file's. Without it the record's tier is not
+ * handed on, and `toGeneratorPlayer` does not read the file's.
  */
-function withDurableIdentity(row, durable) {
+function withDurableIdentity(row, durable, { skillTier = false } = {}) {
   if (!durable) return row;
   const storedWaitlist = typeof durable.status === 'string';
   const storedLead = typeof durable.willing_to_coach === 'boolean';
   const storedPlayUp = typeof durable.play_up_requested === 'boolean';
   const storedYears = Number.isInteger(durable.years_played);
+  // A tier counts as stored when the generator could read one from it: 'advanced', 'developing',
+  // 'novice' or a number. A blank, or a word it cannot read, leaves the file's tier in place.
+  const storedTier = skillTier && normalizeSkillRating(durable.skill_tier) !== undefined;
   const next = {};
   for (const [header, value] of Object.entries(row || {})) {
     const key = canonicalImportKey(header);
@@ -471,12 +486,14 @@ function withDurableIdentity(row, durable) {
     if (storedPlayUp && (PLAY_UP_KEYS.includes(key) || PLAY_UP_KEYS.includes(header))) continue;
     if (storedYears && (YEARS_PLAYED_KEYS.includes(key) || YEARS_PLAYED_KEYS.includes(header)))
       continue;
+    if (storedTier && [key, header].some((name) => SKILL_KEYS_ALL.includes(name))) continue;
     next[header] = value;
   }
   if (storedWaitlist) next.waitlist = durable.status === 'waitlist';
   if (storedLead) next.willing_to_coach = durable.willing_to_coach;
   if (storedPlayUp) next.play_up_requested = durable.play_up_requested ? 'yes' : 'no';
   if (storedYears) next.years_played = durable.years_played;
+  if (storedTier) next.skill_tier = durable.skill_tier;
   if (Number.isFinite(durable.rating)) next.rating = durable.rating;
   // A name the player row lacks (a mock row, a partial select) keeps the import's.
   next.first_name =
@@ -641,13 +658,16 @@ function parseYearsPlayed(value) {
  * names (`coach_id`, `coach_email`) does not (owner decision 8a, 2026-10-27: the coach import
  * writes the links, from the children it names). With `waitlist` (the
  * Waitlist flag) a player the row marks as waitlisted carries `status: 'waitlist'`, which the
- * generator seats nowhere and leaves out of the league-wide averages.
+ * generator seats nowhere and leaves out of the league-wide averages. With `skillTier` (the
+ * Skill Tier flag) the row's skill tier counts as a skill rating (novice 1, developing 3,
+ * advanced 5); without it only a number the row already carries as one does, so a tier the file
+ * holds does not steer the teams of an organization that has not asked for it.
  */
 function toGeneratorPlayer(
   row,
   sourceIndex,
   division,
-  { buddyRequests = false, coachingLeads = false, waitlist = false } = {}
+  { buddyRequests = false, coachingLeads = false, waitlist = false, skillTier = false } = {}
 ) {
   const id = String(
     firstNonEmpty(row, [
@@ -662,7 +682,7 @@ function toGeneratorPlayer(
   const firstName = firstNonEmpty(row, ['first_name', 'First Name', 'firstName']) || '';
   const lastName = firstNonEmpty(row, ['last_name', 'Last Name', 'lastName']) || '';
   const skillRating = normalizeSkillRating(
-    firstNonEmpty(row, ['skillRating', 'skill_rating', 'Skill Rating', 'skill_tier', 'Skill Tier'])
+    firstNonEmpty(row, skillTier ? SKILL_KEYS_ALL : SKILL_NUMBER_KEYS)
   );
   const isWaitlisted = waitlist && WAITLIST_KEYS.some((key) => parseBooleanLike(row?.[key]));
   const isCoachingLead =
@@ -813,6 +833,7 @@ export default function TeamAnalysisPage() {
   const buddyRequestsEnabled = isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS);
   const coachingInterestEnabled = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
   const waitlistEnabled = isEnabled(FEATURE_FLAGS.WAITLIST);
+  const skillTierEnabled = isEnabled(FEATURE_FLAGS.SKILL_TIER);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
@@ -1329,7 +1350,7 @@ export default function TeamAnalysisPage() {
 
         const rowForGeneration = durablePlayer
           ? {
-              ...withDurableIdentity(row, durablePlayer),
+              ...withDurableIdentity(row, durablePlayer, { skillTier: skillTierEnabled }),
               id: durablePlayer.id,
               player_id: durablePlayer.id,
               division_id: durablePlayer.division_id || row.division_id,
@@ -1341,6 +1362,7 @@ export default function TeamAnalysisPage() {
           buddyRequests: buddyRequestsEnabled,
           coachingLeads: coachingInterestEnabled,
           waitlist: waitlistEnabled,
+          skillTier: skillTierEnabled,
         });
       });
 
@@ -1357,6 +1379,7 @@ export default function TeamAnalysisPage() {
       buddyRequestsEnabled,
       coachingInterestEnabled,
       waitlistEnabled,
+      skillTierEnabled,
       currentOrganization?.id,
       currentSeasonSetting?.id,
     ]
@@ -1430,7 +1453,7 @@ export default function TeamAnalysisPage() {
           (isUuid(idCandidate) && otherById.get(idCandidate)) ||
           (externalCandidate && otherByExternalId.get(externalCandidate)) ||
           null;
-        const identified = withDurableIdentity(row, durable);
+        const identified = withDurableIdentity(row, durable, { skillTier: skillTierEnabled });
         const generationRow = durable
           ? {
               ...identified,
@@ -1449,6 +1472,7 @@ export default function TeamAnalysisPage() {
             buddyRequests: buddyRequestsEnabled,
             coachingLeads: coachingInterestEnabled,
             waitlist: waitlistEnabled,
+            skillTier: skillTierEnabled,
           }),
         };
       });
@@ -1714,6 +1738,7 @@ export default function TeamAnalysisPage() {
     buddyRule,
     coachingInterestEnabled,
     waitlistEnabled,
+    skillTierEnabled,
     configs,
     canManageTeams,
     features,

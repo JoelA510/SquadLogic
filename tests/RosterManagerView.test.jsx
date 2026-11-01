@@ -6,8 +6,15 @@
  */
 import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RosterManager from '../frontend/src/components/teaming/RosterManager.jsx';
+import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
+
+// The flags the organization has stored; the card prints the skill only with Skill Tier on.
+const org = vi.hoisted(() => ({ stored: /** @type {Record<string, boolean>} */ ({}) }));
+vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
+  useOrganization: () => ({ featureFlags: FeatureFlagSchema.parse(org.stored) }),
+}));
 
 const longName = 'Maximilian Bartholomew Featherstonehaugh-Cholmondeley';
 
@@ -28,7 +35,12 @@ const makeTeams = () => [
 ];
 
 describe('RosterManager view', () => {
+  beforeEach(() => {
+    org.stored = {};
+  });
+
   it('shows each player in full with their skill, and no card has a scroll box of its own', () => {
+    org.stored = { skill_tier: true };
     render(<RosterManager initialTeams={makeTeams()} onTeamsChange={() => {}} />);
     const card = screen.getByTestId('player-card-p1');
     expect(within(card).getByText(longName)).toBeInTheDocument();
@@ -41,6 +53,25 @@ describe('RosterManager view', () => {
     }
     expect(screen.getByText('2 Players')).toBeInTheDocument();
     expect(screen.getByText('1 Player')).toBeInTheDocument();
+  });
+
+  it('shows no skill, in the text or the card name, until Skill Tier is turned on', () => {
+    // Off is the default: the card names the player and nothing about a tier.
+    const { unmount } = render(
+      <RosterManager initialTeams={makeTeams()} onTeamsChange={() => {}} />
+    );
+    const card = screen.getByTestId('player-card-p1');
+    expect(within(card).getByText(longName)).toBeInTheDocument();
+    expect(within(card).queryByText(/Skill:/)).toBeNull();
+    expect(card).toHaveAttribute('aria-label', longName);
+    unmount();
+
+    org.stored = { skill_tier: true };
+    render(<RosterManager initialTeams={makeTeams()} onTeamsChange={() => {}} />);
+    expect(screen.getByTestId('player-card-p1')).toHaveAttribute(
+      'aria-label',
+      `${longName}, Skill: 3`
+    );
   });
 
   it('gives every player a named drag handle and a named Move button, and every team a heading', () => {

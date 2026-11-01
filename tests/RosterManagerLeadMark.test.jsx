@@ -6,9 +6,15 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SortablePlayer } from '../frontend/src/components/teaming/RosterManager.jsx';
+import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
+
+// The card prints the skill only with the Skill Tier option on (Settings, Features).
+vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
+  useOrganization: () => ({ featureFlags: FeatureFlagSchema.parse({ skill_tier: true }) }),
+}));
 
 const card = (player) =>
   render(

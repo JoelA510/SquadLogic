@@ -250,11 +250,17 @@ true)`: the same statement with its writes switched off, so the numbers shown ar
   (`warning_summary.evaluation_finalize`). A finished job answers a second call with that stored
   result. A finished job's staged rows are deleted after 30 days
   (`cleanup-staging-evaluation-rows`).
-- **What reads the values.** Teaming reads `years_played` and `rating` from the player record
-  (the Teams page's durable select), so they move the next team run when the Years Played and Player
-  Rating features are on. `skill_tier` is stored, as the player import has always stored it, but the Players
-  page does not show it and teaming reads it only from the registration file held in the browser
-  during an import session (the Teams page's durable select leaves it out).
+- **What reads the values.** Teaming reads `years_played`, `skill_tier` and `rating` from the player
+  record (the Teams page's durable select). `years_played` and `rating` act when the Years Played and
+  Player Rating options are on. `skill_tier` acts only when the **Skill Tier** option is on (Settings,
+  Features, or "Choose your tools" at set-up; off unless turned on): then a stored tier the generator can
+  read replaces the registration file's tier for that player and reaches the generator as its skill rating
+  (novice 1, developing 3, advanced 5), a blank leaves the file's, and a numeric `rating` still wins over it.
+  With the option off the tier is stored and nothing reads it: not teaming (the registration file's tier
+  included), not a screen. With it on, the tier shows on the player page and as a column in the Players grid
+  and the team roster, read-only. A re-run in review, published or locked mode moves no player already on a
+  team. The import accepts the Skill Tier column whatever the option, so a file can be loaded before the
+  option is turned on.
 
 ## Dropped on import (never stored)
 

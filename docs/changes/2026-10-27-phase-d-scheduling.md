@@ -645,6 +645,60 @@ Each PR runs the season fixture suite and the full Definition of Done.
 - **Not run:** the real-backend scenario and RLS under a real Supabase (the local pgTAP stub lacks
   `storage.objects` privileges: six files fail there identically on the base).
 
+## Build notes: PR C2 (2026-11-01)
+
+- **Built:** C2, no migration and no RPC or table shape changed (the five C1 RPCs, the import type and the mock's
+  answers are used as C1 left them). The Practice preferences page (`/coaches/practice-preferences`) is four tabs
+  over the season shown, all admin-only: **Import a file** (preview, then the import, then the database's counts);
+  **Pending musts** grouped by import file, each rule's Accept as must (with the impact preview) and Keep as prefer,
+  and **Accept all N** per file; **Rules** (every rule in force, filters for team, coach, level and the coach's
+  priority, an editor for several values per condition, Remove after a confirmation); **Conflicts** (musts no
+  practice can meet together). A completed season turns every writing control off and says so
+  (`SeasonReadOnlyNote` takes its own words); the database refuses the same writes. Per-screen detail:
+  `docs/architecture/practice-scheduling.md`, "The preference screens".
+- **The preview is a twin of the finalizer, not a validate-only run.** The finalizer's counts exist only after it
+  applies, so the existing deferred apply (`mark_import_job_ready_to_apply`, which stages and then says
+  "N rows staged") could not say what the file _will do_. The browser computes it
+  (`utils/practicePreferenceImportPreview.js`, over `practicePreferenceRows.js`) from the season's coaches, teams,
+  rosters and rules in force, and `tests/preferenceImport.test.jsx` requires every count to equal the one the mock
+  finalizer returns over a file that reaches every outcome (each count non-zero, so the equality cannot hold
+  vacuously). The mock finalizer is held to the SQL by C1's `tests/coachPreferencesMock.test.js` and
+  `supabase/tests/practice_preference_import.sql`; this PR did not run the SQL (no `supabase/` file changed).
+  After the import the screen sets the finalizer's counts beside the preview's and says where they differ.
+- **Departures from the text above** (each follows a fact found in the build or the coordinator's brief):
+  (1) **The import lives on the preferences page, not as a fifth type of the shared Data Ingestion panel**, and runs
+  `create_import_job`, `import-validation` and `finalize_practice_preference_import_job` itself
+  (`utils/practicePreferenceImportRun.js`) rather than through `ImportContext`: E3c (#684) edits `ImportPanel`,
+  `ImportContext`, `ColumnMapper` and the allowlist, and the type has nothing the shared panel's per-type state
+  (imported coaches, fields) would hold. No shared import file is edited. (2) **The older plan's coach-facing text
+  stays retired** (`2026-10-27-admin-only.md`, "Effect on approved plans"): no coach screen, withdraw, admin
+  notification or bell, and no "ask for must" form; an admin adds a rule at `prefer` or `must` directly and the
+  coach's priority is recorded by the admin. (3) **Add a rule is one dialog with a Coach select**, where C1's page had
+  a table of one Add button per coach (130 in production). (4) **Editing a rule that was asked for as a must decides the
+  request**: `admin_edit_practice_preference` takes only the level, so Prefer keeps it as prefer and Must accepts it;
+  the editor says so and defaults to the level in force (Prefer for a pending must), so editing its days cannot
+  accept it by accident. (5) **Remove asks first** (C1's button removed at once; there is no undo in the app).
+  (6) **A rule the scheduler is not judging says so** ("Not applied today": its coach no longer coaches the team, or
+  its window is closed), which C1's gap list had declared and not shown. (7) **Conflicts are listed for musts
+  only**; prefer rules that disagree only cost breaches, and the page says so. (8) **No axe in Vitest**: `axe-core` is
+  not a direct dependency (only a transitive one of `@axe-core/playwright`), and importing it from a test would add
+  one; axe runs in the E2E, in both themes, on the import preview, the pending list with the Accept all dialog, the
+  rules list with the editor, and the conflicts view. The unit tests hold the structure axe cannot see in jsdom
+  (names, roles, focus, keyboard).
+- **Accept all, as built.** The count on the button is the count sent. A refusal for a stale count
+  (`expected_count_mismatch`) is shown in the dialog with the database's own sentence, the list is read again, and the
+  button names the new count; **nothing retries by itself**, so the admin confirms again knowing what changed. Any other
+  refusal is shown with its message and the list is left alone. A pending must with no import file (only a seeded row
+  can be one) is its own group with no Accept all.
+- **Found by the E2E, not by the unit tests:** the page's list refresh took the tabs down while it loaded when no rule
+  existed yet, and the import's result panel went with them (the unit tests had stubbed the callback that refreshes).
+  `useCoachPracticePreferences` now says when the first read has finished (`loaded`), only that read waits, and a
+  page-level test imports through the real refresh and requires the result to survive it.
+- **Not run:** the real-backend scenario and RLS under a real Supabase (nothing under `supabase/` changed, so no
+  Deno, pgTAP or harness run). The preview was not run against the SQL finalizer, only its mock (above). The screens
+  were not exercised with a screen reader; the keyboard paths are tested (tab order and wrap, Escape, arrow keys on
+  the tabs) and axe ran in Chromium in both themes.
+
 ## Plan-change output
 
 Size: planned (PRs, migrations, the solver, RPC shapes, an Edge Function). Departures: none.

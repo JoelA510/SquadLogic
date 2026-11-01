@@ -263,6 +263,18 @@ JavaScript twin of the SQL parsing, so the preview and the mock client read a ro
 - **Staged rows are deleted 30 days after they were staged, once their job has finished**, by the same
   retention job as coach rows (`cleanup-staging-import-rows`), because they hold coaches' emails. The deferred
   apply (`mark_import_job_ready_to_apply`, `cancel_ready_import_job`) takes the type too.
+- **The screen previews the file before it uploads anything** (Phase D C2, the Practice preferences page's
+  Import tab; it does not go through the shared import panel). The browser parses the CSV, applies the
+  allowlist (`filterImportRows`) so the columns the import does not read are named as ignored and never
+  leave it, normalizes each row as `import-validation` does (`normalizeImportRow`, the Edge function's
+  `sanitizeString`, its email check), and computes the finalizer's counts from the season's coaches, teams,
+  rosters and rules in force (`utils/practicePreferenceImportPreview.js`, over `practicePreferenceRows.js`).
+  `tests/preferenceImport.test.jsx` runs a file that reaches every outcome through that preview and the mock
+  finalizer and requires each count equal. The import itself is the three calls above in order
+  (`utils/practicePreferenceImportRun.js`: `create_import_job`, `import-validation` in chunks of 1,000,
+  `finalize_practice_preference_import_job`); a failure marks the job failed. A file with no email column, or
+  with none of days, start times or venues, is refused before any call, and a file that can apply nothing
+  offers no import.
 
 ## Dropped on import (never stored)
 

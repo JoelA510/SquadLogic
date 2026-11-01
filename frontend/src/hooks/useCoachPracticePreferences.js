@@ -173,6 +173,10 @@ export function isExpectedCountMismatch(error) {
 export function useCoachPracticePreferences(orgId, { coachId = null, enabled = true } = {}) {
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(false);
+  // True once a read has finished (rows or an error), so a screen can tell the first load from a
+  // refresh: a refresh must not take the screen down, or what a panel holds (an import's result)
+  // goes with it.
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(/** @type {any} */ (null));
   const requestRef = useRef(0);
 
@@ -202,7 +206,10 @@ export function useCoachPracticePreferences(orgId, { coachId = null, enabled = t
       setRows([]);
       setError(err || { message: 'Failed to load practice preference rules' });
     } finally {
-      if (requestRef.current === requestId) setLoading(false);
+      if (requestRef.current === requestId) {
+        setLoading(false);
+        setLoaded(true);
+      }
     }
   }, [orgId, coachId, enabled]);
 
@@ -210,5 +217,5 @@ export function useCoachPracticePreferences(orgId, { coachId = null, enabled = t
     refresh();
   }, [refresh]);
 
-  return { rows, loading, error, refresh };
+  return { rows, loading, loaded, error, refresh };
 }

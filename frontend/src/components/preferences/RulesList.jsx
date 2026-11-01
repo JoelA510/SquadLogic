@@ -8,6 +8,7 @@ import {
   PRIORITY_LABEL,
   describeRule,
   priorityRank,
+  ruleNotApplied,
 } from '../../utils/coachPreferencePreview.js';
 
 /** The most rows drawn at once; the filters narrow a longer list. */
@@ -66,6 +67,8 @@ export default function RulesList({
   locationNames,
   readOnly,
   busyId,
+  rosterRows,
+  date,
   onAdd,
   onEdit,
   onRemove,
@@ -252,6 +255,14 @@ export default function RulesList({
                       {windowText(row) && (
                         <span className="block text-xs text-text-muted">{windowText(row)}</span>
                       )}
+                      {rosterRows && ruleNotApplied(row, rosterRows, date) && (
+                        <span
+                          className="block text-xs text-text-muted"
+                          data-testid="rule-not-applied"
+                        >
+                          Not applied today: {ruleNotApplied(row, rosterRows, date)}.
+                        </span>
+                      )}
                     </td>
                     <td>
                       {row.coach_priority ? (
@@ -301,6 +312,9 @@ RulesList.propTypes = {
   locationNames: PropTypes.instanceOf(Map).isRequired,
   readOnly: PropTypes.bool.isRequired,
   busyId: PropTypes.string,
+  /** The roster, or null when it did not load (then no rule is judged "not applied"). */
+  rosterRows: PropTypes.array,
+  date: PropTypes.string.isRequired,
   onAdd: PropTypes.func.isRequired,
   onEdit: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,

@@ -17,10 +17,15 @@
 
 import React from 'react';
 import Papa from 'papaparse';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import PreferenceImportPanel from '../frontend/src/components/preferences/PreferenceImportPanel.jsx';
+import CoachPreferencesPage from '../frontend/src/pages/CoachPreferencesPage.jsx';
+import ToastHost from '../frontend/src/components/ui/ToastHost.jsx';
+import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { useAuth } from '../frontend/src/contexts/AuthContext.jsx';
 import { mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { makeDedupeHeaderTransformer } from '../frontend/src/utils/gotsportCanonicalizer.js';
 import { canonicalImportKey, isAllowedImportKey } from '../frontend/src/utils/importAllowlist.js';
@@ -36,6 +41,7 @@ import {
   STAGE_CHUNK_SIZE,
   runPracticePreferenceImport,
 } from '../frontend/src/utils/practicePreferenceImportRun.js';
+import { seedMockDb } from './helpers/seedMockDb.js';
 import { databaseIsoDate } from '../frontend/src/utils/coachPreferencePreview.js';
 import {
   ADMIN_USER,
@@ -50,10 +56,25 @@ import {
 } from './helpers/preferenceTables.js';
 
 const demo = vi.hoisted(() => ({ isDemo: false }));
+vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({ useOrganization: vi.fn() }));
+vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({ useAuth: vi.fn() }));
 vi.mock('../frontend/src/hooks/useDemo.js', () => ({ useDemo: () => demo }));
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => ({
   supabase: (await import('../frontend/src/lib/mockSupabaseClient.js')).mockSupabase,
 }));
+// Every paged read takes a moment, as a network read does: without it the mock answers inside one
+// task, React never draws the "reading again" state, and a refresh that takes a panel down is
+// invisible to the page-level test below.
+vi.mock('../frontend/src/lib/pagedFetch.js', async (importOriginal) => {
+  const actual = /** @type {any} */ (await importOriginal());
+  return {
+    ...actual,
+    fetchAllPages: async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      return actual.fetchAllPages(...args);
+    },
+  };
+});
 vi.mock('../frontend/src/components/DemoImportNotice.jsx', () => ({
   default: ({ open }) =>
     open ? <div role="dialog" aria-label="Importing is turned off in the demo" /> : null,
@@ -89,9 +110,11 @@ function panelContext(db) {
 
 let db;
 const seed = () => {
-  // The mock keeps its last write on `window` as well as in sessionStorage; both are replaced.
+  // The mock keeps its last write on `window` as well as in sessionStorage; both are replaced. The
+  // tables go in through the sanctioned seeder (tests/mockDeleteTombstones.test.js counts direct writes).
   delete window.__MOCK_DB__;
-  sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  sessionStorage.removeItem('__MOCK_DB__');
+  seedMockDb(db);
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: ADMIN_USER } }));
 };
 const stored = () => JSON.parse(sessionStorage.getItem('__MOCK_DB__') ?? '{}');
@@ -481,6 +504,14 @@ describe('running an import', () => {
   });
 });
 
+/** Choose a CSV file in the panel's file input. */
+const choose = (name, text) => {
+  const input = screen.getByLabelText('Choose a CSV file');
+  fireEvent.change(input, {
+    target: { files: [new File([text], name, { type: 'text/csv' })] },
+  });
+};
+
 describe('the panel', () => {
   const renderPanel = (over = {}) => {
     const props = {
@@ -496,12 +527,6 @@ describe('the panel', () => {
     };
     render(<PreferenceImportPanel {...props} />);
     return props;
-  };
-  const choose = (name, text) => {
-    const input = screen.getByLabelText('Choose a CSV file');
-    fireEvent.change(input, {
-      target: { files: [new File([text], name, { type: 'text/csv' })] },
-    });
   };
 
   it('previews a file before anything is sent, then imports it and reports the database’s counts', async () => {
@@ -655,16 +680,24 @@ describe('the panel', () => {
     renderPanel();
     choose('prefs.csv', `${HEADER}\ncasey@example.test,U10 Hawks,prefer,Monday,,,,,\n`);
     await screen.findByTestId('preference-import-preview');
-    // Casey stops coaching Hawks after the preview was drawn.
-    const changed = stored();
-    changed.team_coach_assignments = changed.team_coach_assignments.filter((a) => a.team_id !== T1);
-    delete window.__MOCK_DB__;
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(changed));
+    expect(screen.getByText('Imported rules replaced').nextSibling).toHaveTextContent('0');
+    // Meanwhile another admin imports a file for Hawks, through the real pipeline: this file now
+    // replaces a rule the preview did not know of.
+    await runPracticePreferenceImport({
+      supabase: mockSupabase,
+      organizationId: ORG,
+      seasonSettingsId: null,
+      fileName: 'elsewhere.csv',
+      rows: [{ 'Coach Email': 'casey@example.test', Team: 'U10 Hawks', Days: 'Friday' }],
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Import 1 rule' }));
     const differs = await screen.findByTestId('preference-import-differs');
-    expect(differs).toHaveTextContent('rules added: previewed 1, applied 0');
-    expect(differs).toHaveTextContent(
-      'rows for a team the coach does not coach: previewed 0, applied 1'
+    expect(differs).toHaveTextContent('rules replaced: previewed 0, applied 1');
+    // Only what differs is named: the rule it adds is the one it promised.
+    expect(differs).not.toHaveTextContent('rules added');
+    // The screen still gives the database's numbers.
+    expect(screen.getByTestId('preference-import-summary')).toHaveTextContent(
+      '1 imported rule replaced'
     );
   });
 
@@ -731,5 +764,41 @@ describe('the panel', () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(click).toHaveBeenCalledTimes(1);
     click.mockRestore();
+  });
+});
+
+describe('on the page', () => {
+  it('the result of an import stays on screen while the rules are read again, and the pending count follows', async () => {
+    vi.mocked(useOrganization).mockReturnValue(
+      /** @type {any} */ ({
+        currentOrganization: { id: ORG },
+        currentSeasonSetting: { id: SEASON, status: 'active' },
+        orgMember: { role: 'admin' },
+      })
+    );
+    vi.mocked(useAuth).mockReturnValue(/** @type {any} */ ({ user: { id: ADMIN_USER } }));
+    render(
+      <MemoryRouter>
+        <ToastHost>
+          <CoachPreferencesPage />
+        </ToastHost>
+      </MemoryRouter>
+    );
+    // No rule exists yet: the page opens on the rules, with the import a tab away.
+    await screen.findByTestId('admin-preferences-view');
+    fireEvent.click(screen.getByRole('tab', { name: 'Import a file' }));
+    choose('prefs.csv', `${HEADER}\ncasey@example.test,U10 Hawks,must,Monday,,,,,\n`);
+    await screen.findByTestId('preference-import-preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 rule' }));
+    await screen.findByTestId('preference-import-summary');
+    // The page reads its rules again after the import; the tab's count follows, and the result is
+    // still there (a refresh that took the tabs down would have taken the result with them).
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: /^Pending musts/ })).toHaveTextContent('1')
+    );
+    expect(screen.getByTestId('preference-import-summary')).toHaveTextContent('1 rule added');
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 pending must' }));
+    expect(await screen.findByRole('heading', { name: 'Pending musts (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Accept all 1 pending must/ })).toBeEnabled();
   });
 });

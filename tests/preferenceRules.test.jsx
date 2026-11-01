@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -269,5 +269,67 @@ describe('the rules list', () => {
     expect(labels).toContain("Edit Casey Coach's rule for U10 Hawks: Tuesday or Thursday");
     expect(labels).toContain("Remove Robin Unassigned's rule for U12 Owls: Riverside Park");
     expect(shownIds()).toHaveLength(4);
+  });
+});
+
+describe('a rule in force on paper that the scheduler does not judge', () => {
+  // The scheduler judges a rule while its coach is one of the team's current coaches and the day is
+  // inside its window; a rule failing either is in force and does nothing, and the list says so.
+  // Dated explicitly: "today" is the day the scheduler judges on.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-28T12:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const notes = () => screen.queryAllByTestId('rule-not-applied').map((node) => node.textContent);
+
+  it('says so for a coach who no longer coaches the team and for a window not open today, and for nothing else', async () => {
+    tables.team_coach_assignments = tables.team_coach_assignments.map((a) =>
+      a.coach_id === C3 ? { ...a, effective_to: '2026-09-01' } : a
+    );
+    tables.coach_practice_preferences.push(
+      ruleRow({
+        id: 'future',
+        weekdays: ['SUN'],
+        effective_from: '2026-10-15',
+        created_at: '2026-09-06T00:00:00Z',
+      }),
+      ruleRow({
+        id: 'past',
+        weekdays: ['SAT'],
+        effective_to: '2026-09-15',
+        created_at: '2026-09-07T00:00:00Z',
+      })
+    );
+    await openRules();
+    expect(notes()).toEqual([
+      'Not applied today: it starts on 2026-10-15.',
+      'Not applied today: it ended on 2026-09-15.',
+      'Not applied today: the coach does not coach this team today.',
+    ]);
+  });
+
+  it('says nothing about a rule that applies: its coach coaches the team and today is in its window', async () => {
+    await openRules();
+    expect(notes()).toEqual([]);
+  });
+
+  it('says nothing when the roster did not load, rather than calling every rule not applied', async () => {
+    tables.team_coach_assignments = [];
+    const real = vi.mocked(supabase.from).getMockImplementation();
+    vi.mocked(supabase.from).mockImplementation(
+      /** @type {any} */ (
+        (table) =>
+          table === 'team_coach_assignments'
+            ? makeFrom(tables, { team_coach_assignments: { code: '42501', message: 'denied' } })(
+                table
+              )
+            : real(table)
+      )
+    );
+    await openRules();
+    expect(notes()).toEqual([]);
+    expect(screen.getByRole('table')).toBeInTheDocument();
   });
 });

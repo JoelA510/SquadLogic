@@ -268,6 +268,26 @@ export function summarizeRule(row, { teamName = null, locationNames = new Map() 
 }
 
 /**
+ * Why the scheduler does not judge a rule on `date`, in words; null when it does. A rule applies
+ * while its coach is one of the team's current coaches (the roster, never the rule row) and the day
+ * is inside its window (`resolveCoachPreferences`, the same two tests), so a rule that fails either
+ * is in force on paper and does nothing, and the rules list says so rather than let it look binding.
+ *
+ * @param {any} row - a rule row
+ * @param {any[]} rosterRows - `team_coach_assignments` rows
+ * @param {string} date - `YYYY-MM-DD`, the day the scheduler judges on
+ */
+export function ruleNotApplied(row, rosterRows, date) {
+  const { lead, assistants } = coachesOfTeamOn(rosterRows, String(row.team_id), date);
+  if (![...lead, ...assistants].includes(String(row.coach_id))) {
+    return 'the coach does not coach this team today';
+  }
+  if (row.effective_from && date < row.effective_from) return `it starts on ${row.effective_from}`;
+  if (row.effective_to && date > row.effective_to) return `it ended on ${row.effective_to}`;
+  return null;
+}
+
+/**
  * Re-judge a requested must at the moment an admin accepts it (or adds one): which of the team's
  * current practice series it would make unsatisfiable.
  *

@@ -133,7 +133,8 @@ the Edge counterpart of core `practice/daylight.js`:
 
 Plan: `docs/changes/2026-10-26-coach-preference-rules.md` ("Revised 2026-10-27": admins import preferences).
 A coach has no sign-in, so an admin imports the league's preference file or adds a rule by hand
-(`docs/architecture/gotsport-import-contract.md`, "Practice preference import"). The screens are Phase D C2.
+(`docs/architecture/gotsport-import-contract.md`, "Practice preference import"). The screens are on the
+Practice preferences page (Phase D C2, below).
 
 - **A rule is one row for one team** (`coach_practice_preferences`): `weekdays text[]`, `start_minutes int[]`
   and `venue_ids uuid[]` (each optional; the values inside a condition are *any of*), or keep-current per
@@ -174,6 +175,44 @@ A coach has no sign-in, so an admin imports the league's preference file or adds
   Tuesday and Thursday; a must no slot meets is TIME TBD naming the rule),
   `supabase/tests/practice_preference_rules.sql`, `supabase/tests/practice_preference_import.sql`, and the
   harness's backfill stage (the old scalar rows are planted and the migration applied onto them).
+
+
+### The preference screens (Phase D C2; no migration)
+
+`/coaches/practice-preferences` (`CoachPreferencesPage`, `components/preferences/`) is four tabs over the
+season shown. It never sends a coach anywhere: nobody but an admin signs in.
+
+- **Pending musts**, grouped by the import file they came from (newest first; within a file the coach's
+  priority, then the oldest), each with **Accept as must** (the re-judge of which current series it would
+  break) and **Keep as prefer**, and **Accept all N** for a file. Accept all's confirmation names how many
+  rules it makes musts and lists **the conflicts first** (musts of the file that no practice can meet
+  together, or that clash with a must already in force), then the current series that would stop meeting a
+  must. It calls `admin_accept_all_musts(job, expected_count)` with the count it showed; when the database
+  refuses because the file's pending musts changed (`expected_count_mismatch`), the dialog says so in words,
+  reads the list again and names the new count on its button. It never retries by itself.
+- **Rules** (every rule in force): filters for the team, the coach, the level (Must, Prefer, Pending must)
+  and the coach's priority; Edit (several days, start times and venues per condition, keep-current, the
+  window, a sentence that reads the rule back, and the must re-judge) and Remove (asks first). The priority
+  is shown and filterable and **not weighed** (the page says so). A rule whose coach does not coach the team
+  today, or whose window is not open today, does nothing in the scheduler, and its row says "Not applied
+  today" and why (`ruleNotApplied`: the same two tests as `resolveCoachPreferences`).
+- **Conflicts**: the musts of one team that no practice can meet together (core's
+  `resolveCoachPreferences` finds them; `utils/practiceMustConflicts.js` enumerates the teams from the rules
+  in force, so a team is not skipped because nothing was found). It says how many teams it checked, and
+  when the roster or practice data did not load it says the check could not run, never "no conflicts".
+  Prefer rules that disagree are not listed: they only cost a breach.
+- **Import a file**: choose a CSV; the browser reads it, keeps only the columns the import reads (the rest
+  never leave it, and the screen names them), and **previews what the file will do** before anything is
+  created: the rules per team, the musts that will wait, the imported rules a re-import replaces (and an
+  accepted must among them that comes back pending), each row not applied with its reason, and the rows with
+  no team that make a rule per team. An unknown coach or team is listed and never created. `utils/
+  practicePreferenceImportPreview.js` is the twin of the finalizer's body; `tests/preferenceImport.test.jsx`
+  runs one file that reaches every outcome through the preview and the mock finalizer and requires every
+  count equal. The import then runs `create_import_job`, `import-validation` and
+  `finalize_practice_preference_import_job` (`utils/practicePreferenceImportRun.js`, not the shared import
+  context) and reports the database's counts, saying so where they differ from the preview.
+- **A completed season is read-only**: the note says why and every control that writes is off (Accept, Keep,
+  Accept all, Add, Edit, Remove, the file chooser); the database refuses the writes as well.
 
 ## Manual Adjustment Workflow
 

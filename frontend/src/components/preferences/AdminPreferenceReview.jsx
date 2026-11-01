@@ -87,12 +87,7 @@ export default function AdminPreferenceReview({ orgId, toast }) {
   const seasonId = currentSeasonSetting?.id ?? null;
   const readOnly = useSeasonReadOnly();
   const context = usePreferenceContext(orgId, seasonId);
-  const {
-    rows: allRows,
-    loading: rowsLoading,
-    error,
-    refresh,
-  } = useCoachPracticePreferences(orgId);
+  const { rows: allRows, loaded: rowsLoaded, error, refresh } = useCoachPracticePreferences(orgId);
   const [tabChoice, setTabChoice] = useState(/** @type {string | null} */ (null));
   const [dialog, setDialog] = useState(/** @type {any} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string | null} */ (null));
@@ -287,7 +282,8 @@ export default function AdminPreferenceReview({ orgId, toast }) {
           message={`Could not read the import files the pending musts came from (${jobLabels.error.message || 'unknown error'}); they are named by date.`}
         />
       )}
-      {!error && (rows.length > 0 || !rowsLoading) && (
+      {/* Only the first read waits: a refresh keeps the tabs, and what a panel holds, in place. */}
+      {!error && rowsLoaded && (
         <>
           <Tabs
             tabs={tabs}
@@ -338,6 +334,8 @@ export default function AdminPreferenceReview({ orgId, toast }) {
                   locationNames={locationNames}
                   readOnly={readOnly}
                   busyId={busyId}
+                  rosterRows={context.previewError ? null : context.rosterRows}
+                  date={date}
                   onAdd={() => setDialog({ mode: 'add' })}
                   onEdit={(row) => setDialog({ mode: 'edit', row })}
                   onRemove={(row) => setDialog({ mode: 'remove', row })}

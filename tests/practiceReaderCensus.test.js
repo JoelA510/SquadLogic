@@ -72,7 +72,9 @@ const REGISTRY = {
     class: 'series-only',
     why: 'R10: the player record lists weekday and time only (Q6, D4)',
   },
-  'frontend/src/components/preferences/AdminPreferenceReview.jsx': {
+  // Phase D C2 moved the read out of `AdminPreferenceReview.jsx` into the context hook the
+  // preference screens share.
+  'frontend/src/hooks/usePreferenceContext.js': {
     class: 'series-only',
     why: 'X7: judges a placement in force on a date, makes no dates',
   },

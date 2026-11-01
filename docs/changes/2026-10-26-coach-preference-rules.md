@@ -28,7 +28,7 @@ Only league admins sign in (`2026-10-27-admin-only.md`). What changes from the p
   team) and 3 (only an admin grants must; a declined must is prefer) stand.
 - **PR split:** P1 as below (data model, solver, RPCs) plus the preference import's server side;
   P2 the admin screens: the import with its preview, Pending musts with Accept all, the rules list
-  and editor.
+  and editor. (Built as C2; `2026-10-27-phase-d-scheduling.md`, "Build notes: PR C2".)
 
 ## Today
 

@@ -1013,6 +1013,11 @@
   height: auto;
   padding: var(--space-2);
 }
+/* A native file picker in a form (the practice preference import; Phase D C2). */
+.input.file-input {
+  height: auto;
+  padding: var(--space-2);
+}
 .permit-notice {
   margin-bottom: var(--space-3);
 }

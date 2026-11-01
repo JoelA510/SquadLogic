@@ -23,11 +23,14 @@ export const PREFERENCE_COLUMNS =
  * missing migration from a refusal.
  */
 export class PreferenceRpcError extends Error {
-  /** @param {{ message?: string, code?: string }} error */
+  /** @param {{ message?: string, code?: string, details?: string }} error */
   constructor(error) {
     super(error?.message || 'The request failed');
     this.name = 'PreferenceRpcError';
     this.code = error?.code ?? null;
+    // Postgres's DETAIL (`expected_count_mismatch`, `season_completed`, `not_pending`...): what a
+    // caller branches on, since the message is for a person.
+    this.details = error?.details ?? null;
   }
 }
 
@@ -85,9 +88,77 @@ export async function addPracticePreference(input) {
   });
 }
 
+/**
+ * An admin replaces an in-force rule's conditions, level, priority and window (the coach and the team
+ * stay). The RPC takes the whole rule, so every field is sent. Saving a rule that was requested as a
+ * must at `prefer` keeps it as prefer, and saving it at `must` accepts it: the RPC decides the
+ * request by the level it is given (migration 20261112010000).
+ *
+ * @param {any} row - the rule row being edited
+ * @param {{ level: 'prefer' | 'must', weekdays?: string[] | null, startMinutes?: number[] | null,
+ *   venueIds?: string[] | null, keepWeekday?: boolean, keepStart?: boolean, keepVenue?: boolean,
+ *   coachPriority?: 'high' | 'medium' | 'low' | null, effectiveFrom?: string | null,
+ *   effectiveTo?: string | null }} input
+ */
+export async function editPracticePreference(row, input) {
+  const rule = validateRule({
+    id: String(row.id),
+    coachId: String(row.coach_id),
+    teamId: String(row.team_id),
+    ...input,
+  });
+  return callRpc('admin_edit_practice_preference', {
+    p_preference_id: row.id,
+    p_level: rule.level,
+    p_weekdays: rule.weekdays,
+    p_start_minutes: rule.startMinutes,
+    p_venue_ids: rule.venueIds,
+    p_keep_weekday: rule.keepWeekday,
+    p_keep_start: rule.keepStart,
+    p_keep_venue: rule.keepVenue,
+    p_coach_priority: rule.coachPriority,
+    p_effective_from: rule.effectiveFrom,
+    p_effective_to: rule.effectiveTo,
+  });
+}
+
 /** An admin removes a rule in force (the row stays as history). */
 export async function removePracticePreference(row) {
   return callRpc('admin_remove_practice_preference', { p_preference_id: row.id });
+}
+
+/**
+ * Accept every pending must of one import file. `expectedCount` is the number the admin was shown:
+ * the RPC refuses (22023, DETAIL `expected_count_mismatch`) when the file's pending musts are not
+ * that many, and accepts nothing, so the confirmation can never accept more than it named.
+ *
+ * @param {{ importJobId: string, expectedCount: number }} input
+ * @returns {Promise<{ accepted: number, import_job_id: string }>}
+ */
+export async function acceptAllMusts({ importJobId, expectedCount }) {
+  if (!importJobId || !Number.isInteger(expectedCount) || expectedCount < 0) {
+    throw new PreferenceRpcError({
+      code: 'VALIDATION',
+      message: 'Accept all needs the import file and the number of musts it was shown',
+    });
+  }
+  return callRpc('admin_accept_all_musts', {
+    p_import_job_id: importJobId,
+    p_expected_count: expectedCount,
+  });
+}
+
+/**
+ * True when Accept all was refused because the file's pending musts changed after the admin saw
+ * them (another tab accepted or kept one, or a re-import replaced them).
+ * @param {unknown} error
+ */
+export function isExpectedCountMismatch(error) {
+  const e = /** @type {any} */ (error);
+  // The DETAIL is the contract; the phrase is the message's own, for a transport that drops DETAIL.
+  return (
+    e?.details === 'expected_count_mismatch' || /the confirmation showed/.test(e?.message ?? '')
+  );
 }
 
 /**
@@ -102,6 +173,10 @@ export async function removePracticePreference(row) {
 export function useCoachPracticePreferences(orgId, { coachId = null, enabled = true } = {}) {
   const [rows, setRows] = useState(/** @type {any[]} */ ([]));
   const [loading, setLoading] = useState(false);
+  // True once a read has finished (rows or an error), so a screen can tell the first load from a
+  // refresh: a refresh must not take the screen down, or what a panel holds (an import's result)
+  // goes with it.
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(/** @type {any} */ (null));
   const requestRef = useRef(0);
 
@@ -131,7 +206,10 @@ export function useCoachPracticePreferences(orgId, { coachId = null, enabled = t
       setRows([]);
       setError(err || { message: 'Failed to load practice preference rules' });
     } finally {
-      if (requestRef.current === requestId) setLoading(false);
+      if (requestRef.current === requestId) {
+        setLoading(false);
+        setLoaded(true);
+      }
     }
   }, [orgId, coachId, enabled]);
 
@@ -139,5 +217,5 @@ export function useCoachPracticePreferences(orgId, { coachId = null, enabled = t
     refresh();
   }, [refresh]);
 
-  return { rows, loading, error, refresh };
+  return { rows, loading, loaded, error, refresh };
 }

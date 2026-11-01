@@ -620,37 +620,11 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         STATUS=1
       fi
     fi
-    # **8.6 PR 3b PR 1: coach practice preferences.** Four guarantees, each a
-    # claim of its own because each has a plant in prove.sh that must turn it
-    # red: decide is admin-only, the read policy is admin-only (20261104010000;
-    # it was admin-or-self), every write is audited, one approved row per
-    # (coach, dimension). The request guarantee went with the request RPC. The
-    # smoke RAISEs on each; these fail if its evidence stops.
-    if [ "$id" = "20260927000000" ]; then
-      # Since 20261104010000 no coach requests a preference (the request RPC is dropped; the
-      # smoke checks it stays gone) and the read is an admin's, so the first claim went and the
-      # others are about an admin and a signed-in non-member.
-      if grep -qF 'a signed-in non-member approving was refused (42501) and the row is still requested' $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an org admin decides a coach practice preference; a signed-in non-member approving is refused"
-      else
-        echo "FAIL smoke ${id}: it passed without proving a non-member cannot approve"; STATUS=1
-      fi
-      if grep -qF "the admin read 6 of 6; a signed-in non-member read 0; another organisation's admin read 0" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only an admin of the organisation reads its coach practice preferences: a signed-in non-member and another organisation's admin read none"
-      else
-        echo "FAIL smoke ${id}: it passed without proving the preference read policy is admin-only"; STATUS=1
-      fi
-      if grep -qF 'every write audited -- 5 of 5 (2 approved, 1 rejected, 2 changed), each naming its row' $SCRATCH/harness_smoke; then
-        echo "  | (checked) every coach practice preference write leaves its audit row, 5 of 5, each naming the row it wrote"
-      else
-        echo "FAIL smoke ${id}: it passed without proving every preference write is audited"; STATUS=1
-      fi
-      if grep -qF 'a second approved row for one (coach, dimension) was refused by the one-approved index (23505)' $SCRATCH/harness_smoke; then
-        echo "  | (checked) the database refuses a second approved practice preference for one coach and dimension"
-      else
-        echo "FAIL smoke ${id}: it passed without proving one approved preference per coach and dimension"; STATUS=1
-      fi
-    fi
+    # **8.6 PR 3b PR 1: coach practice preferences.** The four claims this smoke used to print (the decide
+    # RPC is admin-only, the read policy is admin-only, every write is audited, one approved row per coach
+    # and dimension) were about the scalar RPCs and the one-approved index, which 20261112010000 replaced;
+    # the rules' own claims are printed from `docs/sql/20261112010000_smoke.sql`. What this smoke still
+    # says (the store is closed, its audit actions are registered, the three old RPCs are gone) RAISES.
     # **8.6 PR 3b PR 6: writer v3, lock-by-default.** One claim per plan §6
     # witness that has a plant in prove.sh. The smoke RAISEs on each; these
     # fail if its evidence ever stops printing. (The split-keeps-id, scope,
@@ -964,6 +938,46 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "  | (checked) the coach import scopes a coach to its organization, links only this organization's players named by registration id, in file order, and reports the ids that match none"
       else
         echo "FAIL smoke ${id}: it passed without proving the coach import scopes by organization and links the named children"; STATUS=1
+      fi
+    fi
+    # **Practice preference rules (20261112010000; plan docs/changes/2026-10-26-coach-preference-rules.md,
+    # "Revised 2026-10-27"; Phase D C1).** Seven claims, each with a plant in prove.sh. The smoke RAISES on
+    # each; these fail if its evidence stops printing.
+    if [ "$id" = "20261112010000" ]; then
+      if grep -qF "as a user: an admin writes rules; a signed-in non-member and another organization's admin are refused each of the 6 RPCs (42501), 12 of 12, and no row changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin writes a practice preference rule or applies a preference file: a signed-in non-member and another organization's admin are refused each of the six RPCs"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a non-member and another organization's admin are refused each rule RPC"; STATUS=1
+      fi
+      if grep -qF "musts: a must nobody accepted is refused by the table (23514); Accept all refused a count that was not the confirmation's (22023, nothing accepted) and, with the right count, accepted exactly the file's 2 pending musts" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a must is a rule an admin accepted: the table refuses a must nobody accepted, and Accept all refuses a count that is not the confirmation's"
+      else
+        echo "FAIL smoke ${id}: it passed without proving Accept all checks the confirmation's count"; STATUS=1
+      fi
+      if grep -qF "rules: 9 of 9 malformed writes refused (an empty set, a duplicate, a weekday outside SUN..SAT, minutes 1440 and -1, another organization's venue, no condition, values with keep-current, a coach who does not coach the team)" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the database refuses a rule with an empty or duplicate set, a weekday or minute out of range, another organization's venue, no condition, values with keep-current, or a coach who does not coach the team"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the malformed rules are refused"; STATUS=1
+      fi
+      if grep -qF "every rule write audited -- 8 of 8 (4 added, 1 Accept all, 1 edited, 1 decided, 1 removed), each naming its row; a refused write left none" $SCRATCH/harness_smoke; then
+        echo "  | (checked) every rule write leaves its audit row, 8 of 8, each naming the rule it wrote"
+      else
+        echo "FAIL smoke ${id}: it passed without proving every rule write is audited"; STATUS=1
+      fi
+      if grep -qF "preference import: a blank team for a two-team coach made 2 rules; the unknown coach and the unknown team were listed (and the email is not on the job), nothing was created; 2 musts are pending" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a preference file makes one rule per row and team (a blank team for a coach of two teams makes two), lists an unknown coach or team and creates neither, and keeps a coach's email off the job"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the import's per-team rules and unknown rows"; STATUS=1
+      fi
+      if grep -qF "re-import: replaced the imported rule of the one team it named (1), left the admin rule and the imported rule of the team it did not name" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a re-import replaces the imported rules of the teams the file names and leaves admin rules and other teams alone"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a re-import replaces only imported rules"; STATUS=1
+      fi
+      if grep -qF "season: a preference import into a completed season was refused (22023 season_completed)" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a preference file is refused for a completed season"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a completed season takes no preference import"; STATUS=1
       fi
     fi
     # **8.6 3b PR 11d-2: enacting a blackout recommendation (plan §5, B8-B11,
@@ -1324,7 +1338,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261112010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2095,6 +2109,70 @@ for id in "${REVERT_CHECKS[@]}"; do
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the demo organizations the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261112010000's revert writes the rules back as scalar rows**, so it REFUSES (55000) while it would
+  # have to guess: a rule holding more than one value in a condition, and two rules of one coach that disagree
+  # on a dimension. Seeded: six rules in force (two of them pending musts, one accepted must) for two coaches
+  # on four teams, one date window, three priorities, and three removed/replaced history rows, with a
+  # multi-value rule first (refused), then a disagreement (refused), then both made agree. A staged
+  # preference row rides on an import job, which the revert deletes. Every figure is distinct where a
+  # plausible miscount would swap it, and every name is synthetic.
+  if [ "$id" = "20261112010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('ee000000-0000-4000-8000-00000000000a','Rules Revert Org','rules-revert');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('ee000000-0000-4000-8000-0000000000a1','ee000000-0000-4000-8000-00000000000a','Rules Revert Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('ee000000-0000-4000-8000-0000000000a2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a1','Rules Revert Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('ee000000-0000-4000-8000-0000000000b1','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a2','Rules Revert X'),
+                ('ee000000-0000-4000-8000-0000000000b2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a2','Rules Revert Y'),
+                ('ee000000-0000-4000-8000-0000000000b3','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a2','Rules Revert Z'),
+                ('ee000000-0000-4000-8000-0000000000b4','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a2','Rules Revert W');
+              INSERT INTO public.coaches (id, organization_id, season_settings_id, full_name, email, status) VALUES
+                ('ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a1','Rules Revert Coach A','rules-revert-a@example.test','active'),
+                ('ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000a1','Rules Revert Coach B','rules-revert-b@example.test','active');
+              INSERT INTO public.coach_practice_preferences
+                (id, organization_id, coach_id, team_id, weekdays, start_minutes, keep_venue,
+                 level, requested_level, must_decision, status, coach_priority, effective_to, source) VALUES
+                ('ee000000-0000-4000-8000-0000000000d1','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', ARRAY['TUE','THU'], NULL, false, 'prefer','prefer',NULL,'in_force', NULL, current_date + 60, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b2', ARRAY['WED'], NULL, false, 'prefer','prefer',NULL,'in_force', 'high', NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d3','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b4', NULL, ARRAY[1020], false, 'prefer','prefer',NULL,'in_force', 'low', NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d4','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', ARRAY['FRI'], NULL, false, 'prefer','must','pending','in_force', NULL, NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d5','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', NULL, NULL, true, 'prefer','must','pending','in_force', NULL, NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000d6','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', NULL, ARRAY[1080], false, 'must','must','accepted','in_force', 'medium', NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000e1','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', ARRAY['MON'], NULL, false, 'prefer','prefer',NULL,'removed', NULL, NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000e2','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c1','ee000000-0000-4000-8000-0000000000b1', NULL, ARRAY[960], false, 'prefer','prefer',NULL,'removed', NULL, NULL, 'admin'),
+                ('ee000000-0000-4000-8000-0000000000e3','ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000c2','ee000000-0000-4000-8000-0000000000b3', ARRAY['SAT'], NULL, false, 'prefer','prefer',NULL,'replaced', NULL, NULL, 'admin');
+              INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, season_settings_id) VALUES
+                ('ee000000-0000-4000-8000-0000000000f1','ee000000-0000-4000-8000-00000000000a','registration','imports/revert/rules.csv','importing','ee000000-0000-4000-8000-0000000000a1');
+              INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload) VALUES
+                ('ee000000-0000-4000-8000-00000000000a','ee000000-0000-4000-8000-0000000000f1','practice_preferences',1,'{}'::jsonb, jsonb_build_object('email','rules-revert-a@example.test','weekdays','Tue'));" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the rules, history rows and staged preference row the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refuse 2>&1; then
+      echo "FAIL revert ${id}: it wrote a rule holding two weekdays back as a scalar row"
+      STATUS=1; continue
+    elif ! grep -q 'refusing to revert: 1 in-force rule(s) hold more than one value in a condition' $SCRATCH/harness_rev_refuse; then
+      echo "FAIL revert ${id}: it failed without the multi-value refusal"
+      dump 10 $SCRATCH/harness_rev_refuse; STATUS=1; continue
+    fi
+    if ! psql_cmd "UPDATE public.coach_practice_preferences SET weekdays = ARRAY['TUE'] WHERE id = 'ee000000-0000-4000-8000-0000000000d1';" >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: could not narrow the multi-value rule"; dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refuse 2>&1; then
+      echo "FAIL revert ${id}: it wrote back two rules of one coach that disagree on the weekday"
+      STATUS=1; continue
+    elif ! grep -q 'refusing to revert: 1 coach/dimension pair(s) hold in-force rules that disagree' $SCRATCH/harness_rev_refuse; then
+      echo "FAIL revert ${id}: it failed without the disagreement refusal"
+      dump 10 $SCRATCH/harness_rev_refuse; STATUS=1; continue
+    fi
+    if ! psql_cmd "UPDATE public.coach_practice_preferences SET weekdays = ARRAY['TUE'] WHERE id = 'ee000000-0000-4000-8000-0000000000d2';" >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: could not make the disagreeing rules agree"; dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -3612,6 +3690,64 @@ PROBE
         dump 10 $SCRATCH/harness_demopractices; STATUS=1
       fi
     fi
+    if [ "$id" = "20261112010000" ]; then
+      # The seed planted 6 rules in force (2 pending musts), 3 history rows, 4 teams, 1 window, 3 priorities.
+      if ! grep -qF 'this revert writes 6 in-force rule(s) back as scalar rows (2 pending must(s) as requested rows); it drops 3 removed/replaced history row(s) and loses the team of the rules (4 team(s)), 1 date window(s) and 3 priority(ies)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 6 rules in force (2 pending), 3 history rows, 4 teams, 1 window and 3 priorities, and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # What the revert must leave: the two coaches, 5 scalar rows (3 approved, 2 requested: two rules of one
+      # coach on one weekday are one row), the pending keep-venue as a NULL value, the staged preference row
+      # gone with its job kept, and the whole public catalogue equal to a build at 20261110010000 (read
+      # 2026-10-27 with the same query: cdb60bee...:1606). The count is part of the verdict.
+      if psql_cmd "SELECT 'RULES-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.coaches WHERE organization_id = 'ee000000-0000-4000-8000-00000000000a') <> 2
+                 OR (SELECT count(*) FROM public.import_jobs WHERE id = 'ee000000-0000-4000-8000-0000000000f1') <> 1 THEN 'seed-lost'
+               WHEN (SELECT count(*) FROM public.staging_import_rows WHERE import_job_id = 'ee000000-0000-4000-8000-0000000000f1') <> 0 THEN 'staged-left'
+               WHEN (SELECT count(*) FROM public.coach_practice_preferences) <> 5
+                 OR (SELECT count(*) FROM public.coach_practice_preferences WHERE status = 'approved') <> 3
+                 OR (SELECT count(*) FROM public.coach_practice_preferences WHERE status = 'requested') <> 2 THEN 'rows-wrong'
+               WHEN NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'weekday' AND level = 'prefer_keep'
+                                  AND value = to_jsonb('TUE'::text) AND status = 'approved'
+                                  AND coach_id = 'ee000000-0000-4000-8000-0000000000c1')
+                 OR NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences WHERE dimension = 'venue' AND level = 'must_keep'
+                                  AND value IS NULL AND status = 'requested'
+                                  AND coach_id = 'ee000000-0000-4000-8000-0000000000c2') THEN 'rows-wrong'
+               WHEN fp = 'cdb60beec6960b5cf1e8dae59c4f4d60:1606' THEN 'restored'
+               ELSE 'wrong ' || fp END
+             FROM (SELECT (SELECT md5(string_agg(x, E'\\n' ORDER BY x)) || ':' || count(*) FROM (
+  SELECT 'f|' || p.oid::regprocedure::text || '|' || p.prosecdef || '|' || p.provolatile::text || '|'
+         || coalesce(array_to_string(p.proconfig, ','), '') || '|' || pg_get_function_result(p.oid) || '|'
+         || pg_get_function_arguments(p.oid) || '|' || coalesce((SELECT string_agg(e::text, ',' ORDER BY e::text) FROM unnest(p.proacl) e), '') || '|' || md5(p.prosrc)
+         || '|' || coalesce(obj_description(p.oid, 'pg_proc'), '') AS x
+    FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 'p|' || schemaname || '|' || tablename || '|' || policyname || '|' || cmd || '|' || roles::text || '|' || coalesce(qual, '') || '|' || coalesce(with_check, '')
+    FROM pg_policies WHERE schemaname IN ('public', 'storage')
+  UNION ALL
+  SELECT 'k|' || conrelid::regclass::text || '|' || conname || '|' || pg_get_constraintdef(oid)
+    FROM pg_constraint WHERE connamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 'a|' || c.relname || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) || '|' || a.attnotnull
+         || '|' || coalesce(pg_get_expr(d.adbin, d.adrelid), '') || '|' || coalesce(col_description(c.oid, a.attnum), '')
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+  UNION ALL
+  SELECT 'i|' || indexrelid::regclass::text || '|' || pg_get_indexdef(indexrelid) FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid WHERE c.relnamespace = 'public'::regnamespace
+  UNION ALL
+  SELECT 't|' || tgrelid::regclass::text || '|' || tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)
+  UNION ALL
+  SELECT 'c|' || c.relname || '|' || coalesce(obj_description(c.oid, 'pg_class'), '') FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
+
+) s) AS fp) t;" \
+         >$SCRATCH/harness_rules 2>&1 && grep -q 'RULES-VERDICT:restored' $SCRATCH/harness_rules; then
+        echo "  revert ${id}: the rules revert refuses a multi-value rule and a disagreement, writes the rest back as 5 scalar rows with the pending musts requested, deletes the staged preference rows, and restores the catalogue as at 20261110010000"
+      else
+        echo "FAIL revert ${id}: the rules revert did not restore the catalogue as at 20261110010000, or lost the rules' data"
+        dump 10 $SCRATCH/harness_rules; STATUS=1
+      fi
+    fi
     if [ "$id" = "20261104010000" ]; then
       # The seed kept one coach with two links; the revert counts them and deletes none. The whole
       # public catalogue (every function with its posture, grants, comment and body md5, every
@@ -4294,6 +4430,103 @@ PROBE
     echo "FAIL revert ${id}"; dump 10 $SCRATCH/harness_rev; STATUS=1
   fi
 done
+
+# ---------------------------------------------------------------------------
+# The preference rules' backfill: old scalar rows planted, then the migration applied onto them
+# ---------------------------------------------------------------------------
+#
+# 20261112010000 turns each old one-dimension, one-value preference row into rules (one per team the coach
+# coaches today), keeps the old id on the first copy, drops a `dont_care` row, and keeps a row for a coach
+# with no team as history. Production holds no rows, so a build from scratch (and every smoke) runs this
+# migration over an empty table and proves only that the code parses. So the harness builds to the migration
+# before it, plants the old shape, and applies the migration onto it. Eight old rows (a `dont_care`, a pending
+# request, a superseded one, a rejected one, a coach with no team, a coach of two teams) become nine rules;
+# every figure is distinct enough that copying a `dont_care` row, or one copy per row instead of per team,
+# prints a different number.
+echo "=== preference rules: the backfill of the old scalar rows (planted, then 20261112010000 applied) ==="
+BF_ID=20261112010000
+BF_FILE="$(ls "$REPO"/supabase/migrations/${BF_ID}_*.sql 2>/dev/null | head -n 1)"
+BF_PREV="$(ls "$REPO"/supabase/migrations/*.sql | sort | grep -B1 "/${BF_ID}_" | head -n 1 | xargs -r basename | cut -c1-14)"
+if [ -z "$BF_FILE" ] || [ -z "$BF_PREV" ] || [ "$BF_PREV" = "$BF_ID" ]; then
+  echo "FAIL backfill ${BF_ID}: could not find the migration or the one before it (${BF_FILE:-none} / ${BF_PREV:-none})"; STATUS=1
+elif ! fresh_db; then
+  echo "FAIL backfill ${BF_ID}: could not build a fresh database"; STATUS=1
+elif ! apply_all "$BF_PREV"; then
+  echo "FAIL backfill ${BF_ID}: could not build up to ${BF_PREV}"; STATUS=1
+elif ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+            ('ef000000-0000-4000-8000-00000000000a','Backfill Org','backfill-rules');
+          INSERT INTO public.season_settings (id, organization_id, name) VALUES
+            ('ef000000-0000-4000-8000-0000000000a1','ef000000-0000-4000-8000-00000000000a','Backfill Season');
+          INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+            ('ef000000-0000-4000-8000-0000000000a2','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Backfill Division');
+          INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+            ('ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a2','Backfill X'),
+            ('ef000000-0000-4000-8000-0000000000b2','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a2','Backfill Y');
+          INSERT INTO public.coaches (id, organization_id, season_settings_id, full_name, email, status) VALUES
+            ('ef000000-0000-4000-8000-0000000000c1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Backfill Coach A','backfill-a@example.test','active'),
+            ('ef000000-0000-4000-8000-0000000000c2','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Backfill Coach B','backfill-b@example.test','active'),
+            ('ef000000-0000-4000-8000-0000000000c3','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Backfill Coach C','backfill-c@example.test','active');
+          INSERT INTO public.locations (id, organization_id, name) VALUES
+            ('ef000000-0000-4000-8000-0000000000e1','ef000000-0000-4000-8000-00000000000a','Backfill Park');
+          INSERT INTO public.team_coach_assignments
+            (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via) VALUES
+            ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-0000000000c1','lead', current_date - 30, NULL, 'harness', NULL),
+            ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000b2','ef000000-0000-4000-8000-0000000000c1','lead', current_date - 30, NULL, 'harness', NULL),
+            ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-0000000000c2','assistant', current_date - 30, NULL, 'harness', NULL),
+            ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000b2','ef000000-0000-4000-8000-0000000000c3','lead', current_date - 60, current_date - 10, 'harness', 'harness');
+          INSERT INTO public.coach_practice_preferences
+            (id, organization_id, coach_id, dimension, level, value, status, decided_at, effective_from, effective_to) VALUES
+            ('ef000000-0000-4000-8000-0000000000d1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c1','weekday','must_keep', to_jsonb('TUE'::text), 'approved', now(), current_date - 5, NULL),
+            ('ef000000-0000-4000-8000-0000000000d2','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c1','start_time','prefer_keep', NULL, 'approved', now(), current_date - 5, NULL),
+            ('ef000000-0000-4000-8000-0000000000d3','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c2','venue','prefer_keep', to_jsonb('ef000000-0000-4000-8000-0000000000e1'::text), 'approved', now(), current_date - 5, NULL),
+            ('ef000000-0000-4000-8000-0000000000d4','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c2','weekday','must_keep', to_jsonb('WED'::text), 'requested', NULL, NULL, NULL),
+            ('ef000000-0000-4000-8000-0000000000d5','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c2','weekday','must_keep', to_jsonb('MON'::text), 'superseded', now(), current_date - 20, current_date - 6),
+            ('ef000000-0000-4000-8000-0000000000d6','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c1','venue','dont_care', NULL, 'approved', now(), current_date - 5, NULL),
+            ('ef000000-0000-4000-8000-0000000000d7','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c3','start_time','prefer_keep', to_jsonb(1020), 'approved', now(), current_date - 5, NULL),
+            ('ef000000-0000-4000-8000-0000000000d8','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c2','weekday','prefer_keep', to_jsonb('THU'::text), 'rejected', now(), NULL, NULL);" \
+       >$SCRATCH/harness_seed 2>&1; then
+  echo "FAIL backfill ${BF_ID}: the eight old preference rows the check requires were never inserted"
+  dump 10 $SCRATCH/harness_seed; STATUS=1
+elif ! psql_file "$BF_FILE" >$SCRATCH/harness_backfill 2>&1; then
+  echo "FAIL backfill ${BF_ID}: the migration did not apply onto the planted old-shape rows"
+  dump 15 $SCRATCH/harness_backfill; STATUS=1
+else
+  echo "PASS backfill ${BF_ID}"
+  if ! grep -qF 'practice preferences: 8 old row(s) -> 9 rule(s) (1 dont_care row(s) carry no rule and are not copied; 1 rule(s) kept as history with no team)' $SCRATCH/harness_backfill; then
+    echo "FAIL backfill ${BF_ID}: planted 8 old rows (1 dont_care, 1 coach with no team, a coach of two teams) and the migration did not report 9 rules with those figures"
+    dump 10 $SCRATCH/harness_backfill; STATUS=1
+  elif psql_cmd "SELECT 'BACKFILL-VERDICT:' || CASE
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences) <> 9 THEN 'count-' || (SELECT count(*) FROM public.coach_practice_preferences)
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d6') <> 0 THEN 'dont-care-copied'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE coach_id = 'ef000000-0000-4000-8000-0000000000c1' AND venue_ids IS NOT NULL) <> 0 THEN 'dont-care-copied'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d1'
+                    AND weekdays = ARRAY['TUE'] AND level = 'must' AND requested_level = 'must' AND must_decision = 'accepted'
+                    AND status = 'in_force' AND source = 'admin') <> 1 THEN 'first-copy-id-lost'
+           WHEN (SELECT count(DISTINCT team_id) FROM public.coach_practice_preferences WHERE coach_id = 'ef000000-0000-4000-8000-0000000000c1'
+                    AND weekdays = ARRAY['TUE'] AND level = 'must' AND status = 'in_force') <> 2 THEN 'not-one-per-team'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE coach_id = 'ef000000-0000-4000-8000-0000000000c1'
+                    AND keep_start AND start_minutes IS NULL AND weekdays IS NULL AND level = 'prefer' AND status = 'in_force') <> 2 THEN 'keep-not-kept'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d3'
+                    AND venue_ids = ARRAY['ef000000-0000-4000-8000-0000000000e1'::uuid] AND level = 'prefer' AND status = 'in_force'
+                    AND team_id = 'ef000000-0000-4000-8000-0000000000b1') <> 1 THEN 'venue-wrong'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d4'
+                    AND status = 'removed' AND level = 'prefer' AND requested_level = 'must' AND must_decision = 'kept_prefer') <> 1 THEN 'pending-request-wrong'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d5'
+                    AND status = 'replaced' AND level = 'must' AND must_decision = 'accepted') <> 1 THEN 'superseded-wrong'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d7'
+                    AND team_id IS NULL AND status = 'removed' AND start_minutes = ARRAY[1020]) <> 1 THEN 'no-team-wrong'
+           WHEN (SELECT count(*) FROM public.coach_practice_preferences WHERE id = 'ef000000-0000-4000-8000-0000000000d8'
+                    AND status = 'removed' AND level = 'prefer' AND requested_level = 'prefer' AND must_decision IS NULL) <> 1 THEN 'rejected-wrong'
+           WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+                          AND table_name = 'coach_practice_preferences' AND column_name IN ('dimension', 'value')) THEN 'old-columns-left'
+           ELSE 'ok' END;" \
+         >$SCRATCH/harness_backfill_v 2>&1 && grep -q 'BACKFILL-VERDICT:ok' $SCRATCH/harness_backfill_v; then
+    echo "  | (checked) the backfill gives each old preference row one rule per team its coach coaches today, keeps the old id on the first copy, drops a dont_care row, and keeps a pending, superseded, rejected or teamless row as history"
+  else
+    echo "FAIL backfill ${BF_ID}: the rules the backfill made from the planted rows are not the ones the model says"
+    dump 5 $SCRATCH/harness_backfill_v; STATUS=1
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # The emergency rollback nobody was running

@@ -22,7 +22,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 - **Teams**: Records from the `teams` table joined with `divisions`.
 - **Practice Slots**: Rows from `practice_slots` joined to `field_subunits` and `fields`, filtered by the current effective date range.
 - **Division reservations** (D2, `docs/changes/2026-10-22-demo-mode.md`; migration `20261029010000`): `practice_slots.division_id`. A reserved slot is used only by its division's teams, and a division with a reserved slot among the run's slots uses only those, matched by division id (a team with none known is refused every reserved slot). The auto-scheduler Edge Function loads each run slot's reservation and each team's `teams.division_id` itself, as the caller through RLS, never from the request body, and refuses the run (503 `SLOT_RESERVATIONS_UNREADABLE`) when it cannot read them (`_shared/engines/practice-reservations.ts`); its hard constraint (`checkHardConstraints`) applies the rule to every new placement, so the seed, the search and the unplaced re-derivation agree. Core `schedulePractices` and the (not live) core optimiser apply the same rule (`reservationRefusal`); `tests/autoSchedulerReservations.test.js` holds the two equal. A locked practice is never judged, so a reservation set after a practice was saved does not move it. A team left with no open slot is unplaced with the search's own reason (core: `no practice slot is open to this division (reservations)`).
-- **Coach Availability**: `coaches.can_coach_multiple_teams`, and the approved rows of `coach_practice_preferences` (weekday, start time and venue, each `must_keep` / `prefer_keep` / `dont_care`) for the coaches `team_coach_assignments` holds current. The auto-scheduler Edge Function loads these itself, as the caller through RLS, and never from the request body (8.6 PR 3b PR 8). The old `coaches.preferred_practice_days` / `preferred_practice_window` columns were never read and were dropped in `20261001000000`.
+- **Coach Availability**: `coaches.can_coach_multiple_teams`, and the rules in force in `coach_practice_preferences` (a rule is for one team: weekdays, start times and venues, each any-of or keep-current, `prefer` or `must`; see "Coach practice preference rules" below) for the coaches `team_coach_assignments` holds current. The auto-scheduler Edge Function loads these itself, as the caller through RLS, and never from the request body (8.6 PR 3b PR 8). The old `coaches.preferred_practice_days` / `preferred_practice_window` columns were never read and were dropped in `20261001000000`.
 - **Season Configuration**: Values from `season_settings` describing early/late season durations, fallback days, and scoring weights for preference satisfaction.
 - **Manual Overrides**: Optional locks stored in `practice_assignments` with `source = 'manual'` that should not be reassigned automatically.
 
@@ -128,6 +128,52 @@ the Edge counterpart of core `practice/daylight.js`:
   count (`practice_new_auto_row_refusals`, P0001, naming each row). The count is per scheduling week (Monday to Sunday), a saved row with no date range holds its slot's whole validity, and `teams_without_practice` leaves out the teams of a 0-a-week division. Manual, repair, recommendation
   and override rows keep their existing checks. Coach overlap, preferences and daylight are the
   server's verify, not the writer.
+
+## Coach practice preference rules (Phase D C1, `20261112010000`)
+
+Plan: `docs/changes/2026-10-26-coach-preference-rules.md` ("Revised 2026-10-27": admins import preferences).
+A coach has no sign-in, so an admin imports the league's preference file or adds a rule by hand
+(`docs/architecture/gotsport-import-contract.md`, "Practice preference import"). The screens are Phase D C2.
+
+- **A rule is one row for one team** (`coach_practice_preferences`): `weekdays text[]`, `start_minutes int[]`
+  and `venue_ids uuid[]` (each optional; the values inside a condition are *any of*), or keep-current per
+  dimension (`keep_weekday`, `keep_start`, `keep_venue`: keep whatever the team's live practices hold); an
+  optional date window (`effective_from` / `effective_to`); `level` in force (`prefer` or `must`);
+  `requested_level` and `must_decision` (`pending`, `accepted`, `kept_prefer`) for a must an import asked
+  for; `coach_priority` (`high` / `medium` / `low`, shown, never judged); `source` (`import` or `admin`) and
+  the import job. The database refuses an empty set, a duplicate value, a weekday outside SUN..SAT, minutes
+  outside 0..1439, a venue of another organization, a rule with no condition, values together with
+  keep-current, a coach who is not of the team's season, and a `must` nobody accepted (16 CHECKs and a
+  tenancy trigger).
+- **Only an admin writes**, through `admin_add_practice_preference`, `admin_edit_practice_preference`,
+  `admin_remove_practice_preference`, `admin_decide_must_preference` and `admin_accept_all_musts(job,
+  expected_count)` (which refuses when the pending count is not the one the confirmation showed); each
+  audits the rule it wrote, with its before and after where it had one (`practice_preference.*`), and a completed season takes no change. An
+  imported `must` is a request: in force as a prefer until an admin accepts it. The table has no write policy
+  or client write grant.
+- **Judged per practice.** A rule applies to a team's practice when the coach is one of the team's current
+  coaches, the rule is in its window on the judged day, and for every condition: a **must** removes the
+  candidates that miss any of its conditions (all-of across conditions and across rules); a **prefer** costs
+  one breach per unmet rule. Keep-current means "any value the team's live practices hold": a team with
+  practices on Tuesday and Thursday and a keep-weekday must can move to either, and a rule with nothing to
+  keep (a team with no live practice) **does nothing and says so**
+  (`COACH_PREFERENCE_NO_REFERENCE`) rather than guessing. Two rules of one level whose sets for a dimension
+  share no value can never both hold: the finding `PRACTICE_COACH_PREFERENCE_CONFLICT` names them. A must
+  that no slot can meet leaves the practice TIME TBD and the reason names the rule.
+- **One judge, two twins, one drift test.** `packages/core/src/practice/coachPreferences.js`
+  (`resolveCoachPreferences`, `judgeCoachPreferenceCandidate`) is the model;
+  `supabase/functions/_shared/engines/coach-preferences.ts` is its Edge twin, and
+  `supabase/functions/_shared/tests/coach-preference-product.ts` runs a 22,053-case product through
+  both, held by a committed digest (`tests/coachPreferenceDrift.test.js` and the Deno test). Every reader
+  goes through them: the Edge loader (`coach-preference-load.ts`, which reads the rules in force as the
+  caller through RLS and the team's held practices), the solver gate, `prepare` / `verify`, the
+  solver-input digest (a rule that bites changes it) and the scoring. The repair adapter and
+  `previewMustKeep` (accepting a must shows which of the team's current series it would make unsatisfiable)
+  compose the same two functions.
+- **Tested.** `tests/coachPreferenceRules.test.js` (a `{Tue, Thu}` must at two practices a week gives
+  Tuesday and Thursday; a must no slot meets is TIME TBD naming the rule),
+  `supabase/tests/practice_preference_rules.sql`, `supabase/tests/practice_preference_import.sql`, and the
+  harness's backfill stage (the old scalar rows are planted and the migration applied onto them).
 
 ## Manual Adjustment Workflow
 

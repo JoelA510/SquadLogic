@@ -37,8 +37,10 @@
   - `email`, `phone`, `certifications`
   - (`preferred_practice_days` / `preferred_practice_window` were dropped in
     `20261001000000`: nothing ever read them. A coach's practice preferences
-    are rows in `coach_practice_preferences`, requested by the coach and
-    approved by an admin.)
+    are rules in `coach_practice_preferences`, one row per rule per team, imported or added by an
+    admin (no coach signs in): weekdays, start times and venues, any-of or keep-current, `prefer` or
+    `must`, an optional date window. `docs/architecture/practice-scheduling.md`, "Coach practice
+    preference rules". Before `20261112010000` it was one scalar `dimension` / `value` row per coach.)
   - `can_coach_multiple_teams` (boolean)
   - `status` (`active`, `pending-confirmation`, `inactive`, `interested`); `interested` is a
     coach who has said they would coach, set by an admin, and a coach import promotes it to

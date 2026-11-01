@@ -274,7 +274,12 @@ JavaScript twin of the SQL parsing, so the preview and the mock client read a ro
   (`utils/practicePreferenceImportRun.js`: `create_import_job`, `import-validation` in chunks of 1,000,
   `finalize_practice_preference_import_job`); a failure marks the job failed. A file with no email column, or
   with none of days, start times or venues, is refused before any call, and a file that can apply nothing
-  offers no import.
+  offers no import. **A file the CSV parser could not split cleanly is refused whole**: a row with more or fewer
+  cells than the header, or an unterminated quote, would be read as its first cells or shifted, and a rule with a
+  dropped condition could replace a complete one; the rows are named by number and the parser's words.
+  Every cell goes through one cleaner (`sanitizeImportText` in `utils/importRows.js`, twin of
+  `_shared/import-rows.ts`, which `import-validation`'s `sanitizeString` calls): tags out, control characters out,
+  trimmed, capped at 500; a lone `<` or `>` stays.
 
 ## Dropped on import (never stored)
 

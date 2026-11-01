@@ -191,15 +191,18 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
   refuses because the file's pending musts changed (`expected_count_mismatch`), the dialog says so in words,
   reads the list again and names the new count on its button. It never retries by itself.
 - **Rules** (every rule in force): filters for the team, the coach, the level (Must, Prefer, Pending must)
-  and the coach's priority; Edit (several days, start times and venues per condition, keep-current, the
-  window, a sentence that reads the rule back, and the must re-judge) and Remove (asks first). The priority
+  and the coach's priority, 200 rules to a page with **Show more** (so a crowd no filter can separate is still
+  reachable); Edit (several days, start times and venues per condition, keep-current, the
+  window, a sentence that reads the rule back, and the must re-judge) and Remove (asks first, and says that a
+  later file with the same preference can bring the rule back). The priority
   is shown and filterable and **not weighed** (the page says so). A rule whose coach does not coach the team
   today, or whose window is not open today, does nothing in the scheduler, and its row says "Not applied
   today" and why (`ruleNotApplied`: the same two tests as `resolveCoachPreferences`).
 - **Conflicts**: the musts of one team that no practice can meet together (core's
   `resolveCoachPreferences` finds them; `utils/practiceMustConflicts.js` enumerates the teams from the rules
   in force, so a team is not skipped because nothing was found). It says how many teams it checked, and
-  when the roster or practice data did not load it says the check could not run, never "no conflicts".
+  when the coaches, the roster or the practice data did not load it says the check could not run, never "no
+  conflicts" (and the Pending musts and Rules panels say they could not be listed, with no count).
   Prefer rules that disagree are not listed: they only cost a breach.
 - **Import a file**: choose a CSV; the browser reads it, keeps only the columns the import reads (the rest
   never leave it, and the screen names them), and **previews what the file will do** before anything is

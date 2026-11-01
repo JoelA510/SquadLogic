@@ -694,6 +694,30 @@ Each PR runs the season fixture suite and the full Definition of Done.
   existed yet, and the import's result panel went with them (the unit tests had stubbed the callback that refreshes).
   `useCoachPracticePreferences` now says when the first read has finished (`loaded`), only that read waits, and a
   page-level test imports through the real refresh and requires the result to survive it.
+- **Codex review of #685, round 1** (four P2s and a CodeQL alert, each reproduced before it was fixed). (1) **Remove's
+  copy promised too much**: removing a rule stops it applying now, but `finalize_practice_preference_import_job` inserts
+  a file's rules without excluding what was removed, so importing the same preference again brings it back; the
+  dialog says that, for any rule. (2) **A CSV the parser could not split cleanly was read as its first cells**
+  (`results.errors` was ignored): a row with more or fewer cells than the header, or an unterminated quote, now
+  refuses the whole file, naming the rows (first twenty, then a count) in the parser's words, which quote no cell.
+  The stricter choice, because a rule with a dropped condition could replace a complete one. (3) **A failed coaches
+  read looked like "none"**: a rule is the season's through its coach, so with them unread every list was empty and
+  the Conflicts tab said "Checked 0 teams". `usePreferenceContext` now says which read failed
+  (`coachesError`, `locationsError`, `previewError`); without the coaches the Pending musts and Rules panels say
+  they could not be listed and show no count, the conflict check says it could not run, and the same was found and
+  fixed in the Add dialog (an unread roster is not "this coach coaches no team") and with a banner naming what did
+  not load. A failed locations read leaves the lists and the check alone (it costs only a venue's name). (4) **Rules
+  past the first 200 were unreachable** when no filter could separate them (an import of distinct times or windows
+  for one team and coach): **Show more** adds a page of 200, announces "Showing N of M", and moves focus to the first
+  rule it added. (5) **The cell cleaner** (CodeQL js/incomplete-multi-character-sanitization, alert 18) is one function,
+  `sanitizeImportText`, in `utils/importRows.js` and its Edge twin `_shared/import-rows.ts`, which the preview, the mock
+  `import-validation` and the Edge function's `sanitizeString` all call, held equal by `tests/importRowsParity.test.js`
+  and `import-rows_test.ts`. It removes a tag (a `<` to the first `>` after it, the span the old regular expression
+  took) by scanning, so ordinary text comes out as it went in, a lone `<` or `>` ("<1", "5 > 3") is still data, and no
+  tag is ever left (checked over every string of five symbols up to seven long). **Departure from the review's
+  suggestion** to drop stray brackets: that would corrupt a declared custom field such as "<1" or ">5", for no gain, since
+  the scan already leaves no tag. **Found on the way:** the old single regular-expression pass was quadratic on a cell of
+  unclosed `<` (80,000 of them took 4.5 s), against the Edge function's 2 s of CPU; the scan is linear.
 - **Not run:** the real-backend scenario and RLS under a real Supabase (nothing under `supabase/` changed, so no
   Deno, pgTAP or harness run). The preview was not run against the SQL finalizer, only its mock (above). The screens
   were not exercised with a screen reader; the keyboard paths are tested (tab order and wrap, Escape, arrow keys on

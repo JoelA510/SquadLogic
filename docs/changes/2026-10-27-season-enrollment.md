@@ -227,6 +227,15 @@ under "For the owner"). Migration `20261111010000_season_rollover.sql`.
   the finalizer's own division inserts carry no window and return before the lock. pgTAP shows each path takes
   the lock by reading `pg_locks` in a fresh organization (a true two-session race cannot run inside one
   pgTAP transaction); the smoke does the same for a cutoff write.
+- **A completed season's scores are read-only** (Codex, round six): `games` is the only table that holds results
+  (the standings are a view over it), and `update_game_score` wrote it with no season check. `games` joins the
+  schedule trigger set; a game's season is its own `season_id`, else its team's division's, and either being
+  completed holds it. `update_game_score` and a direct write both meet it without replacing the function. A cascade
+  from deleting an organization passes (the organization is gone; the check now covers an UPDATE too, which the
+  SET NULL a deleted season makes of `games.season_id` can be). Scores & Results disables the score cells of a
+  completed season's games with a note (`DataGrid` gains `isRowReadOnly`). Deleting a season that has games fails
+  on the base as well (the games' season is set null while their teams are already gone, and the team foreign
+  key refuses): reproduced on 719a570, not changed here.
 - **A completed season's timezone is fixed** (`season_settings_completed_guard`): the calendar feed expands a
   season's occurrences in it. The RPC and a direct write meet one trigger (signed-in callers); the control in
   Settings is disabled with a note. The master export reads a completed season's TIME TBD list without a rebuild.

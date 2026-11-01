@@ -47,6 +47,7 @@ DROP TRIGGER practice_assignments_readonly_when_completed ON public.practice_ass
 DROP TRIGGER practice_exceptions_readonly_when_completed ON public.practice_exceptions;
 DROP TRIGGER game_assignments_readonly_when_completed ON public.game_assignments;
 DROP TRIGGER schedule_tbd_readonly_when_completed ON public.schedule_tbd;
+DROP TRIGGER games_readonly_when_completed ON public.games;
 DROP TRIGGER players_readonly_when_completed ON public.players;
 DROP TRIGGER coaches_readonly_when_completed ON public.coaches;
 DROP TRIGGER season_settings_completed_guard ON public.season_settings;

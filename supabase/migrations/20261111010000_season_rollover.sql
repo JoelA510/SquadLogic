@@ -40,7 +40,7 @@
 --      are not recomputed: the admin finishes or cancels the import first.
 --   4. Completed seasons are read-only, players, coaches and schedules included: a trigger on each
 --      of `players`, `coaches`, `teams`, `team_players`, `team_coach_assignments`,
---      `practice_assignments`, `practice_exceptions`, `game_assignments` and `schedule_tbd` (the TIME TBD
+--      `practice_assignments`, `practice_exceptions`, `game_assignments`, `games` (a season's scores) and `schedule_tbd` (the TIME TBD
 --      list, 20261108020000) refuses any insert,
 --      update or delete by a signed-in caller (an RPC or a direct write; 22023, `season_completed`).
 --      Triggers, not edits to the schedule writers, so the writers stay as they are. A job with no
@@ -582,6 +582,7 @@ DECLARE
     v_row jsonb;
     v_team uuid;
     v_division uuid;
+    v_seasons uuid[];
     v_season uuid;
     v_status text;
     v_org uuid;
@@ -593,7 +594,7 @@ BEGIN
     FOR v_pass IN 1 .. CASE WHEN TG_OP = 'UPDATE' THEN 2 ELSE 1 END LOOP
         v_row := to_jsonb(CASE WHEN TG_OP = 'DELETE' OR v_pass = 2 THEN OLD ELSE NEW END);
         IF TG_TABLE_NAME IN ('practice_exceptions', 'schedule_tbd') THEN
-            v_season := (v_row ->> 'season_settings_id')::uuid;
+            v_seasons := ARRAY[(v_row ->> 'season_settings_id')::uuid];
         ELSE
             IF TG_TABLE_NAME = 'teams' THEN
                 v_division := (v_row ->> 'division_id')::uuid;
@@ -603,17 +604,26 @@ BEGIN
                 SELECT t.division_id INTO v_division FROM public.teams t WHERE t.id = v_team;
             END IF;
             SELECT d.season_settings_id INTO v_season FROM public.divisions d WHERE d.id = v_division;
-        END IF;
-        SELECT s.status, s.organization_id INTO v_status, v_org
-          FROM public.season_settings s WHERE s.id = v_season;
-        IF v_status = 'completed' THEN
-            -- The cascade of a deleted organization: the season may not have been removed yet.
-            IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM public.organizations o WHERE o.id = v_org) THEN
-                CONTINUE;
+            v_seasons := ARRAY[v_season];
+            -- A game (the table that holds a season's scores) also names its season; either one
+            -- being completed holds it.
+            IF TG_TABLE_NAME = 'games' THEN
+                v_seasons := v_seasons || (v_row ->> 'season_id')::uuid;
             END IF;
-            RAISE EXCEPTION 'Season % is completed and read-only: its schedule (%) cannot be changed', v_season, TG_TABLE_NAME
-                USING ERRCODE = '22023', DETAIL = 'season_completed';
         END IF;
+        FOREACH v_season IN ARRAY v_seasons LOOP
+            SELECT s.status, s.organization_id INTO v_status, v_org
+              FROM public.season_settings s WHERE s.id = v_season;
+            IF v_status = 'completed' THEN
+                -- The cascade of a deleted organization: the season may not have been removed yet (a
+                -- delete, or the SET NULL a deleted season makes of a game's season).
+                IF NOT EXISTS (SELECT 1 FROM public.organizations o WHERE o.id = v_org) THEN
+                    CONTINUE;
+                END IF;
+                RAISE EXCEPTION 'Season % is completed and read-only: its schedule (%) cannot be changed', v_season, TG_TABLE_NAME
+                    USING ERRCODE = '22023', DETAIL = 'season_completed';
+            END IF;
+        END LOOP;
     END LOOP;
     RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
 END;
@@ -634,6 +644,9 @@ CREATE TRIGGER practice_assignments_readonly_when_completed
 CREATE TRIGGER schedule_tbd_readonly_when_completed
     BEFORE INSERT OR UPDATE OR DELETE ON public.schedule_tbd
     FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
+CREATE TRIGGER games_readonly_when_completed
+    BEFORE INSERT OR UPDATE OR DELETE ON public.games
+    FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
 CREATE TRIGGER practice_exceptions_readonly_when_completed
     BEFORE INSERT OR UPDATE OR DELETE ON public.practice_exceptions
     FOR EACH ROW EXECUTE FUNCTION public.season_schedule_readonly_when_completed();
@@ -643,7 +656,7 @@ CREATE TRIGGER game_assignments_readonly_when_completed
 
 REVOKE ALL ON FUNCTION public.season_schedule_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS
-    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments and schedule_tbd: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261111010000.';
+    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments, games (scores) and schedule_tbd: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261111010000.';
 
 REVOKE ALL ON FUNCTION public.season_rows_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_rows_readonly_when_completed() IS
@@ -2217,7 +2230,7 @@ BEGIN
                    ('teams_readonly_when_completed'), ('team_players_readonly_when_completed'),
                    ('team_coach_assignments_readonly_when_completed'),
                    ('practice_assignments_readonly_when_completed'),
-                   ('practice_exceptions_readonly_when_completed'), ('schedule_tbd_readonly_when_completed'),
+                   ('practice_exceptions_readonly_when_completed'), ('schedule_tbd_readonly_when_completed'), ('games_readonly_when_completed'),
                    ('game_assignments_readonly_when_completed')) AS t(name)
      WHERE NOT EXISTS (SELECT 1 FROM pg_trigger g
                         WHERE g.tgname = t.name AND NOT g.tgisinternal AND g.tgenabled = 'O');

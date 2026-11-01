@@ -287,6 +287,7 @@ const SCHEDULE_TABLES = [
   'practice_assignments',
   'practice_exceptions',
   'game_assignments',
+  'games',
   'schedule_tbd',
 ];
 
@@ -304,6 +305,13 @@ function scheduleSeasonOf(db, table, row) {
   return division ? seasonOf(db, division.season_settings_id) : null;
 }
 
+/** The seasons a schedule row belongs to: one, and for a game (the scores) its own `season_id` too. */
+function scheduleSeasonsOf(db, table, row) {
+  const seasons = [scheduleSeasonOf(db, table, row)];
+  if (table === 'games' && row?.season_id) seasons.push(seasonOf(db, row.season_id));
+  return seasons;
+}
+
 /**
  * The refusal for a write by a signed-in caller to a schedule row of a completed season, or null;
  * the mock of `season_schedule_readonly_when_completed` on teams, rosters, coach history, practices,
@@ -316,8 +324,10 @@ function scheduleSeasonOf(db, table, row) {
 export function scheduleWriteRefusal(db, table, rows) {
   if (!SCHEDULE_TABLES.includes(table)) return null;
   for (const row of rows || []) {
-    const season = scheduleSeasonOf(db, table, row);
-    if (season?.status === 'completed') {
+    const season = scheduleSeasonsOf(db, table, row).find(
+      (candidate) => candidate?.status === 'completed'
+    );
+    if (season) {
       return fail(
         '22023',
         `Season ${season.id} is completed and read-only: its schedule (${table}) cannot be changed`,

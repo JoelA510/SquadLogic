@@ -902,6 +902,27 @@ describe('a completed season is read-only for its schedule (mock of the schedule
           team_id: LIVE_TEAM,
         },
       ],
+      organizations: getMockData('organizations').map((org) =>
+        String(org.id) === String(MOCK_ORG_ID)
+          ? { ...org, feature_flags: { ...org.feature_flags, score_entry: true } }
+          : org
+      ),
+      games: [
+        {
+          id: 'ms-game-old',
+          organization_id: MOCK_ORG_ID,
+          season_id: OLD,
+          home_team_id: TEAM,
+          away_team_id: LIVE_TEAM,
+        },
+        {
+          id: 'ms-game-live',
+          organization_id: MOCK_ORG_ID,
+          season_id: MOCK_SEASON_ID,
+          home_team_id: LIVE_TEAM,
+          away_team_id: TEAM,
+        },
+      ],
       game_assignments: [
         {
           id: 'ms-ga-old',
@@ -938,6 +959,18 @@ describe('a completed season is read-only for its schedule (mock of the schedule
     expect(getMockData('practice_assignments').map((a) => a.id)).toContain('ms-pa-old');
     expect(getMockData('game_assignments').map((a) => a.id)).toContain('ms-ga-old');
 
+    // The scores of a completed season's game are history too (the games trigger).
+    expect(
+      (
+        await rpc('update_game_score', {
+          p_organization_id: MOCK_ORG_ID,
+          p_game_id: 'ms-game-old',
+          p_score_home: 3,
+          p_score_away: 1,
+        })
+      ).error
+    ).toMatchObject(refused);
+    expect(getMockData('games').find((g) => g.id === 'ms-game-old').score_home).toBeUndefined();
     expect(
       (await rpc('admin_update_team', { p_team_id: LIVE_TEAM, p_patch: { notes: 'ok' } })).error
     ).toBeNull();
@@ -990,6 +1023,14 @@ describe('a completed season is read-only for its schedule (mock of the schedule
     expect(getMockData('teams').find((t) => t.id === TEAM).notes).toBeUndefined();
     expect(getMockData('team_players').filter((r) => r.team_id === TEAM)).toHaveLength(1);
 
+    // The scores table is one too.
+    expect(
+      await write('games', (t) => t.update({ score_home: 9 }).eq('id', 'ms-game-old'))
+    ).toMatchObject(refused);
+    expect(await write('games', (t) => t.delete().eq('id', 'ms-game-old'))).toMatchObject(refused);
+    expect(
+      await write('games', (t) => t.update({ score_home: 2 }).eq('id', 'ms-game-live'))
+    ).toBeNull();
     // The TIME TBD list is a schedule table too.
     expect(
       await write('schedule_tbd', (t) => t.update({ reason: 'late' }).eq('id', 'ms-tbd-old'))

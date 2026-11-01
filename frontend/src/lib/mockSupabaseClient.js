@@ -4469,6 +4469,9 @@ export const mockSupabase = {
           },
         };
       }
+      // 20261111010000: a completed season's scores are history (the games trigger).
+      const scoreSeasonRefused = scheduleWriteRefusal(db, 'games', [game]);
+      if (scoreSeasonRefused) return scoreSeasonRefused;
       await mockSupabase
         .from('games')
         .update({ score_home: params?.p_score_home, score_away: params?.p_score_away })

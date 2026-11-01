@@ -49,7 +49,7 @@
 --      re-import replaces the imported rules of the teams the file names and leaves admin rules alone.
 --      A season that is completed takes no import (draft seasons take one, as E3b does for players and
 --      coaches; `create_import_job` still opens a job only for the active season until E3b lands).
---   6. `admin_delete_team` counts the rules its cascade takes (`practice_preferences_deleted`).
+--   6. `admin_delete_team` counts the rules its cascade takes (`coach_practice_preferences_deleted`).
 --   7. The two old RPCs, `admin_decide_coach_practice_preference` and `admin_set_coach_practice_preference`,
 --      are dropped by exact signature (no CASCADE): they read the columns this drops. The request RPC went
 --      with 20261104010000.
@@ -260,6 +260,7 @@ SELECT id, organization_id, coach_id, team_id, weekdays, start_minutes, venue_id
 
 ALTER TABLE public.coach_practice_preferences
     ALTER COLUMN requested_level SET NOT NULL,
+    ALTER COLUMN status SET DEFAULT 'in_force',
     ADD CONSTRAINT coach_practice_preferences_level_known
         CHECK (level IN ('prefer', 'must')),
     ADD CONSTRAINT coach_practice_preferences_requested_level_known
@@ -955,7 +956,10 @@ DECLARE
     v_priority text;
     v_token text;
     v_code text;
-    v_time time;
+    v_parts text[];
+    v_hour integer;
+    v_minute integer;
+    v_minutes integer;
     v_venue_id uuid;
     v_error text;
     v_kind text;
@@ -1097,13 +1101,23 @@ BEGIN
                 SELECT btrim(t) FROM regexp_split_to_table(lower(v_times_text), '\s*(?:;|,|\||/|&|\sor\s|\sand\s)\s*') t
             LOOP
                 IF v_token = '' THEN CONTINUE; END IF;
-                v_time := public.import_text_to_time(v_token);
-                IF v_time IS NULL THEN
+                -- 5:00 PM, 5pm, 5:30 p.m., 17:00, 17: with am / pm the hour is 1 to 12, without it 0 to 23.
+                v_parts := regexp_match(regexp_replace(v_token, '\.', '', 'g'), '^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$');
+                v_minutes := NULL;
+                IF v_parts IS NOT NULL THEN
+                    v_hour := v_parts[1]::integer;
+                    v_minute := COALESCE(v_parts[2], '0')::integer;
+                    IF v_minute <= 59 AND (CASE WHEN v_parts[3] IS NULL THEN v_hour <= 23 ELSE v_hour BETWEEN 1 AND 12 END) THEN
+                        v_minutes := (CASE WHEN v_parts[3] = 'am' THEN v_hour % 12
+                                           WHEN v_parts[3] = 'pm' THEN v_hour % 12 + 12
+                                           ELSE v_hour END) * 60 + v_minute;
+                    END IF;
+                END IF;
+                IF v_minutes IS NULL THEN
                     v_error := 'Unreadable start time in the start times column';
                     EXIT;
                 END IF;
-                v_code := (extract(hour FROM v_time)::integer * 60 + extract(minute FROM v_time)::integer)::text;
-                IF NOT v_code::integer = ANY (v_starts) THEN v_starts := v_starts || v_code::integer; END IF;
+                IF NOT v_minutes = ANY (v_starts) THEN v_starts := v_starts || v_minutes; END IF;
             END LOOP;
             IF cardinality(v_starts) = 0 THEN v_starts := NULL; END IF;
         END IF;
@@ -1139,6 +1153,18 @@ BEGIN
             ELSIF v_from IS NOT NULL AND v_to IS NOT NULL AND v_to < v_from THEN
                 v_error := 'The effective until date is before the effective from date';
             END IF;
+        END IF;
+
+        -- A set has one canonical order, so the same rule written two ways is one rule: weekdays in week
+        -- order, start times ascending, venues by id.
+        IF v_error IS NULL THEN
+            v_weekdays := ARRAY(SELECT d FROM unnest(v_weekdays) d
+                                 ORDER BY array_position(ARRAY['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], d));
+            v_starts := ARRAY(SELECT m FROM unnest(v_starts) m ORDER BY m);
+            v_venues := ARRAY(SELECT v FROM unnest(v_venues) v ORDER BY v);
+            IF cardinality(v_weekdays) = 0 THEN v_weekdays := NULL; END IF;
+            IF cardinality(v_starts) = 0 THEN v_starts := NULL; END IF;
+            IF cardinality(v_venues) = 0 THEN v_venues := NULL; END IF;
         END IF;
 
         IF v_error IS NULL AND v_weekdays IS NULL AND v_starts IS NULL AND v_venues IS NULL THEN
@@ -1492,7 +1518,7 @@ BEGIN
             (SELECT count(*) FROM public.schedule_tbd
               WHERE team_id = p_team_id OR home_team_id = p_team_id OR away_team_id = p_team_id),
         -- 20261112010000: the practice preference rules the cascade takes.
-        'practice_preferences_deleted',
+        'coach_practice_preferences_deleted',
             (SELECT count(*) FROM public.coach_practice_preferences WHERE team_id = p_team_id)
     );
 
@@ -1587,7 +1613,7 @@ BEGIN
     END IF;
     SELECT count(*) INTO v_n FROM pg_proc p
      WHERE p.oid = to_regprocedure('public.admin_delete_team(uuid)')
-       AND p.prosrc LIKE '%practice_preferences_deleted%' AND p.prosecdef;
+       AND p.prosrc LIKE '%coach_practice_preferences_deleted%' AND p.prosecdef;
     IF v_n <> 1 THEN RAISE EXCEPTION 'admin_delete_team does not count the rules its cascade takes'; END IF;
     FOREACH v_fn IN ARRAY ARRAY['create_import_job(uuid, text, text, uuid)',
                                'mark_import_job_ready_to_apply(uuid, text, jsonb)',

@@ -1,95 +1,92 @@
 /**
- * Coach practice preferences: what one team's preferences mean for one
- * candidate practice (Phase 8.6 PR 3b, PR 1).
+ * Practice preference RULES: what one team's rules mean for one candidate practice
+ * (Phase D, C1; plans `docs/changes/2026-10-26-coach-preference-rules.md`, "Revised
+ * 2026-10-27", and `docs/changes/2026-10-27-phase-d-scheduling.md`, section C).
  *
- * Plan of record: `docs/PHASE_8_6_PR3B_PLAN.md` §4, operator ruling 3. A coach
- * holds, per dimension (weekday, start time, venue), a level: `must_keep`,
- * `prefer_keep` or `dont_care`, and optionally the value it keeps. The store is
- * `public.coach_practice_preferences` (migration `20260927000000`); coaches
- * request and only admins approve, so every preference this module is handed
- * is an APPROVED one. The schema has no `status` key, so passing raw rows
- * fails loudly instead of mixing requests in.
+ * The store is `public.coach_practice_preferences` (migration `20261112010000`): a row is
+ * one rule for one team, asked by one of the team's coaches. Only an admin writes it (an
+ * import, or in the app), and only an admin makes a rule a `must`: a requested must is in
+ * force as `prefer` until an admin accepts it, so every `level` this module is handed is
+ * the level IN FORCE. Rows that are not in force (removed, replaced) are not passed in.
  *
  * ## The rules
  *
- * **Reference.** A preference keeps something, and the reference is what it
- * keeps. A preference with a `value` keeps that value, whether the team's
- * series is being moved or the team is unplaced: an admin who approved
- * `must_keep weekday=TUE` expects Tuesday (operator ruling, 2026-09-28; the
- * #463 approval dialog judges current series against the value too). A
- * preference with no `value` keeps what the team has: the current series'
- * weekday, start or venue. With neither, the preference does nothing, and a
- * `PRACTICE_COACH_PREFERENCE_NO_REFERENCE` finding says so.
+ * **A rule has up to three conditions**: `weekdays`, `startMinutes` and `venueIds`, each a
+ * set of values meaning "any of", or "keep the current one" (`keepWeekday`, `keepStart`,
+ * `keepVenue`). The conditions of one rule must all hold: "Tuesday at 5:00" is one rule
+ * with two conditions; {Tue, Thu} is met by a Tuesday or a Thursday practice. A team that
+ * practises twice a week on different days therefore lands on Tuesday and Thursday.
  *
- * **Strictest wins** across the team's current coaches: `must_keep` >
- * `prefer_keep` > `dont_care`. Every coach at the strictest level must be kept,
- * so two `must_keep` references that differ make the dimension `unsatisfiable`
- * and every candidate violates it. Two differing `prefer_keep` references are
- * the soft analogue: every candidate breaches that dimension once, so the term
- * cannot rank candidates on it. That is one rule for both levels, stated here
- * rather than left for the Deno twin (PR 8) to rediscover, and at both levels a
- * `PRACTICE_COACH_PREFERENCE_CONFLICT` finding names the dimension, the level,
- * the coaches and the references, so preferences that cancel each other out are
- * visible to an admin rather than silently inert.
+ * **Keep-current** is met by any value the team's live practices hold (`current`: the
+ * placements of its rows). With none it does nothing, and a
+ * `PRACTICE_COACH_PREFERENCE_NO_REFERENCE` finding names the rule and the dimension.
  *
- * **The verdict** on a candidate: `mustKeepViolated` when any `must_keep`
- * dimension is not kept (the hard filter), and `preferKeepBreaches`, one per
- * `prefer_keep` dimension not kept (the soft term PR 4 prices).
+ * **Which rules apply** to a team on a day: the rule is for that team, its coach is one of
+ * the team's CURRENT coaches (`coachIds`, the roster and not the rule rows), and the day is
+ * inside the rule's window (`effectiveFrom` / `effectiveTo`, either may be open). The day is
+ * the one a practice starts being judged on: the run date for the auto-scheduler, the first
+ * day of a displaced series' window for a repair. A rule with a window and no day to judge
+ * it on is refused, never read as always in window.
  *
- * **No preferences, no effect.** An empty input resolves every dimension to
- * `dont_care`, and every candidate's verdict is zero breaches and no violation.
- * Nothing is filtered.
+ * **Every rule that applies is judged** against each candidate: a `must` is a filter
+ * (`mustKeepViolated` when any unmet), a `prefer` costs one breach per unmet rule
+ * (`preferKeepBreaches`, the soft term the objective prices). Nothing supersedes anything:
+ * two rules from two coaches, or two rules from one, both count. `coachPriority` is for
+ * visibility only; it changes nothing here.
+ *
+ * **Conflicts** are found before they bite: rules of one level whose explicit sets for one
+ * dimension have no value in common (two `must` rules, {Tue} and {Thu}) leave no practice
+ * that meets them all, and a `PRACTICE_COACH_PREFERENCE_CONFLICT` finding names the
+ * dimension, the level and the rules. A conflict among `must` rules makes every candidate
+ * violate them, so the team is TIME TBD naming those rules, never silently dropped; among
+ * `prefer` rules it only costs breaches.
+ *
+ * **No rules, no effect.** With none that apply, nothing is filtered and every verdict is
+ * zero breaches.
  *
  * ## Declared, not enforced
  *
- * Its one caller is `practice/repair.js` (8.6 PR 3b, PR 4): `must_keep` is a
- * candidate filter there, with `PRACTICE_TBD_REASON.COACH_PREFERENCE` when it
- * empties a series' venue, and `prefer_keep` is priced by the objective as
- * `coachPreferenceBreached`. The repair itself has no production caller yet
- * (the `practice/` unwired pin) until PR 9-10 wire it.
- *
- * The auto-scheduler Edge Function honours the same rule through its Deno
- * twin, `supabase/functions/_shared/engines/coach-preferences.ts` (PR 8):
- * `must_keep` filters new placements, `prefer_keep` breaks ties (plan §5
- * decision 3). `tests/coachPreferenceDrift.test.js` holds the twin to this
- * module over the full enumerated product; change a rule here and that test
- * fails until the twin and its digest follow.
+ * Its callers are `practice/repair.js` (`must` filters candidates, with
+ * `PRACTICE_TBD_REASON.COACH_PREFERENCE` when it empties a series' venue, naming the rules;
+ * `prefer` is priced as `coachPreferenceBreached`) and, through its Deno twin
+ * `supabase/functions/_shared/engines/coach-preferences.ts`, the auto-scheduler Edge
+ * Function. `tests/coachPreferenceDrift.test.js` holds the twin to this module over the
+ * full enumerated product; change a rule here and that test fails until the twin follows.
  */
 
 import { z } from 'zod';
 
-import { IdSchema } from '../availability/schemas.js';
+import { IdSchema, IsoDateSchema } from '../availability/schemas.js';
 import { PRACTICE_REASON, makePracticeFinding } from './reasonCodes.js';
 import { PracticeWeekdaySchema } from './schemas.js';
 
-/** The three things a coach can ask to keep. The DB's `dimension` CHECK, exactly. */
+/** The three things a rule can ask about. */
 export const COACH_PREFERENCE_DIMENSION = Object.freeze({
   WEEKDAY: 'weekday',
   START_TIME: 'start_time',
   VENUE: 'venue',
 });
 
-/** How strongly. The DB's `level` CHECK, exactly. */
+/** The level IN FORCE. The DB's `level` CHECK, exactly. */
 export const COACH_PREFERENCE_LEVEL = Object.freeze({
-  MUST_KEEP: 'must_keep',
-  PREFER_KEEP: 'prefer_keep',
-  DONT_CARE: 'dont_care',
+  MUST: 'must',
+  PREFER: 'prefer',
 });
+
+/** The coach's own ranking of a rule, for visibility only. The DB's `coach_priority` CHECK. */
+export const COACH_PREFERENCE_PRIORITY = Object.freeze(['high', 'medium', 'low']);
 
 const DIMENSIONS = Object.freeze(Object.values(COACH_PREFERENCE_DIMENSION));
 const LEVELS = Object.freeze(Object.values(COACH_PREFERENCE_LEVEL));
 
-/** Higher is stricter: the one ordering strictest-wins reads. */
-const STRICTNESS = Object.freeze({ dont_care: 0, prefer_keep: 1, must_keep: 2 });
-
-/** The key a dimension is read from, on a series and on a candidate. */
+/** The key a dimension is read from, on a placement. */
 const PLACEMENT_KEY = Object.freeze({
   weekday: 'weekday',
   start_time: 'startMinutes',
   venue: 'locationId',
 });
 
-/** A lowercase canonical uuid: the DB CHECK's venue arm, exactly. */
+/** A lowercase canonical uuid: the venue arm of the DB. */
 const LocationIdSchema = z
   .string()
   .regex(
@@ -97,42 +94,75 @@ const LocationIdSchema = z
     'a location id is a lowercase canonical uuid'
   );
 
-/** Minutes past local midnight: the DB CHECK's start_time arm, exactly. */
+/** Minutes past local midnight: the DB CHECK's range, exactly. */
 const StartMinutesSchema = z.number().int().min(0).max(1439);
-
-const VALUE_SCHEMA = Object.freeze({
-  weekday: PracticeWeekdaySchema,
-  start_time: StartMinutesSchema,
-  venue: LocationIdSchema,
-});
 
 export const CoachPreferenceDimensionSchema = z.enum(DIMENSIONS);
 export const CoachPreferenceLevelSchema = z.enum(LEVELS);
 
+/** A set condition as the DB holds it: NULL (absent) or a non-empty array of distinct values. */
+const setOf = (schema) =>
+  z
+    .array(schema)
+    .min(1, 'a condition holds at least one value')
+    .refine((values) => new Set(values).size === values.length, 'a condition holds no duplicate')
+    .nullable()
+    .default(null);
+
 /**
- * One coach's preference on one dimension: what a request carries, and what an
- * approved row means. **Strict**: an unknown key (a `note`, a `reason`) is
- * refused, because the store holds no free text and neither does this.
+ * One rule, in force, for one team: what an admin imported or entered. **Strict**: an unknown
+ * key (a `note`, a `reason`, the old `dimension` / `value`) is refused, because the store
+ * holds no free text and neither does this.
  */
-export const CoachPreferenceSchema = z
+export const CoachPreferenceRuleSchema = z
   .strictObject({
+    /** The rule's id (a uuid in the store): what a finding and a TIME TBD reason name. */
+    id: IdSchema,
+    /** The coach who asked; the rule applies while this coach is one of the team's coaches. */
     coachId: IdSchema,
-    dimension: CoachPreferenceDimensionSchema,
+    teamId: IdSchema,
     level: CoachPreferenceLevelSchema,
-    value: z.union([z.string(), z.number()]).nullable().default(null),
+    weekdays: setOf(PracticeWeekdaySchema),
+    startMinutes: setOf(StartMinutesSchema),
+    venueIds: setOf(LocationIdSchema),
+    keepWeekday: z.boolean().default(false),
+    keepStart: z.boolean().default(false),
+    keepVenue: z.boolean().default(false),
+    coachPriority: z.enum(COACH_PREFERENCE_PRIORITY).nullable().default(null),
+    effectiveFrom: IsoDateSchema.nullable().default(null),
+    effectiveTo: IsoDateSchema.nullable().default(null),
   })
-  .superRefine((preference, ctx) => {
-    if (preference.value === null) return;
-    if (!VALUE_SCHEMA[preference.dimension].safeParse(preference.value).success) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['value'],
-        message: `${JSON.stringify(preference.value)} is not a ${preference.dimension} value`,
-      });
+  .superRefine((rule, ctx) => {
+    for (const [values, keep, name] of [
+      [rule.weekdays, rule.keepWeekday, 'weekday'],
+      [rule.startMinutes, rule.keepStart, 'start'],
+      [rule.venueIds, rule.keepVenue, 'venue'],
+    ]) {
+      if (values !== null && keep) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: `a rule holds either values or keep-current for the ${name}, not both`,
+        });
+      }
+    }
+    const conditions =
+      (rule.weekdays !== null || rule.keepWeekday) +
+      (rule.startMinutes !== null || rule.keepStart) +
+      (rule.venueIds !== null || rule.keepVenue);
+    if (conditions === 0) {
+      ctx.addIssue({ code: 'custom', message: 'a rule has at least one condition' });
+    }
+    if (
+      rule.effectiveFrom !== null &&
+      rule.effectiveTo !== null &&
+      rule.effectiveTo < rule.effectiveFrom
+    ) {
+      ctx.addIssue({ code: 'custom', path: ['effectiveTo'], message: 'the window ends before it starts' });
     }
   });
 
-/** A practice as this module reads it: the team's current series, or a candidate. */
+/** A practice as this module reads it: one of the team's live practices, or a candidate. */
 export const CoachPreferencePlacementSchema = z.object({
   weekday: PracticeWeekdaySchema,
   startMinutes: StartMinutesSchema,
@@ -140,150 +170,172 @@ export const CoachPreferencePlacementSchema = z.object({
 });
 
 /**
- * One team: its CURRENT coaches (the roster, not the preference rows), the
- * approved preferences in play, and the series when it is being moved.
+ * One team: its CURRENT coaches (the roster, not the rule rows), every rule offered (those of
+ * other teams, of coaches who are not on the team, and out of window on `date` are ignored), the
+ * placements its live practices hold (for keep-current), and the day judged.
  */
 export const CoachPreferenceInputSchema = z
   .strictObject({
+    teamId: IdSchema,
     coachIds: z.array(IdSchema),
-    preferences: z.array(CoachPreferenceSchema),
-    series: CoachPreferencePlacementSchema.nullable().default(null),
+    rules: z.array(CoachPreferenceRuleSchema),
+    current: z.array(CoachPreferencePlacementSchema).default([]),
+    date: IsoDateSchema.nullable().default(null),
   })
   .superRefine((input, ctx) => {
     const seen = new Set();
-    input.preferences.forEach((preference, index) => {
-      const key = `${preference.coachId}\u0000${preference.dimension}`;
-      if (seen.has(key)) {
+    input.rules.forEach((rule, index) => {
+      if (seen.has(rule.id)) {
         ctx.addIssue({
           code: 'custom',
-          path: ['preferences', index],
-          message: `a second preference for coach ${preference.coachId} on ${preference.dimension}; the store holds one approved row per (coach, dimension)`,
+          path: ['rules', index, 'id'],
+          message: `a second rule with id ${rule.id}; a rule is named by its id`,
         });
       }
-      seen.add(key);
+      seen.add(rule.id);
     });
   });
 
-/**
- * The strictest of some levels: `must_keep` > `prefer_keep` > `dont_care`, and
- * `dont_care` for none.
- *
- * @param {readonly string[]} levels
- * @returns {string}
- */
-export function strictestCoachPreferenceLevel(levels) {
-  /** @type {string} */
-  let strictest = COACH_PREFERENCE_LEVEL.DONT_CARE;
-  for (const level of levels) {
-    if (!Object.hasOwn(STRICTNESS, level)) {
-      throw new RangeError(`unknown coach preference level: ${level}`);
-    }
-    if (STRICTNESS[level] > STRICTNESS[strictest]) strictest = level;
+/** Whether a rule's window holds `date`. A bounded rule with no date to judge is refused. */
+export function ruleInWindow(rule, date) {
+  if (rule.effectiveFrom === null && rule.effectiveTo === null) return true;
+  if (date === null || date === undefined) {
+    throw new RangeError(
+      `rule ${rule.id} has a date window and no day was given to judge it on`
+    );
   }
-  return strictest;
+  if (rule.effectiveFrom !== null && date < rule.effectiveFrom) return false;
+  if (rule.effectiveTo !== null && date > rule.effectiveTo) return false;
+  return true;
+}
+
+/** The (dimension, set, keep) triples of a rule, in dimension order. */
+function conditionsOf(rule) {
+  return [
+    { dimension: 'weekday', values: rule.weekdays, keep: rule.keepWeekday },
+    { dimension: 'start_time', values: rule.startMinutes, keep: rule.keepStart },
+    { dimension: 'venue', values: rule.venueIds, keep: rule.keepVenue },
+  ].filter((condition) => condition.values !== null || condition.keep);
 }
 
 /**
- * Resolve one team's preferences into one entry per dimension. The entries are
- * enumerated from the dimension vocabulary, never from the preferences, so a
- * dimension nobody holds is present as `dont_care` rather than absent.
+ * Resolve one team's rules into the conditions each rule asks of a practice.
+ *
+ * The rules that apply are enumerated from the rules offered (never from what a verdict
+ * would find), in the order given. A rule whose every condition has nothing to keep is kept
+ * in the result with no conditions, so the finding and the rule both stay visible.
  *
  * @param {unknown} input - see {@link CoachPreferenceInputSchema}
  */
 export function resolveCoachPreferences(input) {
-  const { coachIds, preferences, series } = CoachPreferenceInputSchema.parse(input);
+  const { teamId, coachIds, rules, current, date } = CoachPreferenceInputSchema.parse(input);
   const onTeam = new Set(coachIds);
   const findings = [];
 
-  const dimensions = DIMENSIONS.map((dimension) => {
-    const holders = [];
-    for (const preference of preferences) {
-      if (preference.dimension !== dimension || !onTeam.has(preference.coachId)) continue;
-      if (preference.level === COACH_PREFERENCE_LEVEL.DONT_CARE) continue;
-      const fromValue = preference.value !== null;
-      const reference = fromValue
-        ? preference.value
-        : series
-          ? series[PLACEMENT_KEY[dimension]]
-          : null;
-      if (reference === null) {
+  const resolved = [];
+  for (const rule of rules) {
+    if (rule.teamId !== teamId || !onTeam.has(rule.coachId) || !ruleInWindow(rule, date)) continue;
+    const conditions = [];
+    for (const { dimension, values, keep } of conditionsOf(rule)) {
+      if (values !== null) {
+        conditions.push({ dimension, source: 'values', allowed: [...values] });
+        continue;
+      }
+      // keep-current: any value the team's live practices hold.
+      const held = [...new Set(current.map((placement) => placement[PLACEMENT_KEY[dimension]]))];
+      if (held.length === 0) {
         findings.push(
           makePracticeFinding(
             PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE,
-            `coach ${preference.coachId} holds ${preference.level} on ${dimension}, but there is neither a value nor a current series to keep, so it does nothing`,
-            { coachId: preference.coachId, dimension, level: preference.level }
+            `rule ${rule.id} (coach ${rule.coachId}) keeps the current ${dimension}, but the team has no live practice to keep it from, so it does nothing`,
+            { ruleId: rule.id, coachId: rule.coachId, dimension, level: rule.level }
           )
         );
         continue;
       }
-      holders.push({
-        coachId: preference.coachId,
-        level: preference.level,
-        reference,
-        source: fromValue ? 'value' : 'series',
-      });
+      conditions.push({ dimension, source: 'current', allowed: held });
     }
-
-    const level = strictestCoachPreferenceLevel(holders.map((holder) => holder.level));
-    const strictest = holders.filter((holder) => holder.level === level);
-    const references = [...new Set(strictest.map((holder) => holder.reference))];
-    if (references.length > 1) {
-      findings.push(
-        makePracticeFinding(
-          PRACTICE_REASON.COACH_PREFERENCE_CONFLICT,
-          `the team's coaches hold ${level} on ${dimension} with ${references.length} different values, so no practice can keep them all`,
-          {
-            dimension,
-            level,
-            coachIds: strictest.map((holder) => holder.coachId),
-            references,
-          }
-        )
-      );
-    }
-    return Object.freeze({
-      dimension,
-      level,
-      source:
-        strictest.length === 0
-          ? null
-          : strictest.every((holder) => holder.source === strictest[0].source)
-            ? strictest[0].source
-            : 'mixed',
-      references: Object.freeze(references),
-      coachIds: Object.freeze(strictest.map((holder) => holder.coachId)),
-      unsatisfiable: level === COACH_PREFERENCE_LEVEL.MUST_KEEP && references.length > 1,
+    resolved.push({
+      id: rule.id,
+      coachId: rule.coachId,
+      level: rule.level,
+      coachPriority: rule.coachPriority,
+      conditions: Object.freeze(conditions.map((condition) => Object.freeze(condition))),
     });
-  });
+  }
+
+  // Conflicts: rules of one level whose sets for one dimension share no value.
+  for (const level of LEVELS) {
+    for (const dimension of DIMENSIONS) {
+      const holders = resolved.filter((rule) => rule.level === level).flatMap((rule) =>
+        rule.conditions
+          .filter((condition) => condition.dimension === dimension)
+          .map((condition) => ({ rule, condition }))
+      );
+      if (holders.length < 2) continue;
+      const common = holders
+        .map(({ condition }) => condition.allowed)
+        .reduce((left, right) => left.filter((value) => right.includes(value)));
+      if (common.length === 0) {
+        findings.push(
+          makePracticeFinding(
+            PRACTICE_REASON.COACH_PREFERENCE_CONFLICT,
+            `the team's ${level} rules ask for ${dimension} values with nothing in common, so no practice can meet them all`,
+            {
+              dimension,
+              level,
+              ruleIds: holders.map(({ rule }) => rule.id),
+              coachIds: [...new Set(holders.map(({ rule }) => rule.coachId))],
+            }
+          )
+        );
+      }
+    }
+  }
 
   return Object.freeze({
-    dimensions: Object.freeze(dimensions),
+    rules: Object.freeze(resolved.map((rule) => Object.freeze(rule))),
     findings: Object.freeze(findings),
   });
 }
 
+/** True when a resolution constrains nothing: no rule has a condition left. */
+export function isInertResolution(resolution) {
+  return resolution.rules.every((rule) => rule.conditions.length === 0);
+}
+
 /**
- * Judge one candidate practice against a resolution: every reference held at a
- * dimension's strictest level must be kept.
+ * Judge one candidate practice against a resolution: every rule that applies is judged, a
+ * `must` that is unmet violates, a `prefer` that is unmet is one breach.
  *
  * @param {ReturnType<typeof resolveCoachPreferences>} resolution
  * @param {unknown} candidate - see {@link CoachPreferencePlacementSchema}
  */
 export function judgeCoachPreferenceCandidate(resolution, candidate) {
   const placement = CoachPreferencePlacementSchema.parse(candidate);
-  const violated = [];
-  const breached = [];
-  for (const entry of resolution.dimensions) {
-    if (entry.references.length === 0) continue;
-    const actual = placement[PLACEMENT_KEY[entry.dimension]];
-    if (entry.references.every((reference) => reference === actual)) continue;
-    if (entry.level === COACH_PREFERENCE_LEVEL.MUST_KEEP) violated.push(entry.dimension);
-    else breached.push(entry.dimension);
+  const violatedRules = [];
+  const breachedRules = [];
+  const violatedDimensions = new Set();
+  const breachedDimensions = new Set();
+  for (const rule of resolution.rules) {
+    const unmet = rule.conditions.filter(
+      (condition) => !condition.allowed.includes(placement[PLACEMENT_KEY[condition.dimension]])
+    );
+    if (unmet.length === 0) continue;
+    if (rule.level === COACH_PREFERENCE_LEVEL.MUST) {
+      violatedRules.push(rule.id);
+      for (const condition of unmet) violatedDimensions.add(condition.dimension);
+    } else {
+      breachedRules.push(rule.id);
+      for (const condition of unmet) breachedDimensions.add(condition.dimension);
+    }
   }
   return Object.freeze({
-    mustKeepViolated: violated.length > 0,
-    preferKeepBreaches: breached.length,
-    violatedDimensions: Object.freeze(violated),
-    breachedDimensions: Object.freeze(breached),
+    mustKeepViolated: violatedRules.length > 0,
+    preferKeepBreaches: breachedRules.length,
+    violatedRules: Object.freeze(violatedRules),
+    breachedRules: Object.freeze(breachedRules),
+    violatedDimensions: Object.freeze(DIMENSIONS.filter((d) => violatedDimensions.has(d))),
+    breachedDimensions: Object.freeze(DIMENSIONS.filter((d) => breachedDimensions.has(d))),
   });
 }

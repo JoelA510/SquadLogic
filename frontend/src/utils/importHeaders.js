@@ -13,6 +13,11 @@
  */
 
 import { HEADER_ALIASES } from './telemetryUtils.js';
+import {
+  EVALUATION_ID_KEYS,
+  EVALUATION_TIER_KEYS,
+  EVALUATION_VALUE_KEYS,
+} from './importEvaluations.js';
 
 /**
  * Canonical columns each import type must contain after header matching.
@@ -23,6 +28,25 @@ export const REQUIRED_HEADERS = {
   coaches: ['full_name', 'email'],
   fields: ['location', 'name', 'type', 'start', 'end'],
   field_availability: ['season_label', 'location', 'name', 'available_from', 'available_until'],
+  // E3c: what an evaluations file needs is "a registration id" and "at least one value", which
+  // are REQUIRED_ANY_HEADERS below (no single column is required by itself).
+  evaluations: [],
+};
+
+/**
+ * Required columns of which any one satisfies the requirement (E3c): an evaluations file names
+ * its players by registration id, under any of the keys the player import stored it from, and
+ * carries at least one of the values it sets. `label` is what a missing group is called.
+ * @type {Record<string, Array<{ label: string, keys: readonly string[] }>>}
+ */
+export const REQUIRED_ANY_HEADERS = {
+  evaluations: [
+    { label: 'external_registration_id', keys: EVALUATION_ID_KEYS },
+    {
+      label: `one of ${EVALUATION_VALUE_KEYS.join(', ')}`,
+      keys: [...EVALUATION_VALUE_KEYS, ...EVALUATION_TIER_KEYS],
+    },
+  ],
 };
 
 /**
@@ -70,11 +94,15 @@ export function findMissingRequiredHeaders(fields, type, mappings) {
       .trim();
     return Object.hasOwn(HEADER_ALIASES, key) ? HEADER_ALIASES[key] : key;
   });
-  return required.filter((req) => {
+  const missing = required.filter((req) => {
     if (normalized.includes(req)) return false;
     const parts = COMPOSABLE_HEADERS[req];
     return !(parts && parts.every((part) => aliased.includes(part)));
   });
+  for (const group of REQUIRED_ANY_HEADERS[type] || []) {
+    if (!group.keys.some((key) => normalized.includes(key))) missing.push(group.label);
+  }
+  return missing;
 }
 
 /**

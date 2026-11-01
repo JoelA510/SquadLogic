@@ -1,7 +1,9 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import FeatureFlagSettings from '../frontend/src/components/settings/FeatureFlagSettings.jsx';
+import FeaturesSetupPage from '../frontend/src/pages/FeaturesSetupPage.jsx';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 import { FeatureFlagSchema } from '../frontend/src/constants/featureFlags.js';
 
@@ -96,6 +98,60 @@ describe('FeatureFlagSettings (FeatureControls)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Future placements only' }));
     await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
     expect(mocks.updateFeatureFlags.mock.calls[0][0]).toMatchObject({ gender_model: 'coed' });
+  });
+
+  // E3c (owner, 2026-10-27): the skill tier is an option an admin turns on, at set-up or later in
+  // Settings; both screens are this panel, drawn from the catalog.
+  it('offers Skill Tier, off by default, and turns it on through the audited path', async () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({});
+    render(<FeatureFlagSettings />);
+    const tier = screen.getByRole('switch', { name: 'Skill Tier' });
+    expect(tier).toHaveAttribute('aria-checked', 'false');
+    // It adds a column, as Years Played and Player Rating do.
+    expect(
+      within(screen.getByText('Skill Tier').parentElement).getByText('Grid column')
+    ).toBeInTheDocument();
+    fireEvent.click(tier);
+    await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
+    expect(mocks.updateFeatureFlags.mock.calls[0][0]).toEqual({ skill_tier: true });
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'record_audit_event',
+        expect.objectContaining({
+          p_action: 'settings.flags_updated',
+          p_metadata: expect.objectContaining({ flags: { skill_tier: true } }),
+        })
+      )
+    );
+  });
+
+  it('shows Skill Tier on when stored on, and off again through the same switch', async () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({ skill_tier: true });
+    render(<FeatureFlagSettings />);
+    const tier = screen.getByRole('switch', { name: 'Skill Tier' });
+    expect(tier).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(tier);
+    await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
+    expect(mocks.updateFeatureFlags.mock.calls[0][0]).toEqual({ skill_tier: false });
+  });
+
+  it('offers Skill Tier in the set-up step, "Choose your tools", too', () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({});
+    render(
+      <MemoryRouter>
+        <FeaturesSetupPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('heading', { name: 'Choose your tools' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Skill Tier' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+    // Years Played still starts on there.
+    expect(screen.getByRole('switch', { name: 'Years Played' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
   });
 
   // Phase B6: the league's Spread Coaching Leads setting, on by default, read through the schema.

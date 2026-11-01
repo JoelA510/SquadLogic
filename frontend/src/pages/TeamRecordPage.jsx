@@ -14,6 +14,7 @@ import InlineField from '../components/ui/InlineField.jsx';
 import { usePermission } from '../hooks/usePermission.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
+import { skillTierLabel } from '../constants/skillTier.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
@@ -61,11 +62,17 @@ export default function TeamRecordPage() {
     useTeamPortal(teamId);
   const { can, PERMISSIONS } = usePermission();
   const { isEnabled, genderModel } = useFeatures();
+  const skillTierOn = isEnabled(FEATURE_FLAGS.SKILL_TIER);
 
   const [tab, setTab] = useState('schedule');
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
   const [staff, setStaff] = useState(/** @type {any[] | null} */ (null));
   const [staffError, setStaffError] = useState(false);
+  // The roster's skill tiers by player id: null while they load, only read with the Skill Tier
+  // option on. `get_team_roster` does not return a tier, so an admin (the only reader of a roster)
+  // reads it from `players` for the ids the roster names.
+  const [tiers, setTiers] = useState(/** @type {Map<string, string | null> | null} */ (null));
+  const [tiersFailed, setTiersFailed] = useState(false);
 
   // Staff tab: every current coach, through the server-side read
   // (20261021010000) that returns names and roles, with no contact details
@@ -98,6 +105,36 @@ export default function TeamRecordPage() {
       cancelled = true;
     };
   }, [team?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // The previous roster's tiers are cleared while this one's load (or are not read at all).
+      setTiers(null);
+      setTiersFailed(false);
+      if (!skillTierOn || roster.length === 0) return;
+      const { data, error: tierError } = await supabase
+        .from('players')
+        .select('id, skill_tier')
+        .in(
+          'id',
+          roster.map((player) => player.id)
+        );
+      if (cancelled) return;
+      if (tierError) {
+        logger.warn('[TeamRecordPage] skill tiers not loaded', {
+          code: tierError.code,
+          message: tierError.message,
+        });
+        setTiersFailed(true);
+        return;
+      }
+      setTiers(new Map((data || []).map((row) => [row.id, row.skill_tier ?? null])));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [skillTierOn, roster]);
 
   if (loading) return <LoadingScreen />;
   if (error) return <div className="p-8 text-status-error glass-panel">Error: {error}</div>;
@@ -311,6 +348,32 @@ export default function TeamRecordPage() {
                         </div>
                       </div>
                     </div>
+                    {/* The columns of the roster: Years Played and Skill Tier, each only with
+                        its option on (Settings, Features). */}
+                    {(yearsOn || skillTierOn) && (
+                      <dl className="text-sm text-text-secondary text-right">
+                        {yearsOn && (
+                          <div data-testid={`roster-years-${player.id}`}>
+                            <dt className="inline">Years played: </dt>
+                            <dd className="inline text-text-primary">
+                              {player.years_played ?? '—'}
+                            </dd>
+                          </div>
+                        )}
+                        {skillTierOn && (
+                          <div data-testid={`roster-tier-${player.id}`}>
+                            <dt className="inline">Skill tier: </dt>
+                            <dd className="inline text-text-primary">
+                              {tiersFailed
+                                ? 'Unavailable'
+                                : tiers === null
+                                  ? '…'
+                                  : (skillTierLabel(tiers.get(player.id)) ?? '—')}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                    )}
                   </div>
                 );
               })}

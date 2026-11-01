@@ -39,7 +39,69 @@ describe('applyRosterDirectory', () => {
     expect(result.players.map((p) => p.name)).toEqual(['Avery Alder', 'Blake Birch']);
     // A rating is the skill when the run carries none; with none, the row stays unrated.
     expect(result.players.map((p) => p.skill)).toEqual(['3', undefined]);
+    // It also travels as `rating`, and the skill it filled is marked as a rating, not a tier.
+    expect(result.players.map((p) => p.rating)).toEqual([3, undefined]);
+    expect(result.players.map((p) => p.skillIsRating)).toEqual([true, undefined]);
     expect(coachLabel(result)).toBe('Coaches: Coach Elm, Coach Fern');
+  });
+
+  it('a skill the run carries is kept and is not marked as a rating, whatever the record rates', () => {
+    const [result] = applyRosterDirectory(
+      [team({ players: [{ id: 'p1', name: 'A B', skill: 'advanced' }] })],
+      directory([['p1', { name: 'A B', rating: 2 }]])
+    );
+    expect(result.players[0]).toMatchObject({ skill: 'advanced', rating: 2 });
+    expect(result.players[0].skillIsRating).toBeUndefined();
+  });
+
+  // Codex, P2 on #684: with the Skill Tier option on the record's tier is the entry's skill, with the
+  // generator's contract (`withDurableIdentity`): a stored tier wins over the file's, a null or blank
+  // one keeps the file's. With the option off nothing of the tier is read into the entry.
+  describe('the stored skill tier', () => {
+    const entry = (over = {}) => ({ id: 'p1', name: 'A B', skill: 'novice', ...over });
+    const run = (player, known, options) =>
+      applyRosterDirectory(
+        [team({ players: [player] })],
+        directory([['p1', { name: 'A B', rating: null, ...known }]]),
+        options
+      )[0].players[0];
+
+    it("wins over the file's tier when the option is on", () => {
+      expect(run(entry(), { skillTier: 'advanced' }, { skillTier: true }).skill).toBe('advanced');
+    });
+
+    it('wins over a persisted skill number, and over a rating filled in as the skill', () => {
+      expect(run(entry({ skill: 5 }), { skillTier: 'novice' }, { skillTier: true }).skill).toBe(
+        'novice'
+      );
+      const filled = run(
+        entry({ skill: undefined }),
+        { rating: 3, skillTier: 'developing' },
+        {
+          skillTier: true,
+        }
+      );
+      expect(filled.skill).toBe('developing');
+      expect(filled.skillIsRating).toBeUndefined();
+    });
+
+    it("a null or blank stored tier keeps the file's", () => {
+      expect(run(entry(), { skillTier: null }, { skillTier: true }).skill).toBe('novice');
+      expect(run(entry(), { skillTier: '' }, { skillTier: true }).skill).toBe('novice');
+      expect(run(entry(), { skillTier: 'platinum' }, { skillTier: true }).skill).toBe('novice');
+    });
+
+    it('is not read into the entry at all when the option is off (the default)', () => {
+      expect(run(entry(), { skillTier: 'advanced' }, { skillTier: false }).skill).toBe('novice');
+      expect(run(entry(), { skillTier: 'advanced' }).skill).toBe('novice');
+    });
+
+    it('returns the same objects when the tier changes nothing', () => {
+      const teams = [team({ players: [entry({ skill: 'advanced' })] })];
+      const dir = directory([['p1', { name: 'A B', rating: null, skillTier: 'advanced' }]]);
+      const once = applyRosterDirectory(teams, dir, { skillTier: true });
+      expect(applyRosterDirectory(once, dir, { skillTier: true })).toBe(once);
+    });
   });
 
   it('POSITIVE CONTROL: the same team without the directory reads as the owner saw it', () => {

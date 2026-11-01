@@ -14,6 +14,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { STATUS_TONE } from '../constants/playerStatus.js';
+import { skillTierLabel } from '../constants/skillTier.js';
 import { logger } from '../lib/logger.js';
 import { canEditPlayerField, isDemoOrganization } from '../lib/demo.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
@@ -327,6 +328,16 @@ export default function PlayerRecordPage() {
                     }))}
                     onSave={(v) => save({ rating: Number(v) })}
                     render={(v) => <Stars n={Number(v) || 0} />}
+                  />
+                )}
+                {isEnabled(FEATURE_FLAGS.SKILL_TIER) && (
+                  // Shown, not edited here: the admin RPCs take no skill tier; the Evaluations
+                  // import writes it.
+                  <InlineField
+                    label="Skill tier"
+                    value={player.skill_tier}
+                    editable={false}
+                    render={(v) => skillTierLabel(v) ?? <span className="muted">—</span>}
                   />
                 )}
                 {isEnabled(FEATURE_FLAGS.BUDDY_REQUESTS) && (

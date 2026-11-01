@@ -7,7 +7,7 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 const IDLE = { status: 'idle', key: null, players: null, coaches: null, error: null };
 
 /**
- * The people a roster names: every durable player (id to name and rating) and every coach (id
+ * The people a roster names: every durable player (id to name, rating and skill tier) and every coach (id
  * to name) of the season the header shows (20261108010000: both belong to one season), for the
  * manual roster editor.
  *
@@ -33,7 +33,7 @@ const IDLE = { status: 'idle', key: null, players: null, coaches: null, error: n
  * @param {{ enabled: boolean }} options
  * @returns {{
  *   status: 'idle' | 'loading' | 'ready' | 'error',
- *   players: Map<string, { name: string, rating: number | null }>,
+ *   players: Map<string, { name: string, rating: number | null, skillTier: string | null }>,
  *   coaches: Map<string, string>,
  *   error: string | null,
  *   retry: () => void,
@@ -56,7 +56,7 @@ export function useRosterDirectory({ enabled }) {
           fetchAllPages(() =>
             supabase
               .from('players')
-              .select('id, first_name, last_name, rating')
+              .select('id, first_name, last_name, rating, skill_tier')
               .eq('organization_id', orgId)
               .eq('season_settings_id', seasonId)
           ),
@@ -78,6 +78,7 @@ export function useRosterDirectory({ enabled }) {
           players.set(String(row.id), {
             name,
             rating: Number.isFinite(row.rating) ? row.rating : null,
+            skillTier: typeof row.skill_tier === 'string' ? row.skill_tier : null,
           });
         }
         const coaches = new Map();

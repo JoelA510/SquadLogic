@@ -87,6 +87,10 @@ export const HEADER_ALIASES = {
   'skill level': 'skill_tier',
   'skill tier': 'skill_tier',
   level: 'skill_tier',
+  // The evaluations import's 1-5 rating (E3c); the player import does not keep it.
+  rating: 'rating',
+  'skill rating': 'rating',
+  'player rating': 'rating',
   id: 'gotsport_id',
   pid: 'gotsport_id',
   'official id': 'gotsport_id',

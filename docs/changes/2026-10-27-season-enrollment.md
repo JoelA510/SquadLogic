@@ -279,3 +279,90 @@ under "For the owner"). Migration `20261111010000_season_rollover.sql`.
   this", Edit (name, dates, year, cutoff presets and custom, each division's window) and Activate. The
   "Current Season Label" control and its ThemeContext state are removed.
 - **Verification** is in the PR body. Not done here, left for E3c: the evaluations import.
+
+## Build notes: E3c (2026-11-01)
+
+Built as written; where the code differed from the plan or left a choice:
+
+- **A finalizer of its own, not an extension of `finalize_import_job`.** The pipeline's convention is a
+  finalizer per type (`finalize_import_job`, `finalize_coach_import_job`, the two field ones). The player
+  finalizer creates players, rewrites identity, division and age, and is stamped with the season's age
+  rule (`age_rule_changed`); the evaluations import must create nobody and touch no age field, so none of
+  that applies to it. `finalize_evaluation_import_job(job, errors, dry_run)` in migration
+  `20261113010000_evaluations_import.sql`. It has its own `import_jobs.job_type` (`evaluations`), so the
+  other finalizers refuse its job (22023), and its staged rows are `staging_import_rows` rows of
+  `import_type = 'evaluations'` (the player rows live in `staging_players`). `create_import_job`,
+  `import_allowed_keys`, `mark_import_job_ready_to_apply` and `cancel_ready_import_job` accept the type,
+  each behind the md5 of its current text; a daily job deletes a finished job's staged rows at 30 days.
+- **Check, then confirm, always.** The plan asked for a preview with matched, unmatched and invalid counts,
+  then a confirm. An evaluations import changes players that exist, so `startImport` defers it whatever
+  the caller passes (the coach and field imports defer only on "Validate Only"). The preview is the
+  finalizer's dry run (`p_dry_run`): the same statement with its writes off, so the counts shown are the
+  counts the apply produces. The dry run is read again when the page is reloaded while a job waits.
+- **What "matched" means.** A row names a player of the job's season by registration id as text
+  (`007` is not `7`); it is matched, unmatched (listed, never created), invalid (a cell out of range, or
+  no id: the whole row is left unapplied, listed with its field and a message that quotes no value) or a
+  duplicate (the first row by row number is used). A matched row changes a player only where a value is
+  present and differs; `updated_at` moves only for a player whose value changed, so a re-import is a
+  no-op to the last column.
+- **Ranges** are the table's own: `years_played` 0 to 30, `rating` 1 to 5, `skill_tier` novice,
+  developing or advanced (migration `20260611000000` and the original schema). A numeric "Skill Level" is
+  an error that points at the Rating column; no tier is mapped to a rating.
+- **Audit** is one `import.completed` row per apply (counts, season, `import_type = 'evaluations'`),
+  with no registration ids; the unmatched, invalid and duplicate lists (at most 200 each) live on the job.
+  No rollback: the values are ordinary player fields.
+- **Not changed:** the age rule and its stamp, the player and coach finalizers, and the generator
+  itself (`packages/core`). Only what the Teams page hands it moved (next bullet).
+- **Skill tier is an option, and reaches teaming only when it is on (Codex, P1 on #684; owner,
+  2026-10-27).** The first build stored the tier and nothing read it, so a tier-only file changed a column
+  no screen or team run used. The owner's rule: the tier does not show and is not used unless an admin
+  turns on **Skill Tier** in the organization options, at set-up ("Choose your tools") or later in
+  Settings, Features. The flag is `skill_tier` in `FEATURE_FLAGS`, a plain boolean (no schema change, no
+  migration, no key in `FEATURE_DEFAULTS`, so absent is off) with a `FEATURE_CATALOG` entry (`column: true`),
+  which is what both screens draw from. Demo and mock organizations store no flags, so both start with it off.
+  With it **on**, the tier shows on the player page, as a Tier column in the Players grid and as a line on
+  each card of the team roster, in words (novice, developing, advanced), read-only (the admin RPCs take no
+  tier; the import writes it), and the Teams page overlays the stored tier on the registration file's with the
+  contract `years_played` and `rating` have: a stored tier the generator can read replaces the file's under
+  any skill column, a null or blank leaves the file's, and it reaches the generator as `skillRating` (novice 1,
+  developing 3, advanced 5; a numeric `rating` still wins over it, `ratingOf`). With it **off**, nothing shows
+  it and teaming reads no tier: not the record's, and not the registration file's `skill_tier` / `Skill Tier`
+  either, which the page used to hand the generator whatever the options (a change to existing behaviour,
+  below). A number a row already carries as a skill rating (`skillRating`, `skill_rating`, `Skill Rating`)
+  and the Player Rating path (`rating`) are read as before. The Teams page reads the flag, not
+  `packages/core`: the generator only sees a number, so there is no core key to keep equal. Both generator
+  inputs go through `withDurableIdentity` and `toGeneratorPlayer` with the flag, so no call site is left out;
+  the select always carries `skill_tier`. The Team Builder board reads the record's `rating` and
+  `years_played` and never a tier, and is unchanged.
+- **What the option changed that already existed.** (1) Teaming used the registration file's tier whatever
+  the options; it now does so only with Skill Tier on, so a league that had a tier column in its file and
+  never chose the option no longer has the tier steer its teams (a Player Rating league lost the file's tier
+  as the fallback skill of an unrated player). (2) The roster editor on the Teams page printed "Skill: ..."
+  for every player (including "Unrated"); it now shows the tier with Skill Tier on and the record's rating
+  with Player Rating on, each only its own (a rating the roster directory filled in as the entry's skill is
+  marked and is not read as a tier), and no line with both off. (3) The team roster showed no
+  years played per player (only the average on the Balance tab); it now lists Years played on each card
+  by default, as the owner's rule says, and the tier beside it when that is on. `get_team_roster` returns no
+  tier, so the page reads the roster's tiers from `players` (an admin, the only reader of a roster, can);
+  returning it from the RPC is a migration the owner has not asked for.
+- **Checked.** A tier-only import changes a fresh run's tier and seating only with the option on; with it off a
+  stored tier, a file tier and both together leave the generator player without a skill rating while a numeric
+  `skillRating` and the record's `rating` still count. A re-run in review, published or locked mode keeps every
+  player already on a team on it whatever their tier (`tests/teamGenerationSkillOverlayIncremental.test.js`),
+  per `docs/architecture/incremental-teaming-hardening.md`: only skill totals and where newcomers sit move.
+  The season fixtures (`fixtures/season-2026/`) feed the scheduler, not the Teams page, and did not move.
+- **Mapping and the confirmation (Codex, P2s on #684).** For an evaluations file the mapped file holds
+  only the mapped columns: a source column the admin mapped elsewhere or cleared is dropped, so
+  `Skill Level` mapped to Rating (and Skill Tier cleared) is a rating column, not also a tier. The
+  confirmation names the season the job was made for (the preview's, else the job's), and says so when
+  the header now shows another; the apply and the SQL already target the job's season.
+- **Review round 2 (Codex, P2s on #684).** (1) After a reload the import screen starts with its own
+  default type (players) and only the waiting job says what it is; the job's type was honoured while it
+  waited and dropped when the apply finished, so the evaluations result (counts, the not-valid rows) and
+  the Roll Back of a coach, field or field availability import vanished the moment they existed. The
+  job's deferred type now stays the screen's type through the apply. (The preference import runs from
+  the preference review screen, not this one.) (2) The Teams page's roster editor read names and ratings
+  from `players` and the file's tier from the import; it now reads the record's `skill_tier` too and,
+  with Skill Tier on, shows it over the file's with the generator's contract (a stored tier wins, a null
+  or blank keeps the file's); with it off no tier is read into the editor. The team roster card, the
+  player page and the Players grid already read the stored tier (`tests/skillTierDisplay.test.jsx`).

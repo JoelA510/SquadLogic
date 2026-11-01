@@ -27,6 +27,20 @@ const FIELD_DEFS = {
     ],
     optional: [{ key: 'willing_to_coach', label: 'Willing to Coach' }],
   },
+  // E3c: the registration id names the player; at least one of the three values is needed
+  // (`requireAny`), and a column left unmapped leaves that value alone.
+  evaluations: {
+    required: [{ key: 'external_registration_id', label: 'Registration ID' }],
+    optional: [
+      { key: 'years_played', label: 'Years Played' },
+      { key: 'skill_tier', label: 'Skill Tier' },
+      { key: 'rating', label: 'Rating' },
+    ],
+    requireAny: {
+      keys: ['years_played', 'skill_tier', 'rating'],
+      label: 'one of the value columns',
+    },
+  },
   fields: {
     required: [{ key: 'name', label: 'Field Name' }],
     optional: [],
@@ -178,10 +192,16 @@ export default function ColumnMapper({
     buildInitialMapping(importType, rawHeaders, autoMatches)
   );
 
-  const missingRequired = useMemo(
-    () => defs.required.filter((f) => !isMappingComplete({ [f.key]: mapping[f.key] }, [f])),
-    [mapping, defs.required]
-  );
+  const missingRequired = useMemo(() => {
+    const missing = defs.required.filter(
+      (f) => !isMappingComplete({ [f.key]: mapping[f.key] }, [f])
+    );
+    // "At least one of": the group is missing only while none of its columns is mapped.
+    if (defs.requireAny && !defs.requireAny.keys.some((key) => mapping[key]?.column)) {
+      missing.push({ key: 'require_any', label: defs.requireAny.label });
+    }
+    return missing;
+  }, [mapping, defs.required, defs.requireAny]);
 
   const setField = (key, entry) => {
     setMapping((prev) => {

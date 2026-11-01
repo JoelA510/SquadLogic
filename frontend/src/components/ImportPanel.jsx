@@ -28,22 +28,46 @@ import {
   normalizeImportHeader,
 } from '../utils/importHeaders.js';
 import { composeFullName, normalizeImportRow } from '../utils/importRows.js';
+import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { useDemo } from '../hooks/useDemo.js';
+import EvaluationImportSummary from './EvaluationImportSummary.jsx';
 
 // A demo opens this instead of the file picker (D4). Lazy: only a demo visitor ever needs it.
 const DemoImportNotice = lazy(() => import('./DemoImportNotice.jsx'));
 
-/** @typedef {'players' | 'coaches' | 'fields' | 'field_availability'} ImportType */
+/** @typedef {'players' | 'coaches' | 'evaluations' | 'fields' | 'field_availability'} ImportType */
 /** @type {readonly ImportType[]} */
-const IMPORT_TYPES = Object.freeze(['players', 'coaches', 'fields', 'field_availability']);
+const IMPORT_TYPES = Object.freeze([
+  'players',
+  'coaches',
+  'evaluations',
+  'fields',
+  'field_availability',
+]);
 const COMPLETED_IMPORT_STATUSES = new Set(['completed', 'completed_with_warnings']);
 const IMPORT_TYPE_TOOLTIPS = {
   players: 'Requires first name, last name, and date of birth columns.',
   coaches:
     'Requires full name (or first and last name) and email columns. An optional Child Registration ID column links each coach to their children. Import players first.',
+  evaluations:
+    'Requires a registration id column and at least one of years played, skill tier or rating. Only updates players already in the season.',
   fields: 'Requires location, name, type, start, and end columns.',
   field_availability:
     'Requires season_label, location, name, available_from, and available_until columns.',
+};
+
+/** What each deferrable import is called in a sentence, and on a button. */
+const DEFERRED_NOUN = {
+  coaches: 'coach',
+  evaluations: 'evaluations',
+  fields: 'field',
+  field_availability: 'field availability',
+};
+const DEFERRED_NAME = {
+  coaches: 'Coach Import',
+  evaluations: 'Evaluations Import',
+  fields: 'Field Import',
+  field_availability: 'Field Availability Import',
 };
 
 /**
@@ -148,6 +172,7 @@ export default function ImportPanel({ onImport }) {
     setNotifyOnComplete,
     importedPlayers,
     importedCoaches,
+    importedEvaluations,
     importedFields,
     importedFieldAvailability,
     rollbackImport,
@@ -156,7 +181,7 @@ export default function ImportPanel({ onImport }) {
     activeJob,
   } = useImport();
 
-  const { currentOrganization } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, availableSeasons } = useOrganization();
   // In a demo no file is read: the picker, the drop zone and the file check all open the notice.
   const { isDemo } = useDemo();
   const [demoNoticeOpen, setDemoNoticeOpen] = useState(false);
@@ -165,8 +190,29 @@ export default function ImportPanel({ onImport }) {
   const isComplete = COMPLETED_IMPORT_STATUSES.has(importStatus);
   const isReadyToApply = importStatus === 'ready_to_apply';
   const deferredImportType = activeJob?.warning_summary?.deferred_apply?.import_type;
+  // A deferred job's own type is the screen's type from the moment it waits for its confirm to the
+  // end of the apply. The screen's local type is only a default (players) after a reload, while the
+  // job the server holds says what is waiting; once the apply finished, the local type used to take
+  // over again and hid the evaluations result and every roll back (Codex, P2 on #684).
   const workflowImportType =
-    isReadyToApply && IMPORT_TYPES.includes(deferredImportType) ? deferredImportType : importType;
+    (isReadyToApply || isComplete) && IMPORT_TYPES.includes(deferredImportType)
+      ? deferredImportType
+      : importType;
+  // E3c: an evaluations import belongs to the season its job was made for, whatever the header
+  // shows after (the dry run, the apply and the SQL all read the job's). The confirmation names
+  // that season; it says so when the header has moved to another one (Codex, P2 on #684).
+  const evaluationResult = isComplete
+    ? importedEvaluations?.persistence?.result
+    : importedEvaluations?.persistence?.preview;
+  const evaluationSeasonId =
+    evaluationResult?.season_settings_id ?? activeJob?.season_settings_id ?? null;
+  const evaluationSeason = evaluationSeasonId
+    ? (availableSeasons ?? []).find((season) => season.id === evaluationSeasonId)
+    : currentSeasonSetting;
+  const evaluationSeasonElsewhere =
+    Boolean(evaluationSeasonId) &&
+    Boolean(currentSeasonSetting?.id) &&
+    evaluationSeasonId !== currentSeasonSetting.id;
   const coachRollbackComplete = importedCoaches?.persistence?.rollback?.status === 'rolled_back';
   const fieldRollbackComplete = importedFields?.persistence?.rollback?.status === 'rolled_back';
   const canRollbackImport =
@@ -260,6 +306,15 @@ export default function ImportPanel({ onImport }) {
           errorFields.push(field);
         }
       });
+
+      // E3c: the evaluations rules import-validation applies (utils/importEvaluations.js): a
+      // registration id, and each value within its range. The cell is marked by its canonical key.
+      if (importType === 'evaluations') {
+        validateEvaluationRow(newRow).forEach((error) => {
+          rowErrors.push(error.message);
+          errorFields.push(error.field);
+        });
+      }
 
       if (rowErrors.length > 0) {
         validationErrors.push({ row: index + 2, data: newRow, errors: rowErrors, errorFields });
@@ -356,10 +411,17 @@ export default function ImportPanel({ onImport }) {
     // review on #186).
     const mappedKeys = new Set(Object.keys(mapping));
     const aliasOf = (h) => HEADER_ALIASES[h.toLowerCase().trim()] ?? h.toLowerCase().trim();
-    const canonicalHeaders = [
-      ...mappedKeys,
-      ...stage.rawHeaders.filter((h) => !mappedKeys.has(h) && !mappedKeys.has(aliasOf(h))),
-    ];
+    // An evaluations file is only its mapped columns. A source column the admin mapped to one
+    // field (or to none) is consumed: left in, its own alias could stage it as another field
+    // ("Skill Level" is an alias of skill_tier, so a rating column cleared of its tier mapping
+    // came back as a tier, Codex on #684). The other types keep their extra columns.
+    const canonicalHeaders =
+      importType === 'evaluations'
+        ? [...mappedKeys]
+        : [
+            ...mappedKeys,
+            ...stage.rawHeaders.filter((h) => !mappedKeys.has(h) && !mappedKeys.has(aliasOf(h))),
+          ];
 
     const csv = serializeCanonicalCsv(mappedRows, canonicalHeaders);
     const rewritten = new File(
@@ -429,6 +491,8 @@ export default function ImportPanel({ onImport }) {
         return importedPlayers?.totalRows || 0;
       case 'coaches':
         return importedCoaches?.totalRows || 0;
+      case 'evaluations':
+        return importedEvaluations?.totalRows || 0;
       case 'fields':
         return importedFields?.totalRows || 0;
       default:
@@ -510,6 +574,19 @@ export default function ImportPanel({ onImport }) {
             </div>
           )}
 
+          {/* E3c: what the evaluations import will change (its dry run), then what it changed. */}
+          {workflowImportType === 'evaluations' && (isReadyToApply || isComplete) && (
+            <EvaluationImportSummary
+              result={evaluationResult}
+              validationErrors={importedEvaluations?.validationErrors}
+              previewError={isReadyToApply ? importedEvaluations?.persistence?.previewError : null}
+              seasonName={evaluationSeason?.name}
+              otherSeasonName={
+                evaluationSeasonElsewhere ? (currentSeasonSetting?.name ?? 'another season') : ''
+              }
+            />
+          )}
+
           {/*
             **The import log, on screen.**
 
@@ -534,7 +611,12 @@ export default function ImportPanel({ onImport }) {
               <h3 id="import-log-heading" className="text-sm font-semibold text-text-primary mb-2">
                 Import log
               </h3>
-              <ol className="max-h-48 overflow-y-auto rounded-lg border border-border bg-bg-sunken divide-y divide-border-soft">
+              <ol
+                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the log scrolls, so a keyboard user must be able to focus it to read past its fold (WCAG 2.1.1)
+                tabIndex={0}
+                aria-labelledby="import-log-heading"
+                className="max-h-48 overflow-y-auto rounded-lg border border-border bg-bg-sunken divide-y divide-border-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+              >
                 {importLogs.map((entry, index) => (
                   <li
                     key={`${index}-${entry.message}`}
@@ -550,7 +632,7 @@ export default function ImportPanel({ onImport }) {
           {isReadyToApply ? (
             <div className="flex flex-wrap justify-center gap-4 w-full max-w-full">
               <Tooltip
-                content={`Apply the validated ${workflowImportType === 'fields' ? 'field' : workflowImportType === 'field_availability' ? 'field availability' : 'coach'} import.`}
+                content={`Apply the validated ${DEFERRED_NOUN[workflowImportType] ?? 'coach'} import.`}
                 className="w-full sm:w-auto"
               >
                 <Button
@@ -566,12 +648,7 @@ export default function ImportPanel({ onImport }) {
                     }
                   }}
                 >
-                  Apply{' '}
-                  {workflowImportType === 'fields'
-                    ? 'Field Import'
-                    : workflowImportType === 'field_availability'
-                      ? 'Field Availability Import'
-                      : 'Coach Import'}
+                  Apply {DEFERRED_NAME[workflowImportType] ?? 'Coach Import'}
                 </Button>
               </Tooltip>
               <Tooltip content="Cancel this validated import." className="w-full sm:w-auto">
@@ -599,7 +676,7 @@ export default function ImportPanel({ onImport }) {
             <div className="flex flex-wrap justify-center gap-4 w-full max-w-full">
               {canRollbackImport && (
                 <Tooltip
-                  content={`Roll back this ${workflowImportType === 'fields' ? 'field' : workflowImportType === 'field_availability' ? 'field availability' : 'coach'} import.`}
+                  content={`Roll back this ${DEFERRED_NOUN[workflowImportType] ?? 'coach'} import.`}
                   className="w-full sm:w-auto"
                 >
                   <Button
@@ -615,12 +692,7 @@ export default function ImportPanel({ onImport }) {
                       }
                     }}
                   >
-                    Roll Back{' '}
-                    {workflowImportType === 'fields'
-                      ? 'Field Import'
-                      : workflowImportType === 'field_availability'
-                        ? 'Field Availability Import'
-                        : 'Coach Import'}
+                    Roll Back {DEFERRED_NAME[workflowImportType] ?? 'Coach Import'}
                   </Button>
                 </Tooltip>
               )}
@@ -724,7 +796,7 @@ export default function ImportPanel({ onImport }) {
 
         <div
           data-testid="import-type-selector"
-          className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8"
+          className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8"
         >
           {IMPORT_TYPES.map((type) => (
             <Tooltip key={type} content={IMPORT_TYPE_TOOLTIPS[type]} className="w-full">
@@ -765,6 +837,7 @@ export default function ImportPanel({ onImport }) {
                   <p className="text-xs text-text-muted">
                     {type === 'players' && 'Upload player registration data'}
                     {type === 'coaches' && 'Upload coaches (after the players)'}
+                    {type === 'evaluations' && 'Add years played and skill from evaluations'}
                     {type === 'fields' && 'Upload field configurations'}
                     {type === 'field_availability' &&
                       'Upload seasonal availability metadata (not schedule slots)'}
@@ -793,6 +866,16 @@ export default function ImportPanel({ onImport }) {
                 <>
                   Seasonal availability metadata — not finalized schedule slots. No explicit
                   day/time slots were provided; schedule slots were not created.
+                </>
+              ) : importType === 'evaluations' ? (
+                <>
+                  <span className="text-text-primary">
+                    {`Updates the players already in ${currentSeasonSetting?.name || 'the season'}.`}
+                  </span>{' '}
+                  Match each row by Registration ID, with any of Years Played, Skill Tier (novice,
+                  developing, advanced) and Rating (1 to 5). A blank cell leaves the stored value as
+                  it is; an id that matches no player is listed and skipped, and no player is
+                  created. You review the changes before they are applied.
                 </>
               ) : importType === 'coaches' ? (
                 <>
@@ -975,7 +1058,7 @@ export default function ImportPanel({ onImport }) {
                     </Button>
                   </Tooltip>
                 )}
-                {importType !== 'players' && (
+                {importType !== 'players' && importType !== 'evaluations' && (
                   <Tooltip
                     content="Validate without applying records."
                     className="w-full sm:w-auto"
@@ -1004,14 +1087,21 @@ export default function ImportPanel({ onImport }) {
                     Cancel
                   </Button>
                 </Tooltip>
-                <Tooltip content="Validate and import this CSV." className="w-full sm:w-auto">
+                <Tooltip
+                  content={
+                    importType === 'evaluations'
+                      ? 'Validate this CSV and preview the changes; nothing is applied yet.'
+                      : 'Validate and import this CSV.'
+                  }
+                  className="w-full sm:w-auto"
+                >
                   <Button
                     variant="primary"
                     size="sm"
                     className="w-full sm:w-auto"
                     onClick={handleStartImport}
                   >
-                    Start Import
+                    {importType === 'evaluations' ? 'Preview Changes' : 'Start Import'}
                   </Button>
                 </Tooltip>
               </div>

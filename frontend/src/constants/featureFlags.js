@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   Clock,
   Flag,
+  Gauge,
   History,
   Scale,
   Star,
@@ -40,6 +41,12 @@ export const FEATURE_FLAGS = {
   // Org feature configuration ("Choose your tools" — redesign)
   YEARS_PLAYED: 'years_played',
   PLAYER_RATING: 'player_rating',
+  // The player's skill tier (novice, developing, advanced). Off unless an admin turns it on,
+  // at set-up or later in Settings: while off nothing shows it and team generation ignores it,
+  // the registration file's tier included (owner, 2026-10-27, E3c of
+  // docs/changes/2026-10-27-season-enrollment.md). The Teams page reads it, not packages/core:
+  // the generator only ever sees the number the page hands it as `skillRating`.
+  SKILL_TIER: 'skill_tier',
   BUDDY_REQUESTS: 'buddy_requests',
   COACHING_INTEREST: 'coaching_interest',
   // Team generation and auto-balance spread coaching leads (players whose parent volunteers
@@ -113,7 +120,8 @@ export const ALL_FLAGS = Object.values(FEATURE_FLAGS);
 
 /**
  * Defaults applied on top of the stored JSONB (absent key = default).
- * Recreational-league posture: Years Played on, 1–5 rating off.
+ * Recreational-league posture: Years Played on, 1–5 rating off, skill tier off (no key: a flag
+ * that is absent is off).
  */
 export const FEATURE_DEFAULTS = {
   [FEATURE_FLAGS.YEARS_PLAYED]: true,
@@ -145,6 +153,14 @@ export const FEATURE_CATALOG = [
     label: 'Player Rating',
     description: '1–5 skill rating used for balanced teaming. Often left off in recreational play.',
     icon: Star,
+    column: true,
+  },
+  {
+    key: FEATURE_FLAGS.SKILL_TIER,
+    label: 'Skill Tier',
+    description:
+      'Novice, developing or advanced for each player. Shows on player pages and as a column in the Players and team rosters, and steers team generation. Off unless turned on.',
+    icon: Gauge,
     column: true,
   },
   {

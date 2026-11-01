@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { matchHeaders } from '../frontend/src/utils/telemetryUtils.js';
 import { isSensitiveHeader } from '../frontend/src/utils/gotsportCanonicalizer.js';
+import { CSV_TEMPLATES } from '../frontend/src/utils/csvTemplates.js';
 import {
+  REQUIRED_ANY_HEADERS,
   REQUIRED_HEADERS,
   normalizeImportHeader,
   findMissingRequiredHeaders,
@@ -170,5 +172,69 @@ describe('importHeaders', () => {
   it('still requires a coach full name when only one half is present', () => {
     expect(resolve(['First Name', 'Email'], 'coaches').missing).toEqual(['full_name']);
     expect(resolve(['Last Name', 'Email'], 'coaches').missing).toEqual(['full_name']);
+  });
+});
+
+// E3c: the evaluations import needs a registration id and at least one value to set. Neither is a
+// single required column, so each is a group of which any one will do.
+describe('the evaluations import headers (E3c)', () => {
+  const TYPE = 'evaluations';
+
+  it('declares no single required column, and two groups of which any one will do', () => {
+    expect(REQUIRED_HEADERS.evaluations).toEqual([]);
+    expect(REQUIRED_ANY_HEADERS.evaluations.map((g) => g.label)).toEqual([
+      'external_registration_id',
+      'one of years_played, skill_tier, rating',
+    ]);
+  });
+
+  it('accepts the template and an id with any one of the three values', () => {
+    expect(resolve(CSV_TEMPLATES.evaluations.headers, TYPE).missing).toEqual([]);
+    for (const value of ['Years Played', 'Skill Tier', 'Rating']) {
+      expect(resolve(['Registration ID', value], TYPE).missing).toEqual([]);
+    }
+  });
+
+  it('names what is missing: the id, the values, or both', () => {
+    expect(resolve(['Registration ID'], TYPE).missing).toEqual([
+      'one of years_played, skill_tier, rating',
+    ]);
+    expect(resolve(['Years Played', 'Rating'], TYPE).missing).toEqual(['external_registration_id']);
+    expect(resolve(['Notes'], TYPE).missing).toEqual([
+      'external_registration_id',
+      'one of years_played, skill_tier, rating',
+    ]);
+  });
+
+  it.each([
+    ['Skill', 'skill_tier'],
+    ['Skill Level', 'skill_tier'],
+    ['Skill Tier', 'skill_tier'],
+    ['Level', 'skill_tier'],
+    ['Rating', 'rating'],
+    ['Skill Rating', 'rating'],
+    ['Player Rating', 'rating'],
+    ['Years Played', 'years_played'],
+    ['How many years has your player played in an organized soccer program?', 'years_played'],
+    ['Registration ID', 'external_registration_id'],
+    ['GotSport ID', 'gotsport_id'],
+  ])('reads the header %j as %s', (header, canonical) => {
+    expect(matchHeaders([header], [], {}).mappings[header]).toBe(canonical);
+  });
+
+  it('accepts the id under every key the player import stored it from, and not under Player ID', () => {
+    for (const id of ['Registration ID', 'GotSport ID', 'registration_id', 'player_id']) {
+      expect(resolve([id, 'Rating'], TYPE).missing).toEqual([]);
+    }
+    // `Player ID` is not aliased (a player file uses it as a registration id already): the mapper asks.
+    expect(resolve(['Player ID', 'Rating'], TYPE).missing).toEqual(['external_registration_id']);
+  });
+
+  it('does not touch the other types: an id and a rating alone are still not a player file', () => {
+    expect(resolve(['Registration ID', 'Rating'], 'players').missing).toEqual([
+      'first_name',
+      'last_name',
+      'date_of_birth',
+    ]);
   });
 });

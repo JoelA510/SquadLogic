@@ -1,6 +1,6 @@
 /**
- * CSV template generators for the three import types (players / coaches /
- * fields). Users click "Download Template" in ImportPanel to get a .csv
+ * CSV template generators for the import types (players / coaches /
+ * evaluations / fields / field availability). Users click "Download Template" in ImportPanel to get a .csv
  * with the expected header row + one example row they can replace.
  *
  * Header labels use the human-friendly form (e.g. "First Name") rather than
@@ -37,6 +37,13 @@ export const CSV_TEMPLATES = {
     headers: ['Full Name', 'Email', 'Willing to Coach', 'Child Registration ID'],
     example: ['Alex Smith', 'coach@example.com', 'yes', 'GS-1001; GS-1003'],
     filename: 'squadlogic-coaches-template.csv',
+  },
+  // E3c: only the registration id and the values it sets. A blank cell leaves a stored value alone,
+  // so a file can carry any of the three columns, and a player's row any of the three cells.
+  evaluations: {
+    headers: ['Registration ID', 'Years Played', 'Skill Tier', 'Rating'],
+    example: ['GS-1001', '2', 'developing', '3'],
+    filename: 'squadlogic-evaluations-template.csv',
   },
   fields: {
     headers: [
@@ -140,7 +147,7 @@ function toCsv(rows) {
 
 /**
  * Generate a template CSV and trigger a browser download.
- * @param {'players'|'coaches'|'fields'|'field_availability'} type
+ * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'} type
  */
 export function downloadTemplate(type) {
   const tmpl = CSV_TEMPLATES[type];

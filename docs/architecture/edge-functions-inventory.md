@@ -27,7 +27,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 - **Authentication**: `getUserFromRequest()` → returns `401` on missing/invalid bearer. Requires admin/tenant-admin membership for the target organization before staging rows.
 - **Rate limit**: `checkRateLimit(user.id)` — 10 req/min per user.
 - **Size caps**: 5000 rows, 500 char/field, 10 MB payload.
-- **RLS interaction**: Uses the service-role client for staging writes, but gates every write with `verifyOrgAdmin()` and verifies the `import_job_id` belongs to the requested organization. Final player promotion uses the admin-only `finalize_import_job(uuid, jsonb)` RPC; non-player promotion uses `finalize_coach_import_job(uuid, jsonb)` and `finalize_field_import_job(uuid, jsonb)`.
+- **RLS interaction**: Uses the service-role client for staging writes, but gates every write with `verifyOrgAdmin()` and verifies the `import_job_id` belongs to the requested organization. Final player promotion uses the admin-only `finalize_import_job(uuid, jsonb)` RPC; non-player promotion uses `finalize_coach_import_job(uuid, jsonb)` and `finalize_field_import_job(uuid, jsonb)`; an `evaluations` import (E3c: years played, skill tier and rating by registration id, updating the season's existing players only) stages its rows in `staging_import_rows` and is applied by `finalize_evaluation_import_job(uuid, jsonb, boolean)`, which also takes a dry run for the preview.
 
 ### 2.2 `team-persistence`
 

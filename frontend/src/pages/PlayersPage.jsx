@@ -13,6 +13,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName, divisionFilters } from '../utils/divisions.js';
 import { STATUS_TONE } from '../constants/playerStatus.js';
+import { skillTierLabel, skillTierRank } from '../constants/skillTier.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import { useDemo } from '../hooks/useDemo.js';
 import { canEditPlayerField } from '../lib/demo.js';
@@ -227,6 +228,16 @@ export default function PlayersPage() {
         num: true,
         min: 1,
         max: 5,
+      });
+    }
+    if (isEnabled(FEATURE_FLAGS.SKILL_TIER)) {
+      // Shown, not edited here: the admin RPCs take no skill tier. The Evaluations import writes it.
+      cols.push({
+        key: 'skill_tier',
+        label: 'Tier',
+        width: 96,
+        sortVal: (row) => skillTierRank(row.skill_tier),
+        render: (row) => skillTierLabel(row.skill_tier) ?? <span className="muted">—</span>,
       });
     }
     cols.push({

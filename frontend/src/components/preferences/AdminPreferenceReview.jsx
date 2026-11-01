@@ -141,7 +141,14 @@ function ruleOf({ coachId, teamId, level, dimension, value }) {
 /** Accept a requested must, with the re-judge of what it would break. */
 function AcceptDialog({ row, coachName, teamName, previewContext, date, onClose, onDone, toast }) {
   const [busy, setBusy] = useState(false);
-  const proposal = useMemo(() => ({ ...ruleOfRow(row), level: 'must' }), [row]);
+  // A row core cannot read says so (as the preview does for the others) instead of breaking the dialog.
+  const proposal = useMemo(() => {
+    try {
+      return { rule: { ...ruleOfRow(row), level: 'must' }, error: null };
+    } catch (err) {
+      return { rule: null, error: err?.message || String(err) };
+    }
+  }, [row]);
 
   const confirm = async () => {
     setBusy(true);
@@ -181,7 +188,14 @@ function AcceptDialog({ row, coachName, teamName, previewContext, date, onClose,
         <p className="text-sm m-0">
           Requested as a must: {describeRule(row, previewContext.locationNames)}
         </p>
-        <MustKeepPreview proposal={proposal} context={previewContext} date={date} />
+        {proposal.error ? (
+          <p role="alert" className="text-sm m-0">
+            Could not re-judge this decision: {proposal.error}. Review the team&apos;s current
+            series before accepting.
+          </p>
+        ) : (
+          <MustKeepPreview proposal={proposal.rule} context={previewContext} date={date} />
+        )}
       </div>
     </Modal>
   );

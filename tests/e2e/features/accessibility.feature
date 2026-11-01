@@ -245,14 +245,14 @@ Feature: Every top-level route passes an automated accessibility scan
     Then the scan sees "The working schedule still matches what was published." on the page
     And axe finds no serious or critical violations on "/exports" in the "dark" theme
 
-  Scenario: Practice preferences with a pending request and one in force passes axe in both themes
+  Scenario: Practice preferences with a pending must and a rule in force passes axe in both themes
     Given I am logged into SquadLogic as an admin
     And a coach has a pending practice preference request and another has one in force
     When I open "/coaches/practice-preferences" and see its "Practice preferences" heading
-    Then the scan sees "Pending requests (1)" on the page
+    Then the scan sees "Pending musts (1)" on the page
     And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "light" theme
     When I switch to the dark theme on this page
-    Then the scan sees "Pending requests (1)" on the page
+    Then the scan sees "Pending musts (1)" on the page
     And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "dark" theme
 
   Scenario: Field management with seasonal availability on it passes axe in both themes
@@ -321,10 +321,10 @@ Feature: Every top-level route passes an automated accessibility scan
     Given I am logged into SquadLogic as an admin
     And a coach has a pending practice preference request and another has one in force
     When I open "/coaches/practice-preferences" and see its "Practice preferences" heading
-    And I open the "Approve with change" dialog with "with a change"
+    And I open the "Accept as must" dialog with "Accept"
     Then axe finds no serious or critical violations on "/coaches/practice-preferences" in the "light" theme
     When I switch to the dark theme behind the open dialog
-    Then the scan sees "Approve with change" on the page
+    Then the scan sees "Accept as must" on the page
     And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "dark" theme
 
   Scenario: The override dialog on practice scheduling passes axe in the light and dark themes

@@ -86,11 +86,33 @@
  * Past sunset is flagged, never blocked (owner, 2026-10-27): the daylight pass
  * keeps a placement that runs past sunset on unlit ground whole and reports it in
  * `daylight.pastSunset` (it used to cut it short and call the rest TIME TBD).
+ *
+ * Three modes (Phase D PR D, `docs/changes/2026-10-27-phase-d-scheduling.md` section D), chosen by
+ * the body's `mode`:
+ *
+ * - `solve` (the default, and what a body with no `mode` is): the run above -- the server searches,
+ *   within its compute cap, and persists the evaluation run.
+ * - `prepare`: loads every input exactly as `solve` does (the same reads, as the caller through
+ *   RLS, the same refusals) and answers with the solver's input and a digest of it, for the
+ *   browser's Web Worker (`frontend/src/workers/practiceOptimizer.worker.js`) to search for as
+ *   long as it needs. It searches nothing, persists nothing and audits nothing but a refusal.
+ * - `verify`: takes the worker's placements and that digest, LOADS EVERYTHING AGAIN ITSELF (the
+ *   body carries no lock, preference, reservation, daylight or division setting that is read), and
+ *   refuses 409 `INPUT_CHANGED` when the digest of what it loaded is not the one the worker
+ *   searched. Otherwise it seats the placements in sorted order through the same `admissible` the
+ *   search uses, runs the daylight pass, scores with `scoring-engine.ts`, persists the evaluation
+ *   run, and answers in `solve`'s shape: the worker's result is a proposal, this is the check. A
+ *   placement that fails is returned unplaced (`verify-refused`, with its rule), never dropped.
+ *   See `verifyPracticePlacements` in `_shared/engines/auto-scheduler-solver.ts` and
+ *   `_shared/engines/solver-input.ts`.
  */
 
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
-import { AutoSchedulerInputSchema } from '../_shared/schemas/auto-scheduler.ts';
+import {
+  AutoSchedulerInputSchema,
+  AutoSchedulerVerifySchema,
+} from '../_shared/schemas/auto-scheduler.ts';
 import { prepareTeam } from '../_shared/engines/practice-coaches.ts';
 import {
   loadCoachPreferenceContext,
@@ -109,7 +131,18 @@ import {
   SLOT_DATING_UNREADABLE,
   undatableSlotIds,
   unitIdOf,
+  verifyPracticePlacements,
+  type OptimizerResult,
+  type PracticeSolverInput,
+  type VerifyRefusal,
 } from '../_shared/engines/auto-scheduler-solver.ts';
+import {
+  checkSolverInputDigest,
+  digestEncodedInput,
+  encodeSolverInput,
+  INPUT_CHANGED,
+  SOLVER_INPUT_UNENCODABLE,
+} from '../_shared/engines/solver-input.ts';
 import {
   crossCheckLockedAssignments,
   describeLockMismatch,
@@ -197,6 +230,20 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     }
 
     const input = parseResult.data;
+
+    // 4b. `verify` carries its claims (the worker's placements and digest) beside the same body a
+    //     `solve` sends; they are checked below, never read as inputs.
+    let verifyClaims: ReturnType<typeof AutoSchedulerVerifySchema.parse> | null = null;
+    if (input.mode === 'verify') {
+      const verifyParse = AutoSchedulerVerifySchema.safeParse(body);
+      if (!verifyParse.success) {
+        return jsonResponse(
+          { error: 'Validation failed', details: verifyParse.error.format() },
+          400
+        );
+      }
+      verifyClaims = verifyParse.data;
+    }
 
     // 5. Organization membership check (IDOR prevention)
     const isMember = await verifyOrgMembership(supabase, user.id, input.organizationId);
@@ -665,10 +712,149 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         : ('caller-scoped' as const),
     };
 
-    // 6. Audit + structured logging: scheduler started
+    // 6. Prepare data (the slots were prepared at 5c-bis, before the preference load that judges
+    //    them). D2: the store's reservations on both, so every placement the search makes -- and
+    //    every placement `verify` seats -- is judged by them (`checkHardConstraints`). Built before
+    //    anything is audited, because `prepare` and `verify` both need it: it is one object, the
+    //    run's whole input, whichever mode uses it.
+    const reserved = applySlotReservations(
+      withSettings.teams.map((t) => ({
+        ...prepareTeam(t),
+        // The store's settings (5c-bis), never the body's.
+        practicesPerWeek: t.practicesPerWeek,
+        practiceMinutes: t.practiceMinutes,
+      })),
+      slots,
+      reservations
+    );
+    const teams = reserved.teams;
+    const solverInput: PracticeSolverInput = {
+      teams,
+      slots: reserved.slots,
+      // Every loaded row -- a TIME TBD series' row included -- is fixed occupancy, one entry per
+      // ROW.
+      locked: lock.rows.map((row) => ({
+        assignmentId: row.id,
+        teamId: row.teamId,
+        slotId: row.slotId,
+        effectiveDateRange: row.effectiveDateRange,
+      })),
+      // 11d-0: the slots live relocations moved locked practices onto, held season-wide like a
+      // locked row's own slot.
+      relocated: lock.relocations,
+      placeableTeamIds: classification.placeable,
+      outsideHolds: outside.holds,
+      unitsNeeded: classification.unitsNeeded,
+      preferenceGate: preferences.gate,
+      daylight: {
+        slots: daylightSlots,
+        venues: venueDaylight.venues,
+        timeZone: season.timezone,
+        today: liveFrom,
+        lightingOverrides: lightingOverrides.overrides,
+      },
+      // M4.8: the same dating, and the same today, as the daylight pass.
+      dating: { liveFrom, slots: daylightSlots },
+    };
+    const solverScope = { organizationId: input.organizationId, seasonSettingsId };
+
+    // 6a. PREPARE (Phase D PR D): everything above was read exactly as `solve` reads it; the
+    //     browser's worker searches it. Nothing is searched, persisted or audited here -- a
+    //     refusal above was audited, and a run that is later verified audits itself.
+    if (input.mode === 'prepare') {
+      let encoded: ReturnType<typeof encodeSolverInput>;
+      try {
+        encoded = encodeSolverInput(solverInput, solverScope);
+      } catch (error) {
+        // The input cannot be written down, which `solve` never needed: the page runs that
+        // instead, so a league the encoding refuses is still scheduled.
+        logRequest(logCtx, 'error', 'Auto-scheduler could not encode the input for the browser', {
+          orgId: input.organizationId,
+          seasonSettingsId,
+          message: auditErrorText(error),
+        });
+        await edgeLogger.flush();
+        return jsonResponse(
+          {
+            error:
+              "The season's data could not be handed to the browser, so the server will run the " +
+              `search itself (${(error as Error).message}).`,
+            code: SOLVER_INPUT_UNENCODABLE,
+          },
+          422
+        );
+      }
+      const digest = await digestEncodedInput(encoded);
+      logRequest(logCtx, 'info', 'Auto-scheduler prepared a browser run', {
+        userId: user.id,
+        orgId: input.organizationId,
+        teamCount: input.teams.length,
+        slotCount: input.slots.length,
+        placeableTeams: classification.placeable.length,
+        digest,
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          mode: 'prepare',
+          digest,
+          input: encoded,
+          liveFrom,
+          placeableTeams: classification.placeable.length,
+          practiceUnitsToPlace: Object.values(classification.unitsNeeded).reduce(
+            (a, b) => a + b,
+            0
+          ),
+        },
+        200
+      );
+    }
+
+    // 6b. VERIFY (Phase D PR D): the worker searched the input `prepare` described; refuse unless
+    //     the input just loaded -- by this function, from the store -- is that input, to the byte.
+    //     The digest in the body is only ever compared with the server's own.
+    if (verifyClaims) {
+      const digestCheck = await checkSolverInputDigest(
+        encodeSolverInput(solverInput, solverScope),
+        verifyClaims.digest
+      );
+      if (!digestCheck.ok) {
+        logRequest(logCtx, 'warn', 'Auto-scheduler refused: the inputs changed since prepare', {
+          orgId: input.organizationId,
+          seasonSettingsId,
+          claimed: verifyClaims.digest,
+          current: digestCheck.digest,
+        });
+        await recordAuditNow(auditClient, logCtx, {
+          organizationId: input.organizationId,
+          action: 'scheduler.auto_refused',
+          resourceType: 'practice_schedule',
+          metadata: {
+            reason: INPUT_CHANGED,
+            mode: 'verify',
+            claimed: verifyClaims.digest,
+            current: digestCheck.digest,
+            placementsProposed: verifyClaims.placements.length,
+          },
+        });
+        await edgeLogger.flush();
+        return jsonResponse(
+          {
+            error:
+              'The season changed (its practices, slots, teams, coaches, preferences or settings) ' +
+              'after the browser began this run, so its result was not accepted. Run it again.',
+            code: INPUT_CHANGED,
+          },
+          409
+        );
+      }
+    }
+
+    // 7. Audit + structured logging: scheduler started
     logRequest(logCtx, 'info', 'Auto-scheduler invoked', {
       userId: user.id,
       orgId: input.organizationId,
+      mode: input.mode,
       teamCount: input.teams.length,
       slotCount: input.slots.length,
       lockedLoaded: lock.rows.length,
@@ -683,6 +869,10 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       action: 'scheduler.auto_started',
       resourceType: 'practice_schedule',
       metadata: {
+        // Only a verify says its mode: a solve's record is what it always was.
+        ...(verifyClaims
+          ? { mode: input.mode, placementsProposed: verifyClaims.placements.length }
+          : {}),
         teamCount: input.teams.length,
         slotCount: input.slots.length,
         lockedLoaded: lock.rows.length,
@@ -702,66 +892,47 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       },
     });
 
-    // 7. Prepare data (the slots were prepared at 5c-bis, before the
-    //    preference load that judges them).
-    //    D2: the store's reservations on both, so every placement the search
-    //    makes is judged by them (`checkHardConstraints`).
-    const reserved = applySlotReservations(
-      withSettings.teams.map((t) => ({
-        ...prepareTeam(t),
-        // The store's settings (5c-bis), never the body's.
-        practicesPerWeek: t.practicesPerWeek,
-        practiceMinutes: t.practiceMinutes,
-      })),
-      slots,
-      reservations
-    );
-    const teams = reserved.teams;
-
-    // 8-9. Greedy seed + hill climbing over the placeable teams only. Every
-    //      loaded row -- a TIME TBD series' row included -- is fixed
-    //      occupancy, one entry per ROW.
-    const run = await runPracticeOptimizer({
-      teams,
-      slots: reserved.slots,
-      locked: lock.rows.map((row) => ({
-        assignmentId: row.id,
-        teamId: row.teamId,
-        slotId: row.slotId,
-        effectiveDateRange: row.effectiveDateRange,
-      })),
-      // 11d-0: the slots live relocations moved locked practices onto, held
-      // season-wide like a locked row's own slot.
-      relocated: lock.relocations,
-      placeableTeamIds: classification.placeable,
-      outsideHolds: outside.holds,
-      unitsNeeded: classification.unitsNeeded,
-      preferenceGate: preferences.gate,
-      daylight: {
-        slots: daylightSlots,
-        venues: venueDaylight.venues,
-        timeZone: season.timezone,
-        today: liveFrom,
-        lightingOverrides: lightingOverrides.overrides,
-      },
-      // M4.8: the same dating, and the same today, as the daylight pass.
-      dating: { liveFrom, slots: daylightSlots },
-      config: input.config,
-      // The server's compute cap: when it is the smaller budget the search
-      // stops with `cpu-cap` and the run completes with its best schedule.
-      requestStartedAt,
-      onProgress: (progress) => {
-        // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
-        // and swallows its own failures; the `.catch` that used to trail this
-        // call was a TypeError on `undefined` at every 100th iteration.
-        recordAudit(auditClient, logCtx, {
-          organizationId: input.organizationId,
-          action: 'scheduler.auto_progress',
-          resourceType: 'practice_schedule',
-          metadata: progress,
-        });
-      },
-    });
+    // 8-9. SOLVE: greedy seed + hill climbing over the placeable teams only. VERIFY: the worker's
+    //      placements, seated one at a time through the same admissibility check; what the worker
+    //      reports of its own search stands in for the statistics only a search has, and the score
+    //      is the server's. Both give the one result shape the rest of this function reads.
+    let run: OptimizerResult;
+    // `verify` only: the proposed placements the server refused (each is also unplaced below).
+    let verifyRefused: VerifyRefusal[] = [];
+    if (verifyClaims) {
+      const verified = verifyPracticePlacements({
+        ...solverInput,
+        placements: verifyClaims.placements,
+      });
+      verifyRefused = verified.refused;
+      run = {
+        ...verified,
+        seedScore: verifyClaims.browserRun.seedScore,
+        iterations: verifyClaims.browserRun.iterations,
+        restarts: verifyClaims.browserRun.restarts,
+        elapsedMs: Math.round(verifyClaims.browserRun.elapsedMs),
+        terminationReason: verifyClaims.browserRun.terminationReason,
+      };
+    } else {
+      run = await runPracticeOptimizer({
+        ...solverInput,
+        config: input.config,
+        // The server's compute cap: when it is the smaller budget the search
+        // stops with `cpu-cap` and the run completes with its best schedule.
+        requestStartedAt,
+        onProgress: (progress) => {
+          // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
+          // and swallows its own failures; the `.catch` that used to trail this
+          // call was a TypeError on `undefined` at every 100th iteration.
+          recordAudit(auditClient, logCtx, {
+            organizationId: input.organizationId,
+            action: 'scheduler.auto_progress',
+            resourceType: 'practice_schedule',
+            metadata: progress,
+          });
+        },
+      });
+    }
     const bestAssignments = run.placements;
     // A team whose division wants several practices a week carries that count on each practice it
     // is short of, so the run's report can say "1 of 2" per team (Phase D PR B).
@@ -832,12 +1003,24 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         approvedPreferencesLoaded: preferences.preferencesLoaded,
         preferKeepBreaches: run.preferKeepBreaches,
         daylight: daylight.meta,
+        // A verified browser run says so, with what the server refused of it; a solve's record is
+        // what it always was. `seedScore`, `iterations`, `restarts` and the termination reason
+        // above are the worker's own report; `bestScore` is the server's.
+        ...(verifyClaims
+          ? {
+              mode: 'verify',
+              ranIn: 'browser',
+              placementsProposed: verifyClaims.placements.length,
+              verifyRefused: verifyRefused.length,
+            }
+          : {}),
       },
       input_snapshot: {
         teamCount: teams.length,
         slotCount: slots.length,
         lockedCount: lock.rows.length,
         seed: input.config.seed,
+        ...(verifyClaims ? { mode: 'verify', digest: verifyClaims.digest } : {}),
       },
       created_by: user.id,
       started_at: new Date(Date.now() - totalElapsedMs).toISOString(),
@@ -852,12 +1035,15 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
           ? `Team ${u.teamId} could not be given one of its ${u.target} practices a week`
           : `Team ${u.teamId} could not be assigned`) +
         `: ${u.reason}` +
+        // A verify-refused placement names the rule the server's check found it breaking.
+        (u.rule ? ` (${u.rule})` : '') +
         (u.dimensions?.length ? ` (must_keep ${u.dimensions.join(', ')})` : ''),
       affected_entities: [
         {
           teamId: u.teamId,
           ...(u.target ? { unitId: u.unitId ?? u.teamId, target: u.target } : {}),
           reason: u.reason,
+          ...(u.rule ? { rule: u.rule } : {}),
           dimensions: u.dimensions ?? [],
         },
       ],
@@ -982,6 +1168,19 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
           date: l.date,
         })),
         lightingOverrideRead,
+        ...(verifyClaims
+          ? {
+              mode: 'verify',
+              ranIn: 'browser',
+              placementsProposed: verifyClaims.placements.length,
+              verifyRefused: verifyRefused.map((r) => ({
+                teamId: r.teamId,
+                unitId: r.unitId,
+                slotId: r.slotId,
+                rule: r.rule,
+              })),
+            }
+          : {}),
       },
     });
 
@@ -1082,6 +1281,12 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
           elapsedMs: totalElapsedMs,
           terminationReason,
         },
+        // `verify` only (Phase D PR D): that the worker's schedule was checked, and every proposed
+        // placement the check refused with its rule. Each one is also an `unassigned` entry above
+        // (`verify-refused`), so it is TIME TBD, never dropped. Absent from a `solve`'s answer.
+        ...(verifyClaims
+          ? { verified: { digest: verifyClaims.digest, refused: verifyRefused } }
+          : {}),
       },
       200
     );

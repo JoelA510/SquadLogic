@@ -40,6 +40,7 @@ Feature: Manual roster editor
 
   Scenario: A demo league that has applied no schedule exports nothing and says why
     Given I am in a demo league of 40 players
+    And the demo league's applied practices have been released
     When I open the Exports page
     Then the Exports page says the demo data is placeholder data
     And the Exports page says no practices or games have been applied

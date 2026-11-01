@@ -1,4 +1,4 @@
--- Smoke checks for 20261109010000_season_rollover.sql
+-- Smoke checks for 20261111010000_season_rollover.sql
 --
 -- What it proves, run against the migrated database with prelude.sql's `auth.uid()` stub:
 --   * an admin starts a draft season from the active one: its divisions (a birth-date window moved
@@ -195,6 +195,18 @@ BEGIN
         RAISE EXCEPTION 'a team write in a completed season gave "%"', v_refused;
     END IF;
     RAISE NOTICE 'activation: one active season, the old one completed, read-only (people and schedules), never reactivated';
+
+    -- A division that bears a window cannot be removed once its season has players.
+    BEGIN
+        DELETE FROM public.divisions WHERE id = v_d1;
+        v_refused := 'allowed';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_detail = PG_EXCEPTION_DETAIL;
+        v_refused := v_state || ':' || v_detail;
+    END;
+    IF v_refused <> '22023:season_has_players' THEN
+        RAISE EXCEPTION 'deleting a window-bearing division of a season with players gave "%"', v_refused;
+    END IF;
 
     -- The completed season's clock is fixed too (the calendar feed expands its dates in it).
     BEGIN

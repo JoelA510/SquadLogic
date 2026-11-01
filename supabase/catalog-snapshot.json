@@ -320,7 +320,7 @@
     "CREATE TRIGGER divisions_default_program BEFORE INSERT ON public.divisions FOR EACH ROW EXECUTE FUNCTION divisions_default_program()",
     "CREATE TRIGGER divisions_program_guard BEFORE UPDATE OF program_id ON public.divisions FOR EACH ROW WHEN ((old.program_id IS DISTINCT FROM new.program_id)) EXECUTE FUNCTION divisions_program_guard()",
     "CREATE TRIGGER divisions_set_timestamp BEFORE UPDATE ON public.divisions FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",
-    "CREATE TRIGGER divisions_window_guard BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name ON public.divisions FOR EACH ROW EXECUTE FUNCTION divisions_window_guard()",
+    "CREATE TRIGGER divisions_window_guard BEFORE INSERT OR DELETE OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name ON public.divisions FOR EACH ROW EXECUTE FUNCTION divisions_window_guard()",
     "CREATE TRIGGER enforce_division_season_org_match BEFORE INSERT OR UPDATE OF organization_id, season_settings_id ON public.divisions FOR EACH ROW EXECUTE FUNCTION enforce_division_season_org_match()",
     "CREATE TRIGGER evaluation_runs_set_timestamp BEFORE UPDATE ON public.evaluation_runs FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",
     "CREATE TRIGGER export_jobs_set_timestamp BEFORE UPDATE ON public.export_jobs FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp()",

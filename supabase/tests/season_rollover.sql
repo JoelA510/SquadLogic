@@ -1,6 +1,6 @@
 -- pgTAP: start the next season from this one; draft editing, activation, the age cutoff and
 -- division windows; drafts take imports; completed seasons are read-only
--- (migration 20261109010000; plans docs/changes/2026-10-22-phase-e-seasons.md, "The seven points",
+-- (migration 20261111010000; plans docs/changes/2026-10-22-phase-e-seasons.md, "The seven points",
 -- "Concurrency", Decisions 4-7, and docs/changes/2026-10-27-season-enrollment.md, C3; PR E3b).
 --
 --   * the catalogue of what a rollover copies names every column of `divisions` and
@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(199);
+SELECT plan(208);
 
 -- Helpers: the SQLSTATE and DETAIL of a refusal, and whether a call took the organization's lock.
 CREATE FUNCTION pg_temp.err(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
@@ -919,6 +919,50 @@ ALTER TABLE public.divisions ENABLE TRIGGER divisions_age_rule_revision;
 SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555504'), false, 'control: organization four''s lock is not held');
 DELETE FROM public.divisions WHERE id = 'e5555555-5555-5555-5555-55555555d004';
 SELECT is(pg_temp.season_lock_held('e5555555-5555-5555-5555-555555555504'), true, 'deleting a window-bearing division takes it (the revision trigger)');
+
+-- ── Removing a division that bears a window ─────────────────────────────────────────────
+-- It moves the ages of the players the division would have taken, so a signed-in caller is held to
+-- the rule the band is held to (Codex, #680); cleanup is not: a cascade from a deleted season or
+-- organization finds the parent already gone, a job with no signed-in user passes, and a division with
+-- no window moves no age.
+SELECT is(pg_temp.err(format($$DELETE FROM public.divisions WHERE id = %L$$, (SELECT id FROM stamp_div))),
+    '22023:season_has_players', 'deleting a window-bearing division is refused once the season has players');
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+    ('e5555555-5555-5555-5555-55555555d0f1', 'a1111111-1111-1111-1111-111111111111', (SELECT s1 FROM stampd), 'Plain Division');
+SELECT is(pg_temp.err($$DELETE FROM public.divisions WHERE id = 'e5555555-5555-5555-5555-55555555d0f1'$$),
+    'no error', 'while a division with no window is unaffected in the same season');
+SELECT is(pg_temp.err(format($$DELETE FROM public.divisions WHERE id = %L$$, (SELECT division FROM band_pend))),
+    '22023:import_pending', 'and it is refused while an import is pending');
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, birthdate_start, birthdate_end) VALUES
+    ('e5555555-5555-5555-5555-55555555d0f2', 'e5555555-5555-5555-5555-555555555504', 'e5555555-5555-5555-5555-5555555555a4', 'Window Probe', '2019-01-01', '2019-12-31');
+SELECT is(pg_temp.err($$DELETE FROM public.divisions WHERE id = 'e5555555-5555-5555-5555-55555555d0f2'$$),
+    'no error', 'a draft with no players and no import lets it go');
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT is(pg_temp.err(format($$DELETE FROM public.divisions WHERE id = %L$$, (SELECT id FROM stamp_div))),
+    'no error', 'a job with no signed-in user (the retention job, the demo purge) may remove it');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+-- Whole-season and organization cleanup still cascades, players and windows and all.
+INSERT INTO public.organizations (id, name, slug) VALUES
+    ('e6666666-6666-6666-6666-666666666601', 'Cascade Org One', 'cascade-org-one'),
+    ('e6666666-6666-6666-6666-666666666602', 'Cascade Org Two', 'cascade-org-two');
+DELETE FROM public.season_settings WHERE organization_id IN ('e6666666-6666-6666-6666-666666666601', 'e6666666-6666-6666-6666-666666666602');
+INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
+    ('e6666666-6666-6666-6666-6666666666a1', 'e6666666-6666-6666-6666-666666666601', 'Cascade A', 'draft', 2030),
+    ('e6666666-6666-6666-6666-6666666666a2', 'e6666666-6666-6666-6666-666666666602', 'Cascade B', 'draft', 2030);
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, min_age, max_age, birthdate_start, birthdate_end) VALUES
+    ('e6666666-6666-6666-6666-66666666d001', 'e6666666-6666-6666-6666-666666666601', 'e6666666-6666-6666-6666-6666666666a1', 'Cascade U4', 4, 4, '2023-01-01', '2024-07-31'),
+    ('e6666666-6666-6666-6666-66666666d002', 'e6666666-6666-6666-6666-666666666602', 'e6666666-6666-6666-6666-6666666666a2', 'Cascade U4', 4, 4, '2023-01-01', '2024-07-31');
+INSERT INTO public.players (organization_id, season_settings_id, division_id, first_name, last_name) VALUES
+    ('e6666666-6666-6666-6666-666666666601', 'e6666666-6666-6666-6666-6666666666a1', 'e6666666-6666-6666-6666-66666666d001', 'Cas', 'One'),
+    ('e6666666-6666-6666-6666-666666666602', 'e6666666-6666-6666-6666-6666666666a2', 'e6666666-6666-6666-6666-66666666d002', 'Cas', 'Two');
+SELECT is(pg_temp.err($$DELETE FROM public.season_settings WHERE id = 'e6666666-6666-6666-6666-6666666666a1'$$),
+    'no error', 'deleting a season that has players and a window-bearing division cascades');
+SELECT is((SELECT count(*)::int FROM public.divisions WHERE season_settings_id = 'e6666666-6666-6666-6666-6666666666a1'), 0,
+    'and its division went with it');
+SELECT is(pg_temp.err($$DELETE FROM public.organizations WHERE id = 'e6666666-6666-6666-6666-666666666602'$$),
+    'no error', 'so does deleting an organization whose season has players and a window-bearing division');
+SELECT is((SELECT count(*)::int FROM public.divisions WHERE organization_id = 'e6666666-6666-6666-6666-666666666602'), 0,
+    'and its division went with it too');
 
 -- ── Grants ─────────────────────────────────────────────────────────────────
 RESET role;

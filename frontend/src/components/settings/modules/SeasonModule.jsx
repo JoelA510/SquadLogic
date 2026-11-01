@@ -43,7 +43,7 @@ export default function SeasonModule() {
   // the same second-source-of-truth this gap is made of, one layer up.
   const { currentOrganization, currentSeasonSetting, refetchOrgs } = useOrganization();
   const timezone = currentSeasonSetting?.timezone ?? '';
-  // A completed season's clock is fixed (20261109010000): the calendar feed expands its dates in it.
+  // A completed season's clock is fixed (20261111010000): the calendar feed expands its dates in it.
   const seasonReadOnly = useSeasonReadOnly();
 
   const [seasonFormat, setSeasonFormat] = useState(/** @type {'single' | 'dual'} */ ('single'));

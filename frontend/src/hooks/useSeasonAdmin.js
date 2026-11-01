@@ -9,7 +9,7 @@ import {
 } from '../utils/seasonSchemas.js';
 
 /**
- * The season writers (Phase E3b; migration 20261109010000): start the next season from one, edit
+ * The season writers (Phase E3b; migration 20261111010000): start the next season from one, edit
  * a draft, set a division's birth-date window and activate a draft.
  *
  * Writes go through the four admin definer RPCs only (`admin_create_season_from`,

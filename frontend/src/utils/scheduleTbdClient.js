@@ -44,7 +44,7 @@ export async function refreshAndReadScheduleTbd(
   seasonSettingsId,
   { readOnly = false } = {}
 ) {
-  // A completed season is history (20261109010000): its list is read as it was kept, never rebuilt
+  // A completed season is history (20261111010000): its list is read as it was kept, never rebuilt
   // (the database refuses the rebuild), so looking back at it and exporting it still work.
   if (!readOnly) await refreshScheduleTbd(client, seasonSettingsId);
   return readScheduleTbd(client, seasonSettingsId);

@@ -1,4 +1,4 @@
--- Revert for 20261109010000_season_rollover.sql
+-- Revert for 20261111010000_season_rollover.sql
 --
 -- Puts back the three replaced functions as they stood after 20261108010000 (create_import_job,
 -- finalize_import_job and finalize_coach_import_job: the active season only takes an import; each

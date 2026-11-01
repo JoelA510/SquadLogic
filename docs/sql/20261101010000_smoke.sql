@@ -13,7 +13,7 @@
 --      client's direct write (insert refused, update and delete reach nothing).
 --   3. `create_import_job` fixes the season: none named is the active one, the active one named is
 --      that, another organization's season is refused (42501), and a completed one (22023,
---      `season_completed`); a draft takes a player import since E3b (20261109010000: players belong
+--      `season_completed`); a draft takes a player import since E3b (20261111010000: players belong
 --      to one season) and a field import for it is refused (`season_not_active`).
 --   4. `finalize_import_job` finalizes a job whose season is a draft into the draft; refuses a job
 --      whose season is completed and promotes nobody; keeps a job made for a season on that season
@@ -127,7 +127,7 @@ BEGIN
     IF v_job.season_settings_id IS DISTINCT FROM v_active THEN
         RAISE EXCEPTION 'a job naming the active season was made for %', v_job.season_settings_id;
     END IF;
-    -- 20261109010000 (E3b): a draft takes a player import, since players belong to one season; a
+    -- 20261111010000 (E3b): a draft takes a player import, since players belong to one season; a
     -- field import still goes to the active season only.
     SELECT * INTO v_job FROM public.create_import_job(v_org, 'players', 'f.csv', v_draft);
     IF v_job.season_settings_id IS DISTINCT FROM v_draft THEN
@@ -165,7 +165,7 @@ BEGIN
     INSERT INTO public.staging_players (organization_id, import_job_id, source_row_number, raw_payload, normalized_payload)
     VALUES (v_org, v_job.id, 1, '{}'::jsonb,
             '{"first_name": "Dee", "last_name": "Smoke", "external_registration_id": "SM-D", "age group": "9", "gender": "M"}'::jsonb);
-    -- 20261109010000 (E3b): a job whose season is a draft finalizes into the draft.
+    -- 20261111010000 (E3b): a job whose season is a draft finalizes into the draft.
     PERFORM public.finalize_import_job(v_job.id);
     IF NOT EXISTS (SELECT 1 FROM public.players p WHERE p.external_registration_id = 'SM-D' AND p.season_settings_id = v_draft)
        OR NOT EXISTS (SELECT 1 FROM public.divisions WHERE season_settings_id = v_draft AND name = 'U10B')
@@ -175,7 +175,7 @@ BEGIN
     RAISE NOTICE 'a job whose season is a draft finalizes into the draft (its player and derived division), and the active season gains neither';
 
     -- A job made for a season stays on it: when another season becomes the active one the job
-    -- still finalizes into the season it was made for (a draft now, 20261109010000), not into the
+    -- still finalizes into the season it was made for (a draft now, 20261111010000), not into the
     -- new active season.
     INSERT INTO public.import_jobs (organization_id, job_type, storage_path, status, created_by, season_settings_id)
     VALUES (v_org, 'registration', 'orga/moved.csv', 'importing', v_admin, v_active) RETURNING * INTO v_job;

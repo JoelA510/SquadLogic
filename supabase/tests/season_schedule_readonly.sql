@@ -1,4 +1,4 @@
--- pgTAP: a completed season's schedules are read-only (migration 20261109010000, E3b; Codex's
+-- pgTAP: a completed season's schedules are read-only (migration 20261111010000, E3b; Codex's
 -- finding on #680). Triggers on teams, team_players, team_coach_assignments, practice_assignments,
 -- practice_exceptions and game_assignments refuse any write by a signed-in caller whose team (or
 -- season) is completed (22023, season_completed), whichever writer: the three persistence RPCs and

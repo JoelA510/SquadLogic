@@ -4,7 +4,7 @@ import { waitForMockClient } from './mockReady.js';
 
 /**
  * Starting the next season from this one (plan docs/changes/2026-10-27-season-enrollment.md, E3b;
- * migration 20261109010000). Every check is a DOM assertion; the mock database is touched only to
+ * migration 20261111010000). Every check is a DOM assertion; the mock database is touched only to
  * seed, through `window.__saveMockDB__`. The mock seed has one active season, "Fall 2026", with
  * two players, "Alex Smith" and "Jamie Jones", in the division "U8 Coed".
  */

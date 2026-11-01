@@ -17,12 +17,21 @@ export const DEMO_ANNOUNCE_AT_MS = Object.freeze([5 * 60_000, 60_000]);
 /**
  * The auto-scheduler's search budget. A run's CPU is its iterations, and a request to the Edge
  * Function gets 2 s of CPU in all (`CPU_CAP_MS` in `auto-scheduler-solver.ts` stops a search at
- * 1.5 s and returns its best schedule). Measured on the seeded demo league (128 teams, 196 slots):
- * 1000 iterations cost 2.06-2.41 s of CPU; 100 iterations cost about 0.45 s, and the greedy seed
- * alone already places all 128 teams. A demo keeps asking for 150 iterations and the schema's
- * smallest time budget: that finishes well inside the cap, so every demo run gets the same
- * schedule and none says "stopped at the server's time limit", which a run ended by the cap
- * would, at a point that depends on the server's speed.
+ * 1.5 s and returns its best schedule). Measured on Deno, on the demo league as it was (128 teams,
+ * 196 slots): 1000 iterations cost 2.06-2.41 s of CPU; 100 iterations cost about 0.45 s.
+ *
+ * Re-measured for Phase D, PR F (executed in Node 24, the same solver, three runs each, the cap
+ * off; CPU ms): the league as it was cost 138-254 at 100 iterations, 194-313 at 150, 389-458 at
+ * 300 and 1,251-1,404 at 1000; a visitor's run now (120 practice units, 132 seeded rows held, 304
+ * slots, two practices a week of 60 or 90 minutes on different weekdays) costs 139-206, 191-309,
+ * 360-469 and 1,224-1,270. The cost per iteration is unchanged (within the spread), and the greedy
+ * seed alone places all 120 practices with none TIME TBD. Node ran about 1.7 times faster than the
+ * recorded Deno figure at 1000 iterations, so 150 iterations are expected to cost about 0.5 s of
+ * CPU on the Edge, inside the cap. A demo keeps asking for 150 iterations and the schema's smallest
+ * time budget: that finishes well inside the cap, so every demo run gets the same schedule and none
+ * says "stopped at the server's time limit", which a run ended by the cap would, at a point that
+ * depends on the server's speed. (The Deno figure for the new league is a conversion, not a
+ * measurement: the Supabase edge runtime was not available where this was written.)
  */
 const DEMO_AUTO_SCHEDULER_CONFIG = Object.freeze({
   timeBudgetMs: 1000,

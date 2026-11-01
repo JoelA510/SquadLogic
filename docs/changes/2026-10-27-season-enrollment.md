@@ -170,7 +170,7 @@ Built as written; where the code or production differed from the plan:
 ## Build notes: E3b (2026-10-28)
 
 Built as written; where the plans left a choice, the recommended option was taken (listed in the PR body
-under "For the owner"). Migration `20261109010000_season_rollover.sql`.
+under "For the owner"). Migration `20261111010000_season_rollover.sql`.
 
 - **RPCs.** `admin_create_season_from(source, name, year, start, end)`, `admin_update_draft_season(season,
   patch)`, `admin_activate_season(season)` and, for the optional window the C3 section names,
@@ -239,7 +239,12 @@ under "For the owner"). Migration `20261109010000_season_rollover.sql`.
   (`import_pending`), the change is refused. `upsert_division_for_import` is left as it is and meets the
   trigger: a call that names no band (the coed transition's) changes nothing, and one that moves the band
   of a window-bearing division in such a season is refused loudly rather than ignored, since silently
-  keeping the old band would hide that the admin's request did nothing.
+  keeping the old band would hide that the admin's request did nothing. **Removing a division that bears a window** is held to the same rule (Codex, round five): its window
+  would have taken players, so a signed-in caller's delete is refused once the season has players or an import is
+  pending. Cleanup is exempt, by the mechanisms the other triggers use: a cascade from a deleted season or
+  organization reaches the row after the parent is already gone (the referential action runs after the parent row
+  is deleted, and the trigger checks that), and a job with no signed-in user (the retention job, the demo
+  purge) passes. A division with no window moves no age and is not checked.
 - **Guard widening.** `create_import_job`, `finalize_import_job` and `finalize_coach_import_job` allow the
   active season or a draft and refuse a completed one; `finalize_field_import_job` (organization-level
   locations and fields) and a field job for a draft stay active-only.

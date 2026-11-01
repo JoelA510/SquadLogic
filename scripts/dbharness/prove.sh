@@ -200,8 +200,13 @@ R58="$REPO/docs/sql/20261108010000_revert.sql"
 # E3b: the next season from this one, draft editing and activation, the age cutoff and division
 # windows, drafts that take imports, completed seasons read-only, and the revert. It replaces the two
 # finalizers and create_import_job, so the plants that aimed at those bodies in $M58 are re-aimed here.
-M59="$REPO/supabase/migrations/20261109010000_season_rollover.sql"
-R59="$REPO/docs/sql/20261109010000_revert.sql"
+M59="$REPO/supabase/migrations/20261111010000_season_rollover.sql"
+R59="$REPO/docs/sql/20261111010000_revert.sql"
+
+# Phase D, F: the demo league's practices (each division's count and length, the one lit venue, the 304-slot
+# grid, the solver-built schedule of U4 and U5 to U8, the demo start replaced to write it), and the revert.
+M60="$REPO/supabase/migrations/20261110010000_demo_practices.sql"
+R60="$REPO/docs/sql/20261110010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4983,9 +4988,9 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
 
-# Seasons rolled over (20261109010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Seven
+# Seasons rolled over (20261111010000; plan docs/changes/2026-10-27-season-enrollment.md, E3b). Eight
 # plants, each executed by hand against the smoke and supabase/tests/season_rollover.sql (both red;
-# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth to seventh against the smoke
+# the fourth against the smoke and supabase/tests/season_schedule_readonly.sql, the fifth to eighth against the smoke
 # and the stamp block of season_rollover.sql):
 # a draft season refused an import again; the rollover without the organization's season lock and
 # row locks (the smoke's second session then writes at once instead of timing out); and a completed
@@ -4993,15 +4998,16 @@ plant "M58 the finalizer matches a player of any season" "$M59" \
 # completed season's schedule writable again (the smoke's team write is accepted); and the finalizer
 # applying a file whose age-rule stamp is stale (the smoke's finalize is accepted); and a cutoff change
 # that leaves the age-rule revision where it was (the same, and the A, B, A the smoke does); and a
-# cutoff write taking no season lock (the smoke's pg_locks check).
+# cutoff write taking no season lock (the smoke's pg_locks check); and a division guard that ignores a
+# delete (the smoke's delete of a window-bearing division in a season with players).
 plant "M59 the finalizer refuses a draft season again" "$M59" \
-  "    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
+  "    -- a new row here. So the active season and a draft season both take an import (20261111010000:" \
   "    IF v_season_status IS NOT NULL AND v_season_status <> 'active' THEN
         RAISE EXCEPTION 'Season % is % and takes no import yet', v_season_settings_id, v_season_status
             USING ERRCODE = '22023', DETAIL = 'season_not_active';
     END IF;
-    -- a new row here. So the active season and a draft season both take an import (20261109010000:" \
-  "smoke 20261109010000"
+    -- a new row here. So the active season and a draft season both take an import (20261111010000:" \
+  "smoke 20261111010000"
 
 plant "M59 the rollover takes no season lock" "$M59" \
   "    PERFORM pg_advisory_xact_lock(hashtextextended('season:' || v_org::text, 0));
@@ -5009,28 +5015,28 @@ plant "M59 the rollover takes no season lock" "$M59" \
 
     SELECT * INTO v_source FROM public.season_settings s WHERE s.id = p_source_season_id;" \
   "    SELECT * INTO v_source FROM public.season_settings s WHERE s.id = p_source_season_id;" \
-  "smoke 20261109010000"
+  "smoke 20261111010000"
 
 plant "M59 a completed season is writable for a signed-in caller" "$M59" \
   "    IF v_status = 'completed' THEN
         -- The cascade of a deleted organization: the season may not have been removed yet." \
   "    IF v_status = 'completed' AND false THEN
         -- The cascade of a deleted organization: the season may not have been removed yet." \
-  "smoke 20261109010000"
+  "smoke 20261111010000"
 
 plant "M59 a completed season's schedule is writable for a signed-in caller" "$M59" \
   "        IF v_status = 'completed' THEN
             -- The cascade of a deleted organization: the season may not have been removed yet." \
   "        IF v_status = 'completed' AND false THEN
             -- The cascade of a deleted organization: the season may not have been removed yet." \
-  "smoke 20261109010000"
+  "smoke 20261111010000"
 
 plant "M59 the finalizer applies a file whose age-rule stamp is stale" "$M59" \
   "    IF v_job.age_rule_revision IS NOT NULL
        AND (v_job.age_rule_season_id IS DISTINCT FROM" \
   "    IF v_job.age_rule_revision IS NOT NULL AND false
        AND (v_job.age_rule_season_id IS DISTINCT FROM" \
-  "smoke 20261109010000"
+  "smoke 20261111010000"
 
 # The age rule changed and changed back (A, B, A) between the read and the apply: the values look the
 # same, so only a revision that goes up on the change catches it. Without the bump in the cutoff guard,
@@ -5039,7 +5045,7 @@ plant "M59 the age-rule revision does not move with the cutoff" "$M59" \
   "    NEW.age_rule_revision := OLD.age_rule_revision + 1;
     RETURN NEW;" \
   "    RETURN NEW;" \
-  "smoke 20261109010000"
+  "smoke 20261111010000"
 
 # The writers of the age rule take the finalizer's season lock, so an uncommitted rule change cannot
 # race a finalization that read the revision: without the lock in the season guard, the smoke's
@@ -5056,7 +5062,41 @@ plant "M59 the season guard takes no season lock" "$M59" \
     -- a writer that reaches here by another path (a direct write) waits for a finalization in
     -- progress, and then sees its players and its revision.
 " \
-  "smoke 20261109010000"
+  "smoke 20261111010000"
+
+# Removing a division that bears a window moves the ages it would have taken: the guard covers DELETE.
+# Without it the smoke's delete of a window-bearing division in a season with players is accepted.
+plant "M59 the division guard ignores a delete" "$M59" \
+  "    BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name OR DELETE ON public.divisions" \
+  "    BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name ON public.divisions" \
+  "smoke 20261111010000"
+
+# The demo's practices (20261110010000; plan docs/changes/2026-10-27-phase-d-scheduling.md, F). Three plants,
+# each run by hand against a scratch cluster built with the planted migration (the smoke 20261110010000 red in
+# each, at the check named); anchors resolved by PLANT_ANCHORS_ONLY=1. (The first plant keeps the column named,
+# so the migration's own end-state check, which only looks for the name, lets it apply and the smoke must catch it.)
+#   - every venue is copied lit, as the demo start did before: the owner's "only one lit field may run past
+#     sunset" is gone and every unlit ground's late practice is exempt from the daylight flag;
+#   - a seeded practice row that finds no slot no longer refuses the start: a team is silently without a
+#     practice and nothing says so;
+#   - the division's practice length is not copied: the demo's divisions take "any slot length" and the
+#     auto-scheduler may give a 90-minute team a 60-minute slot.
+plant "M60 the demo copies every venue lit" "$M60" \
+  "    SELECT v_org, l.name, l.lighting_available, l.latitude, l.longitude FROM demo_seed.locations l;" \
+  "    SELECT v_org, l.name, l.lighting_available OR true, l.latitude, l.longitude FROM demo_seed.locations l;" \
+  "smoke 20261110010000"
+
+plant "M60 a seeded practice row with no slot no longer refuses the start" "$M60" \
+  "    IF v_rows IS DISTINCT FROM v_expected THEN" \
+  "    IF false THEN" \
+  "smoke 20261110010000"
+
+plant "M60 the division's practice length is not copied" "$M60" \
+  "           d.practices_per_week, d.practice_minutes
+      FROM demo_seed.divisions d;" \
+  "           d.practices_per_week, NULL
+      FROM demo_seed.divisions d;" \
+  "smoke 20261110010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

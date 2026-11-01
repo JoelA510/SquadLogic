@@ -60,7 +60,7 @@ export function handleScheduleTbdRpc(db, name, params, ctx) {
         String(row.season_settings_id) === String(seasonId) &&
         String(row.organization_id) === String(season.organization_id)
     );
-    // 20261109010000: the refresh rebuilds the season's practice rows (delete and insert), which a
+    // 20261111010000: the refresh rebuilds the season's practice rows (delete and insert), which a
     // completed season's TIME TBD trigger refuses once the season has any.
     if (season.status === 'completed' && practiceRows.length > 0) {
       return {

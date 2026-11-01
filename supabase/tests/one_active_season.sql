@@ -10,7 +10,7 @@
 --     delete reach no row) and members still read it;
 --   * `create_import_job` fixes the job's season: none named is the active season, another
 --     organization's season is refused (42501) and so is a completed one (22023); a draft takes a
---     player import since E3b (20261109010000: players belong to one season), each refusal
+--     player import since E3b (20261111010000: players belong to one season), each refusal
 --     creating no job;
 --   * `finalize_import_job` reads the job's season: a job whose season is a draft finalizes into the
 --     draft, a completed one is refused and promotes nobody, a job made for a season that has since
@@ -113,7 +113,7 @@ SELECT is(
     'a1111111-1111-1111-1111-111111111aaa'::uuid,
     'naming the active season is the job''s season'
 );
--- E3b (20261109010000): a draft takes a registration import since players belong to one season
+-- E3b (20261111010000): a draft takes a registration import since players belong to one season
 -- (E3a), so the job is made for the draft; a field import still goes to the active season only.
 SELECT is(
     (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'players', 'f.csv',

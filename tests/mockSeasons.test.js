@@ -1,7 +1,7 @@
-// The mock client's twin of migration 20261109010000 (plans docs/changes/2026-10-22-phase-e-seasons.md
+// The mock client's twin of migration 20261111010000 (plans docs/changes/2026-10-22-phase-e-seasons.md
 // and docs/changes/2026-10-27-season-enrollment.md, Phase E3b): the four season writers follow the
 // SQL's outcomes, refusals and audit rows (held to them by supabase/tests/season_rollover.sql and
-// docs/sql/20261109010000_smoke.sql); a draft takes an import and leaves the active season's row
+// docs/sql/20261111010000_smoke.sql); a draft takes an import and leaves the active season's row
 // untouched; a completed season is read-only for players and coaches.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';

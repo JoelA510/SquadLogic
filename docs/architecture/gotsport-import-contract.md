@@ -160,7 +160,7 @@ repeated id counts once). Rules:
 
 Every player and coach row has a `season_settings_id`, and an import adds to
 the season its job was made for (the active one, or a draft: since
-`20261109010000` a draft season takes a player or coach import, so next
+`20261111010000` a draft season takes a player or coach import, so next
 season's registrations can be loaded while this one runs; a completed season
 never does, and a field import stays with the active season). **The import matches existing rows in that season only**: a
 registration id, or a coach email, that another season holds is a new row in
@@ -259,7 +259,7 @@ starts, `S` below:
   Aug 1 (S−N−1) … Jul 31 (S−N).
 - **`birth_year`** — calendar cutoff; the U(N) cohort is born in calendar year
   S−N.
-- **`custom`** (`20261109010000`) — a cutoff month and day the club picks
+- **`custom`** (`20261111010000`) — a cutoff month and day the club picks
   (`age_cutoff_month`, `age_cutoff_day`), applied every season year: a player born
   on or after the cutoff day is in the cohort one U-number younger, as with Aug 1.
   A cutoff of Jan 1 is the calendar year, Feb 29 counts as Mar 1 in a year

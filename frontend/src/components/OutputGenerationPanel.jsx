@@ -541,7 +541,7 @@ export default function OutputGenerationPanel({
   const { user } = useAuth() || {};
   const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
   const seasonSettingsId = currentSeasonSetting?.id ?? null;
-  // A completed season's TIME TBD list is read, never rebuilt (20261109010000).
+  // A completed season's TIME TBD list is read, never rebuilt (20261111010000).
   const seasonCompleted = currentSeasonSetting?.status === 'completed';
   // How many TIME TBD items the season has, as refreshed and read when the panel opened (or the season
   // changed). The refresh matters here: a run that placed nothing never reached the practice save, so

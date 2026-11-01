@@ -1,7 +1,7 @@
 // Imports carry their season (Phase E1; migration 20261101010000; plan
 // docs/changes/2026-10-22-phase-e-seasons.md, point 5). The mock twin: `create_import_job` fixes
 // the season (the active one; another organization's and a completed one are refused; since E3b,
-// migration 20261109010000, a draft takes a player or coach import because a player belongs to one
+// migration 20261111010000, a draft takes a player or coach import because a player belongs to one
 // season, while a field import stays with the active season), and `finalize_import_job` and
 // `finalize_field_import_job` read the job's season, not "the active one first, then the newest".
 // And the browser's call: the season is sent only when it is not the active one, so a call for

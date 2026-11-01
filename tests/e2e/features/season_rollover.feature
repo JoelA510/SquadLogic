@@ -3,7 +3,7 @@ Feature: Start next season from this one
   I want to prepare next season while this one is still running
   So that I can import next season's registrations without disturbing this season's players
 
-  Phase E3b (docs/changes/2026-10-27-season-enrollment.md; migration 20261109010000): an admin
+  Phase E3b (docs/changes/2026-10-27-season-enrollment.md; migration 20261111010000): an admin
   starts a draft season from the active one (its divisions and programs are copied, no people),
   sets the draft's age cutoff, imports a registration file into it, and activates it. The active
   season's Players page does not change until then, and the draft's shows the new rows. The season

@@ -104,7 +104,7 @@ describe('the mock refresh_schedule_tbd_practices', () => {
     expect(JSON.stringify(db.schedule_tbd)).toBe(before);
   });
 
-  it('refuses the rebuild of a completed season that has rows (20261109010000), and answers for one with none', () => {
+  it('refuses the rebuild of a completed season that has rows (20261111010000), and answers for one with none', () => {
     const completed = {
       ...db,
       season_settings: [

@@ -877,7 +877,7 @@ const MOCK_ISO_DOW = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
  */
 /**
  * 20261101010000: a field import goes only to the organization's active season (fields and
- * locations are organization-level). Since 20261109010000 a draft season takes a player or coach
+ * locations are organization-level). Since 20261111010000 a draft season takes a player or coach
  * import, as players and coaches belong to one season; this is the refusal that remains. Mirrors
  * the SQL refusal.
  */
@@ -2618,7 +2618,7 @@ export const mockSupabase = {
         if (!programs.error) saveDB(db);
         return programs;
       }
-      // Seasons rolled over (migration 20261109010000): the four season writers, refusals included.
+      // Seasons rolled over (migration 20261111010000): the four season writers, refusals included.
       const seasons = handleSeasonRpc(db, name, params, { currentUserId, isOrgAdmin });
       if (seasons) {
         if (!seasons.error) saveDB(db);
@@ -4553,7 +4553,7 @@ export const mockSupabase = {
             },
           };
         }
-        // 20261109010000: the active season or a draft takes a player or coach import; a field
+        // 20261111010000: the active season or a draft takes a player or coach import; a field
         // import stays with the active season.
         if (
           named.status !== 'active' &&
@@ -5049,7 +5049,7 @@ export const mockSupabase = {
           String(item.name).toLowerCase() === String(p_name).toLowerCase()
       );
       if (division) {
-        // 20261109010000: the band of a division that bears a window is part of the age rule, fixed
+        // 20261111010000: the band of a division that bears a window is part of the age rule, fixed
         // once the season has players or while an import is pending (refused, never ignored); the
         // arguments left out change nothing (COALESCE).
         const nextBand = {
@@ -5091,7 +5091,7 @@ export const mockSupabase = {
       if (rejected) {
         return { data: null, error: { message: `field ${rejected} is not editable` } };
       }
-      // 20261109010000: a completed season is read-only.
+      // 20261111010000: a completed season is read-only.
       const readOnly = completedSeasonRefusal(db, [player]);
       if (readOnly) return readOnly;
       const patch = { ...(p_patch || {}) };
@@ -8050,7 +8050,7 @@ export const mockSupabase = {
               cutoffMode: importSeasonRow?.age_cutoff_mode ?? null,
               cutoffMonth: importSeasonRow?.age_cutoff_month ?? null,
               cutoffDay: importSeasonRow?.age_cutoff_day ?? null,
-              // As the Edge Function does (20261109010000): the season's divisions with a
+              // As the Edge Function does (20261111010000): the season's divisions with a
               // birth-date window, so a birth date in one counts as that division's age.
               divisions: ageRule?.divisions ?? [],
             });

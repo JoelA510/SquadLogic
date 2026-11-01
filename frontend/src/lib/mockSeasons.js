@@ -1,5 +1,5 @@
 /**
- * Mock arms for the season writers of migration `20261109010000_season_rollover.sql` (Phase E3b;
+ * Mock arms for the season writers of migration `20261111010000_season_rollover.sql` (Phase E3b;
  * plans `docs/changes/2026-10-22-phase-e-seasons.md` and `docs/changes/2026-10-27-season-enrollment.md`):
  * `admin_create_season_from`, `admin_update_draft_season`, `admin_set_division_birthdate_window` and
  * `admin_activate_season`, and the completed-season read-only rule for players and coaches.

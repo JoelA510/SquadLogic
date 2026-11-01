@@ -68,8 +68,8 @@
 -- whose text it has not seen (the md5 of `prosrc`, carriage returns stripped, below; read off a
 -- build of the repository at 20261108010000 and compared with production's on 2026-10-28).
 --
--- Reversible in structure: docs/sql/20261109010000_revert.sql restores the three bodies and drops
--- everything else here. Smoke: docs/sql/20261109010000_smoke.sql. pgTAP: supabase/tests/season_rollover.sql.
+-- Reversible in structure: docs/sql/20261111010000_revert.sql restores the three bodies and drops
+-- everything else here. Smoke: docs/sql/20261111010000_smoke.sql. pgTAP: supabase/tests/season_rollover.sql.
 
 BEGIN;
 
@@ -134,11 +134,11 @@ ALTER TABLE public.season_settings
     );
 
 COMMENT ON COLUMN public.season_settings.age_cutoff_mode IS
-    'Age-group cutoff model: school_year_aug_jul (Aug 1; the default), birth_year (Jan 1 - Dec 31) or custom (age_cutoff_month / age_cutoff_day, every season year). Changed only on a draft season with no players (admin_update_draft_season; season_settings_cutoff_guard). 20261109010000.';
+    'Age-group cutoff model: school_year_aug_jul (Aug 1; the default), birth_year (Jan 1 - Dec 31) or custom (age_cutoff_month / age_cutoff_day, every season year). Changed only on a draft season with no players (admin_update_draft_season; season_settings_cutoff_guard). 20261111010000.';
 COMMENT ON COLUMN public.season_settings.age_cutoff_month IS
-    'The custom cutoff''s month (1-12); NULL unless age_cutoff_mode is custom. A player born on or after the cutoff day is in the cohort one U-number younger; Jan 1 is the calendar year. 20261109010000.';
+    'The custom cutoff''s month (1-12); NULL unless age_cutoff_mode is custom. A player born on or after the cutoff day is in the cohort one U-number younger; Jan 1 is the calendar year. 20261111010000.';
 COMMENT ON COLUMN public.season_settings.age_cutoff_day IS
-    'The custom cutoff''s day of the month; NULL unless age_cutoff_mode is custom. 20261109010000.';
+    'The custom cutoff''s day of the month; NULL unless age_cutoff_mode is custom. 20261111010000.';
 
 -- ---------------------------------------------------------------------------
 -- 3. What a rollover copies, from a catalogue the tests hold to the table.
@@ -201,9 +201,9 @@ REVOKE ALL ON FUNCTION public.rollover_division_skipped_columns() FROM PUBLIC, a
 REVOKE ALL ON FUNCTION public.rollover_season_columns() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.rollover_season_skipped_columns() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.rollover_division_columns() IS
-    'The divisions columns admin_create_season_from copies. With rollover_division_skipped_columns() it names every column of divisions (held by supabase/tests/season_rollover.sql). 20261109010000.';
+    'The divisions columns admin_create_season_from copies. With rollover_division_skipped_columns() it names every column of divisions (held by supabase/tests/season_rollover.sql). 20261111010000.';
 COMMENT ON FUNCTION public.rollover_season_columns() IS
-    'The season_settings columns admin_create_season_from copies. With rollover_season_skipped_columns() it names every column (held by supabase/tests/season_rollover.sql). 20261109010000.';
+    'The season_settings columns admin_create_season_from copies. With rollover_season_skipped_columns() it names every column (held by supabase/tests/season_rollover.sql). 20261111010000.';
 
 -- ---------------------------------------------------------------------------
 -- 4. Once a season has players, its age rule does not change.
@@ -240,7 +240,7 @@ $$;
 
 REVOKE ALL ON FUNCTION public.season_has_pending_player_import(uuid) FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_has_pending_player_import(uuid) IS
-    'True while a player import is in progress for the season (an unfinished registration job with staged rows not yet promoted): its natural ages are staged under the rule in force, so the rule does not change until the import is finished or cancelled. 20261109010000.';
+    'True while a player import is in progress for the season (an unfinished registration job with staged rows not yet promoted): its natural ages are staged under the rule in force, so the rule does not change until the import is finished or cancelled. 20261111010000.';
 
 -- The age rule a player file was checked under. import-validation counts each natural age under the
 -- season's rule and stages it; a rule change made after its read but before its first staged row
@@ -252,14 +252,14 @@ COMMENT ON FUNCTION public.season_has_pending_player_import(uuid) IS
 -- (22023, `age_rule_changed`): the file is validated again.
 ALTER TABLE public.season_settings ADD COLUMN age_rule_revision bigint NOT NULL DEFAULT 0;
 COMMENT ON COLUMN public.season_settings.age_rule_revision IS
-    'Goes up by one on every change that moves a natural age: the cutoff mode, month or day, the season year, and a window-bearing division''s window, age band or (where the name supplies the band) name. Never reset. import_age_rule stamps a player file with it; finalize_import_job refuses a file stamped with another (age_rule_changed). 20261109010000.';
+    'Goes up by one on every change that moves a natural age: the cutoff mode, month or day, the season year, and a window-bearing division''s window, age band or (where the name supplies the band) name. Never reset. import_age_rule stamps a player file with it; finalize_import_job refuses a file stamped with another (age_rule_changed). 20261111010000.';
 
 ALTER TABLE public.import_jobs ADD COLUMN age_rule_season_id uuid;
 ALTER TABLE public.import_jobs ADD COLUMN age_rule_revision bigint;
 COMMENT ON COLUMN public.import_jobs.age_rule_season_id IS
-    'The season whose age rule the player file was validated under (with age_rule_revision). NULL: not stamped. 20261109010000.';
+    'The season whose age rule the player file was validated under (with age_rule_revision). NULL: not stamped. 20261111010000.';
 COMMENT ON COLUMN public.import_jobs.age_rule_revision IS
-    'season_settings.age_rule_revision when the player file was validated; finalize_import_job refuses the job when the season''s revision is another (age_rule_changed). NULL: not stamped (a coach or field job, or one made before 20261109010000), never refused. 20261109010000.';
+    'season_settings.age_rule_revision when the player file was validated; finalize_import_job refuses the job when the season''s revision is another (age_rule_changed). NULL: not stamped (a coach or field job, or one made before 20261111010000), never refused. 20261111010000.';
 
 -- The rule the validation counts ages with, and its revision, from ONE statement (one snapshot), so
 -- the revision is the revision of exactly the data returned. With a job it also stamps the job with
@@ -326,7 +326,7 @@ $$;
 REVOKE ALL ON FUNCTION public.import_age_rule(uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.import_age_rule(uuid, uuid, boolean) TO service_role;
 COMMENT ON FUNCTION public.import_age_rule(uuid, uuid, boolean) IS
-    'Service role only (import-validation): the age rule a player file is counted under (season, cutoff, season year, window-bearing divisions) and its revision, from one statement; with a job it stamps the job with that revision (p_restart replaces an earlier stamp). NULL when the organization has no season for the job. 20261109010000.';
+    'Service role only (import-validation): the age rule a player file is counted under (season, cutoff, season year, window-bearing divisions) and its revision, from one statement; with a job it stamps the job with that revision (p_restart replaces an earlier stamp). NULL when the organization has no season for the job. 20261111010000.';
 
 CREATE FUNCTION public.season_settings_cutoff_guard()
 RETURNS trigger
@@ -388,7 +388,7 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.division_age_rule_differs(public.divisions, public.divisions) FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.division_age_rule_differs(public.divisions, public.divisions) IS
-    'True when a change to a division moves a natural age: its birth-date window, or (for a division that bears one) its age band, or its name where the name supplies the band. 20261109010000.';
+    'True when a change to a division moves a natural age: its birth-date window, or (for a division that bears one) its age band, or its name where the name supplies the band. 20261111010000.';
 
 CREATE FUNCTION public.divisions_window_guard()
 RETURNS trigger
@@ -398,6 +398,29 @@ SET search_path = public
 SET timezone = 'UTC'
 AS $$
 BEGIN
+    -- Removing a division that bears a window moves the ages of the players it would have taken, so it
+    -- is held to the same rule. Whole-season and organization cleanup is not: a delete that is the
+    -- cascade of a deleted season or organization finds that parent already gone (the referential
+    -- action runs after the parent row is deleted), a job with no signed-in user (the retention
+    -- job, the demo purge) is exempt as in the completed-season triggers, and a division with no
+    -- window moves no age.
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.birthdate_start IS NULL OR OLD.birthdate_end IS NULL OR auth.uid() IS NULL
+           OR NOT EXISTS (SELECT 1 FROM public.season_settings s WHERE s.id = OLD.season_settings_id)
+           OR NOT EXISTS (SELECT 1 FROM public.organizations o WHERE o.id = OLD.organization_id) THEN
+            RETURN OLD;
+        END IF;
+        PERFORM pg_advisory_xact_lock(hashtextextended('season:' || OLD.organization_id::text, 0));
+        IF EXISTS (SELECT 1 FROM public.players p WHERE p.season_settings_id = OLD.season_settings_id) THEN
+            RAISE EXCEPTION 'Season % has players: a division that bears a birth-date window cannot be removed', OLD.season_settings_id
+                USING ERRCODE = '22023', DETAIL = 'season_has_players';
+        END IF;
+        IF public.season_has_pending_player_import(OLD.season_settings_id) THEN
+            RAISE EXCEPTION 'Season % has a player import in progress: finish or cancel it before a division that bears a birth-date window is removed', OLD.season_settings_id
+                USING ERRCODE = '22023', DETAIL = 'import_pending';
+        END IF;
+        RETURN OLD;
+    END IF;
     IF TG_OP = 'UPDATE' AND NOT public.division_age_rule_differs(OLD, NEW) THEN
         RETURN NEW;
     END IF;
@@ -420,7 +443,7 @@ END;
 $$;
 
 CREATE TRIGGER divisions_window_guard
-    BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name ON public.divisions
+    BEFORE INSERT OR UPDATE OF birthdate_start, birthdate_end, min_age, max_age, name OR DELETE ON public.divisions
     FOR EACH ROW EXECUTE FUNCTION public.divisions_window_guard();
 
 -- The revision of the season's age rule goes up with every such change (after it is allowed), and
@@ -458,11 +481,11 @@ REVOKE ALL ON FUNCTION public.season_settings_cutoff_guard() FROM PUBLIC, anon, 
 REVOKE ALL ON FUNCTION public.divisions_window_guard() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.divisions_age_rule_revision() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_settings_cutoff_guard() IS
-    'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending); takes the season lock first and raises the age-rule revision. 20261109010000.';
+    'Trigger function: refuses a change of a season''s age cutoff or season year once it has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending); takes the season lock first and raises the age-rule revision. 20261111010000.';
 COMMENT ON FUNCTION public.divisions_window_guard() IS
-    'Trigger function: refuses a new or changed division birth-date window, or the age band (or band-supplying name) of a division that bears one, once the division''s season has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261109010000.';
+    'Trigger function: refuses a new or changed division birth-date window, or the age band (or band-supplying name) of a division that bears one, or the removal of such a division (a signed-in caller; a cascade from a deleted season or organization passes), once the division''s season has players (22023, season_has_players) or while a player import is in progress for it (22023, import_pending). 20261111010000.';
 COMMENT ON FUNCTION public.divisions_age_rule_revision() IS
-    'Trigger function: raises the season''s age_rule_revision when a division change moves a natural age, or a window-bearing division arrives or goes. 20261109010000.';
+    'Trigger function: raises the season''s age_rule_revision when a division change moves a natural age, or a window-bearing division arrives or goes. 20261111010000.';
 
 -- A completed season's clock is history: the calendar feed expands its occurrences in this timezone, so
 -- changing it would move every date of a season that is over. The RPC (`admin_set_season_timezone`) and
@@ -491,7 +514,7 @@ CREATE TRIGGER season_settings_completed_guard
 
 REVOKE ALL ON FUNCTION public.season_settings_completed_guard() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_settings_completed_guard() IS
-    'Trigger function: refuses a signed-in caller''s change of a completed season''s timezone (22023, season_completed). 20261109010000.';
+    'Trigger function: refuses a signed-in caller''s change of a completed season''s timezone (22023, season_completed). 20261111010000.';
 
 -- ---------------------------------------------------------------------------
 -- 5. A completed season is read-only, players and coaches included.
@@ -620,11 +643,11 @@ CREATE TRIGGER game_assignments_readonly_when_completed
 
 REVOKE ALL ON FUNCTION public.season_schedule_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_schedule_readonly_when_completed() IS
-    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments and schedule_tbd: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261109010000.';
+    'Trigger function on teams, team_players, team_coach_assignments, practice_assignments, practice_exceptions, game_assignments and schedule_tbd: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season, team or organization pass. 20261111010000.';
 
 REVOKE ALL ON FUNCTION public.season_rows_readonly_when_completed() FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.season_rows_readonly_when_completed() IS
-    'Trigger function on players and coaches: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season or organization pass. 20261109010000.';
+    'Trigger function on players and coaches: a signed-in caller cannot insert, update or delete a row of a completed season (22023, season_completed). Callers with no signed-in user and cascades from a deleted season or organization pass. 20261111010000.';
 
 -- ---------------------------------------------------------------------------
 -- 6. The four writers.
@@ -1119,13 +1142,13 @@ GRANT EXECUTE ON FUNCTION public.admin_set_division_birthdate_window(uuid, date,
 GRANT EXECUTE ON FUNCTION public.admin_activate_season(uuid) TO authenticated;
 
 COMMENT ON FUNCTION public.admin_create_season_from(uuid, text, integer, date, date) IS
-    'Admin-only: a new draft season from any season of the organization: its divisions (every column of rollover_division_columns(), birth-date windows shifted by the difference in season years) and programs, and no player, coach or team; season settings from rollover_season_columns(). Takes the organization''s season lock. Audited as season.created_from. 20261109010000.';
+    'Admin-only: a new draft season from any season of the organization: its divisions (every column of rollover_division_columns(), birth-date windows shifted by the difference in season years) and programs, and no player, coach or team; season settings from rollover_season_columns(). Takes the organization''s season lock. Audited as season.created_from. 20261111010000.';
 COMMENT ON FUNCTION public.admin_update_draft_season(uuid, jsonb) IS
-    'Admin-only: patch a season''s name and dates (draft or active) and its season year and age cutoff (a draft with no players only); a key present with null clears. A completed season is refused. Audited as season.updated with the old and new values. 20261109010000.';
+    'Admin-only: patch a season''s name and dates (draft or active) and its season year and age cutoff (a draft with no players only); a key present with null clears. A completed season is refused. Audited as season.updated with the old and new values. 20261111010000.';
 COMMENT ON FUNCTION public.admin_set_division_birthdate_window(uuid, date, date) IS
-    'Admin-only: set or clear (both null) a division''s birth-date window, refused once the season has players or is completed. Audited as division.window_changed. 20261109010000.';
+    'Admin-only: set or clear (both null) a division''s birth-date window, refused once the season has players or is completed. Audited as division.window_changed. 20261111010000.';
 COMMENT ON FUNCTION public.admin_activate_season(uuid) IS
-    'Admin-only: activate a draft season (a known timezone, both dates and a season year are required) and complete the previous active season, under the organization''s season lock. A completed season cannot be reactivated. Audited as season.activated. 20261109010000.';
+    'Admin-only: activate a draft season (a known timezone, both dates and a season year are required) and complete the previous active season, under the organization''s season lock. A completed season cannot be reactivated. Audited as season.activated. 20261111010000.';
 
 -- ---------------------------------------------------------------------------
 -- 7. The E1 guard: the active season or a draft; never a completed one.
@@ -1179,7 +1202,7 @@ BEGIN
         RAISE EXCEPTION 'season % is completed and takes no import', p_season_settings_id
           USING ERRCODE='22023', DETAIL='season_completed';
       END IF;
-      -- 20261109010000: the active season or a draft takes a registration or coach import (a
+      -- 20261111010000: the active season or a draft takes a registration or coach import (a
       -- club prepares next season from its own registration data); a field import stays with the
       -- active season, as finalize_field_import_job still requires.
       IF v_season_status <> 'active' AND (v_season_status <> 'draft' OR v_job_type <> 'registration') THEN
@@ -1292,7 +1315,7 @@ BEGIN
     END IF;
     -- Enrollment is per season now (20261108010000): this import matches, updates and creates
     -- players in the destination season only, and a registration id seen in another season is
-    -- a new row here. So the active season and a draft season both take an import (20261109010000:
+    -- a new row here. So the active season and a draft season both take an import (20261111010000:
     -- a club prepares next season from its own registration data), and a completed one never does.
 
     -- The ages in the staged rows were counted under the season's rule when the file was validated
@@ -1791,7 +1814,7 @@ BEGIN
 
     -- A coach row belongs to one season (20261108010000), as a player row does: the job's own
     -- season, or for a job made before jobs carried one the organization's active season.
-    -- The active season and a draft season take an import (20261109010000), as the player
+    -- The active season and a draft season take an import (20261111010000), as the player
     -- finalizer's guard; a completed one never does.
     SELECT s.id, s.status
     INTO v_season_settings_id, v_season_status
@@ -2137,7 +2160,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.create_import_job(uuid, text, text, uuid) IS
-    'Admin-only: start an import job for the named season (none named: the organization''s active season), fixed now. A player or coach import may name the active season or a draft; a field import only the active season; a completed season is refused (22023, season_completed). 20261109010000 (was active-only since 20261101010000).';
+    'Admin-only: start an import job for the named season (none named: the organization''s active season), fixed now. A player or coach import may name the active season or a draft; a field import only the active season; a completed season is refused (22023, season_completed). 20261111010000 (was active-only since 20261101010000).';
 
 -- ---------------------------------------------------------------------------
 -- 8. End state.

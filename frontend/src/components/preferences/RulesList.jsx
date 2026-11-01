@@ -75,6 +75,7 @@ export default function RulesList({
   onAdd,
   onEdit,
   onRemove,
+  pageSize = RULES_PER_PAGE,
 }) {
   const [team, setTeam] = useState(ALL);
   const [coach, setCoach] = useState(ALL);
@@ -125,7 +126,7 @@ export default function RulesList({
         ),
     [rows, team, coach, level, priority, teamName, coachName]
   );
-  const shown = matching.slice(0, pages * RULES_PER_PAGE);
+  const shown = matching.slice(0, pages * pageSize);
   const remaining = matching.length - shown.length;
   const filtered = team !== ALL || coach !== ALL || level !== ALL || priority !== ALL;
   const clear = () => {
@@ -330,8 +331,8 @@ export default function RulesList({
       {remaining > 0 && (
         <div>
           <Button variant="secondary" onClick={showMore}>
-            {`Show ${Math.min(RULES_PER_PAGE, remaining)} more ${
-              Math.min(RULES_PER_PAGE, remaining) === 1 ? 'rule' : 'rules'
+            {`Show ${Math.min(pageSize, remaining)} more ${
+              Math.min(pageSize, remaining) === 1 ? 'rule' : 'rules'
             }`}
           </Button>
         </div>
@@ -353,4 +354,6 @@ RulesList.propTypes = {
   onAdd: PropTypes.func.isRequired,
   onEdit: PropTypes.func.isRequired,
   onRemove: PropTypes.func.isRequired,
+  /** Rules drawn per page (200); a test passes a few to exercise the paging without drawing hundreds. */
+  pageSize: PropTypes.number,
 };

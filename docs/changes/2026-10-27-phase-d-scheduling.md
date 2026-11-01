@@ -709,7 +709,7 @@ Each PR runs the season fixture suite and the full Definition of Done.
   not load. A failed locations read leaves the lists and the check alone (it costs only a venue's name). (4) **Rules
   past the first 200 were unreachable** when no filter could separate them (an import of distinct times or windows
   for one team and coach): **Show more** adds a page of 200, announces "Showing N of M", and moves focus to the first
-  rule it added. (5) **The cell cleaner** (CodeQL js/incomplete-multi-character-sanitization, alert 18) is one function,
+  rule it added. The list takes its page size as a prop (default 200), so the tests hold the paging with a page of five and a few dozen rules, and the real size with one draw of 200 and a rerender at 201: the first version drew 450 rows three times and, run without `--testTimeout=30000`, timed out at 5 s in CI (7.4 s on a loaded machine); the exhaustive cleaner test did the same at 6.5 s and now collects its failures instead of calling `expect` 400,000 times. (5) **The cell cleaner** (CodeQL js/incomplete-multi-character-sanitization, alert 18) is one function,
   `sanitizeImportText`, in `utils/importRows.js` and its Edge twin `_shared/import-rows.ts`, which the preview, the mock
   `import-validation` and the Edge function's `sanitizeString` all call, held equal by `tests/importRowsParity.test.js`
   and `import-rows_test.ts`. It removes a tag (a `<` to the first `>` after it, the span the old regular expression

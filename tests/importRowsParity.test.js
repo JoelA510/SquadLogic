@@ -189,20 +189,24 @@ describe('the cell cleaner: browser and Edge copies agree', () => {
   it('leaves no tag, changes nothing a second time and agrees with the other copy, for every string over five symbols up to seven long', () => {
     const symbols = ['<', '>', 'a', ' ', '/'];
     let checked = 0;
+    // 97,656 strings: a failed `expect` per property per string would be most of this test's time, so
+    // the properties are plain comparisons that collect what breaks, and one `expect` reads the list.
+    /** @type {string[]} */
+    const broken = [];
     const walk = (prefix, remaining) => {
       const a = browser.sanitizeImportText(prefix);
-      const b = edge.sanitizeImportText(prefix);
-      expect(a).toBe(b);
-      expect(hasTagSpan(a)).toBe(false);
-      expect(browser.sanitizeImportText(a)).toBe(a);
+      if (a !== edge.sanitizeImportText(prefix)) broken.push(`${prefix}: the two copies differ`);
+      if (hasTagSpan(a)) broken.push(`${prefix}: a tag is left`);
+      if (browser.sanitizeImportText(a) !== a) broken.push(`${prefix}: a second pass changes it`);
       // The strip alone is the reference rule (the trim is the only other thing these symbols meet).
-      expect(a).toBe(reference(prefix).trim());
+      if (a !== reference(prefix).trim()) broken.push(`${prefix}: not the reference rule`);
       checked += 1;
       if (remaining === 0) return;
       for (const symbol of symbols) walk(prefix + symbol, remaining - 1);
     };
     walk('', 7);
-    // 5^0 + ... + 5^7 strings: a walk that visited none would pass every assertion above.
+    expect(broken.slice(0, 10)).toEqual([]);
+    // 5^0 + ... + 5^7 strings: a walk that visited none would pass every property above.
     expect(checked).toBe(97656);
   });
 

@@ -12,6 +12,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import CoachPreferencesPage from '../frontend/src/pages/CoachPreferencesPage.jsx';
+import RulesList from '../frontend/src/components/preferences/RulesList.jsx';
 import ToastHost from '../frontend/src/components/ui/ToastHost.jsx';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
@@ -236,100 +237,6 @@ describe('the rules list', () => {
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeDisabled();
   });
 
-  describe('more rules than are drawn at once', () => {
-    // 450 rules that share the team, the coach, the level and the priority, so no filter can narrow
-    // them: only paging reaches the rest.
-    const crowd = (count) =>
-      Array.from({ length: count }, (_, index) =>
-        ruleRow({
-          id: `many-${String(index).padStart(3, '0')}`,
-          weekdays: ['MON'],
-          start_minutes: [1000 + index],
-          created_at: `2026-09-01T00:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}Z`,
-        })
-      );
-    const rowIds = () =>
-      screen.getAllByRole('button', { name: /^Edit / }).map((b) => b.getAttribute('aria-label'));
-
-    it('draws 200 at first, says how many of how many, and offers the next page', async () => {
-      tables.coach_practice_preferences = crowd(205);
-      await openRules();
-      expect(bodyRows()).toHaveLength(200);
-      expect(screen.getByTestId('rules-count')).toHaveTextContent(
-        'Showing 200 of 205 rules in force; show more, or narrow the filters.'
-      );
-      expect(screen.getByRole('button', { name: 'Show 5 more rules' })).toBeEnabled();
-    });
-
-    it('reaches every one of 450 rules that no filter can separate, a page at a time, and the button goes with the last', async () => {
-      tables.coach_practice_preferences = crowd(450);
-      await openRules();
-      expect(bodyRows()).toHaveLength(200);
-      fireEvent.click(screen.getByRole('button', { name: 'Show 200 more rules' }));
-      expect(bodyRows()).toHaveLength(400);
-      expect(screen.getByTestId('rules-count')).toHaveTextContent(
-        'Showing 400 of 450 rules in force'
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Show 50 more rules' }));
-      expect(bodyRows()).toHaveLength(450);
-      expect(screen.getByTestId('rules-count')).toHaveTextContent(
-        'Showing 450 of 450 rules in force.'
-      );
-      expect(
-        screen.queryByRole('button', { name: /^Show \d+ more rules$/ })
-      ).not.toBeInTheDocument();
-      // Every rule is there, once, and the last can be edited.
-      expect(new Set(rowIds()).size).toBe(450);
-      fireEvent.click(bodyRows()[449].querySelector('button'));
-      expect(await screen.findByRole('dialog', { name: 'Edit a rule' })).toBeInTheDocument();
-    });
-
-    it('moves focus to the first rule the page added, so a keyboard user is not left at the top or nowhere', async () => {
-      tables.coach_practice_preferences = crowd(450);
-      await openRules();
-      const more = screen.getByRole('button', { name: 'Show 200 more rules' });
-      more.focus();
-      fireEvent.click(more);
-      expect(document.activeElement).toBe(bodyRows()[200].querySelector('button'));
-      fireEvent.click(screen.getByRole('button', { name: 'Show 50 more rules' }));
-      expect(document.activeElement).toBe(bodyRows()[400].querySelector('button'));
-    });
-
-    it('a change of filter starts again at the first page', async () => {
-      tables.coach_practice_preferences = [
-        ...crowd(450),
-        ruleRow({
-          id: 'other',
-          team_id: T2,
-          weekdays: ['SAT'],
-          created_at: '2026-10-01T00:00:00Z',
-        }),
-      ];
-      await openRules();
-      fireEvent.click(screen.getByRole('button', { name: 'Show 200 more rules' }));
-      expect(bodyRows()).toHaveLength(400);
-      choose('Team', T2);
-      expect(bodyRows()).toHaveLength(1);
-      expect(
-        screen.queryByRole('button', { name: /^Show \d+ more rules$/ })
-      ).not.toBeInTheDocument();
-      choose('Team', 'all');
-      expect(bodyRows()).toHaveLength(200);
-    });
-
-    it('with exactly one page there is no button', async () => {
-      tables.coach_practice_preferences = crowd(200);
-      await openRules();
-      expect(bodyRows()).toHaveLength(200);
-      expect(
-        screen.queryByRole('button', { name: /^Show \d+ more rules$/ })
-      ).not.toBeInTheDocument();
-      expect(screen.getByTestId('rules-count')).toHaveTextContent(
-        'Showing 200 of 200 rules in force.'
-      );
-    });
-  });
-
   it('says so when there are no rules in force at all', async () => {
     tables.coach_practice_preferences = [];
     await openRules();
@@ -410,5 +317,151 @@ describe('a rule in force on paper that the scheduler does not judge', () => {
     await openRules();
     expect(notes()).toEqual([]);
     expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+});
+
+describe('paging the rules list', () => {
+  // The list is drawn directly, with a small page size, so the paging (every rule reachable, the
+  // button gone after the last page, focus on the first rule a page adds, a filter starting again at
+  // page one) is held without drawing hundreds of rows. The real size, 200, has its own boundary test.
+  const pad = (n) => String(n).padStart(3, '0');
+  /** `count` rules that share team, coach, level and priority: no filter can separate them. */
+  const crowd = (count, over = {}) =>
+    Array.from({ length: count }, (_, index) =>
+      ruleRow({
+        id: `many-${pad(index)}`,
+        weekdays: ['MON'],
+        start_minutes: [1000 + index],
+        created_at: `2026-09-01T00:${pad(index).slice(0, 2)}:${pad(index).slice(1)}Z`,
+        ...over,
+      })
+    );
+  const listElement = (rows, props, onEdit) => (
+    <RulesList
+      rows={rows}
+      coachName={() => 'Casey Coach'}
+      teamName={(id) => (id === T2 ? 'U12 Owls' : 'U10 Hawks')}
+      locationNames={new Map()}
+      readOnly={false}
+      busyId={null}
+      rosterRows={null}
+      date="2026-09-28"
+      onAdd={vi.fn()}
+      onEdit={onEdit}
+      onRemove={vi.fn()}
+      {...props}
+    />
+  );
+  const renderList = (rows, props = {}) => {
+    const onEdit = vi.fn();
+    const rendered = render(listElement(rows, props, onEdit));
+    return {
+      onEdit,
+      /** The same list over other rules, without drawing it again from nothing. */
+      rerender: (next) => rendered.rerender(listElement(next, props, onEdit)),
+    };
+  };
+  // The rows are counted from the DOM: a role query over hundreds of rows costs more than drawing them.
+  const rowsDrawn = () => [...document.querySelectorAll('table tbody tr')];
+  // The Show more button is found by its text in the DOM: a role-and-name query computes the name of
+  // every button on the page, and a crowd has hundreds.
+  const showMore = (name) =>
+    [...document.querySelectorAll('button')].find((button) => button.textContent === name) ?? null;
+  const anyShowMore = () =>
+    [...document.querySelectorAll('button')].find((button) =>
+      /^Show \d+ more rules?$/.test(button.textContent ?? '')
+    ) ?? null;
+
+  it('reaches every one of 23 rules no filter can separate, a page at a time; the last is editable and the button goes with the last page', () => {
+    const rows = crowd(23);
+    const { onEdit } = renderList(rows, { pageSize: 5 });
+    const counts = [];
+    /** @type {Array<[number, string]>} */
+    const pages = [
+      [5, 'Show 5 more rules'],
+      [10, 'Show 5 more rules'],
+      [15, 'Show 5 more rules'],
+      [20, 'Show 3 more rules'],
+    ];
+    for (const [drawn, label] of pages) {
+      expect(rowsDrawn()).toHaveLength(drawn);
+      expect(screen.getByTestId('rules-count')).toHaveTextContent(
+        `Showing ${drawn} of 23 rules in force; show more, or narrow the filters.`
+      );
+      fireEvent.click(showMore(label));
+      counts.push(rowsDrawn().length);
+    }
+    expect(counts).toEqual([10, 15, 20, 23]);
+    expect(screen.getByTestId('rules-count')).toHaveTextContent('Showing 23 of 23 rules in force.');
+    expect(anyShowMore()).not.toBeInTheDocument();
+    // Every rule is there once, in order, and the last can be edited.
+    const labels = screen
+      .getAllByRole('button', { name: /^Edit / })
+      .map((button) => button.getAttribute('aria-label'));
+    expect(new Set(labels).size).toBe(23);
+    // 1000 + 22 minutes past midnight.
+    expect(labels[22]).toContain('17:02');
+    fireEvent.click(rowsDrawn()[22].querySelector('button'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit.mock.calls[0][0].id).toBe('many-022');
+  });
+
+  it('moves focus to the first rule each page added, including after the button has left with the last page', () => {
+    renderList(crowd(12), { pageSize: 5 });
+    const more = showMore('Show 5 more rules');
+    more.focus();
+    fireEvent.click(more);
+    expect(document.activeElement).toBe(rowsDrawn()[5].querySelector('button'));
+    fireEvent.click(showMore('Show 2 more rules'));
+    expect(anyShowMore()).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(rowsDrawn()[10].querySelector('button'));
+  });
+
+  it('a change of filter starts again at the first page', () => {
+    renderList([...crowd(23), ruleRow({ id: 'other', team_id: T2, weekdays: ['SAT'] })], {
+      pageSize: 5,
+    });
+    fireEvent.click(showMore('Show 5 more rules'));
+    expect(rowsDrawn()).toHaveLength(10);
+    choose('Team', T2);
+    expect(rowsDrawn()).toHaveLength(1);
+    expect(anyShowMore()).not.toBeInTheDocument();
+    choose('Team', 'all');
+    expect(rowsDrawn()).toHaveLength(5);
+    expect(showMore('Show 5 more rules')).toBeEnabled();
+  });
+
+  it('exactly one page has no button, and one more rule leaves "Show 1 more rule"', () => {
+    renderList(crowd(5), { pageSize: 5 });
+    expect(rowsDrawn()).toHaveLength(5);
+    expect(anyShowMore()).not.toBeInTheDocument();
+    expect(screen.getByTestId('rules-count')).toHaveTextContent('Showing 5 of 5 rules in force.');
+  });
+
+  it('one rule past a page leaves a singular button that adds it', () => {
+    renderList(crowd(6), { pageSize: 5 });
+    expect(rowsDrawn()).toHaveLength(5);
+    fireEvent.click(showMore('Show 1 more rule'));
+    expect(rowsDrawn()).toHaveLength(6);
+    expect(anyShowMore()).not.toBeInTheDocument();
+  });
+
+  it('at the real page size, exactly 200 rules have no button and 201 leave Show 1 more rule', () => {
+    // One draw of 200 rows, then one rule more over the same tree: drawing a crowd from nothing
+    // twice is what made the old paging test the slowest in the suite.
+    const { rerender } = renderList(crowd(200));
+    expect(rowsDrawn()).toHaveLength(200);
+    expect(anyShowMore()).not.toBeInTheDocument();
+    expect(screen.getByTestId('rules-count')).toHaveTextContent(
+      'Showing 200 of 200 rules in force.'
+    );
+    rerender(crowd(201));
+    expect(rowsDrawn()).toHaveLength(200);
+    expect(screen.getByTestId('rules-count')).toHaveTextContent(
+      'Showing 200 of 201 rules in force; show more, or narrow the filters.'
+    );
+    fireEvent.click(showMore('Show 1 more rule'));
+    expect(rowsDrawn()).toHaveLength(201);
+    expect(anyShowMore()).not.toBeInTheDocument();
   });
 });

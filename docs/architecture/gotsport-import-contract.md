@@ -203,6 +203,67 @@ the demo purge) and the cascade of a deleted organization still reach its rows.
 > full-name column. Both rules live in `_shared/import-rows.ts`
 > (`import-validation`) and its browser twin `frontend/src/utils/importRows.js`.
 
+## Practice preference import — kept fields (`20261112010000`)
+
+An admin imports a file of coaches' practice preferences (import type `practice_preferences`; the file
+is the league's own spreadsheet, not a GotSport export). **One row is one rule for one team**
+(`docs/changes/2026-10-26-coach-preference-rules.md`, "Revised 2026-10-27"); the rules are described in
+`docs/architecture/practice-scheduling.md`. The import is admin-only end to end: `create_import_job`,
+`mark_import_job_ready_to_apply`, `cancel_ready_import_job` and `finalize_practice_preference_import_job`
+all refuse a signed-in user who is not an admin of the organization (42501), and a coach has no sign-in.
+
+| Canonical key(s)                                               | Stored as                           | Reads                                                                                    |
+| -------------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| `email` (`Coach Email`)                                        | looked up, never stored on the rule | The coach, by email within the job's season (required)                                   |
+| `team_name`, `team name`, `team`                               | `team_id`                           | The team, by name within the season; blank = see below                                   |
+| `request_level` (`Request Level`, `Strength`, …)               | `requested_level`, `must_decision`  | `prefer` (blank or "prefer", "nice", "soft") or `must` ("must", "required", "mandatory") |
+| `weekdays`, `days`, `day`                                      | `weekdays`                          | One or more days, `Tue, Thu` or `Tuesday / Thursday`: any of these                       |
+| `start_times`, `start_time`, `start`                           | `start_minutes`                     | One or more times, `5:00 PM`, `5pm`, `17:00`: any of these                               |
+| `venues`, `location`                                           | `venue_ids`                         | One or more of the organization's locations by name                                      |
+| `effective_from`, `valid_from` / `effective_to`, `valid_until` | `effective_from` / `effective_to`   | A date window, `YYYY-MM-DD` or `M/D/YYYY`                                                |
+| `coach_priority` (`Priority`)                                  | `coach_priority`                    | `high`, `medium` or `low`; shown to the admin, never judged                              |
+
+The browser (`importAllowlist.js`, `telemetryUtils.js` aliases), `import-validation`
+(`_shared/import-allowlist.ts`, `HEADER_ALIASES`) and `import_allowed_keys('practice_preferences')` keep exactly these
+18 keys and no others; a preference entity is not in Settings, so a file declares no extra field, and
+`tests/importAllowlistParity.test.js` holds the three equal. `frontend/src/utils/practicePreferenceRows.js` is the
+JavaScript twin of the SQL parsing, so the preview and the mock client read a row as the database does
+(`tests/practicePreferenceRows.test.js` runs the same inputs as `supabase/tests/practice_preference_import.sql`).
+
+- **A row must name a condition**: at least one of days, start times or venues (a row naming none is
+  invalid and listed; the model's "keep what the team has" is something an admin sets on a rule, not a
+  column of the file). An unreadable day, time, venue, date, level or priority makes the row invalid
+  and it is listed with its row number; the rest of the file still applies.
+- **The coach is found by email within the job's season and the team by name within the same season.**
+  An unknown coach, an unknown team, a team the coach does not coach, and a coach with no team in the
+  season are **listed, never created**: the result carries `unknown_coach_rows`, `unknown_team_rows`,
+  `coach_not_on_team_rows`, `no_team_rows` and `invalid_rows` with their row numbers, and the job
+  completes with warnings. A coach's email appears in the finalizer's result (so the screen can name the
+  coach to the admin who has the file) and **nowhere that is stored**: the job's `warning_summary` and
+  the audit rows carry counts and row numbers only.
+- **A blank team for a coach of several teams is one rule per team** the coach coaches today, so the
+  admin does not repeat a row. A named team makes one rule for that team.
+- **`must` is a request.** An imported `must` is stored in force as `prefer`, with `requested_level`
+  `must` and `must_decision` `pending`; it becomes a must only when an admin accepts it
+  (`admin_decide_must_preference`, or `admin_accept_all_musts(import_job_id, expected_count)`, which
+  refuses when the pending count is not the one the confirmation showed). The solver judges a pending
+  must as a prefer until then.
+- **A re-import replaces the imported rules of the teams the file names** (`status = replaced`, kept as
+  history) and leaves **admin-written rules** and the imported rules of teams the file does not name
+  alone. Two rows that make the same rule (the same coach, team, level, sets and window) count once
+  (`duplicate_rule_rows`). Two files naming one team run one after the other: the finalizer takes a
+  transaction-scoped advisory lock per named team, in id order, before it replaces, so neither file
+  replaces rules the other is about to insert.
+- **The active season or a draft takes a preference file; a completed season never does** (22023,
+  `season_completed`), the rule `20261111010000` set for player and coach files, in `create_import_job` and
+  again in the finalizer, because a season can complete between a job's creation and its apply. A draft season
+  is where next season's rules are prepared; the finalizer reads the job's own season. A completed season's
+  rules are also read-only on the table (`coach_practice_preferences_readonly_when_completed`, the trigger
+  E3b put on the schedule tables), so no write that is not one of these RPCs can change them either.
+- **Staged rows are deleted 30 days after they were staged, once their job has finished**, by the same
+  retention job as coach rows (`cleanup-staging-import-rows`), because they hold coaches' emails. The deferred
+  apply (`mark_import_job_ready_to_apply`, `cancel_ready_import_job`) takes the type too.
+
 ## Dropped on import (never stored)
 
 Everything not listed above, including: guardian and parent names, emails,

@@ -314,8 +314,8 @@ SELECT is(
     (SELECT array_agg(c.relname::text ORDER BY c.relname::text) FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid
       WHERE g.tgname LIKE '%\_readonly\_when\_completed' AND NOT g.tgisinternal AND g.tgenabled = 'O'
         AND g.tgfoid = 'public.season_schedule_readonly_when_completed()'::regprocedure),
-    ARRAY['game_assignments', 'games', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
-    'the eight schedule tables carry the trigger, enabled');
+    ARRAY['coach_practice_preferences', 'game_assignments', 'games', 'practice_assignments', 'practice_exceptions', 'schedule_tbd', 'team_coach_assignments', 'team_players', 'teams'],
+    'the eight schedule tables and the practice preference rules (20261112010000) carry the trigger, enabled');
 SELECT is(has_function_privilege('authenticated', 'public.season_schedule_readonly_when_completed()', 'EXECUTE')
           OR has_function_privilege('anon', 'public.season_schedule_readonly_when_completed()', 'EXECUTE'), false,
     'and the trigger function is nobody''s to call');

@@ -36,13 +36,14 @@
  * solver cannot date refuses the run (422 `SLOT_DATING_UNREADABLE`, Q3); the
  * page's payload is unchanged (§3.6).
  *
- * Coach preferences (8.6 PR 3b PR 8, plan §4 and §5 decision 3): approved
- * `coach_practice_preferences`, with coaches from `team_coach_assignments`
- * current on the season's date, are loaded here -- AS THE CALLER through RLS,
- * never from the request body. `must_keep` is a hard filter on new
- * placements (a team it leaves with no legal slot is unplaced with reason
- * `coach-preference`); `prefer_keep` is a lexicographic tiebreak, fewer
- * breaches first. Locked rows are never judged. A failed or partial read
+ * Practice preference rules (Phase D C1; 8.6 PR 3b PR 8, plan §4 and §5 decision 3): the
+ * `coach_practice_preferences` rules in force (one row, one rule for one team), with coaches from
+ * `team_coach_assignments` current on the season's date, are loaded here -- AS THE CALLER through
+ * RLS, never from the request body. Every rule for a team, asked by one of its coaches and in
+ * window, is judged against each practice: a `must` rule is a hard filter on new placements (a
+ * team it leaves with no legal slot is unplaced with reason `coach-preference`, naming the rules);
+ * a `prefer` rule is a lexicographic tiebreak, fewer unmet rules first. Locked rows are never
+ * judged; keep-current rules keep what the team's saved practices hold. A failed or partial read
  * refuses the run. See `_shared/engines/coach-preference-load.ts`.
  *
  * Daylight (8.9 PR 6, plan §3): each venue's `lighting_available` and
@@ -465,6 +466,8 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         runDate: seasonRunDate(Date.now(), season.timezone),
         placeableTeamIds: classification.placeable,
         slotIds: slots.map((s) => s.id),
+        // What keep-current rules keep: the practices the season already holds.
+        heldRows: lock.rows,
       }
     );
     if (!preferences.ok) {

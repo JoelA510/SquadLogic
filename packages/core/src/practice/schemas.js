@@ -365,11 +365,10 @@ export const PracticeRepairInputSchema = z
     searchNodeLimit: z.number().int().positive().optional(),
     strategy: z.enum(['exact', 'greedy']).optional(),
     /**
-     * APPROVED coach practice preferences (8.6 PR 3b plan §4), as input data;
-     * loading them is the adapter's job (PR 9). Each element is checked by
-     * `repairPracticeLoss()` against `practice/coachPreferences.js`
-     * `CoachPreferenceInputSchema`, the one contract for a preference: that
-     * module imports this one, so importing it back here would be a cycle.
+     * The practice preference RULES in force (Phase D C1; 8.6 PR 3b plan §4), as input data;
+     * loading them is the adapter's job. Each element is checked by `repairPracticeLoss()`
+     * against `practice/coachPreferences.js` `CoachPreferenceRuleSchema`, the one contract for
+     * a rule: that module imports this one, so importing it back here would be a cycle.
      */
     coachPreferences: z.array(z.unknown()).optional(),
     /**

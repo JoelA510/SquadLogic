@@ -274,10 +274,65 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     ).toHaveLength(4);
   });
 
+  it("gives each division its practices a week and length, as the server's seed does", () => {
+    const db = {};
+    const { data } = start(db, anonymous());
+    const divisions = db.divisions.filter((d) => d.organization_id === data.organization_id);
+    // U4: its once-weekly 30-minute Saturday session; U5 to U12: two practices of 60 minutes.
+    expect(divisions.map((d) => [d.name, d.practices_per_week, d.practice_minutes])).toEqual([
+      ['U4', 1, 30],
+      ['U10 Boys', 2, 60],
+    ]);
+    // every division has slots of exactly its length to use, the open ones on two weekdays
+    const slots = db.practice_slots.filter((s) => s.organization_id === data.organization_id);
+    const length = (slot) =>
+      Number(slot.end_time.slice(0, 2)) * 60 +
+      Number(slot.end_time.slice(3, 5)) -
+      (Number(slot.start_time.slice(0, 2)) * 60 + Number(slot.start_time.slice(3, 5)));
+    const u4 = divisions[0];
+    expect(slots.filter((s) => s.division_id === u4.id).every((s) => length(s) === 30)).toBe(true);
+    const open = slots.filter((s) => s.division_id === null);
+    expect(open.every((s) => length(s) === 60)).toBe(true);
+    expect(new Set(open.map((s) => s.day_of_week)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('starts with the U4 cohorts scheduled and the U10 teams left for the auto-scheduler', () => {
+    const db = {};
+    const { data } = start(db, anonymous());
+    const org = data.organization_id;
+    const teams = db.teams.filter((t) => t.organization_id === org);
+    const rows = db.practice_assignments.filter((a) => a.organization_id === org);
+    const u4 = db.divisions.find((d) => d.organization_id === org && d.name === 'U4');
+    const u4Teams = teams.filter((t) => t.division_id === u4.id);
+    // The subject set is the roster: the U4 cohorts hold a practice each, no U10 team holds one.
+    expect(new Set(rows.map((a) => a.team_id))).toEqual(new Set(u4Teams.map((t) => t.id)));
+    expect(teams.length).toBeGreaterThan(u4Teams.length);
+    const slotOf = (row) => db.practice_slots.find((s) => s.id === row.practice_slot_id);
+    for (const row of rows) {
+      expect(slotOf(row).division_id).toBe(u4.id);
+      expect(row.day_of_week).toBe('sat');
+      expect(row.effective_date_range).toMatch(/^\[\d{4}-\d\d-\d\d,\d{4}-\d\d-\d\d\)$/);
+    }
+    const run = db.scheduler_runs.find(
+      (r) => r.organization_id === org && r.run_type === 'practice'
+    );
+    expect(run).toMatchObject({ status: 'completed' });
+    expect(run.results.summary).toMatchObject({
+      totalTeams: teams.length,
+      assignedTeams: u4Teams.length,
+      unassignedTeams: teams.length - u4Teams.length,
+      assignmentsRead: rows.length,
+    });
+    expect(rows.every((a) => a.run_id === run.id)).toBe(true);
+  });
+
   it('leaves the team run the pages read their teams from, holding every team and roster entry', () => {
     const db = {};
     const { data } = start(db, anonymous());
-    const runs = db.scheduler_runs.filter((run) => run.organization_id === data.organization_id);
+    // the team run, and (since 20261110010000) the completed practice run holding the seeded schedule
+    const runs = db.scheduler_runs.filter(
+      (run) => run.organization_id === data.organization_id && run.run_type === 'team'
+    );
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ run_type: 'team', status: 'completed' });
     const teams = Object.values(runs[0].results.teamsByDivision).flat();

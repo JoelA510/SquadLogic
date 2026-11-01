@@ -197,6 +197,10 @@ R57="$REPO/docs/sql/20261108020000_revert.sql"
 # bodies it replaces are re-aimed here.
 M58="$REPO/supabase/migrations/20261108010000_season_enrollment.sql"
 R58="$REPO/docs/sql/20261108010000_revert.sql"
+# Phase D, F: the demo league's practices (each division's count and length, the one lit venue, the 304-slot
+# grid, the solver-built schedule of U4 and U5 to U8, the demo start replaced to write it), and the revert.
+M60="$REPO/supabase/migrations/20261110010000_demo_practices.sql"
+R60="$REPO/docs/sql/20261110010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -4977,6 +4981,33 @@ plant "M58 the finalizer matches a player of any season" "$M58" \
               AND players.external_registration_id = de.external_registration_id" \
   "              AND players.external_registration_id = de.external_registration_id" \
   "smoke 20261108010000"
+
+# The demo's practices (20261110010000; plan docs/changes/2026-10-27-phase-d-scheduling.md, F). Three plants,
+# each run by hand against a scratch cluster built with the planted migration (the smoke 20261110010000 red in
+# each, at the check named); anchors resolved by PLANT_ANCHORS_ONLY=1. (The first plant keeps the column named,
+# so the migration's own end-state check, which only looks for the name, lets it apply and the smoke must catch it.)
+#   - every venue is copied lit, as the demo start did before: the owner's "only one lit field may run past
+#     sunset" is gone and every unlit ground's late practice is exempt from the daylight flag;
+#   - a seeded practice row that finds no slot no longer refuses the start: a team is silently without a
+#     practice and nothing says so;
+#   - the division's practice length is not copied: the demo's divisions take "any slot length" and the
+#     auto-scheduler may give a 90-minute team a 60-minute slot.
+plant "M60 the demo copies every venue lit" "$M60" \
+  "    SELECT v_org, l.name, l.lighting_available, l.latitude, l.longitude FROM demo_seed.locations l;" \
+  "    SELECT v_org, l.name, l.lighting_available OR true, l.latitude, l.longitude FROM demo_seed.locations l;" \
+  "smoke 20261110010000"
+
+plant "M60 a seeded practice row with no slot no longer refuses the start" "$M60" \
+  "    IF v_rows IS DISTINCT FROM v_expected THEN" \
+  "    IF false THEN" \
+  "smoke 20261110010000"
+
+plant "M60 the division's practice length is not copied" "$M60" \
+  "           d.practices_per_week, d.practice_minutes
+      FROM demo_seed.divisions d;" \
+  "           d.practices_per_week, NULL
+      FROM demo_seed.divisions d;" \
+  "smoke 20261110010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

@@ -1324,7 +1324,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2078,6 +2078,22 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('e9000000-0000-4000-8000-00000000000a','e9000000-0000-4000-8000-0000000000a1','game','e9000000-0000-4000-8000-0000000000d1',NULL,'e9000000-0000-4000-8000-0000000000e1','e9000000-0000-4000-8000-0000000000e2',3,NULL,'no-slot-available');" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the teams and TIME TBD rows the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261110010000's revert drops the seeded practice schedule and leaves the demos started with it**, so its
+  # warning is the check. TWO demo organizations, ONE of them live, beside a real organization: every figure
+  # distinct (the seeded rows are in the hundreds), so counting every demo (2), every organization (3) or the
+  # seeded rows as demos prints a different number. Inserted as the table owner (the RPC is the smoke's);
+  # every name is synthetic.
+  if [ "$id" = "20261110010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug, demo_expires_at) VALUES
+                ('ea000000-0000-4000-8000-00000000000a','Practice Demo Live','revert-demo-practices-live', now() + interval '20 minutes'),
+                ('ea000000-0000-4000-8000-00000000000b','Practice Demo Ended','revert-demo-practices-ended', now() - interval '5 minutes'),
+                ('ea000000-0000-4000-8000-00000000000c','Practice Real Org','revert-demo-practices-real', NULL);" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the demo organizations the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3564,6 +3580,36 @@ PROBE
       else
         echo "FAIL revert ${id}: the TIME TBD revert did not restore the three functions or left something of the migration"
         dump 10 $SCRATCH/harness_tbd; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261110010000" ]; then
+      # The seed planted 2 demo organizations, 1 live. The seeded rows are counted from the seed table
+      # itself, so only their presence is pinned here (the fixture sets the figure).
+      if ! grep -Eq 'this revert drops [0-9]+ seeded practice row\(s\); 1 live demo organization\(s\) keep the schedule they were started with' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 2 demo organizations, 1 live, and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # What the revert must leave: the demo start as at 20261108010000 (md5 of its body without carriage
+      # returns, and its comment), no practice seed table and none of the added columns, the previous
+      # 196-slot grid on 3 venues, and the planted organizations.
+      if psql_cmd "SELECT 'DEMOPRACTICES-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.organizations WHERE slug LIKE 'revert-demo-practices-%') <> 3 THEN 'seed-lost'
+               WHEN to_regclass('demo_seed.practice_schedule') IS NOT NULL THEN 'table-left'
+               WHEN (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'demo_seed'
+                      AND ((table_name = 'divisions' AND column_name IN ('practices_per_week', 'practice_minutes'))
+                           OR (table_name = 'locations' AND column_name = 'lighting_available'))) <> 0 THEN 'column-left'
+               WHEN (SELECT count(*) FROM demo_seed.practice_slots) <> 196 OR (SELECT count(*) FROM demo_seed.locations) <> 3 THEN 'grid-not-restored'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',')
+                       FROM pg_proc p WHERE p.oid = 'public.start_demo_session()'::regprocedure)
+                    = '19ff62ceb791a167b426aadf999b7efe:true:search_path=public,TimeZone=UTC'
+                AND (SELECT obj_description('public.start_demo_session()'::regprocedure, 'pg_proc'))
+                    LIKE '%with the league''s programs. Returns%' THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_demopractices 2>&1 && grep -q 'DEMOPRACTICES-VERDICT:restored' $SCRATCH/harness_demopractices; then
+        echo "  revert ${id}: the demo-practices revert restores the demo start as at 20261108010000, the previous 196-slot grid and the seed's columns, drops the seeded schedule table, and keeps the organizations"
+      else
+        echo "FAIL revert ${id}: the demo-practices revert did not restore the demo start, the grid or the seed's columns"
+        dump 10 $SCRATCH/harness_demopractices; STATUS=1
       fi
     fi
     if [ "$id" = "20261104010000" ]; then

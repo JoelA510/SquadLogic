@@ -229,7 +229,7 @@ describe('admin view', () => {
     expect(screen.getAllByText('Casey Coach').length).toBeGreaterThan(0);
     expect(screen.queryByText('Last Season Coach')).not.toBeInTheDocument();
     expect(screen.queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /^Accept .* as a must$/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^Accept as must: / })).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Pending musts (1)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Rules in force (2)' })).toBeInTheDocument();
   });
@@ -248,7 +248,7 @@ describe('admin view', () => {
       );
     expect(row).toBeTruthy();
     expect(within(row).getByText('Wednesday')).toBeInTheDocument();
-    expect(within(row).getByRole('button', { name: /^Keep .* as a prefer$/ })).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: /^Keep as prefer: / })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^Add a rule for/ })).toHaveLength(2);
     expect(screen.getByText('Pending must')).toBeInTheDocument();
   });
@@ -259,7 +259,7 @@ describe('admin view', () => {
     asRole('admin');
     renderPage();
     await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: /^Accept .* as a must$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Accept as must: / }));
     const dialog = await screen.findByRole('dialog', { name: 'Accept as must' });
     const listed = within(dialog)
       .getAllByTestId('unsatisfiable-series')
@@ -282,7 +282,7 @@ describe('admin view', () => {
     asRole('admin');
     renderPage();
     await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: /^Keep .* as a prefer$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Keep as prefer: / }));
     await waitFor(() =>
       expect(supabase.rpc).toHaveBeenCalledWith('admin_decide_must_preference', {
         p_preference_id: 'r1',
@@ -392,7 +392,7 @@ describe('failure states', () => {
     asRole('admin');
     renderPage();
     await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: /^Keep .* as a prefer$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Keep as prefer: / }));
     expect(
       await screen.findByText(/Could not find the function public.admin_decide_must_preference/)
     ).toBeInTheDocument();
@@ -438,10 +438,10 @@ describe('every RPC path surfaces a database refusal', () => {
       rpc: 'admin_decide_must_preference',
       drive: async () => {
         await screen.findByTestId('admin-preferences-view');
-        fireEvent.click(screen.getByRole('button', { name: /^Keep .* as a prefer$/ }));
+        fireEvent.click(screen.getByRole('button', { name: /^Keep as prefer: / }));
       },
       stillThere: () =>
-        expect(screen.getByRole('button', { name: /^Keep .* as a prefer$/ })).toBeInTheDocument(),
+        expect(screen.getByRole('button', { name: /^Keep as prefer: / })).toBeInTheDocument(),
     },
     {
       path: 'accept',
@@ -451,7 +451,7 @@ describe('every RPC path surfaces a database refusal', () => {
       rpc: 'admin_decide_must_preference',
       drive: async () => {
         await screen.findByTestId('admin-preferences-view');
-        fireEvent.click(screen.getByRole('button', { name: /^Accept .* as a must$/ }));
+        fireEvent.click(screen.getByRole('button', { name: /^Accept as must: / }));
         const dialog = await screen.findByRole('dialog', { name: 'Accept as must' });
         fireEvent.click(within(dialog).getByRole('button', { name: 'Accept as must' }));
       },
@@ -524,7 +524,7 @@ describe('every RPC path surfaces a database refusal', () => {
 describe('every load and compute failure is visible', () => {
   const acceptDialog = async () => {
     await screen.findByTestId('admin-preferences-view');
-    fireEvent.click(screen.getByRole('button', { name: /^Accept .* as a must$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Accept as must: / }));
     return screen.findByRole('dialog', { name: 'Accept as must' });
   };
 

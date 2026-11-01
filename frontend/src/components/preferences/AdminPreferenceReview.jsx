@@ -487,7 +487,7 @@ export default function AdminPreferenceReview({ orgId, toast }) {
                               size="sm"
                               variant="primary"
                               disabled={busyId === row.id}
-                              aria-label={`Accept ${ruleLabel(row)} as a must`}
+                              aria-label={`Accept as must: ${ruleLabel(row)}`}
                               onClick={() => setDialog({ mode: 'accept', row })}
                             >
                               Accept as must
@@ -497,7 +497,7 @@ export default function AdminPreferenceReview({ orgId, toast }) {
                               variant="secondary"
                               disabled={busyId === row.id}
                               loading={busyId === row.id}
-                              aria-label={`Keep ${ruleLabel(row)} as a prefer`}
+                              aria-label={`Keep as prefer: ${ruleLabel(row)}`}
                               onClick={() =>
                                 act(
                                   row,

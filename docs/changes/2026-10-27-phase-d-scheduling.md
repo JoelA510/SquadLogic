@@ -609,6 +609,42 @@ Each PR runs the season fixture suite and the full Definition of Done.
 - **Not run:** the real-backend scenario (needs the Supabase CLI and the edge runtime); `verify` on the
   platform's runtime (measured under Deno 2.9.6 only: `docs/operations/edge-function-budget.md`).
 
+## Build notes: PR C1 (2026-11-01)
+
+- **Built:** C1 in migration `20261112010000_practice_preference_rules.sql` (merged on top of E3b's
+  `20261111010000`). `coach_practice_preferences` is one **rule per team**: `weekdays`, `start_minutes`,
+  `venue_ids` (any-of) or keep-current per condition, `level` in force, `requested_level` / `must_decision`,
+  `coach_priority` (shown, never weighed), a date window, `source`, the import job; sixteen CHECKs and a
+  tenancy trigger. Five admin-only audited RPCs (`admin_add_`, `_edit_`, `_remove_practice_preference`,
+  `admin_decide_must_preference`, `admin_accept_all_musts(job, expected_count)`); the import type
+  `practice_preferences` through `import_jobs` / `staging_import_rows` and
+  `finalize_practice_preference_import_job`, columns allowlisted in the browser, `import-validation` and SQL
+  (18 keys). Judging is per practice in core `coachPreferences.js` and its Edge twin, read by the loader, the
+  solver gate, `prepare` / `verify`, the solver-input digest and the scoring; a 22,053-case drift product with
+  a committed digest holds the twins equal. The mock client answers the new RPCs and the import.
+- **The old rows** were moved (production held none, _executed read-only_): a `dont_care` row is not copied; an
+  approved row becomes one rule per team its coach coaches today (the old id on the first copy); a requested,
+  rejected or teamless row is kept as history (`removed`); a superseded one as `replaced`. The harness plants
+  eight old rows and applies the migration onto them. The revert writes rules back as one-value rows and
+  refuses (55000) a rule with two values or two rules of a coach that disagree.
+- **Departures from the text above** (each follows a fact found in the build or the coordinator's answer):
+  (1) **E3b landed first**, so `create_import_job` is its body with the new type added and the finalizer admits
+  a draft season and refuses a completed one, as E3b does for players and coaches. (2) **A completed season's rules are read-only on the table**: the table joins
+  E3b's `season_schedule_readonly_when_completed` trigger set (nine tables now), beside the RPCs' own refusal.
+  (3) **The two deferred-apply bodies lose their `timezone('utc',now())`** for `now()` (both pin the zone to
+  UTC): the idiom guard refuses the old spelling in a new migration. (4) **An unknown coach's email is in the
+  finalizer's result and nowhere stored**: the job and the audit rows carry counts and row numbers. (5) **The
+  existing preferences page is adapted, not redesigned**: Pending musts, Rules in force, Add a rule, and the
+  accept-a-must preview on the rules; the import preview, Accept all's dialog and the conflict list are C2.
+- **Harness:** the four plants and claims on the old decide RPC, read policy and one-approved index retired with
+  their claims; eleven plants aimed at the replaced bodies of `create_import_job`, `import_allowed_keys` and
+  `admin_delete_team` re-aimed at the new migration; seven smoke claims and a backfill claim added, each with a
+  plant, and two revert plants. Three plants were run for real in scratch copies (Accept all's count compare, a
+  re-import that replaces admin rules, the backfill's dont_care filter) and each was caught at the check named;
+  the rest were resolved by `PLANT_ANCHORS_ONLY=1`.
+- **Not run:** the real-backend scenario and RLS under a real Supabase (the local pgTAP stub lacks
+  `storage.objects` privileges: six files fail there identically on the base).
+
 ## Plan-change output
 
 Size: planned (PRs, migrations, the solver, RPC shapes, an Edge Function). Departures: none.

@@ -44,7 +44,7 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
   Scenario: The program overview does not count the waitlisted into the recommended team count
     Given 100 players are imported into the "U12 Boys" program and 20 of them are on the waitlist
     When I ask the Teams page for 5 teams of at most 10 players
-    Then the program overview counts 100 players and 20 on the waitlist for "U12 Boys", and recommends the fewest teams that hold the 80 at 10 each
+    Then the program overview shows 80 players and 20 on the waitlist for "U12 Boys", and recommends the fewest teams that hold them at 10 each
 
   Scenario: Practice Scheduling
     Given these teams and coaches in "U10 Boys":

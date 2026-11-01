@@ -266,7 +266,7 @@ export function summarizePlacementReview(results) {
         playerId: id,
         name: nameOf(id),
         teamName: teamNameOf(teamId),
-        placement: blocked ? player.placement : (player.placement ?? null),
+        placement: player.placement ?? null,
         reviewReason: blocked ? (player.reviewReason ?? null) : null,
         waitlisted: !blocked,
       });

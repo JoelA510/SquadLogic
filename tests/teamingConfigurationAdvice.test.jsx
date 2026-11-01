@@ -461,6 +461,24 @@ describe('The waitlisted are left out of the advice (follow-ups F1)', () => {
     expect(overviewCell('U10', 'Players')).toHaveTextContent('2 on the waitlist');
   });
 
+  it('a program whose registrants are all waitlisted advises no team, as generation builds none', async () => {
+    page.rows = [...importRows('U10', 12, () => ({ waitlist: 'yes' })), ...importRows('U12', 24)];
+    page.divisions = [savedDivision('U10'), savedDivision('U12')];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Status')).toHaveTextContent('All on the waitlist')
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^0\s*12 on the waitlist$/);
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(/^0$/);
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('—');
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent(/^0$/);
+    expect(overviewRow('U10')).not.toHaveTextContent('Fits the limits');
+    // The program beside it is advised as ever (24 at a target of 12 is 2 teams of 12).
+    expect(overviewCell('U12', 'Recommended')).toHaveTextContent('2');
+    expect(overviewCell('U12', 'Status')).toHaveTextContent('Fits the limits');
+  });
+
   it('with the Waitlist option off counts every player and reads nothing new', async () => {
     page.flags = { waitlist: false };
     page.rows = importRows('U10', 30, (i) => (i < 6 ? { waitlist: 'yes' } : {}));

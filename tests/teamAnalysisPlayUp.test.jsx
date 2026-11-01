@@ -38,6 +38,8 @@ const state = vi.hoisted(() => ({
   bulkUpdates: [],
   /** @type {any} the error that write returns */
   bulkError: null,
+  /** how many times the page read `players` */
+  playerReads: 0,
 }));
 
 vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
@@ -76,6 +78,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       if (table === 'coach_team_requests') {
         return createChainMock({ data: state.coachLinks, error: null });
       }
+      if (table === 'players') state.playerReads += 1;
       const rows =
         table === 'players' ? state.durablePlayers : table === 'coaches' ? state.coaches : [];
       return createChainMock({ data: rows, error: null });
@@ -195,6 +198,7 @@ function reset() {
   state.storedFlags = {};
   state.bulkUpdates = [];
   state.bulkError = null;
+  state.playerReads = 0;
 }
 
 describe('the Play-up section of the U12 program', () => {
@@ -341,6 +345,7 @@ describe('the waitlist exception, on save', () => {
 
   it('takes the coach’s child’s buddy off the waitlist, lists it, and makes them active on save', async () => {
     await generate();
+    const readsBeforeSave = state.playerReads;
     const results = stagedResults();
     // Placed on the coach's team with the child; the other waitlisted player is not placed.
     const coachTeam = results.teamsByDivision.U10.find((team) => team.coachId === IDS.coach);
@@ -371,17 +376,23 @@ describe('the waitlist exception, on save', () => {
     expect(
       await screen.findByText(/1 player taken off the waitlist is now active\./)
     ).toBeInTheDocument();
+    // The status changed under the overview's advice (follow-ups F1, item 3): the stored statuses
+    // are read again, so the player who now takes a seat is counted into the recommended teams.
+    await waitFor(() => expect(state.playerReads).toBeGreaterThan(readsBeforeSave));
   });
 
   it('says so when the status write is refused', async () => {
     state.bulkError = { message: 'permission denied' };
     await generate();
+    const readsBeforeSave = state.playerReads;
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save the teams' }));
     });
     expect(
       await screen.findByText(/could not be made active \(permission denied\)/)
     ).toBeInTheDocument();
+    // Nothing changed in the record, so nothing is read again.
+    expect(state.playerReads).toBe(readsBeforeSave);
   });
 
   it('writes no status when nobody was taken off the waitlist', async () => {

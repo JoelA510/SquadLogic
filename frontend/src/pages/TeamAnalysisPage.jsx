@@ -228,16 +228,20 @@ function deriveProgramStats(program, config = {}) {
   // names, by the generator's own rule, so the overview and the settings panel agree with it.
   // Empty limits mean what they mean to the generator: no minimum, a target equal to the maximum
   // (an empty maximum is refused; the overview shows no estimate then).
-  const estimatedTeams = resolveTeamCount({
-    playerCount: program.playerCount,
-    coachCount: program.coachCount ?? 0,
-    maxRosterSize,
-    targetTeamSize: positiveIntegerOrFallback(config.targetTeamSize, null),
-    teamCountOverride: positiveIntegerOrFallback(config.teamCountOverride, null),
-    minTeams: positiveIntegerOrFallback(config.minTeams, null),
-    maxTeams: positiveIntegerOrFallback(config.maxTeams, null),
-    minRosterSize: positiveIntegerOrFallback(config.minRosterSize, null),
-  });
+  // A program whose registrants are all waitlisted has nobody to seat: generation builds no team.
+  const estimatedTeams =
+    program.playerCount === 0
+      ? 0
+      : resolveTeamCount({
+          playerCount: program.playerCount,
+          coachCount: program.coachCount ?? 0,
+          maxRosterSize,
+          targetTeamSize: positiveIntegerOrFallback(config.targetTeamSize, null),
+          teamCountOverride: positiveIntegerOrFallback(config.teamCountOverride, null),
+          minTeams: positiveIntegerOrFallback(config.minTeams, null),
+          maxTeams: positiveIntegerOrFallback(config.maxTeams, null),
+          minRosterSize: positiveIntegerOrFallback(config.minRosterSize, null),
+        });
   // The settings panel's advice, for the overview's recommended count and status: the same
   // call the panel makes, with the config as the admin left it (an empty maximum is "blocked").
   const assessment = assessTeamCount({
@@ -255,7 +259,8 @@ function deriveProgramStats(program, config = {}) {
     ...program,
     estimatedTeams,
     assessment,
-    avgRosterSize: Number((program.playerCount / estimatedTeams).toFixed(1)),
+    avgRosterSize:
+      estimatedTeams > 0 ? Number((program.playerCount / estimatedTeams).toFixed(1)) : 0,
     capacity: estimatedTeams * maxRosterSize,
   };
 }
@@ -514,6 +519,29 @@ function withDurableIdentity(row, durable, { skillTier = false } = {}) {
   return next;
 }
 
+/** Stored players by id and by external registration id, for `matchDurablePlayer`. */
+function indexDurablePlayers(durablePlayers) {
+  return {
+    byId: new Map(durablePlayers.map((player) => [String(player.id), player])),
+    byExternalId: new Map(
+      durablePlayers
+        .filter((player) => player.external_registration_id)
+        .map((player) => [String(player.external_registration_id), player])
+    ),
+  };
+}
+
+/** The stored player an import row is: by its id when that is a UUID, else by registration id. */
+function matchDurablePlayer(row, byId, byExternalId) {
+  const idCandidate = getPlayerIdCandidate(row);
+  const externalCandidate = getPlayerExternalCandidate(row);
+  return (
+    (isUuid(idCandidate) && byId.get(idCandidate)) ||
+    (externalCandidate && byExternalId.get(externalCandidate)) ||
+    null
+  );
+}
+
 /**
  * Does the row mark a registrant as waitlisted? The one place the page decides it: what generation
  * seats (`toGeneratorPlayer`) and what the advice counts (`waitlistedRowIndexes`) both ask here, so
@@ -533,21 +561,12 @@ function isWaitlistedRow(row) {
  * @returns {Set<number>}
  */
 function waitlistedRowIndexes(rows, durablePlayers = []) {
-  const byId = new Map(durablePlayers.map((player) => [String(player.id), player]));
-  const byExternalId = new Map(
-    durablePlayers
-      .filter((player) => player.external_registration_id)
-      .map((player) => [String(player.external_registration_id), player])
-  );
+  const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
   const indexes = new Set();
   rows.forEach((row, index) => {
-    const idCandidate = getPlayerIdCandidate(row);
-    const externalCandidate = getPlayerExternalCandidate(row);
-    const durable =
-      (isUuid(idCandidate) && byId.get(idCandidate)) ||
-      (externalCandidate && byExternalId.get(externalCandidate)) ||
-      null;
-    if (isWaitlistedRow(withDurableIdentity(row, durable))) indexes.add(index);
+    if (isWaitlistedRow(withDurableIdentity(row, matchDurablePlayer(row, byId, byExternalId)))) {
+      indexes.add(index);
+    }
   });
   return indexes;
 }
@@ -926,6 +945,9 @@ export default function TeamAnalysisPage() {
   const [storedWaitlist, setStoredWaitlist] = useState(
     /** @type {null | { rows: any[], indexes: Set<number> }} */ (null)
   );
+  // Bumped when this page changes stored statuses itself (players taken off the waitlist are made
+  // active on save), so the advice reads the record again rather than the one it read on load.
+  const [waitlistReadKey, setWaitlistReadKey] = useState(0);
   useEffect(() => {
     if (
       !waitlistEnabled ||
@@ -963,7 +985,13 @@ export default function TeamAnalysisPage() {
     return () => {
       cancelled = true;
     };
-  }, [waitlistEnabled, importedPlayerRows, currentOrganization?.id, currentSeasonSetting?.id]);
+  }, [
+    waitlistEnabled,
+    importedPlayerRows,
+    currentOrganization?.id,
+    currentSeasonSetting?.id,
+    waitlistReadKey,
+  ]);
   const waitlistedRows = useMemo(() => {
     if (!waitlistEnabled) return NO_WAITLISTED_ROWS;
     return storedWaitlist?.rows === importedPlayerRows
@@ -1434,22 +1462,12 @@ export default function TeamAnalysisPage() {
       ]);
       const durablePlayers = [...byIdRows, ...byExternalRows];
 
-      const byId = new Map(durablePlayers.map((player) => [String(player.id), player]));
-      const byExternalId = new Map(
-        durablePlayers
-          .filter((player) => player.external_registration_id)
-          .map((player) => [String(player.external_registration_id), player])
-      );
+      const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
       const missingRows = [];
       const generationRows = [];
 
       const generatorPlayers = rowsForProgram.map(({ row, sourceIndex }) => {
-        const idCandidate = getPlayerIdCandidate(row);
-        const externalCandidate = getPlayerExternalCandidate(row);
-        const matchedPlayer =
-          (isUuid(idCandidate) && byId.get(idCandidate)) ||
-          (externalCandidate && byExternalId.get(externalCandidate)) ||
-          null;
+        const matchedPlayer = matchDurablePlayer(row, byId, byExternalId);
         const durablePlayer =
           matchedPlayer &&
           (!selectedDivisionKey || String(matchedPlayer.division_id || '') === selectedDivisionKey)
@@ -1551,20 +1569,11 @@ export default function TeamAnalysisPage() {
               collectPlayerLookupKeys(otherEntries)
             )
           : [];
-      const otherById = new Map(otherDurable.map((player) => [String(player.id), player]));
-      const otherByExternalId = new Map(
-        otherDurable
-          .filter((player) => player.external_registration_id)
-          .map((player) => [String(player.external_registration_id), player])
-      );
+      const { byId: otherById, byExternalId: otherByExternalId } =
+        indexDurablePlayers(otherDurable);
       const others = otherEntries.map(({ row, sourceIndex }) => {
         const division = resolveDivisionId(row);
-        const idCandidate = getPlayerIdCandidate(row);
-        const externalCandidate = getPlayerExternalCandidate(row);
-        const durable =
-          (isUuid(idCandidate) && otherById.get(idCandidate)) ||
-          (externalCandidate && otherByExternalId.get(externalCandidate)) ||
-          null;
+        const durable = matchDurablePlayer(row, otherById, otherByExternalId);
         const identified = withDurableIdentity(row, durable, { skillTier: skillTierEnabled });
         const generationRow = durable
           ? {
@@ -1944,6 +1953,7 @@ export default function TeamAnalysisPage() {
       );
       return;
     }
+    setWaitlistReadKey((key) => key + 1);
     setReviewMessage(
       `${appliedMessage} ${playerIds.length} ${plural} taken off the waitlist ${playerIds.length === 1 ? 'is' : 'are'} now active.`
     );

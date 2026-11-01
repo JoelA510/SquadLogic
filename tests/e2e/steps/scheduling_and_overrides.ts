@@ -285,24 +285,17 @@ Then(
 );
 
 Then(
-  'the program overview counts {int} players and {int} on the waitlist for {string}, and recommends the fewest teams that hold the {int} at {int} each',
-  async (
-    { page },
-    registered: number,
-    waitlisted: number,
-    program: string,
-    seatable: number,
-    perTeam: number
-  ) => {
-    // The expectations are the step's arithmetic, never the page's output: a waitlisted player is
-    // seated on no team, so the advice is for the others (and the registered count would say more).
-    expect(registered - waitlisted).toBe(seatable);
+  'the program overview shows {int} players and {int} on the waitlist for {string}, and recommends the fewest teams that hold them at {int} each',
+  async ({ page }, seatable: number, waitlisted: number, program: string, perTeam: number) => {
+    // The expectation is the step's arithmetic, never the page's output: a waitlisted player is
+    // seated on no team, so the advice is for the others. Counting everyone registered would
+    // recommend more, and the step requires the difference to be real.
     const expected = Math.ceil(seatable / perTeam);
-    expect(expected).toBeLessThan(Math.ceil(registered / perTeam));
+    expect(expected).toBeLessThan(Math.ceil((seatable + waitlisted) / perTeam));
     await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
-    const players = await programCell(page, program, 'Players');
-    await expect(players).toContainText(`${seatable}`);
-    await expect(players).toContainText(`${waitlisted} on the waitlist`);
+    await expect(await programCell(page, program, 'Players')).toHaveText(
+      new RegExp(`^${seatable}\\s*${waitlisted} on the waitlist$`)
+    );
   }
 );
 

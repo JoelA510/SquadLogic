@@ -102,7 +102,12 @@ export default function ProgramOverview({
         <td className="p-4 text-text-secondary">{recommended ?? '—'}</td>
         <td className="p-4 text-text-secondary">{program.avgRosterSize}</td>
         <td className="p-4">
-          <ProgramStatus assessment={program.assessment} />
+          {program.playerCount === 0 && program.waitlistedCount > 0 ? (
+            // Nobody to seat: no team is built, so "fits the limits" would say nothing true.
+            <Badge tone="warning">All on the waitlist</Badge>
+          ) : (
+            <ProgramStatus assessment={program.assessment} />
+          )}
         </td>
       </tr>
     );
@@ -181,6 +186,7 @@ ProgramOverview.propTypes = {
       id: PropTypes.string.isRequired,
       name: PropTypes.string,
       playerCount: PropTypes.number,
+      waitlistedCount: PropTypes.number,
       estimatedTeams: PropTypes.number,
       avgRosterSize: PropTypes.number,
       assessment: PropTypes.object,

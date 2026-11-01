@@ -107,6 +107,14 @@ decides each row with the same function generation uses. A read that fails is lo
 column is used meanwhile; generation still re-reads and still stops on a refused read. A league
 with the option off makes no new request and counts as before.
 
+Three things the review of the first build added: a program whose registrants are all waitlisted
+advises no team (estimated teams 0, status "All on the waitlist"), as generation builds none; the
+stored statuses are read again after the page's own status write (players taken off the waitlist are
+made active on save), so the advice does not keep the statuses it read on load; and the id-then-
+registration-id match of an import row to its stored player is one function
+(`matchDurablePlayer`) that the advice and both of generation's reads call, so they cannot match
+differently.
+
 **Options.** (a) File's column only: no request, wrong after a save (rejected). (b) The record over
 the file, read once (chosen). (c) Show the count only after a run: loses the advice before generating.
 
@@ -125,9 +133,11 @@ waitlisted reads byte for byte as before; a refused read falls back to the file'
 the real generator on the same rows makes the advised 2 teams); one mock E2E scenario in
 `Pillar1_Engine.feature` (100 imported, 20 waitlisted: the overview recommends 8 teams, not 10, and
 says 20 are waiting), which runs against the mock client's own `players` table rather than the unit
-tests' stand-in. `tests/rosterSizing.test.js` is unchanged (the function is not). Two defects were
-planted in the page change and each turned tests red (the effect not gated by the option; the stored
-status ignored).
+tests' stand-in; an all-waitlisted program; the re-read after the status write
+(`tests/teamAnalysisPlayUp.test.jsx`). `tests/rosterSizing.test.js` is unchanged (the function is
+not). Five defects were planted in the page change and each turned tests red (the effect not gated by
+the option; the stored status ignored; an all-waitlisted program still estimating a team or reading
+"fits the limits"; no re-read after the write).
 
 ## 4. Permits: Open and Download are written twice (#670)
 

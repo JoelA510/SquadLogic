@@ -11,7 +11,12 @@ import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js'
  * "ready to apply" with the server's dry run beside it, whatever options the caller passes; nothing
  * has touched a player until `applyDeferredImport('evaluations')`; cancelling touches none either.
  */
-const mocks = vi.hoisted(() => ({ parse: vi.fn(), role: undefined }));
+const mocks = vi.hoisted(() => ({
+  parse: vi.fn(),
+  role: undefined,
+  /** The season the header shows; a test switches it, as the admin can. */
+  season: { id: '', name: 'Seed Season', status: 'active' },
+}));
 
 vi.mock('papaparse', () => ({ default: { parse: mocks.parse } }));
 
@@ -19,7 +24,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: MOCK_ORG_ID },
     orgMember: { id: 'member-1', role: mocks.role },
-    currentSeasonSetting: { id: MOCK_SEASON_ID, name: 'Seed Season', status: 'active' },
+    currentSeasonSetting: mocks.season,
   }),
 }));
 
@@ -59,6 +64,7 @@ describe('ImportContext: the evaluations import', () => {
     window.__MOCK_DB__ = undefined;
     mocks.parse.mockReset();
     mocks.role = undefined;
+    mocks.season = { id: MOCK_SEASON_ID, name: 'Seed Season', status: 'active' };
     mocks.parse.mockImplementation((_file, options) => {
       options.complete({ data: FILE_ROWS, meta: { fields: HEADERS } });
     });
@@ -164,6 +170,72 @@ describe('ImportContext: the evaluations import', () => {
       await reloaded.result.current.applyDeferredImport('evaluations');
     });
     expect(player('EVC-1')).toMatchObject({ years_played: 4, rating: 5 });
+  });
+
+  // Codex, P2 on #684: the job's season is fixed when the job is made, whatever the header shows after.
+  it("applies to the job's own season after the header is switched to another one", async () => {
+    const DRAFT = 'ctx-draft-season';
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      season_settings: [
+        ...getMockData('season_settings'),
+        { id: DRAFT, organization_id: MOCK_ORG_ID, name: 'Draft 2027', status: 'draft' },
+      ],
+      players: [
+        ...getMockData('players'),
+        ...[DRAFT, MOCK_SEASON_ID].map((season) => ({
+          id: `ctx-two-${season}`,
+          organization_id: MOCK_ORG_ID,
+          season_settings_id: season,
+          first_name: 'Two',
+          last_name: 'Seasons',
+          external_registration_id: 'EVD-1',
+          years_played: null,
+          skill_tier: null,
+          rating: null,
+        })),
+      ],
+    });
+    mocks.parse.mockImplementation((_file, options) => {
+      options.complete({
+        data: [
+          {
+            'Registration ID': 'EVD-1',
+            'Years Played': '7',
+            'Skill Tier': 'advanced',
+            Rating: '5',
+          },
+        ],
+        meta: { fields: HEADERS },
+      });
+    });
+    const inSeason = (season) =>
+      getMockData('players').find(
+        (p) => p.external_registration_id === 'EVD-1' && p.season_settings_id === season
+      );
+
+    // Checked while the header shows the draft ...
+    mocks.season = { id: DRAFT, name: 'Draft 2027', status: 'draft' };
+    const { result } = renderHook(() => useImport(), { wrapper });
+    await act(async () => {
+      await result.current.startImport(new File(['x'], 'ev.csv'), 'evaluations');
+    });
+    await waitFor(() => expect(result.current.importStatus).toBe('ready_to_apply'));
+    expect(result.current.importedEvaluations.persistence.preview.season_settings_id).toBe(DRAFT);
+    expect(result.current.activeJob.season_settings_id).toBe(DRAFT);
+
+    // ... then the admin switches the header to the active season, and confirms.
+    mocks.season = { id: MOCK_SEASON_ID, name: 'Seed Season', status: 'active' };
+    await act(async () => {
+      await result.current.applyDeferredImport('evaluations');
+    });
+    expect(result.current.importedEvaluations.persistence.result.season_settings_id).toBe(DRAFT);
+    expect(inSeason(DRAFT)).toMatchObject({ years_played: 7, skill_tier: 'advanced', rating: 5 });
+    expect(inSeason(MOCK_SEASON_ID)).toMatchObject({
+      years_played: null,
+      skill_tier: null,
+      rating: null,
+    });
   });
 
   it('fails a file with an id and no value column before anything is staged', async () => {

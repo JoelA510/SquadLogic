@@ -181,7 +181,7 @@ export default function ImportPanel({ onImport }) {
     activeJob,
   } = useImport();
 
-  const { currentOrganization, currentSeasonSetting } = useOrganization();
+  const { currentOrganization, currentSeasonSetting, availableSeasons } = useOrganization();
   // In a demo no file is read: the picker, the drop zone and the file check all open the notice.
   const { isDemo } = useDemo();
   const [demoNoticeOpen, setDemoNoticeOpen] = useState(false);
@@ -192,6 +192,21 @@ export default function ImportPanel({ onImport }) {
   const deferredImportType = activeJob?.warning_summary?.deferred_apply?.import_type;
   const workflowImportType =
     isReadyToApply && IMPORT_TYPES.includes(deferredImportType) ? deferredImportType : importType;
+  // E3c: an evaluations import belongs to the season its job was made for, whatever the header
+  // shows after (the dry run, the apply and the SQL all read the job's). The confirmation names
+  // that season; it says so when the header has moved to another one (Codex, P2 on #684).
+  const evaluationResult = isComplete
+    ? importedEvaluations?.persistence?.result
+    : importedEvaluations?.persistence?.preview;
+  const evaluationSeasonId =
+    evaluationResult?.season_settings_id ?? activeJob?.season_settings_id ?? null;
+  const evaluationSeason = evaluationSeasonId
+    ? (availableSeasons ?? []).find((season) => season.id === evaluationSeasonId)
+    : currentSeasonSetting;
+  const evaluationSeasonElsewhere =
+    Boolean(evaluationSeasonId) &&
+    Boolean(currentSeasonSetting?.id) &&
+    evaluationSeasonId !== currentSeasonSetting.id;
   const coachRollbackComplete = importedCoaches?.persistence?.rollback?.status === 'rolled_back';
   const fieldRollbackComplete = importedFields?.persistence?.rollback?.status === 'rolled_back';
   const canRollbackImport =
@@ -390,10 +405,17 @@ export default function ImportPanel({ onImport }) {
     // review on #186).
     const mappedKeys = new Set(Object.keys(mapping));
     const aliasOf = (h) => HEADER_ALIASES[h.toLowerCase().trim()] ?? h.toLowerCase().trim();
-    const canonicalHeaders = [
-      ...mappedKeys,
-      ...stage.rawHeaders.filter((h) => !mappedKeys.has(h) && !mappedKeys.has(aliasOf(h))),
-    ];
+    // An evaluations file is only its mapped columns. A source column the admin mapped to one
+    // field (or to none) is consumed: left in, its own alias could stage it as another field
+    // ("Skill Level" is an alias of skill_tier, so a rating column cleared of its tier mapping
+    // came back as a tier, Codex on #684). The other types keep their extra columns.
+    const canonicalHeaders =
+      importType === 'evaluations'
+        ? [...mappedKeys]
+        : [
+            ...mappedKeys,
+            ...stage.rawHeaders.filter((h) => !mappedKeys.has(h) && !mappedKeys.has(aliasOf(h))),
+          ];
 
     const csv = serializeCanonicalCsv(mappedRows, canonicalHeaders);
     const rewritten = new File(
@@ -549,14 +571,13 @@ export default function ImportPanel({ onImport }) {
           {/* E3c: what the evaluations import will change (its dry run), then what it changed. */}
           {workflowImportType === 'evaluations' && (isReadyToApply || isComplete) && (
             <EvaluationImportSummary
-              result={
-                isComplete
-                  ? importedEvaluations?.persistence?.result
-                  : importedEvaluations?.persistence?.preview
-              }
+              result={evaluationResult}
               validationErrors={importedEvaluations?.validationErrors}
               previewError={isReadyToApply ? importedEvaluations?.persistence?.previewError : null}
-              seasonName={currentSeasonSetting?.name}
+              seasonName={evaluationSeason?.name}
+              otherSeasonName={
+                evaluationSeasonElsewhere ? (currentSeasonSetting?.name ?? 'another season') : ''
+              }
             />
           )}
 

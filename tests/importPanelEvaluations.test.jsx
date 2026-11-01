@@ -20,6 +20,12 @@ const mocks = vi.hoisted(() => ({
   resetImport: vi.fn(),
   setNotifyOnComplete: vi.fn(),
   rollbackImport: vi.fn(),
+  // The seasons of the organization, and the one the header shows (the admin can switch it).
+  seasons: [
+    { id: 'season-1', name: 'Spring 2026', status: 'active' },
+    { id: 'season-2', name: 'Fall 2026', status: 'draft' },
+  ],
+  currentSeasonId: 'season-1',
 }));
 
 vi.mock('papaparse', () => ({ default: { parse: mocks.parse } }));
@@ -29,7 +35,8 @@ vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: { id: MOCK_ORG_ID },
-    currentSeasonSetting: { id: 'season-1', name: 'Spring 2026', status: 'active' },
+    currentSeasonSetting: mocks.seasons.find((s) => s.id === mocks.currentSeasonId),
+    availableSeasons: mocks.seasons,
   }),
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
@@ -37,6 +44,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 }));
 
 const PREVIEW = {
+  season_settings_id: 'season-1',
   dry_run: true,
   status: 'preview',
   staged_rows: 6,
@@ -73,6 +81,7 @@ const upload = (name = 'evaluations.csv') => {
 describe('ImportPanel: the evaluations import', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.currentSeasonId = 'season-1';
     mocks.importState = {
       isImporting: false,
       progress: 0,
@@ -162,7 +171,10 @@ describe('ImportPanel: the evaluations import', () => {
         ],
         persistence: { preview: PREVIEW },
       },
-      activeJob: { warning_summary: { deferred_apply: { import_type: 'evaluations' } } },
+      activeJob: {
+        season_settings_id: 'season-1',
+        warning_summary: { deferred_apply: { import_type: 'evaluations' } },
+      },
     };
     render(<ImportPanel onImport={vi.fn()} />);
     const summary = screen.getByTestId('evaluation-summary');
@@ -186,6 +198,101 @@ describe('ImportPanel: the evaluations import', () => {
     await waitFor(() => expect(mocks.applyDeferredImport).toHaveBeenCalledWith('evaluations'));
     fireEvent.click(screen.getByRole('button', { name: /cancel deferred import/i }));
     await waitFor(() => expect(mocks.cancelDeferredImport).toHaveBeenCalledWith('evaluations'));
+  });
+
+  // Codex, P2 on #684: switching the header's season after the preview does not move the job.
+  it("names the job's own season in the confirmation, not the one the header shows now", () => {
+    // Checked for Fall 2026 (a draft); the admin then switched the header to Spring 2026.
+    mocks.currentSeasonId = 'season-1';
+    mocks.importState = {
+      ...mocks.importState,
+      importStatus: 'ready_to_apply',
+      progress: 100,
+      importedEvaluations: {
+        importJobId: 'job-1',
+        validationErrors: [],
+        persistence: { preview: { ...PREVIEW, season_settings_id: 'season-2' } },
+      },
+      activeJob: {
+        season_settings_id: 'season-2',
+        warning_summary: { deferred_apply: { import_type: 'evaluations' } },
+      },
+    };
+    render(<ImportPanel onImport={vi.fn()} />);
+    const summary = screen.getByTestId('evaluation-summary');
+    expect(
+      within(summary).getByText(/Only players already in Fall 2026 are updated/)
+    ).toBeInTheDocument();
+    expect(within(summary).queryByText(/already in Spring 2026/)).not.toBeInTheDocument();
+    // And it says the header has moved on, so the confirm is not read as being for that season.
+    expect(within(summary).getByTestId('evaluation-other-season')).toHaveTextContent(
+      'This import was checked for Fall 2026, not Spring 2026, the season now shown in the header.'
+    );
+  });
+
+  it('says nothing about the header when the job and the header agree', () => {
+    mocks.importState = {
+      ...mocks.importState,
+      importStatus: 'ready_to_apply',
+      progress: 100,
+      importedEvaluations: { importJobId: 'job-1', persistence: { preview: PREVIEW } },
+      activeJob: {
+        season_settings_id: 'season-1',
+        warning_summary: { deferred_apply: { import_type: 'evaluations' } },
+      },
+    };
+    render(<ImportPanel onImport={vi.fn()} />);
+    expect(screen.queryByTestId('evaluation-other-season')).not.toBeInTheDocument();
+  });
+
+  it("still says the header differs when the job's season is not among the seasons loaded", () => {
+    mocks.importState = {
+      ...mocks.importState,
+      importStatus: 'ready_to_apply',
+      progress: 100,
+      importedEvaluations: {
+        importJobId: 'job-1',
+        persistence: { preview: { ...PREVIEW, season_settings_id: 'season-gone' } },
+      },
+      activeJob: {
+        season_settings_id: 'season-gone',
+        warning_summary: { deferred_apply: { import_type: 'evaluations' } },
+      },
+    };
+    render(<ImportPanel onImport={vi.fn()} />);
+    const summary = screen.getByTestId('evaluation-summary');
+    // No name to give, and no wrong one: not the header's season.
+    expect(within(summary).queryByText(/already in Spring 2026/)).not.toBeInTheDocument();
+    expect(within(summary).getByTestId('evaluation-other-season')).toHaveTextContent(
+      'This import was checked for a different season than Spring 2026, the one now shown in the header.'
+    );
+  });
+
+  it("names the job's season after the apply too, from the result", () => {
+    mocks.currentSeasonId = 'season-1';
+    const { rerender } = render(<ImportPanel onImport={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^evaluations\b/i }));
+    mocks.importState = {
+      ...mocks.importState,
+      importStatus: 'completed',
+      progress: 100,
+      importedEvaluations: {
+        importJobId: 'job-1',
+        persistence: {
+          result: {
+            ...PREVIEW,
+            dry_run: false,
+            status: 'completed',
+            season_settings_id: 'season-2',
+          },
+        },
+      },
+      activeJob: { season_settings_id: 'season-2' },
+    };
+    rerender(<ImportPanel onImport={vi.fn()} />);
+    expect(
+      within(screen.getByTestId('evaluation-summary')).getByText(/already in Fall 2026 are updated/)
+    ).toBeInTheDocument();
   });
 
   it('says so when the preview could not be read, and still lets the finalizer decide', () => {

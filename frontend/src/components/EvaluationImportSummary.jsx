@@ -50,13 +50,16 @@ function RowList({ heading, items, total, testId }) {
  * @param {Array<{ row?: number, field?: string, message?: string }>} [props.validationErrors] -
  *   the rows import-validation refused before they were staged
  * @param {string | null} [props.previewError] - why there is no preview, when there is none
- * @param {string} [props.seasonName]
+ * @param {string} [props.seasonName] - the season the import's job was made for
+ * @param {string} [props.otherSeasonName] - the season the header shows now, when it is not the
+ *   job's: the admin switched after the check, and the import still targets the job's season
  */
 export default function EvaluationImportSummary({
   result,
   validationErrors = [],
   previewError = null,
   seasonName = '',
+  otherSeasonName = '',
 }) {
   const headingId = React.useId();
   const isPreview = result?.dry_run === true;
@@ -119,6 +122,13 @@ export default function EvaluationImportSummary({
           : 'Only players already in the season are updated. '}
         A blank cell leaves the stored value as it is, and no player is created.
       </p>
+      {otherSeasonName && (
+        <p data-testid="evaluation-other-season" className="text-xs text-text-secondary mb-2">
+          {seasonName
+            ? `This import was checked for ${seasonName}, not ${otherSeasonName}, the season now shown in the header.`
+            : `This import was checked for a different season than ${otherSeasonName}, the one now shown in the header.`}
+        </p>
+      )}
       <div className="rounded-lg border border-border bg-bg-sunken divide-y divide-border-soft">
         <dl className="divide-y divide-border-soft">
           <Count

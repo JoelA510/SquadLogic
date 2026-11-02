@@ -190,7 +190,8 @@ export const AVAILABILITY_REASON = Object.freeze({
    * `PRACTICE_SUNSET_MARGIN_MINUTES` (0: operator ruling 2026-09-27, "teams
    * don't practice after sunset at unlit fields"). Emitted by
    * `practice/daylight.js`, never by the game path, which keeps its own margin
-   * and {@link SUNSET_MARGIN_VIOLATED}.
+   * and {@link SUNSET_MARGIN_VIOLATED}. A `compromise` (owner, 2026-11-02), not a
+   * block: the practice stands and is flagged.
    */
   PRACTICE_PAST_SUNSET: 'PRACTICE_PAST_SUNSET',
   /** Worst-case occupancy runs past sunset less the safety margin. */
@@ -328,7 +329,11 @@ export const AVAILABILITY_REASON_SEVERITY = Object.freeze({
   [AVAILABILITY_REASON.SUNSET_NOT_BINDING_WHEN_LIT]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.SUNSET_PRECEDENCE_AMBIGUOUS]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE]: AVAILABILITY_SEVERITY.COMPROMISE,
-  [AVAILABILITY_REASON.PRACTICE_PAST_SUNSET]: AVAILABILITY_SEVERITY.BLOCKING,
+  // A compromise, not a block (owner, 2026-11-02): a practice past sunset is kept and flagged for the
+  // admin to decide, as the Edge pass and the repair have done since 2026-10-27. The game's
+  // SUNSET_MARGIN_VIOLATED above is not changed here; the owner approved the same relabel for it as
+  // a separate change (docs/changes/2026-11-02-sunset-compromise.md).
+  [AVAILABILITY_REASON.PRACTICE_PAST_SUNSET]: AVAILABILITY_SEVERITY.COMPROMISE,
 
   [AVAILABILITY_REASON.OCCUPANCY_BOUND_BY_BOOKING]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.OCCUPANCY_UNBOUNDED]: AVAILABILITY_SEVERITY.INFO,

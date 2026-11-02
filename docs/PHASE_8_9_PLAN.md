@@ -26,7 +26,8 @@ Spec: `docs/PHASE_8_PLAN.md` §8.9 (line 428).
   the civil twilight between sunset and dusk is the teardown window for
   equipment. So the practice margin is **0 minutes before sunset**. Games keep
   their existing margin (15, per the fixture README and `sunsetMarginRule`).
-  This answers open decision D1 (the rule is hard, not a warning) and replaces
+  This answers open decision D1 (the rule is hard, not a warning; the label became
+  a compromise on 2026-11-02, see the D1 note under the decisions table) and replaces
   D6 (no per-season margin column: one named core constant,
   `PRACTICE_SUNSET_MARGIN_MINUTES = 0`, with its Deno twin pinned equal by the
   drift test).
@@ -270,6 +271,17 @@ refuse yet" is now "do not refuse": `practice/repair.js` keeps an unknown-sunset
 `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`), as the Edge pass has since PR 6, and never TIME TBD
 `sunset-unknown`. Unknown is still never read as legal. Plan: `docs/changes/2026-11-02-unknown-sunset-flag.md`;
 lesson 84 supersedes lesson 47 (the original row above is left as written).
+
+**D1, 2026-11-02 (owner), practice half:** "Relabel the past-sunset constraint as a compromise for both
+practice and game." "The rule is hard" (D1 above, and the 2026-09-27 ruling) is now a label that says
+`compromise`: `PRACTICE_PAST_SUNSET` is a compromise finding, the `practice-daylight` claim is `soft` (weight 1, a
+placeholder nobody has stated; `waivable: false`; the retype is in its `history`), and the evaluator's status for
+a past-sunset practice is `compromised`. Behaviour is unchanged: the Edge pass and the repair have kept and
+flagged such a practice since 2026-10-27, and no number moves. The rule itself (end by `floor(sunset)`, margin 0)
+is unchanged. **Game half: approved by the owner on 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds.") and
+the next PR, not changed here** (it turns `infeasible` into `feasible` and moves the season-2026 corpus results,
+which that PR rewrites from the plan). Plan: `docs/changes/2026-11-02-sunset-compromise.md`; lesson 85. The D1 row and
+the 2026-09-27 entry above are left as written.
 
 Every PR: `/code-review` before opening; the season-2026 fixture suite when it
 touches domain types, constraints or solver stages; each new guarantee shown red

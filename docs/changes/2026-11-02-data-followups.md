@@ -283,3 +283,40 @@ E2E (`--workers=1`), the frontend build and `check:bundle` as CI makes them, the
 and the generation goldens unchanged, and `git diff --check`. **Not run here:** the full `prove.sh`
 sweep (5.4 hours), the real-backend E2E and the CI pgTAP job on the project's PostgreSQL 17 (the guard
 reads catalogue columns present from 12 to 17), and Deno (no Edge or shared code changes).
+
+## Build notes (what was run, and what changed from the plan)
+
+_Executed_ unless marked otherwise; the head the numbers are for is the commit that carries this section.
+
+| Gate                                                                                                                                        | Result                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`, `npm run lint` (`--max-warnings=1`, none printed), `npm run check:unused`                                              | clean                                                                                                                                                                     |
+| `npm run check:advisors`                                                                                                                    | PASS, 172 migration files                                                                                                                                                 |
+| `npm run test:coverage` at the default 5 s timeout                                                                                          | 488 files, 7803 tests passed, thresholds met; includes the season fixture suite (`season2026Fixture`, `naturalAgeSeasonFixture`) and the generation goldens, none changed |
+| Mock E2E, `CI=true --workers=1 --trace off`, its own dev server (port 5173 checked free)                                                    | 215 passed, 0 failed; the new scenario and F1's waitlist scenario both ran in this tree                                                                                   |
+| `VITE_*` stand-ins as CI sets them, `npm run build`, `npm run check:bundle`                                                                 | built; `PASS — all chunks within budget`                                                                                                                                  |
+| `bash scripts/dbharness/run.sh` on a scratch PostgreSQL 16 cluster                                                                          | `HARNESS OK`, 172 migrations applied, `PASS catalog snapshot` (unchanged), `PASS smoke 20261117010000`, `PASS revert 20261117010000` and its three checks                 |
+| `PLANT_ANCHORS_ONLY=1 bash scripts/dbharness/prove.sh`                                                                                      | all 439 anchors resolve exactly once (the four new ones included); the claim census passes                                                                                |
+| The four plants of item 1, run on their own (a copy of the tree, so the real files were never mutated; the green baseline is the run above) | `M66` rebuild, `M66` report-not-refuse, `R66`, `S66`: each CAUGHT at the check named for it                                                                               |
+| Item 2's three plants (page), then each reverted byte for byte                                                                              | the exclusion removed: 7 tests red; the record ignored: 2 red; the overlap counted as waitlisted: 1 red                                                                   |
+
+**Changed from the plan.**
+
+- The test double for `admin_upsert_division_settings` in `tests/teamingConfigurationAdvice.test.jsx`
+  returned a division row with no age band, which the real RPC (it returns the whole `divisions` row as
+  jsonb) does not; with it the generator took the band from the program's name and called every player not
+  eligible. It now returns the band the saved row holds. The F1 test that pinned "the option off reads
+  nothing new" now says the stored players are read once and their status is not looked at, and its log
+  pattern follows the new message.
+- `tests/teamSyncKeepsStatus.test.jsx` handed the page a new `importedData` object on every render. The
+  real context memoizes it (`maskedImportedData`), and the page now reads the import's stored players in an
+  effect keyed on it, so the stand-in looped until the 5 s timeout. It now hands out one object, as the
+  context does. (The page keys the read on the rows' identity, as F1's did; a context that returned a new
+  object per render would re-read per render, which the real one does not.)
+- The pgTAP suite is untouched: no `supabase/tests` file changed, so none was run. No Edge or shared code
+  changed, so Deno was not run.
+
+**Not run.** The full `prove.sh` sweep (5.4 hours: only the four new plants, on their own); the real-backend
+E2E; the CI pgTAP job on the project's PostgreSQL 17 (the migration's check reads `pg_index`, `pg_class`,
+`pg_am`, `pg_attribute` and `pg_opclass` columns present from PostgreSQL 12 to 17; statically reviewed);
+the production deploy; and any run against production beyond the read-only `SELECT`s listed above.

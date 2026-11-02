@@ -553,7 +553,9 @@ Each PR runs the season fixture suite and the full Definition of Done.
 - **Sunset, measured (_executed_):** a 19:00 end is before sunset on 53% of days of a year at the demo's
   sites, an 18:00 end on 69%; for a winter visit (the demo's season is the next twelve weeks) every unlit
   practice is past sunset and is flagged, never blocked. No static grid can make a year of practices fit
-  before sunset; the owner may prefer a different anchor (see the PR).
+  before sunset; the owner may prefer a different anchor (see the PR). **Followed up 2026-11-01:** the demo's
+  season is now the visitor's choice of a spring or an early-fall window in which no unlit slot is near
+  sunset (`docs/changes/2026-11-01-demo-season-selection.md`).
 - **TIME TBD in the demo:** the list starts empty (the sync is call-stack guarded; `start_demo_session` is
   not a caller), is rebuilt when the Exports panel opens, and then lists U9 and older (60 teams, two missing
   practices each, `not-scheduled-yet`) and nothing for U4 to U8; after the visitor's run is applied it is

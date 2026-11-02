@@ -1,8 +1,8 @@
 # Demo season selection: choose a fall or a spring season at demo entry
 
 Kind: FEATURE · Drawn up: 2026-11-01 against `origin/main` `bced965` · Owner: the repository owner ·
-Status: **direction approved** (owner: "demo selection", not a swap inside the demo); the exact windows
-and the fall's length are the owner's to confirm (Decisions). AGENTS.md rule 14 applies because the
+Status: **direction approved** (owner: "demo selection", not a swap inside the demo); **built 2026-11-01**
+(Build notes); the exact windows and the fall's length are the owner's to confirm (Decisions). AGENTS.md rule 14 applies because the
 change touches persistence (`start_demo_session`); it adds a parameter and one pure helper and nothing
 else on the session path (no table, no column, no RLS, no expiry or cleanup change; see Design).
 
@@ -227,6 +227,14 @@ and 2 August plus six weeks ends 12 to 18 September, with at least 10 minutes in
 - **A stale tab calls the old RPC.** — covered: the zero-argument function remains.
 - **Replacing both bodies moves mutation plants and the catalogue snapshot.** — re-aimed in the same PR
   (lesson 70); the snapshot regenerated and reviewed.
+- **The app deploys before the migration** (CI applies migrations on merge, a self-hosted project when its
+  operator does). — the choosing call finds no `start_demo_session(p_season)` (`PGRST202`) and the visitor is
+  told the demo could not be started, until the migration lands. There is deliberately no fall back to the
+  zero-argument call: it would date the demo in a season the visitor did not choose and say nothing.
+  `docs/operations/self-hosting.md` says to apply the migration first.
+- **The banner's own query.** — `useDemoSeason` reads the demo's first season row (by creation) for its label,
+  one request per mount of the timer. The choice could instead ride on the organization row, which the page
+  already loads, but that is a column an admin can write (Options B).
 - **Rollback:** `docs/sql/20261114010000_revert.sql`, then redeploy the previous frontend (the old page
   calls the zero-argument RPC, which the revert restores).
 
@@ -235,22 +243,22 @@ and 2 August plus six weeks ends 12 to 18 September, with at least 10 minutes in
 Each names its test; every test is shown failing first (planted defects below) and must pass at the repo's
 default 5 s timeout.
 
-- [ ] T1 The rule, JS: `tests/demoSeasons.test.js` — vectors (a date inside each window, the day before a
+- [x] T1 The rule, JS: `tests/demoSeasons.test.js` — vectors (a date inside each window, the day before a
       start, a window's last day and the day after, 29 Feb, year end, a leap-year start), the default for
       each, an unknown choice, fall chosen in spring takes this year's, in October next year's.
-- [ ] T2 The proof: the same file reads the unlit slot ends from `fixtures/demo-2026/fields.csv`, walks
+- [x] T2 The proof: the same file reads the unlit slot ends from `fixtures/demo-2026/fields.csv`, walks
       every practice weekday of every instance 2026-2060 and requires each end at least 10 minutes before
       the real `sunsetOnDate` at the seed's venues; it fails on a fall lengthened by two weeks.
-- [ ] T3 The mirror: the pgTAP file's vectors equal T1's (parsed by the test).
-- [ ] T4 Server: pgTAP in `demo_sessions.sql` (the vectors; fall and spring each date the season, divisions
+- [x] T3 The mirror: the pgTAP file's vectors equal T1's (parsed by the test).
+- [x] T4 Server: pgTAP in `demo_sessions.sql` (the vectors; fall and spring each date the season, divisions
       and practice rows; the default; an unknown value is refused; the zero-argument call; an existing demo
       is returned with its own season; `season_weeks` is read) and `demo_practice_schedule.sql` (the seeded
       rows live from the choice's season), all against `CURRENT_DATE`-relative dates.
-- [ ] T5 Smoke and revert for `20261114010000`; harness plant M63.
-- [ ] T6 Browser: `tests/demoLib.test.js` (the RPC call, the result's season, the unknown-season failure,
+- [x] T5 Smoke and revert for `20261114010000`; harness plant M63.
+- [x] T6 Browser: `tests/demoLib.test.js` (the RPC call, the result's season, the unknown-season failure,
       the mock's twin), `tests/demoStart.test.jsx` (choose, then start; the choice reaches the RPC; the
       default; focus and keyboard), `tests/demoTimer.test.jsx` (the banner names the season).
-- [ ] T7 E2E on the mock: a scenario per choice (the demo opens with that season named and its dates), and
+- [x] T7 E2E on the mock: a scenario per choice (the demo opens with that season named and its dates), and
       axe on the entry choice in both themes.
 
 ## Decisions
@@ -264,6 +272,36 @@ default 5 s timeout.
 5. **The expiry is 30 minutes**, as built since D3; the brief's "one hour" is the purge's rule for stray
    anonymous users. Nothing here changes it.
 
-## Build notes
+## Build notes (2026-11-01)
 
-_(filled in as it is built)_
+- **Built as planned:** `demo_seed.season_window()`, `start_demo_session(p_season text)`, the kept
+  `start_demo_session()`, the entry choice, the banner, the mock twin, and the tests below. No table, column,
+  policy, expiry or purge change, so nothing needed the stop rule 14 asks for beyond this plan.
+- **Departures found while building:**
+  1. **The zero-argument function stays a definer with `search_path=public`** and is PL/pgSQL defined before
+     the overload: `docs/sql/20261030010000_smoke.sql` requires every `start_demo_session` to be a pinned
+     definer closed to `anon`, and `tests/practiceReaderCensus.test.js` reads the latest definition of a name
+     in the file, which has to be the real body, not the wrapper. (A first draft was a SQL-language,
+     invoker wrapper; the posture smoke refused it.)
+  2. **The three `M60` plants were re-aimed at `M63`** (lesson 70): they mutate the body this migration
+     replaces, and the harness pre-flight refuses a plant aimed at a superseded body. Anchors unchanged.
+  3. **An anonymous visitor who already has a live demo is not asked again**: the entry opens it (the server
+     would return that demo in its own season whatever was asked).
+  4. **`tests/demoTimer.test.jsx` and `demoStart.test.jsx` reset the mock's `window.__MOCK_DB__`** per test:
+     its demos counted toward the mock's cap of ten across the whole file, which the new tests would have
+     exceeded.
+  5. **`tests/unwiredLayerImporters.test.js` pins `tests/demoSeasons.test.js`** as an importer and consumer
+     of both arms of the sunset helper, as it pins `demoSeed.test.js`.
+  6. **The expiry is 30 minutes**, not an hour (Decisions 5): the brief's "one hour" is the purge's rule for a
+     stray anonymous user. Nothing here touches it.
+- **Planted defects (three, each shown red, then reverted):** the choice not reaching the rule (the smoke and 5
+  of the 52 assertions in `demo_practice_schedule.sql` red); a fall of nine weeks (the sunset proof red,
+  8,088 slot-days too near sunset); the entry page not sending the choice (5 Vitest tests red, and the
+  fall E2E scenario, which read "Spring season"). The other `M63` and `R63` plants are resolved by
+  `PLANT_ANCHORS_ONLY=1` and were not run.
+- **Review of the change** (`/code-review`, medium; eight findings, six answered in the same PR, the fixes each with a test
+  that fails with its fix reverted): the banner read an arbitrary season row (now the first by creation); the
+  server's season and dates were parsed and unread (the page now says them once it has them); an ended demo
+  bounced the visitor away from the choice (now compared with the clock); `''` was treated as no choice (only
+  `null` is); the wrapper sets no TimeZone (a comment says why). Not changed, with the reasons above: no
+  fall back when the migration is missing; the banner's extra query.

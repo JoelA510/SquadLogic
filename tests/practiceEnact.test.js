@@ -42,6 +42,7 @@ import {
   F2,
   F3,
   FINGERPRINT,
+  LOCATIONS,
   RETIREMENT,
   SEASON,
   assignment,
@@ -294,6 +295,36 @@ describe('enact :: the write covers S alone, marked and moved', () => {
         assigned_via: 'recommendation',
       },
     ]);
+  });
+
+  // Owner, 2026-11-02: an unknown sunset is flagged, never refused. The flag is for the admin who
+  // reads the panel; the write is the same as for a recommendation that carries none.
+  it('enacts a recommendation that carries an unknown-sunset flag exactly as one without it', () => {
+    // Venue A has coordinates, venue B (where the cross-venue recommendation lands) has none, and
+    // both are unlit with no sunset table: nothing says when the sun sets at venue B.
+    const flaggedRows = {
+      ...cross(),
+      locations: [
+        { ...LOCATIONS[0], lighting_available: false, latitude: 40, longitude: -75 },
+        { ...LOCATIONS[1], lighting_available: false, latitude: null, longitude: null },
+      ],
+      daylight: { timeZone: 'America/New_York', sunsets: [] },
+    };
+    const state = createRecommendationState(adapt(flaggedRows).input);
+    const shown = recOf(state, uuid(611));
+    expect(shown.to).toMatchObject({ surfaceId: expect.any(String), startMinutes: 18 * 60 });
+    expect(shown.daylightSunsetUnknown).toMatchObject({
+      code: 'SUNSET_UNKNOWN',
+      cause: 'venue-coordinates-missing',
+    });
+    const out = enactOn(flaggedRows, state, uuid(611));
+    expect(out.judged.stands).toBe(true);
+    expect(out.refusal).toBeNull();
+    const plain = enactOn(cross(), createRecommendationState(adapt(cross()).input), uuid(611));
+    expect(plain.payload).not.toBeNull();
+    expect(out.payload.assignmentRows).toEqual(plain.payload.assignmentRows);
+    expect(out.payload.repair.exceptions).toEqual(plain.payload.repair.exceptions);
+    expect(out.payload.repair.closes).toEqual(plain.payload.repair.closes);
   });
 
   // 3b PR 11d: a blackout has its own commit gate; an unsaved one is refused.

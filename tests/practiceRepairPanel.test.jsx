@@ -73,7 +73,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
 
 import PracticeRepairPanel from '../frontend/src/components/scheduling/PracticeRepairPanel.jsx';
 import PracticeEnactDialog from '../frontend/src/components/scheduling/PracticeEnactDialog.jsx';
-import { pastSunsetText } from '../frontend/src/utils/practiceRepairPanel.js';
+import { pastSunsetText, sunsetUnknownText } from '../frontend/src/utils/practiceRepairPanel.js';
 import PracticeRepairLauncher from '../frontend/src/components/scheduling/PracticeRepairLauncher.jsx';
 import { PRACTICE_TBD_REASON } from '@squadlogic/core/practice/index.js';
 
@@ -157,6 +157,24 @@ function seed({ coordinates = false, lit = false, locationId = LOC } = {}) {
     team_coach_assignments: [],
     coach_practice_preferences: [],
   };
+}
+
+/**
+ * A mixed estate: F1's venue has coordinates, F2's venue has none (unlit, no table row), so the
+ * calendar is passed and only F2's sunset is unknown.
+ */
+const LOC2 = uuid(102);
+function seedMixed() {
+  seed({ coordinates: true, lit: false });
+  h.tables.locations.push({
+    id: LOC2,
+    organization_id: ORG,
+    name: 'Venue Two',
+    lighting_available: false,
+    latitude: null,
+    longitude: null,
+  });
+  h.tables.fields = h.tables.fields.map((f) => (f.id === F2 ? { ...f, location_id: LOC2 } : f));
 }
 
 const RETIRE_F1 = { kind: 'retirement', field: { id: F1, effective_to: '2026-10-14' } };
@@ -435,6 +453,129 @@ describe('practice repair panel :: past sunset is shown, not hidden', () => {
     unmount();
     render(<PracticeEnactDialog {...props} />);
     expect(screen.queryByTestId('practice-enact-past-sunset')).toBeNull();
+  });
+});
+
+describe('practice repair panel :: an unknown sunset is shown, not hidden', () => {
+  // An unknown sunset is flagged, never refused (owner, 2026-11-02): a recommendation onto ground
+  // whose sunset nothing says is kept, and the admin must see the flag before enacting it.
+  const unknownRows = () =>
+    screen
+      .getAllByTestId('practice-repair-window')
+      .filter((row) => within(row).queryByTestId('practice-repair-sunset-unknown'));
+
+  it('shows the flag on a recommendation onto a venue with no coordinates, and the finding', async () => {
+    seedMixed();
+    // From the snapshot: F2's venue has no coordinates and F1's has; the lost ground is F1.
+    expect(h.tables.locations.filter((l) => l.latitude === null).map((l) => l.id)).toEqual([LOC2]);
+    await openPanel();
+    const flagged = unknownRows();
+    // T1's Monday 17:00 can only go to F2 (the other venue), whose sunset is unknown.
+    expect(flagged.map((row) => row.getAttribute('data-assignment-id'))).toEqual([A1]);
+    const note = within(flagged[0]).getByTestId('practice-repair-sunset-unknown');
+    expect(note).toHaveTextContent(
+      /Sunset unknown from 2026-1\d-\d\d: the venue has no coordinates, so it cannot be shown to end by sunset, on \d+ dates\./
+    );
+    expect(note).toHaveTextContent('flagged, not blocked');
+    expect(note).toHaveTextContent("set the venue's coordinates");
+    expect(within(note).getByText('Sunset unknown')).toHaveClass('badge');
+    // Unknown is not past sunset: the other flag is not on it.
+    expect(within(flagged[0]).queryByTestId('practice-repair-past-sunset')).toBeNull();
+    // It is placed, not TIME TBD for daylight, and the finding names it as kept and flagged.
+    expect(within(flagged[0]).getByTestId('practice-repair-to')).toHaveTextContent('Pitch 2');
+    expect(within(flagged[0]).queryByTestId('practice-repair-time-tbd')).toBeNull();
+    const finding = screen
+      .getByTestId('practice-repair-findings')
+      .querySelector('[data-reason-code="PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN"]');
+    expect(finding).not.toBeNull();
+    expect(finding).toHaveAttribute('data-severity', 'compromise');
+    expect(finding).toHaveTextContent('kept and flagged');
+    expect(screen.queryByTestId('practice-repair-daylight-why')).toBeNull();
+  });
+
+  it('shows nothing when every venue has coordinates, or when none does (daylight unchecked)', async () => {
+    seed({ coordinates: true, lit: false });
+    await openPanel();
+    expect(screen.queryAllByTestId('practice-repair-sunset-unknown')).toHaveLength(0);
+    cleanup();
+    seed();
+    await openPanel();
+    expect(screen.queryAllByTestId('practice-repair-sunset-unknown')).toHaveLength(0);
+    expect(screen.getByTestId('practice-repair-daylight-why')).toBeInTheDocument();
+  });
+
+  it('words the flag from the recommendation alone, and says nothing without one', () => {
+    expect(sunsetUnknownText({})).toBeNull();
+    expect(sunsetUnknownText(null)).toBeNull();
+    expect(
+      sunsetUnknownText({
+        daylightSunsetUnknown: {
+          date: '2026-10-19',
+          cause: 'venue-coordinates-missing',
+          occurrences: 6,
+        },
+      })
+    ).toBe(
+      "Sunset unknown from 2026-10-19: the venue has no coordinates, so it cannot be shown to end by sunset, on 6 dates. It is flagged, not blocked: check it before you enact it, or set the venue's coordinates."
+    );
+    expect(
+      sunsetUnknownText({
+        daylightSunsetUnknown: {
+          date: '2026-10-19',
+          cause: 'sunset-not-computable',
+          occurrences: 1,
+        },
+      })
+    ).toMatch(/there is no sunset at that latitude on some dates, so .* on 1 date\./);
+    // A cause nothing here knows is not invented.
+    expect(
+      sunsetUnknownText({
+        daylightSunsetUnknown: { date: '2026-10-19', cause: null, occurrences: 2 },
+      })
+    ).toMatch(/: no sunset is known there, so/);
+  });
+
+  it('the confirmation dialog shows the flag before the override is accepted, beside the other one', () => {
+    const unknown = sunsetUnknownText({
+      daylightSunsetUnknown: {
+        date: '2026-10-19',
+        cause: 'venue-coordinates-missing',
+        occurrences: 6,
+      },
+    });
+    const past = pastSunsetText({
+      daylightPastSunset: { date: '2026-11-03', endMinutes: 1080, limitMinutes: 1010, dates: 4 },
+    });
+    const props = {
+      open: true,
+      heading: 'Enact: Pitch 1 retires',
+      lead: 'Move Team One off Pitch 1',
+      stored: '2026-10-14',
+      teams: [{ id: T1, name: 'Team One' }],
+      rows: [],
+      replacement: 'Mon 17:00 · Pitch 2, from 2026-10-15 to 2026-11-30',
+      affected: 0,
+      busy: false,
+      notice: null,
+      blocked: null,
+      onConfirm: () => {},
+      onClose: () => {},
+    };
+    const { unmount } = render(<PracticeEnactDialog {...props} sunsetUnknown={unknown} />);
+    const note = screen.getByTestId('practice-enact-sunset-unknown');
+    expect(note).toHaveTextContent('Sunset unknown. Sunset unknown from 2026-10-19');
+    expect(note).toHaveAttribute('role', 'note');
+    expect(screen.queryByTestId('practice-enact-past-sunset')).toBeNull();
+    unmount();
+    // A candidate with both kinds of date shows both, each in its own note.
+    const both = render(
+      <PracticeEnactDialog {...props} pastSunset={past} sunsetUnknown={unknown} />
+    );
+    expect(screen.getByTestId('practice-enact-past-sunset')).toBeInTheDocument();
+    expect(screen.getByTestId('practice-enact-sunset-unknown')).toBeInTheDocument();
+    both.unmount();
+    render(<PracticeEnactDialog {...props} />);
+    expect(screen.queryByTestId('practice-enact-sunset-unknown')).toBeNull();
   });
 });
 

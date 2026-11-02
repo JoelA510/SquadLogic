@@ -100,8 +100,12 @@ the Edge counterpart of core `practice/daylight.js`:
   first dark date, and the admin decides.
 - **The repair agrees.** `practice/repair.js` keeps a re-home candidate past sunset and flags it
   (`daylightPastSunset` on the re-home and its recommendation, `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET`
-  a compromise finding); a candidate whose sunset is **unknown** is still refused (`sunset-unknown`,
-  D4: unknown says nothing about being past it, and is never read as legal).
+  a compromise finding); a candidate whose sunset is **unknown** is kept and flagged too (owner, 2026-11-02:
+  `daylightSunsetUnknown` on the re-home and its recommendation, the Edge pass's own `SUNSET_UNKNOWN` and cause,
+  and `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`, a compromise finding). D4: unknown says nothing about being past
+  sunset and is never read as legal, and "refusal would break configs that users may otherwise stick with". The
+  repair no longer makes a series TIME TBD for daylight (`past-sunset` and `sunset-unknown` stay for rows saved
+  before); a flag does not change the price (D11). The panel shows each flag on its row and in the enact dialog.
 
 ## Practices per division (Phase D PR B)
 
@@ -230,7 +234,7 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
 - **Metrics**: Emit counts of teams assigned on first pass vs. manual follow-up, distribution of start times per division, and slot utilization percentages. The `evaluatePracticeSchedule` helper in `src/practiceMetrics.js` now implements these summaries and flags data quality issues so the admin UI can surface early warnings.
 - **Alerts**: If more than 5% of teams require manual assignment, raise an admin warning suggesting more slot capacity.
 - **Audit Trail**: Persist a JSON diff of assignments compared to the prior run for transparency.
-- **Daylight (8.9)**: an unlit or undeclared practice ends at or before `floor(sunset)` (margin 0). Core evaluation enforces it through `practice/daylight.js`. The mid-season repair (`practice/repair.js`, 8.9 PR 7) refuses every re-home candidate, tier 1 and tier 2, that runs past sunset on any date of its series-window (`past-sunset`), or whose sunset is unknown (`sunset-unknown`, never allowed). When no legal candidate is left, the series is TIME TBD with that reason. A partly legal candidate is refused, not truncated: D8's truncation belongs to the Edge post-pass. The gate is enforced in the module but is **not live** until 8.6 3b PRs 9-11 wire the repair.
+- **Daylight (8.9)**: an unlit or undeclared practice ends at or before `floor(sunset)` (margin 0). Core evaluation enforces it through `practice/daylight.js`. The mid-season repair (`practice/repair.js`, 8.9 PR 7) judges every re-home candidate, tier 1 and tier 2, over its series-window and refuses none for daylight: a candidate that runs past sunset on some date is kept and flagged (`daylightPastSunset`, owner 2026-10-27), and one whose sunset is unknown is kept and flagged (`daylightSunsetUnknown`, owner 2026-11-02; never read as legal). A partly legal candidate is kept whole, not truncated: D8's truncation belonged to the Edge post-pass, which flags too. The repair is wired into the recommendation panel (8.6 3b PRs 9-11).
 
 ## Future Enhancements
 

@@ -96,3 +96,44 @@ Deno.test('lit is exempt, noon is in daylight, 22:30 is kept whole and flagged p
     [['t2', '2026-09-15', DAYLIGHT_TBD_REASON, true]]
   );
 });
+
+Deno.test(
+  'no coordinates on unlit ground is kept whole and flagged unknown, never refused (D4)',
+  () => {
+    // Owner, 2026-11-02: an unknown sunset is flagged, never refused; core's practice repair now
+    // agrees (`tests/sunsetAgreement.test.js` runs both arms over one product). The pass keeps the
+    // placement, the SAME object, lists it with its cause and counts its dates, and does not count it
+    // as within daylight.
+    const slots = new Map([['s-dark', slotEnding('s-dark', 'f-dark', '12:00')]]);
+    const venues = new Map([
+      ['f-dark', { ...venue('f-dark', false), latitude: null, longitude: null }],
+    ]);
+    const placement = { teamId: 't0', slotId: 's-dark', source: 'auto' as const };
+    const pass = applyDaylightPostPass({
+      placements: [placement],
+      unassigned: [],
+      locked: [],
+      slots,
+      venues,
+      timeZone: ZONE,
+      today: '2026-09-01',
+    });
+    assertEquals(pass.placements.length, 1);
+    assertEquals(pass.placements[0] === placement, true);
+    assertEquals(pass.unassigned, []);
+    // 15, 22 and 29 September are the slot's Tuesdays through its last date.
+    assertEquals(pass.report.unknown, [
+      {
+        teamId: 't0',
+        slotId: 's-dark',
+        code: 'SUNSET_UNKNOWN',
+        cause: 'venue-coordinates-missing',
+        occurrences: 3,
+      },
+    ]);
+    assertEquals(pass.report.meta.daylightUnknownPlacements, 1);
+    assertEquals(pass.report.meta.daylightUnknownOccurrences, 3);
+    assertEquals(pass.report.meta.occurrencesWithinDaylight, 0);
+    assertEquals(pass.report.pastSunset, []);
+  }
+);

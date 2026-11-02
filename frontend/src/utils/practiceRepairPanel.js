@@ -35,6 +35,7 @@
  * @module utils/practiceRepairPanel
  */
 
+import { DAYLIGHT_UNKNOWN_CAUSE_TEXT } from './daylightReport.js';
 import {
   PRACTICE_REASON,
   PRACTICE_REPAIR_PAYLOAD_REFUSAL,
@@ -308,6 +309,32 @@ export function pastSunsetText(rec) {
   );
 }
 
+/** Plain words for the causes of an unknown sunset: the Edge's, and core's own spelling of one. */
+const SUNSET_UNKNOWN_CAUSE_TEXT = Object.freeze({
+  ...DAYLIGHT_UNKNOWN_CAUSE_TEXT,
+  'sunset-not-computable': DAYLIGHT_UNKNOWN_CAUSE_TEXT['sunset-undefined'],
+});
+
+/**
+ * The words for a recommendation whose sunset is unknown (owner, 2026-11-02: flagged, never refused),
+ * or `null`. From the flag the repair put on the recommendation: the first date nothing says when the
+ * sun sets, why, and how many dates are affected. The twin of {@link pastSunsetText}: shown in the
+ * table and in each confirmation, so enacting it is never done without it.
+ *
+ * @param {{ daylightSunsetUnknown?: { date: string, cause: string | null, occurrences: number } } | null | undefined} rec
+ * @returns {string | null}
+ */
+export function sunsetUnknownText(rec) {
+  const flag = rec?.daylightSunsetUnknown;
+  if (!flag) return null;
+  const why = SUNSET_UNKNOWN_CAUSE_TEXT[flag.cause ?? ''] ?? 'no sunset is known there';
+  return (
+    `Sunset unknown from ${flag.date}: ${why}, so it cannot be shown to end by sunset, on ` +
+    `${flag.occurrences} date${flag.occurrences === 1 ? '' : 's'}. ` +
+    "It is flagged, not blocked: check it before you enact it, or set the venue's coordinates."
+  );
+}
+
 /**
  * One view row per recommendation, in the repair's order (assignment id).
  *
@@ -329,6 +356,7 @@ export function panelRowsOf(opened, state, names) {
     reason: rec.to ? null : rec.reason,
     reasonText: rec.to ? null : (TBD_REASON_TEXT[rec.reason] ?? rec.reason),
     pastSunset: rec.to ? pastSunsetText(rec) : null,
+    sunsetUnknown: rec.to ? sunsetUnknownText(rec) : null,
     refusals: (refusals.get(rec.assignmentId) ?? []).map((r) => ({
       why: r.why,
       text: SAVE_REFUSAL_TEXT[r.why] ?? r.why,

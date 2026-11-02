@@ -498,6 +498,8 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
+      // Owner, 2026-11-02: the repair and the Edge pass agree on an unknown sunset (it calls both).
+      'tests/sunsetAgreement.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
@@ -667,6 +669,9 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
+      // Owner, 2026-11-02: calls core's `sunsetOnDate()` for the oracle and the Edge arm through
+      // the pass (it imports each), by name.
+      'tests/sunsetAgreement.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
       // imports, which the name match cannot see. `importers` lists them.
     ]),
@@ -729,6 +734,9 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
+      // Owner, 2026-11-02: calls core's `sunsetOnDate()` for the oracle and the Edge arm through
+      // the pass (it imports each), by name.
+      'tests/sunsetAgreement.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
       // imports, which the name match cannot see. `importers` lists them.
     ]),

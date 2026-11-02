@@ -123,27 +123,31 @@
  * `evaluatePracticeDaylight()`, the one evaluator, so the contract is its own:
  * lit ground is exempt, undeclared lighting is unlit (D5), a practice ending
  * exactly at `floor(sunset)` is legal (margin 0; D2, D6), and an unknown
- * sunset is never allowed (D4). **Past sunset is flagged, never blocked (owner,
- * 2026-10-27; every league):** a candidate with an occurrence past sunset is
- * NOT refused. It is kept, counted and listed in `daylight.flagged` with the
- * first such date and the time it ends against the limit, named per series by
+ * sunset is never read as legal (D4). **Past sunset is flagged, never blocked
+ * (owner, 2026-10-27; every league), and neither is an unknown one (owner,
+ * 2026-11-02):** the gate refuses no candidate for daylight. A candidate with an
+ * occurrence past sunset is kept, counted and listed in `daylight.flagged` with
+ * the first such date and the time it ends against the limit, named per series by
  * `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET` (a compromise the admin sees), and a
  * chosen candidate carries its flag (`daylightPastSunset`) so the panel can show
- * why. A candidate with any unknown date is still refused `sunset-unknown`: an
- * unknown sunset says nothing about being past it, and is never read as legal.
- * The refusal is counted and listed in `daylight`, and named per series by
- * `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`.
+ * why. A candidate with any unknown date (unlit or undeclared ground, no table
+ * record, no venue coordinates) is kept the same way: listed in
+ * `daylight.unknownFlagged`, named per series by
+ * `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN` (a compromise), and a chosen
+ * candidate carries `daylightSunsetUnknown` -- the Edge auto-scheduler pass's own
+ * `SUNSET_UNKNOWN` flag with its cause -- because an unknown sunset says nothing
+ * about being past it: the admin, or the league's own conditions outside the app,
+ * decides. A candidate with both kinds of date carries both flags. A flag does
+ * not change the price (declared, not optimised: D11).
  *
  * - **Flagged, not truncated.** D8's truncation (legal early, TIME TBD from
  *   the first illegal date) was the Edge post-pass's (8.9 PR 6), and it is a flag
  *   there now too. Here one series-window gets exactly one recommendation (3b plan
  *   §5, decision 5), and a candidate past sunset on some dates is that
  *   recommendation, whole, carrying its flag.
- * - **The gate runs before `must`.** A series whose venue had frozen-free
- *   candidates and every one was refused by daylight (their sunset unknown:
- *   coordinates could make one legal) is TIME TBD `sunset-unknown`, never
- *   `coach-preference` and never dropped. (It was `past-sunset` too when the
- *   gate refused candidates past sunset; it no longer does.)
+ * - **Nothing is TIME TBD for daylight.** `PRACTICE_TBD_REASON.PAST_SUNSET` and
+ *   `SUNSET_UNKNOWN` stay in the table for the exceptions saved before (the
+ *   writer's CHECK and the readers still admit them); the repair produces neither.
  * - **No calendar, no gate.** Without one nothing is judged against sunset,
  *   and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so on the result. With a
  *   calendar on which every candidate is lit, the result is identical to one
@@ -153,7 +157,8 @@
  *   plan slots, an input) exempt a candidate's date only when the plan has a
  *   slot of that shape and **every** slot of that shape is overridden on it.
  *   Exempt dates are not judged; a candidate exempt on some dates and past
- *   sunset on others is still refused -- partly legal is not legal.
+ *   sunset (or unknown) on others is kept and flagged from its first such date
+ *   -- partly legal is not legal, so the flag stays.
  *
  * Enforced in this module and shown by the read-only panel (3b PR 10); **not
  * live** for families until 3b PR 11 enacts a recommendation.
@@ -263,13 +268,17 @@ export const PRACTICE_TBD_REASON = Object.freeze({
   /**
    * It had frozen-free candidates at its venue, and the daylight gate refused
    * every one: each runs past `floor(sunset)` on unlit or undeclared ground on
-   * some date of its window (8.9 PR 7).
+   * some date of its window (8.9 PR 7). **No longer produced by the repair**:
+   * past sunset is flagged, never blocked (owner, 2026-10-27). Kept for the
+   * exceptions saved before, which the writer's CHECK and the readers admit.
    */
   PAST_SUNSET: 'past-sunset',
   /**
    * As `PAST_SUNSET`, but at least one refusal was an unknown sunset (no table
    * record, no coordinates): never read as allowed (D4), and coordinates
-   * could make a candidate legal.
+   * could make a candidate legal. **No longer produced by the repair**: an
+   * unknown sunset is flagged, never refused (owner, 2026-11-02;
+   * `daylightSunsetUnknown`). Kept for the exceptions saved before.
    *
    * Both daylight reasons are persistable since 8.9 PR 6b (20261002000000):
    * a repair window keeps its own `cause_kind` (blackout or retirement), the
@@ -407,9 +416,12 @@ export function buildPracticeRepairContext(input) {
     candidatesLitExempt: 0,
     candidatesWithNoOccurrence: 0,
     candidatesWithinDaylight: 0,
-    // Past sunset on some date: kept and listed in `flagged`, never refused (2026-10-27).
+    // The counters partition `candidatesJudged`. A candidate with an unknown date is kept and
+    // listed in `unknownFlagged`, never refused (owner, 2026-11-02); one past sunset on some date
+    // is kept and listed in `flagged`, never refused (2026-10-27). A candidate with both is
+    // counted once, as unknown (the weaker statement about it), and is listed in both lists.
+    candidatesFlaggedSunsetUnknown: 0,
     candidatesFlaggedPastSunset: 0,
-    candidatesRefusedSunsetUnknown: 0,
     // The evaluator's gaps, kept visible rather than read as a pass: judgements
     // resting on undeclared lighting (D5), and occurrence-dates on which the
     // table and a venue's coordinates disagree (the table was applied, D10).
@@ -419,7 +431,8 @@ export function buildPracticeRepairContext(input) {
     // lighting override exempts, and the exempt occurrences themselves.
     candidatesLightingOverrideExempt: 0,
     occurrencesLightingOverrideExempt: 0,
-    refused: [],
+    // Every kept candidate with an unknown date / a date past sunset, in the order judged.
+    unknownFlagged: [],
     flagged: [],
   };
   // A candidate is a shape, not a slot. It is exempt on a date only when the
@@ -450,7 +463,8 @@ export function buildPracticeRepairContext(input) {
   const daylightVerdicts = new Map();
   /**
    * Judge `shape` over `series`' window with the one evaluator. Returns the
-   * refusal, or `null` when every occurrence is lit or ends by the limit.
+   * flags it carries, each `null` when it has none: nothing is refused. Both
+   * are `null` when every occurrence is lit, exempt or ends by the limit.
    */
   const judgeDaylight = (series, shape) => {
     const key = `${shapeKey(shape)}|${series.from}|${series.until}`;
@@ -511,17 +525,25 @@ export function buildPracticeRepairContext(input) {
         disagreements: judged.findings.filter(
           (finding) => finding.code === AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE
         ).length,
-        // An unknown sunset is never read as legal (D4): refused, whether or not another date
-        // is known to be past it.
-        refusal:
+        // An unknown sunset is never read as legal (D4) and never refused (owner, 2026-11-02): the
+        // candidate stands with the Edge pass's own flag, whether or not another date is known
+        // to be past it. The cause is the evaluator's, for the first unknown date.
+        unknownFlag:
           unknown === null
             ? null
-            : { reason: PRACTICE_TBD_REASON.SUNSET_UNKNOWN, ...detail(unknown) },
+            : {
+                reason: PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
+                code: AVAILABILITY_REASON.SUNSET_UNKNOWN,
+                cause:
+                  judged.findings.find(
+                    (finding) =>
+                      finding.code === AVAILABILITY_REASON.SUNSET_UNKNOWN &&
+                      finding.details?.occurrenceId === unknown.occurrenceId
+                  )?.details?.cause ?? null,
+                ...detail(unknown),
+              },
         // Past sunset is flagged, never blocked (owner, 2026-10-27): the candidate stands.
-        flag:
-          unknown === null && past !== null
-            ? { reason: PRACTICE_TBD_REASON.PAST_SUNSET, ...detail(past) }
-            : null,
+        flag: past === null ? null : { reason: PRACTICE_TBD_REASON.PAST_SUNSET, ...detail(past) },
       };
       daylightVerdicts.set(key, verdict);
     }
@@ -534,10 +556,10 @@ export function buildPracticeRepairContext(input) {
     else if (verdict.lit) daylight.candidatesLitExempt += 1;
     else if (verdict.lightingOverrideExempt === verdict.occurrences) {
       daylight.candidatesLightingOverrideExempt += 1;
-    } else if (verdict.refusal !== null) daylight.candidatesRefusedSunsetUnknown += 1;
+    } else if (verdict.unknownFlag !== null) daylight.candidatesFlaggedSunsetUnknown += 1;
     else if (verdict.flag !== null) daylight.candidatesFlaggedPastSunset += 1;
     else daylight.candidatesWithinDaylight += 1;
-    return { refusal: verdict.refusal, flag: verdict.flag };
+    return { unknownFlag: verdict.unknownFlag, flag: verdict.flag };
   };
 
   /* -- the lost ground ---------------------------------------------------- */
@@ -926,14 +948,12 @@ export function buildPracticeRepairContext(input) {
     let sameBeforeMustKeep = 0;
     const mustKeepViolated = new Set();
     const mustKeepRules = new Set();
-    // Frozen-free same-venue candidates before the daylight gate, and what it
-    // refused: what tells SUNSET_UNKNOWN from no slot at all. Candidates past
-    // sunset are flagged, not refused, so they are not counted here.
-    let sameBeforeDaylight = 0;
-    const sameDaylightRefused = { sunsetUnknown: 0 };
-    const refusedHere = { sunsetUnknown: 0 };
+    // What the daylight gate flagged for this series (it refuses nothing): candidates past
+    // sunset on some date, and candidates with an unknown sunset on some date.
     let flaggedHere = 0;
     let sameFlagged = 0;
+    let unknownHere = 0;
+    let sameUnknown = 0;
     for (const shape of inventoryShapes) {
       if (shape.durationMinutes !== series.durationMinutes) continue;
       const sameVenue = venueOf(shape.surfaceId) === venueOf(series.surfaceId);
@@ -956,20 +976,20 @@ export function buildPracticeRepairContext(input) {
       const overlaps = againstFrozen(series, shape);
       if (overlaps === null) continue;
       let daylightFlag = null;
+      let daylightUnknown = null;
       if (calendar !== null) {
-        if (sameVenue) sameBeforeDaylight += 1;
-        const { refusal, flag } = judgeDaylight(series, shape);
-        if (refusal !== null) {
-          refusedHere.sunsetUnknown += 1;
-          if (sameVenue) sameDaylightRefused.sunsetUnknown += 1;
-          daylight.refused.push({
+        const { unknownFlag, flag } = judgeDaylight(series, shape);
+        if (unknownFlag !== null) {
+          unknownHere += 1;
+          if (sameVenue) sameUnknown += 1;
+          daylightUnknown = unknownFlag;
+          daylight.unknownFlagged.push({
             assignmentId: series.assignmentId,
             teamId: series.teamId,
             tier: sameVenue ? 'same-venue' : 'cross-venue',
             to: { ...shape },
-            ...refusal,
+            ...unknownFlag,
           });
-          continue;
         }
         if (flag !== null) {
           flaggedHere += 1;
@@ -1014,6 +1034,7 @@ export function buildPracticeRepairContext(input) {
       const entry = {
         shape,
         daylightFlag,
+        daylightUnknown,
         counts,
         frozenOverlaps: overlaps,
         carriesCompromise: overlaps.length + standaloneWorsened > 0,
@@ -1041,21 +1062,20 @@ export function buildPracticeRepairContext(input) {
         )
       );
     }
-    if (refusedHere.sunsetUnknown > 0) {
+    if (unknownHere > 0) {
       findings.push(
         makePracticeFinding(
           PRACTICE_REASON.REPAIR_CANDIDATES_SUNSET_UNKNOWN,
-          `${series.teamId}: ${refusedHere.sunsetUnknown} re-home candidate(s) refused: the sunset on unlit or undeclared ground is unknown on some date from ${series.from} until ${series.until} (no table record, no venue coordinates), so they cannot be shown to end by it.`,
+          `${series.teamId}: ${unknownHere} re-home candidate(s) kept and flagged: the sunset on unlit or undeclared ground is unknown on some date from ${series.from} until ${series.until} (no table record, no venue coordinates), so they cannot be shown to end by it (an unknown sunset is flagged, never blocked); check them, or set the venue's coordinates.`,
           {
             assignmentId: series.assignmentId,
             teamId: series.teamId,
-            refused: refusedHere.sunsetUnknown,
-            sameVenue: sameDaylightRefused.sunsetUnknown,
+            flagged: unknownHere,
+            sameVenue: sameUnknown,
           }
         )
       );
     }
-    const daylightRefusedAtVenue = sameDaylightRefused.sunsetUnknown;
     return {
       series,
       same: same.sort(order),
@@ -1064,9 +1084,6 @@ export function buildPracticeRepairContext(input) {
       mustKeepEmptied: sameBeforeMustKeep > 0 && same.length === 0,
       mustKeepViolated: [...mustKeepViolated].sort(),
       mustKeepRules: [...mustKeepRules].sort(),
-      // Frozen-free at its venue, and every one refused by daylight.
-      daylightEmptied: sameBeforeDaylight > 0 && daylightRefusedAtVenue === sameBeforeDaylight,
-      daylightRefused: sameDaylightRefused,
     };
   });
 
@@ -1555,14 +1572,16 @@ export function repairPracticeLoss(input) {
         weekdayChanged: candidate.weekdayChanged,
         locationChanged: candidate.shape.surfaceId !== series.surfaceId,
         counts: { ...candidate.counts },
-        // Past sunset on some date: kept, with the reason the panel shows (2026-10-27).
+        // Past sunset or an unknown sunset on some date: kept, with the reasons the panel shows
+        // (2026-10-27, 2026-11-02).
         ...pastSunsetField(candidate),
+        ...sunsetUnknownField(candidate),
       };
       rehomed.push(entry);
       findings.push(
         makePracticeFinding(
           PRACTICE_REASON.REPAIR_REHOMED,
-          `${series.teamId}: ${series.weekday} ${series.startMinutes} on ${series.surfaceId} -> ${candidate.shape.weekday} ${candidate.shape.startMinutes} on ${candidate.shape.surfaceId} ${span}${candidate.timeChanged ? ' (published time changed)' : ' (same published time)'}${candidate.daylightFlag ? `; ends past sunset from ${candidate.daylightFlag.date} (flagged)` : ''}`,
+          `${series.teamId}: ${series.weekday} ${series.startMinutes} on ${series.surfaceId} -> ${candidate.shape.weekday} ${candidate.shape.startMinutes} on ${candidate.shape.surfaceId} ${span}${candidate.timeChanged ? ' (published time changed)' : ' (same published time)'}${candidate.daylightFlag ? `; ends past sunset from ${candidate.daylightFlag.date} (flagged)` : ''}${candidate.daylightUnknown ? `; sunset unknown from ${candidate.daylightUnknown.date} (flagged)` : ''}`,
           {
             assignmentId: series.assignmentId,
             teamId: series.teamId,
@@ -1581,7 +1600,6 @@ export function repairPracticeLoss(input) {
       let reason;
       if (entry.same.length === 0) {
         if (entry.mustKeepEmptied) reason = PRACTICE_TBD_REASON.COACH_PREFERENCE;
-        else if (entry.daylightEmptied) reason = PRACTICE_TBD_REASON.SUNSET_UNKNOWN;
         else reason = PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE;
       } else if (freeNow.length > 0) {
         reason =
@@ -1605,9 +1623,6 @@ export function repairPracticeLoss(input) {
         lossReason,
         ...(reason === PRACTICE_TBD_REASON.COACH_PREFERENCE
           ? { mustKeepDimensions: entry.mustKeepViolated, mustKeepRules: entry.mustKeepRules }
-          : {}),
-        ...(reason === PRACTICE_TBD_REASON.SUNSET_UNKNOWN
-          ? { daylightRefused: { ...entry.daylightRefused } }
           : {}),
         sameVenueCandidates: entry.same.length,
       });
@@ -1812,7 +1827,11 @@ export function repairPracticeLoss(input) {
       nodeLimit,
       provenOptimal: strategy === 'exact' && tier2.exhausted,
     },
-    daylight: { ...daylight, refused: [...daylight.refused], flagged: [...daylight.flagged] },
+    daylight: {
+      ...daylight,
+      unknownFlagged: [...daylight.unknownFlagged],
+      flagged: [...daylight.flagged],
+    },
     // Only when closures were supplied: none, and the result is main's, byte for byte.
     ...(closureMeta === null
       ? {}
@@ -1840,6 +1859,29 @@ function pastSunsetField(candidate) {
           endMinutes: flag.endMinutes,
           limitMinutes: flag.limitMinutes,
           dates: flag.datesPastSunset,
+        },
+      };
+}
+
+/**
+ * The flag a candidate with an unknown sunset carries (owner, 2026-11-02: flagged, never refused),
+ * or nothing: the Edge auto-scheduler pass's own `SUNSET_UNKNOWN` (`practice-daylight.ts`) with its
+ * cause (`venue-coordinates-missing`, or `sunset-not-computable` when the solar module refused), the
+ * first unknown date and how many dates are unknown. One spelling for a re-home and for its
+ * recommendation.
+ *
+ * @param {{ daylightUnknown?: any }} candidate
+ */
+function sunsetUnknownField(candidate) {
+  const flag = candidate.daylightUnknown ?? null;
+  return flag === null
+    ? {}
+    : {
+        daylightSunsetUnknown: {
+          code: flag.code,
+          cause: flag.cause,
+          date: flag.date,
+          occurrences: flag.datesSunsetUnknown,
         },
       };
 }
@@ -1915,6 +1957,7 @@ export function describePracticeRecommendations(context, chosen, reasonOf) {
       coachOverlaps: [...candidate.frozenOverlaps, ...m.newOverlaps],
       coachDaysWorsened: m.worsened,
       ...pastSunsetField(candidate),
+      ...sunsetUnknownField(candidate),
       // Enacting a cross-venue recommendation is an operator approving an
       // option (#441's precedent); a same-venue one is the repair's own.
       origin: crossVenue ? CHANGE_ORIGIN.APPROVED_OPTION : null,

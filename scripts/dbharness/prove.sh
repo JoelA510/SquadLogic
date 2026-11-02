@@ -223,6 +223,11 @@ R62="$REPO/docs/sql/20261113010000_revert.sql"
 # the zero-argument one kept as the default, and the revert. Plan docs/changes/2026-11-01-demo-season-selection.md.
 M63="$REPO/supabase/migrations/20261114010000_demo_season_choice.sql"
 R63="$REPO/docs/sql/20261114010000_revert.sql"
+# The demo's fall window (a fall from the Monday on or after 17 August to 31 October, sunset flags accepted): the
+# season rule replaced on its deployed body, and the revert. Plan docs/changes/2026-11-02-demo-fall-window.md. It
+# replaces `demo_seed.season_window`, so the two plants that aimed at that body in $M63 are re-aimed here.
+M64="$REPO/supabase/migrations/20261115010000_demo_fall_window.sql"
+R64="$REPO/docs/sql/20261115010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5210,8 +5215,7 @@ plant "M62 a completed season is not refused up front" "$M62" \
 #     chose the fall is in the spring (the smoke's fall demo returns the wrong season);
 #   - the visitor's own live demo reports the season they asked for now instead of the one it was started in;
 #   - the `demo.started` row stops naming the season;
-#   - the fall runs twelve weeks: past sunset on the grid's 19:00 end from late September (the end-state vectors);
-#   - the default takes the window that ends last, not first (the end-state vectors);
+#   - (re-aimed at $M64, which replaces the season rule these two mutated; see the M64 plants below)
 #   - the zero-argument function stops delegating to the default (the end-state check);
 #   - run (review of #689, Codex P2): the visitor's own demo is read back without an order, so once its admin has
 #     started a next season the repeat call returns the later one (the smoke and 2 of the 55 assertions of
@@ -5230,16 +5234,6 @@ plant "M63 demo.started stops naming the season" "$M63" \
   "        jsonb_build_object('expires_at', v_expires, 'minutes', c_minutes, 'season', v_choice)" \
   "        jsonb_build_object('expires_at', v_expires, 'minutes', c_minutes)" \
   "smoke 20261114010000"
-
-plant "M63 the fall runs twelve weeks" "$M63" \
-  "            v_month := 8; v_day := 2; v_weeks := 6;" \
-  "            v_month := 8; v_day := 2; v_weeks := 12;" \
-  "applying 20261114010000_demo_season_choice.sql"
-
-plant "M63 the default is the window that ends last" "$M63" \
-  "        IF season IS NULL OR v_end < season_end THEN" \
-  "        IF season IS NULL OR v_end > season_end THEN" \
-  "applying 20261114010000_demo_season_choice.sql"
 
 plant "M63 an existing demo's season is read without an order" "$M63" \
   "              FROM public.season_settings s WHERE s.organization_id = v_org
@@ -5263,6 +5257,66 @@ plant "R63 the revert leaves the choosing function" "$R63" \
   "DROP FUNCTION public.start_demo_session(text);" \
   "-- DROP FUNCTION public.start_demo_session(text);" \
   "revert 20261114010000"
+
+# The demo's fall window (20261115010000; plan docs/changes/2026-11-02-demo-fall-window.md). The migration's own
+# end-state check holds the rule on ten dates (a date in each window, between them, the fall's last day and the day
+# after, a Monday anchor, a Sunday end and a Tuesday end) and the shape of the function; the smoke 20261115010000
+# walks every day of 2026 to 2062. The first two plants are the M63 plants that aimed at the rule's body in
+# $M63 (lesson 70), re-aimed here with the anchors that moved. Which were run, and which only resolved by
+# PLANT_ANCHORS_ONLY=1, is in the plan's build notes.
+#   - the fall runs twelve weeks from its anchor again, not to 31 October (the end-state vectors);
+#   - the default takes the window that ends last, not first (the end-state vectors);
+#   - the fall ends on 30 October, a day short of the owner's date (the end-state vectors);
+#   - the fall is anchored on the Monday on or after 1 August, not 17 August (the end-state vectors);
+#   - the rule is left callable by a signed-in client (the end-state check);
+#   - the replaced rule loses its pinned search path (the end-state check).
+plant "M64 the fall runs twelve weeks" "$M64" \
+  "            v_month := 8; v_day := 17; v_weeks := NULL; v_end_month := 10; v_end_day := 31;" \
+  "            v_month := 8; v_day := 17; v_weeks := 12; v_end_month := NULL; v_end_day := NULL;" \
+  "applying 20261115010000_demo_fall_window.sql"
+
+plant "M64 the default is the window that ends last" "$M64" \
+  "        IF season IS NULL OR v_end < season_end THEN" \
+  "        IF season IS NULL OR v_end > season_end THEN" \
+  "applying 20261115010000_demo_fall_window.sql"
+
+plant "M64 the fall ends on 30 October" "$M64" \
+  "v_end_month := 10; v_end_day := 31;" \
+  "v_end_month := 10; v_end_day := 30;" \
+  "applying 20261115010000_demo_fall_window.sql"
+
+plant "M64 the fall is anchored on 1 August" "$M64" \
+  "v_month := 8; v_day := 17;" \
+  "v_month := 8; v_day := 1;" \
+  "applying 20261115010000_demo_fall_window.sql"
+
+plant "M64 the season rule is left callable by a signed-in client" "$M64" \
+  "COMMENT ON FUNCTION demo_seed.season_window(text, date) IS" \
+  "GRANT EXECUTE ON FUNCTION demo_seed.season_window(text, date) TO authenticated;
+
+COMMENT ON FUNCTION demo_seed.season_window(text, date) IS" \
+  "applying 20261115010000_demo_fall_window.sql"
+
+plant "M64 the replaced rule loses its pinned search path" "$M64" \
+  " STABLE
+ SET search_path TO ''
+AS \$function\$" \
+  " STABLE
+AS \$function\$" \
+  "applying 20261115010000_demo_fall_window.sql"
+
+# Its revert warns how many live demos keep a fall to 31 October (the seed plants 5 organizations, 2 of them live
+# in such a fall) and restores the deployed body behind its md5.
+plant "R64 the revert counts every live Fall, not only those that run to 31 October" "$R64" \
+  "                         WHERE s.organization_id = o.id AND s.season_label = 'Fall'
+                           AND extract(month FROM s.season_end) = 10 AND extract(day FROM s.season_end) = 31));" \
+  "                         WHERE s.organization_id = o.id AND s.season_label = 'Fall'));" \
+  "revert 20261115010000: planted 2 live demos in a fall to 31 October"
+
+plant "R64 the revert restores a six-week fall that is not the deployed body" "$R64" \
+  "            v_month := 8; v_day := 2; v_weeks := 6;" \
+  "            v_month := 8; v_day := 2; v_weeks := 5;" \
+  "revert 20261115010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

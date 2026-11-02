@@ -100,7 +100,7 @@ unless you turn it on, and a deployment that does not shows nothing of it. To of
    user has no password); every other sign-up and every password change is still checked. It replaces
    the check function only if its text is one it knows, and aborts otherwise. The app's demo entry
    asks the visitor for a fall or a spring season and calls `start_demo_session(p_season)`, which
-   `20261114010000_demo_season_choice.sql` adds: apply it before you deploy that app.
+   `20261114010000_demo_season_choice.sql` adds: apply it before you deploy that app. The fall's dates (the Monday on or after 17 August to 31 October) are `20261115010000_demo_fall_window.sql`, which replaces only the season rule: apply it before the app too, or the entry page names dates the database does not use until it lands.
 2. **Enable anonymous sign-ins**: Supabase, Authentication, Sign In / Providers, "Allow anonymous
    sign-ins".
 3. **Protect it with CAPTCHA** (strongly advised: the endpoint is public). Create a Cloudflare

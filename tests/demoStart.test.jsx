@@ -41,7 +41,13 @@ vi.mock('../frontend/src/components/OfflineGuard.jsx', () => ({
 
 import App from '../frontend/src/App.jsx';
 import { supabase, supabaseReady } from '../frontend/src/lib/supabaseClient.js';
-import { defaultDemoSeason, demoSeasonWindow, demoToday } from '../frontend/src/lib/demoSeasons.js';
+import {
+  DEMO_FALL_NOTE,
+  defaultDemoSeason,
+  demoSeasonWindow,
+  demoToday,
+  describeDemoWindow,
+} from '../frontend/src/lib/demoSeasons.js';
 
 const CAP_ERROR = {
   code: 'P0001',
@@ -92,12 +98,16 @@ describe('/demo/start through the real App', () => {
     // each says the window it covers today, in the league's zone, as the server will date it
     const fall = demoSeasonWindow('fall', demoToday());
     const spring = demoSeasonWindow('spring', demoToday());
+    // the fall carries one more line, linked to the radio as part of its description: its evening practices
+    // after sunset are flagged by design (owner, 2026-11-02). The spring has none.
     expect(screen.getByRole('radio', { name: /Fall season/ })).toHaveAccessibleDescription(
-      new RegExp(`${fall.start.slice(0, 4)}.*6 weeks`)
+      `${describeDemoWindow(fall)} · ${fall.weeks} weeks ${DEMO_FALL_NOTE}`
     );
     expect(screen.getByRole('radio', { name: /Spring season/ })).toHaveAccessibleDescription(
-      new RegExp(`${spring.end.slice(0, 4)}.*12 weeks`)
+      `${describeDemoWindow(spring)} · 12 weeks`
     );
+    expect(screen.getAllByText(DEMO_FALL_NOTE)).toHaveLength(1);
+    expect(within(group).getByText(DEMO_FALL_NOTE)).toBeInTheDocument();
     // the day's default is preselected, the other is not
     const preselected = defaultDemoSeason(demoToday());
     expect(radios.filter((radio) => radio.checked).map((radio) => radio.value)).toEqual([

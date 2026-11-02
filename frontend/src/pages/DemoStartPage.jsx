@@ -231,13 +231,20 @@ export default function DemoStartPage() {
                       value={option.season}
                       checked={option.season === season}
                       onChange={() => setSeason(option.season)}
-                      aria-describedby={`${inputId}-dates`}
+                      aria-describedby={
+                        option.note ? `${inputId}-dates ${inputId}-note` : `${inputId}-dates`
+                      }
                     />
                     <span className="demo-season-text">
                       <span className="demo-season-name">{option.label} season</span>
                       <span id={`${inputId}-dates`} className="demo-season-dates">
                         {option.dates} · {option.weeks} weeks
                       </span>
+                      {option.note && (
+                        <span id={`${inputId}-note`} className="demo-season-dates">
+                          {option.note}
+                        </span>
+                      )}
                     </span>
                   </label>
                 );

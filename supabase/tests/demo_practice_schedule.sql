@@ -16,9 +16,10 @@
 --     none of them;
 --   * the TIME TBD list the Exports panel rebuilds lists the 60 teams of U9 and older (two missing
 --     practices each, not scheduled yet) and none of U4 to U8;
---   * the season the visitor chose (migration 20261114010000): a fall demo and a spring demo are the same
---     league (128 teams, 132 seeded practices) with the season, its divisions and every practice dated in
---     the chosen window, each starting on a Monday, the fall six weeks and the spring the league's twelve;
+--   * the season the visitor chose (migrations 20261114010000 and, for the fall, 20261115010000): a fall
+--     demo and a spring demo are the same league (128 teams, 132 seeded practices) with the season, its
+--     divisions and every practice dated in the chosen window, each starting on a Monday, the fall ending
+--     on 31 October and the spring the league's twelve weeks later;
 --     no choice is the window the date falls in or the next to begin; asking again returns the visitor's
 --     own demo in its own season; a choice that is neither fall nor spring is refused, as are a
 --     non-anonymous caller and the anon role, and the `demo.started` row says which season;
@@ -237,7 +238,7 @@ SELECT is(
     'another organization''s admin reads none of the demo''s practices');
 RESET role;
 
--- ── 9. the season the visitor chose (20261114010000) ─────────────────────────────
+-- ── 9. the season the visitor chose (20261114010000, the fall's dates 20261115010000) ──────────
 -- Every date is relative to today in the league's zone, never fixed: the rule's own dates are held by the
 -- vectors in demo_sessions.sql. Here: what a started demo is dated with.
 CREATE TEMP TABLE t_today ON COMMIT DROP AS
@@ -273,20 +274,23 @@ SELECT is(
           extract(year FROM (:'spring_res'::jsonb ->> 'season_start')::date)::int::text,
           :'spring_res'::jsonb ->> 'season_start', :'spring_res'::jsonb ->> 'season_end'],
     'the spring demo''s season is named for the spring and the year it starts, and holds the dates the call returned');
-SELECT is(
-    (SELECT array_agg(extract(isodow FROM s.season_start)::int || ':' || (s.season_end - s.season_start + 1) ORDER BY s.season_label)
+SELECT ok(
+    (SELECT count(*) = 2 AND bool_and(extract(isodow FROM s.season_start) = 1
+                                      AND CASE s.season_label
+                                              WHEN 'Fall' THEN s.season_end = make_date(extract(year FROM s.season_start)::int, 10, 31)
+                                              WHEN 'Spring' THEN s.season_end - s.season_start + 1 = 84
+                                          END)
        FROM public.season_settings s
       WHERE s.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))),
-    ARRAY['1:42', '1:84'],
-    'each season starts on a Monday and runs whole weeks: six for the fall, the league''s twelve for the spring');
+    'each season starts on a Monday; the fall ends on 31 October of its year (no week count) and the spring runs the league''s twelve weeks');
 SELECT ok(
     (SELECT bool_and(CASE s.season_label
-                         WHEN 'Fall' THEN to_char(s.season_start, 'MMDD') BETWEEN '0802' AND '0808'
+                         WHEN 'Fall' THEN to_char(s.season_start, 'MMDD') BETWEEN '0817' AND '0823'
                          WHEN 'Spring' THEN to_char(s.season_start, 'MMDD') BETWEEN '0322' AND '0328'
                      END)
        FROM public.season_settings s
       WHERE s.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))),
-    'the fall starts on the Monday on or after 2 August and the spring on the Monday on or after 22 March');
+    'the fall starts on the Monday on or after 17 August and the spring on the Monday on or after 22 March');
 SELECT ok(
     (SELECT bool_and(s.season_end >= (SELECT d FROM t_today) AND s.season_end <= (SELECT d FROM t_today) + 380)
        FROM public.season_settings s

@@ -170,15 +170,21 @@ the smoke and the pgTAP file. No Edge or core twin of this RPC exists (`grep` ov
 ### Harness
 
 Plants in `scripts/dbharness/prove.sh`, M65 / R65 (the next free after M64 / R64), each anchor resolving
-exactly once (`PLANT_ANCHORS_ONLY=1`), and each **run for real** on a scratch cluster, red then reverted:
-(1) an edit at `prefer` decides a pending must again; (2) an edit at `must` leaves a pending must pending; (3) a
-pending edit stamps the deciding admin; (4) the replaced body loses its pinned search path (the end-state
-check); (5) the replaced edit RPC is granted to `anon` (the end-state check); (6) the revert restores a body
-that is not the deployed one; (7) the revert leaves the new comment. Two `(checked)` claims go in `run.sh`,
-each registered in `CLAIM_PROVER`. The catalogue snapshot holds signatures, policies, triggers and views, none
-of which change, so it is **not** regenerated (checked by the harness's own diff). No existing plant aims at
-`20261112010000`'s `admin_edit_practice_preference` body (`grep` of `prove.sh`), so none is re-aimed
-(lesson 70); `PLANT_ANCHORS_ONLY=1` confirms it.
+exactly once (`PLANT_ANCHORS_ONLY=1`), and each **run for real** through `run.sh` in its own copy of the
+repository, red at the check named, then discarded. Nine are on the migration: four aimed at the smoke (the
+pending branch placed after the kept-as-prefer branch so it never fires; before the accepted branch so a save at
+`must` leaves the rule pending; a pending save that stamps `decided_by`; one that stamps `decided_at`), one at
+the accepted-must branch (dropped), and four at the migration's own end-state check (the pending branch
+deleted, the pinned search path lost, the rule granted to `anon`, the md5 guard expecting another body). Two are
+on the revert (a restored body that is not the deployed one; the new comment left in place). A plant aimed at
+the smoke keeps the end-state check's text in the body and breaks what the body does, so the smoke is the
+check that catches it and not the text (the first design, deleting the branch, was caught by the text check and
+could not prove the smoke's claim). Two `(checked)` claims go in `run.sh`, each registered in `CLAIM_PROVER`
+against the plants that reach it. The harness also seeds a pending must and an admin before the revert and, after
+it, runs the old meaning as that admin (an edit at `prefer` keeps it as prefer again). The catalogue snapshot
+holds signatures, policies, triggers and views, none of which change, so it is **not** regenerated (checked by
+the harness's own diff). No existing plant aims at `20261112010000`'s `admin_edit_practice_preference` body
+(`grep` of `prove.sh`), so none is re-aimed (lesson 70); `PLANT_ANCHORS_ONLY=1` confirms it.
 
 ### Frontend
 
@@ -205,7 +211,7 @@ Each names its test.
 
 1. Plan committed first: this file. (No test.)
 2. Migration, revert, smoke, harness registration (`REVERT_CHECKS`, the post-revert verdict, two `(checked)`
-   claims, seven plants) · tests: the migration's end-state check; `docs/sql/20261116010000_smoke.sql`; the
+   claims, eleven plants) · tests: the migration's end-state check; `docs/sql/20261116010000_smoke.sql`; the
    revert's own verdict; each plant red.
 3. pgTAP: `supabase/tests/practice_preference_rules.sql` gains the edit-keeps-pending cases (pending at
    `prefer`, at `must`, `decided_by` untouched, the audit row, an accepted must still demoted by `prefer`, a
@@ -238,3 +244,64 @@ failing against a planted defect, and the pull request says what was run and wha
 2. **The stale-editor demotion** (above) is unchanged. A guard argument would close it at the price of a
    drop-and-replace of the RPC; worth it?
 3. **The decided stamp on a no-op edit** of a decided rule is unchanged (re-stamped). Leave (recommended).
+
+## Build notes (2026-11-02)
+
+- **Built as planned:** the function replaced on its deployed body (`20261116010000_edit_keeps_must_pending.sql`),
+  its revert and smoke, the harness registration, the mock client, the pgTAP cases, the editor, the card on Data
+  Import and the `?tab=` link, the tests, the docs, lesson 86. No table, column, CHECK, RLS, grant or audit-action
+  change, and no result of `fixtures/season-2026` can move (core and the Edge twin read `level`, never
+  `must_decision`), so none of the brief's stop conditions arose.
+- **Departures from the plan above:** (1) eleven plants rather than seven (the harness section says which: the first
+  design for the smoke plants, deleting the pending branch, was caught by the migration's own text check at
+  `applying` and so could not prove the smoke's claim, which is how the reorder plants and the stamp plants came to
+  be). (2) `RuleForm` takes a `levelLocked` prop for the read-only level; the plan said "a read-only Level" without
+  naming the seam. (3) The Accept dialog is reached by handing over from the editor (one `dialog` state), not by
+  opening a second modal over it.
+- **Found while building:** (a) the brief's "per-team advisory lock as in the siblings" does not describe the
+  siblings (see "Locking" above); (b) `NAV.flatMap` over a union of group and item entries does not typecheck in a
+  `.jsx` file under `checkJs` (a loop and a cast do); (c) the pointer's test restored the `NAV` entry it had
+  renamed by looking it up by the new id, which left the entry renamed for every later test in the file (it now
+  keeps the object by reference); (d) **Playwright's `reuseExistingServer` is on outside CI, so a full E2E run
+  started while another worktree's dev server held port 5173 ran against that worktree's code**: the first full
+  run (178 passed, 41 failed, among them every new scenario, which showed the old dialog) was invalid for this
+  tree and was repeated with `CI=true`, which makes Playwright start its own server; (e) the shared scratch
+  directory held another session's `plants/` folder, which was left alone (these plants used `plants65/`).
+- **Planted defects.** _Tests (three, each shown red, then reverted):_ the mock client decides a pending must again
+  (`staysPending = false`): 2 of the 24 in `tests/coachPreferencesMock.test.js` red, and the E2E scenario "Saving
+  the days of a pending must leaves it pending" red (the toast says the rule is no longer pending); Keep as prefer
+  not guarded by unsaved changes (`disabled={busy}`): 1 of the 39 in `tests/coachPreferencesUi.test.jsx` red; the
+  pointer ignoring the permission: 2 of the 10 in `tests/preferencesImportPointer.test.jsx` red. _Not planted:_ the
+  `?tab=` link tests, the Accept hand-over test, and the pointer's E2E scenarios (each passes on the final tree and
+  was not shown failing). _The migration (eleven, harness plants M65 and R65):_ each run for real through
+  `scripts/dbharness/run.sh` in its own copy of the repository, each scored CAUGHT at the check named and by no
+  other: five at `smoke 20261116010000`, four at `applying 20261116010000_edit_keeps_must_pending.sql`, two at
+  `revert 20261116010000`. The five smoke-aimed bodies were also applied to a scratch database and the new pgTAP
+  file run against each: every one turns assertions red (the pending-stays-pending ones fail by value; the two that
+  break a CHECK abort the file's transaction, so the rest error rather than fail).
+- **Verification** (_executed_ means run here and its output read; nothing here is _fully validated_ against the
+  hosted project):
+  - _Executed_, the database: `bash scripts/dbharness/run.sh` ends `HARNESS OK` (172 migrations apply from scratch,
+    every smoke including `20261116010000`'s two claims, every revert including its own with the old meaning run as
+    the planted admin, the catalogue snapshot unchanged at 196 functions, 69 triggers, 112 policies, 4 views);
+    `PLANT_ANCHORS_ONLY=1`: 446 of 446 anchors resolve exactly once, none inside a superseded statement;
+    `PROVE_CLAIM_CENSUS_ONLY=1`: 149 claims, each with a plant declared. pgTAP on a scratch PostgreSQL 16 with real
+    pgTAP (the harness prelude standing in for `auth`, with `auth.uid()` completed): `practice_preference_rules.sql`
+    81 of 81, `practice_preference_import.sql` 52 of 52, `demo_sessions.sql` 113 of 117 (the four failures are the
+    storage assertions 77 to 80, and the same four fail, 113 of 117, in the same scratch setup built from `main`'s
+    171 migrations without `20261116010000`).
+  - _Executed_, the app: `npm run typecheck`, `npm run lint` (no ESLint output), `npm run check:unused`,
+    `npm run check:advisors`, `npm run test:coverage` at the **default** timeout (489 files, 7,819 tests, exit 0, no
+    timeout raised), the frontend build made as CI makes it and `npm run check:bundle` (all chunks within budget),
+    the full mock E2E (219 passed, `--workers=1 --trace off`, `CI=true`, 19.7 minutes; artefacts deleted),
+    `git diff --check`.
+  - _Executed_, read-only against production on 2026-11-02: the deployed `admin_edit_practice_preference` has md5
+    `4d909e3ea286460367c2ca7c8671f89d`, equal to the body in `20261112010000`; the five admin RPCs' bodies contain
+    no `advisory`, the finalizer's does; the ledger ends at `20261115010000`.
+  - _Not run_: the Deno mirror tests and `deno check` (nothing under `supabase/functions` or the Edge twins
+    changed); `supabase test db` (CI's pgTAP job, with the real `auth` and `storage`); the real-backend E2E scenario
+    (the preference scenarios are mock-client only); `test:perf`; the whole `prove.sh` sweep (hours; only the eleven
+    plants of this change were run, for real, beside the anchors and the census); the pointer and the editor with a
+    screen reader (axe ran in Chromium in both themes; the keyboard path is Tab-order plus Enter on the link, and
+    the unit tests hold the disabled and described states); a browser other than Chromium; the migration against
+    production (CI applies it on merge).

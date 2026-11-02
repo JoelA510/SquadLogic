@@ -219,6 +219,10 @@ R61="$REPO/docs/sql/20261112010000_revert.sql"
 # re-aimed here.
 M62="$REPO/supabase/migrations/20261113010000_evaluations_import.sql"
 R62="$REPO/docs/sql/20261113010000_revert.sql"
+# The demo's season choice (a fall or a spring league at demo entry): the season rule, `start_demo_session(text)`,
+# the zero-argument one kept as the default, and the revert. Plan docs/changes/2026-11-01-demo-season-selection.md.
+M63="$REPO/supabase/migrations/20261114010000_demo_season_choice.sql"
+R63="$REPO/docs/sql/20261114010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5058,6 +5062,7 @@ plant "M59 the division guard ignores a delete" "$M59" \
   "smoke 20261111010000"
 
 # The demo's practices (20261110010000; plan docs/changes/2026-10-27-phase-d-scheduling.md, F). Three plants,
+# re-aimed at $M63 (20261114010000 replaced the demo start they mutate; lesson 70) with the anchors unchanged,
 # each run by hand against a scratch cluster built with the planted migration (the smoke 20261110010000 red in
 # each, at the check named); anchors resolved by PLANT_ANCHORS_ONLY=1. (The first plant keeps the column named,
 # so the migration's own end-state check, which only looks for the name, lets it apply and the smoke must catch it.)
@@ -5067,17 +5072,17 @@ plant "M59 the division guard ignores a delete" "$M59" \
 #     practice and nothing says so;
 #   - the division's practice length is not copied: the demo's divisions take "any slot length" and the
 #     auto-scheduler may give a 90-minute team a 60-minute slot.
-plant "M60 the demo copies every venue lit" "$M60" \
+plant "M60 the demo copies every venue lit" "$M63" \
   "    SELECT v_org, l.name, l.lighting_available, l.latitude, l.longitude FROM demo_seed.locations l;" \
   "    SELECT v_org, l.name, l.lighting_available OR true, l.latitude, l.longitude FROM demo_seed.locations l;" \
   "smoke 20261110010000"
 
-plant "M60 a seeded practice row with no slot no longer refuses the start" "$M60" \
+plant "M60 a seeded practice row with no slot no longer refuses the start" "$M63" \
   "    IF v_rows IS DISTINCT FROM v_expected THEN" \
   "    IF false THEN" \
   "smoke 20261110010000"
 
-plant "M60 the division's practice length is not copied" "$M60" \
+plant "M60 the division's practice length is not copied" "$M63" \
   "           d.practices_per_week, d.practice_minutes
       FROM demo_seed.divisions d;" \
   "           d.practices_per_week, NULL
@@ -5195,6 +5200,60 @@ plant "M62 a completed season is not refused up front" "$M62" \
 
     -- One statement for the plan" \
   "smoke 20261113010000"
+
+# The demo's season choice (20261114010000; plan docs/changes/2026-11-01-demo-season-selection.md). The first was
+# run by hand against a scratch cluster built with the planted migration (marked "run": the smoke, and the 5 of 52
+# assertions of supabase/tests/demo_practice_schedule.sql that read the season, went red); the others are
+# resolved by PLANT_ANCHORS_ONLY=1 and were not run. The smoke 20261114010000 is the check, or the migration's own
+# end-state check, which holds the rule on eight dates and the shape of both functions.
+#   - run: the choice never reaches the rule: every demo is dated in the default window and a visitor who
+#     chose the fall is in the spring (the smoke's fall demo returns the wrong season);
+#   - the visitor's own live demo reports the season they asked for now instead of the one it was started in;
+#   - the `demo.started` row stops naming the season;
+#   - the fall runs twelve weeks: past sunset on the grid's 19:00 end from late September (the end-state vectors);
+#   - the default takes the window that ends last, not first (the end-state vectors);
+#   - the zero-argument function stops delegating to the default (the end-state check).
+plant "M63 the choice never reaches the rule" "$M63" \
+  "      FROM demo_seed.season_window(p_season, (now() AT TIME ZONE v_tz)::date) w;" \
+  "      FROM demo_seed.season_window(NULL, (now() AT TIME ZONE v_tz)::date) w;" \
+  "smoke 20261114010000"
+
+plant "M63 an existing demo reports the season asked for now" "$M63" \
+  "                       'season', CASE WHEN s.season_label IN ('Fall', 'Spring') THEN lower(s.season_label) END," \
+  "                       'season', p_season," \
+  "smoke 20261114010000"
+
+plant "M63 demo.started stops naming the season" "$M63" \
+  "        jsonb_build_object('expires_at', v_expires, 'minutes', c_minutes, 'season', v_choice)" \
+  "        jsonb_build_object('expires_at', v_expires, 'minutes', c_minutes)" \
+  "smoke 20261114010000"
+
+plant "M63 the fall runs twelve weeks" "$M63" \
+  "            v_month := 8; v_day := 2; v_weeks := 6;" \
+  "            v_month := 8; v_day := 2; v_weeks := 12;" \
+  "applying 20261114010000_demo_season_choice.sql"
+
+plant "M63 the default is the window that ends last" "$M63" \
+  "        IF season IS NULL OR v_end < season_end THEN" \
+  "        IF season IS NULL OR v_end > season_end THEN" \
+  "applying 20261114010000_demo_season_choice.sql"
+
+plant "M63 the zero-argument function stops delegating to the default" "$M63" \
+  "    RETURN public.start_demo_session(NULL::text);" \
+  "    RETURN public.start_demo_session('spring');" \
+  "applying 20261114010000_demo_season_choice.sql"
+
+# Its revert warns how many live demos keep their chosen season (the seed plants 5 organizations, 2 of them live
+# in a chosen season) and refuses to leave a signature or the rule behind.
+plant "R63 the revert counts every Fall or Spring season, not the live demos" "$R63" \
+  "            AND EXISTS (SELECT 1 FROM public.season_settings s" \
+  "            OR EXISTS (SELECT 1 FROM public.season_settings s" \
+  "revert 20261114010000: planted 2 live demos in a chosen season"
+
+plant "R63 the revert leaves the choosing function" "$R63" \
+  "DROP FUNCTION public.start_demo_session(text);" \
+  "-- DROP FUNCTION public.start_demo_session(text);" \
+  "revert 20261114010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

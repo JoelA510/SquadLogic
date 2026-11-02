@@ -1,9 +1,11 @@
 # Sunset is a compromise, for practice and game (Step 0)
 
-Status: **Step 0 only. Stopped at the brief's gate; nothing is built.** The practice half is a label
-change. The game half is not: it changes the verdicts the core answers give and moves the
-season-2026 corpus results (section 4). AGENTS.md rule 14 applies (the domain model and the
-solver's inputs), so this waits for a decision before any code moves.
+Status: **practice built (this PR); games approved by the owner and next, not touched here.** Step 0 (this
+document's first commit) found that the practice half is a label change and the game half is not: it
+changes the verdicts the core answers give and moves the season-2026 corpus results (section 4). The
+coordinator's decisions of 2026-11-02 follow in section 5. AGENTS.md rule 14 applies (the domain model);
+the practice half was agreed, and the game half is **approved by the owner (section 5, item 5) and is the
+next PR**, not this one.
 
 Everything below was checked against `main` at `228980a` (#691). Labels follow rule 4: _statically
 reviewed_ (read), _executed_ (run), _fully validated_ (run and the outcome checked).
@@ -69,7 +71,7 @@ runs). With **P**: 7,793 of 7,793 pass. With **G**: 26 fail, in 7 files.
 | P7  | frontend `PracticeRepairPanel.jsx:445`, `PracticeEnactDialog.jsx:128`, `utils/practiceRepairPanel.js`                                                                                                                    | the badge class is `badge warning`, hard-coded; the files import nothing from `availability/` or `constraints/` (searched)                                                                                                           | none                                                                         | none, no UI string moves         |
 | P8  | persisted values: `supabase/migrations`, `supabase/tests`, `docs/sql`, `fixtures`                                                                                                                                        | no hit for `PRACTICE_PAST_SUNSET`, `practice-daylight` (control: the same search over `supabase/functions` hits the Edge files). `past-sunset` and `sunset-unknown` in SQL are `tbd_reason` values, not severities                   | none                                                                         | none, no schema, CHECK or enum   |
 
-## 4. Games: every consumer of the labels
+## 4. Games: every consumer of the labels (approved by the owner, next PR; not changed by this PR)
 
 The live game scheduler does not call any of this (_executed_: `grep -il sunset` over
 `gameScheduling.js`, `autoScheduler.js`, `practiceScheduling.js`, `gameValidation.js`, `gameMetrics.js`,
@@ -105,42 +107,92 @@ slots per week", "sunset trims the two November dates to the bare minimum"), `sc
 incident 10's unplaceable fixtures). Five of the seven files are corpus acceptance tests: the season-2026
 results move.
 
-## 5. The stop conditions, one by one
+## 5. Decisions (coordinator, 2026-11-02)
 
-| Condition from the brief                                            | Result                                                                                                                                                  |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the relabel changes a verdict, gate or waiver beyond label and text | **Practice: no** (P1-P7; 0 of 7,793 tests red). **Games: yes** (G1-G8: `infeasible` becomes `feasible`, a gate stops gating, a placement becomes legal) |
-| a persisted value, CHECK, enum or schema changes                    | **No**, either half (P8, G10)                                                                                                                           |
-| `fixtures/season-2026` results move                                 | **Practice: no. Games: yes** (G6, G7 and the five acceptance files above)                                                                               |
-| the live game scheduler would start or stop enforcing               | **No** (section 4: it does not call this code)                                                                                                          |
+1. **Games: held in this PR.** A past-sunset kickoff becoming a legal, placeable, countable slot, and 26
+   acceptance results flipping, is a domain decision for the owner (answered in item 5). G1 to G10 stay in
+   this document; the game pair (`SUNSET_MARGIN_VIOLATED`, the `sunset-margin` claim) is untouched here and
+   every game test still pins `blocking` and `hard`.
+2. **Practice: proceed as its own PR.** The weight of the `SOFT` claim is **1**, the what-if default
+   (`constraints/whatIf.js:50-53`), which moves no result today. It is a placeholder that nobody has
+   stated: it is recorded as one in the claim's note and in its `history` entry, and no test pins the
+   number.
+3. **`waivable` stays `false` on both claims.** A compromise needs no waiver; the flag is moot, not
+   changed.
+4. **Scope of this PR:** `PRACTICE_PAST_SUNSET` `BLOCKING` to `COMPROMISE`; `practice-daylight` `HARD` to
+   `SOFT` with a `history` entry (`hard` to `soft`, owner, 2026-11-02); the claim's note and rationale
+   (the real behaviour, including the unknown-sunset clause); the comments that say hard; and new
+   plant-proved tests, since none existed.
+5. **Games: approved by the owner, next PR (status: approved, not started).** Owner, 2026-11-02, verbatim:
+   "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds." So `SUNSET_MARGIN_VIOLATED` and the `sunset-margin` claim become
+   `COMPROMISE` and `SOFT` (weight 1, a stated placeholder, `waivable: false`); a past-sunset kickoff is legal,
+   placeable and countable and carries a warning; `latestClean` stays the only remaining sunset bound; and the
+   answers in G1 to G8 change as tabled. It is a second PR on a fresh branch from `main` once this one has merged
+   (both edit `season2026Constraints.js` and `availability/reasonCodes.js`, so they are not stacked); its 26 pinned
+   results are rewritten from this plan, not from the new output.
 
-So the brief's gate is tripped by the game half, and the PR is not built.
+## 6. What was built (practice), and how the Step 0 statements fit together
 
-## 6. What is needed to go on
+Step 0 said that no test pinned these labels, and that `tests/practiceDurationPhases.test.js:1283-1290`
+pins text of the registry note. Both are true, and they are about different things (_executed_): with the
+severity and the type both changed, 0 of 7,793 tests went red, so **no test pinned the severity or the
+type**. Three tests pin words of the claim's **note**, not its labels: `practiceDurationPhases.test.js:1283-1290`
+(`declared, not optimised (D11)` and `never applied`), `practiceRepairDaylight.test.js:386-396` (#691: the repair
+"likewise keeps every re-home candidate and flags it, past sunset (owner, 2026-10-27) or with an unknown
+sunset (owner, 2026-11-02)", "an unknown sunset is never read as legal and never refused", and no
+mention of the old refusals) and `practiceDaylight.test.js:244` (`practiceScheduling.js or
+autoScheduler.js`). The scratch edit of Step 0 did not touch the note, so they stayed green; the rewritten
+note keeps every one of those phrases and all three pins pass on it (_executed_). The note's only
+changed sentence is the one that said "the HARD type above is the operator ruling ... the claim is
+enforced as a flag"; it now says the claim was HARD (the operator ruling, kept in `history`), is SOFT since
+the owner's decision, that the weight is a placeholder, and that the game claim waits.
 
-1. **The game half needs an owner-approved plan (rule 14), and one question answered.** A compromise
-   finding bounds nothing in this model: the verdict, the legal-slot search, the capacity count and the
-   placement gate all read `blocking` as the bound (G2-G7). So "relabel as a compromise" for games means
-   a past-sunset kickoff is a **legal, placeable, countable** slot that carries a warning, and
-   `latestClean` (which still binds at sunset: `cleanBindingKinds ['sunset']`, _executed_) is the only
-   remaining sunset bound. Is that what is meant? If the owner wants the finding labelled a compromise
-   while the answers stay bounded, the registry cannot say it (the type decides both), and that would be
-   a separate design. Either way the 26 pinned results are rewritten from the plan, not from the new
-   output, and the corpus acceptance tests (reserve capacity, scenario, feasibility 1 and 9) are
-   re-derived on purpose.
-2. **A weight for each `SOFT` claim** (section 1). Nothing states one; 1 is what the what-if projection
-   uses and moves no result.
-3. **`waivable`** stays `false` for both (a compromise needs no waiver); say so if not.
-4. **Practice alone can go now.** It is label, text and tests: `PRACTICE_PAST_SUNSET` to `COMPROMISE`,
-   `practice-daylight` to `SOFT` with a `history` entry (`hard` to `soft`, owner, 2026-11-02), the
-   registry note (`season2026Constraints.js:506`) and the comments that say hard or blocking
-   (`practice/daylight.js:10-11`, "Decision D1 makes it hard"; `docs/PHASE_8_9_PLAN.md:250`, D1). No test
-   pins these labels today (0 red), so the PR would add the tests that make the relabel observable
-   (the claim's type and weight, the evaluator's status, the effective severity under the practice
-   registry, the seeded registry's `changed: false`) and prove each can fail against a planted defect.
-   It needs only item 2.
+**Changed:**
 
-## 7. Text that would change if the game half is built
+- `availability/reasonCodes.js`: `PRACTICE_PAST_SUNSET` is `COMPROMISE`, with the reason beside it.
+- `constraints/adapters/season2026Constraints.js`: the `practice-daylight` claim is `SOFT`, weight 1,
+  `waivable: false`, with one `history` entry; note and rationale rewritten.
+- `practice/daylight.js`: the header no longer says the rule "makes it hard"; it says what the severity is
+  and that nothing else changed.
+- Registry stats of the practice registry: hard/soft 10/2 to 9/3. No test or doc stated them; test K4 now
+  states them as a count over the input list of constraints.
+- `docs/PHASE_8_9_PLAN.md` (a dated D1 note, the D1 row left as written), `docs/architecture/practice-scheduling.md`,
+  lesson 85, the CHANGELOG.
+
+**Not changed:** the game pair; any persisted value, CHECK, enum or schema; the Edge twin (it has no
+severity and its persisted finding is already a `warning`); the frontend (the badge is hard-coded
+`badge warning`); `waivable`; `durationPhases.js` (B4 stays an owner item); every number the evaluator,
+the repair or the Edge pass computes.
+
+**Tests (`tests/practiceDaylight.test.js`, block K).** K1: the minute past a table sunset is flagged, its
+finding is a `compromise` and the check `compromised` (control: the practice that ends at sunset alone has no
+finding and is `allowed`). K2: under the practice registry the code is a compromise and the registry
+overrides no severity, so a one-sided change shows up as an override. K3: the claim is `soft`, states a
+weight and is not waivable. K4: the practice registry is the game registry plus one soft claim, counted over
+`SEASON_2026_CONSTRAINTS`, not read from the claim. K5: the retype is on record. Every expected value is
+written from the owner's decision as words, or counted over the input list; none is read from the severity
+table or the claim record under test. Default 5 s timeout.
+
+**Plants** (three, each red then reverted, _executed_): K-P1 `PRACTICE_PAST_SUNSET` back to `BLOCKING`
+(K1 and K2 red); K-P2 the claim back to `hard` with no weight (K2, K3 and K4 red); K-P3 the claim's
+`history` emptied (K5 red).
+
+## 7. The questions that were open
+
+1. **Games: answered (section 5, item 5).** A compromise finding bounds nothing in this model: the verdict,
+   the legal-slot search, the capacity count and the placement gate all read `blocking` as the bound
+   (G2-G7). So "relabel as a compromise" for games means a past-sunset kickoff is a **legal, placeable,
+   countable** slot that carries a warning, and `latestClean` (which still binds at sunset:
+   `cleanBindingKinds ['sunset']`, _executed_) is the only remaining sunset bound. That is what the owner
+   approved, with the reason that some organisations have portable lighting or other workarounds. The 26
+   pinned results are rewritten from the plan, not from the new output, and the corpus acceptance tests
+   (reserve capacity, scenario, feasibility 1 and 9) are re-derived on purpose, in the game PR.
+2. **The weight.** 1 is a placeholder (section 5). If the owner wants a real cost for a past-sunset
+   practice, it is one number on the claim and moves no result until something reads it.
+3. **B4** (`durationPhases.js`: an unwired tool that holds a known past-sunset date out as TIME TBD) is
+   unchanged and still an owner item.
+
+## 8. Text that changes in the game PR (approved, next)
 
 `feasibility/reasonCodes.js:227-240` (the docstring explaining why `SUNSET_MARGIN_VIOLATED` is
 `blocking`) and the test that pins it (`tests/feasibilityApi.test.js:561-570`); `docs/CONSTRAINT_REGISTRY.md:141`
@@ -149,3 +201,13 @@ So the brief's gate is tripped by the game half, and the PR is not built.
 `note` (`season2026Constraints.js:428-437`); `docs/PHASE_8_9_PLAN.md` D7; and the corpus invariant
 "No unlit game ends within 15 min of sunset" that the record cites (`fixtures/season-2026/README.md:62`),
 which would become a warning in the engine and stay a rule on the league's sheet.
+
+## 9. Gates run for the practice PR (_executed_ unless noted)
+
+Typecheck; `eslint . --max-warnings=0`; `check:unused` (knip); `check:advisors`; the full `test:coverage` at
+the default timeout (488 files, 7,798 tests: the 7,793 of Step 0 plus K1 to K5; thresholds met); the frontend
+build with CI's stand-in variables and `check:bundle`; the full mock E2E (214 scenarios, `--workers=1
+--trace off`); `git diff --check`; Prettier on every file touched that was clean on `main`. The season-2026
+fixture tests are in the suite and pass unchanged: no existing test was edited. **Not run, and why:** the Deno
+mirror tests and `deno check` (nothing under `supabase/functions` changed), pgTAP and the real-backend E2E (no
+SQL, no Edge or schema change). The game half's gates are its own PR's.

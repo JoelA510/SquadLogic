@@ -30,6 +30,26 @@ Feature: Practice repair recommendations (read-only)
     When I undo the decline for "Repair Team A"
     Then the recommendation for "Repair Team A" should be placed
 
+  # Owner, 2026-11-02: an unknown sunset is flagged, never refused ("refusal would break configs
+  # that users may otherwise stick with"). One venue has coordinates, so the daylight check runs;
+  # the other has none, so a practice moved onto it has no sunset to be judged against: it is
+  # placed, and the row says so. The panel is scanned with axe in both themes.
+  Scenario: A recommendation onto a venue with no coordinates is kept and flagged, and the panel passes axe
+    Given "Repair Pitch 2" is at a second venue with no coordinates while the first venue has them
+    And I am on the "Field Management" page
+    When I click the "Retire" button for "Repair Pitch 1"
+    And I set the retirement end date to "2026-09-30"
+    And I click "Check and retire"
+    Then the consequence preview should offer practice repair recommendations
+    When I open the practice repair recommendations
+    Then the recommendation for "Repair Team A" should be placed
+    And the recommendation for "Repair Team A" should be flagged "Sunset unknown"
+    And the practice repair panel should say a sunset was kept and flagged
+    And the practice repair panel should not say daylight was not checked
+    And axe finds no serious or critical violations in the practice repair panel in the "light" theme
+    When I switch to the dark theme behind the open dialog
+    Then axe finds no serious or critical violations in the practice repair panel in the "dark" theme
+
   # 8.6 3b PR 11d-1: a mid-range window is no longer refused (the readers
   # apply exceptions). 8.6 3b PR 11d-3 (Q5): the editor's launcher is always
   # a preview, so a draft's Enact waits for the blackout to be saved.

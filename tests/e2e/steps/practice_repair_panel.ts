@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { AxeBuilder } from '@axe-core/playwright';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -253,5 +254,109 @@ Then(
         'Save the blackout first'
       );
     }
+  }
+);
+
+// Owner, 2026-11-02: an unknown sunset is flagged, never refused.
+Given(
+  '{string} is at a second venue with no coordinates while the first venue has them',
+  async ({ page }, fieldName: string) => {
+    if (page.url() === 'about:blank') await page.goto('/');
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ name, ids }) => {
+        const db = JSON.parse(
+          sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+        );
+        const orgId = localStorage.getItem('squadlogic_active_org');
+        // Synthetic round numbers, not a place: the first venue is the only one with coordinates.
+        db.locations = db.locations.map((l) =>
+          l.id === ids.loc ? { ...l, latitude: 40, longitude: -75 } : l
+        );
+        db.locations.push({
+          id: ids.loc2,
+          name: 'Repair Venue Two',
+          organization_id: orgId,
+          lighting_available: false,
+          latitude: null,
+          longitude: null,
+        });
+        const moved = db.fields.filter((f) => f.name === name);
+        if (moved.length !== 1) throw new Error(`expected one field named ${name}`);
+        db.fields = db.fields.map((f) =>
+          f.id === moved[0].id ? { ...f, location_id: ids.loc2 } : f
+        );
+        window.__saveMockDB__(db);
+      },
+      { name: fieldName, ids: { loc: uuid(101), loc2: uuid(102) } }
+    );
+  }
+);
+
+Then(
+  'the recommendation for {string} should be flagged {string}',
+  async ({ page }, team: string, flag: string) => {
+    const note = windowFor(page, team).getByTestId('practice-repair-sunset-unknown');
+    await expect(note).toBeVisible();
+    await expect(note).toContainText(flag);
+    await expect(note).toContainText('flagged, not blocked');
+    // Unknown is not past sunset: that flag is not on it.
+    await expect(windowFor(page, team).getByTestId('practice-repair-past-sunset')).toHaveCount(0);
+  }
+);
+
+Then('the practice repair panel should say a sunset was kept and flagged', async ({ page }) => {
+  const finding = page
+    .getByTestId('practice-repair-findings')
+    .locator('[data-reason-code="PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN"]');
+  await expect(finding).toBeVisible();
+  await expect(finding).toHaveAttribute('data-severity', 'compromise');
+  await expect(finding).toContainText('kept and flagged');
+});
+
+Then('the practice repair panel should not say daylight was not checked', async ({ page }) => {
+  await expect(page.getByTestId('practice-repair-findings')).toBeVisible();
+  await expect(
+    page
+      .getByTestId('practice-repair-findings')
+      .locator('[data-reason-code="PRACTICE_REPAIR_DAYLIGHT_UNCHECKED"]')
+  ).toHaveCount(0);
+});
+
+/** The WCAG 2.0, 2.1 and 2.2 A and AA rules, as tests/e2e/steps/accessibility.ts scans them. */
+const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
+
+Then(
+  'axe finds no serious or critical violations in the practice repair panel in the {string} theme',
+  async ({ page }, theme: string) => {
+    if (theme === 'dark') await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    else await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+    // Finite entrance animations settle first: axe measures colours as drawn.
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((a) => a.finished.catch(() => undefined))
+      )
+    );
+    const results = await new AxeBuilder({ page })
+      .include('[data-testid="practice-repair-panel"]')
+      .withTags(WCAG_TAGS)
+      .analyze();
+    // A scan that checked nothing proves nothing.
+    expect(
+      results.passes.length,
+      'axe passed no rule on the panel: did it render?'
+    ).toBeGreaterThan(5);
+    const blocking = results.violations
+      .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+      .flatMap((v) =>
+        v.nodes.map((n) => `[${v.impact}] ${v.id} at ${n.target.join(' ')}\n    ${n.html}`)
+      );
+    expect(
+      blocking,
+      `serious or critical axe violations in the panel (${theme}):\n${blocking.join('\n')}`
+    ).toEqual([]);
   }
 );

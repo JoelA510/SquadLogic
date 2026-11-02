@@ -1,30 +1,31 @@
 /**
- * The demo's two seasons (plan docs/changes/2026-11-01-demo-season-selection.md): at entry the visitor
- * chooses a fall or a spring league, the same league dated differently.
+ * The demo's two seasons (plans docs/changes/2026-11-01-demo-season-selection.md and
+ * docs/changes/2026-11-02-demo-fall-window.md): at entry the visitor chooses a fall or a spring league, the
+ * same league dated differently.
  *
  * **The server decides.** `start_demo_session(p_season)` dates the season with
- * `demo_seed.season_window()` (migration 20261114010000) and returns the dates it used. This module is
- * that rule's twin, for the three things the browser needs before a demo exists: the window each button
- * covers, the button to preselect, and the mock client's dates. The two are held equal by one table of
- * vectors: `tests/demoSeasons.test.js` checks this file against it and checks that
+ * `demo_seed.season_window()` (migrations 20261114010000, and 20261115010000 for the fall) and returns the
+ * dates it used. This module is that rule's twin, for the three things the browser needs before a demo
+ * exists: the window each button covers, the button to preselect, and the mock client's dates. The two are
+ * held equal by one table of vectors: `tests/demoSeasons.test.js` checks this file against it and checks that
  * `supabase/tests/demo_sessions.sql` embeds exactly the same table, which the SQL is run against.
  *
- * **The rule.** A window is a Monday anchor and a length in weeks:
+ * **The rule.** A window is a Monday anchor and either a length in weeks or an end date:
  *
  *   - spring starts on the Monday on or after 22 March and runs 12 weeks (the league's `season_weeks`);
- *   - fall starts on the Monday on or after 2 August and runs 6 weeks.
+ *   - fall starts on the Monday on or after 17 August and ends on 31 October of the same year (owner,
+ *     2026-11-02), so its length follows the calendar: 70 to 76 days.
  *
  * An instance is dated by the year of its start. The instance a visitor gets is the earliest whose last day
  * is on or after today (the date in the league's zone), so a window containing today gives its current
  * instance, and a window already over this year gives next year's. With no choice, the default is the
  * choice whose instance ends first: the window the date falls in, or else the next one to begin.
  *
- * **Why these windows.** The practice grid is static clock times and sunset moves with the date: an unlit
- * practice ending at 19:00 is before sunset only between the clocks going forward in March and the last
- * week of September. Spring clears the clock change by a week and a half; fall can be at most about six
- * weeks long, ending by mid-September, so it is the "early fall". `tests/demoSeasons.test.js` proves, with
- * the repository's sunset helper at the demo's venues, that no unlit slot of the seeded grid ends within
- * ten minutes of sunset on any practice day of either window in any year to 2060.
+ * **Sunset.** The practice grid is static clock times and sunset moves with the date. Spring is clear of
+ * it (`tests/demoSeasons.test.js` proves no unlit slot ends within ten minutes of sunset on any practice day
+ * of the spring, to 2060). The fall is not, on purpose: an unlit practice ending at 19:00 is past sunset
+ * from about 24 September, and the demo shows it flagged, never blocked (owner, 2026-11-02). The same test
+ * derives exactly which days, from the seed's grid and the real sunset helper.
  *
  * Pure: no `Date` is constructed from a local time and the host's zone is never read; `demoToday` names
  * the league's zone explicitly.
@@ -37,11 +38,13 @@ export const DEMO_TIMEZONE = 'America/Los_Angeles';
 export const DEMO_SPRING_WEEKS = 12;
 
 /**
- * The two seasons a demo may be dated in, in the order the entry page lists them. `month` is 1-12.
- * @type {Readonly<Record<'fall' | 'spring', Readonly<{ label: string, month: number, day: number, weeks: number }>>>}
+ * The two seasons a demo may be dated in, in the order the entry page lists them. `month` is 1-12. A window
+ * is anchored on the Monday on or after `month`/`day` and ends either after `weeks` weeks or on
+ * `endMonth`/`endDay` of the same year, never both.
+ * @type {Readonly<Record<'fall' | 'spring', Readonly<{ label: string, month: number, day: number, weeks?: number, endMonth?: number, endDay?: number }>>>}
  */
 const WINDOWS = Object.freeze({
-  fall: Object.freeze({ label: 'Fall', month: 8, day: 2, weeks: 6 }),
+  fall: Object.freeze({ label: 'Fall', month: 8, day: 17, endMonth: 10, endDay: 31 }),
   spring: Object.freeze({ label: 'Spring', month: 3, day: 22, weeks: DEMO_SPRING_WEEKS }),
 });
 
@@ -51,6 +54,12 @@ const WINDOWS = Object.freeze({
 export const DEMO_SEASONS = /** @type {ReadonlyArray<DemoSeason>} */ (
   Object.freeze(Object.keys(WINDOWS))
 );
+
+/**
+ * The one line under the Fall option on the entry page (owner, 2026-11-02): the fall's late practices end
+ * after sunset from the last week of September, and the demo flags them on purpose. The spring has no line.
+ */
+export const DEMO_FALL_NOTE = 'Evening practices that end after sunset are flagged, by design.';
 
 const DAY_MS = 86_400_000;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -102,9 +111,9 @@ function mondayOnOrAfter(ms) {
  * @property {DemoSeason} season
  * @property {string} label - `Fall` or `Spring`
  * @property {string} start - `YYYY-MM-DD`, a Monday
- * @property {string} end - `YYYY-MM-DD`, the last Sunday of the season
+ * @property {string} end - `YYYY-MM-DD`, the season's last day (a Sunday for the spring, 31 October for the fall)
  * @property {number} year - the year of `start`
- * @property {number} weeks
+ * @property {number} weeks - the Monday-to-Sunday weeks the season touches (the last may be a part week)
  */
 
 /**
@@ -115,13 +124,23 @@ function mondayOnOrAfter(ms) {
  */
 function instanceOn(season, today) {
   const todayMs = parseIsoDate(today);
-  const { label, month, day, weeks } = WINDOWS[season];
+  const { label, month, day, weeks, endMonth, endDay } = WINDOWS[season];
   const thisYear = new Date(todayMs).getUTCFullYear();
   /** @param {number} year */
   const instance = (year) => {
     const start = mondayOnOrAfter(Date.UTC(year, month - 1, day));
-    const end = start + (weeks * 7 - 1) * DAY_MS;
-    return { season, label, start: toIso(start), end: toIso(end), year, weeks };
+    const end =
+      weeks === undefined
+        ? Date.UTC(year, /** @type {number} */ (endMonth) - 1, /** @type {number} */ (endDay))
+        : start + (weeks * 7 - 1) * DAY_MS;
+    return {
+      season,
+      label,
+      start: toIso(start),
+      end: toIso(end),
+      year,
+      weeks: Math.ceil(((end - start) / DAY_MS + 1) / 7),
+    };
   };
   // A window ends in the year it starts, so this year's instance, else next year's, is the answer.
   const current = instance(thisYear);
@@ -189,7 +208,7 @@ const DATE_YEAR_FORMAT = new Intl.DateTimeFormat('en-US', {
 });
 
 /**
- * The dates a window covers, for a person: `Aug 2 to Sep 12, 2027`.
+ * The dates a window covers, for a person: `Aug 23 to Oct 31, 2027`.
  * @param {Pick<DemoSeasonWindow, 'start' | 'end'>} window
  */
 export function describeDemoWindow(window) {
@@ -200,13 +219,19 @@ export function describeDemoWindow(window) {
 }
 
 /**
- * The two buttons of the entry page, with the window each covers today.
+ * The two buttons of the entry page, with the window each covers today. `note` is the one extra line a
+ * button carries (the fall's), or `null`.
  * @param {string} today `YYYY-MM-DD`
- * @returns {Array<DemoSeasonWindow & { name: string, dates: string }>}
+ * @returns {Array<DemoSeasonWindow & { name: string, dates: string, note: string | null }>}
  */
 export function demoSeasonOptions(today) {
   return DEMO_SEASONS.map((season) => {
     const window = instanceOn(season, today);
-    return { ...window, name: demoSeasonName(window), dates: describeDemoWindow(window) };
+    return {
+      ...window,
+      name: demoSeasonName(window),
+      dates: describeDemoWindow(window),
+      note: season === 'fall' ? DEMO_FALL_NOTE : null,
+    };
   });
 }

@@ -58,16 +58,22 @@ ground, and the daylight pass would flag them with the reason. The lit ground is
 `tests/demoSeed.test.js` holds that no unlit slot ends after 19:00, that every unlit slot is before sunset
 from 1 April to 31 August, and that a grid ending at 20:30 or a December date is not.
 
-**The season** is therefore the visitor's choice at demo entry (`docs/changes/2026-11-01-demo-season-selection.md`;
-the same league and seeded practices, only the dates differ): **Spring** starts on the Monday on or after 22
-March and runs 12 weeks, **Fall** starts on the Monday on or after 2 August and runs 6 weeks. No 12-week fall
-can be free of flags at this grid, because a 19:00 end stops being before sunset on about 24 September.
-`demo_seed.season_window()` decides the dates (migration `20261114010000`) and
-`frontend/src/lib/demoSeasons.js` is its twin for the entry page and the mock; `tests/demoSeasons.test.js`
-reads this grid and the venues from the seed and proves that no unlit slot ends within ten minutes of
-sunset on any practice day of either window in any year to 2060 (the tightest margins are 20 and 11
-minutes), and fails for a fall two weeks too long. If the grid's last unlit end moves, that test is the one
-to read first.
+**The season** is therefore the visitor's choice at demo entry (`docs/changes/2026-11-01-demo-season-selection.md`,
+`docs/changes/2026-11-02-demo-fall-window.md`; the same league and seeded practices, only the dates differ):
+**Spring** starts on the Monday on or after 22 March and runs 12 weeks; **Fall** starts on the Monday on or
+after 17 August and ends on 31 October of that year (owner, 2026-11-02; 2026 is 17 August to 31 October). The
+spring is clear of the sun at this grid. **The fall is not, on purpose:** a 19:00 end stops being before
+sunset on about 24 September, so the fall demo's practices in the 19:00-ending unlit slots (42 of the 132
+seeded ones) are past sunset from the last week of September, and the product flags them, never blocks them
+(owner: "A warning keeps room for that, refusal would break configs that users may otherwise stick with").
+The 17:00 and 18:00 ends are in daylight on every day of the window (clocks go back on the first Sunday of
+November, after it), and U4's Saturday mornings are over by noon. `demo_seed.season_window()` decides the
+dates (migrations `20261114010000`, and `20261115010000` for the fall) and `frontend/src/lib/demoSeasons.js`
+is its twin for the entry page and the mock; `tests/demoSeasons.test.js` reads this grid and the venues from
+the seed and proves that no unlit slot ends within ten minutes of sunset on any practice day of the spring in
+any year to 2060 (the tightest margin is 20 minutes), and derives exactly which practice days of every fall
+are past sunset (the sunset helper, both arms, and the Edge daylight pass for each seeded practice). If the
+grid's unlit ends move, that test is the one to read first.
 
 **The seeded schedule** (`demo_seed.practice_schedule`, built by `scripts/build-demo-practice-seed.mjs`
 with the product's own solver, fixed seed): the four U4 cohorts once and the 64 teams of U5 to U8 twice,

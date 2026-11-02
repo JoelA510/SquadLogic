@@ -2,9 +2,17 @@
 
 Kind: FEATURE · Drawn up: 2026-11-01 against `origin/main` `bced965` · Owner: the repository owner ·
 Status: **direction approved** (owner: "demo selection", not a swap inside the demo); **built 2026-11-01**
-(Build notes); the exact windows and the fall's length are the owner's to confirm (Decisions). AGENTS.md rule 14 applies because the
+(Build notes); **the fall amended 2026-11-02** (below); the exact windows are the owner's to confirm
+(Decisions). AGENTS.md rule 14 applies because the
 change touches persistence (`start_demo_session`); it adds a parameter and one pure helper and nothing
 else on the session path (no table, no column, no RLS, no expiry or cleanup change; see Design).
+
+> **Amended 2026-11-02 (owner): the fall is the Monday on or after 17 August through 31 October, and its
+> sunset flags are accepted** (`docs/changes/2026-11-02-demo-fall-window.md`, migration
+> `20261115010000_demo_fall_window.sql`). Wherever this plan says the fall is the Monday on or after 2 August
+> and runs six weeks, or that neither window has a sunset flag, that is the first build and is superseded
+> for the fall; the passages are left as written, marked, because they are the record of why. The spring, the
+> choice at entry, the default, the expiry and the rest of the design stand.
 
 Every claim about the code is _statically reviewed_ unless marked _executed_. The sunset figures are
 _executed_ with the repository's own helper (`packages/core/src/timing/solar.js`, the module the daylight
@@ -126,7 +134,8 @@ pass, the calendar and the exports read, so a browser-side date shift cannot wor
 in the third week of September and is summer by any league's calendar. A conventional 12-week fall (23 Aug
 to 14 Nov 2027) has 35 of its 60 practice days flagged at 19:00, from 27 Sep. What can be offered:
 
-1. **An early-fall window of 6 weeks (built).** Monday on or after 2 Aug, six weeks. Same grid, same seeded
+1. **An early-fall window of 6 weeks (built first; superseded 2026-11-02 by the owner's mid-August to 31
+   October fall, with its flags accepted).** Monday on or after 2 Aug, six weeks. Same grid, same seeded
    schedule, no flags in any year to 2060, at the price of a shorter season than the spring's 12 weeks.
 2. A 12-week fall that shows its flags. Honest, and a showcase for the sunset rule, but it is the thing the
    owner asked to avoid.
@@ -151,8 +160,10 @@ to 14 Nov 2027) has 35 of its 60 practice days flagged at 19:00, from 27 Sep. Wh
 
 **The rule** (one definition per language, equal by test; weeks in brackets). Each window is a Monday anchor
 and a length: **Spring** starts on the Monday on or after 22 March and runs `demo_seed.league.season_weeks`
-(12) weeks, to the Sunday ending 13 to 19 June; **Fall** starts on the Monday on or after 2 August and runs
-6 weeks, to the Sunday ending 12 to 18 September. An instance of a window is dated by the year of its start.
+(12) weeks, to the Sunday ending 13 to 19 June; **Fall** _(first build; since 2026-11-02 it starts on the
+Monday on or after 17 August and ends on 31 October of the same year)_ started on the Monday on or after 2
+August and ran 6 weeks, to the Sunday ending 12 to 18 September. An instance of a window is dated by the year
+of its start.
 
 - **Which instance:** the earliest whose last day is on or after _today_ (the date in the league's zone).
   So a date inside a window gets that window's current instance, and fall chosen in spring gets this year's
@@ -200,6 +211,11 @@ describes the windows and picks the default, and cannot change what is stored. B
 of vectors (below), and the pgTAP file embeds exactly the vectors the Vitest test checks.
 
 ## Sunset evidence for the two windows
+
+_This section is the first build's evidence. Its spring half stands. Its fall half (an early fall with no
+flag in any year) is superseded: the fall now runs to 31 October and the 19:00-ending unlit slots are flagged
+from late September on purpose, with the days derived in `tests/demoSeasons.test.js` and tabulated in
+`docs/changes/2026-11-02-demo-fall-window.md`._
 
 Per year, every Monday to Friday of the instance against the earliest sunset of the three unlit venues
 (`floor`, as enforced), for a 19:00 slot end:
@@ -265,9 +281,11 @@ default 5 s timeout.
 
 ## Decisions
 
-1. **Fall length (owner).** Built: 6 weeks (2 Aug .. 12-18 Sep). Alternatives: Options 2 to 4.
-2. **Anchors (owner).** Spring from the Monday on or after 22 March, fall from the Monday on or after 2
-   August. The proof allows both to move by a few days.
+1. **Fall length (owner).** First build: 6 weeks (2 Aug .. 12-18 Sep). **Decided 2026-11-02: to 31 October
+   (Option 2, with its flags accepted).**
+2. **Anchors (owner).** Spring from the Monday on or after 22 March; the fall's anchor was the Monday on or
+   after 2 August and is, since 2026-11-02, the Monday on or after 17 August. The spring proof allows its
+   anchor to move by a few days.
 3. **Default** is the window containing the date, else the next to begin (the owner's wording: "falls in or
    is nearest before").
 4. **Season name and label** become `Fall 2027` and `Fall`, where they were `2027 Season` twice.

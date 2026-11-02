@@ -60,6 +60,18 @@ updates:
       # setup (resume-queue.md) is adopted.
       - dependency-name: typescript
         versions: ['>= 6.1']
+      # 2026-11-02 (owner approved): @sentry/react 11.10.0 fails `npm run typecheck`
+      # (TS2345 at tests/sentryConfig.test.js:117: its new `tunnel` option is typed
+      # TunnelInit<...>, which is not assignable to `string`), so the bump is held; the
+      # dependency PR #688 took the rest of its group and left it out. This is a
+      # workaround for an upstream typing problem that has not been filed yet
+      # (AGENTS.md, operating rule 16: report it upstream with the reproduction).
+      # Remove this entry once a release types it compatibly; check by bumping
+      # @sentry/react by hand in a scratch branch and running `npm run typecheck`.
+      # `>=11.10.0` also hides any later release, a fixed one included, so someone has
+      # to re-check it; the narrower alternative is `11.10.x`.
+      - dependency-name: '@sentry/react'
+        versions: ['>=11.10.0']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       minor-and-patch:

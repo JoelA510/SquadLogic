@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import {
+  DEMO_FALL_NOTE,
   defaultDemoSeason,
   demoSeasonWindow,
   demoToday,
@@ -40,7 +41,7 @@ async function startDemo(page: Page, lifespanMs?: number, season?: Season) {
   await page.getByRole('button', { name: 'Start the demo' }).click();
 }
 
-/** "Aug 2, 2027": the way the seasons list writes a date. */
+/** "Aug 23, 2027": the way the seasons list writes a date. */
 const listedDate = (iso: string) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', {
     timeZone: 'UTC',
@@ -117,9 +118,15 @@ Then('the demo entry page asks for a fall or a spring season', async ({ page }) 
   await expect(group.getByRole('radio', { name: /Fall season/ })).toBeVisible();
   await expect(group.getByRole('radio', { name: /Spring season/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start the demo' })).toBeEnabled();
-  // each says the dates it covers
-  await expect(group).toContainText('6 weeks');
+  // each says the dates it covers and its weeks (the fall ends on 31 October, so its weeks follow the year)
+  const fallWeeks = demoSeasonWindow('fall', demoToday()).weeks;
+  await expect(group).toContainText(`${fallWeeks} weeks`);
   await expect(group).toContainText('12 weeks');
+  // and the fall says its evening practices after sunset are flagged, by design; the spring says nothing
+  await expect(group.getByRole('radio', { name: /Fall season/ })).toHaveAccessibleDescription(
+    new RegExp(DEMO_FALL_NOTE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  );
+  await expect(group.getByText(DEMO_FALL_NOTE)).toHaveCount(1);
 });
 
 Then('the season the date calls for is already chosen', async ({ page }) => {

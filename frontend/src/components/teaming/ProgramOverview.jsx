@@ -11,6 +11,16 @@ const WARNING_LABELS = {
 };
 
 /**
+ * Why a program with registrants has nobody to seat: all on the waitlist, none eligible for the
+ * division, or both kinds (no team is built for any of them).
+ * @param {{ waitlistedCount?: number, notEligibleCount?: number }} program
+ */
+function nobodyToSeat(program) {
+  if (!(Number(program.notEligibleCount) > 0)) return 'All on the waitlist';
+  return Number(program.waitlistedCount) > 0 ? 'Nobody to seat' : 'None eligible';
+}
+
+/**
  * A program's status before generation, from the same advice the settings panel shows: whether
  * the count generation will build keeps every team within the roster limits. Never a blanket
  * "Ready" (Phase B4): a program that cannot fit its limits says so.
@@ -94,6 +104,11 @@ export default function ProgramOverview({
               {program.waitlistedCount} on the waitlist
             </span>
           )}
+          {program.notEligibleCount > 0 && (
+            <span className="block text-xs text-text-muted">
+              {program.notEligibleCount} not eligible
+            </span>
+          )}
         </td>
         <td className="p-4 text-text-secondary">
           {/* Generation refuses rules the advice calls blocked: no count to estimate. */}
@@ -102,9 +117,10 @@ export default function ProgramOverview({
         <td className="p-4 text-text-secondary">{recommended ?? '—'}</td>
         <td className="p-4 text-text-secondary">{program.avgRosterSize}</td>
         <td className="p-4">
-          {program.playerCount === 0 && program.waitlistedCount > 0 ? (
+          {program.playerCount === 0 &&
+          (program.waitlistedCount > 0 || program.notEligibleCount > 0) ? (
             // Nobody to seat: no team is built, so "fits the limits" would say nothing true.
-            <Badge tone="warning">All on the waitlist</Badge>
+            <Badge tone="warning">{nobodyToSeat(program)}</Badge>
           ) : (
             <ProgramStatus assessment={program.assessment} />
           )}
@@ -187,6 +203,7 @@ ProgramOverview.propTypes = {
       name: PropTypes.string,
       playerCount: PropTypes.number,
       waitlistedCount: PropTypes.number,
+      notEligibleCount: PropTypes.number,
       estimatedTeams: PropTypes.number,
       avgRosterSize: PropTypes.number,
       assessment: PropTypes.object,

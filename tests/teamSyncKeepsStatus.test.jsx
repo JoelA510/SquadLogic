@@ -39,15 +39,18 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
 }));
 // The import the page was handed: the generate view's condition is "no team run
 // in hand and an import", which is the view the old code fell back to.
+// One object for every render, as the real context hands out (`maskedImportedData` is memoized): the
+// page reads the import's stored players once per import, and a new object per render is a new import.
+const IMPORT = vi.hoisted(() => ({
+  importedData: {
+    data: [
+      { first_name: 'Ada', last_name: 'One', division: 'U9 Coed' },
+      { first_name: 'Bea', last_name: 'Two', division: 'U9 Coed' },
+    ],
+  },
+}));
 vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
-  useImport: () => ({
-    importedData: {
-      data: [
-        { first_name: 'Ada', last_name: 'One', division: 'U9 Coed' },
-        { first_name: 'Bea', last_name: 'Two', division: 'U9 Coed' },
-      ],
-    },
-  }),
+  useImport: () => IMPORT,
 }));
 vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
   useAuth: () => ({ session: null, user: null }),

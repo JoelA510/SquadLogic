@@ -90,7 +90,7 @@ already counts the not-eligible".
 
 **What is in scope.** The waitlisted. The not-eligible need each player's age placed against the
 division rules (a different computation) and are not part of this follow-up; they are listed for the
-owner.
+owner. _(Built afterwards, with the owner's go: `docs/changes/2026-11-02-data-followups.md`, item 2.)_
 
 **Design.** One predicate, `isWaitlistedRow(row)`, is the only place the page decides a row is
 waitlisted; `toGeneratorPlayer` calls it (its behaviour is unchanged) and so does the count.

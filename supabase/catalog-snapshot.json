@@ -182,6 +182,7 @@
     "season_settings_default_program() returns trigger",
     "set_team_coaches(p_team_id uuid, p_lead_coach_id uuid, p_assistant_coach_ids uuid[], p_effective_on date, p_via text) returns jsonb",
     "start_demo_session() returns jsonb",
+    "start_demo_session(p_season text) returns jsonb",
     "sync_player_team_id() returns trigger",
     "sync_schedule_tbd_practices(p_organization_id uuid, p_season_settings_id uuid, p_run_id uuid, p_unassigned jsonb) returns integer",
     "team_coach_assignment_drift(p_organization_id uuid) returns TABLE(team_id uuid, in_sync boolean, column_lead uuid[], assignment_leads uuid[], column_assistants uuid[], assignment_assistants uuid[])",

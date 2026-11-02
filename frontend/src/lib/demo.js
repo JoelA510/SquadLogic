@@ -119,10 +119,15 @@ const StartResultSchema = z.object({
   organization_id: z.string().min(1),
   expires_at: z.string().refine((value) => Number.isFinite(Date.parse(value)), 'not a timestamp'),
   existing: z.boolean().optional(),
+  // Migration 20261114010000: the season the demo is dated in, as the server decided it. A demo
+  // started before that migration, or by a server that has not taken it, returns none of the three.
+  season: z.enum(['fall', 'spring']).nullish(),
+  season_start: z.string().nullish(),
+  season_end: z.string().nullish(),
 });
 
 /**
- * @typedef {'capacity' | 'not_anonymous' | 'unavailable'} DemoStartFailureKind
+ * @typedef {'capacity' | 'not_anonymous' | 'unknown_season' | 'unavailable'} DemoStartFailureKind
  */
 
 /** A demo that could not be started; `kind` says why, `message` is fit to show a visitor. */
@@ -140,8 +145,9 @@ export class DemoStartError extends Error {
 
 /**
  * Why `start_demo_session()` (or the anonymous sign-in before it) failed, as a visitor should hear
- * it. The server's two refusals carry a `detail`: `demo_capacity` (P0001) at the cap and
- * `demo_requires_anonymous` (42501) for a signed-in account.
+ * it. The server's refusals carry a `detail`: `demo_capacity` (P0001) at the cap,
+ * `demo_requires_anonymous` (42501) for a signed-in account and `demo_season_unknown` (22023) for a
+ * choice that is neither fall nor spring.
  * @param {any} error A PostgREST or GoTrue error, or anything thrown.
  * @returns {DemoStartError}
  */
@@ -152,6 +158,12 @@ export function demoStartFailure(error) {
     return new DemoStartError(
       'capacity',
       'The demo is busy right now. Try again in a few minutes.'
+    );
+  }
+  if (detail === 'demo_season_unknown') {
+    return new DemoStartError(
+      'unknown_season',
+      'Choose a fall or a spring season to start the demo.'
     );
   }
   if (detail === 'demo_requires_anonymous') {
@@ -167,12 +179,21 @@ export function demoStartFailure(error) {
 }
 
 /**
- * Asks the server for this visitor's demo league: a new one, or the live one they already have.
- * Throws a `DemoStartError`.
- * @returns {Promise<{ organizationId: string, expiresAt: string, existing: boolean }>}
+ * Asks the server for this visitor's demo league: a new one in the season they chose, or the live one
+ * they already have (in the season it was started in, whatever is asked now). With no choice the
+ * server dates it in the window the date falls in, or the next to begin. Throws a `DemoStartError`.
+ * @param {import('./demoSeasons.js').DemoSeason | null} [season] - 'fall' or 'spring'
+ * @returns {Promise<{
+ *   organizationId: string, expiresAt: string, existing: boolean,
+ *   season: 'fall' | 'spring' | null, seasonStart: string | null, seasonEnd: string | null
+ * }>}
  */
-export async function startDemoSession() {
-  const { data, error } = await supabase.rpc('start_demo_session');
+export async function startDemoSession(season = null) {
+  // No choice is `null`/`undefined` and nothing else: anything given is sent, and the server refuses it
+  // unless it is exactly 'fall' or 'spring'.
+  const { data, error } = await (season === null || season === undefined
+    ? supabase.rpc('start_demo_session')
+    : supabase.rpc('start_demo_session', { p_season: season }));
   if (error) throw demoStartFailure(error);
   const parsed = StartResultSchema.safeParse(data);
   if (!parsed.success) {
@@ -185,6 +206,9 @@ export async function startDemoSession() {
     organizationId: parsed.data.organization_id,
     expiresAt: parsed.data.expires_at,
     existing: parsed.data.existing === true,
+    season: parsed.data.season ?? null,
+    seasonStart: parsed.data.season_start ?? null,
+    seasonEnd: parsed.data.season_end ?? null,
   };
 }
 

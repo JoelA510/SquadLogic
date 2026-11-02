@@ -11,9 +11,47 @@ Feature: Try the demo
   Scenario: A visitor tries the demo from the sign-in page
     Given I am signed out on the sign-in page
     When I choose "Try the demo" on the sign-in page
+    And I start the demo from the entry page
     Then the demo league is open
     And the header shows the demo timer counting down
     And the demo league lists 16 players
+
+  # The season choice (docs/changes/2026-11-01-demo-season-selection.md): the same league dated in a
+  # fall window or a spring window, chosen at entry, the date's own preselected.
+
+  Scenario: The visitor is asked for a season first, with the one the date calls for chosen
+    Given I am signed out on the sign-in page
+    When I choose "Try the demo" on the sign-in page
+    Then the demo entry page asks for a fall or a spring season
+    And the season the date calls for is already chosen
+    And no demo has started
+
+  Scenario: A visitor can choose the season with the keyboard
+    Given I am signed out on the sign-in page
+    When I open the demo entry page
+    And I move to the other season on the demo entry page with the arrow keys
+    Then the other season is chosen
+    And no demo has started
+
+  Scenario: A visitor who chooses the fall gets a fall league
+    Given I am signed out on the sign-in page
+    When I open the demo entry page
+    And I choose the "Fall season" on the demo entry page
+    And I start the demo from the entry page
+    Then the demo league is open
+    And the header names the "Fall" season
+    When I open the Season and Calendar settings
+    Then the demo season is listed as the "fall" window with its dates
+
+  Scenario: A visitor who chooses the spring gets a spring league
+    Given I am signed out on the sign-in page
+    When I open the demo entry page
+    And I choose the "Spring season" on the demo entry page
+    And I start the demo from the entry page
+    Then the demo league is open
+    And the header names the "Spring" season
+    When I open the Season and Calendar settings
+    Then the demo season is listed as the "spring" window with its dates
 
   Scenario: A demo's people are read-only, but where they play and how they are rated can change
     Given I am in the demo league
@@ -35,6 +73,7 @@ Feature: Try the demo
     And I am signed out
     When I open the demo-ended page
     And I choose "Start again" on the demo-ended page
+    And I start the demo from the entry page
     Then the demo league is open
 
   Scenario: Leaving the demo signs the visitor out
@@ -45,6 +84,7 @@ Feature: Try the demo
   Scenario: A full demo leaves the visitor on the entry page, signed out, with the reason announced
     Given the demo is full
     When I open the demo entry page
+    And I start the demo from the entry page
     Then I stay on the entry page and it says the demo is busy
     And I am signed out
 

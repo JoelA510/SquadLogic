@@ -1,10 +1,13 @@
 /**
- * Demo mode, the entry (plan docs/changes/2026-10-22-demo-mode.md, D4): `/demo/start` through the
- * real `App` with its real providers and the mock client (whose `signInAnonymously` and
- * `start_demo_session` are the twins of GoTrue's and of migration 20261030010000's). Not the
- * button alone.
+ * Demo mode, the entry (plan docs/changes/2026-10-22-demo-mode.md, D4; the season choice,
+ * docs/changes/2026-11-01-demo-season-selection.md): `/demo/start` through the real `App` with its
+ * real providers and the mock client (whose `signInAnonymously` and `start_demo_session` are the
+ * twins of GoTrue's and of migrations 20261030010000's and 20261114010000's). Not the button alone.
  *
- *  - success: a signed-out visitor is signed in anonymously, gets a demo and lands on the app;
+ *  - the choice: the visitor is first asked for a fall or a spring season, each with the dates it
+ *    covers and the day's default preselected, and nothing starts until they say so;
+ *  - success: the visitor chooses, is signed in anonymously, gets a demo dated in that season and
+ *    lands on the app;
  *  - the cap: the visitor stays on /demo/start, signed out, with the refusal announced;
  *  - an anonymous session is never sent to /organizations/new (nor shown that page), whether its
  *    demo is gone or it asks for the page by address;
@@ -13,7 +16,7 @@
  * Only the heavy routed pages are stubbed; the routing, providers and entry are real.
  */
 import React from 'react';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../frontend/src/env.js', async (importOriginal) => ({
@@ -38,6 +41,7 @@ vi.mock('../frontend/src/components/OfflineGuard.jsx', () => ({
 
 import App from '../frontend/src/App.jsx';
 import { supabase, supabaseReady } from '../frontend/src/lib/supabaseClient.js';
+import { defaultDemoSeason, demoSeasonWindow, demoToday } from '../frontend/src/lib/demoSeasons.js';
 
 const CAP_ERROR = {
   code: 'P0001',
@@ -50,6 +54,12 @@ function openAt(path) {
   return render(<App />);
 }
 
+/** The entry page's button, once the page has settled. */
+const startButton = (name = 'Start the demo') => screen.findByRole('button', { name });
+
+/** Chooses a season by its label on the entry page. */
+const choose = (label) => fireEvent.click(screen.getByRole('radio', { name: new RegExp(label) }));
+
 beforeEach(async () => {
   await supabaseReady;
   // The mock announces a sign-in or sign-out 50 ms after the call; let the previous test's land
@@ -57,6 +67,8 @@ beforeEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 80));
   sessionStorage.clear();
   localStorage.clear();
+  // The mock keeps its database on `window` as well; every test starts from the seed.
+  delete window.__MOCK_DB__;
 });
 
 afterEach(() => {
@@ -65,17 +77,55 @@ afterEach(() => {
 });
 
 describe('/demo/start through the real App', () => {
-  it('signs a signed-out visitor in anonymously, starts their demo and opens the app', async () => {
+  it('asks for a season first, offers the two with their dates, and starts nothing until told to', async () => {
     const signIn = vi.spyOn(supabase.auth, 'signInAnonymously');
     const rpc = vi.spyOn(supabase, 'rpc');
 
     openAt('/demo/start');
 
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a season for your demo' })
+    ).toBeInTheDocument();
+    const group = screen.getByRole('group', { name: 'Season' });
+    const radios = /** @type {HTMLInputElement[]} */ (within(group).getAllByRole('radio'));
+    expect(radios.map((radio) => radio.getAttribute('value'))).toEqual(['fall', 'spring']);
+    // each says the window it covers today, in the league's zone, as the server will date it
+    const fall = demoSeasonWindow('fall', demoToday());
+    const spring = demoSeasonWindow('spring', demoToday());
+    expect(screen.getByRole('radio', { name: /Fall season/ })).toHaveAccessibleDescription(
+      new RegExp(`${fall.start.slice(0, 4)}.*6 weeks`)
+    );
+    expect(screen.getByRole('radio', { name: /Spring season/ })).toHaveAccessibleDescription(
+      new RegExp(`${spring.end.slice(0, 4)}.*12 weeks`)
+    );
+    // the day's default is preselected, the other is not
+    const preselected = defaultDemoSeason(demoToday());
+    expect(radios.filter((radio) => radio.checked).map((radio) => radio.value)).toEqual([
+      preselected,
+    ]);
+    // and nothing has started
+    expect(signIn).not.toHaveBeenCalled();
+    expect(rpc.mock.calls.map(([name]) => name)).not.toContain('start_demo_session');
+    expect(sessionStorage.getItem('__MOCK_SESSION__')).toBeNull();
+    // the radios belong to one group, so the arrow keys move between them in a browser
+    expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
+  });
+
+  it('signs a signed-out visitor in anonymously, starts their demo and opens the app', async () => {
+    const signIn = vi.spyOn(supabase.auth, 'signInAnonymously');
+    const rpc = vi.spyOn(supabase, 'rpc');
+
+    openAt('/demo/start');
+    fireEvent.click(await startButton());
+
     expect(await screen.findByRole('heading', { name: 'Dashboard stub' })).toBeInTheDocument();
     expect(signIn).toHaveBeenCalledTimes(1);
     // No site key: no captcha token is sent.
     expect(signIn.mock.calls[0][0]).toBeUndefined();
-    expect(rpc.mock.calls.filter(([name]) => name === 'start_demo_session')).toHaveLength(1);
+    const starts = rpc.mock.calls.filter(([name]) => name === 'start_demo_session');
+    expect(starts).toHaveLength(1);
+    // the day's default season, sent by name
+    expect(starts[0][1]).toEqual({ p_season: defaultDemoSeason(demoToday()) });
     // An anonymous visitor has no verified email, so no coach-record link is attempted for them.
     expect(rpc.mock.calls.map(([name]) => name)).not.toContain('link_my_coach_record');
     expect(window.location.pathname).toBe('/');
@@ -85,6 +135,157 @@ describe('/demo/start through the real App', () => {
     const demo = db.organizations.find((org) => org.demo_owner === stored.user.id);
     expect(demo.demo_expires_at).toBeTruthy();
     expect(localStorage.getItem('squadlogic_active_org')).toBe(demo.id);
+  });
+
+  it.each([
+    ['Fall', 'fall'],
+    ['Spring', 'spring'],
+  ])('a visitor who chooses the %s gets a demo dated in that season', async (label, season) => {
+    const rpc = vi.spyOn(supabase, 'rpc');
+
+    openAt('/demo/start');
+    await startButton();
+    choose(`${label} season`);
+    expect(screen.getByRole('radio', { name: new RegExp(`${label} season`) })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
+
+    expect(await screen.findByRole('heading', { name: 'Dashboard stub' })).toBeInTheDocument();
+    const starts = rpc.mock.calls.filter(([name]) => name === 'start_demo_session');
+    expect(starts.map(([, args]) => args)).toEqual([{ p_season: season }]);
+    const window = demoSeasonWindow(/** @type {any} */ (season), demoToday());
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
+    const stored = JSON.parse(sessionStorage.getItem('__MOCK_SESSION__'));
+    const demo = db.organizations.find((org) => org.demo_owner === stored.user.id);
+    const row = db.season_settings.find((entry) => entry.organization_id === demo.id);
+    expect(row).toMatchObject({
+      season_label: label,
+      name: `${label} ${window.year}`,
+      season_start: window.start,
+      season_end: window.end,
+    });
+  });
+
+  it('shows what it is doing, in the chosen season, once started', async () => {
+    /** @type {() => void} */
+    let finish = () => {};
+    vi.spyOn(supabase, 'rpc').mockImplementation(
+      /** @type {any} */ (
+        (/** @type {string} */ name) =>
+          name === 'start_demo_session'
+            ? new Promise((resolve) => {
+                finish = () =>
+                  resolve({ data: null, error: { code: 'P0001', details: 'demo_capacity' } });
+              })
+            : Promise.resolve({ data: null, error: null })
+      )
+    );
+
+    openAt('/demo/start');
+    await startButton();
+    choose('Fall season');
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('in the fall season');
+    expect(screen.getByRole('heading', { name: 'Starting your demo' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    // the call is waiting on the server; let it answer
+    await waitFor(() => expect(status).toBeInTheDocument());
+    finish();
+    await screen.findByRole('alert');
+  });
+
+  it('a failed start keeps the choice, and trying again asks for the same season', async () => {
+    const rpc = vi
+      .spyOn(supabase, 'rpc')
+      .mockImplementation(
+        /** @type {any} */ (
+          async (/** @type {string} */ name) =>
+            name === 'start_demo_session'
+              ? { data: null, error: CAP_ERROR }
+              : { data: null, error: null }
+        )
+      );
+
+    openAt('/demo/start');
+    await startButton();
+    choose('Fall season');
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
+
+    await screen.findByRole('alert');
+    // the choice is still there, still the visitor's
+    expect(screen.getByRole('radio', { name: /Fall season/ })).toBeChecked();
+    fireEvent.click(await startButton('Try again'));
+    await waitFor(() =>
+      expect(rpc.mock.calls.filter(([name]) => name === 'start_demo_session')).toHaveLength(2)
+    );
+    expect(
+      rpc.mock.calls.filter(([name]) => name === 'start_demo_session').map(([, args]) => args)
+    ).toEqual([{ p_season: 'fall' }, { p_season: 'fall' }]);
+  });
+
+  it('says the season and dates the server returned, once it has them', async () => {
+    // a server that dated the demo in another window than the page offered (a day's turn, an existing demo)
+    vi.spyOn(supabase, 'rpc').mockImplementation(
+      /** @type {any} */ (
+        async (/** @type {string} */ name) =>
+          name === 'start_demo_session'
+            ? {
+                data: {
+                  organization_id: 'not-in-the-list',
+                  expires_at: new Date(Date.now() + 60_000).toISOString(),
+                  existing: false,
+                  season: 'spring',
+                  season_start: '2031-03-24',
+                  season_end: '2031-06-15',
+                },
+                error: null,
+              }
+            : { data: null, error: null }
+      )
+    );
+
+    openAt('/demo/start');
+    await startButton();
+    choose('Fall season');
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
+
+    // it was the fall that was chosen, and the page says what the server did
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'in the spring season (Mar 24 to Jun 15, 2031)'
+      )
+    );
+  });
+
+  it('does not take a visitor back to a demo that has ended, which the server would replace', async () => {
+    await supabase.auth.signInAnonymously();
+    const { data } = await supabase.rpc('start_demo_session', { p_season: 'fall' });
+    localStorage.setItem('squadlogic_active_org', data.organization_id);
+    const { error } = await supabase
+      .from('organizations')
+      .update({ demo_expires_at: new Date(Date.now() - 60_000).toISOString() })
+      .eq('id', data.organization_id);
+    expect(error).toBeNull();
+
+    openAt('/demo/start');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a season for your demo' })
+    ).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/demo/start');
+  });
+
+  it('takes a visitor who is already in a live demo back to it, without asking again', async () => {
+    await supabase.auth.signInAnonymously();
+    const { data } = await supabase.rpc('start_demo_session', { p_season: 'spring' });
+    localStorage.setItem('squadlogic_active_org', data.organization_id);
+
+    openAt('/demo/start');
+
+    expect(await screen.findByRole('heading', { name: 'Dashboard stub' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
   });
 
   it('at the cap the visitor stays on /demo/start, signed out, with the refusal announced', async () => {
@@ -99,6 +300,7 @@ describe('/demo/start through the real App', () => {
     const signOut = vi.spyOn(supabase.auth, 'signOut');
 
     openAt('/demo/start');
+    fireEvent.click(await startButton());
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('The demo is busy right now. Try again in a few minutes.');
@@ -119,6 +321,7 @@ describe('/demo/start through the real App', () => {
     );
 
     openAt('/demo/start');
+    fireEvent.click(await startButton());
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The demo could not be started.');
     expect(window.location.pathname).toBe('/demo/start');

@@ -16,6 +16,12 @@
 --     none of them;
 --   * the TIME TBD list the Exports panel rebuilds lists the 60 teams of U9 and older (two missing
 --     practices each, not scheduled yet) and none of U4 to U8;
+--   * the season the visitor chose (migration 20261114010000): a fall demo and a spring demo are the same
+--     league (128 teams, 132 seeded practices) with the season, its divisions and every practice dated in
+--     the chosen window, each starting on a Monday, the fall six weeks and the spring the league's twelve;
+--     no choice is the window the date falls in or the next to begin; asking again returns the visitor's
+--     own demo in its own season; a choice that is neither fall nor spring is refused, as are a
+--     non-anonymous caller and the anon role, and the `demo.started` row says which season;
 --   * a seeded row that finds no slot refuses the start rather than leave a team without its practice.
 
 BEGIN;
@@ -23,12 +29,16 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(31);
+SELECT plan(55);
 
 INSERT INTO auth.users (id, email, raw_user_meta_data, aud, role, is_anonymous, created_at)
 VALUES
     ('aaaaaaaa-0000-4000-8000-0000000000c1', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now()),
-    ('aaaaaaaa-0000-4000-8000-0000000000c2', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now());
+    ('aaaaaaaa-0000-4000-8000-0000000000c2', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now()),
+    ('aaaaaaaa-0000-4000-8000-0000000000c3', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now()),
+    ('aaaaaaaa-0000-4000-8000-0000000000c4', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now()),
+    ('aaaaaaaa-0000-4000-8000-0000000000c5', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now()),
+    ('aaaaaaaa-0000-4000-8000-0000000000c6', NULL, '{"password_length": 12}', 'authenticated', 'authenticated', true, now());
 
 CREATE TEMP TABLE t_ids (name text PRIMARY KEY, id uuid) ON COMMIT DROP;
 GRANT SELECT ON t_ids TO authenticated;
@@ -227,7 +237,210 @@ SELECT is(
     'another organization''s admin reads none of the demo''s practices');
 RESET role;
 
--- ── 9. a row with no slot refuses the start ──────────────────────────────────
+-- ── 9. the season the visitor chose (20261114010000) ─────────────────────────────
+-- Every date is relative to today in the league's zone, never fixed: the rule's own dates are held by the
+-- vectors in demo_sessions.sql. Here: what a started demo is dated with.
+CREATE TEMP TABLE t_today ON COMMIT DROP AS
+SELECT (now() AT TIME ZONE (SELECT timezone FROM demo_seed.league))::date AS d;
+
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT public.start_demo_session('fall')::text AS fall_res \gset
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c4","role":"authenticated","is_anonymous":true}';
+SELECT public.start_demo_session('spring')::text AS spring_res \gset
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c5","role":"authenticated","is_anonymous":true}';
+SELECT public.start_demo_session()::text AS default_res \gset
+RESET role;
+INSERT INTO t_ids SELECT 'fall', id FROM public.organizations WHERE demo_owner = 'aaaaaaaa-0000-4000-8000-0000000000c3';
+INSERT INTO t_ids SELECT 'spring', id FROM public.organizations WHERE demo_owner = 'aaaaaaaa-0000-4000-8000-0000000000c4';
+INSERT INTO t_ids SELECT 'default', id FROM public.organizations WHERE demo_owner = 'aaaaaaaa-0000-4000-8000-0000000000c5';
+
+SELECT is(
+    ARRAY[:'fall_res'::jsonb ->> 'season', :'spring_res'::jsonb ->> 'season', :'fall_res'::jsonb ->> 'existing', :'spring_res'::jsonb ->> 'existing'],
+    ARRAY['fall', 'spring', 'false', 'false'],
+    'a visitor who chooses the fall gets the fall, one who chooses the spring the spring, each a new demo');
+SELECT is(
+    (SELECT array[s.season_label, s.name, s.season_year::text, s.season_start::text, s.season_end::text]
+       FROM public.season_settings s WHERE s.organization_id = (SELECT id FROM t_ids WHERE name = 'fall')),
+    ARRAY['Fall', 'Fall ' || extract(year FROM (:'fall_res'::jsonb ->> 'season_start')::date)::int,
+          extract(year FROM (:'fall_res'::jsonb ->> 'season_start')::date)::int::text,
+          :'fall_res'::jsonb ->> 'season_start', :'fall_res'::jsonb ->> 'season_end'],
+    'the fall demo''s season is named for the fall and the year it starts, and holds the dates the call returned');
+SELECT is(
+    (SELECT array[s.season_label, s.name, s.season_year::text, s.season_start::text, s.season_end::text]
+       FROM public.season_settings s WHERE s.organization_id = (SELECT id FROM t_ids WHERE name = 'spring')),
+    ARRAY['Spring', 'Spring ' || extract(year FROM (:'spring_res'::jsonb ->> 'season_start')::date)::int,
+          extract(year FROM (:'spring_res'::jsonb ->> 'season_start')::date)::int::text,
+          :'spring_res'::jsonb ->> 'season_start', :'spring_res'::jsonb ->> 'season_end'],
+    'the spring demo''s season is named for the spring and the year it starts, and holds the dates the call returned');
+SELECT is(
+    (SELECT array_agg(extract(isodow FROM s.season_start)::int || ':' || (s.season_end - s.season_start + 1) ORDER BY s.season_label)
+       FROM public.season_settings s
+      WHERE s.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))),
+    ARRAY['1:42', '1:84'],
+    'each season starts on a Monday and runs whole weeks: six for the fall, the league''s twelve for the spring');
+SELECT ok(
+    (SELECT bool_and(CASE s.season_label
+                         WHEN 'Fall' THEN to_char(s.season_start, 'MMDD') BETWEEN '0802' AND '0808'
+                         WHEN 'Spring' THEN to_char(s.season_start, 'MMDD') BETWEEN '0322' AND '0328'
+                     END)
+       FROM public.season_settings s
+      WHERE s.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))),
+    'the fall starts on the Monday on or after 2 August and the spring on the Monday on or after 22 March');
+SELECT ok(
+    (SELECT bool_and(s.season_end >= (SELECT d FROM t_today) AND s.season_end <= (SELECT d FROM t_today) + 380)
+       FROM public.season_settings s
+      WHERE s.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))),
+    'neither season has ended, and neither is more than a year away (the instance that has not ended, the earliest)');
+SELECT is(
+    (SELECT count(*)::int FROM public.divisions d JOIN public.season_settings s ON s.id = d.season_settings_id
+      WHERE d.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))
+        AND (d.season_start, d.season_end) IS DISTINCT FROM (s.season_start, s.season_end)),
+    0,
+    'every division of both demos carries its season''s dates');
+SELECT is(
+    (SELECT count(*)::int FROM public.divisions WHERE organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))),
+    42,
+    'control: the divisions were examined (21 in each demo)');
+SELECT is(
+    (SELECT count(*)::int FROM public.practice_assignments pa
+       JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
+       JOIN public.season_settings s ON s.organization_id = pa.organization_id
+      WHERE pa.organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))
+        AND (lower(pa.effective_date_range) <> s.season_start + (array_position(ARRAY['mon','tue','wed','thu','fri','sat','sun'], ps.day_of_week::text) - 1)
+             OR upper(pa.effective_date_range) <> s.season_end + 1)),
+    0,
+    'every seeded practice of both demos is live from its weekday''s first date in the chosen season to its last day');
+SELECT is(
+    (SELECT array_agg(n ORDER BY n) FROM (SELECT count(*)::int AS n FROM public.practice_assignments
+      WHERE organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring')) GROUP BY organization_id) c),
+    ARRAY[132, 132],
+    'control: both demos hold the same 132 seeded practices (only the dates differ)');
+SELECT is(
+    (SELECT array_agg(DISTINCT n ORDER BY n) FROM (
+        SELECT count(*)::int AS n FROM public.teams
+         WHERE organization_id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring')) GROUP BY organization_id) c),
+    ARRAY[128],
+    'both demos are the same league: 128 teams each');
+SELECT is(
+    (SELECT array_agg(DISTINCT n ORDER BY n) FROM (
+        SELECT (SELECT count(*) FROM public.players p WHERE p.organization_id = o.id)::int * 10000
+               + (SELECT count(*) FROM public.coaches c WHERE c.organization_id = o.id)::int AS n
+          FROM public.organizations o WHERE o.id IN (SELECT id FROM t_ids WHERE name IN ('fall', 'spring'))) c),
+    (SELECT array_agg(DISTINCT n) FROM (
+        SELECT (SELECT count(*) FROM public.players p WHERE p.organization_id = o.id)::int * 10000
+               + (SELECT count(*) FROM public.coaches c WHERE c.organization_id = o.id)::int AS n
+          FROM public.organizations o WHERE o.id = (SELECT id FROM t_ids WHERE name = 'demo')) c),
+    'and the same people: the fall and the spring demo hold as many players and coaches as the first');
+
+-- No choice: the window the date falls in, or the next to begin.
+SELECT is(
+    (SELECT array[s.season_label, s.season_start::text, s.season_end::text]
+       FROM public.season_settings s WHERE s.organization_id = (SELECT id FROM t_ids WHERE name = 'default')),
+    (SELECT array[initcap(w.season), w.season_start::text, w.season_end::text]
+       FROM demo_seed.season_window(NULL, (SELECT d FROM t_today)) w),
+    'with no choice the demo is dated in the window the date falls in, or else the next to begin');
+SELECT is(:'default_res'::jsonb ->> 'season', lower((SELECT s.season_label FROM public.season_settings s WHERE s.organization_id = (SELECT id FROM t_ids WHERE name = 'default'))),
+    'and the call says which season that was');
+
+-- Asking again returns the visitor's own demo, in the season it was started in.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT public.start_demo_session('spring')::text AS again_res \gset
+RESET role;
+SELECT is(
+    ARRAY[:'again_res'::jsonb ->> 'existing', :'again_res'::jsonb ->> 'season', :'again_res'::jsonb ->> 'organization_id',
+          :'again_res'::jsonb ->> 'season_start'],
+    ARRAY['true', 'fall', (SELECT id::text FROM t_ids WHERE name = 'fall'), :'fall_res'::jsonb ->> 'season_start'],
+    'asking again, for the other season, returns the visitor''s own demo in the season it was started in');
+
+-- A demo's admin may start a next season from the demo's own (admin_create_season_from), and that season is not
+-- the choice: asking again still returns the season the demo was started in, the first by creation. The read
+-- must not depend on the plan: here the new season is named to sort before the first in the (organization, name)
+-- index the planner reads, and then the first row is rewritten and the table is scanned in storage order (the
+-- other plan the planner may pick). The new season is made later than the first by hand: every row of this test
+-- shares one transaction time, where in use they are separate transactions.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT (public.admin_create_season_from(
+            (SELECT id FROM public.season_settings WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall')),
+            'Autumn ' || (extract(year FROM (:'fall_res'::jsonb ->> 'season_end')::date + 120))::int,
+            (extract(year FROM (:'fall_res'::jsonb ->> 'season_end')::date + 120))::int,
+            (:'fall_res'::jsonb ->> 'season_end')::date + 120,
+            (:'fall_res'::jsonb ->> 'season_end')::date + 200) ->> 'id')::uuid AS later_season \gset
+RESET role;
+UPDATE public.season_settings SET created_at = created_at + interval '1 minute' WHERE id = :'later_season';
+SELECT is(
+    (SELECT count(*)::int FROM public.season_settings WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall')),
+    2,
+    'control: the demo now has two seasons, the second one the admin started');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT public.start_demo_session('spring')::text AS two_res \gset
+RESET role;
+SELECT is(
+    ARRAY[:'two_res'::jsonb ->> 'existing', :'two_res'::jsonb ->> 'season', :'two_res'::jsonb ->> 'season_start',
+          :'two_res'::jsonb ->> 'season_end'],
+    ARRAY['true', 'fall', :'fall_res'::jsonb ->> 'season_start', :'fall_res'::jsonb ->> 'season_end'],
+    'with a second season in the demo, asking again still returns the season it was started in, not the later one');
+-- Now the other plan: the second season is renamed to sort AFTER the first (so an index read finds the first),
+-- the first row is rewritten (so it is stored after the second), and the table is read in storage order.
+UPDATE public.season_settings SET name = 'Winter ' || (extract(year FROM (:'fall_res'::jsonb ->> 'season_end')::date + 120))::int
+ WHERE id = :'later_season';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT public.admin_set_season_timezone(
+    (SELECT id FROM t_ids WHERE name = 'fall'),
+    (SELECT id FROM public.season_settings WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall') AND season_label = 'Fall'),
+    'America/Denver') IS NOT NULL AS rewritten \gset
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_bitmapscan = off;
+DISCARD PLANS;
+SELECT public.start_demo_session('spring')::text AS scan_res \gset
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+RESET role;
+SELECT is(
+    ARRAY[:'scan_res'::jsonb ->> 'season', :'scan_res'::jsonb ->> 'season_start', :'scan_res'::jsonb ->> 'season_end'],
+    ARRAY['fall', :'fall_res'::jsonb ->> 'season_start', :'fall_res'::jsonb ->> 'season_end'],
+    'and the same when the second sorts after it, the first row was rewritten and the table is read in storage order');
+
+-- A choice that is neither is refused, and leaves nothing behind.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c6","role":"authenticated","is_anonymous":true}';
+SELECT throws_ok(
+    $$ SELECT public.start_demo_session('summer') $$,
+    '22023', 'Unknown demo season: choose fall or spring',
+    'a choice that is neither fall nor spring is refused');
+SELECT throws_ok(
+    $$ SELECT public.start_demo_session('Fall') $$,
+    '22023', 'Unknown demo season: choose fall or spring',
+    'and it is not case-folded');
+RESET role;
+SELECT is(
+    (SELECT count(*)::int FROM public.organizations WHERE demo_owner = 'aaaaaaaa-0000-4000-8000-0000000000c6'),
+    0,
+    'the refused choices left no demo behind');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+SELECT throws_ok(
+    $$ SELECT public.start_demo_session('fall') $$,
+    '42501', 'Only a demo visitor can start a demo',
+    'a signed-in account is refused whatever it chooses');
+RESET role;
+SET LOCAL role = 'anon';
+SELECT throws_ok(
+    $$ SELECT public.start_demo_session('fall') $$,
+    '42501', NULL,
+    'the anon role cannot execute the choosing function');
+RESET role;
+SELECT is(
+    (SELECT metadata ->> 'season' FROM public.audit_log
+      WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall') AND action = 'demo.started'),
+    'fall',
+    'the demo.started row says which season the visitor chose');
+
+-- ── 10. a row with no slot refuses the start ──────────────────────────────────
 UPDATE demo_seed.practice_schedule SET start_time = time '03:00' WHERE id = (SELECT min(id) FROM demo_seed.practice_schedule);
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c2","role":"authenticated","is_anonymous":true}';

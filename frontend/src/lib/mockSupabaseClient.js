@@ -2815,6 +2815,7 @@ export const mockSupabase = {
         typeof window !== 'undefined'
           ? Number(sessionStorage.getItem('__MOCK_DEMO_PLAYERS__')) || undefined
           : undefined,
+      params,
     });
     if (demoResult) {
       if (!demoResult.error) saveDB(db);

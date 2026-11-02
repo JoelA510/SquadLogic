@@ -52,11 +52,22 @@ slots. `tests/demoSeed.test.js` counts both from the fixture.
 **Sunset** (owner: practices fit before sunset, only one lit field may run past it, past sunset is flagged
 and never blocked). Every unlit slot ends by 19:00. Sunset moves with the date and the grid does not
 (_executed_, `sunsetOnDate`, the three unlit synthetic sites, 2027): a 19:00 end is before sunset on 53% of
-days (late March to early September), an 18:00 end on 69%; the demo's first twelve weeks of a winter visit
-(November to January: sunset 16:49 to 17:26) are past sunset on every unlit ground, and the daylight pass
-flags them with the reason. The lit ground is exempt. `tests/demoSeed.test.js` holds that no unlit slot ends
-after 19:00, that every unlit slot is before sunset from 1 April to 31 August, and that a grid ending at
-20:30 or a December date is not.
+days (from the clocks going forward on 14 March to 24 September), an 18:00 end on 69%, a 17:00 end on 86%.
+Opened on any date, a demo whose season was "the coming twelve weeks" could be past sunset on every unlit
+ground, and the daylight pass would flag them with the reason. The lit ground is exempt.
+`tests/demoSeed.test.js` holds that no unlit slot ends after 19:00, that every unlit slot is before sunset
+from 1 April to 31 August, and that a grid ending at 20:30 or a December date is not.
+
+**The season** is therefore the visitor's choice at demo entry (`docs/changes/2026-11-01-demo-season-selection.md`;
+the same league and seeded practices, only the dates differ): **Spring** starts on the Monday on or after 22
+March and runs 12 weeks, **Fall** starts on the Monday on or after 2 August and runs 6 weeks. No 12-week fall
+can be free of flags at this grid, because a 19:00 end stops being before sunset on about 24 September.
+`demo_seed.season_window()` decides the dates (migration `20261114010000`) and
+`frontend/src/lib/demoSeasons.js` is its twin for the entry page and the mock; `tests/demoSeasons.test.js`
+reads this grid and the venues from the seed and proves that no unlit slot ends within ten minutes of
+sunset on any practice day of either window in any year to 2060 (the tightest margins are 20 and 11
+minutes), and fails for a fall two weeks too long. If the grid's last unlit end moves, that test is the one
+to read first.
 
 **The seeded schedule** (`demo_seed.practice_schedule`, built by `scripts/build-demo-practice-seed.mjs`
 with the product's own solver, fixed seed): the four U4 cohorts once and the 64 teams of U5 to U8 twice,

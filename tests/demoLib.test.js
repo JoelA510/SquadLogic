@@ -20,6 +20,7 @@ import {
   startDemoSession,
 } from '../frontend/src/lib/demo.js';
 import { handleDemoRpc, makeAnonymousSession } from '../frontend/src/lib/mockDemo.js';
+import { demoSeasonWindow, demoToday } from '../frontend/src/lib/demoSeasons.js';
 
 describe('formatTimeLeft', () => {
   it.each([
@@ -154,6 +155,16 @@ describe('demoStartFailure', () => {
     ).toBe('not_anonymous');
   });
 
+  it('words a season that is neither fall nor spring by its detail', () => {
+    const failure = demoStartFailure({
+      code: '22023',
+      details: 'demo_season_unknown',
+      message: 'x',
+    });
+    expect(failure.kind).toBe('unknown_season');
+    expect(failure.message).toBe('Choose a fall or a spring season to start the demo.');
+  });
+
   it.each([
     [{ message: 'Anonymous sign-ins are disabled', status: 422 }],
     [{ message: 'captcha verification process failed' }],
@@ -179,8 +190,68 @@ describe('startDemoSession (the RPC result is checked, not trusted)', () => {
       organizationId: 'org-1',
       expiresAt: '2026-10-26T12:30:00Z',
       existing: true,
+      season: null,
+      seasonStart: null,
+      seasonEnd: null,
     });
+    // no choice: the call is the zero-argument one, which the server dates by the day
     expect(rpc).toHaveBeenCalledWith('start_demo_session');
+  });
+
+  it.each(['fall', 'spring'])(
+    'asks for the %s by name and returns the dates the server used',
+    async (season) => {
+      rpc.mockResolvedValue({
+        data: {
+          organization_id: 'org-1',
+          expires_at: '2026-10-26T12:30:00Z',
+          existing: false,
+          season,
+          season_start: '2027-03-22',
+          season_end: '2027-06-13',
+        },
+        error: null,
+      });
+      await expect(startDemoSession(/** @type {any} */ (season))).resolves.toEqual({
+        organizationId: 'org-1',
+        expiresAt: '2026-10-26T12:30:00Z',
+        existing: false,
+        season,
+        seasonStart: '2027-03-22',
+        seasonEnd: '2027-06-13',
+      });
+      expect(rpc).toHaveBeenCalledWith('start_demo_session', { p_season: season });
+    }
+  );
+
+  it('sends a choice that is neither as it is, for the server to refuse (only null is "no choice")', async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: '22023', details: 'demo_season_unknown', message: 'Unknown demo season' },
+    });
+    await expect(startDemoSession(/** @type {any} */ (''))).rejects.toMatchObject({
+      kind: 'unknown_season',
+    });
+    expect(rpc).toHaveBeenCalledWith('start_demo_session', { p_season: '' });
+    rpc.mockClear();
+    await expect(startDemoSession(null)).rejects.toMatchObject({ kind: 'unknown_season' });
+    expect(rpc).toHaveBeenCalledWith('start_demo_session');
+  });
+
+  it('refuses a result naming a season that is neither (the server is not trusted either)', async () => {
+    rpc.mockResolvedValue({
+      data: { organization_id: 'org-1', expires_at: '2026-10-26T12:30:00Z', season: 'summer' },
+      error: null,
+    });
+    await expect(startDemoSession('fall')).rejects.toMatchObject({ kind: 'unavailable' });
+  });
+
+  it("words the server's refusal of a season that is neither", async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: '22023', details: 'demo_season_unknown', message: 'Unknown demo season' },
+    });
+    await expect(startDemoSession('fall')).rejects.toMatchObject({ kind: 'unknown_season' });
   });
 
   it.each([
@@ -380,6 +451,152 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     const refused = start(db, { ...anonymous(), failure: 'capacity' });
     expect(refused.error).toMatchObject({ code: 'P0001', details: 'demo_capacity' });
     expect(db.organizations ?? []).toHaveLength(0);
+  });
+
+  describe('the season choice (migration 20261114010000)', () => {
+    const seasonOf = (db, orgId) => db.season_settings.find((s) => s.organization_id === orgId);
+
+    it.each([
+      ['fall', 'Fall', 'Fall 2027', '2027-08-02', '2027-09-12', 42],
+      ['spring', 'Spring', 'Spring 2027', '2027-03-22', '2027-06-13', 84],
+    ])(
+      'dates a demo in the %s: the season, its divisions and every practice',
+      (choice, label, name, first, last, days) => {
+        const db = {};
+        const { data, error } = start(db, { ...anonymous(), params: { p_season: choice } });
+        expect(error).toBeNull();
+        expect(data).toMatchObject({ season: choice, season_start: first, season_end: last });
+        const season = seasonOf(db, data.organization_id);
+        expect(season).toMatchObject({
+          name,
+          season_label: label,
+          season_year: 2027,
+          season_start: first,
+          season_end: last,
+        });
+        expect((Date.parse(last) - Date.parse(first)) / 86_400_000 + 1).toBe(days);
+        const divisions = db.divisions.filter((d) => d.organization_id === data.organization_id);
+        expect(divisions).toHaveLength(2);
+        for (const division of divisions) {
+          expect([division.season_start, division.season_end]).toEqual([first, last]);
+        }
+        // a Saturday cohort's practice is live from the season's first Saturday to its last day
+        const rows = db.practice_assignments.filter(
+          (a) => a.organization_id === data.organization_id
+        );
+        expect(rows.length).toBeGreaterThan(0);
+        const firstSaturday = new Date(Date.parse(first) + 5 * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+        const dayAfterEnd = new Date(Date.parse(last) + 86_400_000).toISOString().slice(0, 10);
+        for (const row of rows) {
+          expect(row.effective_date_range).toBe(`[${firstSaturday},${dayAfterEnd})`);
+        }
+      }
+    );
+
+    it('with no choice dates the demo in the window the date falls in, or else the next to begin', () => {
+      // 26 Oct 2026: the spring of 2027 is next
+      const autumn = start({}, anonymous());
+      expect(autumn.data).toMatchObject({ season: 'spring', season_start: '2027-03-22' });
+      // in the middle of the fall window
+      const db = {};
+      const summer = handleDemoRpc(db, 'start_demo_session', {
+        ...anonymous(),
+        mockId,
+        now: Date.parse('2027-08-20T12:00:00Z'),
+      });
+      expect(summer.data).toMatchObject({
+        season: 'fall',
+        season_start: '2027-08-02',
+        season_end: '2027-09-12',
+      });
+      // and the same call made in the middle of the spring window is the spring, in progress
+      const may = handleDemoRpc({}, 'start_demo_session', {
+        ...anonymous(),
+        mockId,
+        now: Date.parse('2027-05-10T12:00:00Z'),
+      });
+      expect(may.data).toMatchObject({ season: 'spring', season_start: '2027-03-22' });
+    });
+
+    it('takes the day in the league’s zone, not UTC, for the instance it chooses', () => {
+      // 02:00 UTC on 13 Sep 2027 is still the evening of the 12th (the fall's last day) in Pacific time
+      const evening = handleDemoRpc({}, 'start_demo_session', {
+        ...anonymous(),
+        mockId,
+        now: Date.parse('2027-09-13T02:00:00Z'),
+        params: { p_season: 'fall' },
+      });
+      expect(evening.data.season_start).toBe('2027-08-02');
+      expect(demoToday(Date.parse('2027-09-13T02:00:00Z'))).toBe('2027-09-12');
+      const next = handleDemoRpc({}, 'start_demo_session', {
+        ...anonymous(),
+        mockId,
+        now: Date.parse('2027-09-13T12:00:00Z'),
+        params: { p_season: 'fall' },
+      });
+      expect(next.data.season_start).toBe('2028-08-07');
+    });
+
+    it.each([['summer'], ['Fall'], [' fall'], [''], [5], [['fall']]])(
+      'refuses %j as the server does, before anything else, and leaves nothing behind',
+      (choice) => {
+        const db = {};
+        const refused = start(db, { ...anonymous(), params: { p_season: choice } });
+        expect(refused.data).toBeNull();
+        expect(refused.error).toMatchObject({ code: '22023', details: 'demo_season_unknown' });
+        expect(db.organizations ?? []).toHaveLength(0);
+        // ahead of the cap, as the server's check is ahead of its lock
+        const full = start(
+          {},
+          { ...anonymous(), failure: 'capacity', params: { p_season: choice } }
+        );
+        expect(full.error).toMatchObject({ details: 'demo_season_unknown' });
+      }
+    );
+
+    it('still refuses a signed-in account first, whatever it chooses', () => {
+      const account = { session: { user: { id: 'u1', is_anonymous: false } } };
+      expect(start({}, { ...account, params: { p_season: 'summer' } }).error).toMatchObject({
+        details: 'demo_requires_anonymous',
+      });
+    });
+
+    it('treats an explicit null as no choice (the zero-argument call)', () => {
+      const { data } = start({}, { ...anonymous(), params: { p_season: null } });
+      expect(data.season).toBe(demoSeasonWindow(null, demoToday(NOW)).season);
+    });
+
+    it('returns the demo’s FIRST season by creation once its admin has started a next one', () => {
+      const db = {};
+      const ctx = anonymous();
+      const first = start(db, { ...ctx, params: { p_season: 'fall' } }).data;
+      const own = db.season_settings[0];
+      // created later, and listed first in the table (the server's read has no order of its own)
+      db.season_settings.unshift({
+        ...own,
+        id: 'a-later-season',
+        name: 'Autumn 2028',
+        season_label: null,
+        season_start: '2028-01-10',
+        season_end: '2028-03-26',
+        created_at: new Date(Date.parse(own.created_at) + 60_000).toISOString(),
+      });
+      const again = start(db, { ...ctx, params: { p_season: 'spring' } }).data;
+      expect(again).toEqual({ ...first, existing: true });
+      expect(again.season).toBe('fall');
+    });
+
+    it('returns the visitor’s own demo in the season it was started in, whatever is asked now', () => {
+      const db = {};
+      const ctx = anonymous();
+      const first = start(db, { ...ctx, params: { p_season: 'fall' } }).data;
+      const again = start(db, { ...ctx, params: { p_season: 'spring' } }).data;
+      expect(again).toEqual({ ...first, existing: true });
+      expect(again.season).toBe('fall');
+      expect(db.organizations).toHaveLength(1);
+    });
   });
 
   it('honours a shortened lifespan (a test or E2E step may set one)', () => {

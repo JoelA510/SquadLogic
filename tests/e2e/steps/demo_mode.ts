@@ -2,19 +2,30 @@ import { createBdd } from 'playwright-bdd';
 import Papa from 'papaparse';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import {
+  defaultDemoSeason,
+  demoSeasonWindow,
+  demoToday,
+} from '../../../frontend/src/lib/demoSeasons.js';
 
 /**
- * Demo mode, on the mock (plan docs/changes/2026-10-22-demo-mode.md, D4). Every check is a DOM
- * assertion; the mock's sessionStorage is touched only for the two knobs the mock's
- * `start_demo_session` reads: `__MOCK_DEMO_MS__` (a shorter demo) and `__MOCK_DEMO_FAIL__`
- * (`capacity`: the server's refusal at the cap).
+ * Demo mode, on the mock (plan docs/changes/2026-10-22-demo-mode.md, D4; the season choice,
+ * docs/changes/2026-11-01-demo-season-selection.md). Every check is a DOM assertion; the mock's
+ * sessionStorage is touched only for the two knobs the mock's `start_demo_session` reads:
+ * `__MOCK_DEMO_MS__` (a shorter demo) and `__MOCK_DEMO_FAIL__` (`capacity`: the server's refusal at
+ * the cap). The entry page asks for a season first, so every way into a demo goes through its
+ * **Start the demo** button.
  */
 
 const { Given, When, Then } = createBdd();
 
 const DEMO_START_TIMEOUT = 30_000;
 
-async function startDemo(page: Page, lifespanMs?: number) {
+type Season = 'fall' | 'spring';
+const SEASON_LABEL: Record<Season, string> = { fall: 'Fall', spring: 'Spring' };
+
+/** Opens the entry page and starts the demo: in the given season, or in the one preselected. */
+async function startDemo(page: Page, lifespanMs?: number, season?: Season) {
   await page.goto('/');
   await waitForMockClient(page);
   await page.evaluate((ms) => {
@@ -24,7 +35,19 @@ async function startDemo(page: Page, lifespanMs?: number) {
     else sessionStorage.removeItem('__MOCK_DEMO_MS__');
   }, lifespanMs ?? 0);
   await page.goto('/demo/start');
+  if (season)
+    await page.getByRole('radio', { name: new RegExp(`${SEASON_LABEL[season]} season`) }).check();
+  await page.getByRole('button', { name: 'Start the demo' }).click();
 }
+
+/** "Aug 2, 2027": the way the seasons list writes a date. */
+const listedDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
 async function expectInDemo(page: Page) {
   await expect(page.getByRole('timer')).toBeVisible({ timeout: DEMO_START_TIMEOUT });
@@ -36,6 +59,11 @@ async function expectInDemo(page: Page) {
 
 Given('I am in the demo league', async ({ page }) => {
   await startDemo(page);
+  await expectInDemo(page);
+});
+
+Given('I am in a demo league dated in the {string} season', async ({ page }, season: string) => {
+  await startDemo(page, undefined, season as Season);
   await expectInDemo(page);
 });
 
@@ -60,6 +88,73 @@ When('I choose {string} on the sign-in page', async ({ page }, label: string) =>
 When('I open the demo entry page', async ({ page }) => {
   await page.goto('/demo/start');
 });
+
+When('I start the demo from the entry page', async ({ page }) => {
+  await page.getByRole('button', { name: 'Start the demo' }).click();
+});
+
+When('I choose the {string} on the demo entry page', async ({ page }, label: string) => {
+  await page.getByRole('radio', { name: new RegExp(label) }).check();
+});
+
+When('I move to the other season on the demo entry page with the arrow keys', async ({ page }) => {
+  const chosen = page.getByRole('radio', { checked: true });
+  const before = await chosen.getAttribute('value');
+  await chosen.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('radio', { checked: true })).not.toHaveAttribute(
+    'value',
+    before ?? ''
+  );
+});
+
+Then('the demo entry page asks for a fall or a spring season', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: 'Choose a season for your demo' })).toBeVisible({
+    timeout: DEMO_START_TIMEOUT,
+  });
+  const group = page.getByRole('group', { name: 'Season' });
+  await expect(group.getByRole('radio')).toHaveCount(2);
+  await expect(group.getByRole('radio', { name: /Fall season/ })).toBeVisible();
+  await expect(group.getByRole('radio', { name: /Spring season/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start the demo' })).toBeEnabled();
+  // each says the dates it covers
+  await expect(group).toContainText('6 weeks');
+  await expect(group).toContainText('12 weeks');
+});
+
+Then('the season the date calls for is already chosen', async ({ page }) => {
+  const expected = defaultDemoSeason(demoToday());
+  await expect(page.getByRole('radio', { checked: true })).toHaveAttribute('value', expected);
+  await expect(page.getByRole('radio', { checked: true })).toHaveCount(1);
+});
+
+Then('no demo has started', async ({ page }) => {
+  expect(new URL(page.url()).pathname).toBe('/demo/start');
+  await expect(page.getByRole('timer')).toHaveCount(0);
+});
+
+Then('the other season is chosen', async ({ page }) => {
+  const expected = defaultDemoSeason(demoToday()) === 'fall' ? 'spring' : 'fall';
+  await expect(page.getByRole('radio', { checked: true })).toHaveAttribute('value', expected);
+});
+
+Then('the header names the {string} season', async ({ page }, label: string) => {
+  await expect(page.getByTestId('demo-season')).toHaveText(new RegExp(`^${label} season`));
+  await expect(page.getByRole('timer')).toContainText(`Demo league · ${label} season`);
+});
+
+Then(
+  'the demo season is listed as the {string} window with its dates',
+  async ({ page }, choice: string) => {
+    const window = demoSeasonWindow(choice as Season, demoToday());
+    const item = page
+      .getByRole('list', { name: 'Seasons of this league' })
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('heading', { name: `${window.label} ${window.year}` }) });
+    await expect(item).toHaveCount(1);
+    await expect(item).toContainText(`${listedDate(window.start)} to ${listedDate(window.end)}`);
+  }
+);
 
 When('I choose {string} on the demo-ended page', async ({ page }, label: string) => {
   await page.getByRole('button', { name: label }).click();
@@ -220,16 +315,29 @@ When('I switch the demo-ended page to the dark theme', async ({ page }) => {
 });
 
 When('I switch the demo entry page to the dark theme', async ({ page }) => {
-  // The page rests in its failed state (the demo is full), so a reload lands on it again.
   await page.evaluate(() => localStorage.setItem('sl-theme', 'dark'));
   await page.reload();
-  await expect(
-    page.getByRole('alert').filter({ hasText: 'The demo is busy right now' })
-  ).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Choose a season for your demo' })).toBeVisible({
     timeout: DEMO_START_TIMEOUT,
   });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
+
+When(
+  'I switch the demo entry page to the dark theme and start the demo again',
+  async ({ page }) => {
+    // A reload lands on the choice again; the demo is still full, so starting it fails the same way.
+    await page.evaluate(() => localStorage.setItem('sl-theme', 'dark'));
+    await page.reload();
+    await page.getByRole('button', { name: 'Start the demo' }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'The demo is busy right now' })
+    ).toBeVisible({
+      timeout: DEMO_START_TIMEOUT,
+    });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  }
+);
 
 /** The last master CSV this scenario downloaded: header, then one object per row. */
 let masterCsv: Array<Record<string, string>> = [];

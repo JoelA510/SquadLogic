@@ -1338,7 +1338,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261117010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2441,6 +2441,56 @@ NEEDLES
       echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
       dump 15 $SCRATCH/harness_reapply; STATUS=1
     fi
+  fi
+
+  # **20261117010000 codifies an index production already has**, so the case that matters is not the
+  # build from scratch (the smoke) but the migration applied onto a database that holds the index, which
+  # is production. This database is built up to the migration, so the index is there. Three things are
+  # measured, each of which a smoke run afterwards cannot reach (it cannot run the migration again):
+  # applying it again succeeds and does not rebuild the index (an unchanged relfilenode: a rebuild would
+  # lock `players` for writes in production); an index of the same name that is not the GIN index (a btree
+  # here) is refused, because IF NOT EXISTS compares the name alone; and the GIN index put back afterwards
+  # is what the revert check below finds.
+  if [ "$id" = "20261117010000" ]; then
+    v_gin_mig="$REPO/supabase/migrations/20261117010000_players_custom_attributes_gin_index.sql"
+    v_gin_q="SELECT relfilenode FROM pg_class WHERE oid = 'public.players_custom_attributes_gin_idx'::regclass;"
+    v_gin_node="$(psql_cmd "$v_gin_q" 2>$SCRATCH/harness_gin_node)"
+    if [ -z "$v_gin_node" ]; then
+      echo "FAIL ${id}: the index the migration creates is not there on a database built up to it"
+      dump 5 $SCRATCH/harness_gin_node; STATUS=1; continue
+    fi
+    if ! psql_file "$v_gin_mig" >$SCRATCH/harness_gin_reapply 2>&1; then
+      echo "FAIL ${id}: re-applied onto a database that already holds the index, the migration failed"
+      dump 10 $SCRATCH/harness_gin_reapply; STATUS=1
+    else
+      v_gin_after="$(psql_cmd "$v_gin_q" 2>/dev/null)"
+      if [ "$v_gin_after" != "$v_gin_node" ]; then
+        echo "FAIL ${id}: re-applied onto a database that already holds the index, the migration rebuilt it (relfilenode ${v_gin_node} became ${v_gin_after})"
+        STATUS=1
+      else
+        echo "  migration ${id}: applied again onto a database that already holds the index it leaves it as it was (not rebuilt)"
+      fi
+    fi
+    if ! psql_cmd "DROP INDEX public.players_custom_attributes_gin_idx; CREATE INDEX players_custom_attributes_gin_idx ON public.players USING btree (custom_attributes);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the btree index of the same name the refusal check requires was never created"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$v_gin_mig" >$SCRATCH/harness_gin_refuse 2>&1; then
+      echo "FAIL ${id}: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration accepted it"
+      STATUS=1
+    elif ! grep -qF 'players_custom_attributes_gin_idx is not the GIN index on public.players (custom_attributes) that production holds: it is a btree index' $SCRATCH/harness_gin_refuse; then
+      echo "FAIL ${id}: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration failed without naming the index and the access method"
+      dump 10 $SCRATCH/harness_gin_refuse; STATUS=1
+    else
+      echo "  migration ${id}: applied onto a btree index of the same name it refuses, naming the index and the access method"
+    fi
+    if ! psql_cmd "DROP INDEX public.players_custom_attributes_gin_idx; CREATE INDEX players_custom_attributes_gin_idx ON public.players USING gin (custom_attributes);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the GIN index could not be put back after the refusal check"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    v_gin_node="$(psql_cmd "$v_gin_q" 2>/dev/null)"
   fi
 
   if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev 2>&1; then
@@ -3798,6 +3848,28 @@ PROBE
       else
         echo "FAIL revert ${id}: the demo-fall revert did not restore the season rule as at 20261114010000"
         dump 10 $SCRATCH/harness_demofall; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261117010000" ]; then
+      # A revert that changes nothing, because the index exists in production independently of the
+      # migration: it must say so, and leave the index there, the same GIN index, valid and not rebuilt
+      # (the relfilenode read after the check above put the GIN index back).
+      if ! grep -q 'this revert changes nothing: players_custom_attributes_gin_idx is present' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: the revert did not say it changes nothing and that the index is present"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'GININDEX-VERDICT:' || CASE
+               WHEN to_regclass('public.players_custom_attributes_gin_idx') IS NULL THEN 'index-dropped'
+               WHEN (SELECT relfilenode FROM pg_class WHERE oid = 'public.players_custom_attributes_gin_idx'::regclass) <> ${v_gin_node}::oid THEN 'index-rebuilt'
+               WHEN pg_get_indexdef('public.players_custom_attributes_gin_idx'::regclass)
+                    <> 'CREATE INDEX players_custom_attributes_gin_idx ON public.players USING gin (custom_attributes)' THEN 'definition-changed'
+               WHEN NOT (SELECT indisvalid AND indisready FROM pg_index WHERE indexrelid = 'public.players_custom_attributes_gin_idx'::regclass) THEN 'not-valid'
+               ELSE 'left-alone' END;" \
+         >$SCRATCH/harness_gin_verdict 2>&1 && grep -q 'GININDEX-VERDICT:left-alone' $SCRATCH/harness_gin_verdict; then
+        echo "  revert ${id}: the revert changes nothing: the GIN index on players (custom_attributes) is still there, valid, not rebuilt and as production defines it"
+      else
+        echo "FAIL revert ${id}: the revert did not leave players_custom_attributes_gin_idx as it was"
+        dump 10 $SCRATCH/harness_gin_verdict; STATUS=1
       fi
     fi
     if [ "$id" = "20261112010000" ]; then

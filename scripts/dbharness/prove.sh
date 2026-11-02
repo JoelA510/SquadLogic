@@ -228,6 +228,12 @@ R63="$REPO/docs/sql/20261114010000_revert.sql"
 # replaces `demo_seed.season_window`, so the two plants that aimed at that body in $M63 are re-aimed here.
 M64="$REPO/supabase/migrations/20261115010000_demo_fall_window.sql"
 R64="$REPO/docs/sql/20261115010000_revert.sql"
+# The GIN index on players.custom_attributes that production had and no migration created, codified with
+# CREATE INDEX IF NOT EXISTS behind a check of its shape, its no-op revert and its smoke. Plan
+# docs/changes/2026-11-02-data-followups.md, item 1. M65/R65 are the preference follow-ups' (20261116010000).
+M66="$REPO/supabase/migrations/20261117010000_players_custom_attributes_gin_index.sql"
+R66="$REPO/docs/sql/20261117010000_revert.sql"
+S66="$REPO/docs/sql/20261117010000_smoke.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5317,6 +5323,40 @@ plant "R64 the revert restores a six-week fall that is not the deployed body" "$
   "            v_month := 8; v_day := 2; v_weeks := 6;" \
   "            v_month := 8; v_day := 2; v_weeks := 5;" \
   "revert 20261115010000"
+
+# The GIN index on players.custom_attributes (docs/changes/2026-11-02-data-followups.md, item 1). The migration
+# must do nothing where the index exists (production), refuse a same-named index of another shape, and its revert
+# must leave the index alone. run.sh builds the database up to the migration, applies it again, swaps the index for
+# a btree of the same name and applies it again, then runs the revert; the smoke reads the end state at head. Four
+# plants, each aimed at one of those:
+#   - the migration drops and rebuilds the index on every apply (run.sh: the relfilenode changes);
+#   - its check reports instead of refusing (run.sh: the btree index is accepted);
+#   - the revert drops the index (run.sh: the verdict after the revert);
+#   - the smoke looks for another index in the plan (the smoke itself goes red).
+plant "M66 the index is dropped and rebuilt on every apply" "$M66" \
+  "CREATE INDEX IF NOT EXISTS players_custom_attributes_gin_idx
+    ON public.players USING gin (custom_attributes);" \
+  "DROP INDEX IF EXISTS public.players_custom_attributes_gin_idx;
+CREATE INDEX players_custom_attributes_gin_idx
+    ON public.players USING gin (custom_attributes);" \
+  "20261117010000: re-applied onto a database that already holds the index, the migration rebuilt it"
+
+plant "M66 the check reports instead of refusing" "$M66" \
+  "        RAISE EXCEPTION 'players_custom_attributes_gin_idx is not the GIN index on public.players (custom_attributes) that production holds: %; drop or rename it and apply this migration again', v_why;" \
+  "        RAISE NOTICE 'players_custom_attributes_gin_idx is not the GIN index on public.players (custom_attributes) that production holds: %; drop or rename it and apply this migration again', v_why;" \
+  "20261117010000: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration accepted it"
+
+plant "R66 the revert drops the index" "$R66" \
+  "COMMIT;" \
+  "DROP INDEX public.players_custom_attributes_gin_idx;
+
+COMMIT;" \
+  "revert 20261117010000: the revert did not leave players_custom_attributes_gin_idx as it was"
+
+plant "S66 the smoke looks for another index in the plan" "$S66" \
+  "IF position('players_custom_attributes_gin_idx' IN v_plan) = 0 THEN" \
+  "IF position('players_pkey' IN v_plan) = 0 THEN" \
+  "smoke 20261117010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

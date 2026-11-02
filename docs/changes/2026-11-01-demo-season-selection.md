@@ -305,3 +305,25 @@ default 5 s timeout.
   bounced the visitor away from the choice (now compared with the clock); `''` was treated as no choice (only
   `null` is); the wrapper sets no TimeZone (a comment says why). Not changed, with the reasons above: no
   fall back when the migration is missing; the banner's extra query.
+- **Verification** (labels: _executed_ means run here and its output read; nothing here is _fully validated_ against the
+  hosted project):
+  - _Executed_ on the tree merged with `origin/main` `aaf6dc9`: `npm run typecheck`, `lint` (no warnings), `check:unused`,
+    `check:advisors`, `test:coverage` at the **default** timeout (487 files, 7,766 tests), the production build with CI's
+    stand-in variables and `check:bundle` (main entry 177.06 KB gz, first paint 278.72 of 289.06 KB; this PR's own share of
+    the growth was not isolated from the dependency update merged with it), and the demo, roster-editor and demo-axe E2E
+    scenarios (21). The **full** mock E2E suite (213, `--workers=1`, 19.4 minutes) ran on the tree before that merge. The
+    Deno mirror tests (240) and `deno check` (7 of 7 entry points) ran; no Edge Function changed.
+  - _Executed_, the database: the migration harness (`HARNESS OK`: the 170 migrations apply from scratch, every smoke including
+    `20261114010000`, every revert including its own, the catalogue snapshot) before a comment-only edit to the migration, after
+    which the 428 plant anchors resolve again (428 of 428). pgTAP on a scratch PostgreSQL 16 with real pgTAP 1.3.2 (the harness
+    prelude stands in for Supabase's `auth` and `storage`): `demo_practice_schedule.sql` 52 of 52, run four times;
+    `demo_sessions.sql` 113 of 117, the four that fail being the storage-policy assertions 77 to 80, which fail identically on
+    `main` at `20261113010000` (the stand-in has no storage policies); the migration, the smoke, the revert and the migration
+    again, in turn, on one database.
+  - _Executed_, tests alone and under load at the default 5 s: the changed Vitest files (217 tests) alone, slowest 1.7 s; under
+    load (the E2E suite and two busy loops), slowest 2.4 s. The only test over 2 s is `unwiredLayerImporters.test.js`'s
+    "splits a consumer list into production and test halves that recompose it", a scan of the whole repository that predates
+    this change (the pins it reads gained one file).
+  - _Not run_: `supabase test db` (CI's pgTAP job, which has the real `auth` and `storage`); the real-backend E2E scenario
+    (`real_backend_demo.feature`, whose entry step now chooses a season: statically reviewed); Turnstile against Cloudflare;
+    a browser other than Chromium; production (the migration's md5 guard checks the body in this repository's history).

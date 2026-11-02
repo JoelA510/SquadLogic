@@ -1,10 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { DEMO_ENABLED } from '../env.js';
-import { DemoStartError, demoStartFailure, startDemoSession } from '../lib/demo.js';
+import {
+  DemoStartError,
+  demoStartFailure,
+  isDemoOrganization,
+  startDemoSession,
+} from '../lib/demo.js';
+import { defaultDemoSeason, demoSeasonOptions, demoToday } from '../lib/demoSeasons.js';
 import { logger } from '../lib/logger.js';
 import Turnstile, { useCaptcha } from '../components/auth/Turnstile.jsx';
 import LoadingScreen from '../components/LoadingScreen.jsx';
@@ -18,9 +24,15 @@ const OPEN_TIMEOUT_MS = 15_000;
  * signed-out visitor and for an anonymous one alike, outside the redirect that sends a user with no
  * organization to `/organizations/new`.
  *
- * Once the Turnstile widget yields a token (or at once, with no site key), it signs the visitor in
- * anonymously, asks the server for their demo league and opens it. On any failure it signs the
- * anonymous session out again and stays here, with the reason announced.
+ * The visitor first chooses the season the demo league is dated in, a fall or a spring one (plan
+ * docs/changes/2026-11-01-demo-season-selection.md): the same league either way, only the dates differ.
+ * The window each covers is shown, and the one the date falls in (or else the next to begin) is
+ * preselected. **Start the demo** then waits for the Turnstile token (none, with no site key), signs the
+ * visitor in anonymously, asks the server for their demo league in that season and opens it. On any
+ * failure it signs the anonymous session out again and stays here, with the reason announced and the
+ * choice kept.
+ *
+ * A visitor who is already in a live demo is not asked again: the entry opens it.
  */
 export default function DemoStartPage() {
   const navigate = useNavigate();
@@ -30,13 +42,23 @@ export default function DemoStartPage() {
   const { enabled: captchaEnabled, token, ready, reset: resetCaptcha } = captcha;
 
   const [phase, setPhase] = useState(
-    /** @type {'idle' | 'starting' | 'opening' | 'failed'} */ ('idle')
+    /** @type {'choosing' | 'starting' | 'opening' | 'failed'} */ ('choosing')
   );
+  // The windows the buttons cover are dated from today in the league's zone, which is the date the
+  // server dates the demo from; they are read once, when the page opens.
+  const today = useMemo(() => demoToday(), []);
+  const options = useMemo(() => demoSeasonOptions(today), [today]);
+  const [season, setSeason] = useState(() => defaultDemoSeason(today));
+  const legendId = useId();
   const [error, setError] = useState(/** @type {string | null} */ (null));
   const [startedOrgId, setStartedOrgId] = useState(/** @type {string | null} */ (null));
   const running = useRef(false);
 
   const isSignedInAccount = Boolean(session) && session.user?.is_anonymous !== true;
+  const isAnonymousSession = Boolean(session) && session.user?.is_anonymous === true;
+  // An anonymous session that already has a live demo goes back to it (the server would return that
+  // demo, in its own season, whatever was asked for now).
+  const hasLiveDemo = organizations.some((member) => isDemoOrganization(member.organizations));
 
   const fail = useCallback(
     async (/** @type {unknown} */ cause) => {
@@ -71,22 +93,20 @@ export default function DemoStartPage() {
         // The token is single-use; a retry gets a fresh one.
         resetCaptcha();
       }
-      const started = await startDemoSession();
+      const started = await startDemoSession(season);
       setStartedOrgId(started.organizationId);
       setPhase('opening');
       refetchOrgs?.();
     } catch (cause) {
       await fail(cause);
     }
-  }, [session, captchaEnabled, token, resetCaptcha, refetchOrgs, fail]);
+  }, [session, season, captchaEnabled, token, resetCaptcha, refetchOrgs, fail]);
 
-  // Start by itself once there is nothing left to wait for: auth settled, not a real account, the
-  // token (if CAPTCHA is on) in hand.
+  // A visitor who is already in a live demo is taken back to it.
   useEffect(() => {
-    if (!DEMO_ENABLED || authLoading || isSignedInAccount) return;
-    if (phase !== 'idle' || !ready) return;
-    begin();
-  }, [authLoading, isSignedInAccount, phase, ready, begin]);
+    if (!DEMO_ENABLED || phase !== 'choosing' || !isAnonymousSession || orgLoading) return;
+    if (hasLiveDemo) navigate('/', { replace: true });
+  }, [phase, isAnonymousSession, orgLoading, hasLiveDemo, navigate]);
 
   // Open the demo once the organization list has it.
   useEffect(() => {
@@ -107,7 +127,12 @@ export default function DemoStartPage() {
     return () => clearTimeout(timer);
   }, [phase, fail]);
 
-  if (authLoading) return <LoadingScreen message="Preparing the demo..." />;
+  if (authLoading || (isAnonymousSession && orgLoading && phase === 'choosing')) {
+    return <LoadingScreen message="Preparing the demo..." />;
+  }
+
+  const working = phase === 'starting' || phase === 'opening';
+  const chosen = options.find((option) => option.season === season);
 
   let body;
   if (!DEMO_ENABLED) {
@@ -140,42 +165,88 @@ export default function DemoStartPage() {
   } else {
     body = (
       <>
-        <h1>{phase === 'failed' ? 'The demo did not start' : 'Starting your demo'}</h1>
-        {phase === 'failed' ? (
+        <h1>
+          {phase === 'failed'
+            ? 'The demo did not start'
+            : working
+              ? 'Starting your demo'
+              : 'Choose a season for your demo'}
+        </h1>
+        {phase === 'failed' && (
           <div role="alert" className="demo-error">
             {error}
           </div>
-        ) : (
+        )}
+        {working ? (
           <p role="status" aria-live="polite">
-            {phase === 'idle' && captchaEnabled
-              ? 'Complete the check below to open a private copy of a ready-made league.'
-              : 'Setting up a private copy of a ready-made league. This takes a few seconds.'}
+            Setting up a private copy of a ready-made league in the {chosen.label.toLowerCase()}{' '}
+            season ({chosen.dates}). This takes a few seconds.
           </p>
-        )}
-        {(phase === 'idle' || phase === 'failed') && (
-          <Turnstile
-            resetKey={captcha.resetKey}
-            onToken={captcha.onToken}
-            onFailure={captcha.onFailure}
-          />
-        )}
-        {phase === 'failed' && (
-          <div className="demo-page-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={!ready}
-              onClick={() => {
-                setPhase('idle');
-                setError(null);
-              }}
-            >
-              Try again
-            </button>
-            <Link className="btn btn-default" to="/">
-              Back to sign in
-            </Link>
-          </div>
+        ) : (
+          <form
+            className="demo-season-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (ready) begin();
+            }}
+          >
+            {phase === 'choosing' && (
+              <p>
+                A private copy of a ready-made league: 128 teams, placeholder data only. Pick when
+                its season runs. The league and its teams are the same either way; only the dates
+                differ.
+              </p>
+            )}
+            <fieldset className="demo-season-choice" aria-labelledby={legendId}>
+              <legend id={legendId} className="demo-season-legend">
+                Season
+              </legend>
+              {options.map((option) => {
+                const inputId = `demo-season-${option.season}`;
+                return (
+                  <label
+                    key={option.season}
+                    htmlFor={inputId}
+                    className={`demo-season-option${option.season === season ? ' is-selected' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      id={inputId}
+                      name="demo-season"
+                      value={option.season}
+                      checked={option.season === season}
+                      onChange={() => setSeason(option.season)}
+                      aria-describedby={`${inputId}-dates`}
+                    />
+                    <span className="demo-season-text">
+                      <span className="demo-season-name">{option.label} season</span>
+                      <span id={`${inputId}-dates`} className="demo-season-dates">
+                        {option.dates} · {option.weeks} weeks
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+            <Turnstile
+              resetKey={captcha.resetKey}
+              onToken={captcha.onToken}
+              onFailure={captcha.onFailure}
+            />
+            {captchaEnabled && !ready && (
+              <p role="status" aria-live="polite" className="demo-season-wait">
+                Complete the check above to start the demo.
+              </p>
+            )}
+            <div className="demo-page-actions">
+              <button type="submit" className="btn btn-primary" disabled={!ready}>
+                {phase === 'failed' ? 'Try again' : 'Start the demo'}
+              </button>
+              <Link className="btn btn-default" to="/">
+                Back to sign in
+              </Link>
+            </div>
+          </form>
         )}
       </>
     );

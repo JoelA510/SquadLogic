@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useDemo } from '../../hooks/useDemo.js';
+import { useDemoSeason } from '../../hooks/useDemoSeason.js';
 import { DEMO_ANNOUNCE_AT_MS, formatTimeLeft, spokenTimeLeft } from '../../lib/demo.js';
 
 /**
@@ -10,6 +11,9 @@ import { DEMO_ANNOUNCE_AT_MS, formatTimeLeft, spokenTimeLeft } from '../../lib/d
  * whole demo, "Demo league · 22:14 left", with **Leave demo**. It is the warning: there is no
  * separate visual alert. It is a `timer` that does not chatter (`aria-live="off"`); a screen-reader
  * user, who cannot see it, hears two polite announcements, at 5 minutes and at 1 minute left.
+ *
+ * It names the season the visitor chose at entry, "Demo league · Fall season · 22:14 left", read from the
+ * demo's own season row (`useDemoSeason`).
  *
  * The clock runs from the expiry the server set (`organizations.demo_expires_at`). At zero the
  * visitor is signed out and sent to `/demo/ended`; the server stopped honouring the demo at that
@@ -20,6 +24,7 @@ import { DEMO_ANNOUNCE_AT_MS, formatTimeLeft, spokenTimeLeft } from '../../lib/d
  */
 export default function DemoTimer({ floating = false }) {
   const { isDemo, expiresAtMs } = useDemo();
+  const season = useDemoSeason();
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const [now, setNow] = useState(() => Date.now());
@@ -82,6 +87,11 @@ export default function DemoTimer({ floating = false }) {
       >
         <span>
           <span className="demo-timer-label">Demo league · </span>
+          {season && (
+            <span className="demo-timer-season" data-testid="demo-season">
+              {season} season ·{' '}
+            </span>
+          )}
           <span className="demo-timer-clock">{formatTimeLeft(msLeft ?? 0)}</span> left
         </span>
         <button

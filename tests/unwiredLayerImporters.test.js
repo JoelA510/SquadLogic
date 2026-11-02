@@ -644,6 +644,9 @@ const LAYERS = Object.freeze([
       // 8.9 PR 6: the Edge daylight witness derives its expectations from
       // core's sunset, independently of the Edge arm it judges.
       'tests/autoSchedulerDaylight.test.js',
+      // The demo's seasons: the proof that no unlit practice of the seeded grid is near sunset on any
+      // day of either window measures it with core's sunset and checks the Edge arm agrees.
+      'tests/demoSeasons.test.js',
       'tests/solarDrift.test.js',
       'tests/solarVectors.test.js',
     ]),
@@ -655,6 +658,8 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
       'tests/autoSchedulerDaylight.test.js',
+      // The demo's seasons: calls both arms (it imports each).
+      'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test calls the Edge arm (it imports it), by name.
       'tests/demoSeed.test.js',
       'tests/practiceDaylight.test.js',
@@ -695,6 +700,8 @@ const LAYERS = Object.freeze([
     importers: Object.freeze([
       'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
+      // The demo's seasons: checks the Edge arm agrees with core's on every day of both windows.
+      'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test measures its grid against the sun with the Edge arm.
       'tests/demoSeed.test.js',
       'tests/solarDrift.test.js',
@@ -713,6 +720,8 @@ const LAYERS = Object.freeze([
       // 8.9 PR 6: by name only -- it calls core's `sunsetOnDate()` for the
       // independent derivation, and the Edge arm through the solver.
       'tests/autoSchedulerDaylight.test.js',
+      // The demo's seasons: calls both arms (it imports each).
+      'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test calls the Edge arm (it imports it), by name.
       'tests/demoSeed.test.js',
       'tests/practiceDaylight.test.js',

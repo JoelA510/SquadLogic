@@ -58,6 +58,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
 
 import Login from '../frontend/src/components/Login.jsx';
 import DemoStartPage from '../frontend/src/pages/DemoStartPage.jsx';
+import { defaultDemoSeason, demoToday } from '../frontend/src/lib/demoSeasons.js';
 
 /** @type {{ render: any, reset: any, remove: any, widgets: any[] }} */
 let turnstile;
@@ -196,19 +197,26 @@ describe('with a site key', () => {
     );
 
     await waitFor(() => expect(turnstile.render).toHaveBeenCalledTimes(1));
-    // Nothing happens while the challenge is unsolved.
+    // Nothing happens while the challenge is unsolved: the visitor cannot start the demo yet.
     expect(state.signInAnonymously).not.toHaveBeenCalled();
-    expect(
-      screen.getByText('Complete the check below to open a private copy of a ready-made league.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('Complete the check above to start the demo.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start the demo' })).toBeDisabled();
 
     await solve('token-demo');
+
+    // The token alone does not start it: the visitor chooses a season, then starts.
+    expect(state.signInAnonymously).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
 
     await waitFor(() => expect(state.signInAnonymously).toHaveBeenCalledTimes(1));
     expect(state.signInAnonymously).toHaveBeenCalledWith({
       options: { captchaToken: 'token-demo' },
     });
-    await waitFor(() => expect(state.rpc).toHaveBeenCalledWith('start_demo_session'));
+    await waitFor(() =>
+      expect(state.rpc).toHaveBeenCalledWith('start_demo_session', {
+        p_season: defaultDemoSeason(demoToday()),
+      })
+    );
   });
 
   it('a failed sign-in attempt announces the failure, shows a fresh challenge and a retry', async () => {
@@ -222,6 +230,7 @@ describe('with a site key', () => {
       </MemoryRouter>
     );
     await solve('token-one');
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('The demo could not be started.');
@@ -306,12 +315,17 @@ describe('without a site key', () => {
     expect(state.resetPasswordForEmail).toHaveBeenCalledWith('person@example.test', undefined);
   });
 
-  it('demo start signs in anonymously at once, with no token', async () => {
+  it('demo start signs in anonymously when the visitor starts it, with no token', async () => {
     render(
       <MemoryRouter initialEntries={['/demo/start']}>
         <DemoStartPage />
       </MemoryRouter>
     );
+
+    // Nothing starts by itself: the visitor chooses a season and starts the demo.
+    expect(state.signInAnonymously).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Complete the check/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
 
     await waitFor(() => expect(state.signInAnonymously).toHaveBeenCalledTimes(1));
     expect(state.signInAnonymously).toHaveBeenCalledWith(undefined);

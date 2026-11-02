@@ -97,16 +97,28 @@ Feature: Every top-level route passes an automated accessibility scan
     Then the scan sees "Central Park, Field 1" on the page
     And axe finds no serious or critical violations on "/permits" in the "dark" theme
 
-  # Demo mode (docs/changes/2026-10-22-demo-mode.md, D4). The entry page is scanned in its failed
-  # state (the demo is full), the one it rests in; the ended page and the demo's own dashboard,
-  # with its timer in the header, are scanned as a visitor sees them.
+  # Demo mode (docs/changes/2026-10-22-demo-mode.md, D4; the season choice,
+  # docs/changes/2026-11-01-demo-season-selection.md). The entry page is scanned as a visitor first
+  # sees it, asking for a fall or a spring season, and again in its failed state (the demo is full);
+  # the ended page and the demo's own dashboard, with its timer naming the season in the header, are
+  # scanned as a visitor sees them.
 
-  Scenario: The demo entry page passes axe in the light and dark themes
-    Given the demo is full
+  Scenario: The demo entry page, asking for a season, passes axe in the light and dark themes
+    Given I am signed out on the sign-in page
     When I open the demo entry page
-    Then I stay on the entry page and it says the demo is busy
+    Then the demo entry page asks for a fall or a spring season
     And axe finds no serious or critical violations on "/demo/start" in the "light" theme
     When I switch the demo entry page to the dark theme
+    Then the demo entry page asks for a fall or a spring season
+    And axe finds no serious or critical violations on "/demo/start" in the "dark" theme
+
+  Scenario: The demo entry page, after a refusal, passes axe in the light and dark themes
+    Given the demo is full
+    When I open the demo entry page
+    And I start the demo from the entry page
+    Then I stay on the entry page and it says the demo is busy
+    And axe finds no serious or critical violations on "/demo/start" in the "light" theme
+    When I switch the demo entry page to the dark theme and start the demo again
     Then I stay on the entry page and it says the demo is busy
     And axe finds no serious or critical violations on "/demo/start" in the "dark" theme
 

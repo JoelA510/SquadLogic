@@ -24,6 +24,8 @@ Given('I am in a demo league of {int} players', async ({ page }, players: number
     sessionStorage.setItem('__MOCK_DEMO_PLAYERS__', String(count));
   }, players);
   await page.goto('/demo/start');
+  // The entry asks for a season first; this league takes the one preselected.
+  await page.getByRole('button', { name: 'Start the demo' }).click();
   await expect(page.getByRole('timer')).toBeVisible({ timeout: LOAD_TIMEOUT });
 });
 

@@ -134,7 +134,8 @@ const REGISTRY = {
   'sql:start_demo_session': {
     class: 'writer',
     why:
-      "X10: seeds a demo's applied weekly practice schedule from demo_seed (20261110010000): one " +
+      "X10: seeds a demo's applied weekly practice schedule from demo_seed (20261110010000, now the " +
+      "start_demo_session(text) of 20261114010000, which dates the season by the visitor's choice): one " +
       "series per team and slot, live from the weekday's first date in the season to its end",
   },
 };

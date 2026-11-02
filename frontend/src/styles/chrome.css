@@ -319,6 +319,80 @@
   width: 100%;
 }
 
+/* ---------- Demo season choice (plan docs/changes/2026-11-01-demo-season-selection.md) ---------- */
+.demo-season-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  width: 100%;
+}
+.demo-season-choice {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: left;
+}
+.demo-season-legend {
+  padding: 0;
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.demo-season-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-height: 44px;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.demo-season-option:hover {
+  background: var(--bg-hover);
+}
+.demo-season-option.is-selected {
+  border-color: var(--primary);
+  background: var(--primary-weak);
+}
+.demo-season-option:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.demo-season-option input {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.15rem 0 0;
+  accent-color: var(--primary);
+}
+.demo-season-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.demo-season-name {
+  font-weight: 700;
+}
+.demo-season-dates {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+.demo-season-wait {
+  font-size: 0.875rem;
+}
+
 /* ---------- Nested navigation ---------- */
 .nav {
   width: 100%;

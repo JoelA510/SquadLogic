@@ -35,14 +35,20 @@ vi.mock('../frontend/src/components/OfflineGuard.jsx', () => ({
 
 import App from '../frontend/src/App.jsx';
 import { supabase, supabaseReady } from '../frontend/src/lib/supabaseClient.js';
+import { defaultDemoSeason, demoToday } from '../frontend/src/lib/demoSeasons.js';
 
 const settle = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Starts a demo for a fresh anonymous visitor on the mock, with the given lifespan. */
-async function startDemo(lifespanMs) {
+/**
+ * Starts a demo for a fresh anonymous visitor on the mock, with the given lifespan and (none: the
+ * default for the day) season.
+ */
+async function startDemo(lifespanMs, season) {
   if (lifespanMs) sessionStorage.setItem('__MOCK_DEMO_MS__', String(lifespanMs));
   await supabase.auth.signInAnonymously();
-  const { data, error } = await supabase.rpc('start_demo_session');
+  const { data, error } = await (season
+    ? supabase.rpc('start_demo_session', { p_season: season })
+    : supabase.rpc('start_demo_session'));
   expect(error).toBeNull();
   localStorage.setItem('squadlogic_active_org', data.organization_id);
   return data;
@@ -58,6 +64,9 @@ beforeEach(async () => {
   await settle();
   sessionStorage.clear();
   localStorage.clear();
+  // The mock keeps its database on `window` as well: without this the demos of every earlier test
+  // count toward the cap of ten live demos, and the file runs out of them (the seasons it names add three).
+  delete window.__MOCK_DB__;
 });
 
 afterEach(() => {
@@ -80,11 +89,49 @@ describe('the demo timer on every route', () => {
     expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
     const timer = await screen.findByRole('timer');
     expect(timer).toHaveAttribute('aria-live', 'off');
-    expect(timer).toHaveTextContent(/Demo league · \d+:\d{2} left/);
+    // It names the season the demo was started in (here, the day's default).
+    const season = defaultDemoSeason(demoToday()) === 'fall' ? 'Fall' : 'Spring';
+    await waitFor(() => expect(timer).toHaveTextContent(`Demo league · ${season} season · `));
+    expect(timer).toHaveTextContent(/Demo league · (Fall|Spring) season · \d+:\d{2} left/);
     expect(within(timer).getByRole('button', { name: 'Leave demo' })).toBeInTheDocument();
     // In the header, not floating.
     expect(timer.closest('header.topbar')).not.toBeNull();
     expect(timer).not.toHaveClass('demo-timer-floating');
+  });
+
+  it.each([
+    ['fall', 'Fall'],
+    ['spring', 'Spring'],
+  ])("names the %s season the visitor chose, not the day's default", async (choice, label) => {
+    await startDemo(undefined, choice);
+    openAt('/players');
+
+    expect(await screen.findByRole('heading', { name: 'Players stub' })).toBeInTheDocument();
+    const season = await screen.findByTestId('demo-season');
+    expect(season).toHaveTextContent(`${label} season`);
+    expect(await screen.findByRole('timer')).toHaveTextContent(
+      new RegExp(`Demo league · ${label} season · \\d+:\\d{2} left`)
+    );
+  });
+
+  it('says nothing of a season for a demo that was not started in a chosen one', async () => {
+    const { organization_id: orgId } = await startDemo(undefined, 'fall');
+    // a demo started before the choice existed: its season is called "2026 Season"
+    const { error } = await supabase
+      .from('season_settings')
+      .update({ season_label: '2026 Season' })
+      .eq('organization_id', orgId);
+    expect(error).toBeNull();
+    const read = vi.spyOn(supabase, 'from');
+    openAt('/players');
+
+    expect(await screen.findByRole('heading', { name: 'Players stub' })).toBeInTheDocument();
+    const timer = await screen.findByRole('timer');
+    // the season row has been read, and the banner has nothing to name
+    await waitFor(() => expect(read).toHaveBeenCalledWith('season_settings'));
+    await settle();
+    expect(timer).toHaveTextContent(/Demo league · \d+:\d{2} left/);
+    expect(screen.queryByTestId('demo-season')).not.toBeInTheDocument();
   });
 
   it('floats over the season setup page, which has no header', async () => {

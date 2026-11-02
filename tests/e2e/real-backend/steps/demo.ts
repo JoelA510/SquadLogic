@@ -89,6 +89,8 @@ When('I try the demo', async ({ page, $testInfo }) => {
   // could not be run where this was written).
   $testInfo.setTimeout(600_000);
   await page.getByRole('button', { name: 'Try the demo' }).click();
+  // The entry asks for a season first (migration 20261114010000); the visitor takes the preselected one.
+  await page.getByRole('button', { name: 'Start the demo' }).click();
 });
 
 Then('the demo league is open with its timer', async ({ page }) => {

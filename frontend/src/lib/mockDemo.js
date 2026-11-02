@@ -1,10 +1,14 @@
+import { demoSeasonName, demoSeasonWindow, demoToday, isDemoSeason } from './demoSeasons.js';
+
 /**
  * The mock client's twin of the demo (plan docs/changes/2026-10-22-demo-mode.md, D4; the server side
  * is migration 20261030010000). For the mock E2E suite and the Vitest tests only: the production
  * build never includes the mock, and the demo there runs on the real backend.
  *
  * `signInAnonymously` makes an anonymous session; `start_demo_session()` gives the caller a "Demo
- * league" that expires 30 minutes on, holding a SMALL slice of the real seed (two divisions, one of
+ * league", dated in the season they chose (`{ p_season: 'fall' | 'spring' }`, none being the window
+ * the date falls in or the next to begin; migration 20261114010000, the dates from `demoSeasons.js`
+ * as the server's `demo_seed.season_window()` decides them), that expires 30 minutes on, holding a SMALL slice of the real seed (two divisions, one of
  * them the practice-only U4 with its four reserved Saturday sessions) and the applied weekly practice
  * schedule of the divisions the server seeds (the U4 cohorts on their sessions; the U10 teams, two
  * practices a week of 60 minutes, left for the visitor's auto-scheduler), enough for the UI tests. The
@@ -21,6 +25,13 @@
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 /** The live-demo cap, as in the server's `start_demo_session()`. */
 const MOCK_DEMO_CAP = 10;
+
+/** The server's refusal of a choice that is neither: 22023, detail `demo_season_unknown`. */
+const unknownSeasonError = () => ({
+  code: '22023',
+  message: 'Unknown demo season: choose fall or spring',
+  details: 'demo_season_unknown',
+});
 
 /** The server's refusal at the cap: P0001, detail `demo_capacity`. */
 const capacityError = () => ({
@@ -74,12 +85,13 @@ export function makeAnonymousSession(mockId) {
  *   lifespanMs?: number,
  *   failure?: string | null,
  *   playerCount?: number,
+ *   params?: { p_season?: unknown } | null,
  * }} ctx
  */
 export function handleDemoRpc(
   db,
   name,
-  { session, mockId, now = Date.now(), lifespanMs, failure = null, playerCount }
+  { session, mockId, now = Date.now(), lifespanMs, failure = null, playerCount, params }
 ) {
   if (name !== 'start_demo_session') return null;
 
@@ -101,6 +113,14 @@ export function handleDemoRpc(
     };
   }
 
+  // The choice is checked before anything else the server checks (before its lock and its cap).
+  const requested = params?.p_season ?? null;
+  const asked =
+    requested === null || isDemoSeason(requested)
+      ? /** @type {import('./demoSeasons.js').DemoSeason | null} */ (requested)
+      : undefined;
+  if (asked === undefined) return { data: null, error: unknownSeasonError() };
+
   if (failure === 'capacity') return { data: null, error: capacityError() };
 
   db.organizations = db.organizations || [];
@@ -109,8 +129,20 @@ export function handleDemoRpc(
   );
   const mine = live.find((org) => org.demo_owner === user.id);
   if (mine) {
+    // Their own live demo, in the season it was started in, whatever is asked for now.
+    const own = (db.season_settings || []).find((entry) => entry.organization_id === mine.id);
     return {
-      data: { organization_id: mine.id, expires_at: mine.demo_expires_at, existing: true },
+      data: {
+        organization_id: mine.id,
+        expires_at: mine.demo_expires_at,
+        existing: true,
+        season:
+          own?.season_label === 'Fall' || own?.season_label === 'Spring'
+            ? own.season_label.toLowerCase()
+            : null,
+        season_start: own?.season_start ?? null,
+        season_end: own?.season_end ?? null,
+      },
       error: null,
     };
   }
@@ -121,6 +153,8 @@ export function handleDemoRpc(
   const seasonId = mockId();
   const created = new Date(now).toISOString();
   const year = new Date(now).getUTCFullYear();
+  // The season, dated as the server dates it: the visitor's choice, or the default for the day.
+  const season = demoSeasonWindow(asked, demoToday(now));
 
   db.organizations.push({
     id: orgId,
@@ -144,10 +178,12 @@ export function handleDemoRpc(
   db.season_settings.push({
     id: seasonId,
     organization_id: orgId,
-    name: `${year} Season`,
+    name: demoSeasonName(season),
     status: 'active',
-    season_year: year,
-    season_label: `${year} Season`,
+    season_year: season.year,
+    season_label: season.label,
+    season_start: season.start,
+    season_end: season.end,
     timezone: 'America/Los_Angeles',
     created_at: created,
   });
@@ -182,6 +218,8 @@ export function handleDemoRpc(
       season_settings_id: seasonId,
       name: slice.name,
       plays_games: slice.plays_games,
+      season_start: season.start,
+      season_end: season.end,
       // The seed's practices a week and length (20261105010000, 20261110010000).
       practices_per_week: slice.practices,
       practice_minutes: slice.minutes,
@@ -324,17 +362,13 @@ export function handleDemoRpc(
 
   // The applied weekly practice schedule the server's start_demo_session seeds (20261110010000): the
   // practice-only U4 cohorts (and, on the server, U5 to U8's two practices a week), each on a slot, live
-  // from its weekday's first date in the season (which starts on the Monday after the demo does and
-  // runs twelve weeks) to the season's last day. U9 and older have none, for the visitor's
+  // from its weekday's first date in the season (the chosen window, which starts on a Monday) to the
+  // season's last day. U9 and older have none, for the visitor's
   // auto-scheduler. Here, a U4 cohort in each of the first two reserved sessions (one at a time, 15
   // minutes apart); the U10 teams are left unscheduled, with the four open weekday slots free for them.
   const dayMs = 24 * 60 * 60 * 1000;
-  const today = new Date(now);
-  const daysToMonday = (8 - today.getUTCDay()) % 7 || 7;
-  const seasonStart = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) + daysToMonday * dayMs
-  );
-  const seasonEnd = new Date(seasonStart.getTime() + (12 * 7 - 1) * dayMs);
+  const seasonStart = new Date(`${season.start}T00:00:00Z`);
+  const seasonEnd = new Date(`${season.end}T00:00:00Z`);
   const isoDate = (date) => date.toISOString().slice(0, 10);
   const practiceRunId = mockId();
   const orgTeams = db.teams.filter((entry) => entry.organization_id === orgId);
@@ -400,7 +434,14 @@ export function handleDemoRpc(
   });
 
   return {
-    data: { organization_id: orgId, expires_at: expiresAt, existing: false },
+    data: {
+      organization_id: orgId,
+      expires_at: expiresAt,
+      existing: false,
+      season: season.season,
+      season_start: season.start,
+      season_end: season.end,
+    },
     error: null,
   };
 }

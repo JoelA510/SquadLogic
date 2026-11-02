@@ -1,8 +1,9 @@
 # Unknown sunset: flag it, do not refuse it (practice repair)
 
-Status: **plan only, not built. Stopped at the brief's gate: the season-2026 corpus result moves
-(measured in section 5).** AGENTS.md rule 14 applies (it touches the solver's practice repair), so
-this is the plan, written before the code, for approval.
+Status: **built.** The first pass of this document was the plan, which stopped at the brief's gate
+because the season-2026 corpus result moves (section 5). The coordinator approved the movement on
+2026-11-02 ("it is the direct consequence of the owner's decision ... shown-otherwise"), so this is the
+plan as approved and as built. AGENTS.md rule 14 applies (it touches the solver's practice repair).
 
 Everything below was checked against `main` at `93987ac`. Labels follow rule 4: _statically
 reviewed_ (read), _executed_ (run), _fully validated_ (run and the outcome checked).
@@ -46,7 +47,7 @@ grep 20261002` lists only `20261002000000_practice_exceptions_daylight.sql`).
 | A9  | `20261002000000:1106-1121` (copies `20261105010000:1260-1275`, `20261108020000:1549-1564`), `repairAdapter.js:153-156, 871-874`, `practice-persistence/index.ts:103-110`, `practiceRepairPanel.js:70-71` | a `past-sunset` or `sunset-unknown` TIME TBD window that ends before its series (a shape rule)      | **REFUSE** the save (22023 / `DAYLIGHT_MID_RANGE`). Not a sunset judgment; after the change the repair stops producing such windows, the rule stays for stored rows                                                                               | none                             |
 | A10 | `auto-scheduler/index.ts:510-531`                                                                                                                                                                        | venue lighting or coordinates cannot be READ (a database read failure)                              | **REFUSE the whole run** (503, `scheduler.auto_refused`). Not a sunset condition; "refused rather than scheduled without a daylight check"                                                                                                        | none (listed because it refuses) |
 
-### B. Known past sunset (not changed; recommendations in section 6)
+### B. Known past sunset (not changed; recommendations in section 6, "For the owner")
 
 | #   | Place                                                                                                                                                                                                | Today                                                                                                                                                                                                                                                       |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -77,49 +78,72 @@ places that really refuse a known past-sunset practice or game: **B4** and **B6*
 - Lit ground, an override-exempt date and a known sunset are untouched. With no calendar nothing is
   judged, as now.
 
-## 3. Design
+## 3. Design, as built
 
 **No schema, no CHECK, no enum, no migration, no persisted shape.** The flag is an optional key on an
 in-memory result object, exactly as `daylightPastSunset` is (not persisted, not in any Zod schema;
 `grep daylightPastSunset` finds `repair.js`, the panel's text helper, tests, and an unrelated audit
-key of the same name in `auto-scheduler/index.ts:1161`), and the finding
-code and its severity already exist. The Edge's representation already exists (`report.unknown`,
-`DAYLIGHT_UNKNOWN`).
+key of the same name in `auto-scheduler/index.ts:1161`), and the finding code and its severity
+already exist. The Edge's representation already exists (`report.unknown`, `DAYLIGHT_UNKNOWN`).
 
 `packages/core/src/practice/repair.js` (the unknown branch only):
 
-1. `judgeDaylight` (`:455-541`): `refusal` goes; `unknownFlag` is built from `judged.unknown[0]`
-   (`{ code, cause, date, occurrences }`, the cause read from the evaluator's own `SUNSET_UNKNOWN`
-   finding for that date); the past-sunset flag stops requiring `unknown === null`.
-2. The gate (`:958-986`): no `continue` for unknown; the candidate gains `daylightUnknown`, is listed
-   in `daylight.unknownFlagged` (replacing `daylight.refused`, which would be a field that is always
-   empty), and `candidatesFlaggedSunsetUnknown` replaces `candidatesRefusedSunsetUnknown` (the
-   counters stay mutually exclusive in `:528-539`). Every reader of those names is a test
-   (`grep`: `repair.js`, `practiceRepairDaylight.test.js`, `practiceRepairAdapter.test.js`).
-3. The finding (`:1044-1057`) is reworded; `sameBeforeDaylight`, `sameDaylightRefused`,
-   `refusedHere`, `daylightEmptied`, `daylightRefused` and the `SUNSET_UNKNOWN` branch at `:1584`
-   and `:1609-1611` become unreachable and are deleted ("honour it or delete it").
-4. `pastSunsetField` gains a twin (`unknownSunsetField`) spread at the same two places (`:1559`,
-   `:1917`), and the `REPAIR_REHOMED` message names it as it names a past-sunset one.
-5. Header comment (`:117-160`), `PRACTICE_TBD_REASON` comments (`:263-281`), `reasonCodes.js`
-   (`:238-245`, `:309`), the registry note (`season2026Constraints.js:506`, the unknown clause only).
+1. `judgeDaylight`: `refusal` is gone. `unknownFlag` is built from the evaluator's first unknown
+   occurrence (`reason`, `code: 'SUNSET_UNKNOWN'`, the evaluator's own `cause`, the first unknown
+   date, the counts); the past-sunset `flag` no longer requires `unknown === null`, so a candidate
+   with both kinds of date carries both.
+2. The gate has no `continue` for unknown. The candidate entry gains `daylightUnknown`; each flagged
+   candidate is listed in `daylight.unknownFlagged` (replacing `daylight.refused`, which would be a
+   field that is always empty) and `candidatesFlaggedSunsetUnknown` replaces
+   `candidatesRefusedSunsetUnknown`. The counters still partition `candidatesJudged`: a candidate with
+   both flags is counted once, as unknown, and is listed in both lists. Every reader of the old names
+   was a test (`grep`: `repair.js`, `practiceRepairDaylight.test.js`, `practiceRepairAdapter.test.js`).
+3. The finding `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN` (still a **compromise**, so the result's
+   status is not `ok`) now says "kept and flagged"; its details are `flagged` and `sameVenue`.
+   `sameBeforeDaylight`, `sameDaylightRefused`, `refusedHere`, `daylightEmptied`, `daylightRefused`
+   and the `SUNSET_UNKNOWN` TIME TBD branch are deleted ("honour it or delete it").
+4. `sunsetUnknownField` is the twin of `pastSunsetField`, spread on the re-home and on its
+   recommendation (`daylightSunsetUnknown: { code, cause, date, occurrences }`, the Edge's names), and
+   the `REPAIR_REHOMED` message names it as it names a past-sunset one.
+5. Comments: the header, `PRACTICE_TBD_REASON` (both daylight reasons "no longer produced by the
+   repair", kept for rows saved before), `reasonCodes.js`, and the registry note
+   (`season2026Constraints.js:506`, below).
 
-**The Edge twin: no behaviour change** (A2, A3 already accept and flag). What changes is the proof
-that the two agree. No daylight drift product test exists (the three product digests under
+**Pricing (D11): an unknown-sunset candidate is priced exactly like a known-legal one.** The flag is
+for the admin; it is not a cost. Tested: with a known venue and an unknown one offering the same
+Tuesday 15:00, the two cost the same and the order is the shapes' (`dark/...` before `dusk/...`);
+declining the flagged one re-offers the unflagged one.
+
+**The Edge twin: no behaviour change** (A2, A3 already accept and flag). What is new is proof that
+the two agree. No daylight drift product test existed (the three product digests under
 `supabase/functions/_shared/tests/` are for coach preferences, lighting overrides and practice
-exceptions; none judges a sunset). The plan is one new cross-arm test, `tests/sunsetAgreement.test.js`,
-over the full product of lighting (lit, unlit, undeclared) x coordinates (none, present) x end time
-(early, late) x override (none, covering the window): the core arm is `repairPracticeLoss` over one
-displaced series and one candidate, the Edge arm is `applyDaylightPostPass` over a placement in the
-same slot; both must **keep** the practice and put it in the same class (exempt, within daylight,
-flagged past, flagged unknown). The Deno mirror (`practice-daylight_test.ts`) keeps holding the Edge
-arm in the runtime it deploys to.
+exceptions; none judges a sunset). `tests/sunsetAgreement.test.js` runs both arms over the full
+product of lighting (lit, unlit, undeclared) x coordinates (none, present) x end time (early, late) x
+portable-lighting override (none, whole window, before DST) = 36 cases: the core arm is
+`repairPracticeLoss` over one displaced series and one candidate, the Edge arm is
+`applyDaylightPostPass` over a placement in the same slot. Neither may refuse a case, both must give
+it the class an oracle (the rule and the solar function, written from neither arm) gives it, and an
+unknown sunset must be the same flag in both: code, cause, first date, number of dates. The Deno
+mirror gains a test of the Edge arm's unknown verdict in its own runtime
+(`practice-daylight_test.ts`), run under both host zones by `scripts/deno-mirror-tests.sh`.
 
-**Panel and enact dialog: no change in this PR.** The panel prints every repair finding
-(`PracticeRepairPanel.jsx:637-643`), so the reworded compromise finding reaches the admin; a per-row
-"Sunset unknown" badge and a sentence in the enact dialog (the twins of `:442-445` and
-`PracticeEnactDialog.jsx:126-129`) would be frontend-only and are left as an owner call
-(section 6).
+**UI parity (frontend only, small).** The past-sunset flag has a row badge
+(`PracticeRepairPanel.jsx`, `practice-repair-past-sunset`) and an enact-dialog sentence
+(`PracticeEnactDialog.jsx`, `practice-enact-past-sunset`), so the unknown flag has both
+(`practice-repair-sunset-unknown`, `practice-enact-sunset-unknown`, wording from
+`sunsetUnknownText` in `practiceRepairPanel.js`, causes from `daylightReport.js`'s table). A flag
+nobody sees is a hollow guarantee. Tests: the helper's exact wording, the row in a mixed estate (one
+venue with coordinates, one without) and the controls (all venues with coordinates; none, where the
+repair judges no sunset at all), the dialog alone and beside the past-sunset note, and one E2E
+scenario (`practice_repair_panel.feature`) in which the panel with the flag on screen is scanned with
+axe (WCAG 2.0 to 2.2 A and AA, serious and critical) in both themes. `axe-core` is not a direct
+dependency here, so the scan is the repo's own Playwright one (`@axe-core/playwright`), not a jsdom one.
+
+**The registry note** (`season2026Constraints.js:506`) now describes what happens: the Edge pass and
+the repair keep and flag, past sunset (2026-10-27) and unknown (2026-11-02), never refuse; an unknown
+sunset is never read as legal; a flag is not a price. It also says the `HARD` type is the operator's
+2026-09-27 ruling and that no path blocks on it since 2026-10-27. **The `HARD` type, the `BLOCKING`
+severity of `PRACTICE_PAST_SUNSET` and every behaviour are unchanged** (B5, for the owner).
 
 **Mock client and demo: they do not read the A1 branch.** The repair runs in the browser from the
 core package, so the mock path gets the new behaviour with no change; `mockPracticeEnact.js` mirrors
@@ -129,99 +153,82 @@ in the Playwright steps (`tests/e2e/steps/auto_scheduler.ts`), unchanged.
 
 ## 4. Tests and plants
 
-Written during, each at the default 5 s timeout:
+All at the default 5 s Vitest timeout.
 
-1. Core: an unlit venue of unknown sunset, one candidate: placed with the flag, **not** TIME TBD, not
-   `sunset-unknown`, finding present and `compromise`, counters (replaces the "refuses" test at
-   `practiceRepairDaylight.test.js:~385`).
-2. A lit venue and a known-sunset venue in the same run are unaffected (flags absent, same
-   placements as without the calendar).
-3. Unknown and known venues compete for the same slot: two series, one slot; neither is refused for
-   daylight, the loser is `contended` (not sunset), the winner carries exactly its own flag.
-4. Mixed dates (the existing "past on some dates and unknown on others" case, now accepted with both
-   flags); the cross-venue recommendation carries the flag; a decline re-offers the next candidate.
-5. The corpus as it ships (no coordinates): nothing is refused or TIME TBD for sunset, every placed
-   recommendation on unlit ground is flagged unknown, and the counts are derived from the plan and the
-   graph, not from the result (rewrites the test pinned to the old behaviour, section 5).
-6. `tests/sunsetAgreement.test.js` (section 3), with a meta-assertion that every class is non-empty.
-7. Adapter: the `practiceRepairAdapter` cases that expect a `sunset-unknown` TIME TBD are re-aimed.
+1. `practiceRepairDaylight.test.js`, "D4": a candidate on unlit ground with no coordinates and no
+   table is placed with the flag and is not TIME TBD; the same placement as a repair that judged no
+   sunset; past and unknown on one candidate carry both flags; a venue mixing a past-sunset shape with
+   an unknown one keeps both candidates; a lit venue, a known-sunset venue and an unknown one in one
+   run (only the unknown one is flagged, the counts come from the input); an unknown and a known venue
+   offering the same slot are priced alike (D11) and a decline re-offers the unflagged one; two series
+   contending for the one slot at an unknown venue (the loser is TIME TBD `contended`, not for
+   daylight); no calendar, no flag.
+2. The corpus as it ships (`season-2026: every corpus loss, gated`): the pinned refusal is rewritten
+   from the plan and the graph. For each of the 29 surfaces: none dropped, every placement and TIME
+   TBD reason equals the repair's with no calendar, none TIME TBD for daylight, each placement's flags
+   derived date by date from the table, and the counters partition `candidatesJudged`.
+3. `practiceRepairAdapter.test.js`: "never geocodes" now expects a flag and no `sunset-unknown` row;
+   the payload-enum test takes a daylight-judged plan in place of the one that needed the refusal.
+4. `tests/sunsetAgreement.test.js` (above), registered as a consumer in
+   `tests/unwiredLayerImporters.test.js`'s census, and the Deno mirror test. `practiceEnact.test.js`:
+   a recommendation carrying the flag is enacted exactly as one without it (same rows, same closes,
+   same exceptions).
+5. `practiceRepairPanel.test.jsx` and the E2E scenario (above).
+6. `reasonCodeReachability.test.js`: the description of the TIME TBD reasons is updated; the finding
+   `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN` is still emitted, so the audit stays green (it goes red
+   when the emission is removed: plant P2).
 
-Plants (at most 3, each red then reverted): P1 the gate re-adds `continue` for an unknown candidate
-(tests 1, 3, 5 go red); P2 `judgeDaylight` returns no unknown flag (tests 1, 4, 6 go red); P3 the
-Edge pass drops an unknown placement (test 6 goes red, the Edge arm of the agreement).
+**Plants** (three, each red then reverted, _executed_): P1 the gate refuses an unknown candidate again
+(14 tests red across the daylight, adapter, panel and agreement files); P2 `judgeDaylight` returns no
+unknown flag (14 red, including the reachability audit); P3 the Edge pass drops an unknown-sunset
+placement (8 red, including the agreement test's "neither arm refuses").
 
-Also run: the season fixture suite (the 60 test files that load `fixtures/season-2026` or run the
-repair), unchanged apart from the rewritten items above; `deno check` and the Deno mirror tests
-(Edge files are comment-only here).
+## 5. What the change does to the season-2026 corpus (approved 2026-11-02)
 
-## 5. Why this was not built: the gate in the brief
+The fixture's data files do not change; what the repair makes of them does. This is the corpus swept
+as `practiceRepairDaylight.test.js` sweeps it "as it ships" (the shipped weekend-only sunset table, no
+venue has coordinates, so a weekday date on unlit ground has no sunset): a retirement from 2026-09-28
+on each of the 29 surfaces the baseline stands on (_executed_, before on `93987ac`, after on this
+branch).
 
-| Stop condition                                                             | Result                                                                                                                                                                      |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The flag has no existing representation (schema, CHECK, enum, migration)   | **Not triggered** (section 3): optional in-memory key, existing finding code and severity, no migration.                                                                    |
-| `fixtures/season-2026` results move                                        | **TRIGGERED** (below).                                                                                                                                                      |
-| More than the unknown branch of repair, its Edge twin and their tests/docs | **Not triggered** as designed: `repair.js`, comments in `reasonCodes.js` and the registry note, one new test, docs. The Edge needs no code change; the panel is left alone. |
+| Result of the 29 repairs                         | Before (refused) | After (flagged)  |
+| ------------------------------------------------ | ---------------- | ---------------- |
+| Series re-homed (tier 1)                         | 0                | 36               |
+| Series TIME TBD                                  | 187              | 151              |
+| of those, `sunset-unknown`                       | 97               | 0                |
+| of those, `no-legal-slot-at-venue` / `contended` | 90 / 0           | 90 / 61          |
+| Recommendations placed (tier 1 and tier 2)       | 0 of 187         | 102 of 187       |
+| Candidates refused for an unknown sunset         | 992              | 0 (flagged: 992) |
 
-**What moves** (_executed_, on `93987ac`, a throwaway edit to `repair.js` that removed the unknown
-refusal, reverted; `git status` clean afterwards). The season-2026 practice corpus swept as
-`practiceRepairDaylight.test.js` sweeps it "as it ships" (the shipped weekend-only sunset table, no
-venue has coordinates, so a weekday date on unlit ground has no sunset), a retirement from
-2026-09-28 on each of the 29 surfaces the baseline stands on:
+With no coordinates anywhere, the old repair placed nothing on this corpus; that is what "refusal
+would break configs that users may otherwise stick with" describes. Nothing else in
+`fixtures/season-2026` moves: the 60 test files that load the fixtures or run the repair all pass, and
+the only assertions rewritten are the ones that pinned the refusal or the stale registry note: four
+in `practiceRepairDaylight.test.js` (the three D4 refusals and the corpus "as it ships"), one there
+for the registry note, and two in `practiceRepairAdapter.test.js`. The two reachability audits stay
+green with the finding still emitted; only a description string in that file was updated.
 
-| Result of the 29 repairs                         | Today (refuse) | With the flag |
-| ------------------------------------------------ | -------------- | ------------- |
-| Series re-homed (tier 1)                         | 0              | 36            |
-| Series TIME TBD                                  | 187            | 151           |
-| of those, `sunset-unknown`                       | 97             | 0             |
-| of those, `no-legal-slot-at-venue` / `contended` | 90 / 0         | 90 / 61       |
-| Recommendations placed (tier 1 and tier 2)       | 0 of 187       | 102 of 187    |
-| Candidates refused for an unknown sunset         | 992            | 0             |
+## 6. For the owner
 
-The fixture's data files do not change; what the repair makes of them does, and substantially: with
-no coordinates anywhere, today's repair places nothing on the shipped corpus. That is the owner's
-intent ("refusal would break configs that users may otherwise stick with"), but it is also what the
-brief calls a fixture result moving, so I stopped.
+- **B4** `durationPhases.js:654, 730` holds a known past-sunset date out as TIME TBD when neither a
+  shorter practice nor an earlier start saves it. Unwired (no production consumer), so nothing in the
+  app does this today. Recommendation: apply the principle there (keep the date, flag it) when it is
+  wired.
+- **B5** the `practice-daylight` constraint is `HARD` and non-waivable and `PRACTICE_PAST_SUNSET` is
+  `BLOCKING`, though no path has blocked on it since 2026-10-27. The registry note now says so; the
+  labels are unchanged. Recommendation: relabel to a compromise (soft) in a small PR of its own. `HARD`
+  is the operator's 2026-09-27 wording, so the owner should say.
+- **B6** games: `SUNSET_MARGIN_VIOLATED` is `BLOCKING` in the feasibility answer and the rule engine on
+  the 15-minute margin the league's own sheet states; the live game scheduler does not enforce it
+  (D7). Recommendation: decide games separately; the practice principle does not obviously carry over.
+- A known inconsistency left alone: the core evaluator spells a polar-latitude cause
+  `sunset-not-computable` and the Edge pass `sunset-undefined`. The panel text maps both; the
+  agreement test compares the coordinates-missing cause, the only one this product reaches.
 
-The same throwaway edit, run over the 60 test files that load the season fixtures or run the repair
-(_executed_): 2,699 pass, **8 assertions in 3 files fail**, and all are pinned to the old behaviour:
+## 7. Records
 
-- `tests/practiceRepairDaylight.test.js`: "refuses a candidate on unlit ground with no coordinates",
-  "a candidate past sunset on some dates and unknown on others is still refused", "a venue mixing a
-  past-sunset shape with an unknown one", and "the corpus as it ships ... refuses unknowns" (asserts
-  `unknownRefused > 0` and `unknownTbd > 0`).
-- `tests/practiceRepairAdapter.test.js`: "never geocodes: ... is sunset-unknown" and "names each
-  exception row exactly once, within the DB enums" (its payload fixture needs a `sunset-unknown` TIME
-  TBD from the repair).
-- `tests/reasonCodeReachability.test.js`: two audits that fail only because the throwaway edit
-  removed the finding's emission; the real change keeps it reachable.
-
-Every other fixture-driven test (the game schedule, rosters, facility, permits, the draft
-repair/enact/recommendation suites, the Edge daylight suites) is unchanged by it.
-
-## 6. What I need, and the owner's list
-
-To build: a go on the movement in section 5 (rewrite the "as it ships" corpus test to the new
-behaviour: nothing refused or TIME TBD for sunset, the 102 placed recommendations flagged), and answers to:
-
-1. **Priced the same?** An unknown-sunset candidate and a known-legal one at the same cost are tied by
-   the usual order. Recommendation: leave it (D11, as past sunset); the flag is for the admin.
-2. **Row badge and enact sentence for the unknown flag** (frontend-only, twins of the past-sunset
-   ones). Recommendation: yes, as a follow-up PR; this one stays in core.
-3. **Known past-sunset refusals found (not changed):**
-   - **B4** `durationPhases` holds a date out as TIME TBD when nothing saves it. Unwired. Recommend
-     leaving it until it is wired, then applying the principle there (keep the date, flag it).
-   - **B5** the `practice-daylight` constraint is `HARD`/non-waivable and `PRACTICE_PAST_SUNSET` is
-     `BLOCKING` though behaviour has been a flag since 2026-10-27. Recommend a small docs/label PR
-     (compromise severity, a rewritten note); `HARD` is the operator's 2026-09-27 wording, so the owner
-     should say.
-   - **B6** games: `SUNSET_MARGIN_VIOLATED` is `BLOCKING` in the feasibility answer and the rule
-     engine on the 15-minute margin the league's own sheet states; the live game scheduler does not
-     enforce it. Recommend a separate decision; the practice principle does not obviously carry over.
-
-## 7. After approval: records
-
-A new lesson (number 83 or 84, after whichever open PR lands its 83 first) superseding lesson 47,
-without rewriting it; a dated note under D4 in `docs/PHASE_8_9_PLAN.md` and under the "unknown
-sunset is still refused" lines in `docs/changes/2026-10-27-phase-d-scheduling.md:457`,
-`docs/architecture/practice-scheduling.md:103-105` and `docs/PHASE_8_9_PLAN.md:164`; section 5 of
+Lesson 84 supersedes lesson 47 (47 is left as written); a dated note under D4 in
+`docs/PHASE_8_9_PLAN.md` (and a "superseded" tag on its repair row); a "superseded 2026-11-02" tag on
+the "unknown sunset is still refused" line in `docs/changes/2026-10-27-phase-d-scheduling.md`; the
+repair and daylight lines in `docs/architecture/practice-scheduling.md`; and section 5 of
 `docs/changes/2026-11-01-followups-f1.md` marked decided.

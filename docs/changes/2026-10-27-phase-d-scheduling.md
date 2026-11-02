@@ -454,7 +454,7 @@ Each PR runs the season fixture suite and the full Definition of Done.
   finding `PRACTICE_PAST_SUNSET`, audit `daylightPastSunset`; core `repair.js`: `daylightPastSunset`
   on the re-home and the recommendation, `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET` now a compromise).
   `frontend/src/utils/daylightExceptions.js` (which built the exceptions that wrote a truncation) is
-  deleted. An unknown sunset is still refused. `PRACTICE_TBD_REASON.PAST_SUNSET` stays for rows
+  deleted. An unknown sunset is still refused _[superseded 2026-11-02: the repair now keeps and flags an unknown sunset too, `docs/changes/2026-11-02-unknown-sunset-flag.md`]_. `PRACTICE_TBD_REASON.PAST_SUNSET` stays for rows
   saved before.
 - **Migration contents:** the two columns with their CHECKs, the helper
   `practice_new_auto_row_refusals`, `persist_practice_schedule` replaced behind its md5 (production's

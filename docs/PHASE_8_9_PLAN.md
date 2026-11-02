@@ -161,7 +161,7 @@ clustering idea is unnecessary. For scale, 50 miles of longitude at 40°N is
 | New core `practice/daylight.js` evaluator over materialised occurrences | Enforced in core evaluation; registry claim, exercise counters, attribution kind `sunset` with the numbers (for 8.10) |
 | Core `practiceScheduling.js` / `autoScheduler.js` | Unchanged; stated unenforced (the live scheduler is the Deno twin) |
 | Deno auto-scheduler | Enforced by a post-pass (`_shared/engines/practice-daylight.ts`, PR 6) on new placements, judged from the season's today; locked rows are reported with a proposed fix, never changed; an unreadable venue read refuses the run; the TIME TBD remainder is reported and audited, not persisted as a `practice_exceptions` row; optimising toward surviving slots is declared, not optimised (D11) |
-| `practice/repair.js` | Candidate gate; enforced in the module, not live until 3b wires it. *As built (PR 7):* every tier-1 and tier-2 candidate is judged by `evaluatePracticeDaylight()` over its series-window; past sunset → refused `past-sunset`, unknown sunset → refused `sunset-unknown` (D4 in core: never allowed); a venue emptied by the gate → TIME TBD with that reason, ahead of the `must_keep` filter. Partly legal candidates are **refused, not truncated**: one recommendation per series-window (3b decision 5), and D8's truncation stays the Edge post-pass's. No calendar → nothing judged, and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so |
+| `practice/repair.js` | Candidate gate; enforced in the module, not live until 3b wires it. *As built (PR 7):* every tier-1 and tier-2 candidate is judged by `evaluatePracticeDaylight()` over its series-window; past sunset → refused `past-sunset`, unknown sunset → refused `sunset-unknown` (D4 in core: never allowed); a venue emptied by the gate → TIME TBD with that reason, ahead of the `must_keep` filter. Partly legal candidates are **refused, not truncated**: one recommendation per series-window (3b decision 5), and D8's truncation stays the Edge post-pass's. No calendar → nothing judged, and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so. *Superseded: past sunset has been kept and flagged since 2026-10-27 and an unknown sunset since 2026-11-02 (D4 note below the decisions table); the gate refuses nothing.* |
 
 **Auto-scheduler post-pass (PR 6).** Slots carry `fieldId` and
 `effectiveFrom`/`effectiveUntil` (`PracticeSchedulingPage.jsx:156-184`); the
@@ -261,6 +261,15 @@ pinned. Annotate, do not rewrite, PHASE_8_PLAN's "75-minute drop … 4:44 PM"
 | D12 | The `Note` column | Read as the DST cross-check (W11) |
 | D13 | Persisting daylight TIME TBD (PR 6b; operator 2026-09-29) | (a) truncated remainder recorded as a `time_tbd` exception, `tbd_reason` `past-sunset`, new `cause_kind` `daylight`, the row kept truncated; (c) repair `past-sunset`/`sunset-unknown` tail windows only, mid-range refused until 3b PR 12; (b) row-less withdrawn team **deferred** (it stays in the writer's `teams_without_practice`) |
 | D14 | Compression strategy and step (operator 2026-09-29) | Either **shorten** or **move earlier**; default is shorten by **10 minutes** per slot; a per-slot override for portable lighting. Minimum 40 min; earliest start `school_day_end`; plan `docs/PHASE_8_9_D14_PLAN.md` APPROVED 2026-09-29 |
+
+**D4, 2026-11-02 (owner):** "Flag them, as coaches or orgs may be comfortable with extra conditions
+determined outside of the app - like going to end of dusk on a clear day, but not an overcast day. A
+warning keeps room for that, refusal would break configs that users may otherwise stick with." "Do not
+refuse yet" is now "do not refuse": `practice/repair.js` keeps an unknown-sunset candidate and flags it
+(`daylightSunsetUnknown`, the Edge pass's own `SUNSET_UNKNOWN` and cause; the finding
+`PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`), as the Edge pass has since PR 6, and never TIME TBD
+`sunset-unknown`. Unknown is still never read as legal. Plan: `docs/changes/2026-11-02-unknown-sunset-flag.md`;
+lesson 84 supersedes lesson 47 (the original row above is left as written).
 
 Every PR: `/code-review` before opening; the season-2026 fixture suite when it
 touches domain types, constraints or solver stages; each new guarantee shown red

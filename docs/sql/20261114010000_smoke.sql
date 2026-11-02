@@ -12,7 +12,9 @@
 --      the fall is six weeks and the spring the league's twelve; the two demos hold the same people, teams
 --      and seeded practices (only the dates differ).
 --   4. No choice is the window the date falls in or the next to begin; asking again returns the visitor's
---      own demo in the season it was started in; the `demo.started` row names the season.
+--      own demo in the season it was started in, also once the admin has started a next season in it (named
+--      to sort before the first, the case a read without an order gets wrong); the `demo.started` row names
+--      the season.
 --   5. A choice that is neither is refused for a visitor, before the lock, and leaves no demo behind.
 --
 -- Dates are relative to today in the league's zone wherever a demo is started; the rule is also run on fixed
@@ -33,6 +35,7 @@ DECLARE
     v_spring jsonb;
     v_default jsonb;
     v_again  jsonb;
+    v_next   jsonb;
     v_fall_org uuid;
     v_spring_org uuid;
     v_default_org uuid;
@@ -168,10 +171,27 @@ BEGIN
        OR v_again ->> 'season' <> 'fall' OR v_again ->> 'season_start' <> v_fall ->> 'season_start' THEN
         RAISE EXCEPTION 'asking again for the other season did not return the visitor''s own fall demo: %', v_again;
     END IF;
+    -- The demo's admin starts a next season from it, named to sort before the first by (organization, name), the
+    -- index the planner reads; it is made later than the first by hand (one transaction shares one now()).
+    v_next := public.admin_create_season_from(
+        (SELECT id FROM public.season_settings WHERE organization_id = v_fall_org),
+        'Autumn ' || (extract(year FROM (v_fall ->> 'season_end')::date + 120))::integer,
+        (extract(year FROM (v_fall ->> 'season_end')::date + 120))::integer,
+        (v_fall ->> 'season_end')::date + 120, (v_fall ->> 'season_end')::date + 200);
+    UPDATE public.season_settings SET created_at = created_at + interval '1 minute' WHERE id = (v_next ->> 'id')::uuid;
+    IF (SELECT count(*) FROM public.season_settings WHERE organization_id = v_fall_org) <> 2 THEN
+        RAISE EXCEPTION 'the fall demo does not hold the second season the admin started';
+    END IF;
+    v_again := public.start_demo_session('spring');
+    IF NOT (v_again ->> 'existing')::boolean OR v_again ->> 'season' IS DISTINCT FROM 'fall'
+       OR v_again ->> 'season_start' IS DISTINCT FROM v_fall ->> 'season_start'
+       OR v_again ->> 'season_end' IS DISTINCT FROM v_fall ->> 'season_end' THEN
+        RAISE EXCEPTION 'asking again in a demo with a second season did not return the season it was started in: %', v_again;
+    END IF;
     SELECT count(*) INTO v_n FROM public.audit_log
      WHERE organization_id = v_fall_org AND action = 'demo.started' AND metadata ->> 'season' = 'fall';
     IF v_n <> 1 THEN RAISE EXCEPTION 'the fall demo has % demo.started rows naming the fall, not 1', v_n; END IF;
-    RAISE NOTICE 'no choice is the % window (% to %); asking again for the other season returns the visitor''s own demo, in its own season; demo.started names the season',
+    RAISE NOTICE 'no choice is the % window (% to %); asking again for the other season returns the visitor''s own demo, in its own season, also with a second season started in it; demo.started names the season',
         w.season, w.season_start, w.season_end;
 
     -- ---- 5. a choice that is neither is refused ---------------------------------------------

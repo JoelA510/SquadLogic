@@ -176,7 +176,9 @@ replaces, `md5(replace(p.prosrc, E'\r', ''))`):
   existing smokes and every `regprocedure` literal stay as they are. The text overload has no default, so
   PostgREST never sees an ambiguous call.
 - A visitor who already has a live demo gets it back (`existing: true`) with its own `season`, whatever they
-  asked for now; the entry page says which.
+  asked for now; the entry page says which. That is the demo's **first season by creation** (`ORDER BY
+created_at, id`): an admin may start a next season in a demo, and a read with no order returns whichever
+  row the plan reaches first (found in review, below).
 - No table, column, policy, expiry or purge change. The revert restores the 20261110010000 bodies behind
   their md5 and drops the helper and the overload.
 
@@ -299,6 +301,23 @@ default 5 s timeout.
   8,088 slot-days too near sunset); the entry page not sending the choice (5 Vitest tests red, and the
   fall E2E scenario, which read "Spring season"). The other `M63` and `R63` plants are resolved by
   `PLANT_ANCHORS_ONLY=1` and were not run.
+- **Codex review of #689 (P2, comment 4438177460): the own-demo read had no order.** `start_demo_session`'s
+  "own live demo" branch read the visitor's season with no `ORDER BY`, so once the demo's admin had started a next
+  season (`admin_create_season_from`, which a demo admin may call) the repeat call could return the later one,
+  `season: null` and its dates. _Executed_ before the fix: a fall demo plus a second season named `Autumn 2028`
+  returned `{season: null, season_start: 2028-01-10}` at default planner settings (the planner reads the
+  `(organization_id, lower(name))` index, so the name decides), and with the second named `Winter` and the first
+  row rewritten (`admin_set_season_timezone`) a storage-order scan returned the same. Fixed in place in the
+  migration (`ORDER BY s.created_at, s.id LIMIT 1`, the order `useDemoSeason` reads in). Tests, each red before
+  the fix and green after: two cases in `demo_practice_schedule.sql` (one per plan; the second seasons are made
+  later by hand, since one test transaction shares one `now()`), the smoke's second-season check, and a Vitest case
+  for the mock, which had the same unordered `find` (`mockDemo.js`). The search of the rest of the demo path
+  (`start_demo_session`, `demo_seed.*`, `useDemo*`, `useDemoSeason`, `lib/demoSeasons.js`, the mock) found no other
+  read of `season_settings`; `demo_seed.league` is a one-row seed table read without an order here and by the
+  bodies before it, which is not this defect (the seed inserts exactly one row) and was left. One plant for the fix
+  (`M63 an existing demo's season is read without an order`, the smoke and 2 of the 55 assertions red): the
+  fourth real plant of this PR, past the three the brief allowed, because the first three were spent before the
+  finding arrived.
 - **Review of the change** (`/code-review`, medium; eight findings, six answered in the same PR, the fixes each with a test
   that fails with its fix reverted): the banner read an arbitrary season row (now the first by creation); the
   server's season and dates were parsed and unread (the page now says them once it has them); an ended demo

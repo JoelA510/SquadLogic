@@ -5212,7 +5212,10 @@ plant "M62 a completed season is not refused up front" "$M62" \
 #   - the `demo.started` row stops naming the season;
 #   - the fall runs twelve weeks: past sunset on the grid's 19:00 end from late September (the end-state vectors);
 #   - the default takes the window that ends last, not first (the end-state vectors);
-#   - the zero-argument function stops delegating to the default (the end-state check).
+#   - the zero-argument function stops delegating to the default (the end-state check);
+#   - run (review of #689, Codex P2): the visitor's own demo is read back without an order, so once its admin has
+#     started a next season the repeat call returns the later one (the smoke and 2 of the 55 assertions of
+#     supabase/tests/demo_practice_schedule.sql went red).
 plant "M63 the choice never reaches the rule" "$M63" \
   "      FROM demo_seed.season_window(p_season, (now() AT TIME ZONE v_tz)::date) w;" \
   "      FROM demo_seed.season_window(NULL, (now() AT TIME ZONE v_tz)::date) w;" \
@@ -5237,6 +5240,12 @@ plant "M63 the default is the window that ends last" "$M63" \
   "        IF season IS NULL OR v_end < season_end THEN" \
   "        IF season IS NULL OR v_end > season_end THEN" \
   "applying 20261114010000_demo_season_choice.sql"
+
+plant "M63 an existing demo's season is read without an order" "$M63" \
+  "              FROM public.season_settings s WHERE s.organization_id = v_org
+             ORDER BY s.created_at, s.id LIMIT 1;" \
+  "              FROM public.season_settings s WHERE s.organization_id = v_org;" \
+  "smoke 20261114010000"
 
 plant "M63 the zero-argument function stops delegating to the default" "$M63" \
   "    RETURN public.start_demo_session(NULL::text);" \

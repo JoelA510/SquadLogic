@@ -568,6 +568,26 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
       expect(data.season).toBe(demoSeasonWindow(null, demoToday(NOW)).season);
     });
 
+    it('returns the demo’s FIRST season by creation once its admin has started a next one', () => {
+      const db = {};
+      const ctx = anonymous();
+      const first = start(db, { ...ctx, params: { p_season: 'fall' } }).data;
+      const own = db.season_settings[0];
+      // created later, and listed first in the table (the server's read has no order of its own)
+      db.season_settings.unshift({
+        ...own,
+        id: 'a-later-season',
+        name: 'Autumn 2028',
+        season_label: null,
+        season_start: '2028-01-10',
+        season_end: '2028-03-26',
+        created_at: new Date(Date.parse(own.created_at) + 60_000).toISOString(),
+      });
+      const again = start(db, { ...ctx, params: { p_season: 'spring' } }).data;
+      expect(again).toEqual({ ...first, existing: true });
+      expect(again.season).toBe('fall');
+    });
+
     it('returns the visitor’s own demo in the season it was started in, whatever is asked now', () => {
       const db = {};
       const ctx = anonymous();

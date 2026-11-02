@@ -130,7 +130,15 @@ export function handleDemoRpc(
   const mine = live.find((org) => org.demo_owner === user.id);
   if (mine) {
     // Their own live demo, in the season it was started in, whatever is asked for now.
-    const own = (db.season_settings || []).find((entry) => entry.organization_id === mine.id);
+    // The demo's FIRST season by creation, as the server reads it: an admin may start a next season in a demo,
+    // and neither the order of the table nor of a lookup says which is the choice.
+    const own = (db.season_settings || [])
+      .filter((entry) => entry.organization_id === mine.id)
+      .sort(
+        (a, b) =>
+          String(a.created_at).localeCompare(String(b.created_at)) ||
+          String(a.id).localeCompare(String(b.id))
+      )[0];
     return {
       data: {
         organization_id: mine.id,

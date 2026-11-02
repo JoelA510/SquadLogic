@@ -29,7 +29,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(52);
+SELECT plan(55);
 
 INSERT INTO auth.users (id, email, raw_user_meta_data, aud, role, is_anonymous, created_at)
 VALUES
@@ -353,6 +353,57 @@ SELECT is(
           :'again_res'::jsonb ->> 'season_start'],
     ARRAY['true', 'fall', (SELECT id::text FROM t_ids WHERE name = 'fall'), :'fall_res'::jsonb ->> 'season_start'],
     'asking again, for the other season, returns the visitor''s own demo in the season it was started in');
+
+-- A demo's admin may start a next season from the demo's own (admin_create_season_from), and that season is not
+-- the choice: asking again still returns the season the demo was started in, the first by creation. The read
+-- must not depend on the plan: here the new season is named to sort before the first in the (organization, name)
+-- index the planner reads, and then the first row is rewritten and the table is scanned in storage order (the
+-- other plan the planner may pick). The new season is made later than the first by hand: every row of this test
+-- shares one transaction time, where in use they are separate transactions.
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT (public.admin_create_season_from(
+            (SELECT id FROM public.season_settings WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall')),
+            'Autumn ' || (extract(year FROM (:'fall_res'::jsonb ->> 'season_end')::date + 120))::int,
+            (extract(year FROM (:'fall_res'::jsonb ->> 'season_end')::date + 120))::int,
+            (:'fall_res'::jsonb ->> 'season_end')::date + 120,
+            (:'fall_res'::jsonb ->> 'season_end')::date + 200) ->> 'id')::uuid AS later_season \gset
+RESET role;
+UPDATE public.season_settings SET created_at = created_at + interval '1 minute' WHERE id = :'later_season';
+SELECT is(
+    (SELECT count(*)::int FROM public.season_settings WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall')),
+    2,
+    'control: the demo now has two seasons, the second one the admin started');
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT public.start_demo_session('spring')::text AS two_res \gset
+RESET role;
+SELECT is(
+    ARRAY[:'two_res'::jsonb ->> 'existing', :'two_res'::jsonb ->> 'season', :'two_res'::jsonb ->> 'season_start',
+          :'two_res'::jsonb ->> 'season_end'],
+    ARRAY['true', 'fall', :'fall_res'::jsonb ->> 'season_start', :'fall_res'::jsonb ->> 'season_end'],
+    'with a second season in the demo, asking again still returns the season it was started in, not the later one');
+-- Now the other plan: the second season is renamed to sort AFTER the first (so an index read finds the first),
+-- the first row is rewritten (so it is stored after the second), and the table is read in storage order.
+UPDATE public.season_settings SET name = 'Winter ' || (extract(year FROM (:'fall_res'::jsonb ->> 'season_end')::date + 120))::int
+ WHERE id = :'later_season';
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"aaaaaaaa-0000-4000-8000-0000000000c3","role":"authenticated","is_anonymous":true}';
+SELECT public.admin_set_season_timezone(
+    (SELECT id FROM t_ids WHERE name = 'fall'),
+    (SELECT id FROM public.season_settings WHERE organization_id = (SELECT id FROM t_ids WHERE name = 'fall') AND season_label = 'Fall'),
+    'America/Denver') IS NOT NULL AS rewritten \gset
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_bitmapscan = off;
+DISCARD PLANS;
+SELECT public.start_demo_session('spring')::text AS scan_res \gset
+RESET enable_indexscan;
+RESET enable_bitmapscan;
+RESET role;
+SELECT is(
+    ARRAY[:'scan_res'::jsonb ->> 'season', :'scan_res'::jsonb ->> 'season_start', :'scan_res'::jsonb ->> 'season_end'],
+    ARRAY['fall', :'fall_res'::jsonb ->> 'season_start', :'fall_res'::jsonb ->> 'season_end'],
+    'and the same when the second sorts after it, the first row was rewritten and the table is read in storage order');
 
 -- A choice that is neither is refused, and leaves nothing behind.
 SET LOCAL role = 'authenticated';

@@ -200,12 +200,15 @@ BEGIN
       FROM public.organizations o WHERE o.demo_owner = v_uid;
     IF FOUND THEN
         IF v_expires > now() THEN
-            -- Their own live demo, in the season it was started in, whatever was asked for now.
+            -- Their own live demo, in the season it was started in, whatever was asked for now. That is the
+            -- demo's FIRST season by creation: an admin may start a next season in a demo (admin_create_season_from),
+            -- and without an order this read returns whichever row the plan reaches first.
             SELECT jsonb_build_object(
                        'season', CASE WHEN s.season_label IN ('Fall', 'Spring') THEN lower(s.season_label) END,
                        'season_start', s.season_start, 'season_end', s.season_end)
               INTO v_chosen
-              FROM public.season_settings s WHERE s.organization_id = v_org;
+              FROM public.season_settings s WHERE s.organization_id = v_org
+             ORDER BY s.created_at, s.id LIMIT 1;
             RETURN jsonb_build_object('organization_id', v_org, 'expires_at', v_expires, 'existing', true)
                    || COALESCE(v_chosen, '{}'::jsonb);
         END IF;

@@ -9,8 +9,9 @@
 --      after, an anchor that falls on a Sunday; a choice that is neither fall nor spring is refused.
 --   3. A fall demo and a spring demo for two visitors: the season row (name, label, year, dates), every
 --      division, and every seeded practice carry the chosen window's dates; each season starts on a Monday,
---      the fall is six weeks and the spring the league's twelve; the two demos hold the same people, teams
---      and seeded practices (only the dates differ).
+--      the fall (since 20261115010000) is the Monday on or after 17 August to 31 October of that year and the
+--      spring the league's twelve weeks; the two demos hold the same people, teams and seeded practices (only
+--      the dates differ).
 --   4. No choice is the window the date falls in or the next to begin; asking again returns the visitor's
 --      own demo in the season it was started in, also once the admin has started a next season in it (named
 --      to sort before the first, the case a read without an order gets wrong); the `demo.started` row names
@@ -18,7 +19,9 @@
 --   5. A choice that is neither is refused for a visitor, before the lock, and leaves no demo behind.
 --
 -- Dates are relative to today in the league's zone wherever a demo is started; the rule is also run on fixed
--- dates, which it is given as arguments. Every id is generated and every name is the fixture's placeholder;
+-- dates, which it is given as arguments. **The fall's dates here are those of 20261115010000** (the smoke runs
+-- on the database built to head, where that migration has replaced the rule this one created); this file's
+-- first version held the six-week early fall. Every id is generated and every name is the fixture's placeholder;
 -- there is no PII.
 
 \set ON_ERROR_STOP on
@@ -70,14 +73,14 @@ BEGIN
     -- ---- 2. the rule ------------------------------------------------------------------
     SELECT count(*) INTO v_n FROM (VALUES
         ('spring', DATE '2026-11-01', 'spring', DATE '2027-03-22', DATE '2027-06-13'),
-        ('fall',   DATE '2026-11-01', 'fall',   DATE '2027-08-02', DATE '2027-09-12'),
+        ('fall',   DATE '2026-11-01', 'fall',   DATE '2027-08-23', DATE '2027-10-31'),
         (NULL,     DATE '2026-11-01', 'spring', DATE '2027-03-22', DATE '2027-06-13'),
-        ('fall',   DATE '2027-05-10', 'fall',   DATE '2027-08-02', DATE '2027-09-12'),
-        (NULL,     DATE '2027-06-14', 'fall',   DATE '2027-08-02', DATE '2027-09-12'),
-        (NULL,     DATE '2027-09-12', 'fall',   DATE '2027-08-02', DATE '2027-09-12'),
-        (NULL,     DATE '2027-09-13', 'spring', DATE '2028-03-27', DATE '2028-06-18'),
-        ('fall',   DATE '2027-09-13', 'fall',   DATE '2028-08-07', DATE '2028-09-17'),
-        ('fall',   DATE '2026-08-02', 'fall',   DATE '2026-08-03', DATE '2026-09-13'),
+        ('fall',   DATE '2027-05-10', 'fall',   DATE '2027-08-23', DATE '2027-10-31'),
+        (NULL,     DATE '2027-06-14', 'fall',   DATE '2027-08-23', DATE '2027-10-31'),
+        (NULL,     DATE '2027-10-31', 'fall',   DATE '2027-08-23', DATE '2027-10-31'),
+        (NULL,     DATE '2027-11-01', 'spring', DATE '2028-03-27', DATE '2028-06-18'),
+        ('fall',   DATE '2027-11-01', 'fall',   DATE '2028-08-21', DATE '2028-10-31'),
+        ('fall',   DATE '2026-08-02', 'fall',   DATE '2026-08-17', DATE '2026-10-31'),
         ('spring', DATE '2026-03-22', 'spring', DATE '2026-03-23', DATE '2026-06-14')
     ) v(choice, today, season, season_start, season_end)
     CROSS JOIN LATERAL demo_seed.season_window(v.choice, v.today) x
@@ -115,13 +118,19 @@ BEGIN
         RAISE EXCEPTION 'the calls did not return a new fall and a new spring demo: % and %', v_fall, v_spring;
     END IF;
 
-    FOR w IN SELECT * FROM (VALUES (v_fall_org, v_fall, 'Fall', 42), (v_spring_org, v_spring, 'Spring', 84)) x(org, res, label, days) LOOP
+    -- days: the spring's length in days; NULL for the fall, which ends on 31 October (20261115010000).
+    FOR w IN SELECT * FROM (VALUES (v_fall_org, v_fall, 'Fall', NULL::integer), (v_spring_org, v_spring, 'Spring', 84)) x(org, res, label, days) LOOP
         SELECT count(*) INTO v_n FROM public.season_settings s
          WHERE s.organization_id = w.org AND s.season_label = w.label
            AND s.name = w.label || ' ' || extract(year FROM s.season_start)::integer
            AND s.season_year = extract(year FROM s.season_start)::integer
            AND s.season_start::text = w.res ->> 'season_start' AND s.season_end::text = w.res ->> 'season_end'
-           AND extract(isodow FROM s.season_start) = 1 AND s.season_end - s.season_start + 1 = w.days
+           AND extract(isodow FROM s.season_start) = 1
+           AND (CASE WHEN w.days IS NULL
+                     THEN s.season_end = make_date(extract(year FROM s.season_start)::integer, 10, 31)
+                          AND s.season_start BETWEEN make_date(extract(year FROM s.season_start)::integer, 8, 17)
+                                                 AND make_date(extract(year FROM s.season_start)::integer, 8, 23)
+                     ELSE s.season_end - s.season_start + 1 = w.days END)
            AND s.season_end >= v_today AND s.season_end <= v_today + 380;
         IF v_n <> 1 THEN RAISE EXCEPTION 'the % demo''s season row is not the chosen window as returned (%)', w.label, w.res; END IF;
         SELECT count(*) INTO v_n FROM public.divisions d JOIN public.season_settings s ON s.id = d.season_settings_id
@@ -148,7 +157,7 @@ BEGIN
        OR (SELECT count(*) FROM public.teams WHERE organization_id = v_fall_org) <> 128 THEN
         RAISE EXCEPTION 'the fall and the spring demo are not the same 128-team league';
     END IF;
-    RAISE NOTICE 'a fall demo (%) and a spring demo (%): the season, its 21 divisions and 132 seeded practices carry the window, each starts on a Monday, six weeks and twelve; the same 128 teams and people',
+    RAISE NOTICE 'a fall demo (%) and a spring demo (%): the season, its 21 divisions and 132 seeded practices carry the window, each starts on a Monday, the fall to 31 October and the spring twelve weeks; the same 128 teams and people',
         v_fall ->> 'season_start', v_spring ->> 'season_start';
 
     -- ---- 4. no choice, asking again, the audit row ---------------------------------------

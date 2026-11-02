@@ -272,7 +272,8 @@ describe('startDemoSession (the RPC result is checked, not trusted)', () => {
 });
 
 describe("the mock client's start_demo_session (the twin of migration 20261030010000)", () => {
-  const NOW = Date.parse('2026-10-26T12:00:00Z');
+  // 2 Nov 2026: the fall of 2026 (to 31 October) is over, so the spring of 2027 and the fall of 2027 are next
+  const NOW = Date.parse('2026-11-02T12:00:00Z');
   let n = 0;
   const mockId = (prefix = '') => `${prefix}id-${++n}`;
   const anonymous = () => ({ session: makeAnonymousSession(mockId) });
@@ -453,11 +454,11 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     expect(db.organizations ?? []).toHaveLength(0);
   });
 
-  describe('the season choice (migration 20261114010000)', () => {
+  describe('the season choice (migrations 20261114010000 and, for the fall, 20261115010000)', () => {
     const seasonOf = (db, orgId) => db.season_settings.find((s) => s.organization_id === orgId);
 
     it.each([
-      ['fall', 'Fall', 'Fall 2027', '2027-08-02', '2027-09-12', 42],
+      ['fall', 'Fall', 'Fall 2027', '2027-08-23', '2027-10-31', 70],
       ['spring', 'Spring', 'Spring 2027', '2027-03-22', '2027-06-13', 84],
     ])(
       'dates a demo in the %s: the season, its divisions and every practice',
@@ -496,20 +497,31 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     );
 
     it('with no choice dates the demo in the window the date falls in, or else the next to begin', () => {
-      // 26 Oct 2026: the spring of 2027 is next
+      // 2 Nov 2026: the fall has just ended (31 October), the spring of 2027 is next
       const autumn = start({}, anonymous());
       expect(autumn.data).toMatchObject({ season: 'spring', season_start: '2027-03-22' });
-      // in the middle of the fall window
-      const db = {};
-      const summer = handleDemoRpc(db, 'start_demo_session', {
+      // 26 Oct 2026, a week before it ends: the fall in progress, dated from its own Monday of 17 August
+      const lateFall = handleDemoRpc({}, 'start_demo_session', {
         ...anonymous(),
         mockId,
-        now: Date.parse('2027-08-20T12:00:00Z'),
+        now: Date.parse('2026-10-26T12:00:00Z'),
       });
-      expect(summer.data).toMatchObject({
+      expect(lateFall.data).toMatchObject({
         season: 'fall',
-        season_start: '2027-08-02',
-        season_end: '2027-09-12',
+        season_start: '2026-08-17',
+        season_end: '2026-10-31',
+      });
+      // in the middle of the fall window (it runs to 31 October)
+      const db = {};
+      const autumnDay = handleDemoRpc(db, 'start_demo_session', {
+        ...anonymous(),
+        mockId,
+        now: Date.parse('2027-09-20T12:00:00Z'),
+      });
+      expect(autumnDay.data).toMatchObject({
+        season: 'fall',
+        season_start: '2027-08-23',
+        season_end: '2027-10-31',
       });
       // and the same call made in the middle of the spring window is the spring, in progress
       const may = handleDemoRpc({}, 'start_demo_session', {
@@ -521,22 +533,22 @@ describe("the mock client's start_demo_session (the twin of migration 2026103001
     });
 
     it('takes the day in the league’s zone, not UTC, for the instance it chooses', () => {
-      // 02:00 UTC on 13 Sep 2027 is still the evening of the 12th (the fall's last day) in Pacific time
+      // 02:00 UTC on 1 Nov 2027 is still the evening of 31 October (the fall's last day) in Pacific time
       const evening = handleDemoRpc({}, 'start_demo_session', {
         ...anonymous(),
         mockId,
-        now: Date.parse('2027-09-13T02:00:00Z'),
+        now: Date.parse('2027-11-01T02:00:00Z'),
         params: { p_season: 'fall' },
       });
-      expect(evening.data.season_start).toBe('2027-08-02');
-      expect(demoToday(Date.parse('2027-09-13T02:00:00Z'))).toBe('2027-09-12');
+      expect(evening.data.season_start).toBe('2027-08-23');
+      expect(demoToday(Date.parse('2027-11-01T02:00:00Z'))).toBe('2027-10-31');
       const next = handleDemoRpc({}, 'start_demo_session', {
         ...anonymous(),
         mockId,
-        now: Date.parse('2027-09-13T12:00:00Z'),
+        now: Date.parse('2027-11-01T12:00:00Z'),
         params: { p_season: 'fall' },
       });
-      expect(next.data.season_start).toBe('2028-08-07');
+      expect(next.data.season_start).toBe('2028-08-21');
     });
 
     it.each([['summer'], ['Fall'], [' fall'], [''], [5], [['fall']]])(

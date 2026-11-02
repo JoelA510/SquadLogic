@@ -886,7 +886,7 @@ SELECT is(
     'and the live count is ten, not eleven'
 );
 
--- ── 11. The season rule (migration 20261114010000) ─────────────────────────
+-- ── 11. The season rule (migrations 20261114010000 and, for the fall, 20261115010000) ──────────────
 -- demo_seed.season_window() dates a demo from the visitor's choice. tests/demoSeasons.test.js checks the
 -- JavaScript twin of the rule against exactly this table (and that this file embeds it), so the two
 -- implementations are held to one set of vectors. The dates are explicit arguments: the function is
@@ -895,29 +895,34 @@ CREATE TEMP TABLE t_season_vectors (choice text, today date, season text, season
 -- BEGIN season vectors (tests/demoSeasons.test.js; do not edit)
 INSERT INTO t_season_vectors VALUES
     ('spring', '2026-11-01', 'spring', '2027-03-22', '2027-06-13'),
-    ('fall', '2026-11-01', 'fall', '2027-08-02', '2027-09-12'),
+    ('fall', '2026-11-01', 'fall', '2027-08-23', '2027-10-31'),
     (NULL, '2026-11-01', 'spring', '2027-03-22', '2027-06-13'),
-    ('fall', '2027-05-10', 'fall', '2027-08-02', '2027-09-12'),
+    ('fall', '2027-05-10', 'fall', '2027-08-23', '2027-10-31'),
     ('spring', '2027-05-10', 'spring', '2027-03-22', '2027-06-13'),
     (NULL, '2027-05-10', 'spring', '2027-03-22', '2027-06-13'),
-    (NULL, '2027-06-14', 'fall', '2027-08-02', '2027-09-12'),
+    (NULL, '2027-06-14', 'fall', '2027-08-23', '2027-10-31'),
     ('spring', '2027-06-13', 'spring', '2027-03-22', '2027-06-13'),
     ('spring', '2027-06-14', 'spring', '2028-03-27', '2028-06-18'),
-    (NULL, '2027-09-12', 'fall', '2027-08-02', '2027-09-12'),
-    (NULL, '2027-09-13', 'spring', '2028-03-27', '2028-06-18'),
-    ('fall', '2027-09-13', 'fall', '2028-08-07', '2028-09-17'),
+    (NULL, '2027-10-31', 'fall', '2027-08-23', '2027-10-31'),
+    (NULL, '2027-11-01', 'spring', '2028-03-27', '2028-06-18'),
+    ('fall', '2027-11-01', 'fall', '2028-08-21', '2028-10-31'),
     (NULL, '2027-12-31', 'spring', '2028-03-27', '2028-06-18'),
     (NULL, '2028-01-01', 'spring', '2028-03-27', '2028-06-18'),
     ('spring', '2028-02-29', 'spring', '2028-03-27', '2028-06-18'),
-    (NULL, '2027-08-01', 'fall', '2027-08-02', '2027-09-12'),
-    ('fall', '2026-08-02', 'fall', '2026-08-03', '2026-09-13'),
+    (NULL, '2027-08-01', 'fall', '2027-08-23', '2027-10-31'),
+    ('fall', '2026-08-02', 'fall', '2026-08-17', '2026-10-31'),
     ('spring', '2026-03-22', 'spring', '2026-03-23', '2026-06-14'),
     (NULL, '2026-03-22', 'spring', '2026-03-23', '2026-06-14'),
-    ('fall', '2028-12-31', 'fall', '2029-08-06', '2029-09-16'),
+    ('fall', '2028-12-31', 'fall', '2029-08-20', '2029-10-31'),
     ('spring', '2029-03-22', 'spring', '2029-03-26', '2029-06-17'),
-    ('fall', '2027-08-02', 'fall', '2027-08-02', '2027-09-12'),
+    ('fall', '2027-08-02', 'fall', '2027-08-23', '2027-10-31'),
     (NULL, '2027-03-21', 'spring', '2027-03-22', '2027-06-13'),
-    (NULL, '2027-03-22', 'spring', '2027-03-22', '2027-06-13');
+    (NULL, '2027-03-22', 'spring', '2027-03-22', '2027-06-13'),
+    ('fall', '2026-08-17', 'fall', '2026-08-17', '2026-10-31'),
+    ('fall', '2026-10-31', 'fall', '2026-08-17', '2026-10-31'),
+    (NULL, '2026-10-31', 'fall', '2026-08-17', '2026-10-31'),
+    ('fall', '2027-08-17', 'fall', '2027-08-23', '2027-10-31'),
+    ('fall', '2028-10-31', 'fall', '2028-08-21', '2028-10-31');
 -- END season vectors
 SELECT is(
     (SELECT count(*)::int FROM t_season_vectors v
@@ -927,16 +932,16 @@ SELECT is(
     'demo_seed.season_window gives every vector''s window');
 SELECT is(
     (SELECT count(*)::int FROM t_season_vectors),
-    24,
-    'control: the table of vectors was read (24 of them)');
+    29,
+    'control: the table of vectors was read (29 of them)');
 SELECT is(
     (SELECT count(*)::int
        FROM (SELECT * FROM t_season_vectors
-             UNION ALL SELECT 'fall', DATE '2027-09-13', 'fall', DATE '2027-08-02', DATE '2027-09-12') v
+             UNION ALL SELECT 'fall', DATE '2027-11-01', 'fall', DATE '2027-08-23', DATE '2027-10-31') v
        CROSS JOIN LATERAL demo_seed.season_window(v.choice, v.today) w
       WHERE (w.season, w.season_start, w.season_end) IS DISTINCT FROM (v.season, v.season_start, v.season_end)),
     1,
-    'control: the comparison names a wrong vector (a fall chosen after the window has ended is next year''s)');
+    'control: the comparison names a wrong vector (a fall chosen the day after it ended, 1 November, is next year''s)');
 SELECT throws_ok(
     $$SELECT * FROM demo_seed.season_window('summer', DATE '2027-05-10')$$,
     '22023', 'Unknown demo season: choose fall or spring',
@@ -963,9 +968,9 @@ SELECT is(
     ARRAY[70],
     'the spring''s length is the league''s season_weeks (the field is read)');
 SELECT is(
-    (SELECT array[(w.season_end - w.season_start + 1)::int] FROM demo_seed.season_window('fall', DATE '2027-01-01') w),
-    ARRAY[42],
-    'and the fall''s is not: six weeks, the early fall');
+    (SELECT array[(w.season_end - w.season_start + 1)::int] FROM demo_seed.season_window('fall', DATE '2026-01-01') w),
+    ARRAY[76],
+    'and the fall''s is not: it ends on 31 October (2026: Monday 17 August to Saturday 31 October, 76 days), whatever the weeks');
 UPDATE demo_seed.league SET season_weeks = 12;
 
 SELECT * FROM finish();

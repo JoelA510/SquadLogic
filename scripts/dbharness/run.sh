@@ -1338,7 +1338,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2131,6 +2131,32 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('eb000000-0000-4000-8000-0000000000c1','eb000000-0000-4000-8000-00000000000c','2026 Season','2026 Season'),
                 ('eb000000-0000-4000-8000-0000000000d1','eb000000-0000-4000-8000-00000000000d','Fall 2027','Fall'),
                 ('eb000000-0000-4000-8000-0000000000e1','eb000000-0000-4000-8000-00000000000e','Fall 2027','Fall');" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the demo organizations and seasons the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261115010000's revert leaves the demos dated in the fall that runs to 31 October to expire**, so its
+  # warning is the check: it counts the LIVE demo organizations whose season is labelled Fall and ends on
+  # 31 October. FIVE organizations, every figure distinct: two live demos in such a fall (the figure, 2), one
+  # live demo from the early fall (a Fall ending 12 September: counting every live Fall prints 3), one ENDED
+  # demo in a fall to 31 October and a REAL organization whose own season is called Fall and ends on 31
+  # October (counting every such season prints 4), and every organization is 5. Inserted as the table owner;
+  # every name is synthetic.
+  if [ "$id" = "20261115010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug, demo_expires_at) VALUES
+                ('ec000000-0000-4000-8000-00000000000a','Fall Demo One','revert-demo-fall-a', now() + interval '20 minutes'),
+                ('ec000000-0000-4000-8000-00000000000b','Fall Demo Two','revert-demo-fall-b', now() + interval '20 minutes'),
+                ('ec000000-0000-4000-8000-00000000000c','Fall Demo Early','revert-demo-fall-c', now() + interval '20 minutes'),
+                ('ec000000-0000-4000-8000-00000000000d','Fall Demo Ended','revert-demo-fall-d', now() - interval '5 minutes'),
+                ('ec000000-0000-4000-8000-00000000000e','Fall Real Org','revert-demo-fall-e', NULL);
+              INSERT INTO public.season_settings (id, organization_id, name, season_label, season_start, season_end) VALUES
+                ('ec000000-0000-4000-8000-0000000000a1','ec000000-0000-4000-8000-00000000000a','Fall 2027','Fall','2027-08-23','2027-10-31'),
+                ('ec000000-0000-4000-8000-0000000000b1','ec000000-0000-4000-8000-00000000000b','Fall 2028','Fall','2028-08-21','2028-10-31'),
+                ('ec000000-0000-4000-8000-0000000000c1','ec000000-0000-4000-8000-00000000000c','Fall 2027','Fall','2027-08-02','2027-09-12'),
+                ('ec000000-0000-4000-8000-0000000000d1','ec000000-0000-4000-8000-00000000000d','Fall 2027','Fall','2027-08-23','2027-10-31'),
+                ('ec000000-0000-4000-8000-0000000000e1','ec000000-0000-4000-8000-00000000000e','Fall 2027','Fall','2027-08-23','2027-10-31');" \
        >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the demo organizations and seasons the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
@@ -3743,6 +3769,35 @@ PROBE
       else
         echo "FAIL revert ${id}: the demo-season revert did not restore the demo start or left the choosing function or the season rule"
         dump 10 $SCRATCH/harness_demoseason; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261115010000" ]; then
+      # The seed planted 5 organizations: 2 live demos in a fall to 31 October (the figure), a live demo in the
+      # early fall, an ended demo and a real organization in a fall to 31 October.
+      if ! grep -q 'this revert leaves 2 live demo organization(s) dated in a fall that runs to 31 October to expire' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 2 live demos in a fall to 31 October among 5 organizations, and the revert did not warn with that figure"
+        STATUS=1
+      fi
+      # What the revert must leave: the season rule as 20261114010000 created it (md5 of its body without
+      # carriage returns, STABLE, an empty search path, its comment), dating the fall as the early fall; the
+      # choosing function untouched and still naming the rule; the planted organizations.
+      if psql_cmd "SELECT 'DEMOFALL-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.organizations WHERE slug LIKE 'revert-demo-fall-%') <> 5 THEN 'seed-lost'
+               WHEN to_regprocedure('public.start_demo_session(text)') IS NULL
+                 OR (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.start_demo_session(text)')) !~ 'demo_seed\.season_window' THEN 'choice-lost'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.provolatile::text || ':' || array_to_string(p.proconfig, ',')
+                       FROM pg_proc p WHERE p.oid = 'demo_seed.season_window(text, date)'::regprocedure)
+                    <> ('f295e02cdf5917c7ccbf012e356a8a8a:s:search_path=' || chr(34) || chr(34)) THEN 'body-wrong'
+               WHEN (SELECT w.season_start || ' ' || w.season_end FROM demo_seed.season_window('fall', DATE '2027-01-01') w)
+                    <> '2027-08-02 2027-09-12' THEN 'rule-wrong'
+               WHEN (SELECT obj_description('demo_seed.season_window(text, date)'::regprocedure, 'pg_proc'))
+                    NOT LIKE '%fall (the Monday on or after 2 August, 6 weeks)%' THEN 'comment-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_demofall 2>&1 && grep -q 'DEMOFALL-VERDICT:restored' $SCRATCH/harness_demofall; then
+        echo "  revert ${id}: the demo-fall revert restores the season rule as at 20261114010000 (the early fall, its body and comment), leaves the choosing function and keeps the organizations"
+      else
+        echo "FAIL revert ${id}: the demo-fall revert did not restore the season rule as at 20261114010000"
+        dump 10 $SCRATCH/harness_demofall; STATUS=1
       fi
     fi
     if [ "$id" = "20261112010000" ]; then

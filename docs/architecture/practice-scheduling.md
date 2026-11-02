@@ -106,6 +106,12 @@ the Edge counterpart of core `practice/daylight.js`:
   sunset and is never read as legal, and "refusal would break configs that users may otherwise stick with". The
   repair no longer makes a series TIME TBD for daylight (`past-sunset` and `sunset-unknown` stay for rows saved
   before); a flag does not change the price (D11). The panel shows each flag on its row and in the enact dialog.
+- **Past sunset is a compromise, by label too (owner, 2026-11-02).** "Relabel the past-sunset constraint as a
+  compromise for both practice and game." In core, `PRACTICE_PAST_SUNSET` is a `compromise` finding (it was
+  `blocking`), `evaluatePracticeDaylight()` reports a past-sunset practice as `compromised` (not `rejected`), and the
+  `practice-daylight` claim is `soft` with a placeholder weight of 1 and a `history` entry for the retype. That is the
+  label for what the Edge pass and the repair already did; the rule and every number are unchanged. The game claim
+  `sunset-margin` is not changed here; the owner approved the same relabel for it as a separate change (`docs/changes/2026-11-02-sunset-compromise.md`).
 
 ## Practices per division (Phase D PR B)
 

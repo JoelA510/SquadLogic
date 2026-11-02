@@ -492,26 +492,34 @@ export const SEASON_2026_PRACTICE_DAYLIGHT_CONSTRAINT = Object.freeze({
   id: PRACTICE_DAYLIGHT_CONSTRAINT_ID,
   policy: 'practice-daylight',
   name: 'Unlit practices end by sunset',
-  type: CONSTRAINT_TYPE.HARD,
+  type: CONSTRAINT_TYPE.SOFT,
   scope: GLOBAL,
   parameters: { marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES },
   restrictiveDirection: 'higher',
   rationale:
-    'On unlit or undeclared ground a practice must end at or before sunset (floor of the minute). The civil twilight after sunset is the teardown window for equipment, not practice time; games keep their own fifteen-minute margin.',
+    'On unlit or undeclared ground a practice should end at or before sunset (floor of the minute). The civil twilight after sunset is the teardown window for equipment, not practice time; games keep their own fifteen-minute margin. A practice that would run past it is kept and flagged for the admin to decide, never refused: coaches and organisations may accept conditions the app cannot see.',
   source: {
     setBy: 'operator',
     setAt: '2026-09-27',
     reference:
       'docs/PHASE_8_9_PLAN.md — operator ruling 2026-09-27 ("teams don\'t practice after sunset at unlit fields, and the right margin is sunset"); decisions D1, D2, D5, D6',
-    note: 'enforced in core evaluation by practice/daylight.js over materialised occurrences. Not enforced by the core practiceScheduling.js or autoScheduler.js, which do not call it: the live practice scheduler is the Deno auto-scheduler, whose daylight post-pass (8.9 PR 6) judges the placements a run produces and FLAGS, never changes or blocks, each one with a date past sunset (owner, 2026-10-27) and each one whose sunset is unknown, an unlit venue with no coordinates (D4), and reports, never changes, locked rows past sunset. practice/repair.js (8.9 PR 7) likewise keeps every re-home candidate and flags it, past sunset (owner, 2026-10-27) or with an unknown sunset (owner, 2026-11-02), for the admin to decide: judged in that module and shown by the recommendation panel (8.6 3b PRs 9-11); an unknown sunset is never read as legal and never refused, and a flag does not change the price (D11). The HARD type above is the operator ruling of 2026-09-27; since 2026-10-27 no path blocks on it, so the claim is enforced as a flag, not a refusal. The season adapts through practice/durationPhases.js (8.9 PR 5): duration phases, hold-start and cascade compression, the DST survival report. Those report and propose; cascade proposals are 8.8 change-log entries and are never applied. Optimising toward surviving slots is declared, not optimised (D11): no durations, starts or nights are chosen to maximise survivors',
+    note: 'enforced in core evaluation by practice/daylight.js over materialised occurrences. Not enforced by the core practiceScheduling.js or autoScheduler.js, which do not call it: the live practice scheduler is the Deno auto-scheduler, whose daylight post-pass (8.9 PR 6) judges the placements a run produces and FLAGS, never changes or blocks, each one with a date past sunset (owner, 2026-10-27) and each one whose sunset is unknown, an unlit venue with no coordinates (D4), and reports, never changes, locked rows past sunset. practice/repair.js (8.9 PR 7) likewise keeps every re-home candidate and flags it, past sunset (owner, 2026-10-27) or with an unknown sunset (owner, 2026-11-02), for the admin to decide: judged in that module and shown by the recommendation panel (8.6 3b PRs 9-11); an unknown sunset is never read as legal and never refused, and a flag does not change the price (D11). The claim was HARD (the operator ruling of 2026-09-27, kept in history) and is SOFT since the owner decision of 2026-11-02 ("Relabel the past-sunset constraint as a compromise for both practice and game"): PRACTICE_PAST_SUNSET is a compromise finding, not a block, which is what the behaviour has been since 2026-10-27, so the claim is enforced as a flag, not a refusal. The weight (1) is a placeholder that nobody has stated and that changes no result: severities come from the type. The game claim sunset-margin is not changed by this; the owner approved the same relabel for it (2026-11-02), as a separate change. The season adapts through practice/durationPhases.js (8.9 PR 5): duration phases, hold-start and cascade compression, the DST survival report. Those report and propose; cascade proposals are 8.8 change-log entries and are never applied. Optimising toward surviving slots is declared, not optimised (D11): no durations, starts or nights are chosen to maximise survivors',
   },
   effectiveFrom: null,
   effectiveTo: null,
   enforcement: CONSTRAINT_ENFORCEMENT.REASON_CODES,
   reasonCodes: [AVAILABILITY_REASON.PRACTICE_PAST_SUNSET],
-  weight: null,
+  weight: 1,
   waivable: false,
-  history: [],
+  history: [
+    {
+      from: CONSTRAINT_TYPE.HARD,
+      to: CONSTRAINT_TYPE.SOFT,
+      at: '2026-11-02',
+      by: 'owner',
+      note: '"Relabel the past-sunset constraint as a compromise for both practice and game." For practices the behaviour was already a flag (2026-10-27, 2026-11-02); the label now says so. The weight 1 is a placeholder nobody stated (docs/changes/2026-11-02-sunset-compromise.md)',
+    },
+  ],
 });
 
 /**

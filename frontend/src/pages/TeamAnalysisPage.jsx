@@ -987,6 +987,10 @@ export default function TeamAnalysisPage() {
   const [placementAnnouncement, setPlacementAnnouncement] = useState('');
   const [stagedReview, setStagedReview] = useState(null);
   const [divisionRows, setDivisionRows] = useState(null);
+  // Whether `divisionRows` is what the season's divisions read returned. It is `[]` while nothing was
+  // read as well (no season yet, or the read failed: `divisionSettingsError` says so), so `[]` alone
+  // cannot tell a season with no divisions from a read that gave none. Only a read that worked sets this.
+  const [divisionsRead, setDivisionsRead] = useState(false);
   // The season's programs (E2), read to group the overview. Empty before the migration, when the
   // read fails, or for a league that never made one: the overview is then a flat list.
   const [seasonPrograms, setSeasonPrograms] = useState([]);
@@ -1066,11 +1070,13 @@ export default function TeamAnalysisPage() {
   const cutoffMonthSetting = currentSeasonSetting?.age_cutoff_month;
   const cutoffDaySetting = currentSeasonSetting?.age_cutoff_day;
   // The registrants no division can hold are seated on no team, as the waitlisted are, so the
-  // advice leaves them out too. Nobody is counted as not eligible until the season's divisions are
-  // read (`divisionRows` is null while they load, and if the read fails): the advice is then what
-  // it was.
+  // advice leaves them out too. Nobody is counted as not eligible until the season's divisions have
+  // been read (`divisionsRead`: not while they load, not when the read failed, not with no season):
+  // without their saved age bands a band is guessed from each division's name, and a guess must not
+  // decide who is left out. A read that worked and returned no divisions is still judged by the names,
+  // as generation judges it. The advice is what it was until then.
   const notEligibleRows = useMemo(() => {
-    if (!divisionRows || importedPlayerRows.length === 0) return NO_NOT_ELIGIBLE_ROWS;
+    if (!divisionsRead || importedPlayerRows.length === 0) return NO_NOT_ELIGIBLE_ROWS;
     const { divisionDescriptors } = buildDivisionDescriptors({
       programs: derivePrograms(importedPlayerRows),
       divisionRows,
@@ -1087,6 +1093,7 @@ export default function TeamAnalysisPage() {
       cutoffDay: cutoffDaySetting,
     });
   }, [
+    divisionsRead,
     divisionRows,
     importedPlayerRows,
     durablePlayers,
@@ -1263,11 +1270,13 @@ export default function TeamAnalysisPage() {
     const fetchDivisionRows = async () => {
       if (!currentOrganization?.id || !currentSeasonSetting?.id) {
         setDivisionRows([]);
+        setDivisionsRead(false);
         setDivisionSettingsError(null);
         return;
       }
 
       setDivisionRows(null);
+      setDivisionsRead(false);
       setDivisionSettingsError(null);
       const readDivisions = (columns) =>
         supabase
@@ -1300,11 +1309,13 @@ export default function TeamAnalysisPage() {
       if (cancelled) return;
       if (error) {
         setDivisionRows([]);
+        setDivisionsRead(false);
         setDivisionSettingsError(error.message || 'Could not load division settings.');
         return;
       }
 
       setDivisionRows(data || []);
+      setDivisionsRead(true);
       setDivisionSettingsError(null);
     };
 

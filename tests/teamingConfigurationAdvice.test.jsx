@@ -88,6 +88,8 @@ const page = vi.hoisted(() => ({
   playerReads: 0,
   /** @type {null | Promise<void>} while set, the `divisions` read waits for it */
   divisionsGate: null,
+  /** @type {any} the error the `divisions` read returns */
+  divisionsError: null,
   /** @type {any} the organization's stored feature flags, parsed by the schema */
   flags: {},
 }));
@@ -138,10 +140,11 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
             : { data: page.players, error: null }
         );
       }
-      const chain = createChainMock({
-        data: table === 'divisions' ? page.divisions : [],
-        error: null,
-      });
+      const chain = createChainMock(
+        table === 'divisions' && page.divisionsError
+          ? { data: null, error: page.divisionsError }
+          : { data: table === 'divisions' ? page.divisions : [], error: null }
+      );
       if (table === 'divisions' && page.divisionsGate) {
         // Held back until the test lets the season's divisions arrive.
         const gate = page.divisionsGate;
@@ -234,7 +237,11 @@ const overviewRow = (program) =>
   /** @type {HTMLElement} */ (screen.getByRole('button', { name: program }).closest('tr'));
 /** A cell of that row, by its column header. */
 function overviewCell(program, header) {
-  const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
+  // Only the overview's own headers: a banner above it can carry a table of its own.
+  const table = screen.getByRole('table', { name: 'Division Overview' });
+  const headers = within(table)
+    .getAllByRole('columnheader')
+    .map((th) => th.textContent);
   return within(overviewRow(program)).getAllByRole('cell')[headers.indexOf(header)];
 }
 
@@ -583,6 +590,7 @@ describe('The players no division can hold are left out of the advice (data foll
     page.playersError = null;
     page.playerReads = 0;
     page.divisionsGate = null;
+    page.divisionsError = null;
     page.flags = {};
     sessionStorage.clear();
   };
@@ -777,6 +785,40 @@ describe('The players no division can hold are left out of the advice (data foll
     await waitFor(() =>
       expect(overviewCell('U10', 'Players')).toHaveTextContent(/^24\s*6 not eligible$/)
     );
+  });
+
+  it('leaves nobody out when the season\u2019s divisions cannot be read, whatever a name would imply', async () => {
+    // The read is refused. The saved band (U10 holds 9 to 10) is unknown, and a band guessed from the
+    // name "U10" is 10 alone, which would call every 9-year-old too young and the whole division "None
+    // eligible". A failed read is not an empty season: the advice is what it was before this change.
+    page.divisionsError = { message: 'permission denied for table divisions', code: '42501' };
+    page.rows = importRows('U10', 30, () => ({ natural_age: 9 }));
+    page.divisions = [U10()];
+    await renderPage();
+
+    expect(await screen.findByText(/permission denied for table divisions/)).toBeInTheDocument();
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    expect(overviewCell('U10', 'Status')).not.toHaveTextContent('None eligible');
+    expect(screen.queryByText(/not eligible/)).toBeNull();
+  });
+
+  it('still judges by the name when the read succeeds and the season has no divisions', async () => {
+    // An empty season is a read that worked: a division with no saved row is held to the band its name
+    // gives (U10 is 10), as generation holds it. Thirty registered: six aged 14, whom nothing holds, and
+    // twenty-four aged 10.
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? TOO_OLD : 10 }));
+    page.divisions = [];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players (6 not eligible for the division are not counted)'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^24\s*6 not eligible$/);
   });
 
   it('falls back to the file when the stored players cannot be read, and logs it', async () => {

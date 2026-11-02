@@ -214,8 +214,13 @@ Adopted for the not-eligible:
   time, as generation's own read is. **This is the new cost:** F1 made no request for a league with the
   option off; this one makes the page's read for everyone. A read that fails is logged, and the file's
   own columns are used meanwhile; generation still re-reads and still stops on a refused read.
-- Until the season's divisions are read (`divisionRows` is `null`: loading, or the read failed), nobody
-  is counted as not eligible, so the advice is what it was; once they arrive it narrows.
+- Until a read of the season's divisions has worked (`divisionsRead`, set only by a successful read:
+  not while they load, not when the read failed, not with no season), nobody is counted as not
+  eligible, so the advice is what it was; once they arrive it narrows. A read that worked and returned
+  no divisions is still judged, by the band each division's name gives, as generation judges it. (The
+  first build keyed this on `divisionRows` alone, which the page sets to `[]` after a failed read to keep
+  rendering: a failed read then looked like a season with no divisions, lost the saved age bands, and
+  called a U10 held to ages 9 to 10 an age-10-only division. Review of #696; fixed in its own commit.)
 
 ### Options considered
 
@@ -259,8 +264,9 @@ every expected figure worked out from the import and the limits, never read back
   band, though the file's is inside, is not counted.
 - A row both waitlisted and not eligible is counted once, as not eligible; the three counts add up.
 - A program whose registrants are all not eligible advises no team and reads `None eligible`.
-- The divisions not yet read: nobody is left out, and the advice is what it was; a refused `players`
-  read falls back to the file and logs.
+- The divisions not yet read, or refused: nobody is left out, and the advice is what it was; a read that
+  worked with no divisions is judged by the names; a refused `players` read falls back to the file and
+  logs.
 - An option-off league now reads the stored players once (the F1 test that pinned "reads nothing new"
   is changed to say so, and still counts everyone when nobody is waitlisted or ineligible).
 - The sentence and the badge for each combination.
@@ -320,3 +326,19 @@ _Executed_ unless marked otherwise; the head the numbers are for is the commit t
 E2E; the CI pgTAP job on the project's PostgreSQL 17 (the migration's check reads `pg_index`, `pg_class`,
 `pg_am`, `pg_attribute` and `pg_opclass` columns present from PostgreSQL 12 to 17; statically reviewed);
 the production deploy; and any run against production beyond the read-only `SELECT`s listed above.
+
+### Review round 1 (the divisions read)
+
+A review of #696 found that the exclusion still ran after a failed read of the season's divisions:
+`fetchDivisionRows` sets `divisionRows` to `[]` on an error (so the page renders and `divisionSettingsError`
+blocks Generate and Save Rules), and the first guard only skipped `null`. Verified by a test that failed
+first: with the read refused, 30 nine-year-olds in a U10 saved as ages 9 to 10 were called not eligible (the
+name "U10" gives the band 10 alone) and the division read `None eligible` instead of 3 teams. Every consumer
+of `divisionRows` was searched: generation and the rules save cannot run in that state (the validation error
+disables both), the program grouping and `destinationPrograms` treat `[]` as nothing to group, and only the
+new exclusion read `[]` as the season's divisions. The fix is at the read: `divisionsRead` is set by a
+successful read only. Two tests (the refused read leaves the advice as it was; a read that worked with no
+divisions is still judged by the names) and two plants (the old guard, and an over-guard that skips an empty
+successful read), each red at its own test and restored. `tests/teamingConfigurationAdvice.test.jsx`'s
+overview helper now reads the overview table's own headers, because the validation banner carries a table
+of its own.

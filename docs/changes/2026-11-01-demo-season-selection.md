@@ -327,15 +327,17 @@ default 5 s timeout.
 - **Verification** (labels: _executed_ means run here and its output read; nothing here is _fully validated_ against the
   hosted project):
   - _Executed_ on the tree merged with `origin/main` `aaf6dc9`: `npm run typecheck`, `lint` (no warnings), `check:unused`,
-    `check:advisors`, `test:coverage` at the **default** timeout (487 files, 7,766 tests), the production build with CI's
+    `check:advisors`, `test:coverage` at the **default** timeout (487 files, 7,767 tests), the production build with CI's
     stand-in variables and `check:bundle` (main entry 177.06 KB gz, first paint 278.72 of 289.06 KB; this PR's own share of
     the growth was not isolated from the dependency update merged with it), and the demo, roster-editor and demo-axe E2E
-    scenarios (21). The **full** mock E2E suite (213, `--workers=1`, 19.4 minutes) ran on the tree before that merge. The
-    Deno mirror tests (240) and `deno check` (7 of 7 entry points) ran; no Edge Function changed.
+    scenarios (21). The **full** mock E2E suite (213, `--workers=1`, 18.2 minutes) ran again on the tree with the Codex fix
+    (an earlier full run, 19.4 minutes, was on the tree before `main` was merged). The Deno mirror tests (240) and `deno check`
+    (7 of 7 entry points) ran; no Edge Function changed. After the Codex fix the whole list above ran again on the final tree
+    (coverage, build and bundle, full E2E, knip, advisor-lint, Deno, harness, pgTAP).
   - _Executed_, the database: the migration harness (`HARNESS OK`: the 170 migrations apply from scratch, every smoke including
-    `20261114010000`, every revert including its own, the catalogue snapshot) before a comment-only edit to the migration, after
-    which the 428 plant anchors resolve again (428 of 428). pgTAP on a scratch PostgreSQL 16 with real pgTAP 1.3.2 (the harness
-    prelude stands in for Supabase's `auth` and `storage`): `demo_practice_schedule.sql` 52 of 52, run four times;
+    `20261114010000` with its two-season check, every revert including its own, the catalogue snapshot), run again on the tree
+    with the Codex fix; the 429 plant anchors resolve exactly once (429 of 429). pgTAP on a scratch PostgreSQL 16 with real pgTAP 1.3.2 (the harness
+    prelude stands in for Supabase's `auth` and `storage`): `demo_practice_schedule.sql` 55 of 55, run four times;
     `demo_sessions.sql` 113 of 117, the four that fail being the storage-policy assertions 77 to 80, which fail identically on
     `main` at `20261113010000` (the stand-in has no storage policies); the migration, the smoke, the revert and the migration
     again, in turn, on one database.

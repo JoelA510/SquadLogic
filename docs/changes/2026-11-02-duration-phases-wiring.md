@@ -1,9 +1,10 @@
 # Duration phases: wire the practice duration-phase reports, flagging what they cannot save
 
 Kind: FEATURE · Drawn up: 2026-11-02 against `origin/main` `228980a` · Owner: the repository owner ·
-Status: **PROPOSED; nothing is built.** AGENTS.md rule 14 applies (the change touches the practice
-domain layer and, in its second reading, persistence), so no code starts until the owner has chosen a
-reading in "Owner decisions".
+Status: **DECIDED 2026-11-02: Reading A, decisions 1 to 7 as recommended. PR A (core, tasks A1 to A5) is
+built in the pull request this file rides in; PR B (the page, B1 to B5) follows once A merges.**
+AGENTS.md rule 14 applied (the change touches the practice domain layer), so no code started until the
+owner chose a reading in "Owner decisions" (below, as drawn up).
 
 Every claim about the code is _statically reviewed_ (read) unless marked _executed_. Executed figures
 come from `npx vitest run` on the unmodified tree and from throwaway scripts kept outside the repository
@@ -13,6 +14,16 @@ was only made after the same search, with a positive control, matched something.
 ## Owner decision (2026-11-02, verbatim)
 
 > "Wire the durationPhases as recommended."
+
+and, of the two readings section 3 offers:
+
+> "Go with A on durationPhases"
+
+Reading A is a read-only "Practice daylight" outlook. Reading B (apply the retimed lengths, which needs a
+schema change) is **not** part of this work. The defaults of section 12 are accepted: a flagged date still
+occupies its field; the page lives at `/schedule/practice-daylight` under the Practices permission with no
+feature flag; the builders are duplicated behind a parity test, not extracted from the repair adapter; the
+G4 cascade stays unwired.
 
 Context: `docs/changes/2026-11-02-unknown-sunset-flag.md` section 6 (B4) found that
 `packages/core/src/practice/durationPhases.js` holds a known past-sunset date out as TIME TBD (`:654`,
@@ -285,28 +296,60 @@ Sizes are estimates, not measurements: S under 150 lines, M 150 to 500, L over 5
 **PR A, core** (domain; rule 14; no migration, no UI). Run the season fixture suite and the Definition of
 Done.
 
-- [ ] A1 (M) Flag, not hold out, in G3 (F1, F2, the occupancy rule). Proved by
+- [x] A1 (M) Flag, not hold out, in G3 (F1, F2, the occupancy rule). Proved by
       `tests/practiceDurationPhases.test.js`: a slot below the minimum with no legal shift keeps its
       timing, appears in `flagged` with its date and both refusals, and nothing shorter than 40 minutes is
       emitted; **new**: a flagged practice occupies its surface, so a later slot's shift into its minutes
       is itself flagged `overlap` (fails against today's module, plant P1); the corpus sweep's independent
       model rewritten to occupy and equal to the module's retimings and flagged set, non-empty.
-- [ ] A2 (S) G5 and G4 follow (F5): `d8` gone, `firstFlaggedDate` and `flaggedDates` present. Proved by the
+- [x] A2 (S) G5 and G4 follow (F5): `d8` gone, `firstFlaggedDate` and `flaggedDates` present. Proved by the
       same file: each non-survivor's `firstFlaggedDate` equals its first flagged date; no `reason` or key
       contains "TIME TBD" or "d8" (the search is run with a positive control that it matches the old
       module); hold-starts still equal the flagged set.
-- [ ] A3 (M) `durationPhaseAdapter.js`. Proved by `tests/practiceDurationPhaseAdapter.test.js` (new): over
+- [x] A3 (M) `durationPhaseAdapter.js`. Proved by `tests/practiceDurationPhaseAdapter.test.js` (new): over
       one snapshot with a lit and an unlit venue, a string-typed coordinate, a sub-unit, and an undated
       slot, its graph, slots and calendar equal `buildPracticeRepairInput`'s (the twin held by a test);
       the undated slot is dated by the season window and present in the output (the subject set comes from
       the rows, plant P3); no zone throws; an unreadable `school_day_end` makes a shift
       `earliest-start-unknown`.
-- [ ] A4 (S) Stale statements: the module header (F6), `docs/PHASE_8_9_D14_PLAN.md` (a dated note under
+- [x] A4 (S) Stale statements: the module header (F6), `docs/PHASE_8_9_D14_PLAN.md` (a dated note under
       defaults 6 and 8), `docs/PHASE_8_9_PLAN.md` (the G3 row), `docs/architecture/practice-scheduling.md`
       (the Daylight section), and `docs/changes/2026-11-02-unknown-sunset-flag.md` section 6 (B4 marked
       decided). Proved by reading; `tests/sourceHygiene.test.js` stays green (no raw control characters).
-- [ ] A5 (S) Census: the adapter is registered in `practice/index.js`; `tests/unwiredLayerImporters.test.js`
+- [x] A5 (S) Census: the adapter is registered in `practice/index.js`; `tests/unwiredLayerImporters.test.js`
       lists its new importers. Proved by that test, shown red before the entry is edited.
+
+**What PR A did differently from the tasks above** (each is a finding of the build, not a change of
+scope; nothing here needed a schema, CHECK, enum, column or persisted shape, and the season fixture suite
+did not move):
+
+- **Hold-starts are a subset of the flagged dates, not always equal to them (A2).** The corpus equality
+  holds (every corpus flag is past sunset at its timing). But F1's `overlap` flag is raised before the
+  sunset comparison, so a shifted slot that a pinned or lit earlier slot now blocks is flagged although it
+  ends inside daylight (the existing "re-checked every night" case: 16:50 to 17:50 against a 17:50 limit).
+  G4's hold-starts are the dates left past sunset, so they do not list it. The tests pin both: equality on
+  the corpus, and the strict subset on the rig. That flag carries `PRACTICE_PAST_SUNSET` as the old TIME TBD
+  entry did; the entry has `startMinutes`, `durationMinutes` and `limitMinutes`, so the page (PR B) can word
+  an overlap-only flag as an overlap.
+- **G5 row shape (A2).** Every row has `flaggedDates`, `firstFlaggedDate` and `refusals` (empty or null
+  where there is nothing to name), so the keys do not depend on the verdict. `failingDates` became
+  `flaggedDates` (one name for one list); `d8` and its `legalThrough` are gone; the counter
+  `slotDatesHeldOut` is `slotDatesFlagged`.
+- **The adapter is stricter than the repair's in three places (A3).** All six tables must be present (a
+  forgotten read must not look like "nothing to judge"); a season with no dates is an error as well as one
+  with no zone; and an approved lighting window the module would refuse (a slot now on lit ground, or no
+  slot read) is left out and named in `declared.lightingOverrides.notApplied`, so it cannot take the whole
+  report down. A half-dated slot's missing end is the season's, never beyond the end it does state.
+- **Census (A5).** Besides the module's own entry, the adapter's imports and calls changed four other
+  entries (`slots.js`, `lightingOverrides.js`, `coachPreferences.js`, `repairAdapter.js`), which the test
+  caught and which are updated; the adapter has an entry of its own.
+- **Executed on the season-2026 corpus** (141 unlit slots, 1,833 slot-dates), before and after: phase
+  changes 341 and 317; shortenings 160 and 160; fallback shifts 181 and 157; flagged (held-out) dates 312
+  and 336, 24 more and none fewer; slots with different phases 17 of 141; survivors 51 and 51; the cascade's
+  98 proposals unchanged.
+- **Plants** (the owner's cap is three): P1, P2 and P3, the three that guard the one design decision, the
+  "none dropped" meta-assertion and the hollow-guarantee shape (the adapter's subject set). P4 and P5 belong
+  to PR B; P6 (a missing zone read as UTC) has a plain test and was not planted.
 
 **PR B, frontend** (after A merges; at most two PRs in flight).
 

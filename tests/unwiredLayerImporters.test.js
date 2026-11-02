@@ -397,6 +397,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/slots.js',
     functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
     importers: Object.freeze([
+      // The duration-phase adapter builds its slot set through the one
+      // validating builder, as the repair does.
+      'packages/core/src/practice/durationPhaseAdapter.js',
       // 8.9 PR 5: the duration-phase reports enumerate slot x dates on the
       // same weekday walk.
       'packages/core/src/practice/durationPhases.js',
@@ -409,6 +412,7 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
@@ -419,6 +423,7 @@ const LAYERS = Object.freeze([
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
@@ -529,6 +534,8 @@ const LAYERS = Object.freeze([
       'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
       'packages/core/src/practice/enact.js',
+      // The duration-phase adapter's parity test holds its builders to this one's.
+      'tests/practiceDurationPhaseAdapter.test.js',
       'tests/practiceEnact.test.js',
       'tests/practiceRepairAdapter.test.js',
       // 8.6 3b PR 11d-1: the live-exception and blackout-enact witnesses.
@@ -812,7 +819,11 @@ const LAYERS = Object.freeze([
   // 8.9 PR 5: duration phases, compression and the DST survival report.
   // Reports and proposals only -- cascade proposals leave as change-log
   // entries and nothing applies them. Nothing in the app or the Edge calls
-  // it; the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller.
+  // it; the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller. Its input
+  // adapter (`practice/durationPhaseAdapter.js`, below) is registered and
+  // tested; the read-only "Practice daylight" outlook that will call both is the
+  // second step of `docs/changes/2026-11-02-duration-phases-wiring.md`, and the
+  // day it lands this list gains its first production consumer.
   Object.freeze({
     layer: 'practice/durationPhases.js',
     modulePath: 'packages/core/src/practice/durationPhases.js',
@@ -825,7 +836,24 @@ const LAYERS = Object.freeze([
       'shiftedStart',
     ]),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
-    consumers: Object.freeze(['tests/practiceDurationPhases.test.js']),
+    consumers: Object.freeze([
+      // Runs the three reports over the adapter's output, end to end.
+      'tests/practiceDurationPhaseAdapter.test.js',
+      'tests/practiceDurationPhases.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // The duration-phase input adapter: database rows -> the three reports'
+  // input. Nothing calls it yet (see the durationPhases.js entry above); its
+  // only importer is the barrel and its only consumer is its own test, which
+  // also holds its graph, calendar and slots to `repairAdapter.js`'s.
+  Object.freeze({
+    layer: 'practice/durationPhaseAdapter.js',
+    modulePath: 'packages/core/src/practice/durationPhaseAdapter.js',
+    functions: Object.freeze(['buildDurationPhaseInput']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceDurationPhaseAdapter.test.js']),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
@@ -844,9 +872,12 @@ const LAYERS = Object.freeze([
     ]),
     importers: Object.freeze([
       'frontend/src/utils/lightingOverrides.js',
+      // The duration-phase adapter reads the approved windows through it.
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/index.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
       'supabase/functions/_shared/tests/lighting-overrides_test.ts',
       'tests/practiceLightingOverrides.test.js',
@@ -854,6 +885,7 @@ const LAYERS = Object.freeze([
       'tests/practiceLightingOverridesMock.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
       'supabase/functions/_shared/tests/lighting-overrides_test.ts',
     ]),
@@ -893,6 +925,8 @@ const LAYERS = Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
       // Phase D C2: the conflicts view and Accept all's confirmation judge with core.
       'frontend/src/utils/practiceMustConflicts.js',
+      // Reuses the repair adapter's location-id contract, consults nothing.
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/index.js',
       'packages/core/src/practice/repair.js',
       // 8.6 3b PR 9: reuses the location-id contract, consults nothing.

@@ -120,6 +120,11 @@ export {
   shiftedStart,
 } from './durationPhases.js';
 
+export {
+  DURATION_PHASE_OVERRIDE_NOT_APPLIED,
+  buildDurationPhaseInput,
+} from './durationPhaseAdapter.js';
+
 export { toPracticeMetricsInput } from './metricsInput.js';
 
 export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';

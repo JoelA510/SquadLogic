@@ -30,6 +30,9 @@ export function useDemoSeason() {
         .from('season_settings')
         .select('season_label')
         .eq('organization_id', demoId)
+        // The season the demo was started in is its first: a visitor who starts a next season from it
+        // (an admin may, in a demo) adds later ones, and none of those is the choice.
+        .order('created_at', { ascending: true })
         .limit(1);
       if (cancelled) return;
       if (error) {

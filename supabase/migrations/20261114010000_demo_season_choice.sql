@@ -127,6 +127,8 @@ COMMENT ON FUNCTION demo_seed.season_window(text, date) IS
 --    the name (tests/practiceReaderCensus.test.js reads the latest definition of a name).
 -- ---------------------------------------------------------------------------
 
+-- It sets no TimeZone (the body it replaces pinned UTC for the dates it computed): it computes nothing,
+-- and the function it calls pins its own.
 CREATE OR REPLACE FUNCTION public.start_demo_session()
  RETURNS jsonb
  LANGUAGE plpgsql

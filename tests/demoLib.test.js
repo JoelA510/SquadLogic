@@ -224,6 +224,20 @@ describe('startDemoSession (the RPC result is checked, not trusted)', () => {
     }
   );
 
+  it('sends a choice that is neither as it is, for the server to refuse (only null is "no choice")', async () => {
+    rpc.mockResolvedValue({
+      data: null,
+      error: { code: '22023', details: 'demo_season_unknown', message: 'Unknown demo season' },
+    });
+    await expect(startDemoSession(/** @type {any} */ (''))).rejects.toMatchObject({
+      kind: 'unknown_season',
+    });
+    expect(rpc).toHaveBeenCalledWith('start_demo_session', { p_season: '' });
+    rpc.mockClear();
+    await expect(startDemoSession(null)).rejects.toMatchObject({ kind: 'unknown_season' });
+    expect(rpc).toHaveBeenCalledWith('start_demo_session');
+  });
+
   it('refuses a result naming a season that is neither (the server is not trusted either)', async () => {
     rpc.mockResolvedValue({
       data: { organization_id: 'org-1', expires_at: '2026-10-26T12:30:00Z', season: 'summer' },

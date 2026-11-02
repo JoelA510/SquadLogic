@@ -4,13 +4,13 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { DEMO_ENABLED } from '../env.js';
+import { DemoStartError, demoExpiryMs, demoStartFailure, startDemoSession } from '../lib/demo.js';
 import {
-  DemoStartError,
-  demoStartFailure,
-  isDemoOrganization,
-  startDemoSession,
-} from '../lib/demo.js';
-import { defaultDemoSeason, demoSeasonOptions, demoToday } from '../lib/demoSeasons.js';
+  defaultDemoSeason,
+  demoSeasonOptions,
+  demoToday,
+  describeDemoWindow,
+} from '../lib/demoSeasons.js';
 import { logger } from '../lib/logger.js';
 import Turnstile, { useCaptcha } from '../components/auth/Turnstile.jsx';
 import LoadingScreen from '../components/LoadingScreen.jsx';
@@ -52,13 +52,20 @@ export default function DemoStartPage() {
   const legendId = useId();
   const [error, setError] = useState(/** @type {string | null} */ (null));
   const [startedOrgId, setStartedOrgId] = useState(/** @type {string | null} */ (null));
+  // The season the server dated the demo in, once it has: what the page then says is the server's.
+  const [startedWindow, setStartedWindow] = useState(
+    /** @type {{ season: string, start: string, end: string } | null} */ (null)
+  );
   const running = useRef(false);
 
   const isSignedInAccount = Boolean(session) && session.user?.is_anonymous !== true;
   const isAnonymousSession = Boolean(session) && session.user?.is_anonymous === true;
   // An anonymous session that already has a live demo goes back to it (the server would return that
   // demo, in its own season, whatever was asked for now).
-  const hasLiveDemo = organizations.some((member) => isDemoOrganization(member.organizations));
+  const hasLiveDemo = organizations.some((member) => {
+    const expiresAt = demoExpiryMs(member.organizations);
+    return expiresAt !== null && expiresAt > Date.now();
+  });
 
   const fail = useCallback(
     async (/** @type {unknown} */ cause) => {
@@ -95,6 +102,11 @@ export default function DemoStartPage() {
       }
       const started = await startDemoSession(season);
       setStartedOrgId(started.organizationId);
+      setStartedWindow(
+        started.season && started.seasonStart && started.seasonEnd
+          ? { season: started.season, start: started.seasonStart, end: started.seasonEnd }
+          : null
+      );
       setPhase('opening');
       refetchOrgs?.();
     } catch (cause) {
@@ -133,6 +145,9 @@ export default function DemoStartPage() {
 
   const working = phase === 'starting' || phase === 'opening';
   const chosen = options.find((option) => option.season === season);
+  // While it works, the page names the season and dates the server returned once it has them, and
+  // until then the ones the visitor chose.
+  const shown = startedWindow ?? { season, start: chosen.start, end: chosen.end };
 
   let body;
   if (!DEMO_ENABLED) {
@@ -179,8 +194,8 @@ export default function DemoStartPage() {
         )}
         {working ? (
           <p role="status" aria-live="polite">
-            Setting up a private copy of a ready-made league in the {chosen.label.toLowerCase()}{' '}
-            season ({chosen.dates}). This takes a few seconds.
+            Setting up a private copy of a ready-made league in the {shown.season} season (
+            {describeDemoWindow(shown)}). This takes a few seconds.
           </p>
         ) : (
           <form

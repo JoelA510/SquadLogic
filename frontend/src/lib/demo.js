@@ -189,9 +189,11 @@ export function demoStartFailure(error) {
  * }>}
  */
 export async function startDemoSession(season = null) {
-  const { data, error } = await (season
-    ? supabase.rpc('start_demo_session', { p_season: season })
-    : supabase.rpc('start_demo_session'));
+  // No choice is `null`/`undefined` and nothing else: anything given is sent, and the server refuses it
+  // unless it is exactly 'fall' or 'spring'.
+  const { data, error } = await (season === null || season === undefined
+    ? supabase.rpc('start_demo_session')
+    : supabase.rpc('start_demo_session', { p_season: season }));
   if (error) throw demoStartFailure(error);
   const parsed = StartResultSchema.safeParse(data);
   if (!parsed.success) {

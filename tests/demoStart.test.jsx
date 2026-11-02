@@ -224,6 +224,58 @@ describe('/demo/start through the real App', () => {
     ).toEqual([{ p_season: 'fall' }, { p_season: 'fall' }]);
   });
 
+  it('says the season and dates the server returned, once it has them', async () => {
+    // a server that dated the demo in another window than the page offered (a day's turn, an existing demo)
+    vi.spyOn(supabase, 'rpc').mockImplementation(
+      /** @type {any} */ (
+        async (/** @type {string} */ name) =>
+          name === 'start_demo_session'
+            ? {
+                data: {
+                  organization_id: 'not-in-the-list',
+                  expires_at: new Date(Date.now() + 60_000).toISOString(),
+                  existing: false,
+                  season: 'spring',
+                  season_start: '2031-03-24',
+                  season_end: '2031-06-15',
+                },
+                error: null,
+              }
+            : { data: null, error: null }
+      )
+    );
+
+    openAt('/demo/start');
+    await startButton();
+    choose('Fall season');
+    fireEvent.click(screen.getByRole('button', { name: 'Start the demo' }));
+
+    // it was the fall that was chosen, and the page says what the server did
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'in the spring season (Mar 24 to Jun 15, 2031)'
+      )
+    );
+  });
+
+  it('does not take a visitor back to a demo that has ended, which the server would replace', async () => {
+    await supabase.auth.signInAnonymously();
+    const { data } = await supabase.rpc('start_demo_session', { p_season: 'fall' });
+    localStorage.setItem('squadlogic_active_org', data.organization_id);
+    const { error } = await supabase
+      .from('organizations')
+      .update({ demo_expires_at: new Date(Date.now() - 60_000).toISOString() })
+      .eq('id', data.organization_id);
+    expect(error).toBeNull();
+
+    openAt('/demo/start');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a season for your demo' })
+    ).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/demo/start');
+  });
+
   it('takes a visitor who is already in a live demo back to it, without asking again', async () => {
     await supabase.auth.signInAnonymously();
     const { data } = await supabase.rpc('start_demo_session', { p_season: 'spring' });

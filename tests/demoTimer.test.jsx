@@ -114,6 +114,33 @@ describe('the demo timer on every route', () => {
     );
   });
 
+  it('names the season the demo was started in, not a later one the visitor added', async () => {
+    const { organization_id: orgId } = await startDemo(undefined, 'fall');
+    // An admin may start a next season from this one in a demo; it is created later and is not the
+    // choice. The first season is then written back, so that it is the LAST row of the table: only
+    // the order by creation, not the order the rows happen to come in, names the right one.
+    const rows = await supabase.from('season_settings').select('*').eq('organization_id', orgId);
+    const [chosen] = rows.data;
+    const later = await supabase.from('season_settings').insert({
+      ...chosen,
+      id: 'a-later-season',
+      name: 'Spring 2028',
+      season_label: 'Spring',
+      status: 'draft',
+      created_at: new Date(Date.parse(chosen.created_at) + 60_000).toISOString(),
+    });
+    expect(later.error).toBeNull();
+    expect((await supabase.from('season_settings').delete().eq('id', chosen.id)).error).toBeNull();
+    expect((await supabase.from('season_settings').insert(chosen)).error).toBeNull();
+    const order = (await supabase.from('season_settings').select('id').eq('organization_id', orgId))
+      .data;
+    expect(order.map((row) => row.id)).toEqual(['a-later-season', chosen.id]);
+    openAt('/players');
+
+    expect(await screen.findByRole('heading', { name: 'Players stub' })).toBeInTheDocument();
+    expect(await screen.findByTestId('demo-season')).toHaveTextContent('Fall season');
+  });
+
   it('says nothing of a season for a demo that was not started in a chosen one', async () => {
     const { organization_id: orgId } = await startDemo(undefined, 'fall');
     // a demo started before the choice existed: its season is called "2026 Season"

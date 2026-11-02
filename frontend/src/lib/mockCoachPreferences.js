@@ -1,6 +1,7 @@
 /**
- * Mock arms for the practice preference rule RPCs and the preference import (migration
- * `20261112010000_practice_preference_rules.sql`; Phase D C1): `admin_add_practice_preference`,
+ * Mock arms for the practice preference rule RPCs and the preference import (migrations
+ * `20261112010000_practice_preference_rules.sql`, Phase D C1, and `20261116010000_edit_keeps_must_pending.sql`,
+ * which made an edit leave a pending must pending): `admin_add_practice_preference`,
  * `admin_edit_practice_preference`, `admin_remove_practice_preference`,
  * `admin_decide_must_preference`, `admin_accept_all_musts` and
  * `finalize_practice_preference_import_job`.
@@ -412,16 +413,25 @@ export function handleCoachPreferenceRpc(db, name, params, ctx) {
     return fail('22023', `p_level must be prefer or must, not ${p.p_level}`);
   }
   if (seasonDone()) return completed(`practice preference ${row.id}`);
+  // A requested must that is still pending and is saved at prefer (the level it is in force at) is not
+  // decided: only Accept, Keep as prefer, Accept all or a save at must decide it (20261116010000). Every
+  // other state is decided as before.
+  const staysPending = level !== 'must' && row.must_decision === 'pending';
+  const decides = level === 'must' || (row.requested_level === 'must' && !staysPending);
   const draft = {
     ...row,
     ...conditionsOf(p),
     level,
     requested_level: level === 'must' ? 'must' : row.requested_level,
     must_decision:
-      level === 'must' ? 'accepted' : row.requested_level === 'must' ? 'kept_prefer' : null,
-    ...(level === 'must' || row.requested_level === 'must'
-      ? { decided_by: currentUserId, decided_at: now.toISOString() }
-      : {}),
+      level === 'must'
+        ? 'accepted'
+        : staysPending
+          ? 'pending'
+          : row.requested_level === 'must'
+            ? 'kept_prefer'
+            : null,
+    ...(decides ? { decided_by: currentUserId, decided_at: now.toISOString() } : {}),
     updated_by: currentUserId,
     updated_at: now.toISOString(),
   };

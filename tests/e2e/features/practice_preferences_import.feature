@@ -133,3 +133,31 @@ Feature: Practice preferences import
     When I switch to the dark theme on this page
     Then the scan sees "these musts ask for values with nothing in common" on the page
     And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "dark" theme
+
+  Scenario: Saving the days of a pending must leaves it pending, and the editor decides it only with its own buttons
+    Given a file of practice preferences was imported with two musts that disagree
+    When I open the practice preferences page
+    And I open the "Rules" tab of the practice preferences page
+    And I open the "Edit a rule" dialog with "Edit"
+    Then the editor says the rule is still pending
+    When I move the open rule's day from "Tuesday" to "Friday" and save it
+    Then the page says the rule is still waiting for a decision
+    When I open the "Pending musts" tab of the practice preferences page
+    Then 2 musts are pending
+    When I open the "Rules" tab of the practice preferences page
+    And I open the "Edit a rule" dialog with "Edit"
+    And I keep the open rule as prefer from its editor
+    Then the page says the rule was kept as prefer
+    When I open the "Pending musts" tab of the practice preferences page
+    Then 1 must is pending
+
+  Scenario: The editor on a pending must passes axe in the light and dark themes
+    Given a file of practice preferences was imported with two musts that disagree
+    When I open "/coaches/practice-preferences" and see its "Practice preferences" heading
+    And I open the "Rules" tab of the practice preferences page
+    And I open the "Edit a rule" dialog with "Edit"
+    Then the scan sees "Still pending" on the page
+    And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "light" theme
+    When I switch to the dark theme behind the open dialog
+    Then the scan sees "Still pending" on the page
+    And axe finds no serious or critical violations on "/coaches/practice-preferences" in the "dark" theme

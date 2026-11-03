@@ -1,7 +1,7 @@
 /**
  * Mock parity for the practice preference rule RPCs and the preference import
- * (`frontend/src/lib/mockCoachPreferences.js` vs migration 20261112010000; the SQL's own tests are
- * `supabase/tests/practice_preference_rules.sql` and `practice_preference_import.sql`).
+ * (`frontend/src/lib/mockCoachPreferences.js` vs migrations 20261112010000 and 20261116010000; the SQL's own
+ * tests are `supabase/tests/practice_preference_rules.sql` and `practice_preference_import.sql`).
  *
  * Plant (b): let an RPC through for a non-admin -> the refusal cases go red.
  * Plant (c): stop replacing a team's imported rules on a re-import -> the replace case goes red.
@@ -222,6 +222,169 @@ describe('edit, remove, decide and Accept all', () => {
         'stranger'
       ).error?.code
     ).toBe('42501');
+  });
+
+  // The table of `docs/sql/20261116010000_smoke.sql` (and the pgTAP file), state by level sent. The one row that
+  // changed with 20261116010000 is the first two: a pending must saved at prefer, or with the level left out,
+  // is not decided and nobody is stamped; every other row decides as it always did.
+  const OLD_STAMP = '2026-09-01T00:00:00.000Z';
+  const EDIT_CASES = [
+    {
+      name: 'a pending must saved at prefer stays pending and unstamped',
+      row: { level: 'prefer', requested_level: 'must', must_decision: 'pending' },
+      sent: 'prefer',
+      want: {
+        level: 'prefer',
+        requested_level: 'must',
+        must_decision: 'pending',
+        decided_by: null,
+        decided_at: null,
+      },
+    },
+    {
+      name: 'a pending must saved with the level left out (the default is prefer) stays pending and unstamped',
+      row: { level: 'prefer', requested_level: 'must', must_decision: 'pending' },
+      sent: undefined,
+      want: {
+        level: 'prefer',
+        requested_level: 'must',
+        must_decision: 'pending',
+        decided_by: null,
+        decided_at: null,
+      },
+    },
+    {
+      name: 'a pending must saved at must is accepted, explicitly, and stamped',
+      row: { level: 'prefer', requested_level: 'must', must_decision: 'pending' },
+      sent: 'must',
+      want: {
+        level: 'must',
+        requested_level: 'must',
+        must_decision: 'accepted',
+        decided_by: 'admin-user',
+        decided_at: NOW.toISOString(),
+      },
+    },
+    {
+      name: 'an accepted must saved at must stays accepted (re-stamped, as before)',
+      row: {
+        level: 'must',
+        requested_level: 'must',
+        must_decision: 'accepted',
+        decided_by: 'other-admin',
+        decided_at: OLD_STAMP,
+      },
+      sent: 'must',
+      want: { level: 'must', must_decision: 'accepted', decided_by: 'admin-user' },
+    },
+    {
+      name: 'an accepted must saved at prefer is kept as prefer and stamped',
+      row: {
+        level: 'must',
+        requested_level: 'must',
+        must_decision: 'accepted',
+        decided_by: 'other-admin',
+        decided_at: OLD_STAMP,
+      },
+      sent: 'prefer',
+      want: {
+        level: 'prefer',
+        requested_level: 'must',
+        must_decision: 'kept_prefer',
+        decided_by: 'admin-user',
+        decided_at: NOW.toISOString(),
+      },
+    },
+    {
+      name: 'a must kept as prefer and saved at prefer stays kept',
+      row: {
+        level: 'prefer',
+        requested_level: 'must',
+        must_decision: 'kept_prefer',
+        decided_by: 'other-admin',
+        decided_at: OLD_STAMP,
+      },
+      sent: 'prefer',
+      want: { level: 'prefer', must_decision: 'kept_prefer', decided_by: 'admin-user' },
+    },
+    {
+      name: 'a must kept as prefer and saved at must is accepted',
+      row: {
+        level: 'prefer',
+        requested_level: 'must',
+        must_decision: 'kept_prefer',
+        decided_by: 'other-admin',
+        decided_at: OLD_STAMP,
+      },
+      sent: 'must',
+      want: { level: 'must', must_decision: 'accepted', decided_by: 'admin-user' },
+    },
+    {
+      name: 'a rule nobody asked a must of has no decision at prefer',
+      row: { level: 'prefer', requested_level: 'prefer', must_decision: null },
+      sent: 'prefer',
+      want: {
+        level: 'prefer',
+        requested_level: 'prefer',
+        must_decision: null,
+        decided_by: null,
+        decided_at: null,
+      },
+    },
+    {
+      name: 'a rule nobody asked a must of is accepted when an admin saves it at must',
+      row: { level: 'prefer', requested_level: 'prefer', must_decision: null },
+      sent: 'must',
+      want: { level: 'must', requested_level: 'must', must_decision: 'accepted' },
+    },
+  ];
+
+  it.each(EDIT_CASES.map((entry) => [entry.name, entry]))('edit: %s', (_name, entry) => {
+    const db = freshDb();
+    db.coach_practice_preferences.push({
+      id: 'p-edit',
+      organization_id: ORG,
+      coach_id: COACH,
+      team_id: TEAM_A,
+      weekdays: ['MON'],
+      start_minutes: null,
+      venue_ids: null,
+      keep_weekday: false,
+      keep_start: false,
+      keep_venue: false,
+      status: 'in_force',
+      source: 'import',
+      import_job_id: 'job-1',
+      decided_by: null,
+      decided_at: null,
+      ...entry.row,
+    });
+    const result = call(db, 'admin_edit_practice_preference', {
+      p_preference_id: 'p-edit',
+      ...(entry.sent === undefined ? {} : { p_level: entry.sent }),
+      p_weekdays: ['WED'],
+    });
+    expect(result.error).toBeNull();
+    expect(result.data).toMatchObject({ ...entry.want, weekdays: ['WED'], status: 'in_force' });
+    // What the call returned is what is stored, and the audit says what it was and what it became.
+    expect(db.coach_practice_preferences[0]).toMatchObject(entry.want);
+    const audit = db.audit_log.filter((item) => item.action === 'practice_preference.edited');
+    expect(audit).toHaveLength(1);
+    expect(audit[0].metadata.before.must_decision ?? null).toBe(entry.row.must_decision);
+    expect(audit[0].metadata.after.must_decision ?? null).toBe(entry.want.must_decision);
+  });
+
+  it('the edit table reaches every outcome, so the cases above cannot all hold vacuously', () => {
+    // A table that never reached "stays pending" would pass whatever the mock did with a pending must.
+    const outcomes = new Set(EDIT_CASES.map((entry) => entry.want.must_decision));
+    expect(outcomes).toEqual(new Set([null, 'accepted', 'kept_prefer', 'pending']));
+    const pendingStays = EDIT_CASES.filter(
+      (entry) => entry.row.must_decision === 'pending' && entry.want.must_decision === 'pending'
+    );
+    expect(pendingStays).toHaveLength(2);
+    expect(new Set(EDIT_CASES.map((entry) => entry.sent))).toEqual(
+      new Set(['prefer', 'must', undefined])
+    );
   });
 
   it('removes a rule once, and refuses to edit or remove it again', () => {

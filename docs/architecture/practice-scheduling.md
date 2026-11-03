@@ -162,6 +162,15 @@ Practice preferences page (Phase D C2, below).
   audits the rule it wrote, with its before and after where it had one (`practice_preference.*`), and a completed season takes no change (the RPCs refuse it, and the table carries E3b's completed-season read-only trigger, so any other write is refused too). An
   imported `must` is a request: in force as a prefer until an admin accepts it. The table has no write policy
   or client write grant.
+- **An edit decides a requested must only by changing its level** (`20261116010000`).
+  `admin_edit_practice_preference` replaces a rule's conditions, priority and window. A requested must that is
+  still `pending` and is saved at `prefer` (the level it is in force at) **stays pending**: `must_decision`,
+  `decided_by` and `decided_at` are untouched, and the audit row says pending before and after. Saved at `must`
+  it is accepted, stamped by the admin who saved it. A requested must that was already decided, and a rule
+  nobody asked a must of, behave as they did (an accepted must saved at `prefer` is kept as prefer, one kept as
+  prefer and saved at `prefer` stays kept). The decisions themselves are `admin_decide_must_preference`
+  (Accept as must, Keep as prefer) and `admin_accept_all_musts`. Nothing in the scheduler reads
+  `must_decision`: a pending must and a must kept as prefer are both `level = 'prefer'`.
 - **Judged per practice.** A rule applies to a team's practice when the coach is one of the team's current
   coaches, the rule is in its window on the judged day, and for every condition: a **must** removes the
   candidates that miss any of its conditions (all-of across conditions and across rules); a **prefer** costs
@@ -204,7 +213,12 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
   and the coach's priority, 200 rules to a page with **Show more** (so a crowd no filter can separate is still
   reachable); Edit (several days, start times and venues per condition, keep-current, the
   window, a sentence that reads the rule back, and the must re-judge) and Remove (asks first, and says that a
-  later file with the same preference can bring the rule back). The priority
+  later file with the same preference can bring the rule back). **Editing a pending must leaves it pending**
+  (`20261116010000`): the editor shows **Still pending** with the level as text, Save sends the level in force
+  and says "Rule saved. It is still waiting for your decision." (or, against a database that has not applied the
+  migration, what the database did instead), and **Accept as must…** (which hands over to the Accept dialog and
+  its impact preview) and **Keep as prefer** are buttons of their own, off while the form holds unsaved changes
+  because they act on the rule as saved. A must that was already decided keeps its Level control. The priority
   is shown and filterable and **not weighed** (the page says so). A rule whose coach does not coach the team
   today, or whose window is not open today, does nothing in the scheduler, and its row says "Not applied
   today" and why (`ruleNotApplied`: the same two tests as `resolveCoachPreferences`).
@@ -226,6 +240,12 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
   context) and reports the database's counts, saying so where they differ from the preview.
 - **A completed season is read-only**: the note says why and every control that writes is off (Accept, Keep,
   Accept all, Add, Edit, Remove, the file chooser); the database refuses the writes as well.
+- **Where it is linked from.** Data Import (`/import`) is not given a fifth type: a card under its panel,
+  `PracticePreferencesPointer`, says that a coach preference file is imported on this page, in the Import a file
+  tab, and links to `/coaches/practice-preferences?tab=import`. The page reads `?tab=` once on arrival
+  (`import`, `pending`, `rules` or `conflicts`; anything else opens it as usual). The card takes its visibility
+  from this page's own `NAV` entry (its `permission`, and its `feature` flag if it is ever given one), so it is
+  shown only where the page is reachable.
 
 ## Manual Adjustment Workflow
 

@@ -11,13 +11,17 @@
 -- previous migration, plants old-shape rows and applies this one).
 --
 -- Every date is relative to CURRENT_DATE: the RPCs read the coach's assignment as of today.
+--
+-- 20261116010000 changed one rule of `admin_edit_practice_preference`: a requested must that is still
+-- pending and is saved at prefer is NOT decided (it stays pending, nobody is stamped). The "Edit, and a
+-- pending must" block below holds that rule and every other state of a rule at both levels.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(67);
+SELECT plan(81);
 
 -- ---- the roster (as the table owner, before any role is set) -------------------------------------
 -- Org A, season aaa (active): A-Team (the fixture's) and A2; coach C1 coaches both, C2 coaches A-Team only,
@@ -233,6 +237,61 @@ SELECT throws_ok(
         'prefer', ARRAY[]::text[])$$,
     '23514', NULL, 'an edit to an empty set is refused by the CHECK');
 
+-- ---- Edit, and a pending must (20261116010000) ---------------------------------------------------------
+-- A rule in each state, written as the owner (an import writes the pending ones, an earlier decision the
+-- others) with the decided ones stamped two days ago, so an edit that re-stamps moves the stamp and one that
+-- must not stamp leaves NULL. None carries an import job, so Accept all's counts above and below are not moved.
+RESET role;
+INSERT INTO public.coach_practice_preferences
+    (id, organization_id, coach_id, team_id, weekdays, level, requested_level, must_decision, status, source, decided_by, decided_at) VALUES
+    ('c0000000-0000-4000-8000-0000000000f1', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', ARRAY['MON'], 'prefer', 'must', 'pending', 'in_force', 'import', NULL, NULL),
+    ('c0000000-0000-4000-8000-0000000000f2', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', ARRAY['FRI'], 'prefer', 'must', 'pending', 'in_force', 'import', NULL, NULL),
+    ('c0000000-0000-4000-8000-0000000000f3', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', ARRAY['SAT'], 'must', 'must', 'accepted', 'in_force', 'import', '33333333-3333-3333-3333-333333333333', now() - interval '2 days'),
+    ('c0000000-0000-4000-8000-0000000000f4', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', ARRAY['SUN'], 'prefer', 'must', 'kept_prefer', 'in_force', 'import', '33333333-3333-3333-3333-333333333333', now() - interval '2 days'),
+    ('c0000000-0000-4000-8000-0000000000f5', 'a1111111-1111-1111-1111-111111111111', 'c0000000-0000-4000-8000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', ARRAY['TUE'], 'prefer', 'prefer', NULL, 'in_force', 'admin', NULL, NULL);
+SET LOCAL role = 'authenticated';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+
+SELECT lives_ok(
+    $$SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f1', 'prefer', ARRAY['THU'], NULL, NULL, false, false, false, 'high', CURRENT_DATE, CURRENT_DATE + 30)$$,
+    'an admin saves a pending must at prefer');
+SELECT results_eq(
+    $$SELECT level, requested_level, must_decision, decided_by IS NULL, decided_at IS NULL, weekdays, coach_priority
+        FROM public.coach_practice_preferences WHERE id = 'c0000000-0000-4000-8000-0000000000f1'$$,
+    $$VALUES ('prefer'::text, 'must'::text, 'pending'::text, true, true, ARRAY['THU']::text[], 'high'::text)$$,
+    'a pending must saved at prefer stays pending and unstamped, and the edit took (days, priority)');
+SELECT is(
+    (SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f1', p_weekdays => ARRAY['SUN']) ->> 'must_decision'),
+    'pending', 'saved with the level left out (the default is prefer) it also stays pending');
+SELECT is(
+    (SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f2', 'must', ARRAY['FRI']) ->> 'must_decision'),
+    'accepted', 'a pending must saved at must is accepted: the edit decides when it changes the level');
+SELECT results_eq(
+    $$SELECT level, requested_level, must_decision, decided_by::text, decided_at IS NOT NULL
+        FROM public.coach_practice_preferences WHERE id = 'c0000000-0000-4000-8000-0000000000f2'$$,
+    $$VALUES ('must'::text, 'must'::text, 'accepted'::text, '11111111-1111-1111-1111-111111111111'::text, true)$$,
+    'and the admin who saved it is the one stamped as deciding it');
+SELECT is(
+    (SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f3', 'prefer', ARRAY['SAT']) ->> 'must_decision'),
+    'kept_prefer', 'an accepted must saved at prefer is kept as prefer');
+SELECT results_eq(
+    $$SELECT level, requested_level, must_decision, decided_by::text, decided_at > now() - interval '1 day'
+        FROM public.coach_practice_preferences WHERE id = 'c0000000-0000-4000-8000-0000000000f3'$$,
+    $$VALUES ('prefer'::text, 'must'::text, 'kept_prefer'::text, '11111111-1111-1111-1111-111111111111'::text, true)$$,
+    'at prefer, with what was asked kept, and that decision stamped by the admin who saved it, now');
+SELECT is(
+    (SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f4', 'prefer', ARRAY['SUN']) ->> 'must_decision'),
+    'kept_prefer', 'a must kept as prefer and saved at prefer stays kept as prefer');
+SELECT is(
+    (SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f5', 'prefer', ARRAY['TUE']) ->> 'must_decision'),
+    NULL, 'a rule nobody asked a must of has no decision when saved at prefer');
+SELECT is(
+    (SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000f5', 'must', ARRAY['TUE']) ->> 'must_decision'),
+    'accepted', 'and is accepted when an admin saves it at must');
+SELECT is(
+    (SELECT public.admin_decide_must_preference('c0000000-0000-4000-8000-0000000000f1', 'keep_prefer') ->> 'must_decision'),
+    'kept_prefer', 'the pending rule that was edited is then decided on its own, by Keep as prefer');
+
 -- Decide a pending must: accept it, keep another as prefer, and a decided one cannot be decided again.
 SELECT results_eq(
     $$SELECT level, must_decision FROM public.coach_practice_preferences
@@ -291,6 +350,9 @@ SELECT is(
 SELECT throws_ok(
     $$SELECT public.admin_remove_practice_preference((SELECT id FROM public.coach_practice_preferences WHERE source = 'admin' AND keep_weekday))$$,
     '22023', NULL, 'a rule already removed cannot be removed again');
+SELECT throws_ok(
+    $$SELECT public.admin_edit_practice_preference((SELECT id FROM public.coach_practice_preferences WHERE source = 'admin' AND keep_weekday), 'prefer', ARRAY['TUE'])$$,
+    '22023', NULL, 'and a rule already removed cannot be edited');
 
 -- Every write is audited, with the row.
 RESET role;
@@ -300,6 +362,12 @@ SELECT is(
     ARRAY['practice_preference.added', 'practice_preference.edited', 'practice_preference.must_decided',
           'practice_preference.musts_accepted', 'practice_preference.removed']::text[],
     'each RPC left its audit action');
+SELECT is(
+    (SELECT count(*)::int FROM public.audit_log
+      WHERE action = 'practice_preference.edited' AND resource_id = 'c0000000-0000-4000-8000-0000000000f1'
+        AND metadata -> 'before' ->> 'must_decision' = 'pending' AND metadata -> 'after' ->> 'must_decision' = 'pending'
+        AND metadata -> 'after' ->> 'decided_by' IS NULL),
+    2, 'both saves of the pending must are audited as edits that say pending before and after');
 SELECT is(
     (SELECT count(*)::int FROM public.audit_log WHERE action = 'practice_preference.added'
         AND resource_id IN (SELECT id FROM public.coach_practice_preferences WHERE source = 'admin')
@@ -342,6 +410,10 @@ SELECT throws_like(
     $$UPDATE public.coach_practice_preferences SET weekdays = ARRAY['WED'] WHERE id = 'c0000000-0000-4000-8000-0000000000e9'$$,
     '%Season % is completed and read-only%',
     'and a signed-in change of a rule already in a completed season is refused');
+SELECT throws_ok(
+    $$SELECT public.admin_edit_practice_preference('c0000000-0000-4000-8000-0000000000e9', 'prefer', ARRAY['WED'])$$,
+    '22023', 'The season of practice preference c0000000-0000-4000-8000-0000000000e9 is completed and takes no change',
+    'and the edit RPC refuses a rule of a completed season in words of its own (season_completed)');
 SELECT lives_ok(
     $$DELETE FROM public.season_settings WHERE id = 'a1111111-1111-1111-1111-111111111ccc'$$,
     'a signed-in caller can still delete the completed season: the rule goes with its team, not through the guard');

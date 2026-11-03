@@ -350,7 +350,7 @@ When('I review the pending musts', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /^Pending musts \(/ })).toBeVisible();
 });
 
-Then('{int} musts are pending', async ({ page }, count: number) => {
+Then('{int} must(s) is/are pending', async ({ page }, count: number) => {
   await expect(page.getByRole('heading', { name: `Pending musts (${count})` })).toBeVisible({
     timeout: 20_000,
   });
@@ -451,3 +451,51 @@ Then(
     ).toBeVisible();
   }
 );
+
+// ---- Editing a pending must leaves it pending (20261116010000; docs/changes/2026-11-02-preference-followups.md) ----
+
+const editor = (page: Page) => page.getByRole('dialog', { name: 'Edit a rule' });
+
+Then('the editor says the rule is still pending', async ({ page }) => {
+  const dialog = editor(page);
+  await expect(dialog.getByTestId('edit-pending-note')).toContainText('Still pending');
+  await expect(dialog.getByTestId('edit-pending-note')).toContainText(
+    'Saving your changes does not decide it'
+  );
+  // Nothing to set Prefer or Must with: the level is text, and the two decisions are buttons of their own.
+  await expect(dialog.getByLabel('Level', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Accept as must…' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Keep as prefer' })).toBeEnabled();
+});
+
+When(
+  "I move the open rule's day from {string} to {string} and save it",
+  async ({ page }, from: string, to: string) => {
+    const dialog = editor(page);
+    await dialog.getByLabel(from, { exact: true }).uncheck();
+    await dialog.getByLabel(to, { exact: true }).check();
+    // Accept and Keep act on the saved rule, so they wait for Save while the form has changes.
+    await expect(dialog.getByRole('button', { name: 'Keep as prefer' })).toBeDisabled();
+    await expect(dialog.getByTestId('decide-hint')).toContainText('Save your changes first');
+    await dialog.getByRole('button', { name: 'Save rule' }).click();
+    await expect(dialog).toHaveCount(0, { timeout: 20_000 });
+  }
+);
+
+Then('the page says the rule is still waiting for a decision', async ({ page }) => {
+  await expect(
+    page.locator('.toast-wrap').getByText('Rule saved. It is still waiting for your decision.')
+  ).toBeVisible({ timeout: 20_000 });
+});
+
+When('I keep the open rule as prefer from its editor', async ({ page }) => {
+  const dialog = editor(page);
+  await dialog.getByRole('button', { name: 'Keep as prefer' }).click();
+  await expect(dialog).toHaveCount(0, { timeout: 20_000 });
+});
+
+Then('the page says the rule was kept as prefer', async ({ page }) => {
+  await expect(
+    page.locator('.toast-wrap').getByText('Kept as prefer', { exact: true })
+  ).toBeVisible({ timeout: 20_000 });
+});

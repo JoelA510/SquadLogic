@@ -254,3 +254,38 @@ production (CI applies it on merge).
   small plan.
 - The prod-only `teams_custom_attributes_gin_idx` is left alone, as decided.
 - Two Dependabot pull requests (#692, #693) are open; this would be a third open pull request.
+
+## Build notes (what was run, and what changed from the plan)
+
+_Executed_ unless marked. Gates ran on the committed tree one at a time under the shared lock.
+
+| Gate                                                                                                       | Result                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typecheck`, `eslint . --max-warnings=0`, `check:unused`, `check:advisors`, `migrationVersions.mjs --base` | clean; advisors PASS over 174 files; versions OK                                                                                                                                                                                                |
+| `test:coverage`, default 5 s timeout                                                                       | 494 files, 7,987 tests passed, thresholds met                                                                                                                                                                                                   |
+| Mock E2E, `CI=true --workers=1 --trace off`                                                                | 222 passed (no feature changed, so no `bddgen` change)                                                                                                                                                                                          |
+| CI-style build, `check:bundle`                                                                             | built; all chunks within budget                                                                                                                                                                                                                 |
+| `run.sh`                                                                                                   | `HARNESS OK`: 174 migrations; `PASS catalog snapshot` **unchanged** (196 functions, 69 triggers, 112 policies, 4 views); `PASS smoke 20261118010000`; `PASS revert 20261118010000`; `PASS drop 20261118010000` (37 columns became 36)           |
+| `PLANT_ANCHORS_ONLY=1`, `PROVE_CLAIM_CENSUS_ONLY=1`                                                        | 453 of 453 anchors resolve once; 149 claims, each with a plant                                                                                                                                                                                  |
+| The three plants, on their own in a copy of the tree (the baseline is the `run.sh` run above)              | each CAUGHT at its named check and no other: the guard at the drop stage, the fence at `applying 20261118010000_...`, the revert at `revert 20261118010000`                                                                                     |
+| pgTAP on a scratch PostgreSQL 16 with real pgTAP 1.3.2 (prelude stands in for `auth`)                      | `demo_sessions.sql` 123 assertions, 119 ok; the 4 failures are the storage assertions (83 to 86), which fail the same on `main` `2ae6333` (77 to 80, 113 of 117); `demo_practice_schedule.sql` 55 of 55; `definer_function_grants.sql` 13 of 13 |
+
+By hand, against a scratch build (each red, then the build discarded): the migration refused a planted index, a
+second function naming the column, a view, and a changed fence body, each naming it, with the column still there
+afterwards; the smoke went red for a function naming the column, the column back, a fence list that grew and one that
+lost `rating`; the pgTAP file went red for each of those and for the three newly asserted columns removed from the list;
+the browser parity test went red for the name put back, a column on one side only, and a later fence definition with
+no list. The old `20260530000000` smoke printed `ok = f` for its players row at head before the edit and `t` after.
+Read-only on production: `players` has RLS enabled and not forced, and `postgres` has `BYPASSRLS`, so the guard's count
+sees every row.
+
+**Changed from the plan.** The browser parity test reads `demo.js`'s source (no new export) and requires the newest
+fence definition to carry a list. The dependents check ignores a not-null constraint row (PostgreSQL 18 records one).
+The pgTAP "column gone" assertion is an `ok(NOT EXISTS ...)`, because the plan-count test does not know
+`hasnt_column`. One end-state message was reworded because `check:advisors` reads the words SECURITY DEFINER on any
+non-comment line. **Review:** the first `/code-review` run reviewed another repository (the session's first project)
+and is discarded; the review was redone with `prompts/review.md`. It found two things, both fixed: this plan
+called the finalizers' `p.*` a CTE of players (it is of staged rows), and the parity test could read a stale list.
+
+**Not run.** The full `prove.sh` sweep; `supabase test db` and the CI pgTAP job on PostgreSQL 17; the real-backend
+E2E; Deno (nothing under `supabase/functions` changed); the migration against production (CI applies it on merge).

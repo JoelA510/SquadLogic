@@ -286,7 +286,8 @@ engine conventions), and the demo league is teamed end to end.
 - **More pairs change rosters.** Programs with name requests produce different teams after B1.
   Watch: the buddy list's counts on the first real import. Reruns are safe: preserved players stay.
 - **Blocked players lower the team count.** Advice counts the registered; generation, the eligible.
-  The outcome warnings and "Not placed" make the gap visible.
+  The outcome warnings and "Not placed" make the gap visible. _(Closed afterwards: the advice leaves
+  the blocked out too, data follow-ups item 2, `docs/changes/2026-11-02-data-followups.md`.)_
 - **Review of PR #647 (Codex).** A namesake tie is settled only by a reverse request that names
   the requester and nobody else in its division. Any request text with a digit that matches no
   registration id is `not-found`. The page reads names and the request from the durable player
@@ -751,7 +752,8 @@ plan is the rule-14 plan for them. No migration, no new persistence, no dependen
    player. **Not built here, built in follow-ups F1
    (`docs/changes/2026-11-01-followups-f1.md`, 2026-11-01):** a preserved player later waitlisted
    stays on their reviewed roster and is now listed as a hold, as a blocked one is, and the program
-   overview's recommended team count leaves the waitlisted out. It still counts the not-eligible.
+   overview's recommended team count leaves the waitlisted out. It still counted the not-eligible until
+   data follow-ups item 2 (`docs/changes/2026-11-02-data-followups.md`) left them out too.
 2. **A coach whose only child is held out is shown, flagged.** In "Players to review", "Not
    placed" (B3's list, no parallel list), a held-out player's entry whose `metadata.coachId` (a
    `coach_team_requests` link) names a coach with no team in the division's `teamsByDivision` gets

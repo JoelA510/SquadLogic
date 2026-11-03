@@ -1104,16 +1104,25 @@ export default function TeamAnalysisPage() {
   // division's name, and a guess must not decide who is left out or moved. A read that worked and
   // returned no divisions is still judged by the names, as generation judges it. The advice is what it
   // was until then: everyone where they registered, less the waitlisted.
-  const placement = useMemo(() => {
-    const entries = importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }));
-    const { divisionDescriptors, otherDescriptors } =
-      divisionsRead && importedPlayerRows.length > 0
+  // Every division a player's age is counted against, once the season's divisions have been read; the
+  // same set the Play-up section judges a run's listing by, so the two cannot be given different bands.
+  const descriptorSet = useMemo(
+    () =>
+      divisionsRead
         ? buildDivisionDescriptors({
             programs: registeredDivisions,
             divisionRows,
             selectedProgramKey: null,
             savedDivision: null,
           })
+        : { divisionDescriptors: null, otherDescriptors: [] },
+    [divisionsRead, registeredDivisions, divisionRows]
+  );
+  const placement = useMemo(() => {
+    const entries = importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }));
+    const { divisionDescriptors, otherDescriptors } =
+      importedPlayerRows.length > 0
+        ? descriptorSet
         : { divisionDescriptors: null, otherDescriptors: [] };
     const placed = placeImportRows({
       entries,
@@ -1127,10 +1136,8 @@ export default function TeamAnalysisPage() {
     });
     return { placed, divisionDescriptors, otherDescriptors };
   }, [
-    divisionsRead,
-    divisionRows,
+    descriptorSet,
     importedPlayerRows,
-    registeredDivisions,
     durablePlayers,
     waitlistEnabled,
     seasonYearSetting,
@@ -1949,7 +1956,9 @@ export default function TeamAnalysisPage() {
         [
           teamSizeAnnouncement(summarizeTeamSizeReview(snapshot.runMetadata.results)),
           placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results)),
-          playUpAnnouncement(summarizePlayUpReview(snapshot.runMetadata.results)),
+          playUpAnnouncement(
+            summarizePlayUpReview(snapshot.runMetadata.results, divisionDescriptors)
+          ),
         ]
           .filter(Boolean)
           .join(' ')
@@ -2573,7 +2582,10 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
-          <PlayUpList results={displayPersistenceSnapshot?.runMetadata?.results} />
+          <PlayUpList
+            results={displayPersistenceSnapshot?.runMetadata?.results}
+            divisions={descriptorSet.divisionDescriptors}
+          />
           <PlacementReviewList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (

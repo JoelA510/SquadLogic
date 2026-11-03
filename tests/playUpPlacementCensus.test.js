@@ -154,11 +154,15 @@ describe('the placement and the seat count have one caller each', () => {
     expect(callers).toEqual([['packages/core/src/teamingPipeline.js', 1]]);
   });
 
-  it('counts seats from one module, imported by the Teams page alone', () => {
+  it('counts seats from one module, imported by the Teams page and the views it feeds', () => {
     const importers = sources.filter((file) => importsFrom(read(file), 'playUpSeats.js'));
-    // `summarizeSeats` and `seatsFromPlacedPlayers` are used by the page. No feed, export, coach
-    // surface or calendar reads play-up or age data; a new consumer is added here deliberately.
-    expect(importers).toEqual(['frontend/src/pages/TeamAnalysisPage.jsx']);
+    // The page counts the file's seats (the overview) and the Play-up section counts a run's listing
+    // (`playUpReview.js`), both through `summarizeSeats`. No feed, export, coach surface or calendar
+    // reads play-up or age data; a new consumer is added here deliberately (PR 2 added the section).
+    expect(importers).toEqual([
+      'frontend/src/pages/TeamAnalysisPage.jsx',
+      'frontend/src/utils/playUpReview.js',
+    ]);
     // The positive control for the walk: another module of the same family is imported by something.
     expect(sources.some((file) => importsFrom(read(file), 'playUp.js'))).toBe(true);
   });

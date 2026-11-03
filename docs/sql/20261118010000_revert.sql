@@ -70,7 +70,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_proc p
                     WHERE p.oid = to_regprocedure('public.demo_fence_player_write()')
                       AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public']) THEN
-        RAISE EXCEPTION 'the restored fence is not a SECURITY DEFINER function with a pinned search path';
+        RAISE EXCEPTION 'the restored fence is not a definer function with a pinned search path';
     END IF;
     IF has_function_privilege('anon', 'public.demo_fence_player_write()', 'EXECUTE')
        OR has_function_privilege('authenticated', 'public.demo_fence_player_write()', 'EXECUTE') THEN

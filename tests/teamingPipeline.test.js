@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import { PLACEMENT } from '../packages/core/src/playUp.js';
+import { seatsFromPlacedPlayers, summarizeSeats } from '../packages/core/src/playUpSeats.js';
 import { generateTeams } from '../packages/core/src/teamGeneration.js';
 import { BuddyEvaluator } from '../packages/core/src/evaluators/index.js';
 
@@ -51,8 +52,15 @@ test('links coaches and lists every play-up in one pass', () => {
   // In-band player untouched.
   assert.equal(inband.placement, PLACEMENT.IN_BAND);
 
-  assert.equal(diagnostics.playUp.counts.playUpRequested, 1);
-  assert.equal(diagnostics.playUp.counts.playUpUnrequested, 1);
+  // By the division played: the requested child plays up in U10B (age 9, band 10); the other one
+  // plays in their own age division, U9B, in band, so is moved and not playing up.
+  const { byDivision, league } = summarizeSeats({
+    seats: seatsFromPlacedPlayers(out),
+    divisions,
+  });
+  assert.equal(league.playingUp, 1);
+  assert.equal(byDivision.get('U10B').playingUp, 1);
+  assert.equal(byDivision.get('U9B').movedIn, 1);
   // The listing carries the coach link the pipeline made.
   assert.equal(diagnostics.playUp.listing.find((e) => e.playerId === 'p_child').coachId, 'coachA');
 });

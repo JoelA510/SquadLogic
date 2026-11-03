@@ -42,7 +42,8 @@ const MinutesSchema = z.number().int().min(0);
  * - {@link PRACTICE_COMPRESSION_STEP_MINUTES}: a phase shortens a practice to
  *   `D0 - 10k`, D0 its own length, k the fewest steps that end it by sunset.
  * - {@link PRACTICE_MINIMUM_DURATION_MINUTES}: shortening stops at 40; below
- *   it the practice shifts earlier if the floor allows, else it is TIME TBD.
+ *   it the practice shifts earlier if the floor allows, else the date is kept
+ *   as scheduled and flagged (owner, 2026-11-02; never made TIME TBD).
  * - {@link PRACTICE_EARLIEST_START_WEEKDAYS}: the nights
  *   `season_settings.school_day_end` bounds (Mon-Thu, as `practiceMetrics.js`
  *   reads it). On any other night the floor is unknown and a shift is refused.

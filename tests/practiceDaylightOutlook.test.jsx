@@ -403,10 +403,7 @@ describe('the empty and unusual estates', () => {
       ),
     });
     expect(screen.getByTestId('daylight-notes')).toHaveTextContent(
-      '1 practice slot has no start or end date of its own, so the season’s dates are used for it.'.replace(
-        '’',
-        "'"
-      )
+      "1 practice slot has no start or end date of its own, so the season's dates are used for it."
     );
   });
 });
@@ -416,9 +413,7 @@ describe('the largest real grid, on the main thread', () => {
     const { rows, season } = demoGridRows(DEMO_GRID);
     expect(rows.practiceSlots).toHaveLength(304);
     expect(rows.teams).toHaveLength(128);
-    const started = performance.now();
     const outlook = buildDaylightOutlook({ rows, season });
-    const elapsed = performance.now() - started;
     // Subject set from the rows: the slots on a lit field are found from the venue's flag.
     const litVenues = new Set(rows.locations.filter((l) => l.lighting_available).map((l) => l.id));
     const litFields = new Set(
@@ -432,16 +427,14 @@ describe('the largest real grid, on the main thread', () => {
     expect(outlook.counts.litSlots).toBe(rows.practiceSlots.length - unlit.length);
     // Every team assigned to an unlit slot is named on its row.
     const unlitIds = new Set(unlit.map((s) => s.id));
-    const assigned = rows.practiceAssignments.filter((a) => unlitIds.has(a.practice_slot_id));
-    expect(outlook.rows.filter((r) => r.teams !== 'no team assigned')).toHaveLength(
-      assigned.length
+    const teamedSlots = new Set(
+      rows.practiceAssignments.map((a) => a.practice_slot_id).filter((id) => unlitIds.has(id))
     );
-    // The plan's risk note: it runs on the main thread unless it ever does not fit the default 5 s
-    // timeout; it took about 130 ms the first time here (executed, not copied), so no worker.
-    expect(
-      elapsed,
-      'the outlook over the demo league took too long for the main thread'
-    ).toBeLessThan(4500);
+    expect(outlook.rows.filter((r) => r.teams !== 'no team assigned')).toHaveLength(
+      teamedSlots.size
+    );
+    // The plan's risk note: the model runs on the main thread unless it ever outgrows the default 5 s
+    // timeout this test runs under (no override). It took 130 ms the first time here, then about 50.
   });
 
   it('renders the demo league’s table without stalling', async () => {

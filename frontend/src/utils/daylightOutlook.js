@@ -170,6 +170,8 @@ export function clockChangeNote(date, clockChanges, day) {
  * @property {(iso: string) => string} day
  * @property {number} minimumDurationMinutes
  * @property {ReadonlyArray<any>} [clockChanges]
+ * @property {number|null} [earliestStartMinutes] - the season's school-day end; null when it has none
+ * @property {string} [earliestStartDays] - the days that end bounds, in words ("Monday and Tuesday")
  */
 
 /**
@@ -200,8 +202,11 @@ export function describePhase(phase, ctx) {
     what =
       `shortening would go below the ${ctx.minimumDurationMinutes}-minute minimum, so it starts at ` +
       `${clock(start)} instead, keeping ${duration} min, ${span}.`;
-  } else {
+  } else if (phase.retime === PRACTICE_RETIME_KIND.SHIFT_EARLIER) {
     what = `start at ${clock(start)}, keeping ${duration} min, ${span}.`;
+  } else {
+    // Never worded as something it is not: a kind with no sentence is a page that says so.
+    throw new Error(`the outlook has no wording for a phase retimed as "${phase.retime}"`);
   }
   const note = clockChangeNote(phase.effectiveFrom, ctx.clockChanges ?? [], ctx.day);
   return `From ${ctx.day(phase.effectiveFrom)}: ${what}${limit}${note ? ` ${note}` : ''}`;
@@ -279,7 +284,16 @@ export function describeFlaggedDate(entry, ctx) {
       `Starting at ${clock(entry.wouldStartMinutes)} is before school ends (${clock(/** @type {number} */ (entry.floorMinutes))}).`
     );
   } else if (entry.shiftRefused === PRACTICE_RETIME_REFUSAL.EARLIEST_START_UNKNOWN) {
-    parts.push('The season has no school-day end, so an earlier start is not proposed.');
+    // Null on any day the school-day end does not bound (Friday to Sunday), set or not.
+    let why;
+    if (ctx.earliestStartMinutes === null || ctx.earliestStartMinutes === undefined) {
+      why = 'The season has no school-day end, so an earlier start is not proposed.';
+    } else if (ctx.earliestStartDays) {
+      why = `The school-day end only bounds ${ctx.earliestStartDays}, so no earlier start is proposed on this day.`;
+    } else {
+      why = 'The school-day end does not bound this day, so no earlier start is proposed on it.';
+    }
+    parts.push(why);
   } else if (entry.shiftRefused === PRACTICE_RETIME_REFUSAL.OVERLAP) {
     parts.push(
       `Starting at ${clock(entry.wouldStartMinutes)} would overlap another practice on this field that ends ${earlierEnd}.`
@@ -362,6 +376,9 @@ export function describeFix(fix, ctx) {
       link: null,
     };
   }
+  if (fix.kind !== PRACTICE_SURVIVAL_FIX_KIND.LIGHTING_OVERRIDE) {
+    throw new Error(`the outlook has no wording for a fix of kind "${fix.kind}"`);
+  }
   const { from, until } = fix.window;
   return {
     kind: fix.kind,
@@ -442,13 +459,16 @@ export function describeVerdict(key, facts, day) {
         headline:
           'Its weekday never falls inside its dates and the season, so there is nothing to judge.',
       };
-    default:
+    case OUTLOOK_VERDICT.OK:
       return {
-        key: OUTLOOK_VERDICT.OK,
+        key,
         label: 'Ends by sunset all season',
         tone: 'success',
         headline: 'It ends by sunset on every date as planned.',
       };
+    default:
+      // An outlook with no sentence is never drawn as the green one: that says it is fine.
+      throw new Error(`the outlook has no wording for the verdict "${key}"`);
   }
 }
 
@@ -456,12 +476,14 @@ export function describeVerdict(key, facts, day) {
  * The line under the banner: which approach is taken, because there is no
  * setting to take another.
  *
- * @param {{ minimumDurationMinutes: number, durationStepMinutes: number, earliestStartMinutes: number|null }} rules
+ * @param {{ minimumDurationMinutes: number, durationStepMinutes: number, earliestStartMinutes: number|null,
+ *   earliestStartDays: string }} rules
  */
 export function describeRules({
   minimumDurationMinutes,
   durationStepMinutes,
   earliestStartMinutes,
+  earliestStartDays,
 }) {
   const shorten = `Each slot is shortened first, in ${durationStepMinutes}-minute steps to no less than ${minimumDurationMinutes} minutes`;
   const rest =
@@ -469,10 +491,27 @@ export function describeRules({
   if (earliestStartMinutes === null) {
     return `${shorten}. The season has no school-day end set, so starting earlier is not proposed.${rest}`;
   }
+  const days = earliestStartDays
+    ? `The school-day end only bounds ${earliestStartDays}, so on other days a practice is shortened but not started earlier.`
+    : 'The school-day end bounds no day, so a practice is shortened and not started earlier.';
   return (
     `${shorten}, then started earlier when that would break the minimum, never before school ends at ` +
-    `${clock(earliestStartMinutes)} and never into another practice on the same field.${rest}`
+    `${clock(earliestStartMinutes)} and never into another practice on the same field. ${days}${rest}`
   );
+}
+
+/**
+ * Weekday codes as words: "Monday, Tuesday and Wednesday".
+ *
+ * @param {ReadonlyArray<string>} codes
+ */
+function listDays(codes) {
+  const words = codes.map(
+    (code) => WEEKDAY_NAME[/** @type {keyof typeof WEEKDAY_NAME} */ (code)] ?? code
+  );
+  return words.length < 2
+    ? words.join('')
+    : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
 /** @param {unknown} value an id */
@@ -515,6 +554,79 @@ function namesOf(rows) {
 function listSome(names, shown = 4) {
   const head = names.slice(0, shown).join(', ');
   return names.length > shown ? `${head} and ${names.length - shown} more` : head;
+}
+
+/**
+ * How many of the rows' slots stand on a venue declared lit, counted from the rows
+ * and nothing the reports said (a venue whose lighting is not stated is not lit).
+ * A second reading of the rule, on purpose: the adapter passes no per-surface lighting
+ * record, so a venue's own flag is the whole of it today; the day it does, this and the
+ * reports disagree, the page refuses to draw, and this is what to update.
+ *
+ * @param {Record<string, any[]>} rows
+ */
+function litSlotsOf(rows) {
+  const lit = new Map(
+    (rows.locations ?? []).map((l) => [lower(l.id), l.lighting_available === true])
+  );
+  const venueOfField = new Map((rows.fields ?? []).map((f) => [lower(f.id), lower(f.location_id)]));
+  const fieldOfSubunit = new Map(
+    (rows.fieldSubunits ?? []).map((s) => [lower(s.id), lower(s.field_id)])
+  );
+  return rows.practiceSlots.filter((slot) => {
+    const fieldId =
+      slot.field_subunit_id == null
+        ? lower(slot.field_id)
+        : fieldOfSubunit.get(lower(slot.field_subunit_id));
+    return (
+      lit.get(/** @type {string} */ (venueOfField.get(/** @type {string} */ (fieldId)))) === true
+    );
+  }).length;
+}
+
+/**
+ * The teams on a slot, by name, each with the part of the season it has the slot for when that is
+ * not all of it. Read from the slot set the reports were run on, so the dates are the ones they
+ * judged (a slot with no dates of its own is dated by the season). An assignment that ends before
+ * the slot's dates in the season, or starts after them, is not listed.
+ *
+ * @param {import('@squadlogic/core/practice/types.js').PracticeSlotSet} slotSet
+ * @param {{ from: string, to: string }} window
+ * @param {(id: string) => string} teamName
+ * @param {(iso: string) => string} day
+ * @returns {Map<string, string[]>} slot id -> labels, in name order
+ */
+function teamsOnSlots(slotSet, window, teamName, day) {
+  const slotById = new Map(slotSet.slots.map((slot) => [slot.id, slot]));
+  /** @type {Map<string, Map<string, { name: string, label: string, first: string }>>} */
+  const bySlot = new Map();
+  for (const assignment of slotSet.assignments) {
+    const slot = /** @type {NonNullable<ReturnType<typeof slotById.get>>} */ (
+      slotById.get(assignment.slotId)
+    );
+    // The dates the slot is practised on within the season.
+    const lo = slot.validFrom && slot.validFrom > window.from ? slot.validFrom : window.from;
+    const hi = slot.validUntil && slot.validUntil < window.to ? slot.validUntil : window.to;
+    if (lo > hi) continue;
+    const first = assignment.effectiveFrom ?? lo;
+    const last = assignment.effectiveUntil ?? hi;
+    if (first > hi || last < lo) continue;
+    const name = teamName(assignment.teamId);
+    const from = first > lo ? `from ${day(first)}` : '';
+    const until = last < hi ? `until ${day(last)}` : '';
+    const label = from || until ? `${name} (${[from, until].filter(Boolean).join(' ')})` : name;
+    const entries = bySlot.get(assignment.slotId) ?? new Map();
+    entries.set(`${name}|${first}|${last}`, { name, label, first });
+    bySlot.set(assignment.slotId, entries);
+  }
+  return new Map(
+    [...bySlot].map(([slotId, entries]) => [
+      slotId,
+      [...entries.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.first.localeCompare(b.first))
+        .map((entry) => entry.label),
+    ])
+  );
 }
 
 /**
@@ -597,18 +709,42 @@ export function buildDaylightOutlook({ rows, season }) {
   if (survival.rows.length !== phases.slotPhases.length) {
     throw new Error('the two daylight reports disagree on which slots are on unlit ground');
   }
+  // ... and the unlit ones are counted from the rows, by each venue's own flag, so a report that
+  // lost or invented an unlit slot is not shown whatever its two halves say of each other.
+  const litFromRows = litSlotsOf(rows);
+  if (
+    survival.meta.litSlotsExempt !== litFromRows ||
+    survival.rows.length !== rows.practiceSlots.length - litFromRows
+  ) {
+    throw new Error(
+      `the outlook lists ${survival.rows.length} unlit and ${survival.meta.litSlotsExempt} lit slots of the ${rows.practiceSlots.length} read, and the rows say ${litFromRows} are lit`
+    );
+  }
 
   const { window, timeZone } = adapted.declared;
   const day = dayFormatterFor(window);
   const names = namesOf(rows);
+  // From a week before the first date: a clock change is named on a slot's first practice after it,
+  // which can be up to six days after it, and the first date of the season has no day before it in
+  // the window. (The adapter has refused an unreadable zone or window, so the events are readable.)
+  const weekBefore = new Date(Date.parse(`${window.from}T00:00:00Z`) - 7 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   const { events: clockChanges } = deriveSeasonClockEvents({
-    from: window.from,
+    from: weekBefore,
     to: window.to,
     timeZone,
   });
   const minimum = survival.minimumDurationMinutes;
+  const earliestStartDays = listDays(survival.earliestStartWeekdays);
   /** @type {WordContext} */
-  const ctx = { day, minimumDurationMinutes: minimum, clockChanges };
+  const ctx = {
+    day,
+    minimumDurationMinutes: minimum,
+    clockChanges,
+    earliestStartMinutes: adapted.declared.earliestStart.minutes,
+    earliestStartDays,
+  };
 
   /** @type {Map<string, Set<string|null>>} venue id -> the causes its unknown sunsets gave */
   const causesByVenue = new Map();
@@ -620,14 +756,7 @@ export function buildDaylightOutlook({ rows, season }) {
     causesByVenue.set(venueId, causes);
   }
 
-  /** @type {Map<string, Set<string>>} slot id -> the names of the teams assigned to it */
-  const teamsBySlot = new Map();
-  for (const assignment of rows.practiceAssignments) {
-    const slotId = lower(assignment.practice_slot_id ?? assignment.slot_id);
-    const set = teamsBySlot.get(slotId) ?? new Set();
-    set.add(names.team(assignment.team_id));
-    teamsBySlot.set(slotId, set);
-  }
+  const teamsBySlot = teamsOnSlots(adapted.input.slotSet, window, names.team, day);
 
   const keyed = survival.rows.map((row) => {
     const timeline = timelines.get(row.slotId);
@@ -644,7 +773,11 @@ export function buildDaylightOutlook({ rows, season }) {
     else if (row.verdict === PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE) {
       key = OUTLOOK_VERDICT.FLAGGED;
     } else if (row.verdict === PRACTICE_SURVIVAL_VERDICT.UNKNOWN) key = OUTLOOK_VERDICT.UNKNOWN;
-    else key = retimes.length > 0 ? OUTLOOK_VERDICT.RETIMED : OUTLOOK_VERDICT.OK;
+    else if (row.verdict === PRACTICE_SURVIVAL_VERDICT.SURVIVES) {
+      key = retimes.length > 0 ? OUTLOOK_VERDICT.RETIMED : OUTLOOK_VERDICT.OK;
+    } else {
+      throw new Error(`slot ${row.slotId}: the survival report gave the verdict "${row.verdict}"`);
+    }
 
     const facts = {
       flagged: flaggedEntries.length,
@@ -655,7 +788,7 @@ export function buildDaylightOutlook({ rows, season }) {
     };
     const venueName = names.venue(row.venueId);
     const causes = [...(causesByVenue.get(row.venueId ?? '') ?? [])];
-    const teamNames = [...(teamsBySlot.get(row.slotId) ?? [])].sort();
+    const teamNames = teamsBySlot.get(row.slotId) ?? [];
     const fixCtx = {
       day,
       surfaceName: names.surface,
@@ -771,6 +904,25 @@ export function buildDaylightOutlook({ rows, season }) {
       `An approved lighting window for ${label} from ${day(override.from)} to ${day(override.until)} is not applied: ${why}.`
     );
   }
+  // A venue whose lighting is not stated is judged as unlit by the daylight rule. Counted from the
+  // rows, over the slots judged on some date (not the ones a lighting window fully exempts, or with no dates).
+  const lightingStated = new Map(
+    (rows.locations ?? []).map((l) => [lower(l.id), typeof l.lighting_available === 'boolean'])
+  );
+  const undeclared = survival.rows.filter(
+    (row) =>
+      row.venueId !== null &&
+      lightingStated.get(row.venueId) === false &&
+      row.verdict !== PRACTICE_SURVIVAL_VERDICT.EXEMPT &&
+      row.verdict !== PRACTICE_SURVIVAL_VERDICT.NO_DATES
+  ).length;
+  if (undeclared > 0) {
+    notes.push(
+      undeclared === 1
+        ? "1 practice slot is at a venue whose lighting is not stated, so it is judged as unlit, as the daylight rule does. State the venue's lighting on Fields & Venues."
+        : `${undeclared} practice slots are at venues whose lighting is not stated, so they are judged as unlit, as the daylight rule does. State each venue's lighting on Fields & Venues.`
+    );
+  }
   if (declared.earliestStart.note) {
     notes.push(`Starting a practice earlier is not proposed: ${declared.earliestStart.note}.`);
   }
@@ -789,6 +941,7 @@ export function buildDaylightOutlook({ rows, season }) {
       minimumDurationMinutes: minimum,
       durationStepMinutes: survival.durationStepMinutes,
       earliestStartMinutes: declared.earliestStart.minutes,
+      earliestStartDays,
     }),
     counts,
     judged: survival.exercised,

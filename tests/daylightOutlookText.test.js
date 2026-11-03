@@ -49,7 +49,7 @@ import {
   describeVerdict,
   formatDay,
 } from '../frontend/src/utils/daylightOutlook.js';
-import { ID, SEASON, estateRows } from './helpers/practiceDaylightRows.js';
+import { ID, SEASON, assignment, estateRows, uuid } from './helpers/practiceDaylightRows.js';
 
 const ZONE = 'America/New_York';
 const outlook = buildDaylightOutlook({ rows: estateRows(), season: SEASON });
@@ -125,8 +125,10 @@ describe('the estate, in words', () => {
     expect(outlook.rules).toBe(
       'Each slot is shortened first, in 10-minute steps to no less than 40 minutes, then started ' +
         'earlier when that would break the minimum, never before school ends at 16:00 and never ' +
-        'into another practice on the same field. There is no setting to choose another approach ' +
-        'per slot, and permits, field size and capacity are not checked.'
+        'into another practice on the same field. The school-day end only bounds Monday, Tuesday, ' +
+        'Wednesday and Thursday, so on other days a practice is shortened but not started ' +
+        'earlier. There is no setting to choose another approach per slot, and permits, field ' +
+        'size and capacity are not checked.'
     );
     expect(OUTLOOK_BANNER).toBe(
       'Proposed, not applied. Nothing on this page changes a practice, an assignment or a ' +
@@ -295,6 +297,126 @@ describe('the estate, in words', () => {
   });
 });
 
+describe('variants of the estate: the teams, a venue with no stated lighting, the first day of the season', () => {
+  const rowsWith = (change) => change(estateRows());
+
+  it('lists a team for the part of the season it has the slot, and no team that has it outside the season', () => {
+    const bears = uuid(404);
+    const rows = rowsWith((r) => ({
+      ...r,
+      teams: [...r.teams, { id: bears, organization_id: SEASON.organization_id, name: 'Bears' }],
+      practiceAssignments: [
+        // Lions leave after 19 Oct (the range ends 20 Oct, exclusive), Tigers arrive on 6 Oct, Bears are next season's.
+        {
+          ...assignment(uuid(611), uuid(402), ID.dark),
+          effective_date_range: '[2026-09-01,2026-10-20)',
+        },
+        {
+          ...assignment(uuid(612), uuid(401), ID.dark),
+          effective_date_range: '[2026-10-06,2026-12-01)',
+        },
+        {
+          ...assignment(uuid(613), bears, ID.dark),
+          effective_date_range: '[2026-12-01,2027-02-01)',
+        },
+        // A team on the slot for the whole of it carries no dates, and one with two stretches shows both.
+        assignment(uuid(614), uuid(403), ID.ok),
+        {
+          ...assignment(uuid(615), uuid(402), ID.floor),
+          effective_date_range: '[2026-09-01,2026-09-15)',
+        },
+        {
+          ...assignment(uuid(616), uuid(402), ID.floor),
+          effective_date_range: '[2026-10-27,2026-12-01)',
+        },
+      ],
+    }));
+    const built = buildDaylightOutlook({ rows, season: SEASON });
+    const teams = (slotId) => built.rows.find((r) => r.slotId === slotId).teams;
+    expect(teams(ID.dark)).toBe('Lions (until Mon 19 Oct), Tigers (from Tue 6 Oct)');
+    expect(teams(ID.ok)).toBe('Hawks');
+    expect(teams(ID.floor)).toBe('Lions (until Mon 14 Sep), Lions (from Tue 27 Oct)');
+    expect(teams(ID.unknown)).toBe('no team assigned');
+  });
+
+  it('says a venue whose lighting is not stated is judged as unlit, and still counts it as unlit', () => {
+    const rows = rowsWith((r) => ({
+      ...r,
+      locations: r.locations.map((l) =>
+        l.name === 'Far Park' ? { ...l, lighting_available: null } : l
+      ),
+    }));
+    const built = buildDaylightOutlook({ rows, season: SEASON });
+    expect(built.notes).toContain(
+      "1 practice slot is at a venue whose lighting is not stated, so it is judged as unlit, as the daylight rule does. State the venue's lighting on Fields & Venues."
+    );
+    // Judged exactly as before (the estate's own row for it is unknown, never fine), and not lit.
+    expect(built.counts.slots).toBe(8);
+    expect(built.counts.litSlots).toBe(1);
+    expect(built.rows.find((r) => r.slotId === ID.unknown).verdict.key).toBe('unknown');
+    // The estate as it stands has no such venue, so no such note.
+    expect(outlook.notes.some((n) => /lighting is not stated/.test(n))).toBe(false);
+  });
+
+  it('names a clock change that falls on the first day of the season', () => {
+    // 2026-11-01 is the day the clocks went back, and the season's first date: a Sunday practice.
+    const rows = rowsWith((r) => ({
+      ...r,
+      practiceSlots: r.practiceSlots
+        .filter((slot) => slot.id === ID.ok)
+        .map((slot) => ({
+          ...slot,
+          day_of_week: 'sun',
+          start_time: '17:00:00',
+          end_time: '18:00:00',
+          valid_from: null,
+          valid_until: null,
+        })),
+      practiceAssignments: [],
+      lightingOverrides: [],
+    }));
+    const built = buildDaylightOutlook({
+      rows,
+      season: { ...SEASON, season_start: '2026-11-01', season_end: '2026-11-29' },
+    });
+    const first = built.rows[0].flagged.items[0];
+    expect(first.date).toBe('2026-11-01');
+    expect(first.text).toMatch(
+      /^Sun 1 Nov: it runs 17:00 to 18:00, after the latest it may end \(16:5\d\)\./
+    );
+    expect(first.text).toMatch(
+      /The clocks go back on Sun 1 Nov, which moves sunset about an hour earlier\.$/
+    );
+  });
+
+  it('says why no earlier start is proposed on a day the school-day end does not bound', () => {
+    // The same Sunday practice, with a school-day end set: it bounds Monday to Thursday only.
+    const rows = rowsWith((r) => ({
+      ...r,
+      practiceSlots: r.practiceSlots
+        .filter((slot) => slot.id === ID.ok)
+        .map((slot) => ({
+          ...slot,
+          day_of_week: 'sun',
+          start_time: '17:00:00',
+          end_time: '18:00:00',
+        })),
+      practiceAssignments: [],
+      lightingOverrides: [],
+    }));
+    const text = buildDaylightOutlook({ rows, season: SEASON }).rows[0].flagged.items[0].text;
+    expect(text).toContain(
+      'The school-day end only bounds Monday, Tuesday, Wednesday and Thursday, so no earlier start is proposed on this day.'
+    );
+    expect(text).not.toMatch(/no school-day end/);
+    // With no school-day end at all, it says that instead.
+    const none = buildDaylightOutlook({ rows, season: { ...SEASON, school_day_end: null } });
+    expect(none.rows[0].flagged.items[0].text).toContain(
+      'The season has no school-day end, so an earlier start is not proposed.'
+    );
+  });
+});
+
 describe('an overlap is worded as an overlap, never as past sunset', () => {
   // The rig of `practiceDurationPhases.test.js` ("a shifted slot is re-checked every night"):
   // B moves into the room A's operator pin frees, and when A is pinned back, B's move would
@@ -450,6 +572,7 @@ describe('the smaller sentences', () => {
         minimumDurationMinutes: 40,
         durationStepMinutes: 10,
         earliestStartMinutes: null,
+        earliestStartDays: 'Monday and Tuesday',
       })
     ).toBe(
       'Each slot is shortened first, in 10-minute steps to no less than 40 minutes. The season has ' +

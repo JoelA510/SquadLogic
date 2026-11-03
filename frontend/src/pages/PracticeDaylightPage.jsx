@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
 import DaylightOutlook from '../components/daylight/DaylightOutlook.jsx';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { usePracticeDaylightOutlook } from '../hooks/usePracticeDaylightOutlook.js';
 
@@ -38,9 +39,11 @@ export default function PracticeDaylightPage() {
     );
   } else if (outlook.status === 'unreadable') {
     body = (
-      <p className="badge danger" role="alert" data-testid="daylight-unreadable">
-        The season&rsquo;s practices could not be read, so no outlook is shown: {outlook.message}
-      </p>
+      <div data-testid="daylight-unreadable">
+        <DataErrorBanner
+          message={`The season's practices could not be read, so no outlook is shown: ${outlook.message}`}
+        />
+      </div>
     );
   } else if (outlook.status === 'no-season' || outlook.status === 'no-zone') {
     body = (

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
 import Badge from '../ui/Badge.jsx';
+import DataErrorBanner from '../ui/DataErrorBanner.jsx';
 import {
   FIXES_UNCHECKED,
   FLAGGED_DATES_SHOWN,
@@ -168,10 +169,11 @@ export default function DaylightOutlook({ rows, season }) {
 
   if (!built.ok) {
     return (
-      <p className="badge danger" role="alert" data-testid="daylight-error">
-        The outlook could not be worked out over this season&rsquo;s data, so nothing is shown:{' '}
-        {built.message}
-      </p>
+      <div data-testid="daylight-error">
+        <DataErrorBanner
+          message={`The outlook could not be worked out over this season's data, so nothing is shown: ${built.message}`}
+        />
+      </div>
     );
   }
   const { outlook } = built;

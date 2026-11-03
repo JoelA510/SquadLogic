@@ -103,7 +103,7 @@ export async function loadPracticeDaylightRows(client, { organizationId, seasonS
 export const NO_SEASON_MESSAGE =
   'This organization has no season yet, so there are no practices to look at.';
 export const NO_ZONE_MESSAGE =
-  'The season has no time zone, so no sunset can be placed on its clock. Set the season’s time zone in Settings.';
+  "The season has no time zone, so no sunset can be placed on its clock. Set the season's time zone in Settings.";
 
 /**
  * The outlook's rows for one organization and season, read once per mount.

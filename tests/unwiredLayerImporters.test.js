@@ -854,6 +854,8 @@ const LAYERS = Object.freeze([
     consumers: Object.freeze([
       // PR B: runs G3 and G5 over the stored rows' input.
       'frontend/src/utils/daylightOutlook.js',
+      // Wraps G3 and G5 to alter what they return, to show the page's checks can fail.
+      'tests/daylightOutlookGuards.test.js',
       // Builds a rig the stored rows cannot reach (an operator pin) and runs G3 on it.
       'tests/daylightOutlookText.test.js',
       // Runs the three reports over the adapter's output, end to end.

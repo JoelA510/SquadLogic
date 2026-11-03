@@ -411,6 +411,24 @@ stopped saying nothing calls the module):
   well inside the default 5 s.
 - **Axe is run in Chromium**, in both themes, by the E2E scenario (axe-core is not a direct dependency, so
   the jsdom test checks structure: a caption, column headers with scope, landmarks, headings, real links).
+- **Found by reviewing the build, fixed in it.** (1) The page's own checks (the report examined every slot,
+  the two reports agree) compared two views of one derivation and could not fail; the unlit slots are now
+  also counted from the rows by each venue's own `lighting_available`, and `daylightOutlookGuards.test.js`
+  alters a copy of the real reports to make each check throw. (2) A verdict, a fix kind or a retime kind with
+  no sentence is refused with a message, never worded as the green "ends by sunset" or as portable lighting.
+  (3) "The season has no school-day end" was said of a Friday, Saturday or Sunday practice too: the module's
+  floor is unknown outside Monday to Thursday whether or not the season has one, so the page now says the
+  school-day end only bounds those days (and says so in its rules line). (4) A venue whose lighting is not
+  stated is judged as unlit by the daylight rule and was called "unlit ground" without a word; a note says so.
+  (5) "Teams:" no longer lists every team ever assigned to a slot: an assignment outside the season is
+  left out and a partial one shows its dates. (6) A clock change on the season's first day is named (the
+  events are read from the day before it). (7) The stale TIME TBD sentence in the D14 constants' doc
+  (`practice/schemas.js`) now says what the module does.
+- **Observed in PR A's adapter, not changed here** (executed on throwaway rows; each shows as a message,
+  never as a clean report): an approved lighting window on a slot whose field was not read makes the
+  adapter throw `facility: unknown surface` (the reads are all-or-nothing and the foreign key holds, so
+  the page does not reach it), and a `team_id` of null would become the team "null" (the column is NOT
+  NULL).
 - **Plants** (the owner's cap is three): P4 (a failed read made an empty one: 22 tests red), P5 (a frontend
   importer with no census entry: 4 red) and one of the builder's choice, the overlap sentence replaced by the
   past-sunset one (2 red); each reverted and confirmed byte-identical.

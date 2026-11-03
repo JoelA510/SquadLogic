@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import PropTypes from 'prop-types';
+import { playUpPlaysWhereNote } from '../../utils/playDownNote.js';
 import { summarizePlayUpReview } from '../../utils/playUpReview.js';
 
 const anchorId = (division, part) => `play-up-${division}-${part}`.replace(/[^A-Za-z0-9_-]/g, '-');
@@ -67,7 +68,7 @@ const coachPossessive = (name) => (name ? `Coach ${name}'s child` : "a coach's c
  * refuses nothing. Read from the run's `results`, so a staged or synced run shows it after a
  * reload. Announced by the page's polite live region, once per generation, not here.
  */
-export default function PlayUpList({ results }) {
+export default function PlayUpList({ results, playDown = false }) {
   const summary = useMemo(() => summarizePlayUpReview(results), [results]);
   if (!summary) return null;
   const { totals } = summary;
@@ -82,7 +83,7 @@ export default function PlayUpList({ results }) {
       <p className="text-sm text-text-secondary mb-4">
         {`${totals.playUps} play-up${totals.playUps === 1 ? '' : 's'} (${totals.requested} requested, ${totals.unrequested} not), ${totals.playDowns} play-down${totals.playDowns === 1 ? '' : 's'}${
           totals.takenOffWaitlist > 0 ? `, ${totals.takenOffWaitlist} taken off the waitlist` : ''
-        }. Nothing here is approved or refused: players play in their own age division unless a play-up was requested. Check each against your club's rules.`}
+        }. Nothing here is approved or refused: ${playUpPlaysWhereNote(playDown)}. Check each against your club's rules.`}
       </p>
       <div className="space-y-6">
         {summary.divisions.map(({ division, divisionName, entries, takenOffWaitlist }) => (
@@ -163,6 +164,8 @@ export default function PlayUpList({ results }) {
 }
 
 PlayUpList.propTypes = {
+  /** The Play-down setting is on: the sentence says where a play-down plays. */
+  playDown: PropTypes.bool,
   results: PropTypes.shape({
     playUpByDivision: PropTypes.object,
     waitlistExceptionsByDivision: PropTypes.object,

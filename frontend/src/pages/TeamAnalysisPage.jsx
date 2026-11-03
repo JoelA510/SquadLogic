@@ -2565,7 +2565,10 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
-          <PlayUpList results={displayPersistenceSnapshot?.runMetadata?.results} />
+          <PlayUpList
+            results={displayPersistenceSnapshot?.runMetadata?.results}
+            playDown={playDownEnabled}
+          />
           <PlacementReviewList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (

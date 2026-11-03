@@ -233,6 +233,10 @@ describe('the play-down setting is read in one place and handed to every placeme
         expect(body, `${name} is handed the saved rosters`).toMatch(/\bheldSeats\b/);
       }
     }
+    // Every surface that states the rule is handed the same boolean: the Play-up section.
+    const sections = text.match(/<PlayUpList[\s\S]*?\/>/g) ?? [];
+    expect(sections.length).toBe(1);
+    expect(sections[0]).toMatch(/playDown=\{playDownEnabled\}/);
     // The helper hands both to core's placement, and the core pipeline hands them on.
     const [placement] = callBodies(text, 'applyPlayUpEligibility');
     expect(placement).toMatch(/\ballowPlayDown\b/);

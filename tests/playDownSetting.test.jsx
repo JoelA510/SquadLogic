@@ -26,6 +26,7 @@ import {
   FeatureFlagSchema,
 } from '../frontend/src/constants/featureFlags.js';
 import { PLAY_DOWN_FLAG } from '../packages/core/src/playUp.js';
+import { playUpPlaysWhereNote } from '../frontend/src/utils/playDownNote.js';
 
 const IDS = vi.hoisted(() => ({
   organization: '7f3e4d5c-6a71-4c8d-9e9f-1a2b3c4d5e31',
@@ -241,6 +242,7 @@ describe('the Teams page reads the stored setting, in the advice and in generati
   afterEach(reset);
 
   // What is stored, and whether the setting is on. A value that is not the boolean true is off.
+  /** @type {Array<[string, Record<string, unknown>, boolean]>} */
   const STORED = [
     ['no key', {}, false],
     ['false', { play_down: false }, false],
@@ -284,6 +286,11 @@ describe('the Teams page reads the stored setting, in the advice and in generati
           ? 'Plays in U10, the younger division they registered for.'
           : 'Registered in U10 but plays in U12.'
       );
+      // The sentence above the rows says the same as the setting: where a play-down plays is named
+      // only while it is on (one wording module, `playDownNote.js`).
+      const sentence = /** @type {HTMLElement} */ (document.querySelector('#play-up-heading + p'));
+      expect(sentence).toHaveTextContent(playUpPlaysWhereNote(on));
+      if (!on) expect(sentence).not.toHaveTextContent('with Play-down on');
     });
   });
 

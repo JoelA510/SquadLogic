@@ -263,16 +263,20 @@ export default function ProgramOverview({
                     colSpan={7}
                     className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary"
                   >
-                    {group.label}
-                    {group.flags && (
-                      // Not capitalised: the counts are a sentence the heading reads out.
-                      <span className="normal-case font-normal tracking-normal">
-                        {`: ${flagSummary(group.flags)}`}
-                        {flagsAreKnown(group.flags) && group.flags.movedIn > 0
-                          ? ` (${movedInFromProgramsNote(group.flags.movedIn)})`
-                          : ''}
-                      </span>
-                    )}
+                    {/* Sticky and wrapped: the table scrolls sideways in a narrow column, and a heading
+                        as wide as the table would read cut off ("...moved in from another p"). */}
+                    <span className="sticky left-4 block max-w-[22rem] whitespace-normal">
+                      {group.label}
+                      {group.flags && (
+                        // Not capitalised: the counts are a sentence the heading reads out.
+                        <span className="normal-case font-normal tracking-normal">
+                          {`: ${flagSummary(group.flags)}`}
+                          {flagsAreKnown(group.flags) && group.flags.movedIn > 0
+                            ? ` (${movedInFromProgramsNote(group.flags.movedIn)})`
+                            : ''}
+                        </span>
+                      )}
+                    </span>
                   </th>
                 </tr>
                 {group.ids

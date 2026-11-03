@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { applyPlayUpEligibility, PLACEMENT } from '../packages/core/src/playUp.js';
+import { seatsFromPlacedPlayers, summarizeSeats } from '../packages/core/src/playUpSeats.js';
 
 const MODE = 'birth_year'; // exact ages: age = 2026 - birthYear
 const SEASON = 2026;
@@ -22,6 +23,17 @@ function run(players, opts = {}) {
   });
 }
 
+/**
+ * The league counted by the division each player plays in (`summarizeSeats`): what the placement
+ * used to count by registered kind in `diagnostics.counts`, which nothing read and which is gone.
+ */
+function counted(players, opts = {}) {
+  return summarizeSeats({
+    seats: seatsFromPlacedPlayers(players),
+    divisions: opts.divisions ?? divisions,
+  });
+}
+
 const AGE_9 = '2017-04-01';
 const AGE_10 = '2016-04-01';
 const AGE_11 = '2015-04-01';
@@ -31,7 +43,9 @@ test('an in-band player is unchanged and not listed', () => {
   assert.equal(players[0].placement, PLACEMENT.IN_BAND);
   assert.equal(players[0].division, 'U10B');
   assert.equal(players[0].needsReview, false);
-  assert.equal(diagnostics.counts.inBand, 1);
+  const { league } = counted(players);
+  assert.equal(league.seated, 1);
+  assert.equal(league.playingUp + league.playingDown + league.movedIn + league.notChecked, 0);
   assert.deepEqual(diagnostics.listing, []);
 });
 
@@ -41,7 +55,11 @@ test('an unrequested play-up plays in the player’s own age division and is lis
   assert.equal(players[0].division, 'U9B'); // own age division
   assert.equal(players[0].registeredDivision, 'U10B');
   assert.equal(players[0].playUpRequested, false);
-  assert.equal(diagnostics.counts.playUpUnrequested, 1);
+  // Played in their own age division, in band: moved from U10B to U9B, and not "playing up".
+  const { byDivision, league } = counted(players);
+  assert.equal(league.playingUp, 0);
+  assert.equal(byDivision.get('U9B').movedIn, 1);
+  assert.equal(byDivision.get('U10B').movedOut, 1);
   assert.deepEqual(diagnostics.listing, [
     {
       playerId: 'p1',
@@ -81,7 +99,9 @@ test('a requested play-up plays in the older division and is listed with its fac
   assert.equal(up.placement, PLACEMENT.PLAY_UP);
   assert.equal(up.division, 'U10B'); // stays up
   assert.equal(up.playUpRequested, true);
-  assert.equal(diagnostics.counts.playUpRequested, 1);
+  // Age 9 plays in U10B (band 10): one play-up by seat, requested; the buddy is in band.
+  assert.equal(counted(players).byDivision.get('U10B').playingUp, 1);
+  assert.equal(counted(players).league.movedIn, 0);
   assert.equal(diagnostics.listing.length, 1);
   assert.deepEqual(
     {
@@ -122,7 +142,11 @@ test('a play-down plays in the player’s own age division and is listed', () =>
   assert.equal(players[0].placement, PLACEMENT.PLAY_DOWN);
   assert.equal(players[0].division, 'U12B');
   assert.equal(players[0].registeredDivision, 'U10B');
-  assert.equal(diagnostics.counts.playDown, 1);
+  // Plays in U12B (band 11 to 12), in band: moved, and not "playing down".
+  const { byDivision, league } = counted(players);
+  assert.equal(league.playingDown, 0);
+  assert.equal(byDivision.get('U12B').movedIn, 1);
+  assert.equal(byDivision.get('U10B').movedOut, 1);
   assert.equal(diagnostics.listing[0].kind, 'play-down');
   assert.equal(diagnostics.listing[0].playedDivision, 'U12B');
 });
@@ -145,7 +169,10 @@ test('a player no division can hold is blocked, listed, and stays where they reg
   const { players, diagnostics } = run([{ id: 'old', division: 'U10B', dob: '2010-04-01' }]);
   assert.equal(players[0].placement, PLACEMENT.NO_DIVISION);
   assert.equal(players[0].division, 'U10B');
-  assert.equal(diagnostics.counts.noDivision, 1);
+  // Held out, in the division they registered in: one not eligible, seated nowhere.
+  const { byDivision, league } = counted(players);
+  assert.equal(byDivision.get('U10B').notEligible, 1);
+  assert.equal(league.seated, 0);
   assert.equal(diagnostics.listing[0].kind, 'no-division');
   assert.equal(diagnostics.listing[0].playedDivision, null);
   assert.match(players[0].reviewReason, /no suitable division holds natural age 16/);
@@ -180,7 +207,11 @@ test('a player with no natural age is placed where they registered and flagged o
   ]);
   assert.equal(players[0].placement, PLACEMENT.UNKNOWN);
   assert.equal(players[1].placement, PLACEMENT.UNKNOWN);
-  assert.equal(diagnostics.counts.unknown, 2);
+  // Nothing can be checked for either, and the one who asked has nothing to honour.
+  const { league } = counted(players);
+  assert.equal(league.notChecked, 2);
+  assert.equal(league.askedToPlayUp, 1);
+  assert.equal(league.seated, 2);
   assert.deepEqual(
     diagnostics.listing.map((e) => [e.playerId, e.kind]),
     [['b', 'requested-age-unknown']]

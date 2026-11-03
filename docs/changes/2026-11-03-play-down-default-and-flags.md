@@ -2,9 +2,10 @@
 
 Kind: FEATURE (a setting, flags and counts) with a defect fix (the team-count advice counts by the wrong
 division) · Drawn up: 2026-11-03 against `origin/main` `2ae6333` · Owner: the repository owner · Status:
-**PROPOSED, awaiting the owner's decisions in section 7.** AGENTS.md rule 14 applies (the change touches what
-team generation seats, which is the domain model), so no code starts until the owner approves. Persistence is
-touched only by an existing JSONB column through an existing audited RPC: no migration is planned.
+**APPROVED 2026-11-03: every decision of section 7 as recommended (record in section 7); PR 1 is in build, PR 2
+and PR 3 are not started.** AGENTS.md rule 14 applies (the change touches what team generation seats, which is
+the domain model); the owner's approval is the plan it asked for. Persistence is touched only by an existing
+JSONB column through an existing audited RPC: no migration is planned.
 
 Every claim about the code is _statically reviewed_ (read) unless marked _executed_. Executed figures come from
 `npx vitest run` on the unmodified tree and from throwaway scripts kept outside the repository (they import core
@@ -468,7 +469,17 @@ reads today": add `play_down`).
 
 ## 7. Owner decisions (question F)
 
-Only decision 1 blocks the start of the build; 2 and 3 block later tasks only; the rest have a default that applies
+**Owner's decision, 2026-11-03 (verbatim): "As recommended on all of them, start PR 1".** That is decisions 1 to
+10, each as recommended: the advice and every flag count by the division played, with the two refactors flagged
+under rule 2 approved (one page helper in place of the three placement call sites, and deleting the unread
+`diagnostics.counts`); the `play_down` organization setting, off by default (PR 3); a rostered player keeps their
+seat when a setting flips (task C3); the waitlisted are counted in the flags; "asked to play up, registered in their
+own division" is its own line; roster age flags get their own list; the program view is the Teams overview's program
+headings plus a league line; the demo is unchanged; there is no coach-facing surface; and decision 10 stays
+**report only** (nothing in it is built). The approval starts PR 1 only: PR 2 and PR 3 are separate pull requests,
+started after it merges. The text below is the plan as it was put to the owner; the decisions are kept as asked.
+
+Only decision 1 blocked the start of the build; 2 and 3 block later tasks only; the rest have a default that applies
 if the owner is silent.
 
 1. **BLOCKS PR 1 and PR 2. Count by the division played.** Recommended: the advice and every flag count a player in

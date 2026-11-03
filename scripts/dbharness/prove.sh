@@ -239,6 +239,13 @@ R65="$REPO/docs/sql/20261116010000_revert.sql"
 M66="$REPO/supabase/migrations/20261117010000_players_custom_attributes_gin_index.sql"
 R66="$REPO/docs/sql/20261117010000_revert.sql"
 S66="$REPO/docs/sql/20261117010000_smoke.sql"
+# The dead column players.placement_eligible dropped, behind a refusal for a player holding false, with the demo
+# fence's list of editable columns replaced on its deployed body, its revert and its smoke. Plan
+# docs/changes/2026-11-03-drop-placement-eligible.md. No existing plant aims at the body of
+# `demo_fence_player_write`, so none is re-aimed. The smoke has no plant of its own (the budget is three): its
+# checks are shown failing by hand, in the plan's build notes.
+M67="$REPO/supabase/migrations/20261118010000_drop_players_placement_eligible.sql"
+R67="$REPO/docs/sql/20261118010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -5449,6 +5456,33 @@ plant "S66 the smoke looks for another index in the plan" "$S66" \
   "IF position('players_custom_attributes_gin_idx' IN v_plan) = 0 THEN" \
   "IF position('players_pkey' IN v_plan) = 0 THEN" \
   "smoke 20261117010000"
+
+# The dead column players.placement_eligible (docs/changes/2026-11-03-drop-placement-eligible.md). run.sh builds the
+# database to the migration before it, plants three players (two true, one false), applies the migration to be
+# refused, sets the row to true and applies it again; the migration's own end-state check refuses a function that
+# still names the column; the revert is applied onto two planted players and read back from the catalogue. Three
+# plants, each aimed at one of those:
+#   - the value guard counts the players that hold true, so it names 2 where the planted false row is 1 (run.sh:
+#     the drop stage);
+#   - the replaced fence keeps the dropped column in its list, so the migration's end-state check refuses to
+#     commit (the build stops at the migration);
+#   - the revert re-adds the column with another default, so its own end-state check refuses (the revert stage).
+plant "M67 the guard counts the players that hold true" "$M67" \
+  "        EXECUTE 'SELECT count(*) FROM public.players WHERE NOT placement_eligible' INTO v_false;" \
+  "        EXECUTE 'SELECT count(*) FROM public.players WHERE placement_eligible' INTO v_false;" \
+  "drop 20261118010000: refused, but without naming the 1 player that holds false"
+
+plant "M67 the fence keeps the dropped column in its allowlist" "$M67" \
+  "        'willing_to_coach', 'updated_at'
+    ];" \
+  "        'willing_to_coach', 'placement_eligible', 'updated_at'
+    ];" \
+  "applying 20261118010000_drop_players_placement_eligible.sql"
+
+plant "R67 the revert re-adds the column without its default" "$R67" \
+  "    ADD COLUMN IF NOT EXISTS placement_eligible boolean NOT NULL DEFAULT true;" \
+  "    ADD COLUMN IF NOT EXISTS placement_eligible boolean NOT NULL DEFAULT false;" \
+  "revert 20261118010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

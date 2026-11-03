@@ -40,6 +40,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/schedule/heat`                | `HeatForecastPage`       | Field WBGT forecast (admin, `heat_forecast` feature; NWS API)                                                                |
 | `/coaches`                      | `CoachesPage`            | Coach roster, status and team assignment (admin)                                                                             |
 | `/coaches/practice-preferences` | `CoachPreferencesPage`   | Practice preference rules (admins only): pending musts and Accept all, the rules and their editor, conflicts, a file import |
+| `/schedule/practice-daylight`   | `PracticeDaylightPage`   | Practice daylight: what the rest of the season does to each unlit practice slot, proposed and never applied (read-only)      |
 | `/schedule/practice-lighting`   | `PracticeLightingPage`   | Portable lighting on practice slots (admin; no coach requests since R6)                                                      |
 | `/permits`                      | `PermitsPage`            | Field Permits: every permit, to open or download (admin); upload stays in Fields & Venues                                    |
 | `/setup/features`               | `FeaturesSetupPage`      | "Choose your tools": feature flags, outside the dashboard chrome                                                             |

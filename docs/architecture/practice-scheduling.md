@@ -112,15 +112,23 @@ the Edge counterpart of core `practice/daylight.js`:
   `practice-daylight` claim is `soft` with a placeholder weight of 1 and a `history` entry for the retype. That is the
   label for what the Edge pass and the repair already did; the rule and every number are unchanged. The game claim
   `sunset-margin` was relabelled the same way in the following change (`docs/changes/2026-11-02-sunset-compromise.md`).
-- **The season's outlook (core only; nothing calls it yet).** `practice/durationPhases.js` proposes how the season adapts as sunset
-  moves (shorten a practice in 10-minute steps to 40, else start earlier, never before `school_day_end`), and reports which
+- **The season's outlook (the Practice daylight page; read-only).** `practice/durationPhases.js` proposes how the season adapts as
+  sunset moves (shorten a practice in 10-minute steps to 40, else start earlier, never before `school_day_end`), and reports which
   slots survive and what would fix the ones that do not. It applies nothing, and it follows the same principle as the pass above
   (owner, 2026-11-02, "Wire the durationPhases as recommended"): a date no retiming saves is **flagged, not held out** (it is not
   made TIME TBD, and nothing is truncated); it stays at the timing the slot has that night, still on the surface, and the
   survival report names its first flagged date. Its rows come through `practice/durationPhaseAdapter.js`, which dates a slot with
-  no dates by the season. The read-only "Practice daylight" page that shows it is the next PR
-  (`docs/changes/2026-11-02-duration-phases-wiring.md`); the per-slot strategy and duration pins have no storage, so every slot
-  uses the default, and applying a retimed length would need a stored representation that does not exist.
+  no dates by the season. The page, `/schedule/practice-daylight` under Scheduling (`PracticeDaylightPage`, the Practices
+  permission, no feature flag), reads seven tables as the signed-in user (`usePracticeDaylightOutlook`: locations, fields,
+  sub-units, practice slots, approved-or-not lighting windows, teams for names, and the season's assignments), **all or
+  nothing** (a failed read names its table and draws no row), runs G3 and G5 in the browser (`utils/daylightOutlook.js`; about
+  0.1 s on the demo league's 304 slots, so no worker), and lists each practice slot on unlit ground, worst first: the changes
+  proposed by date, the dates kept as scheduled and flagged (an overlap with another practice is worded as an overlap, not as past
+  sunset), an unknown sunset (never read as fine; it points at the coordinates form), the dates under an approved lighting window,
+  and the fixes G5 names (a lit field, an earlier start, another night, a lighting window, each unchecked for permits, size and
+  room). It says on its face that it is **proposed, not applied**. G4's cascade is not called: its proposals leave only as an 8.8
+  change-log that no screen renders. The per-slot strategy and duration pins have no storage, so every slot uses the default, and
+  applying a retimed length would need a stored representation that does not exist (the plan's Reading B, not built).
 
 ## Practices per division (Phase D PR B)
 

@@ -17,6 +17,7 @@ import {
   History,
   Settings,
   Lightbulb,
+  Sunset,
   ThermometerSun,
   FileText,
 } from 'lucide-react';
@@ -118,6 +119,13 @@ export const NAV = [
         icon: CalendarOff,
         path: '/scheduling/blackouts',
         permission: PERMISSIONS.MANAGE_ORGANIZATION,
+      },
+      {
+        id: 'practice-daylight',
+        label: 'Practice Daylight',
+        icon: Sunset,
+        path: '/schedule/practice-daylight',
+        permission: PERMISSIONS.VIEW_SCHEDULE,
       },
       {
         id: 'practice-lighting',
@@ -271,5 +279,6 @@ export const FULL_BLEED_ROUTES = new Set([
   '/coaches/practice-preferences',
   '/permits',
   '/schedule/practice-lighting',
+  '/schedule/practice-daylight',
   '/schedule/heat',
 ]);

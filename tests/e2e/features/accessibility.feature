@@ -70,6 +70,7 @@ Feature: Every top-level route passes an automated accessibility scan
       | /coaches                      | Coaches                  | Casey Rivera                            |
       | /coaches/practice-preferences | Practice preferences     | No rules in force.                      |
       | /schedule/practice-lighting   | Practice lighting        | Set lighting override                   |
+      | /schedule/practice-daylight   | Practice daylight        | could not be worked out                 |
       | /schedule/heat                | Heat forecast            | turned off for this organization        |
       | /fields                       | Field Management         | Field 1                                 |
       | /permits                      | Field permits            | No permits are on record yet            |

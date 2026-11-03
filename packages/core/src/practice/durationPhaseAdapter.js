@@ -5,8 +5,9 @@
  * Loading the rows is the caller's, as the user, through RLS, all or nothing
  * (a table that failed to read is a failed read, never an empty one).
  *
- * Nothing calls it yet. The read-only "Practice daylight" outlook that will
- * (`docs/changes/2026-11-02-duration-phases-wiring.md`) is its first caller.
+ * Its one caller is the read-only "Practice daylight" page's model
+ * (`frontend/src/utils/daylightOutlook.js`, PR B of
+ * `docs/changes/2026-11-02-duration-phases-wiring.md`).
  *
  * ## Held to the repair adapter
  *

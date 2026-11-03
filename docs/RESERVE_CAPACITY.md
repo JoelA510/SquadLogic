@@ -300,6 +300,13 @@ the unlit surfaces and trimmed the two November dates to the bare minimum. See
   date is at the bare minimum: the 11/07 and 11/14 dates, which carry the earliest
   sunsets of the season, hold the same 19 slots as the other Saturdays.
 
+**The warning is kept.** Counting a past-sunset slot must not hide it: each surface row carries
+`sunsetWarnedKickoffMinutes` (the slots that end after the daylight limit, a subset of `kickoffMinutes`) and
+`sunsetWarnedSlots`, each date carries `sunsetWarnedSlots`, and the report carries the total. On this corpus 26 of the
+189 slots need a lighting workaround (Alder P2 and P3 lose their last slot of each date to it, 2 a date before November and
+5 on 11/07 and 11/14, when Riverbend's last slot joins); the other 163 are daylight capacity, which is the figure the report
+gave before the decision. The status is not changed by it.
+
 The test derives every one of these counts independently, from the permit rows
 and the format's timing (`tests/helpers/reserveOracle.js`), and checks the report
 against them, so a regression in either direction is a disagreement rather than a

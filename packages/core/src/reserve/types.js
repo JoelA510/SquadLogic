@@ -168,6 +168,9 @@
  * @property {boolean} conditional
  * @property {SlotCondition|null} condition
  * @property {number[]} kickoffMinutes - the slots this surface offers, ascending
+ * @property {number[]} sunsetWarnedKickoffMinutes - of those, the ones that end past the daylight
+ *   limit: legal, and counted, with `SUNSET_MARGIN_VIOLATED` (owner, 2026-11-02)
+ * @property {number} sunsetWarnedSlots - how many of them
  * @property {number} slots
  * @property {number} conditionSatisfied
  * @property {number} conditionBlocked
@@ -196,6 +199,7 @@
  * @property {number} assigned - reserved slots whose teams are known
  * @property {number} unassigned
  * @property {number} spare - slots minus reserved
+ * @property {number} sunsetWarnedSlots - of `slots`, those that end past the daylight limit
  * @property {boolean} meetsRequirement - on `slots`
  * @property {boolean} availableMeetsRequirement - on `available`
  * @property {boolean} bareMinimum - `slots` equals the requirement exactly
@@ -221,6 +225,8 @@
  * @property {Record<string, number>} bestSlotsBySurface
  * @property {number|null} minSlots
  * @property {number|null} maxSlots
+ * @property {number} sunsetWarnedSlots - across every date: the slots that need a lighting
+ *   workaround, a subset of what `slotsByDate` counts
  * @property {string[]} bareMinimumDates
  * @property {string} status
  * @property {ReserveFinding[]} findings

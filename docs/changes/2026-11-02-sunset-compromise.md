@@ -289,3 +289,30 @@ withdrawal strands none, asserted in `keeps every fixture`, which is red under a
 - Whole-corpus scans in `feasibilityApi` already carry explicit per-test timeouts in the source (`120_000` on the changed
   rule, `300_000` on its sibling) and `scenarioBranching` raises its file timeout to 30 s; none is a command-line override
   and I did not add one. The changed whole-corpus rule now runs two scans, so it takes about twice as long as before.
+
+### 10.6 Review of #697 (Codex, two P2s), both reproduced and fixed
+
+**P2-1, `explainLatestKickoff()` under a hard-sunset what-if (_executed_).** With `sunset-margin` retyped `hard` through
+`whatIfConstraintType()`, `combined_schedule.csv#671` (Alder Pitch 3, 11/14, 11v11) was answered 18:30 with its own sunset claim
+`blocking` at -214 minutes: the claims were re-severitied through the context's registry, the search read the frozen table. The
+search now takes `options.sunsetBlocks` (what the registry says for that place, asked the way the claims are asked) and falls
+back to the table when the caller gives none; `latestLegalKickoff()` and `checkKickoffAvailability()` pass it to the
+ceiling and the binding. Now #671 reads 08:30 (the permit's 18:30 and the daylight bound at 14:56 are both out: another game
+stands on that pitch at 14:00, so the latest legal minute is the occupancy bound), equal to a minute-by-minute scan of the
+registry's own `checkPlacement()`. A game with the ground to itself (`#2`, 9v9, 08/22) reads 18:40, the daylight bound, bound by
+sunset, against 18:55 unretyped. Of 127 Alder games, 93 read the daylight bound under the hard what-if. The brief's
+"equal to the daylight bound" holds for those; #671 is the occupancy case. `feasibleKickoffBounds()` was already right: it confirms
+under the registry (the 772 reproduction above).
+
+**P2-2, `buildReserveCapacityReport()` dropped the warning (_executed_).** Unlit Alder Pitch 3, 11/14, an 11v11 grid of
+17:00 and 18:30, a one-slot requirement: two slots, `meetsRequirement: true`, status `allowed`, and nothing about the sunset
+anywhere in the result, although both end after the 16:26 daylight limit. The slots stay counted (the owner's decision). The
+report now also keeps them: per surface `sunsetWarnedKickoffMinutes` and `sunsetWarnedSlots`, per date `sunsetWarnedSlots`,
+and `sunsetWarnedSlots` for the report, all additive (no field renamed, no status or finding changed). On the corpus 26 of
+the 189 weekly slots need a lighting workaround (2 on each date before November, 5 on 11/07 and 11/14), and the other 163
+are daylight capacity: the 163 the report said before the decision. The oracle (`tests/helpers/reserveOracle.js`) derives the
+same lists from the sunset rows. Decision left open: the report's status stays `allowed` for a result whose slots all need a
+workaround; an info finding is possible without changing the shape, if the owner wants the status to say it.
+
+Plants for these two (one each, each red then reverted): the `sunsetBlocks` argument dropped from `explainLatestKickoff()`; the
+warned-slot push removed from the capacity loop.

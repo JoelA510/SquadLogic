@@ -30,7 +30,10 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { buildAvailabilityCalendarFromSeason2026 } from '@squadlogic/core/availability/index.js';
+import {
+  buildAvailabilityCalendarFromSeason2026,
+  daylightLimitMinutes,
+} from '@squadlogic/core/availability/index.js';
 import {
   SEASON_2026_CONSTRAINT_ID,
   buildSeason2026ConstraintRegistry,
@@ -68,7 +71,7 @@ import {
 
 import { SCHEDULE_EXPORT_HEADERS } from '@squadlogic/core/outputGeneration.js';
 
-import { expectedReserveKickoffs } from './helpers/reserveOracle.js';
+import { expectedReserveKickoffs, expectedSunsetWarnedKickoffs } from './helpers/reserveOracle.js';
 
 import {
   CONDITION_VERDICT,
@@ -157,6 +160,17 @@ const RESERVE_OCCUPANCY = requireFormatTiming(table, capacityInput.format).occup
   .scheduled;
 const expectedKickoffs = (date, surfaceId, overrides = {}) =>
   expectedReserveKickoffs({
+    graph,
+    calendar,
+    surfaceId,
+    date,
+    occupancyMinutes: RESERVE_OCCUPANCY,
+    earliestKickoffMinutes: capacityInput.earliestKickoffMinutes,
+    cadenceMinutes: capacityInput.cadenceMinutes,
+    ...overrides,
+  });
+const expectedWarnedKickoffs = (date, surfaceId, overrides = {}) =>
+  expectedSunsetWarnedKickoffs({
     graph,
     calendar,
     surfaceId,
@@ -984,6 +998,33 @@ describe('acceptance 3 :: the reserve capacity report', () => {
       expect(dateRow.slots).toBe(dateRow.unconditionalSlots + dateRow.conditionalSlots);
     }
 
+    // The slots that end past the daylight limit are counted AND kept: a caller can tell daylight
+    // capacity from capacity that needs a lighting workaround (review of #697). Derived from the
+    // sunset rows, surface by surface.
+    let warnedTotal = 0;
+    for (const dateRow of report.dates) {
+      let warnedHere = 0;
+      for (const row of dateRow.bySurface) {
+        const expected = expectedWarnedKickoffs(dateRow.date, row.surfaceId);
+        expect(row.sunsetWarnedKickoffMinutes, `${dateRow.date} ${row.surfaceId}`).toEqual(
+          expected
+        );
+        expect(row.sunsetWarnedSlots).toBe(expected.length);
+        // A warned slot is one of the slots, never an extra one.
+        for (const kickoff of row.sunsetWarnedKickoffMinutes) {
+          expect(row.kickoffMinutes).toContain(kickoff);
+        }
+        warnedHere += expected.length;
+      }
+      expect(dateRow.sunsetWarnedSlots, dateRow.date).toBe(warnedHere);
+      warnedTotal += warnedHere;
+    }
+    expect(report.sunsetWarnedSlots).toBe(warnedTotal);
+    // Meta-assertion: some capacity is daylight and some is not, so neither count is vacuous.
+    const allSlots = report.dates.reduce((sum, dateRow) => sum + dateRow.slots, 0);
+    expect(warnedTotal).toBeGreaterThan(0);
+    expect(warnedTotal).toBeLessThan(allSlots);
+
     // The requirement is derived from the roster, not typed in.
     expect(report.requirement.slots).toBe(selectTeamIds.length);
     expect(report.requirement.slots).toBe(14);
@@ -1175,6 +1216,55 @@ describe('acceptance 3 :: the reserve capacity report', () => {
         (finding) => finding.code === RESERVE_REASON.RESERVE_CAPACITY_AT_REQUIREMENT
       )
     ).toHaveLength(0);
+  });
+
+  it('keeps the sunset warning of a slot it counts: capacity that needs a lighting workaround (constructed)', () => {
+    // The review's own case. Unlit Alder Pitch 3 on 2026-11-14 (sunset 16:41, so the daylight
+    // limit is 16:26), an 11v11 grid of 17:00 and 18:30, and a requirement of one slot: both
+    // slots are legal and counted (owner, 2026-11-02: legal with a warning, because some
+    // organisations have portable lighting or other workarounds) and the report used to say
+    // nothing about the sunset at all.
+    const pitch3 = season2026SurfaceId('Alder Park', 'Pitch 3');
+    const date = '2026-11-14';
+    const ask = (overrides) =>
+      buildReserveCapacityReport(
+        { graph, table, calendar, registry },
+        {
+          ...capacityInput,
+          dates: [date],
+          surfaceIds: [pitch3],
+          reservedSlots: [],
+          bookings: [],
+          requirement: { ...capacityInput.requirement, slots: 1 },
+          cadenceMinutes: 90,
+          ...overrides,
+        }
+      );
+    const grid = { earliestKickoffMinutes: 17 * 60 };
+    const late = ask(grid);
+    const row = late.dates[0].bySurface[0];
+    // The two slots, from the oracle's grid, and each ends after the daylight limit.
+    const limit = daylightLimitMinutes(calendar, date);
+    expect(row.kickoffMinutes).toEqual(
+      expectedKickoffs(date, pitch3, { ...grid, cadenceMinutes: 90 })
+    );
+    expect(row.kickoffMinutes).toEqual([17 * 60, 18 * 60 + 30]);
+    for (const kickoff of row.kickoffMinutes) {
+      expect(kickoff + RESERVE_OCCUPANCY, String(kickoff)).toBeGreaterThan(limit);
+    }
+    expect(late.dates[0].slots).toBe(2);
+    expect(late.dates[0].meetsRequirement).toBe(true);
+    // Still legal and still counted; now also said.
+    expect(row.sunsetWarnedKickoffMinutes).toEqual(row.kickoffMinutes);
+    expect(late.dates[0].sunsetWarnedSlots).toBe(2);
+    expect(late.sunsetWarnedSlots).toBe(2);
+
+    // The control: the same ground and day on a grid inside daylight warns about nothing.
+    const early = ask({ earliestKickoffMinutes: 9 * 60, latestKickoffMinutes: 10 * 60 + 30 });
+    expect(early.dates[0].slots).toBe(2);
+    expect(early.dates[0].bySurface[0].kickoffMinutes).toEqual([9 * 60, 10 * 60 + 30]);
+    expect(early.dates[0].bySurface[0].sunsetWarnedKickoffMinutes).toEqual([]);
+    expect(early.sunsetWarnedSlots).toBe(0);
   });
 
   it('names the constraint that caps every date, and no date is left unattributed', () => {

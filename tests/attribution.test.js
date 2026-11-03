@@ -35,6 +35,7 @@ import {
   AVAILABILITY_REASON,
   availabilitySeverityOf,
   buildAvailabilityCalendarFromSeason2026,
+  daylightLimitMinutes,
   latestLegalKickoff,
   resolveLighting,
   resolvePermitWindow,
@@ -49,6 +50,7 @@ import {
   buildConstraintRegistry,
   buildSeason2026ConstraintRegistry,
   effectiveSeverityTable,
+  whatIfConstraintType,
 } from '@squadlogic/core/constraints/index.js';
 import {
   FACILITY_REASON,
@@ -81,6 +83,7 @@ import {
   TIMING_REASON,
   buildFormatTimingTableFromSeason2026,
   earliestKickoffWithWarmup,
+  formatTimingOrUnknown,
 } from '@squadlogic/core/timing/index.js';
 
 import {
@@ -1569,6 +1572,73 @@ describe('attribution :: the boundary answers honour the registry too', () => {
     expect(fromBoundary.severity).toBe(fromPlacement.severity);
     expect(fromBoundary.binding).toBe(fromPlacement.binding);
     expect(fromBoundary.constraintIds).toEqual(['lining-is-hard-this-season']);
+  });
+
+  it('searches inside daylight when the registry retypes the sunset margin hard (review of #697)', () => {
+    // `explainLatestKickoff()` re-severities its claims through the context's registry, so a
+    // what-if that makes the sunset margin `hard` turned its sunset claim `blocking` while the
+    // search, reading the frozen table, still offered the permit's 18:30: an answer whose own
+    // claim called it illegal. Both ends are now asked of the registry.
+    const hardRegistry = whatIfConstraintType(
+      registry,
+      SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
+      CONSTRAINT_TYPE.HARD
+    ).projectedRegistry;
+    const hardContext = buildAttributionContext({
+      graph,
+      table,
+      calendar,
+      registry: hardRegistry,
+      schedule,
+      verification: runRuleEngine(schedule, {
+        registry: hardRegistry,
+        resources: { graph, timingTable: table, calendar, venueComplexes },
+      }),
+      venueComplexes,
+      roster,
+    });
+    // The oracle never calls the boundary search: the latest minute at which the registry's own
+    // placement check calls the slot legal, scanned from the end of the day down.
+    const latestLegalByScan = (registryUnderTest, game) => {
+      for (let minute = 24 * 60; minute >= game.startMinutes; minute -= 1) {
+        const placement = checkPlacement(
+          { graph, table, calendar, registry: registryUnderTest },
+          context.state,
+          game.id,
+          { date: game.date, surfaceId: game.surfaceId, startMinutes: minute }
+        );
+        if (placement.legal) return minute;
+      }
+      return null;
+    };
+    const gameNamed = (id) =>
+      /** @type {Object} */ (schedule.games.find((entry) => entry.id === id));
+
+    // #671: the case the review reproduced. Unretyped, 18:30; retyped, the permit's 18:30 and the
+    // daylight bound beyond the games already on the pitch are both out, so it is earlier.
+    // #2: a game with the ground to itself, where the answer is the daylight bound.
+    for (const id of ['combined_schedule.csv#671', 'combined_schedule.csv#2']) {
+      const game = gameNamed(id);
+      const control = explainLatestKickoff(context, { gameId: id });
+      const hard = explainLatestKickoff(hardContext, { gameId: id });
+      expect(control.kickoffMinutes, id).toBe(latestLegalByScan(registry, game));
+      expect(hard.kickoffMinutes, id).toBe(latestLegalByScan(hardRegistry, game));
+      expect(hard.kickoffMinutes, id).toBeLessThan(control.kickoffMinutes);
+      // The answer is legal by its own claims: nothing blocking is broken at the minute it names.
+      for (const claim of hard.claims) {
+        if (claim.severity === ATTRIBUTION_SEVERITY.BLOCKING) {
+          expect(claim.slackMinutes, `${id} ${claim.kind}`).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
+    // Where the ground is free the retyped answer is the daylight bound, bound by sunset.
+    const free = explainLatestKickoff(hardContext, { gameId: 'combined_schedule.csv#2' });
+    const freeGame = gameNamed('combined_schedule.csv#2');
+    expect(free.kickoffMinutes).toBe(
+      daylightLimitMinutes(calendar, freeGame.date) -
+        formatTimingOrUnknown(table, freeGame.format).occupancyMinutes.scheduled
+    );
+    expect(free.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
   });
 
   it('re-severities "the earliest kickoff with a full warm-up" the same way', () => {

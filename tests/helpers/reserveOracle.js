@@ -18,7 +18,11 @@
  * (or the lights-off time), or at once on a date with no permit.
  */
 
-import { resolveLighting, resolvePermitWindow } from '@squadlogic/core/availability/index.js';
+import {
+  daylightLimitMinutes,
+  resolveLighting,
+  resolvePermitWindow,
+} from '@squadlogic/core/availability/index.js';
 
 /**
  * @param {Object} spec
@@ -67,4 +71,22 @@ export function expectedReserveKickoffs(spec) {
     kickoffs.push(kickoff);
   }
   return kickoffs;
+}
+
+/**
+ * Of the legal kickoffs, the ones that carry the sunset warning: unlit (or undeclared) ground
+ * whose game ends after the daylight limit on that date, sunset less the club's margin, from the
+ * sunset rows. They count as capacity (owner, 2026-11-02) and a caller needs to tell them from
+ * daylight capacity, so the report keeps them. Same inputs and same independence as
+ * {@link expectedReserveKickoffs}: no call into the availability check or the capacity report.
+ *
+ * @param {Parameters<typeof expectedReserveKickoffs>[0]} spec
+ * @returns {number[]}
+ */
+export function expectedSunsetWarnedKickoffs(spec) {
+  const { graph, calendar, surfaceId, date, occupancyMinutes } = spec;
+  if (resolveLighting(graph, calendar, surfaceId).lit === true) return [];
+  const limit = daylightLimitMinutes(calendar, date);
+  if (limit === null) return [];
+  return expectedReserveKickoffs(spec).filter((kickoff) => kickoff + occupancyMinutes > limit);
 }

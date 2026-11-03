@@ -93,12 +93,19 @@ function makeConstraint(kind, spec) {
  * binds it (the clean bound in `feasibility/` is where it still stops anything). Permit close and
  * lights-off are blocking and stay in.
  *
+ * The table is the default. A caller that judges findings under a constraint registry passes
+ * `options.sunsetBlocks` with what that registry says for the place asked about, so a what-if that
+ * retypes the sunset margin `hard` searches inside daylight and the answer cannot advertise a
+ * kickoff its own sunset claim calls blocking (`attribution/explain.js` does).
+ *
+ * @param {boolean} [override] - the caller's resolved answer, when it has one
  * @returns {boolean}
  */
-function sunsetBlocks() {
+function sunsetBlocks(override) {
   return (
+    override ??
     availabilitySeverityOf(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED) ===
-    AVAILABILITY_SEVERITY.BLOCKING
+      AVAILABILITY_SEVERITY.BLOCKING
   );
 }
 
@@ -130,9 +137,10 @@ function tightnessKey(constraint) {
  * in its place and never marked `binding`: it bounds nothing that is legal.
  *
  * @param {import('./types.js').AvailabilityConstraint[]} constraints
+ * @param {boolean} [sunsetBlocksOverride] - see {@link sunsetBlocks}
  * @returns {{ constraints: import('./types.js').AvailabilityConstraint[], binding: import('./types.js').AvailabilityConstraint|null, bindingKinds: string[] }}
  */
-function orderByTightness(constraints) {
+function orderByTightness(constraints, sunsetBlocksOverride) {
   const ordered = [...constraints].sort((a, b) => {
     const delta = tightnessKey(a) - tightnessKey(b);
     if (delta !== 0 && !Number.isNaN(delta)) return delta < 0 ? -1 : 1;
@@ -141,7 +149,7 @@ function orderByTightness(constraints) {
     );
   });
 
-  const blocksHere = sunsetBlocks();
+  const blocksHere = sunsetBlocks(sunsetBlocksOverride);
   const applicable = ordered.filter(
     (constraint) =>
       constraint.applicable && (constraint.kind !== AVAILABILITY_CONSTRAINT.SUNSET || blocksHere)
@@ -592,7 +600,7 @@ function occupancyConstraint(graph, conflicting, ctx, findings) {
  * @param {import('../timing/types.js').FormatTimingTable} table
  * @param {import('./types.js').AvailabilityCalendar} calendar
  * @param {Object} rawQuery - see `KickoffAvailabilityQuerySchema`
- * @param {{ existingBookings?: ReadonlyArray<import('../facility/types.js').FacilityBooking>, sizePolicy?: string, sizeRank?: Record<string, number> }} [options]
+ * @param {{ existingBookings?: ReadonlyArray<import('../facility/types.js').FacilityBooking>, sizePolicy?: string, sizeRank?: Record<string, number>, sunsetBlocks?: boolean }} [options]
  * @returns {import('./types.js').KickoffAvailabilityResult}
  */
 export function checkKickoffAvailability(graph, table, calendar, rawQuery, options = {}) {
@@ -749,7 +757,7 @@ export function checkKickoffAvailability(graph, table, calendar, rawQuery, optio
   ];
   meta.constraintsEvaluated += constraints.length;
 
-  const ordered = orderByTightness(constraints);
+  const ordered = orderByTightness(constraints, options.sunsetBlocks);
   answer.constraints = ordered.constraints;
   answer.binding = ordered.binding;
   answer.bindingKinds = ordered.bindingKinds;
@@ -780,7 +788,7 @@ export function checkKickoffAvailability(graph, table, calendar, rawQuery, optio
  * @param {import('../timing/types.js').FormatTimingTable} table
  * @param {import('./types.js').AvailabilityCalendar} calendar
  * @param {Object} rawQuery - see `LatestKickoffQuerySchema`
- * @param {{ existingBookings?: ReadonlyArray<import('../facility/types.js').FacilityBooking>, sizePolicy?: string, sizeRank?: Record<string, number> }} [options]
+ * @param {{ existingBookings?: ReadonlyArray<import('../facility/types.js').FacilityBooking>, sizePolicy?: string, sizeRank?: Record<string, number>, sunsetBlocks?: boolean }} [options]
  * @returns {import('./types.js').LatestKickoffResult}
  */
 export function latestLegalKickoff(graph, table, calendar, rawQuery, options = {}) {
@@ -871,7 +879,7 @@ export function latestLegalKickoff(graph, table, calendar, rawQuery, options = {
       },
       findings
     );
-    const ordered = orderByTightness([constraint]);
+    const ordered = orderByTightness([constraint], options.sunsetBlocks);
     meta.constraintsEvaluated += 1;
     return {
       ...noAnswer,
@@ -913,7 +921,7 @@ export function latestLegalKickoff(graph, table, calendar, rawQuery, options = {
     // The daylight limit bounds this search only while running past it blocks ({@link sunsetBlocks}):
     // otherwise the answer would name a "latest legal kickoff" bound by nothing. Permit close and
     // lights-off are blocking and stay in.
-    if (daylight !== null && sunsetBlocks()) hardLimits.push(daylight);
+    if (daylight !== null && sunsetBlocks(options.sunsetBlocks)) hardLimits.push(daylight);
   }
 
   const floorMinutes = query.notBeforeMinutes ?? resolvedPermit.window?.openMinutes ?? 0;

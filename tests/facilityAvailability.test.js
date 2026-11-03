@@ -125,6 +125,21 @@ const OCCUPANCY = requireFormatTiming(table, ELEVEN).occupancyMinutes.scheduled;
 /** Sunset on the acceptance date, in minutes past midnight. */
 const ACCEPTANCE_SUNSET = sunsetOn(calendar, ACCEPTANCE_DATE).sunsetMinutes;
 
+/**
+ * **Sunset warns; the permit bounds.** Owner, 2026-11-02: "Yes to legal-with-a-warning for
+ * kickoffs after sunset, because some orgs have portable lighting or other workarounds." A
+ * kickoff that ends inside the sunset margin is legal and carries `SUNSET_MARGIN_VIOLATED` as a
+ * compromise. So on the unlit pitch the latest LEGAL kickoff is the permit close less the
+ * occupancy, and the latest kickoff WITHOUT a warning is sunset less the margin less the
+ * occupancy (the original criterion's 4:24 PM). Both are derived from the fixture rows.
+ */
+const UNLIT_PERMIT_CLOSE = resolvePermitWindow(calendar, {
+  venueId: season2026VenueId(UNLIT_VENUE),
+  date: ACCEPTANCE_DATE,
+}).window.closeMinutes;
+const UNLIT_LEGAL_LATEST = UNLIT_PERMIT_CLOSE - OCCUPANCY;
+const UNLIT_CLEAN_LATEST = ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes - OCCUPANCY;
+
 const codesOf = (result) => result.findings.map((finding) => finding.code);
 const blockingOf = (result) =>
   result.findings.filter((finding) => finding.severity === AVAILABILITY_SEVERITY.BLOCKING);
@@ -189,28 +204,34 @@ describe('facility availability :: corpus guard', () => {
 /* Acceptance test 1 - sunset binds an unlit field                             */
 /* -------------------------------------------------------------------------- */
 
-describe('facility availability :: acceptance 1 - the latest unlit kickoff is bound by sunset', () => {
-  it('answers 4:24 PM on the acceptance date, derived from sunset less the margin', () => {
-    const expectedKickoff = ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes - OCCUPANCY;
-    // Derived first, then cross-checked against the criterion's own words.
-    expect(formatClockMinutes(expectedKickoff)).toBe('16:24');
-
+describe('facility availability :: acceptance 1 - an unlit kickoff past sunset is legal, with a warning', () => {
+  it('answers the permit close less the occupancy as the latest LEGAL kickoff, carrying the sunset warning', () => {
     const result = latestLegalKickoff(graph, table, calendar, {
       surfaceId: UNLIT,
       date: ACCEPTANCE_DATE,
       format: ELEVEN,
     });
 
-    expect(result.kickoffMinutes).toBe(expectedKickoff);
-    expect(result.endMinutes).toBe(ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes);
+    expect(result.kickoffMinutes).toBe(UNLIT_LEGAL_LATEST);
+    expect(result.kickoffMinutes).toBeGreaterThan(UNLIT_CLEAN_LATEST);
+    expect(result.endMinutes).toBe(UNLIT_PERMIT_CLOSE);
     expect(result.occupancyMinutes).toBe(OCCUPANCY);
     expect(blockingOf(result)).toEqual([]);
-    expect(result.status).toBe(AVAILABILITY_STATUS.ALLOWED);
+    expect(result.status).toBe(AVAILABILITY_STATUS.COMPROMISED);
+    expect(codesOf(result)).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
 
-    // The deliverable: which of the four is binding.
-    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
-    expect(result.binding.kind).toBe(AVAILABILITY_CONSTRAINT.SUNSET);
+    // The deliverable: which of the four is binding. Sunset is not: it is evaluated and
+    // reported, broken by the derived amount, and bounds nothing that is legal.
+    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
+    expect(result.binding.kind).toBe(AVAILABILITY_CONSTRAINT.PERMIT);
     expect(result.binding.slackMinutes).toBe(0);
+    const sunset = constraintOf(result, AVAILABILITY_CONSTRAINT.SUNSET);
+    expect(sunset.applicable).toBe(true);
+    expect(sunset.binding).toBe(false);
+    expect(sunset.slackMinutes).toBe(
+      ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes - UNLIT_PERMIT_CLOSE
+    );
+    expect(sunset.slackMinutes).toBeLessThan(0);
 
     // Meta-assertions: real records consulted, real constraints evaluated.
     expect(result.meta.permitWindowsConsulted).toBeGreaterThan(0);
@@ -220,7 +241,8 @@ describe('facility availability :: acceptance 1 - the latest unlit kickoff is bo
   });
 
   it('reports every constraint ordered by tightness, not just the winner', () => {
-    // Prompt 4.3 needs the ordering, so it is asserted as a contract here.
+    // Prompt 4.3 needs the ordering, so it is asserted as a contract here. The order is the
+    // order of the limits, whether or not a limit blocks.
     const result = latestLegalKickoff(graph, table, calendar, {
       surfaceId: UNLIT,
       date: ACCEPTANCE_DATE,
@@ -244,8 +266,7 @@ describe('facility availability :: acceptance 1 - the latest unlit kickoff is bo
       );
     }
 
-    // The permit is genuinely looser here, which is what makes sunset the
-    // binding constraint rather than the only one.
+    // The permit is the looser limit, and the one that binds: the answer ends exactly at it.
     const permit = constraintOf(result, AVAILABILITY_CONSTRAINT.PERMIT);
     const permitWindow = resolvePermitWindow(calendar, {
       venueId: season2026VenueId(UNLIT_VENUE),
@@ -253,24 +274,40 @@ describe('facility availability :: acceptance 1 - the latest unlit kickoff is bo
     }).window;
     expect(permit.limitMinutes).toBe(permitWindow.closeMinutes);
     expect(permit.slackMinutes).toBe(permitWindow.closeMinutes - result.endMinutes);
-    expect(permit.slackMinutes).toBeGreaterThan(0);
-    expect(permit.binding).toBe(false);
+    expect(permit.slackMinutes).toBe(0);
+    expect(permit.binding).toBe(true);
+    // The sunset limit is the tighter one, and does not bind.
+    const sunset = constraintOf(result, AVAILABILITY_CONSTRAINT.SUNSET);
+    expect(sunset.latestKickoffMinutes).toBeLessThan(permit.latestKickoffMinutes);
+    expect(sunset.binding).toBe(false);
   });
 
-  it('rejects the same game one minute later, naming the sunset margin', () => {
-    // The negative control. Without it, "allowed" proves nothing.
-    const result = checkKickoffAvailability(graph, table, calendar, {
-      surfaceId: UNLIT,
-      date: ACCEPTANCE_DATE,
-      kickoffMinutes: ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes - OCCUPANCY + 1,
-      format: ELEVEN,
-    });
+  it('answers 4:24 PM as the last kickoff without a warning, and warns about the same game one minute later', () => {
+    expect(formatClockMinutes(UNLIT_CLEAN_LATEST)).toBe('16:24'); // the criterion's own words
 
-    expect(result.status).toBe(AVAILABILITY_STATUS.REJECTED);
+    const atEdge = (kickoffMinutes) =>
+      checkKickoffAvailability(graph, table, calendar, {
+        surfaceId: UNLIT,
+        date: ACCEPTANCE_DATE,
+        kickoffMinutes,
+        format: ELEVEN,
+      });
+    const clean = atEdge(UNLIT_CLEAN_LATEST);
+    expect(clean.status).toBe(AVAILABILITY_STATUS.ALLOWED);
+    expect(codesOf(clean)).not.toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+    expect(clean.endMinutes).toBe(ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes);
+    expect(constraintOf(clean, AVAILABILITY_CONSTRAINT.SUNSET).slackMinutes).toBe(0);
+
+    // The negative control, one minute later. Without it, "no warning" proves nothing: the same
+    // game is now allowed to stand, compromised, naming the sunset margin.
+    const result = atEdge(UNLIT_CLEAN_LATEST + 1);
+    expect(result.status).toBe(AVAILABILITY_STATUS.COMPROMISED);
+    expect(blockingOf(result)).toEqual([]);
     expect(codesOf(result)).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
     const finding = result.findings.find(
       (entry) => entry.code === AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED
     );
+    expect(finding.severity).toBe(AVAILABILITY_SEVERITY.COMPROMISE);
     expect(finding.details.sunsetMinutes).toBe(ACCEPTANCE_SUNSET);
     expect(finding.details.sunsetMarginMinutes).toBe(calendar.sunsetMarginMinutes);
     expect(finding.details.limitMinutes).toBe(ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes);
@@ -280,35 +317,59 @@ describe('facility availability :: acceptance 1 - the latest unlit kickoff is bo
     for (const margin of [0, 30]) {
       const tuned = calendarWith({ sunsetMarginMinutes: margin });
       expect(tuned.sunsetMarginMinutes).toBe(margin);
+      // The margin moves where the warning starts...
+      const cleanLatest = ACCEPTANCE_SUNSET - margin - OCCUPANCY;
+      const at = (kickoffMinutes) =>
+        checkKickoffAvailability(graph, table, tuned, {
+          surfaceId: UNLIT,
+          date: ACCEPTANCE_DATE,
+          kickoffMinutes,
+          format: ELEVEN,
+        });
+      expect(codesOf(at(cleanLatest))).not.toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+      expect(codesOf(at(cleanLatest + 1))).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+      // ...and not the latest legal kickoff, which only the permit bounds.
       const result = latestLegalKickoff(graph, table, tuned, {
         surfaceId: UNLIT,
         date: ACCEPTANCE_DATE,
         format: ELEVEN,
       });
-      expect(result.kickoffMinutes).toBe(ACCEPTANCE_SUNSET - margin - OCCUPANCY);
-      expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
+      expect(result.kickoffMinutes).toBe(UNLIT_LEGAL_LATEST);
+      expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
     }
   });
 
   it('moves with the date, because sunset is per date', () => {
-    // GAP-06 in one assertion: thirteen dates, thirteen different answers, all
-    // derived from the file.
+    // GAP-06 in one assertion: the date the warning starts on moves with the file; the latest
+    // legal kickoff is the permit's, date by date.
     const seen = new Set();
     for (const record of sunsets) {
-      const result = latestLegalKickoff(graph, table, calendar, {
-        surfaceId: UNLIT,
-        date: record.date,
-        format: ELEVEN,
-      });
       const permitWindow = resolvePermitWindow(calendar, {
         venueId: season2026VenueId(UNLIT_VENUE),
         date: record.date,
       }).window;
       if (!permitWindow) continue;
+      const result = latestLegalKickoff(graph, table, calendar, {
+        surfaceId: UNLIT,
+        date: record.date,
+        format: ELEVEN,
+      });
+      expect(result.kickoffMinutes, record.date).toBe(permitWindow.closeMinutes - OCCUPANCY);
+
       const daylight = record.sunsetMinutes - calendar.sunsetMarginMinutes;
-      const expected = Math.min(daylight, permitWindow.closeMinutes) - OCCUPANCY;
-      expect(result.kickoffMinutes, record.date).toBe(expected);
-      seen.add(result.kickoffMinutes);
+      const cleanLatest = Math.min(daylight, permitWindow.closeMinutes) - OCCUPANCY;
+      const warnsAt = (kickoffMinutes) =>
+        codesOf(
+          checkKickoffAvailability(graph, table, calendar, {
+            surfaceId: UNLIT,
+            date: record.date,
+            kickoffMinutes,
+            format: ELEVEN,
+          })
+        ).includes(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+      expect(warnsAt(cleanLatest), record.date).toBe(false);
+      expect(warnsAt(cleanLatest + 1), record.date).toBe(daylight < permitWindow.closeMinutes);
+      seen.add(cleanLatest);
     }
     expect(seen.size).toBeGreaterThan(5);
   });
@@ -367,7 +428,7 @@ describe('facility availability :: acceptance 2 - the lit stadium is bound by th
     expect(codesOf(result)).toContain(AVAILABILITY_REASON.PERMIT_MARGIN_TIGHT);
   });
 
-  it('falls back to sunset the moment the same field is recorded unlit', () => {
+  it('carries the sunset warning the moment the same field is recorded unlit', () => {
     // The lighting control: nothing about the date, the format or the permit
     // changes, only the light. GAP-05 per *field*, overriding the venue.
     const tuned = calendarWith({
@@ -387,6 +448,10 @@ describe('facility availability :: acceptance 2 - the lit stadium is bound by th
       return record.sunsetMinutes - tuned.sunsetMarginMinutes - OCCUPANCY >= permit.openMinutes;
     });
     expect(feasible).toBeDefined();
+    const permit = resolvePermitWindow(tuned, {
+      venueId: season2026VenueId(LIT_VENUE),
+      date: feasible.date,
+    }).window;
 
     const result = latestLegalKickoff(graph, table, tuned, {
       surfaceId: LIT,
@@ -396,39 +461,55 @@ describe('facility availability :: acceptance 2 - the lit stadium is bound by th
 
     expect(result.lit).toBe(false);
     expect(result.lighting.source).toBe('surface');
-    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
-    expect(result.kickoffMinutes).toBe(
-      feasible.sunsetMinutes - tuned.sunsetMarginMinutes - OCCUPANCY
-    );
+    // The permit close bounds it, as it bounds the lit stadium; sunset does not.
+    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
+    expect(result.kickoffMinutes).toBe(permit.closeMinutes - OCCUPANCY);
+    // What the lights change is the warning: unlit, that kickoff ends past the daylight limit.
+    expect(permit.closeMinutes).toBeGreaterThan(feasible.sunsetMinutes - tuned.sunsetMarginMinutes);
+    expect(codesOf(result)).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
     // The permit paperwork still claims the venue is lit; the disagreement is
     // reported rather than reconciled silently.
     expect(codesOf(result)).toContain(AVAILABILITY_REASON.LIGHTING_SOURCE_DISAGREES);
 
-    // Lit, the same date and the same permit reach the permit close instead.
+    // Lit, the same date and the same permit reach the same minute with no sunset warning at all.
     const withLights = latestLegalKickoff(graph, table, calendar, {
       surfaceId: LIT,
       date: feasible.date,
       format: ELEVEN,
     });
     expect(withLights.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
-    expect(withLights.kickoffMinutes).toBeGreaterThan(result.kickoffMinutes);
+    expect(withLights.kickoffMinutes).toBe(result.kickoffMinutes);
+    expect(codesOf(withLights)).not.toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
   });
 
-  it('cannot fit an unlit game there at all on the acceptance date', () => {
-    // The stadium opens at 5:00 PM and the daylight limit that day is 5:54 PM,
-    // so without floodlights there is no legal kickoff - reported as such rather
-    // than as a negative-length window.
+  it('can fit an unlit game there on the acceptance date, with a warning', () => {
+    // The stadium opens at 5:00 PM and the daylight limit that day is 5:54 PM, so without
+    // floodlights no game can finish inside daylight. It used to mean no legal kickoff; since the
+    // owner's decision of 2026-11-02 it means a legal one that carries the sunset warning.
     const tuned = calendarWith({
       lighting: [{ surfaceId: LIT, lit: false, note: 'floodlights out of service' }],
     });
+    const permit = resolvePermitWindow(tuned, {
+      venueId: season2026VenueId(LIT_VENUE),
+      date: ACCEPTANCE_DATE,
+    }).window;
+    // Why this case exists: nothing fits inside daylight.
+    expect(ACCEPTANCE_SUNSET - tuned.sunsetMarginMinutes - OCCUPANCY).toBeLessThan(
+      permit.openMinutes
+    );
+
     const result = latestLegalKickoff(graph, table, tuned, {
       surfaceId: LIT,
       date: ACCEPTANCE_DATE,
       format: ELEVEN,
     });
-    expect(result.kickoffMinutes).toBeNull();
-    expect(codesOf(result)).toContain(AVAILABILITY_REASON.NO_LEGAL_KICKOFF);
-    expect(result.searchedFromMinutes).toBeGreaterThan(result.searchedToMinutes);
+    expect(result.kickoffMinutes).toBe(permit.closeMinutes - OCCUPANCY);
+    expect(result.kickoffMinutes).toBeGreaterThanOrEqual(permit.openMinutes);
+    expect(codesOf(result)).not.toContain(AVAILABILITY_REASON.NO_LEGAL_KICKOFF);
+    expect(codesOf(result)).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+    expect(blockingOf(result)).toEqual([]);
+    expect(result.status).toBe(AVAILABILITY_STATUS.COMPROMISED);
+    expect(result.searchedFromMinutes).toBeLessThanOrEqual(result.searchedToMinutes);
   });
 });
 
@@ -827,12 +908,13 @@ describe('facility availability :: lighting is a property of the field', () => {
     expect(lit.kickoffMinutes).toBe(permitClose - OCCUPANCY);
     expect(lit.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
 
-    // The pitch next to it is untouched: still dark, still bound by sunset.
+    // The pitch next to it is untouched: still dark, so the same minute carries the sunset
+    // warning that the lit pitch does not.
     expect(neighbour.lit).toBe(false);
-    expect(neighbour.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
-    expect(neighbour.kickoffMinutes).toBe(
-      ACCEPTANCE_SUNSET - tuned.sunsetMarginMinutes - OCCUPANCY
-    );
+    expect(neighbour.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
+    expect(neighbour.kickoffMinutes).toBe(permitClose - OCCUPANCY);
+    expect(codesOf(neighbour)).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+    expect(codesOf(lit)).not.toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
   });
 
   it('inherits a lighting record from a parent surface down to its halves', () => {
@@ -929,9 +1011,9 @@ describe('facility availability :: lighting is a property of the field', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('facility availability :: occupancy bounds the answer through the facility graph', () => {
-  /** A blocker derived from the sunset-bound answer, on the *overlapping* pitch. */
-  const sunsetBoundKickoff = ACCEPTANCE_SUNSET - SEASON_2026_SUNSET_MARGIN_MINUTES - OCCUPANCY;
-  const blockerStart = sunsetBoundKickoff + 30;
+  /** A blocker derived from the permit-bound answer, on the *overlapping* pitch. */
+  const permitBoundKickoff = UNLIT_LEGAL_LATEST;
+  const blockerStart = permitBoundKickoff + 30;
   const blocker = {
     id: 'blocker',
     surfaceId: sid(UNLIT_VENUE, 'Pitch 1A'),
@@ -954,7 +1036,7 @@ describe('facility availability :: occupancy bounds the answer through the facil
     );
 
     expect(result.kickoffMinutes).toBe(blockerStart - OCCUPANCY);
-    expect(result.kickoffMinutes).toBeLessThan(sunsetBoundKickoff);
+    expect(result.kickoffMinutes).toBeLessThan(permitBoundKickoff);
     expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.OCCUPANCY]);
 
     const occupancy = constraintOf(result, AVAILABILITY_CONSTRAINT.OCCUPANCY);
@@ -963,12 +1045,18 @@ describe('facility availability :: occupancy bounds the answer through the facil
     expect(occupancy.detail.boundByBookingIds).toEqual([blocker.id]);
     expect(occupancy.detail.boundBySurfaceIds).toEqual([blocker.surfaceId]);
 
-    // ...and the other three are still reported, in tightness order behind it.
-    expect(result.constraints.map((constraint) => constraint.kind).slice(0, 3)).toEqual([
-      AVAILABILITY_CONSTRAINT.OCCUPANCY,
-      AVAILABILITY_CONSTRAINT.SUNSET,
-      AVAILABILITY_CONSTRAINT.PERMIT,
-    ]);
+    // ...and the other three are still reported, in the order of their limits (derived here from
+    // the raw numbers, not read back), whether or not each one blocks.
+    const expectedOrder = [
+      { kind: AVAILABILITY_CONSTRAINT.OCCUPANCY, latest: blockerStart - OCCUPANCY },
+      { kind: AVAILABILITY_CONSTRAINT.SUNSET, latest: UNLIT_CLEAN_LATEST },
+      { kind: AVAILABILITY_CONSTRAINT.PERMIT, latest: UNLIT_LEGAL_LATEST },
+    ]
+      .sort((a, b) => a.latest - b.latest)
+      .map((entry) => entry.kind);
+    expect(result.constraints.map((constraint) => constraint.kind).slice(0, 3)).toEqual(
+      expectedOrder
+    );
     expect(constraintOf(result, AVAILABILITY_CONSTRAINT.SUNSET).slackMinutes).toBe(
       ACCEPTANCE_SUNSET - calendar.sunsetMarginMinutes - result.endMinutes
     );
@@ -988,8 +1076,8 @@ describe('facility availability :: occupancy bounds the answer through the facil
       { surfaceId: UNLIT, date: ACCEPTANCE_DATE, format: ELEVEN },
       { existingBookings: [elsewhere] }
     );
-    expect(result.kickoffMinutes).toBe(sunsetBoundKickoff);
-    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
+    expect(result.kickoffMinutes).toBe(permitBoundKickoff);
+    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
     expect(result.meta.overlapPairsConsulted).toBeGreaterThan(0);
   });
 
@@ -1003,7 +1091,7 @@ describe('facility availability :: occupancy bounds the answer through the facil
       { surfaceId: UNLIT, date: ACCEPTANCE_DATE, format: ELEVEN },
       { existingBookings: [otherDay] }
     );
-    expect(result.kickoffMinutes).toBe(sunsetBoundKickoff);
+    expect(result.kickoffMinutes).toBe(permitBoundKickoff);
   });
 
   it('ignores the fixture being re-timed, so a game does not block itself', () => {
@@ -1020,18 +1108,18 @@ describe('facility availability :: occupancy bounds the answer through the facil
       },
       { existingBookings: [self] }
     );
-    expect(result.kickoffMinutes).toBe(sunsetBoundKickoff);
-    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
+    expect(result.kickoffMinutes).toBe(permitBoundKickoff);
+    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
   });
 
   it('finds the earlier gap when the window right below the limit is occupied', () => {
-    // A booking spanning the sunset-bound slot: the answer must fall back to the
+    // A booking spanning the permit-bound slot: the answer must fall back to the
     // latest kickoff that finishes as that booking starts, not give up.
     const wall = {
       ...blocker,
       id: 'wall',
-      startMinutes: sunsetBoundKickoff - 10,
-      endMinutes: sunsetBoundKickoff + OCCUPANCY,
+      startMinutes: permitBoundKickoff - 10,
+      endMinutes: permitBoundKickoff + OCCUPANCY,
     };
     const result = latestLegalKickoff(
       graph,
@@ -1070,10 +1158,34 @@ describe('facility availability :: occupancy bounds the answer through the facil
     expect(result.candidatesTested).toBeGreaterThan(0);
   });
 
-  it('marks both constraints when two bind equally hard', () => {
-    // Ties are real: a permit that closes exactly at the daylight limit binds
-    // with the sunset rule, and an explanation that named only one would be
+  it('marks both constraints when two blocking constraints bind equally hard; a sunset limit never binds', () => {
+    // Ties are real: a permit that closes exactly at the lights-off time binds
+    // with the lighting rule, and an explanation that named only one would be
     // half a truth. Ordered by the declared tie-break, not by chance.
+    const permitClose = resolvePermitWindow(calendar, {
+      venueId: season2026VenueId(LIT_VENUE),
+      date: ACCEPTANCE_DATE,
+    }).window.closeMinutes;
+    const tiedLights = calendarWith({
+      lighting: [
+        { surfaceId: LIT, lit: true, lightsOffMinutes: permitClose, note: 'curfew = close' },
+      ],
+    });
+    const lights = latestLegalKickoff(graph, table, tiedLights, {
+      surfaceId: LIT,
+      date: ACCEPTANCE_DATE,
+      format: ELEVEN,
+    });
+    expect(lights.bindingKinds).toEqual([
+      AVAILABILITY_CONSTRAINT.LIGHTING,
+      AVAILABILITY_CONSTRAINT.PERMIT,
+    ]);
+    expect(constraintOf(lights, AVAILABILITY_CONSTRAINT.LIGHTING).binding).toBe(true);
+    expect(constraintOf(lights, AVAILABILITY_CONSTRAINT.PERMIT).binding).toBe(true);
+
+    // The same tie with the daylight limit: a permit that closes exactly at the limit ties with
+    // the sunset rule on the numbers (both have no room left) but only the permit BINDS, because
+    // running past the daylight limit is a warning (owner, 2026-11-02), not a bound.
     const venueId = season2026VenueId(UNLIT_VENUE);
     const input = toAvailabilityCalendarInput(permits, sunsets);
     const tied = buildAvailabilityCalendar({
@@ -1102,13 +1214,14 @@ describe('facility availability :: occupancy bounds the answer through the facil
       date: ACCEPTANCE_DATE,
       format: ELEVEN,
     });
-    expect(result.bindingKinds).toEqual([
-      AVAILABILITY_CONSTRAINT.SUNSET,
-      AVAILABILITY_CONSTRAINT.PERMIT,
-    ]);
-    expect(constraintOf(result, AVAILABILITY_CONSTRAINT.SUNSET).binding).toBe(true);
+    expect(result.kickoffMinutes).toBe(UNLIT_CLEAN_LATEST);
+    expect(result.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
+    expect(constraintOf(result, AVAILABILITY_CONSTRAINT.SUNSET).binding).toBe(false);
+    expect(constraintOf(result, AVAILABILITY_CONSTRAINT.SUNSET).slackMinutes).toBe(0);
     expect(constraintOf(result, AVAILABILITY_CONSTRAINT.PERMIT).binding).toBe(true);
     expect(constraintOf(result, AVAILABILITY_CONSTRAINT.PERMIT).slackMinutes).toBe(0);
+    // And nothing is past the limit at that minute, so no warning either.
+    expect(codesOf(result)).not.toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
   });
 });
 
@@ -1117,10 +1230,14 @@ describe('facility availability :: occupancy bounds the answer through the facil
 /* -------------------------------------------------------------------------- */
 
 describe('facility availability :: full-corpus replay', () => {
-  const replay = () => {
+  const replay = (replayCalendar = calendar) => {
     const summary = {
       checked: 0,
       availabilityBreaches: [],
+      // Every SUNSET_MARGIN_VIOLATED, at any severity. Since the owner's decision of 2026-11-02 it
+      // is a compromise, so `availabilityBreaches` (blocking only) no longer sees it: a replay
+      // that kept looking only at blockers would call a season that ends in the dark clean.
+      daylightWarnings: [],
       otherBlocking: [],
       compromised: 0,
       unlitChecked: 0,
@@ -1132,7 +1249,7 @@ describe('facility availability :: full-corpus replay', () => {
     };
     for (const game of combinedGames) {
       const surfaceId = sid(game.venue, game.field);
-      const result = checkKickoffAvailability(graph, table, calendar, {
+      const result = checkKickoffAvailability(graph, table, replayCalendar, {
         surfaceId,
         date: game.date,
         kickoffMinutes: game.kickoffMinutes,
@@ -1140,6 +1257,9 @@ describe('facility availability :: full-corpus replay', () => {
       });
       summary.checked += 1;
       const codes = codesOf(result);
+      if (codes.includes(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED)) {
+        summary.daylightWarnings.push({ game: game.id, date: game.date });
+      }
       for (const finding of blockingOf(result)) {
         const bucket = Object.values(AVAILABILITY_REASON).includes(finding.code)
           ? summary.availabilityBreaches
@@ -1165,8 +1285,10 @@ describe('facility availability :: full-corpus replay', () => {
     // (README: "no unlit game ends within 15 min of sunset; no game sits outside
     // its venue permit") replayed through the model that now owns the rule.
     const summary = replay();
-    // Not one permit breach and not one daylight breach in 679 published rows.
+    // Not one permit breach and not one daylight breach in 679 published rows: blocking ones
+    // (the permit) and warnings (the daylight margin) alike.
     expect(summary.availabilityBreaches).toEqual([]);
+    expect(summary.daylightWarnings).toEqual([]);
     expect(summary.checked).toBe(combinedGames.length);
     expect(summary.checked).toBe(679);
 
@@ -1209,8 +1331,20 @@ describe('facility availability :: full-corpus replay', () => {
       kickoffMinutes: daylight - (unlitGame.endMinutes - unlitGame.kickoffMinutes) + 1,
       format: unlitGame.format,
     });
-    expect(pastSunset.status).toBe(AVAILABILITY_STATUS.REJECTED);
+    // Past sunset is a warning (owner, 2026-11-02): allowed to stand, never silent.
+    expect(pastSunset.status).toBe(AVAILABILITY_STATUS.COMPROMISED);
+    expect(blockingOf(pastSunset)).toEqual([]);
     expect(codesOf(pastSunset)).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+
+    // ...and the replay sees it: the same published season on a calendar whose every sunset is
+    // two hours earlier has games that end in the dark, none of them a blocker.
+    const earlier = buildAvailabilityCalendarFromSeason2026(
+      permits,
+      sunsets.map((record) => ({ ...record, sunsetMinutes: record.sunsetMinutes - 120 }))
+    );
+    const dark = replay(earlier);
+    expect(dark.daylightWarnings.length).toBeGreaterThan(0);
+    expect(dark.availabilityBreaches).toEqual([]);
 
     const litGame = combinedGames.find(
       (game) => game.venue === LIT_VENUE && formatsByName[game.format]
@@ -1232,6 +1366,7 @@ describe('facility availability :: full-corpus replay', () => {
     // at or below every applicable limit.
     let answered = 0;
     let unbounded = 0;
+    let pastDaylight = 0;
     for (const date of [...new Set(combinedGames.map((game) => game.date))]) {
       for (const surfaceId of graph.surfaceIds) {
         if (!graph.surfaces[surfaceId].sizes.includes(ELEVEN)) continue;
@@ -1245,6 +1380,17 @@ describe('facility availability :: full-corpus replay', () => {
         expect(blockingOf(result), `${surfaceId} ${date}`).toEqual([]);
         for (const constraint of result.constraints) {
           if (!constraint.applicable || constraint.limitMinutes === null) continue;
+          // The daylight limit is the one limit a legal answer may run past (owner, 2026-11-02),
+          // and when it does the answer says so; every other limit is kept.
+          if (constraint.kind === AVAILABILITY_CONSTRAINT.SUNSET) {
+            if (result.endMinutes > constraint.limitMinutes) {
+              pastDaylight += 1;
+              expect(codesOf(result), `${surfaceId} ${date}`).toContain(
+                AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED
+              );
+            }
+            continue;
+          }
           expect(result.endMinutes, `${surfaceId} ${date} ${constraint.kind}`).toBeLessThanOrEqual(
             constraint.limitMinutes
           );
@@ -1262,6 +1408,8 @@ describe('facility availability :: full-corpus replay', () => {
     }
     expect(answered).toBeGreaterThan(20);
     expect(unbounded).toBeLessThan(answered);
+    // Meta-assertion: the daylight exception was exercised, not vacuously true.
+    expect(pastDaylight).toBeGreaterThan(0);
   });
 });
 

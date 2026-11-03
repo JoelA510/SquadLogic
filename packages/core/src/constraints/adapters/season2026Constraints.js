@@ -421,25 +421,33 @@ export const SEASON_2026_CONSTRAINTS = Object.freeze([
     id: SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
     policy: 'sunset-margin',
     name: 'Unlit games finish before dusk',
-    type: CONSTRAINT_TYPE.HARD,
+    type: CONSTRAINT_TYPE.SOFT,
     scope: GLOBAL,
     parameters: { marginMinutes: 15 },
     restrictiveDirection: 'higher',
     rationale:
-      'On unlit ground a game must be over fifteen minutes before sunset. The margin is the safety, not the sunset itself: a game finishing at last light is a game finishing in the dark.',
+      'On unlit ground a game should be over fifteen minutes before sunset. The margin is the safety, not the sunset itself: a game finishing at last light is a game finishing in the dark. A kickoff that would end inside the margin is legal and carries a warning, never a refusal: some organisations have portable lighting or other workarounds.',
     source: {
       setBy: 'club operations',
       setAt: null,
       reference: `${INVARIANTS} — "No unlit game ends within 15 min of sunset"; per-date sunsets in fixtures/season-2026/sunsets.csv`,
-      note: 'recorded as a corpus invariant rather than as a dated decision. Enforced in core evaluation only (availability/kickoff.js, the rule engine); the live game path -- gameScheduling.js and the Edge game functions -- reads no sunset, so there it is declared, not enforced (8.9 plan, F2 and D7)',
+      note: 'recorded as a corpus invariant rather than as a dated decision. Enforced in core evaluation only (availability/kickoff.js, the rule engine); the live game path -- gameScheduling.js and the Edge game functions -- reads no sunset, so there it is declared, not enforced (8.9 plan, F2 and D7). The claim was HARD (the corpus invariant, kept in history) and is SOFT since the owner decision of 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds."): SUNSET_MARGIN_VIOLATED is a compromise finding, a kickoff past the limit is legal, placeable and counted, and only the clean bound (latestClean) still stops at the limit. The weight (1) is a placeholder that nobody has stated and that changes no result: severities come from the type',
     },
     effectiveFrom: null,
     effectiveTo: null,
     enforcement: CONSTRAINT_ENFORCEMENT.REASON_CODES,
     reasonCodes: [AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED],
-    weight: null,
+    weight: 1,
     waivable: false,
-    history: [],
+    history: [
+      {
+        from: CONSTRAINT_TYPE.HARD,
+        to: CONSTRAINT_TYPE.SOFT,
+        at: '2026-11-02',
+        by: 'owner',
+        note: '"Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds." A kickoff past the limit is legal with a warning, as a practice past sunset already was. The weight 1 is a placeholder nobody stated (docs/changes/2026-11-02-sunset-compromise.md)',
+      },
+    ],
   },
 
   {

@@ -1,11 +1,10 @@
 # Sunset is a compromise, for practice and game (Step 0)
 
-Status: **practice built (this PR); games approved by the owner and next, not touched here.** Step 0 (this
-document's first commit) found that the practice half is a label change and the game half is not: it
-changes the verdicts the core answers give and moves the season-2026 corpus results (section 4). The
-coordinator's decisions of 2026-11-02 follow in section 5. AGENTS.md rule 14 applies (the domain model);
-the practice half was agreed, and the game half is **approved by the owner (section 5, item 5) and is the
-next PR**, not this one.
+Status: **practice built (#694); the game half built in the following change (section 10).** Step 0
+found that the practice half is a label change and the game half is not: it changes the verdicts the
+core answers give and moves the season-2026 corpus results (section 4). The coordinator's decisions of
+2026-11-02 follow in section 5. AGENTS.md rule 14 applies (the domain model); the practice half was
+agreed, and the owner then approved the game half (section 5, item 5).
 
 Everything below was checked against `main` at `228980a` (#691). Labels follow rule 4: _statically
 reviewed_ (read), _executed_ (run), _fully validated_ (run and the outcome checked).
@@ -123,7 +122,7 @@ results move.
    `SOFT` with a `history` entry (`hard` to `soft`, owner, 2026-11-02); the claim's note and rationale
    (the real behaviour, including the unknown-sunset clause); the comments that say hard; and new
    plant-proved tests, since none existed.
-5. **Games: approved by the owner, next PR (status: approved, not started).** Owner, 2026-11-02, verbatim:
+5. **Games: approved by the owner (status: built in the following change, section 10).** Owner, 2026-11-02, verbatim:
    "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds." So `SUNSET_MARGIN_VIOLATED` and the `sunset-margin` claim become
    `COMPROMISE` and `SOFT` (weight 1, a stated placeholder, `waivable: false`); a past-sunset kickoff is legal,
    placeable and countable and carries a warning; `latestClean` stays the only remaining sunset bound; and the
@@ -211,3 +210,82 @@ build with CI's stand-in variables and `check:bundle`; the full mock E2E (214 sc
 fixture tests are in the suite and pass unchanged: no existing test was edited. **Not run, and why:** the Deno
 mirror tests and `deno check` (nothing under `supabase/functions` changed), pgTAP and the real-backend E2E (no
 SQL, no Edge or schema change). The game half's gates are its own PR's.
+
+## 10. The game half (built in the following change)
+
+Owner, 2026-11-02, verbatim: "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds." So `SUNSET_MARGIN_VIOLATED` is a compromise, the `sunset-margin` claim is `soft` (weight 1, a placeholder
+nobody has stated; `waivable: false`; the retype on its `history`), and a kickoff past the daylight limit is legal,
+placeable and counted, carries the warning, and is stopped only by the clean bound.
+
+**Changed:** `availability/reasonCodes.js` (the severity); `constraints/adapters/season2026Constraints.js` (the claim: type,
+weight, history, rationale, note); `availability/kickoff.js` (below); the comments that called sunset a bound
+(`feasibility/reasonCodes.js`, `waivers/reasonCodes.js`, `waivers/ledger.js`); `docs/CONSTRAINT_REGISTRY.md`,
+`docs/RESERVE_CAPACITY.md`, `docs/MODEL_GAPS.md`, `docs/PHASE_8_9_PLAN.md` (D1 and D7 notes). **Not changed:** the live game
+scheduler (it reads no sunset), any persisted value, CHECK, enum or schema, the Edge functions, the frontend, `waivable`.
+
+### 10.1 Two corrections to the Step 0 table (G2 and G4)
+
+- **G2 was marked "statically reviewed" and was wrong.** `latestLegalKickoff()` took the daylight limit into its search
+  ceiling, and `orderByTightness()` into the binding constraint, without asking the severity table. Relabelling the code
+  alone left the answer "latest hard kickoff 14:56, bound by nothing" (_executed_: `hardBinding []` and a new
+  `FEASIBILITY_BOUND_UNSTATED`), and the reserve capacity attributed every day's cap to sunset (`cappedByKinds
+['sunset']`) while the permit was what stopped it. `kickoff.js` now reads `sunsetBlocks()` (the same table the finding's
+  severity comes from) in both places: the daylight limit still appears, ordered and reported, but bounds the legal search
+  and binds only while breaking it blocks. That is why the pinned results were 49, not the 26 the relabel alone moved.
+- **G4's "new `FEASIBILITY_RULE_UNENFORCED`" was a misreading, traced.** `ruleCoverage()` lists a constraint as unenforced when no
+  rule claims it, whatever its type; `sunset-margin` has a rule, so the retype cannot add or remove it (_executed_: the
+  unenforced ids are `coach-maximum-gap` and `kickoff-variety` before and after, and the same two non-verdict-bearing unknowns
+  ride on the same past-sunset move before and after). I had only the "after" findings when I wrote it. Documented, no fix
+  needed. What is new on that move is `FEASIBILITY_TIGHT` (info).
+
+### 10.2 The pinned results, before and after (_executed_)
+
+All derived from the plan, not read back from the new output (section 10.3). Files and tests that moved: 49 tests in 7 files.
+
+| Result (season-2026 corpus)                               | Before                                                 | After                                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Latest legal kickoff, unlit Alder Pitch 2, 10/24 (11v11)  | 16:24 (sunset less margin less 90)                     | 18:30 (permit close less 90); 16:24 is the last kickoff without a warning                             |
+| Bounds at Alder P2 on 11/14: hard / clean / tight band    | 14:56 sunset / 14:56 / 0                               | 18:30 permit / 14:56 sunset / 214 min                                                                 |
+| `canGameMove` to 18:00 past sunset                        | infeasible, margin -184                                | feasible, tight; margin -184 is the sunset limit, a compromise bound, broken                          |
+| "Can this 9v9 team play at 6pm in November?"              | no (8 of 8 cells infeasible)                           | yes, 8 of 8 feasible, margin 55 = permit room, sunset a compromise claim                              |
+| Reserve capacity per week                                 | 14-18 slots (163), 11/07 and 11/14 at the bare minimum | 17-20 slots (189); the permit caps every date, none at the bare minimum                               |
+| Dates short of the requirement once conditions are judged | 5                                                      | 1 (09/19)                                                                                             |
+| Minimal blocking set of an over-booked slot               | 3 constraints                                          | 2 (same-ground, permit); sunset is a warning on it                                                    |
+| "No venue Brookside" withdrawal (72 games)                | 60 relocated, 12 TIME TBD                              | 72 relocated; the 12 carry the sunset warning (10/03, 10/17, 10/24, 10/31)                            |
+| Bounds cells with a hard bound and nothing clean          | 772                                                    | 772 reproduced exactly in a sunset-hard world, plus the cells where a game never fits inside daylight |
+
+### 10.3 How the expectations were derived
+
+- **`tests/helpers/reserveOracle.js`** states how many slots a day holds from the permit rows and the format's timing alone
+  (blackout, open, close, lights-off), sharing only the permit and lighting resolvers. The capacity report must agree on every
+  date and surface, including the conditional verdicts (counted from the games on the overlapping ground). It agreed first time.
+- **The world as it was**, reproduced from the data: the same questions asked with the sunset margin retyped `hard`, through
+  `whatIfConstraintType()` in `feasibilityApi` and a `RETYPE` scenario override in `scenarioBranching`. That reproduces the
+  reviewed 772 and the 12 shelved games exactly, so the decision's whole effect is the difference between the two worlds. The
+  hard answer is never earlier than before, the clean answer never moves, and every newly never-clean cell is unlit ground.
+- **A published-season replay that only counted blockers would have gone blind**: `finds no permit breach and no daylight
+breach` now also asserts there is no `SUNSET_MARGIN_VIOLATED` at any severity, with a negative control (the same replay on
+  sunsets two hours earlier finds warnings and no blocker).
+- Expected values are written as arithmetic over the raw rows (permit close less occupancy, sunset less margin less
+  occupancy), never as the number the new code printed.
+
+### 10.4 Plants (three, each red then reverted, _executed_), and what they do not reach
+
+L-P1 `SUNSET_MARGIN_VIOLATED` back to `BLOCKING` (42 tests red); L-P2 the claim back to `hard` with no weight (25 red);
+L-P3 `sunsetBlocks()` always true (28 red). Every test changed or added for the decision is red under at least one, **except**
+these, which are inputs moved to keep a premise rather than relabel-detectors, each guarded by its own meta-assertion:
+`counts the grid's unknowns once` (a grid the permit closes on, because the 6pm grid is now feasible with nothing to roll up),
+`holds at every severity a blocker can carry` (a caller-bounded cell supplies the info-only row the corpus no longer has),
+`the two 15-minute margins: main's 15:05 ...` and the `finds no permit breach` replay line (assertions about quantities the
+decision leaves unmoved; the replay's control is red under L-P1), and `reports how many candidates...`, `keeps every fixture...`
+and `carries the fixture accounting's verdict...` (the incident-10 accounting, moved onto the sunset-hard branch; the plain
+withdrawal strands none, asserted in `keeps every fixture`, which is red under all three).
+
+### 10.5 For the owner
+
+- `canGameMove` now answers `feasible` with a negative margin for a kickoff past the daylight limit. By the sign convention the
+  margin is the compromise bound broken by that many minutes; the verdict is `feasible` and `tight`. Say if a past-sunset move
+  should read differently.
+- Three existing tests carry explicit per-test timeouts for whole-corpus scans (120 s and 300 s in `feasibilityApi`) and
+  `scenarioBranching` raises its file timeout to 30 s; they were not mine and are unchanged. The changed whole-corpus rule now
+  runs two scans (about twice as long).

@@ -45,6 +45,7 @@ import {
   AVAILABILITY_CONSTRAINT_ORDER,
   AVAILABILITY_REASON,
   AVAILABILITY_SEVERITY,
+  availabilitySeverityOf,
   deriveAvailabilityStatus,
   makeAvailabilityFinding,
 } from './reasonCodes.js';
@@ -82,6 +83,26 @@ function makeConstraint(kind, spec) {
 }
 
 /**
+ * Does running past the daylight limit block a kickoff? Read off the severity table, as every
+ * finding's severity is, so the limit and the finding it raises cannot disagree.
+ *
+ * Since the owner's decision of 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset,
+ * because some orgs have portable lighting or other workarounds.") `SUNSET_MARGIN_VIOLATED` is a
+ * compromise: a kickoff past the limit is legal and carries the warning. The limit is still
+ * evaluated, ordered and reported; it just no longer bounds the legal answer or counts as what
+ * binds it (the clean bound in `feasibility/` is where it still stops anything). Permit close and
+ * lights-off are blocking and stay in.
+ *
+ * @returns {boolean}
+ */
+function sunsetBlocks() {
+  return (
+    availabilitySeverityOf(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED) ===
+    AVAILABILITY_SEVERITY.BLOCKING
+  );
+}
+
+/**
  * Sort key for tightness. Smaller binds harder.
  *
  * A stated blackout is `-Infinity` (nothing is legal, so nothing binds harder);
@@ -104,6 +125,10 @@ function tightnessKey(constraint) {
  * that closes exactly at the daylight limit binds both), *every* constraint at
  * the tightest position is marked, not just the first.
  *
+ * **Only a constraint that can block binds.** The ordering lists all four, but a
+ * daylight limit whose breach is a compromise ({@link sunsetBlocks}) is reported
+ * in its place and never marked `binding`: it bounds nothing that is legal.
+ *
  * @param {import('./types.js').AvailabilityConstraint[]} constraints
  * @returns {{ constraints: import('./types.js').AvailabilityConstraint[], binding: import('./types.js').AvailabilityConstraint|null, bindingKinds: string[] }}
  */
@@ -116,7 +141,11 @@ function orderByTightness(constraints) {
     );
   });
 
-  const applicable = ordered.filter((constraint) => constraint.applicable);
+  const blocksHere = sunsetBlocks();
+  const applicable = ordered.filter(
+    (constraint) =>
+      constraint.applicable && (constraint.kind !== AVAILABILITY_CONSTRAINT.SUNSET || blocksHere)
+  );
   if (applicable.length === 0) return { constraints: ordered, binding: null, bindingKinds: [] };
 
   const tightest = tightnessKey(applicable[0]);
@@ -881,7 +910,10 @@ export function latestLegalKickoff(graph, table, calendar, rawQuery, options = {
   }
   if (lighting.lit !== true) {
     const daylight = daylightLimitMinutes(calendar, query.date);
-    if (daylight !== null) hardLimits.push(daylight);
+    // The daylight limit bounds this search only while running past it blocks ({@link sunsetBlocks}):
+    // otherwise the answer would name a "latest legal kickoff" bound by nothing. Permit close and
+    // lights-off are blocking and stay in.
+    if (daylight !== null && sunsetBlocks()) hardLimits.push(daylight);
   }
 
   const floorMinutes = query.notBeforeMinutes ?? resolvedPermit.window?.openMinutes ?? 0;

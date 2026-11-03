@@ -1091,3 +1091,63 @@ describe('the what-if query', () => {
     });
   });
 });
+
+describe('the sunset margin is a compromise (owner, 2026-11-02)', () => {
+  // The owner: "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have
+  // portable lighting or other workarounds." The expected values below come from that decision and
+  // from the other constraints of the same set, never from the sunset record or its code's severity.
+  //
+  // Plants (each red, then reverted): L-P1 `SUNSET_MARGIN_VIOLATED` back to `BLOCKING` in
+  // `AVAILABILITY_REASON_SEVERITY`; L-P2 the `sunset-margin` record back to `hard` with no weight;
+  // L-P3 `sunsetBlocks()` in `availability/kickoff.js` always true.
+  const sunset = requireConstraint(seeded, SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN);
+
+  it('L1: the record is soft, states a weight, is not waivable, and the retype is on record', () => {
+    expect(sunset.type).toBe('soft');
+    expect(sunset.weight).toBeGreaterThan(0);
+    expect(sunset.waivable).toBe(false);
+    expect(sunset.reasonCodes).toEqual([AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]);
+    expect(sunset.history).toHaveLength(1);
+    expect(sunset.history[0]).toMatchObject({
+      from: 'hard',
+      to: 'soft',
+      by: 'owner',
+      at: '2026-11-02',
+    });
+    const said = seeded.findings.filter(
+      (f) =>
+        f.code === CONSTRAINT_REASON.CONSTRAINT_TYPE_CHANGED &&
+        f.details.constraintId === SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN
+    );
+    expect(said).toHaveLength(1);
+    expect(said[0].details).toMatchObject({ firstType: 'hard', lastChangeTo: 'soft' });
+  });
+
+  it('L2: the registry still overrides no severity, and the code is a compromise under it', () => {
+    const table = effectiveSeverityTable(seeded, {});
+    // A one-sided change (the record or the code's own severity alone) shows up here.
+    expect(table.overrides.filter((override) => override.changed)).toEqual([]);
+    expect(table.severityByCode[AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]).toBe('compromise');
+    // The permit close next to it is still a block: only the sunset margin moved.
+    expect(table.severityByCode[AVAILABILITY_REASON.PERMIT_CLOSE_EXCEEDED]).toBe('blocking');
+  });
+
+  it('L3: the soft constraints are the two coach-travel records and the sunset margin; it is not hard', () => {
+    const idsOf = (type) =>
+      Object.values(seeded.byId)
+        .filter((record) => record.type === type)
+        .map((record) => record.id)
+        .sort();
+    expect(idsOf('soft')).toEqual(
+      [
+        SEASON_2026_CONSTRAINT_ID.COACH_TRAVEL_BETWEEN_VENUES,
+        SEASON_2026_CONSTRAINT_ID.COACH_TRAVEL_WITHIN_VENUE,
+        SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
+      ].sort()
+    );
+    expect(idsOf('hard')).not.toContain(SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN);
+    // The permit window is the hard bound beside it, and stays one.
+    expect(idsOf('hard')).toContain(SEASON_2026_CONSTRAINT_ID.PERMIT_WINDOW);
+    expect(seeded.stats.softCount).toBe(3);
+  });
+});

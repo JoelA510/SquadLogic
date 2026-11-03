@@ -276,57 +276,65 @@ provenance, and checked against the corpus rather than derived from it.
 
 | date | Alder P2 (cond) | Alder P3 (cond) | Riverbend Turf | Summit Stadium | slots | reserved | spare |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 09/12 | 5 | 5 | 5 | **3** | **18** | 10 | 8 |
-| 09/19 | 5 | 5 | 5 | **0** | **15** | 10 | 5 |
-| 09/26 – 10/31 (7 dates) | 5 | 5 | 5 | 2 | **17** | 10 | 7 |
-| 11/07 | 4 | 4 | 4 | 2 | **14** | 10 | 4 |
-| 11/14 | 4 | 4 | 4 | 2 | **14** | 10 | 4 |
+| 09/12 | 6 | 6 | 5 | **3** | **20** | 10 | 10 |
+| 09/19 | 6 | 6 | 5 | **0** | **17** | 10 | 7 |
+| 09/26 – 11/14 (8 dates) | 6 | 6 | 5 | 2 | **19** | 10 | 9 |
 
-**14–18 slots per week**, every date at the 10-game cap, nothing assigned —
+**17–20 slots per week**, every date at the 10-game cap, nothing assigned —
 the league had not published its picks, which is why these rows exist at all.
+(Before the owner's decision of 2026-11-02 the report said 14–18: sunset bounded
+the unlit surfaces and trimmed the two November dates to the bare minimum. See
+"Sunset only warns" below.)
 
 - **09/12 is the maximum** because Summit HS's permit opens at 14:00 that day
   instead of 17:00 — the date-scoped exception, read by the availability
   calendar. Three slots instead of two.
-- **09/19 is 15** because Summit HS has **no permit at all** that date. The
+- **09/19 is 17** because Summit HS has **no permit at all** that date. The
   stadium contributes zero and is `cappedBy: permit`.
-- **11/07 and 11/14 are the bare minimum**: exactly the requirement, zero spare
-  against it. Each of the three *unlit* 11v11 surfaces loses one slot, and each
-  loses it to `sunset` — 4:44pm on 11/07 and 4:35pm on 11/14, the earliest of the
-  season, less the club's 15-minute margin, less 90 minutes of occupancy, puts
-  the 16:00 kickoff out of reach. `17 − 3 = 14`. The lit stadium is unaffected
-  and stays `cappedBy: permit`.
+- **Sunset only warns.** Owner, 2026-11-02: "Yes to legal-with-a-warning for
+  kickoffs after sunset, because some orgs have portable lighting or other
+  workarounds." A kickoff that ends inside the club's 15-minute daylight margin is
+  a legal slot that carries `SUNSET_MARGIN_VIOLATED` as a compromise, so it is
+  counted. What stops a day's slots is the permit close (and a lights-off time,
+  where one is recorded). Every surface on every date is `cappedBy: permit`, and no
+  date is at the bare minimum: the 11/07 and 11/14 dates, which carry the earliest
+  sunsets of the season, hold the same 19 slots as the other Saturdays.
 
-The test finds those two dates by asking which dates equal the requirement, then
-cross-checks against `sunsets.csv` that they are the two earliest sunsets of the
-season.
+The test derives every one of these counts independently, from the permit rows
+and the format's timing (`tests/helpers/reserveOracle.js`), and checks the report
+against them, so a regression in either direction is a disagreement rather than a
+number that moved.
 
 ### 5.4 The number the tab does not show
 
 `slots` counts conditional ground as an asset. `available` evaluates the
-conditions against what is standing, and the two differ on eight of the ten
+conditions against what is standing, and the two differ on seven of the ten
 dates, because the rec layer occupies Alder Pitch 1A/1B on every rec Saturday and
 Pitch 2 therefore is not free at those hours:
 
 | date | slots | available |
 | --- | --- | --- |
-| 09/12 | 18 | 15 |
-| 09/19 | 15 | 11 |
-| 09/26 | 17 | 13 |
-| 10/03 | 17 | 13 |
-| 10/10 | 17 | **17** (no rec games) |
-| 10/17 | 17 | 13 |
-| 10/24 | 17 | 14 |
-| 10/31 | 17 | 13 |
-| 11/07 | 14 | **14** |
-| 11/14 | 14 | **14** |
+| 09/12 | 20 | 17 |
+| 09/19 | 17 | 13 |
+| 09/26 | 19 | 15 |
+| 10/03 | 19 | 15 |
+| 10/10 | 19 | **19** (no rec games) |
+| 10/17 | 19 | 15 |
+| 10/24 | 19 | 16 |
+| 10/31 | 19 | 15 |
+| 11/07 | 19 | **19** |
+| 11/14 | 19 | **19** |
 
-Five dates — 09/19, 09/26, 10/03, 10/17 and 10/31 — clear the requirement on
-`slots` and fail it on `available`, which is
-`RESERVE_CAPACITY_CONDITIONAL_SHORTFALL` at `compromise`. It is the same
-declared-versus-enforced gap this repository keeps finding: a capacity tab that
-counts conditional ground as free is reporting a number nobody can use. Both
-columns are in the report; neither is hidden behind the other.
+One date, 09/19, clears the requirement on `slots` and fails it on `available`,
+which is `RESERVE_CAPACITY_CONDITIONAL_SHORTFALL` at `compromise` (it fell short
+by one: Summit's blackout takes the stadium's three slots away and the rec layer
+blocks four conditional ones). It is the same declared-versus-enforced gap this
+repository keeps finding: a capacity tab that counts conditional ground as free is
+reporting a number nobody can use. Both columns are in the report; neither is
+hidden behind the other. (Before 2026-11-02 five dates failed it. The number of
+conditional slots the rec layer blocks did not move on any date; the later slots
+sunset used to remove are never blocked by it, so `available` rose by as many as
+`slots` did.)
 
 ---
 

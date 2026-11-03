@@ -150,7 +150,8 @@ which the fence also governs) and still refuses a column it does not name (first
 
 ### pgTAP: `supabase/tests/demo_sessions.sql` (plan 117 to 123)
 
-Six assertions in the people-fence section: `hasnt_column('public', 'players', 'placement_eligible')`; no
+Six assertions in the people-fence section: the column is absent from `pg_attribute` (an `ok(NOT EXISTS ...)`: `hasnt_column` is not on
+`tests/pgtapPlanCounts.test.js`'s list of assertion functions, so a plan over it would count one short); no
 function names it (`prosrc` count `0`); a demo player's `years_played`, `jersey_number` and `willing_to_coach` each
 still change through `admin_update_player` (the three allowed columns the file did not yet exercise); and
 `play_up_requested`, a sibling column that is not on the list, is still refused (`42501`).

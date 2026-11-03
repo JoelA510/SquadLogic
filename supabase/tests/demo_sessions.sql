@@ -407,7 +407,11 @@ SELECT throws_ok(
 );
 RESET role;
 SELECT ok(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'link_my_coach_record'), 'no function links a sign-in to a coach record (20261104010000)');
-SELECT hasnt_column('public', 'players', 'placement_eligible', 'players.placement_eligible is gone (20261118010000), so the demo starts and the fence runs without it');
+SELECT ok(
+    NOT EXISTS (SELECT 1 FROM pg_attribute a
+                 WHERE a.attrelid = 'public.players'::regclass AND a.attname = 'placement_eligible' AND NOT a.attisdropped),
+    'players.placement_eligible is gone (20261118010000), so the demo starts and the fence runs without it'
+);
 SELECT is(
     (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND p.prosrc ~* '\mplacement_eligible\M'),

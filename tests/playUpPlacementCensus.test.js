@@ -58,6 +58,31 @@ function importsFrom(source, file) {
   return new RegExp(`from\\s+['"][^'"]*${escaped}['"]`).test(source);
 }
 
+/**
+ * The argument text of every call `name({ ... })` in `source`: from the call's opening brace to its
+ * matching close, nested braces included. A call written another way (a variable passed whole) has no
+ * body here, so the census below counts the calls separately and requires one body for each.
+ */
+function callBodies(source, name) {
+  const open = new RegExp(`(?<!function\\s+)\\b${name}\\s*\\(\\s*\\{`, 'g');
+  const bodies = [];
+  for (const match of source.matchAll(open)) {
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    for (let i = start; i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1;
+      else if (source[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          bodies.push(source.slice(start, i + 1));
+          break;
+        }
+      }
+    }
+  }
+  return bodies;
+}
+
 const sources = SOURCE_ROOTS.flatMap(listSources);
 const read = (file) => readFileSync(path.join(ROOT, file), 'utf8');
 
@@ -167,5 +192,83 @@ describe('the placement and the seat count have one caller each', () => {
     ]);
     // The positive control for the walk: another module of the same family is imported by something.
     expect(sources.some((file) => importsFrom(read(file), 'playUp.js'))).toBe(true);
+  });
+});
+
+describe('the play-down setting is read in one place and handed to every placement', () => {
+  const page = () => read('frontend/src/pages/TeamAnalysisPage.jsx');
+
+  it('the scanner reads a call body, nested braces and all, and misses no call', () => {
+    const source = [
+      'function place({ a }) { return a; }',
+      'x = place({ a: { b: 1 }, c: [{ d: 2 }] });',
+      "y = place ({ a: 'z' });",
+      'z = place(whole);',
+    ].join('\n');
+    expect(callBodies(source, 'place')).toEqual(['{ a: { b: 1 }, c: [{ d: 2 }] }', "{ a: 'z' }"]);
+    // The call passed whole is a call with no body: callCount sees three, callBodies two.
+    expect(callCount(source, 'place')).toBe(3);
+  });
+
+  it('names the registry key only in the catalog and on the Teams page', () => {
+    const readers = sources
+      .filter((file) => file.startsWith('frontend/src/'))
+      .filter((file) => /FEATURE_FLAGS\.PLAY_DOWN\b/.test(read(file)));
+    expect(readers).toEqual([
+      'frontend/src/constants/featureFlags.js',
+      'frontend/src/pages/TeamAnalysisPage.jsx',
+    ]);
+    // Core is handed a boolean and never reads the organization's flags for this.
+    expect(
+      sources
+        .filter((file) => file.startsWith('packages/core/src/'))
+        .filter((file) => /\bplay_down\b/.test(read(file)))
+    ).toEqual(['packages/core/src/playUp.js']);
+  });
+
+  it('reads the setting once on the page, and every placement it makes is handed it', () => {
+    const text = page();
+    expect((text.match(/isEnabled\(FEATURE_FLAGS\.PLAY_DOWN\)/g) ?? []).length).toBe(1);
+    for (const name of ['placeImportRows', 'prepareTeamingInput']) {
+      const bodies = callBodies(text, name);
+      // The positive control: the calls are found, and each has a body to read.
+      expect(bodies.length).toBeGreaterThan(0);
+      expect(bodies.length).toBe(callCount(text, name));
+      for (const body of bodies) {
+        expect(body, `${name} is handed the setting`).toMatch(/allowPlayDown:\s*playDownEnabled/);
+        expect(body, `${name} is handed the saved rosters`).toMatch(/\bheldSeats\b/);
+      }
+    }
+    // Every surface that states the rule is handed the same boolean: the Play-up section and the
+    // Division Overview's note, each one element on the page.
+    for (const element of ['PlayUpList', 'ProgramOverview']) {
+      const surfaces = text.match(new RegExp(`<${element}[\\s\\S]*?\\/>`, 'g')) ?? [];
+      expect(surfaces.length, element).toBe(1);
+      expect(surfaces[0], element).toMatch(/playDown=\{playDownEnabled\}/);
+    }
+    // The helper hands both to core's placement, and the core pipeline hands them on.
+    const [placement] = callBodies(text, 'applyPlayUpEligibility');
+    expect(placement).toMatch(/\ballowPlayDown\b/);
+    expect(placement).toMatch(/\bheldSeats\b/);
+    const [pipeline] = callBodies(
+      read('packages/core/src/teamingPipeline.js'),
+      'applyPlayUpEligibility'
+    );
+    expect(pipeline).toMatch(/\ballowPlayDown\b/);
+    expect(pipeline).toMatch(/\bheldSeats\b/);
+  });
+
+  it('words the rule in one module, so the surfaces cannot say different things', () => {
+    const wording = /Play-down is not available|Play-down is on|with Play-down on/;
+    const files = sources
+      .filter((file) => file.startsWith('frontend/src/'))
+      .filter((file) => wording.test(read(file)));
+    expect(files).toEqual(['frontend/src/utils/playDownNote.js']);
+  });
+
+  it('would fail a call that leaves the setting out', () => {
+    const forgot = 'placeImportRows({ entries, divisionDescriptors });';
+    const [body] = callBodies(forgot, 'placeImportRows');
+    expect(body).not.toMatch(/allowPlayDown:\s*playDownEnabled/);
   });
 });

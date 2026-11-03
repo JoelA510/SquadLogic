@@ -505,20 +505,75 @@ the column reads `1 playing up` for U12B and `None` for the other 20 divisions.
 
 **PR 3: the setting** (after PR 1; only if decision 2 says build it)
 
-- [ ] C1 (S) Core `allowPlayDown` on `applyPlayUpEligibility` and `prepareTeamingInput`, default false. Test:
+- [x] C1 (S) Core `allowPlayDown` on `applyPlayUpEligibility` and `prepareTeamingInput`, default false. Test:
       `tests/playUp.test.js`: off equals today for every case; on seats a play-down in the registered division,
       listed and counted `playingDown`, including the no-own-division case; the golden
       `teamGenerationEligibility.golden.json` unchanged.
-- [ ] C2 (S) `FEATURE_FLAGS.PLAY_DOWN`, its catalog entry (off), `PLAY_DOWN_FLAG` in core, the page reads it, the three
+- [x] C2 (S) `FEATURE_FLAGS.PLAY_DOWN`, its catalog entry (off), `PLAY_DOWN_FLAG` in core, the page reads it, the three
       placement call sites already share the helper. Tests: `tests/FeatureFlagSettings.test.jsx`; a new
       `tests/playDownSetting.test.jsx` from a **stored** value through `FeatureFlagSchema` and the real page, both
       states; the key held equal to core's (lesson 75: a gate on every place that shows it and every place that
       uses it, each shown red with the gate removed).
-- [ ] C3 (M) Flip safety (decision 3): a player already on a preserved roster keeps their seat when a setting
+- [x] C3 (M) Flip safety (decision 3): a player already on a preserved roster keeps their seat when a setting
       change (or a cleared request) would move them, and is flagged. Test: a reviewed roster with a seated
       play-down, setting turned off, re-run: still on the roster, `droppedPlayersRemoved` is 0, flagged; first
       written against today's code to show what it does now.
-- [ ] C4 (S) Docs and the lesson (below).
+- [x] C4 (S) Docs and the lesson (below).
+
+**What PR 3 did differently from the tasks above** (built 2026-11-03; the code won where it and the plan
+disagreed):
+
+- **Three placements, not "the three call sites already share the helper".** After PR 1 the page asks the
+  placement from `placeImportRows` twice (the advice, and generation's "who plays here") and generation
+  asks it again inside `prepareTeamingInput`. The page reads the setting once (`playDownEnabled`) and hands
+  `allowPlayDown` to all three; a census (`tests/playUpPlacementCensus.test.js`) reads the argument text of
+  every such call and fails one that leaves the setting, or the saved rosters, out. It also pins the readers
+  of the registry key (the catalog and the page) and that core is handed a boolean.
+- **C3 is in the placement, not the generator.** Only the placement knows a player was moved by a rule and
+  did not leave, so it takes `heldSeats` (player id to the division of a saved roster; the page builds it
+  with `heldSeatsFromSnapshot` from every division's own latest payload) and keeps the player on that
+  division when it is a seat the rule itself can give them: the division registered for, or their own age
+  division. Any other roster is left to the re-run, so a registration that changed or a move by hand still
+  moves a player (the hold would otherwise pin them for good). A request set after a roster was built holds
+  the same way as one cleared. `generateTeams` is unchanged: the held player is an ordinary incoming player of
+  the roster's division. **Written first against the code before the change**: a cleared request removed the
+  player from her U12 team, `droppedPlayersRemoved` 1, `heldSeats` not yet a parameter; the same test with the
+  hold takes it to 0 (`tests/playDownFlipSafety.test.js`, 12 tests; the page-level twin is in
+  `tests/playDownSetting.test.jsx`).
+- **"Flagged" is a listing entry.** A held player is listed with `heldSeat: true`, `ruleDivision` and
+  `ruleDivisionName`, keys present only on a held entry, so every other listing is byte for byte what it was.
+  The Play-up section row says: "Stays on the roster they are on in U10: a team that exists is not reshuffled.
+  A new roster would place them in U12." A play-down the setting honours reads "Plays in U10, the younger
+  division they registered for." (the only other row sentence that changed).
+- **With the setting on, the gap is not capped.** The plan's table says the registration is the request, so a
+  16-year-old registered in U10 plays there, flagged; the one remaining hold-out with the setting on is a
+  play-up nobody asked for into a division no one holds (age 7 into U10 with no U7). For the owner: say so if
+  a cap is wanted (it would be a second rule).
+- **Executed (throwaway script outside the repository, 2026-11-03).** Setting off equals `origin/main` byte
+  for byte: the placement's `sha256` is the same from `origin/main` and from this branch, with the setting
+  absent and with it `false`, over the season fixture's 1,108 registrations that carry a division, the same
+  with ten re-registered, and the demo league's 1,259. Off versus on differs for 0 of the season fixture and 0
+  of the demo (nobody is registered below their age: nothing to honour). With six age-12 players
+  re-registered in U10B and four age-10 players in U12B (one asking): U10B seats 78 off and 84 on (6 playing
+  down), U12B 94 off and 88 on. The season fixture suite, the natural-age fixture and
+  `teamGenerationEligibility.golden.json` pass unchanged (29 files, 426 tests, before the full run).
+- **The wording of what the page says about the rule is PR 3's, from one module.** The Division Overview's
+  note (PR 2 shipped it as static text, "Play-down is not available: ...") and the Play-up section's sentence
+  ("players play in their own age division unless a play-up was requested") named the rule as if the setting
+  did not exist. Both now read it from `frontend/src/utils/playDownNote.js`, each taking the same boolean the
+  placement is given (off: the words they had; on: "Play-down is on: a player registered in a younger division
+  plays there, and is flagged." and "... or, with Play-down on, they registered in a younger division"). A
+  census checks both elements are handed it and that no other file under `frontend/src` carries those words.
+  There is no "Turn on play-down" link: the Features tab is local state with no address, and the tab needs a
+  permission a Teams admin may not hold, so a link would land on a page that may not show it. The card says
+  where the switch is.
+- **No E2E scenario**, as the plan lists none; the setting is shown from a stored value through the schema
+  and the real page in jsdom, both states, in the advice and in generation.
+- **Left alone, report only:** a player moved by hand to a roster that is neither the division registered nor
+  their own age division is still dropped from it by a re-run of that division, as before; Team Builder; the
+  advice reads the saved rosters only once they have loaded, so it can change once as they arrive. The buddy
+  list's "played apart" sentence still says a play-up or play-down put one buddy in their own age division; a held
+  seat can also put a pair in two divisions.
 
 **Plants** (three per pull request; each must turn the named test red, then is reverted). PR 1: the advice counts by
 registered division (A2's parity case); `summarizeSeats` classifies from the registration, not the seat (A1); the
@@ -526,6 +581,11 @@ subject set is taken from the seated players, so a waitlisted or no-division row
 the roster check reads `teamRow.min_age` again (B3); the program heading counts only its first division (B1); the
 section sentence reads registered kinds (B2). PR 3: the gate removed so on is always on (C1/C2); an absent key read
 as on (C2); a flip that evicts a rostered player (C3).
+_Run for PR 3_ (each reverted, the files equal by `sha256`): `isEnabled(...) || true` on the page turned 9 tests of
+`tests/playDownSetting.test.jsx` red (the off states of the advice and of generation, and both flips); a
+`FEATURE_DEFAULTS` entry of `true` turned 10 red across `tests/playDownSetting.test.jsx` and
+`tests/FeatureFlagSettings.test.jsx`; a hold that never applies turned 5 of `tests/playDownFlipSafety.test.js`
+and 2 of `tests/playDownSetting.test.jsx` red.
 
 **Stop conditions** (checked against this plan). Stop and report if: a migration, RPC, CHECK or table change turns
 out to be needed (none planned: the diff must show no file under `supabase/migrations`); the season fixture suite

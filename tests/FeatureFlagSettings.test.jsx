@@ -154,6 +154,67 @@ describe('FeatureFlagSettings (FeatureControls)', () => {
     );
   });
 
+  // Play-down (owner, 2026-11-03): off unless an admin turns it on, at set-up or later in Settings;
+  // both screens are this panel, drawn from the catalog.
+  it('offers Play-down, off by default, in plain words, and turns it on through the audited path', async () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({});
+    render(<FeatureFlagSettings />);
+    const playDown = screen.getByRole('switch', { name: 'Play-down' });
+    expect(playDown).toHaveAttribute('aria-checked', 'false');
+    // What turning it on does, and what it leaves alone, without refusal language.
+    const card = screen.getByText('Play-down').parentElement;
+    expect(card).toHaveTextContent('placed in their own age division unless this is on');
+    expect(card).toHaveTextContent('play in the division they registered for');
+    expect(card).toHaveTextContent('Teams already reviewed, published or locked are not changed');
+    expect(card).not.toHaveTextContent(/not permitted|not allowed|refuse|blocked/i);
+    // It adds no grid column.
+    expect(within(card).queryByText('Grid column')).not.toBeInTheDocument();
+    fireEvent.click(playDown);
+    await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
+    expect(mocks.updateFeatureFlags.mock.calls[0][0]).toEqual({ play_down: true });
+    await waitFor(() =>
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'record_audit_event',
+        expect.objectContaining({
+          p_action: 'settings.flags_updated',
+          p_metadata: expect.objectContaining({ flags: { play_down: true } }),
+        })
+      )
+    );
+  });
+
+  it('shows Play-down on when stored on, off again through the same switch, and off for a stored non-boolean', async () => {
+    expect(FeatureFlagSchema.parse({ play_down: 'yes' })).toEqual({});
+    mocks.featureFlags = FeatureFlagSchema.parse({ play_down: 'yes' });
+    const { unmount } = render(<FeatureFlagSettings />);
+    expect(screen.getByRole('switch', { name: 'Play-down' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+    unmount();
+
+    mocks.featureFlags = FeatureFlagSchema.parse({ play_down: true });
+    render(<FeatureFlagSettings />);
+    const playDown = screen.getByRole('switch', { name: 'Play-down' });
+    expect(playDown).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(playDown);
+    await waitFor(() => expect(mocks.updateFeatureFlags).toHaveBeenCalled());
+    expect(mocks.updateFeatureFlags.mock.calls[0][0]).toEqual({ play_down: false });
+  });
+
+  it('offers Play-down in the set-up step, "Choose your tools", too, off', () => {
+    mocks.featureFlags = FeatureFlagSchema.parse({});
+    render(
+      <MemoryRouter>
+        <FeaturesSetupPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('switch', { name: 'Play-down' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+  });
+
   // Phase B6: the league's Spread Coaching Leads setting, on by default, read through the schema.
   it('offers Spread Coaching Leads, on by default, and turns it off through the audited path', async () => {
     mocks.featureFlags = FeatureFlagSchema.parse({});

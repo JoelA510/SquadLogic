@@ -746,18 +746,23 @@ describe('The players no division can hold are left out of the advice (data foll
 
   it('does not call a player not eligible who another division can hold', async () => {
     // Six of the thirty are 11: too old for U10, but U12 holds them, so they play there and are not
-    // "not eligible". (The advice still counts them in the program they registered in; that is the
-    // gap the plan lists, not a not-eligible player.)
+    // "not eligible". The advice counts them where they play (play-down plan, PR 1): U10 seats 24
+    // (2 teams: 24 fit two of 12), and U12, which the file has no registrants in, seats the six.
     page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? 11 : 9 }));
     page.divisions = [U10(), U12()];
     await renderPage();
 
     await waitFor(() =>
       expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
-        'Recommended: 3 teams for 30 players'
+        'Recommended: 2 teams for 24 players'
       )
     );
-    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(
+      /^24\s*6 registered here, placed in their own age division$/
+    );
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^6\s*6 moved here from other divisions$/
+    );
     expect(screen.queryByText(/not eligible/)).toBeNull();
   });
 
@@ -848,6 +853,245 @@ describe('The players no division can hold are left out of the advice (data foll
       /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
     );
     expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+  });
+});
+
+/*
+ * Play-down plan, PR 1 (docs/changes/2026-11-03-play-down-default-and-flags.md): the advice counts a
+ * player in the division they PLAY in, as generation seats them, not the one they registered in. Two
+ * divisions, both with registrants, so a player who moves leaves one count and joins the other (the
+ * old advice left them in the division they registered in and, for a division the file had
+ * registrants in, never added them to the one they joined). Limits as above (target 12, minimum 10,
+ * maximum 14: 24 players are 2 teams, 28 are 2, 30 are 3); every expected count is worked out from
+ * the rows, never read back from the page.
+ */
+describe('The advice counts the division a player plays in (play-down plan, PR 1)', () => {
+  const resetState = () => {
+    page.rows = [];
+    page.divisions = [];
+    page.saves = [];
+    page.players = [];
+    page.playersError = null;
+    page.playerReads = 0;
+    page.divisionsGate = null;
+    page.divisionsError = null;
+    page.flags = {};
+    sessionStorage.clear();
+  };
+  beforeEach(resetState);
+  afterEach(() => {
+    cleanup();
+    resetState();
+    vi.restoreAllMocks();
+  });
+
+  const U10 = () => savedDivision('U10', { min_age: 9, max_age: 10 });
+  const U12 = () => savedDivision('U12', { min_age: 11, max_age: 12 });
+
+  /** Click Generate for the division the settings panel shows, and wait for the staged review. */
+  async function generate() {
+    const button = screen.getByRole('button', { name: /Generate Teams/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await screen.findByText('Team Review Pending');
+  }
+
+  it('advises the teams Generate makes, for both divisions, when players move between them', async () => {
+    // U10: thirty registered, twenty-four aged 10 and six aged 12 (registered younger than their age,
+    // so they play in U12). U12: twenty-four aged 11, two of whom asked to play up from their own
+    // division (nothing to honour: they are in band, and not a play-up).
+    // Seated: U10 24 (2 teams), U12 24 + 6 = 30 (3 teams). Counted where they registered, U10 would be
+    // 30 (3 teams) and U12 24 (2 teams): both wrong, in opposite directions.
+    page.rows = [
+      ...importRows('U10', 30, (i) => ({ natural_age: i < 6 ? 12 : 10 })),
+      ...importRows('U12', 24, (i) => ({
+        natural_age: 11,
+        ...(i < 2 ? { play_up: 'yes' } : {}),
+      })),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Players')).toHaveTextContent(
+        /^24\s*6 registered here, placed in their own age division$/
+      )
+    );
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^30\s*6 moved here from other divisions$/
+    );
+    expect(Math.ceil(24 / 12)).toBe(2);
+    expect(Math.ceil(30 / 12)).toBe(3);
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(/^2$/);
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent(/^2$/);
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent(/^12$/);
+    expect(overviewCell('U12', 'Est. Teams')).toHaveTextContent(/^3$/);
+    expect(overviewCell('U12', 'Recommended')).toHaveTextContent(/^3$/);
+    expect(overviewCell('U12', 'Avg Roster')).toHaveTextContent(/^10$/);
+    // The settings panel says the same for the division it shows.
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      'Recommended: 2 teams for 24 players'
+    );
+
+    // And Generate makes exactly those teams: U10 first, then (a fresh page) U12.
+    await generate();
+    expect(screen.getByText('Team review staged: 2 teams.', { exact: false })).toBeInTheDocument();
+    cleanup();
+    sessionStorage.clear();
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'U12' }));
+    await screen.findByRole('heading', { name: 'U12 Settings' });
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 3 teams for 30 players'
+      )
+    );
+    await generate();
+    expect(screen.getByText('Team review staged: 3 teams.', { exact: false })).toBeInTheDocument();
+  });
+
+  it('an unrequested play-up plays in their own age division, a requested one where they registered', async () => {
+    // U10: twenty-four aged 10. U12: thirty registered, twenty-four aged 11 in band, four aged 10 not
+    // asking (they play U10) and two aged 10 asking (they stay in U12, playing up).
+    // Seated: U10 24 + 4 = 28 (2 teams), U12 24 + 2 = 26 (2 teams). Counted by registration U12 is
+    // 30, which is 3 teams: the advice must not say 3.
+    page.rows = [
+      ...importRows('U10', 24, () => ({ natural_age: 10 })),
+      ...importRows('U12', 30, (i) => ({
+        natural_age: i < 24 ? 11 : 10,
+        ...(i >= 28 ? { play_up: 'yes' } : {}),
+      })),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Players')).toHaveTextContent(
+        /^28\s*4 moved here from other divisions$/
+      )
+    );
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^26\s*4 registered here, placed in their own age division$/
+    );
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(/^2$/);
+    expect(overviewCell('U12', 'Est. Teams')).toHaveTextContent(/^2$/);
+    expect(overviewCell('U12', 'Recommended')).toHaveTextContent(/^2$/);
+  });
+
+  it('counts a waitlisted player who moves on the waitlist of the division they would play in', async () => {
+    // U10: thirty registered, twenty-four aged 10 and six aged 12, two of the six on the waitlist.
+    // U12: twenty-four aged 11. Seated U10 24; U12 holds 24 + 6 = 30 players of whom 2 are waitlisted,
+    // so it seats 28 (2 teams; counted all 30 it would say 3).
+    page.rows = [
+      ...importRows('U10', 30, (i) => ({
+        natural_age: i < 6 ? 12 : 10,
+        ...(i < 2 ? { waitlist: 'yes' } : {}),
+      })),
+      ...importRows('U12', 24, () => ({ natural_age: 11 })),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U12', 'Players')).toHaveTextContent(
+        /^28\s*2 on the waitlist\s*6 moved here from other divisions$/
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(
+      /^24\s*6 registered here, placed in their own age division$/
+    );
+    expect(overviewCell('U12', 'Recommended')).toHaveTextContent(/^2$/);
+  });
+
+  it('a division whose registrants have all moved away has nobody to seat and advises no team', async () => {
+    // U10: twelve registered, all aged 11, so all play in U12 with the twelve already registered
+    // there. Seated: U10 0, U12 24 (2 teams).
+    page.rows = [
+      ...importRows('U10', 12, () => ({ natural_age: 11 })),
+      ...importRows('U12', 12, () => ({ natural_age: 11 })),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Players')).toHaveTextContent(
+        /^0\s*12 registered here, placed in their own age division$/
+      )
+    );
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(/^0$/);
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('—');
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent(/^0$/);
+    expect(overviewCell('U10', 'Status')).toHaveTextContent('All placed in other divisions');
+    expect(overviewRow('U10')).not.toHaveTextContent('Fits the limits');
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^24\s*12 moved here from other divisions$/
+    );
+    expect(overviewCell('U12', 'Recommended')).toHaveTextContent(/^2$/);
+  });
+
+  it('says in the settings panel who moved, in the words of the overview', async () => {
+    page.rows = [
+      ...importRows('U10', 30, (i) => ({ natural_age: i < 6 ? 12 : 10 })),
+      ...importRows('U12', 24, () => ({ natural_age: 11 })),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players (6 registered here, placed in their own age division)'
+      )
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'U12' }));
+    await screen.findByRole('heading', { name: 'U12 Settings' });
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      'Recommended: 3 teams for 30 players (6 moved here from other divisions)'
+    );
+  });
+
+  it('a league with nobody moved reads exactly as before: no note anywhere', async () => {
+    page.rows = [
+      ...importRows('U10', 30, () => ({ natural_age: 10 })),
+      ...importRows('U12', 24, () => ({ natural_age: 11, play_up: 'yes' })),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(/^24$/);
+    expect(screen.queryByText(/moved here|placed in their own age division/)).toBeNull();
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
+    );
+  });
+
+  it('counts the stored player over the file when it moves them, as generation reads the record', async () => {
+    // The file says thirty aged 10 in U10. The record has six of them at 12 (an admin corrected the
+    // age): they play in U12, so U10 seats 24 and U12 seats 24 + 6.
+    page.rows = [
+      ...importRows('U10', 30, () => ({ natural_age: 10 })),
+      ...importRows('U12', 24, () => ({ natural_age: 11 })),
+    ];
+    page.divisions = [U10(), U12()];
+    page.players = Array.from({ length: 6 }, (_, i) => ({
+      id: `${IDS.division}-player-${i + 1}`,
+      external_registration_id: `U10-REG-${i + 1}`,
+      division_id: `${IDS.division}-U10`,
+      first_name: `Kid${i + 1}`,
+      last_name: `Placeholder${i + 1}`,
+      natural_age: 12,
+    }));
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U12', 'Players')).toHaveTextContent(
+        /^30\s*6 moved here from other divisions$/
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(
+      /^24\s*6 registered here, placed in their own age division$/
+    );
   });
 });
 

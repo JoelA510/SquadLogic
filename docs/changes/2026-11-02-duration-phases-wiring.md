@@ -2,7 +2,7 @@
 
 Kind: FEATURE · Drawn up: 2026-11-02 against `origin/main` `228980a` · Owner: the repository owner ·
 Status: **DECIDED 2026-11-02: Reading A, decisions 1 to 7 as recommended. PR A (core, tasks A1 to A5) is
-built in the pull request this file rides in; PR B (the page, B1 to B5) follows once A merges.**
+merged (#698); PR B (the page, tasks B1 to B5) is built in the pull request that follows it.**
 AGENTS.md rule 14 applied (the change touches the practice domain layer), so no code started until the
 owner chose a reading in "Owner decisions" (below, as drawn up).
 
@@ -353,23 +353,67 @@ did not move):
 
 **PR B, frontend** (after A merges; at most two PRs in flight).
 
-- [ ] B1 (S) The read hook. Proved by `tests/practiceDaylightOutlookHook.test.jsx` (new): each of the
+- [x] B1 (S) The read hook. Proved by `tests/practiceDaylightOutlookHook.test.jsx` (new): each of the
       tables failing in turn gives `{ ok: false }` naming it; no row renders as surviving (plant P4);
       a season with no zone is a message.
-- [ ] B2 (M) Page, component, helper, route, navigation. Proved by `tests/practiceDaylightOutlook.test.jsx`
+- [x] B2 (M) Page, component, helper, route, navigation. Proved by `tests/practiceDaylightOutlook.test.jsx`
       (new): one estate with a surviving slot, a slot that goes dark with its phases in words, a slot with
       a flagged date ("kept as scheduled"), a slot at a venue with no coordinates ("sunset unknown"), a
       slot under a lighting window; the banner sentence; the empty, loading and unreadable states; axe
       clean; the link to Practice lighting is a real link.
-- [ ] B3 (S) Wording helper. Proved by `tests/daylightOutlookText.test.js` (new): the exact sentences,
+- [x] B3 (S) Wording helper. Proved by `tests/daylightOutlookText.test.js` (new): the exact sentences,
       including a minimum-breaking date and the DST date.
-- [ ] B4 (M) One E2E scenario, `tests/e2e/features/practice_daylight_outlook.feature` with its steps:
+- [x] B4 (M) One E2E scenario, `tests/e2e/features/practice_daylight_outlook.feature` with its steps:
       coordinates set through the mock (as `practice_repair_panel.ts:274` does), the page lists the dark
       slot with its first date; with no coordinates it says so; axe (WCAG 2.0 to 2.2 A and AA, serious and
       critical) in both themes. Run after `bddgen`.
-- [ ] B5 (S) Census and docs: `tests/unwiredLayerImporters.test.js` gains the frontend importer and the
+- [x] B5 (S) Census and docs: `tests/unwiredLayerImporters.test.js` gains the frontend importer and the
       first expected production consumer for the module (the claim that it is unwired is retired); the
       docs index and `docs/architecture/practice-scheduling.md`; a lesson.
+
+**What PR B did differently from the tasks above** (each is a finding of the build, not a change of scope;
+no migration, schema, Edge or Deno change, and no core behaviour changed: two header comments in `practice/`
+stopped saying nothing calls the module):
+
+- **Seven reads, not six (B1).** The adapter needs six tables; the page also reads `teams` (id and name),
+  so a slot shows the teams on it by name. It is part of the same all-or-nothing read: any one failing, by an
+  error answer or a rejected request, is `{ ok: false }` naming the table. The rejected-request case found a
+  gap in the first draft: core's `loadSeasonPracticeAssignments` returns `{ ok: false }` for a refused read
+  and **throws** for a rejected one, so the assignments read is caught and named like the others.
+- **The season row comes from the organization context** (it is already read there), not from an eighth
+  read. A season with no time zone, no season, or a season still being read is answered without reading.
+- **Imports are direct, not through the barrel (B5).** The page's model imports `durationPhases.js` and
+  `durationPhaseAdapter.js` by path (the precedent of `utils/lightingOverrides.js`), so the census lists it as
+  an importer and as the first production consumer of both; it also names the wording test as a consumer of
+  `slots.js` and of both sunset arms by name (the test calls them to re-derive every limit a sentence quotes).
+  G4 stays uncalled, as decided.
+- **Two kinds of flag are worded apart (the PR A note).** An entry raised by the overlap check before any
+  retiming is tried (`shiftRefused` overlap, nothing shortened, `wouldStartMinutes` equal to `startMinutes`) is
+  worded as an overlap, "another practice is on this field at that time", and counted apart in the slot's
+  verdict; it says "it also ends after the latest it may end" only when it does. **No stored-row case reached
+  it** (statically reviewed; not proven impossible): the earlier slot's end only grows back through an operator
+  duration pin or a lighting window, and a shifted slot has to fit between a retimed slot's end and the limit,
+  a gap the ladder leaves under a step; the pin has no storage. So that sentence is pinned from the module's own
+  output on a rig (as `practiceDurationPhases.test.js` builds it), and the reachable overlap (a shift refused
+  because another practice holds the field) is pinned through the page.
+- **An unknown-sunset slot's fix is the coordinates**, a fix the module has no entry for (its fixes are for a
+  slot that does not survive); the page adds it, with a link to Fields & Venues, and does not print the
+  "candidates only" line under it.
+- **No venue with coordinates** is one message with a link, not a list of "unknown" (every judged date unknown
+  and no unlit venue with a coordinate pair); some venues without is a row each.
+- **The table is a real table.** The class name `grid` (the data grid's) also takes Tailwind's `grid`
+  utility, `display: grid`, so a header and each row lay out as separate tables: invisible to the tests and to
+  axe, and plain in a screenshot (header columns narrower than the body's). `table.grid.grid-prose` restores
+  `display: table` for this one table, in `styles/grid.css`; the other tables are untouched.
+- **Timing, executed.** `buildDaylightOutlook` over the demo league's grid (`DEMO_GRID`: 304 slots, 274 on
+  unlit ground, 3,014 slot-dates, 128 teams; the plan's 196 slots was the grid before PR F) took 130 ms the
+  first time and 47 to 66 ms after, on the main thread, so there is no worker; the test asserts it finishes
+  well inside the default 5 s.
+- **Axe is run in Chromium**, in both themes, by the E2E scenario (axe-core is not a direct dependency, so
+  the jsdom test checks structure: a caption, column headers with scope, landmarks, headings, real links).
+- **Plants** (the owner's cap is three): P4 (a failed read made an empty one: 22 tests red), P5 (a frontend
+  importer with no census entry: 4 red) and one of the builder's choice, the overlap sentence replaced by the
+  past-sunset one (2 red); each reverted and confirmed byte-identical.
 
 **Reading B, sized only** (a separate plan, not these tasks): (1) a migration widening
 `practice_exceptions_kind_check` and its shape CHECK, or a phases table, with revert, smoke, harness plants
@@ -420,8 +464,10 @@ now. A dated note under D14 defaults 6 and 8 in `docs/PHASE_8_9_D14_PLAN.md`.
 
 ## Done when
 
-- [ ] Every task's test passes, and each item of "Unchanged" (section 4) has a test.
-- [ ] The Definition of Done (AGENTS.md section 3) is green, the season fixture suite and the corpus sweep
-      are rerun, and every new check was shown failing first (P1 to P6).
-- [ ] `docs/product.md` is unchanged (a read-only screen for the existing user); the docs named in A4 and B5
+- [x] Every task's test passes, and each item of "Unchanged" (section 4) has a test: the page's only
+      requests are reads (no write, no RPC; `practiceDaylightOutlook.test.jsx`), nothing it draws applies
+      anything, and no solver, repair, writer or migration file is in the diff.
+- [x] The Definition of Done (AGENTS.md section 3) is green on the final tree of each pull request, and every
+      new check was shown failing first (P1 to P5; P6 has a plain test).
+- [x] `docs/product.md` is unchanged (a read-only screen for the existing user); the docs named in A4 and B5
       are updated.

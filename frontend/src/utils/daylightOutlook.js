@@ -404,7 +404,12 @@ export function describeVerdict(key, facts, day) {
           `start keeps inside daylight and ${count(facts.overlapOnly, 'date')} where another practice is on the field ` +
           `at that time. The first is ${first}.`;
       }
-      return { key, label, tone: 'warning', headline: `${because} ${kept}` };
+      // A slot that was retimed before its first flagged date went dark earlier than that date.
+      const dark =
+        facts.firstPhaseDate !== null && facts.firstPhaseDate < facts.firstFlaggedDate
+          ? `As planned it would end past sunset from ${day(facts.firstPhaseDate)}. `
+          : '';
+      return { key, label, tone: 'warning', headline: `${dark}${because} ${kept}` };
     }
     case OUTLOOK_VERDICT.UNKNOWN:
       return {

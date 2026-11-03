@@ -178,8 +178,9 @@ describe('the estate, in words', () => {
       label: 'Flagged on 1 date',
       tone: 'warning',
       headline:
-        'On 1 date no shortening or earlier start keeps it inside daylight, the first being ' +
-        'Tue 24 Nov. Those dates are kept as scheduled and flagged.',
+        'As planned it would end past sunset from Tue 22 Sep. On 1 date no shortening or earlier ' +
+        'start keeps it inside daylight, the first being Tue 24 Nov. Those dates are kept as ' +
+        'scheduled and flagged.',
     });
   });
 

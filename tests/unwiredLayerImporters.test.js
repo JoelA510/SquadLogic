@@ -417,6 +417,9 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
+      // The Practice daylight page's wording test builds a rig's slot set for the one flag the
+      // stored rows cannot reach.
+      'tests/daylightOutlookText.test.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       'tests/practiceSlotModel.test.js',
@@ -667,6 +670,9 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
       'tests/autoSchedulerDaylight.test.js',
+      // The Practice daylight page's wording test re-derives every limit a sentence quotes from
+      // core's sunset (it imports core's only).
+      'tests/daylightOutlookText.test.js',
       // The demo's seasons: calls both arms (it imports each).
       'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test calls the Edge arm (it imports it), by name.
@@ -732,6 +738,8 @@ const LAYERS = Object.freeze([
       // 8.9 PR 6: by name only -- it calls core's `sunsetOnDate()` for the
       // independent derivation, and the Edge arm through the solver.
       'tests/autoSchedulerDaylight.test.js',
+      // By name only: it calls core's `sunsetOnDate()` for the independent derivation.
+      'tests/daylightOutlookText.test.js',
       // The demo's seasons: calls both arms (it imports each).
       'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test calls the Edge arm (it imports it), by name.
@@ -818,12 +826,15 @@ const LAYERS = Object.freeze([
   }),
   // 8.9 PR 5: duration phases, compression and the DST survival report.
   // Reports and proposals only -- cascade proposals leave as change-log
-  // entries and nothing applies them. Nothing in the app or the Edge calls
-  // it; the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller. Its input
-  // adapter (`practice/durationPhaseAdapter.js`, below) is registered and
-  // tested; the read-only "Practice daylight" outlook that will call both is the
-  // second step of `docs/changes/2026-11-02-duration-phases-wiring.md`, and the
-  // day it lands this list gains its first production consumer.
+  // entries and nothing applies them. The Edge post-pass (8.9 PR 6) is a Deno
+  // twin, not a caller. Its first production caller is the read-only "Practice
+  // daylight" page's model (`frontend/src/utils/daylightOutlook.js`, PR B of
+  // `docs/changes/2026-11-02-duration-phases-wiring.md`), which runs G3 and G5 over
+  // the adapter's output. G4 (`buildPracticeCompressionReport`) is still called by
+  // nothing outside the tests: its cascade proposals leave only as an 8.8
+  // change-log that no screen renders (plan section 6). The module was unwired
+  // for two months and described a rule the app had dropped (lesson 89); the
+  // day it gained a caller this list changed.
   Object.freeze({
     layer: 'practice/durationPhases.js',
     modulePath: 'packages/core/src/practice/durationPhases.js',
@@ -835,27 +846,41 @@ const LAYERS = Object.freeze([
       'ladderDuration',
       'shiftedStart',
     ]),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    importers: Object.freeze([
+      // PR B: the Practice daylight page's model imports it directly, not through the barrel.
+      'frontend/src/utils/daylightOutlook.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
+      // PR B: runs G3 and G5 over the stored rows' input.
+      'frontend/src/utils/daylightOutlook.js',
+      // Builds a rig the stored rows cannot reach (an operator pin) and runs G3 on it.
+      'tests/daylightOutlookText.test.js',
       // Runs the three reports over the adapter's output, end to end.
       'tests/practiceDurationPhaseAdapter.test.js',
       'tests/practiceDurationPhases.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
+    expectedExternalProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
   }),
   // The duration-phase input adapter: database rows -> the three reports'
-  // input. Nothing calls it yet (see the durationPhases.js entry above); its
-  // only importer is the barrel and its only consumer is its own test, which
-  // also holds its graph, calendar and slots to `repairAdapter.js`'s.
+  // input. Its first caller is the Practice daylight page's model (PR B); its
+  // other consumer is its own test, which also holds its graph, calendar and
+  // slots to `repairAdapter.js`'s.
   Object.freeze({
     layer: 'practice/durationPhaseAdapter.js',
     modulePath: 'packages/core/src/practice/durationPhaseAdapter.js',
     functions: Object.freeze(['buildDurationPhaseInput']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
-    consumers: Object.freeze(['tests/practiceDurationPhaseAdapter.test.js']),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    importers: Object.freeze([
+      'frontend/src/utils/daylightOutlook.js',
+      'packages/core/src/practice/index.js',
+    ]),
+    consumers: Object.freeze([
+      'frontend/src/utils/daylightOutlook.js',
+      'tests/practiceDurationPhaseAdapter.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
+    expectedExternalProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
   }),
   // 8.9 D14 PR B: stored lighting-override rows -> PR A's input. PR C: the
   // Edge read is a Deno twin, not a caller -- it DEFINES a same-named

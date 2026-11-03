@@ -250,18 +250,26 @@ export default function DaylightOutlook({ rows, season }) {
           <h2 id="daylight-table-title" className="mb-1 text-base font-bold text-text-primary">
             Practice slots on unlit ground
           </h2>
-          <div className="grid-wrap">
-            <table className="grid" data-testid="daylight-table">
+          <div className="overflow-x-auto">
+            <table className="grid grid-prose" data-testid="daylight-table">
               <caption className="sr-only">
                 Practice slots on unlit ground, those that need attention first, with the changes
                 proposed for each
               </caption>
               <thead>
                 <tr>
-                  <th scope="col">Practice</th>
-                  <th scope="col">Outlook</th>
-                  <th scope="col">Proposed changes</th>
-                  <th scope="col">Ways to fix</th>
+                  <th scope="col" className="min-w-36">
+                    Practice
+                  </th>
+                  <th scope="col" className="min-w-64">
+                    Outlook
+                  </th>
+                  <th scope="col" className="min-w-64">
+                    Proposed changes
+                  </th>
+                  <th scope="col" className="min-w-56">
+                    Ways to fix
+                  </th>
                 </tr>
               </thead>
               <tbody>

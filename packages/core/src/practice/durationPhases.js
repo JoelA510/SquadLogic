@@ -105,12 +105,14 @@
  * counted, never omitted. Dated one-off exceptions are out of scope: they are
  * judged per occurrence by `evaluatePracticeDaylight()`.
  *
- * Called by nothing live yet: the core `practiceScheduling.js`/`autoScheduler.js`
- * do not call this, and the Edge post-pass (8.9 PR 6) is a Deno twin, not a
- * caller. Its inputs come from stored rows through `durationPhaseAdapter.js`;
- * the read-only "Practice daylight" outlook that will show these reports is the
- * second step of `docs/changes/2026-11-02-duration-phases-wiring.md`. The D14
- * constants are exported for the Edge twin (PR C) to pin.
+ * Called by one thing: the read-only "Practice daylight" page's model
+ * (`frontend/src/utils/daylightOutlook.js`, PR B of
+ * `docs/changes/2026-11-02-duration-phases-wiring.md`) runs G3 and G5 over the
+ * stored rows, which come through `durationPhaseAdapter.js`, and shows them as a
+ * proposal. The core `practiceScheduling.js`/`autoScheduler.js` do not call this,
+ * the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller, and G4 is called by
+ * nothing outside the tests (its cascade has no screen). The D14 constants are
+ * exported for the Edge twin (PR C) to pin.
  *
  * @module practice/durationPhases
  */

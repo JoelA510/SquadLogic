@@ -66,6 +66,17 @@ table.grid {
   width: 100%;
   font-size: 13px;
 }
+/* A table of sentences (the Practice daylight outlook). Any element that carries the class `grid`
+   also gets Tailwind's `grid` utility, `display: grid`, and `table.grid` is no exception: its header
+   and each row then lay out as separate tables, which does not matter for one-line cells and does
+   for long text, whose columns stop lining up. This table is a table. */
+table.grid.grid-prose {
+  display: table;
+}
+table.grid.grid-prose tbody td {
+  height: auto;
+}
+
 table.grid thead th {
   position: sticky;
   top: 0;

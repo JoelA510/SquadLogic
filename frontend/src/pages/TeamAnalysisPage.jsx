@@ -2513,6 +2513,7 @@ export default function TeamAnalysisPage() {
                 programs={programs}
                 groups={overviewGroups}
                 league={leagueFlags}
+                playDown={playDownEnabled}
                 onSelectProgram={setSelectedProgramId}
                 selectedProgramId={selectedProgramId}
               />

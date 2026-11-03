@@ -10,6 +10,7 @@ import {
   movedHereNote,
   movedInFromProgramsNote,
 } from '../../utils/seatNotes.js';
+import { playDownOverviewNote } from '../../utils/playDownNote.js';
 
 /** The settings panel's warnings (`assessTeamCount`), in a few words for the overview's table. */
 const WARNING_LABELS = {
@@ -116,7 +117,8 @@ const flagCountsShape = PropTypes.shape({
  * Every play-up and play-down is flagged and counted (play-down plan, 2026-11-03, PR 2): a column
  * for each division, the counts in each program heading (`group.flags`) and a line for the league
  * (`league`), all from `summarizeSeats`, which counts a player in the division they PLAY in. They are
- * flags, not decisions: nothing here approves or refuses a player.
+ * flags, not decisions: nothing here approves or refuses a player. The note under the heading says
+ * whether the organization's Play-down setting is on (`playDown`, off unless an admin turned it on).
  */
 export default function ProgramOverview({
   programs,
@@ -124,6 +126,7 @@ export default function ProgramOverview({
   selectedProgramId,
   groups = null,
   league = null,
+  playDown = false,
 }) {
   const renderRow = (program) => {
     const selected = selectedProgramId === program.id;
@@ -213,9 +216,7 @@ export default function ProgramOverview({
           Division Overview
         </h3>
         <p id="program-overview-note" className="mt-1 text-sm text-text-secondary">
-          Play-down is not available: a player registered in a younger division is placed in their
-          own age division and shown as moved. Play-up is by request. These are flags: nothing here
-          is approved or refused.
+          {playDownOverviewNote(playDown)}
         </p>
         {league && (
           <p className="mt-1 text-sm font-medium text-text-primary" data-testid="play-flags-league">
@@ -330,4 +331,6 @@ ProgramOverview.propTypes = {
     })
   ),
   league: flagCountsShape,
+  /** The Play-down setting is on: the note under the heading says so. */
+  playDown: PropTypes.bool,
 };

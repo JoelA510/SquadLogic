@@ -557,16 +557,16 @@ disagreed):
   re-registered in U10B and four age-10 players in U12B (one asking): U10B seats 78 off and 84 on (6 playing
   down), U12B 94 off and 88 on. The season fixture suite, the natural-age fixture and
   `teamGenerationEligibility.golden.json` pass unchanged (29 files, 426 tests, before the full run).
-- **The wording of what the page says about the rule is PR 3's, from one module.** The Play-up section's
-  sentence ("players play in their own age division unless a play-up was requested") named the rule as if the
-  setting did not exist; it now reads it from `frontend/src/utils/playDownNote.js` (on: "... or, with Play-down
-  on, they registered in a younger division"), the page handing the section the same boolean as the placement
-  (the census checks the element). PR 2 ships the Division Overview's note as static text ("Play-down is not
-  available: ..."), which is not on `main` yet: once it is, the note is read from the same module (on: "Play-down
-  is on: a player registered in a younger division plays there, and is flagged."), applied in a later push and
-  drafted and tested on PR 2's head. There is no "Turn on play-down" link: the Features tab is local state with
-  no address, and the tab needs a permission a Teams admin may not hold, so a link would land on a page that may
-  not show it. The card says where the switch is.
+- **The wording of what the page says about the rule is PR 3's, from one module.** The Division Overview's
+  note (PR 2 shipped it as static text, "Play-down is not available: ...") and the Play-up section's sentence
+  ("players play in their own age division unless a play-up was requested") named the rule as if the setting
+  did not exist. Both now read it from `frontend/src/utils/playDownNote.js`, each taking the same boolean the
+  placement is given (off: the words they had; on: "Play-down is on: a player registered in a younger division
+  plays there, and is flagged." and "... or, with Play-down on, they registered in a younger division"). A
+  census checks both elements are handed it and that no other file under `frontend/src` carries those words.
+  There is no "Turn on play-down" link: the Features tab is local state with no address, and the tab needs a
+  permission a Teams admin may not hold, so a link would land on a page that may not show it. The card says
+  where the switch is.
 - **No E2E scenario**, as the plan lists none; the setting is shown from a stored value through the schema
   and the real page in jsdom, both states, in the advice and in generation.
 - **Left alone, report only:** a player moved by hand to a roster that is neither the division registered nor

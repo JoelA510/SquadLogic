@@ -26,7 +26,7 @@ import {
   FeatureFlagSchema,
 } from '../frontend/src/constants/featureFlags.js';
 import { PLAY_DOWN_FLAG } from '../packages/core/src/playUp.js';
-import { playUpPlaysWhereNote } from '../frontend/src/utils/playDownNote.js';
+import { playDownOverviewNote, playUpPlaysWhereNote } from '../frontend/src/utils/playDownNote.js';
 
 const IDS = vi.hoisted(() => ({
   organization: '7f3e4d5c-6a71-4c8d-9e9f-1a2b3c4d5e31',
@@ -268,6 +268,15 @@ describe('the Teams page reads the stored setting, in the advice and in generati
       }
     });
 
+    it(`says on the Division Overview that play-down is ${on ? 'on' : 'not available'}`, async () => {
+      state.storedFlags = stored;
+      await openPage();
+      const note = /** @type {HTMLElement} */ (document.getElementById('program-overview-note'));
+      expect(note).toHaveTextContent(playDownOverviewNote(on));
+      expect(note).toHaveTextContent(on ? 'Play-down is on' : 'Play-down is not available');
+      expect(note).not.toHaveTextContent(on ? 'not available' : 'Play-down is on');
+    });
+
     it(`generation seats Jake in ${on ? 'U10, the division he registered for' : 'U12, his own age division'}`, async () => {
       state.storedFlags = stored;
       await generate();
@@ -291,6 +300,10 @@ describe('the Teams page reads the stored setting, in the advice and in generati
       const sentence = /** @type {HTMLElement} */ (document.querySelector('#play-up-heading + p'));
       expect(sentence).toHaveTextContent(playUpPlaysWhereNote(on));
       if (!on) expect(sentence).not.toHaveTextContent('with Play-down on');
+      // And it counts the seat: playing down only where the setting seats him there, else moved.
+      expect(sentence).toHaveTextContent(on ? '1 playing down' : '0 playing down');
+      if (on) expect(sentence).not.toHaveTextContent('moved to their own age division');
+      else expect(sentence).toHaveTextContent('1 moved to their own age division');
     });
   });
 
@@ -337,6 +350,9 @@ describe('turning the setting off or on does not move a player off a roster that
       again.teamsByDivision.U10.find((team) => team.id === teamId).players.map((p) => p.id)
     ).toContain(idOf(JAKE));
     expect(again.changeDiagnosticsByDivision.U10.droppedPlayersRemoved).toBe(0);
+    // Counted by the seat he holds, though the setting is off: playing down in U10, not moved to U12.
+    expect(section()).toHaveTextContent('1 playing down');
+    expect(section()).not.toHaveTextContent('moved to their own age division');
     expect(sectionRow('Kid1 Placeholder1')).toHaveTextContent(
       'Stays on the roster they are on in U10: a team that exists is not reshuffled. A new roster would place them in U12.'
     );

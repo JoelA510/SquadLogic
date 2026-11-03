@@ -239,10 +239,13 @@ describe('the play-down setting is read in one place and handed to every placeme
         expect(body, `${name} is handed the saved rosters`).toMatch(/\bheldSeats\b/);
       }
     }
-    // Every surface that states the rule is handed the same boolean: the Play-up section.
-    const sections = text.match(/<PlayUpList[\s\S]*?\/>/g) ?? [];
-    expect(sections.length).toBe(1);
-    expect(sections[0]).toMatch(/playDown=\{playDownEnabled\}/);
+    // Every surface that states the rule is handed the same boolean: the Play-up section and the
+    // Division Overview's note, each one element on the page.
+    for (const element of ['PlayUpList', 'ProgramOverview']) {
+      const surfaces = text.match(new RegExp(`<${element}[\\s\\S]*?\\/>`, 'g')) ?? [];
+      expect(surfaces.length, element).toBe(1);
+      expect(surfaces[0], element).toMatch(/playDown=\{playDownEnabled\}/);
+    }
     // The helper hands both to core's placement, and the core pipeline hands them on.
     const [placement] = callBodies(text, 'applyPlayUpEligibility');
     expect(placement).toMatch(/\ballowPlayDown\b/);
@@ -253,6 +256,14 @@ describe('the play-down setting is read in one place and handed to every placeme
     );
     expect(pipeline).toMatch(/\ballowPlayDown\b/);
     expect(pipeline).toMatch(/\bheldSeats\b/);
+  });
+
+  it('words the rule in one module, so the surfaces cannot say different things', () => {
+    const wording = /Play-down is not available|Play-down is on|with Play-down on/;
+    const files = sources
+      .filter((file) => file.startsWith('frontend/src/'))
+      .filter((file) => wording.test(read(file)));
+    expect(files).toEqual(['frontend/src/utils/playDownNote.js']);
   });
 
   it('would fail a call that leaves the setting out', () => {

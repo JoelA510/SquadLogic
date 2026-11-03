@@ -6,10 +6,11 @@
  * value; this file holds the component to the words in both states.
  */
 import React from 'react';
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import PlayUpList from '../frontend/src/components/teaming/PlayUpList.jsx';
-import { playUpPlaysWhereNote } from '../frontend/src/utils/playDownNote.js';
+import ProgramOverview from '../frontend/src/components/teaming/ProgramOverview.jsx';
+import { playDownOverviewNote, playUpPlaysWhereNote } from '../frontend/src/utils/playDownNote.js';
 
 afterEach(() => cleanup());
 
@@ -43,6 +44,61 @@ describe('the words', () => {
     expect(playUpPlaysWhereNote(true)).toBe(
       'players play in their own age division unless a play-up was requested or, with Play-down on, they registered in a younger division'
     );
+  });
+});
+
+const OFF_NOTE =
+  'Play-down is not available: a player registered in a younger division is placed in their own age division and shown as moved. Play-up is by request. These are flags: nothing here is approved or refused.';
+const ON_NOTE =
+  'Play-down is on: a player registered in a younger division plays there, and is flagged. Play-up is by request. These are flags: nothing here is approved or refused.';
+
+const program = {
+  id: 'U10',
+  name: 'U10',
+  playerCount: 24,
+  waitlistedCount: 0,
+  notEligibleCount: 0,
+  movedInCount: 0,
+  movedOutCount: 0,
+  estimatedTeams: 2,
+  avgRosterSize: 12,
+  assessment: {
+    blocked: false,
+    teamCount: 2,
+    recommendedTeamCount: 2,
+    fitRange: null,
+    smallestTeam: null,
+    largestTeam: null,
+    warnings: [],
+  },
+};
+function overviewNote(extra = {}) {
+  render(
+    <ProgramOverview
+      programs={[program]}
+      onSelectProgram={vi.fn()}
+      selectedProgramId={null}
+      {...extra}
+    />
+  );
+  return /** @type {HTMLElement} */ (document.getElementById('program-overview-note'));
+}
+
+describe('the Division Overview note', () => {
+  it('has the words: the old ones when off, and one that says it is on', () => {
+    expect(playDownOverviewNote(false)).toBe(OFF_NOTE);
+    expect(playDownOverviewNote(true)).toBe(ON_NOTE);
+  });
+
+  it('reads the setting: off by default, on when handed it, and still describes the table', () => {
+    expect(overviewNote()).toHaveTextContent(OFF_NOTE);
+    cleanup();
+    expect(overviewNote({ playDown: false })).toHaveTextContent(OFF_NOTE);
+    cleanup();
+    const note = overviewNote({ playDown: true });
+    expect(note).toHaveTextContent(ON_NOTE);
+    expect(note).not.toHaveTextContent('not available');
+    expect(screen.getByRole('table')).toHaveAttribute('aria-describedby', 'program-overview-note');
   });
 });
 

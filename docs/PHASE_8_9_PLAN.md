@@ -288,6 +288,14 @@ and 88. The D1 row and the 2026-09-27 entry above are left as written.
 **D7, 2026-11-02:** "Live game path sunset: out of 8.9; stated unenforced" is unchanged: the live game scheduler
 still reads no sunset. What changed is the core's answer for a game past it: a compromise, not a block.
 
+**D8 and G3 to G5, 2026-11-02 (owner):** "Wire the durationPhases as recommended." and, of the two readings offered,
+"Go with A on durationPhases" (a read-only outlook; applying retimed lengths is not part of this). The principle of the D4 note
+above reaches the duration-phase reports: `practice/durationPhases.js` no longer "holds out" a date that neither a shorter
+practice nor an earlier start saves (TIME TBD, D8) - the date stays at its timing, is **flagged** (`slotPhases[].flagged`,
+`PRACTICE_PAST_SUNSET`, a compromise) and occupies its surface, and G5 names `firstFlaggedDate` and `flaggedDates` in place of
+D8's `tbdFrom`. The Edge dropped D8's truncation on 2026-10-27; this brings the reports into line with it. The G3 to G5 rows
+above and the D8 row are left as written. Plan: `docs/changes/2026-11-02-duration-phases-wiring.md`; lesson 89.
+
 Every PR: `/code-review` before opening; the season-2026 fixture suite when it
 touches domain types, constraints or solver stages; each new guarantee shown red
 by its plant.

@@ -213,7 +213,9 @@ green with the finding still emitted; only a description string in that file was
 - **B4** `durationPhases.js:654, 730` holds a known past-sunset date out as TIME TBD when neither a
   shorter practice nor an earlier start saves it. Unwired (no production consumer), so nothing in the
   app does this today. Recommendation: apply the principle there (keep the date, flag it) when it is
-  wired.
+  wired. **Decided 2026-11-02 (owner: "Wire the durationPhases as recommended."): done in
+  `docs/changes/2026-11-02-duration-phases-wiring.md`, task A1** - the date is kept at its timing,
+  flagged, and occupies its surface.
 - **B5** the `practice-daylight` constraint is `HARD` and non-waivable and `PRACTICE_PAST_SUNSET` is
   `BLOCKING`, though no path has blocked on it since 2026-10-27. The registry note now says so; the
   labels are unchanged. Recommendation: relabel to a compromise (soft) in a small PR of its own. `HARD`

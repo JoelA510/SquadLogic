@@ -8,6 +8,13 @@
  * on the describe block) before it counted; the plants are source edits
  * recorded in the PR, not left in the tree.
  *
+ * **Flag, not hold out (owner, 2026-11-02;
+ * `docs/changes/2026-11-02-duration-phases-wiring.md`).** A date no retiming
+ * saves is flagged and kept as scheduled, and a flagged practice occupies its
+ * surface. The expectations below come from that rule and from the plan's
+ * arithmetic (a rig's sunsets are set to the minute; the corpus is swept by an
+ * independent model written from the rule), not from what the module printed.
+ *
  * **No real coordinates.** The one coordinate below is synthetic -- round
  * numbers, not a place (40.00/-75.00), the same point `practiceDaylight.test.js`
  * uses. Nothing is fitted, geocoded or fetched.
@@ -20,6 +27,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AVAILABILITY_REASON,
+  AVAILABILITY_SEVERITY,
+  availabilitySeverityOf,
   buildAvailabilityCalendar,
   buildAvailabilityCalendarFromSeason2026,
 } from '@squadlogic/core/availability/index.js';
@@ -135,10 +145,24 @@ const derivedOf = (schedule, slotId) =>
     .find((entry) => entry.slotId === slotId)
     .phases.filter((phase) => phase.source === PRACTICE_PHASE_SOURCE.DERIVED)
     .map((phase) => [phase.effectiveFrom, phase.startMinutes, phase.durationMinutes, phase.retime]);
-const tbdOf = (schedule, slotId) =>
+/** The flagged dates of one slot, as `[date, shortenRefused, shiftRefused]`. */
+const flaggedOf = (schedule, slotId) =>
   schedule.slotPhases
     .find((entry) => entry.slotId === slotId)
-    .tbd.map((entry) => [entry.date, entry.shortenRefused, entry.shiftRefused]);
+    .flagged.map((entry) => [entry.date, entry.shortenRefused, entry.shiftRefused]);
+/**
+ * Words that describe a date as lost: the stale vocabulary of the hold-out
+ * (TIME TBD, `tbd`, D8's truncation, "held out"). Every key and string of a value.
+ */
+const STALE_WORDS = /TIME TBD|\btbd\b|\bd8\b|held[ -]?out/i;
+const staleWordsIn = (value, path = '$') => {
+  if (typeof value === 'string') return STALE_WORDS.test(value) ? [`${path} = ${value}`] : [];
+  if (value === null || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, inner]) => [
+    ...(STALE_WORDS.test(key) ? [`${path}.${key} (a key)`] : []),
+    ...staleWordsIn(inner, `${path}.${key}`),
+  ]);
+};
 
 /* -------------------------------------------------------------------------- */
 /* W12 -- the phase transition                                                 */
@@ -323,12 +347,17 @@ describe('W16/W17: the default is the 10-minute ladder, from the slot’s own le
 });
 
 /* -------------------------------------------------------------------------- */
-/* W19 -- below the minimum with no legal shift: TIME TBD with its date        */
+/* W19 -- below the minimum with no legal shift: flagged, kept as scheduled     */
 /* -------------------------------------------------------------------------- */
 
-describe('W19: a slot below the minimum with no legal shift is TIME TBD, never emitted', () => {
+describe('W19: a slot below the minimum with no legal shift is flagged and kept as scheduled, never emitted shorter', () => {
   // Plant: drop the minimum check in the SHORTEN branch (accept any rung). The
   // slot is then emitted at 20 minutes and every assertion here goes red.
+  //
+  // From the rule, by hand. 18:00 for 60 minutes; no floor is given, so a
+  // shift is refused. 10/06 ends 19:00 against 19:05: legal. 10/13 (18:25) is
+  // 35 minutes over: the ladder reaches 60 - 4 x 10 = 20, below 40. 10/20
+  // (18:20) is 40 over: 20 again. Both dates stay at 18:00 for 60 minutes.
   const calendar = rigCalendar([
     { date: '2026-10-06', sunsetMinutes: 19 * 60 + 5 },
     { date: '2026-10-13', sunsetMinutes: 18 * 60 + 25 },
@@ -338,8 +367,8 @@ describe('W19: a slot below the minimum with no legal shift is TIME TBD, never e
   const input = { slotSet: plan, graph: rigGraph, calendar, window: RIG_WINDOW };
   const schedule = derivePracticeDurationPhases(input);
 
-  it('held out on each date with its reasons; nothing shorter than 40 is emitted', () => {
-    expect(tbdOf(schedule, 'dusk')).toEqual([
+  it('flagged on each date with both refusals; nothing shorter than 40 is emitted', () => {
+    expect(flaggedOf(schedule, 'dusk')).toEqual([
       [
         '2026-10-13',
         PRACTICE_RETIME_REFUSAL.BELOW_MINIMUM,
@@ -351,27 +380,150 @@ describe('W19: a slot below the minimum with no legal shift is TIME TBD, never e
         PRACTICE_RETIME_REFUSAL.EARLIEST_START_UNKNOWN,
       ],
     ]);
-    expect(schedule.slotPhases[0].tbd[0].reason).toMatch(/below the 40-minute minimum/);
+    expect(schedule.slotPhases[0].flagged[0].reason).toMatch(/below the 40-minute minimum/);
     expect(derivedOf(schedule, 'dusk')).toEqual([]);
     for (const slot of schedule.slots) {
       for (const override of Object.values(slot.seasonOverrides)) {
         expect(override.durationMinutes).toBeGreaterThanOrEqual(40);
       }
     }
-    expect(schedule.meta.slotDatesHeldOut).toBe(2);
+    expect(schedule.meta.slotDatesFlagged).toBe(2);
   });
 
-  it('G5 names the D8 date; G4 flags the same dates', () => {
+  it('a flagged date is kept as scheduled: the slot still runs its 60 minutes from 18:00 on it', () => {
+    expect(schedule.slots[0].seasonOverrides).toEqual({});
+    const expanded = expandPracticeSlotsForSeason({
+      slots: schedule.slots,
+      seasonPhases: schedule.seasonPhases,
+    });
+    expect(expanded).toHaveLength(1);
+    expect([
+      minutesOfDate(expanded[0].start),
+      (expanded[0].end - expanded[0].start) / 60000,
+    ]).toEqual([18 * 60, 60]);
+    for (const entry of schedule.slotPhases[0].flagged) {
+      expect([entry.startMinutes, entry.durationMinutes]).toEqual([18 * 60, 60]);
+      expect(entry.reason).toMatch(/kept as scheduled and flagged$/);
+    }
+  });
+
+  it('the flag carries the sunset code, and that code is a compromise: severity is read from the map, not stored', () => {
+    for (const entry of schedule.slotPhases[0].flagged) {
+      expect(entry.code).toBe(AVAILABILITY_REASON.PRACTICE_PAST_SUNSET);
+      expect(availabilitySeverityOf(entry.code)).toBe(AVAILABILITY_SEVERITY.COMPROMISE);
+      expect(Object.keys(entry)).not.toContain('severity');
+    }
+  });
+
+  it('G5 names the first flagged date and every flagged date; G4 flags the same dates', () => {
     const [row] = buildDstSurvivalReport(input).rows;
     expect(row.verdict).toBe(PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE);
-    expect(row.d8).toEqual({
-      legalThrough: '2026-10-06',
-      tbdFrom: '2026-10-13',
-      tbdDates: 2,
-      heldOutDates: 2,
-    });
+    expect(row.firstFlaggedDate).toBe('2026-10-13');
+    expect(row.flaggedDates).toEqual(['2026-10-13', '2026-10-20']);
+    expect(row.refusals.map((refusal) => refusal.date)).toEqual(row.flaggedDates);
+    expect('d8' in row).toBe(false);
     const report = buildPracticeCompressionReport({ ...input, phaseSchedule: schedule });
     expect(report.holdStarts.flagged.map((f) => f.date)).toEqual(['2026-10-13', '2026-10-20']);
+  });
+
+  it('no report says a date is lost: no TIME TBD, no D8, no held-out, in any key or sentence', () => {
+    const survival = buildDstSurvivalReport(input);
+    const compression = buildPracticeCompressionReport({ ...input, phaseSchedule: schedule });
+    expect(staleWordsIn(schedule)).toEqual([]);
+    expect(staleWordsIn(survival)).toEqual([]);
+    expect(staleWordsIn(compression)).toEqual([]);
+  });
+
+  it('the stale-word search can fail: it finds the old module’s shapes', () => {
+    // The positive control the plan asks for: the search matches what the
+    // module used to print, so an empty result above is not an empty search.
+    expect(staleWordsIn({ d8: { tbdFrom: '2026-10-13' } })).toHaveLength(1);
+    expect(staleWordsIn({ slotPhases: [{ tbd: [] }] })).toHaveLength(1);
+    expect(staleWordsIn({ rows: [{ reason: 'held out as TIME TBD' }] })).toHaveLength(1);
+    expect(staleWordsIn({ meta: { slotDatesHeldOut: 2 } })).toHaveLength(1);
+    expect(staleWordsIn({ reason: 'kept as scheduled and flagged' })).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* A flagged practice occupies its surface                                     */
+/* -------------------------------------------------------------------------- */
+
+describe('a flagged practice still happens, so it occupies its surface (the design decision of the wiring plan)', () => {
+  // Plant (P1): do not push the flagged practice's end onto the night
+  // (`ends.push(start + duration)` removed from both flagged branches). B then
+  // shifts into the minutes A is still using, and the overlap assertions go red.
+  //
+  // From the rule, by hand. The floor is 17:00. A runs 17:00-18:00 and
+  // shifts earlier; B runs 18:00-18:40 and shifts earlier too. On 10/13 the
+  // limit is 17:50. A would have to start at 16:50, before the floor: flagged,
+  // and it keeps 17:00-18:00. B ends 18:40, 50 minutes over, so a shift to
+  // 17:10 keeps its 40 minutes: legal for the floor, but A is on the surface
+  // until 18:00, so the shift would overlap it: B is flagged `overlap` and
+  // keeps 18:00-18:40. On the other two dates (limit 20:00) both are legal.
+  const calendar = rigCalendar([
+    { date: '2026-10-06', sunsetMinutes: 20 * 60 },
+    { date: '2026-10-13', sunsetMinutes: 17 * 60 + 50 },
+    { date: '2026-10-20', sunsetMinutes: 20 * 60 },
+  ]);
+  // A strategy naming a slot the plan does not hold is refused, so name only the present ones.
+  const strategiesFor = (slots) =>
+    Object.fromEntries(slots.map((slot) => [slot.id, PRACTICE_COMPRESSION_STRATEGY.SHIFT_EARLIER]));
+  const derive = (slots) =>
+    derivePracticeDurationPhases({
+      slotSet: rigPlan(slots),
+      graph: rigGraph,
+      calendar,
+      window: RIG_WINDOW,
+      strategies: strategiesFor(slots),
+      earliestStartMinutes: 17 * 60,
+    });
+  const A = rigSlot('A', 17 * 60, 60);
+  const B = rigSlot('B', 18 * 60, 40);
+
+  it('A is flagged (the floor), and B’s shift into A’s minutes is flagged `overlap`, not made', () => {
+    const schedule = derive([A, B]);
+    expect(flaggedOf(schedule, 'A')).toEqual([
+      ['2026-10-13', null, PRACTICE_RETIME_REFUSAL.EARLIEST_START_FLOOR],
+    ]);
+    expect(flaggedOf(schedule, 'B')).toEqual([
+      ['2026-10-13', null, PRACTICE_RETIME_REFUSAL.OVERLAP],
+    ]);
+    const flaggedB = schedule.slotPhases.find((entry) => entry.slotId === 'B').flagged[0];
+    expect(flaggedB).toMatchObject({
+      startMinutes: 18 * 60,
+      durationMinutes: 40,
+      wouldStartMinutes: 17 * 60 + 10,
+      earlierEndMinutes: 18 * 60,
+    });
+    expect(derivedOf(schedule, 'B')).toEqual([]);
+    expect(schedule.meta.slotDatesFlagged).toBe(2);
+    expect(schedule.meta.phaseTransitionsDerived).toBe(0);
+  });
+
+  it('the case is not vacuous: without A, the same shift of B is legal', () => {
+    const alone = derive([B]);
+    expect(derivedOf(alone, 'B')).toEqual([
+      ['2026-10-13', 17 * 60 + 10, 40, PRACTICE_RETIME_KIND.SHIFT_EARLIER],
+    ]);
+    expect(flaggedOf(alone, 'B')).toEqual([]);
+  });
+
+  it('G5 reads the same derivation: both slots do not survive, and the overlap is B’s refusal', () => {
+    const report = buildDstSurvivalReport({
+      slotSet: rigPlan([A, B]),
+      graph: rigGraph,
+      calendar,
+      window: RIG_WINDOW,
+      strategies: strategiesFor([A, B]),
+      earliestStartMinutes: 17 * 60,
+    });
+    const byId = new Map(report.rows.map((row) => [row.slotId, row]));
+    expect(byId.get('A').verdict).toBe(PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE);
+    expect(byId.get('B').verdict).toBe(PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE);
+    expect(byId.get('B').refusals).toEqual([
+      { date: '2026-10-13', shortenRefused: null, shiftRefused: PRACTICE_RETIME_REFUSAL.OVERLAP },
+    ]);
   });
 });
 
@@ -381,7 +533,7 @@ describe('W19: a slot below the minimum with no legal shift is TIME TBD, never e
 
 describe('W20/W21: SHIFT_EARLIER keeps the duration and never starts before the floor', () => {
   // W20 plant: remove the floor check in shiftedStart(); 10/13 then shifts to
-  // 16:40, before the 16:45 floor, and the TBD assertion goes red.
+  // 16:40, before the 16:45 floor, and the flagged assertion goes red.
   // W21 plant: shorten as well as shift (the ladder's rung as the duration);
   // the 60-minute assertions go red.
   const calendar = rigCalendar([
@@ -400,14 +552,19 @@ describe('W20/W21: SHIFT_EARLIER keeps the duration and never starts before the 
   };
   const schedule = derivePracticeDurationPhases(input);
 
-  it('W20: 10/06 moves to 16:50; 10/13 would need 16:40, before the floor: TIME TBD', () => {
+  it('W20: 10/06 moves to 16:50; 10/13 would need 16:40, before the floor: flagged, kept at 16:50', () => {
     expect(derivedOf(schedule, 's')).toEqual([
       ['2026-10-06', 16 * 60 + 50, 60, PRACTICE_RETIME_KIND.SHIFT_EARLIER],
     ]);
-    expect(tbdOf(schedule, 's')).toEqual([
+    expect(flaggedOf(schedule, 's')).toEqual([
       ['2026-10-13', null, PRACTICE_RETIME_REFUSAL.EARLIEST_START_FLOOR],
     ]);
-    expect(schedule.slotPhases[0].tbd[0].wouldStartMinutes).toBe(16 * 60 + 40);
+    expect(schedule.slotPhases[0].flagged[0].wouldStartMinutes).toBe(16 * 60 + 40);
+    // Kept as scheduled means as it runs that night: the 16:50 it moved to.
+    expect(schedule.slotPhases[0].flagged[0]).toMatchObject({
+      startMinutes: 16 * 60 + 50,
+      durationMinutes: 60,
+    });
     expect(
       shiftedStart({
         startMinutes: 17 * 60,
@@ -455,7 +612,7 @@ describe('W20/W21: SHIFT_EARLIER keeps the duration and never starts before the 
       window: { from: '2026-10-09', to: '2026-10-09' },
       calendar: rigCalendar([{ date: '2026-10-09', sunsetMinutes: 17 * 60 + 50 }]),
     });
-    expect(tbdOf(friday, 's')).toEqual([
+    expect(flaggedOf(friday, 's')).toEqual([
       ['2026-10-09', null, PRACTICE_RETIME_REFUSAL.EARLIEST_START_UNKNOWN],
     ]);
   });
@@ -483,15 +640,15 @@ describe('W22: a shifted slot never overlaps an earlier slot on its surface that
       earliestStartMinutes: 16 * 60,
     });
 
-  it('back to back: the shift would overlap, so 10/13 is TIME TBD `overlap`', () => {
+  it('back to back: the shift would overlap, so 10/13 is flagged `overlap` and kept at 18:00', () => {
     const schedule = derive(17 * 60);
     expect(derivedOf(schedule, 'after')).toEqual([]);
-    expect(tbdOf(schedule, 'after')).toEqual([
+    expect(flaggedOf(schedule, 'after')).toEqual([
       ['2026-10-13', null, PRACTICE_RETIME_REFUSAL.OVERLAP],
     ]);
-    expect(schedule.slotPhases.find((s) => s.slotId === 'after').tbd[0].earlierEndMinutes).toBe(
-      18 * 60
-    );
+    const [flagged] = schedule.slotPhases.find((s) => s.slotId === 'after').flagged;
+    expect(flagged.earlierEndMinutes).toBe(18 * 60);
+    expect([flagged.startMinutes, flagged.durationMinutes]).toEqual([18 * 60, 60]);
   });
 
   it('with a gap before it, the same shift is legal (the case is not vacuous)', () => {
@@ -507,8 +664,8 @@ describe('W22: a shifted slot never overlaps an earlier slot on its surface that
 /* -------------------------------------------------------------------------- */
 
 describe('auto-fallback: SHORTEN that would go below 40 shifts earlier when the floor allows', () => {
-  // Plant: disable the fallback (no shift for a SHORTEN slot); 10/13 goes
-  // TIME TBD and the fallback assertions go red.
+  // Plant: disable the fallback (no shift for a SHORTEN slot); 10/13 is
+  // flagged and the fallback assertions go red.
   const calendar = rigCalendar([
     { date: '2026-10-06', sunsetMinutes: 18 * 60 + 55 },
     { date: '2026-10-13', sunsetMinutes: 18 * 60 + 35 },
@@ -527,9 +684,9 @@ describe('auto-fallback: SHORTEN that would go below 40 shifts earlier when the 
       ['2026-10-06', 18 * 60, 50, PRACTICE_RETIME_KIND.SHORTEN],
       ['2026-10-13', 17 * 60 + 40, 50, PRACTICE_RETIME_KIND.FALLBACK_SHIFT],
     ]);
-    expect(tbdOf(schedule, 'f')).toEqual([]);
+    expect(flaggedOf(schedule, 'f')).toEqual([]);
     expect(schedule.meta.fallbackShifts).toBe(1);
-    // Refusals count held-out dates only: the ladder's refusal on 10/13 was
+    // Refusals count flagged dates only: the ladder's refusal on 10/13 was
     // rescued by the shift, so nothing is counted.
     expect(Object.values(schedule.meta.retimeRefusals)).toEqual([0, 0, 0, 0]);
     expect(schedule.slots[0].seasonOverrides).toEqual({
@@ -545,8 +702,7 @@ describe('auto-fallback: SHORTEN that would go below 40 shifts earlier when the 
 
 describe('W23: an override exempts only its window; a boundary moved one day turns only that date red', () => {
   // Plant: `date < window.until` in lightingOverrideCovers(). The window's last
-  // date (10/20) is then judged and goes TIME TBD; the exact-set assertion
-  // goes red.
+  // date (10/20) is then judged and flagged; the exact-set assertion goes red.
   const window = { from: '2026-10-06', to: '2026-10-27' };
   // 10/13 has no sunset at all (no row, no coordinates): exempt, it is never
   // SUNSET_UNKNOWN.
@@ -564,11 +720,11 @@ describe('W23: an override exempts only its window; a boundary moved one day tur
       window,
       lightingOverrides: [{ slotId: 'lamp', from, until }],
     });
-  const tbdDates = (schedule) => schedule.slotPhases[0].tbd.map((entry) => entry.date);
+  const flaggedDates = (schedule) => schedule.slotPhases[0].flagged.map((entry) => entry.date);
 
   it('inside the window nothing is judged, nothing is unknown, and the slot runs as planned', () => {
     const schedule = run('2026-10-13', '2026-10-20');
-    expect(tbdDates(schedule)).toEqual(['2026-10-06', '2026-10-27']);
+    expect(flaggedDates(schedule)).toEqual(['2026-10-06', '2026-10-27']);
     expect(schedule.meta.slotDatesExempt).toBe(2);
     expect(schedule.meta.slotDatesSunsetUnknown).toBe(0);
     expect(schedule.findings.filter((f) => f.details?.date === '2026-10-13')).toEqual([]);
@@ -591,9 +747,9 @@ describe('W23: an override exempts only its window; a boundary moved one day tur
   });
 
   it('moving either edge one day in turns exactly that date red', () => {
-    const base = new Set(tbdDates(run('2026-10-13', '2026-10-20')));
-    const early = tbdDates(run('2026-10-13', '2026-10-19')).filter((d) => !base.has(d));
-    const late = tbdDates(run('2026-10-14', '2026-10-20')).filter((d) => !base.has(d));
+    const base = new Set(flaggedDates(run('2026-10-13', '2026-10-20')));
+    const early = flaggedDates(run('2026-10-13', '2026-10-19')).filter((d) => !base.has(d));
+    const late = flaggedDates(run('2026-10-14', '2026-10-20')).filter((d) => !base.has(d));
     expect(early).toEqual(['2026-10-20']);
     // 10/13 has no sunset: judged, it is unknown -- never read as legal.
     expect(late).toEqual([]);
@@ -640,9 +796,9 @@ describe('W23: an override exempts only its window; a boundary moved one day tur
 /* -------------------------------------------------------------------------- */
 
 describe('a shifted slot is re-checked every night, and a lighting window keeps the operator pin', () => {
-  // Plants: drop the nightly re-check (10/13 and 10/20 stop being held out);
-  // drop the pin inside the window (`seasonOverrides` loses 40, and B is held
-  // out on the lit night because A would run its full hour).
+  // Plants: drop the nightly re-check (10/13 and 10/20 stop being flagged);
+  // drop the pin inside the window (`seasonOverrides` loses 40, and B is
+  // flagged on the lit night because A would run its full hour).
   const calendar = rigCalendar([
     { date: '2026-10-06', sunsetMinutes: 17 * 60 + 50 },
     { date: '2026-10-13', sunsetMinutes: 17 * 60 + 50 },
@@ -663,7 +819,7 @@ describe('a shifted slot is re-checked every night, and a lighting window keeps 
     reason: 'club asked',
   });
 
-  it('B moves into the room A’s pin frees; when A is pinned back, those nights are held out', () => {
+  it('B moves into the room A’s pin frees; when A is pinned back, those nights are flagged `overlap`', () => {
     const schedule = derivePracticeDurationPhases({
       ...base,
       overrides: [pin('2026-10-06', 40), pin('2026-10-13', 60)],
@@ -671,10 +827,26 @@ describe('a shifted slot is re-checked every night, and a lighting window keeps 
     expect(derivedOf(schedule, 'B')).toEqual([
       ['2026-10-06', 16 * 60 + 50, 60, PRACTICE_RETIME_KIND.SHIFT_EARLIER],
     ]);
-    expect(tbdOf(schedule, 'B')).toEqual([
+    expect(flaggedOf(schedule, 'B')).toEqual([
       ['2026-10-13', null, PRACTICE_RETIME_REFUSAL.OVERLAP],
       ['2026-10-20', null, PRACTICE_RETIME_REFUSAL.OVERLAP],
     ]);
+    // B stays at the 16:50 it moved to on those nights, 16:50-17:50: that ends
+    // exactly at the 17:50 limit, so these are flags for the overlap alone and
+    // sit inside daylight. G4's hold-starts are the dates left PAST sunset, so
+    // they do not list them: the flagged set can be larger than the hold-starts,
+    // and the difference is exactly the overlap-only flags.
+    for (const entry of schedule.slotPhases.find((s) => s.slotId === 'B').flagged) {
+      expect([entry.startMinutes, entry.durationMinutes]).toEqual([16 * 60 + 50, 60]);
+      expect(entry.startMinutes + entry.durationMinutes).toBeLessThanOrEqual(entry.limitMinutes);
+    }
+    const report = buildPracticeCompressionReport({
+      slotSet: base.slotSet,
+      graph: rigGraph,
+      calendar,
+      phaseSchedule: schedule,
+    });
+    expect(report.holdStarts.flagged).toEqual([]);
   });
 
   it('inside A’s lighting window A keeps its pin, so B stays clear', () => {
@@ -683,7 +855,7 @@ describe('a shifted slot is re-checked every night, and a lighting window keeps 
       overrides: [pin('2026-10-06', 40)],
       lightingOverrides: [{ slotId: 'A', from: '2026-10-13', until: '2026-10-13' }],
     });
-    expect(tbdOf(schedule, 'B')).toEqual([]);
+    expect(flaggedOf(schedule, 'B')).toEqual([]);
     const a = schedule.slots.find((slot) => slot.id === 'A');
     expect(Object.values(a.seasonOverrides)).toEqual([
       { durationMinutes: 40 },
@@ -767,19 +939,19 @@ describe('W13: the cascade proposes through the 8.8 change log and applies nothi
     phaseSchedule: schedule,
   });
 
-  it('G3 on the rig: only C is cut, to 30 from 10/13; D is held out', () => {
+  it('G3 on the rig: only C is cut, to 30 from 10/13; D is flagged and kept', () => {
     expect(derivedOf(schedule, 'c')).toEqual([
       ['2026-10-13', 18 * 60 + 30, 30, PRACTICE_RETIME_KIND.SHORTEN],
     ]);
     for (const id of ['a', 'b']) expect(derivedOf(schedule, id)).toEqual([]);
-    expect(tbdOf(schedule, 'd')).toEqual([
+    expect(flaggedOf(schedule, 'd')).toEqual([
       [
         '2026-10-13',
         PRACTICE_RETIME_REFUSAL.BELOW_MINIMUM,
         PRACTICE_RETIME_REFUSAL.EARLIEST_START_UNKNOWN,
       ],
     ]);
-    expect(schedule.meta.slotDatesHeldOut).toBe(1);
+    expect(schedule.meta.slotDatesFlagged).toBe(1);
     expect(schedule.litSlotIds).toEqual(['lit']);
   });
 
@@ -873,7 +1045,8 @@ describe('edges /code-review raised', () => {
       minimumDurationMinutes: 60,
     });
     expect(report.rows[0].verdict).toBe(PRACTICE_SURVIVAL_VERDICT.SURVIVES);
-    expect(report.rows[0].d8).toBeNull();
+    expect(report.rows[0].firstFlaggedDate).toBeNull();
+    expect(report.rows[0].flaggedDates).toEqual([]);
   });
 
   it('an earlier start is offered only inside the hours the plan already uses on the surface', () => {
@@ -1012,6 +1185,12 @@ const corpus = () => {
  * floor(sunsetOnDate()) at the synthetic point, and the D14 rules by plain
  * loops (a step at a time, never the module's ceilings). Nothing here calls
  * the module or the provider.
+ *
+ * Written from the rule, not from the module's output: a date nothing saves is
+ * FLAGGED, the slot keeps its state, and **the flagged practice still happens,
+ * so it occupies its surface** that night (`occupyFlagged`). The sweep is run
+ * both ways so the occupancy rule is shown to bite on this corpus: the module
+ * must equal the occupying sweep and differ from the one that forgets.
  */
 const independent = (() => {
   const tableByDate = new Map(sunsets.map((row) => [row.date, row.sunsetMinutes]));
@@ -1026,65 +1205,81 @@ const independent = (() => {
     if ((rawGeometry.venues[venue.name]?.lit ?? null) === true) continue;
     unlit.set(slot.id, slotDates(slot, SEASON_FROM, SEASON_UNTIL));
   }
-
-  /** slotId -> [[date, start, duration]] of each retiming */
-  const retimes = new Map();
-  /** `slotId|date` of every held-out slot-date */
-  const tbd = new Set();
-  /** `surfaceId|date` -> the latest end of the slots already swept that night */
-  const nightEnd = new Map();
   const ordered = PLAN.slots
     .filter((slot) => unlit.has(slot.id))
     .sort((a, b) => a.startMinutes - b.startMinutes || (a.id < b.id ? -1 : 1));
-  for (const slot of ordered) {
-    let start = slot.startMinutes;
-    let duration = slot.durationMinutes;
-    const list = [];
-    for (const date of unlit.get(slot.id)) {
-      const limit = limitOn(date);
-      const night = `${slot.surfaceId}|${date}`;
-      const before = nightEnd.has(night) ? nightEnd.get(night) : null;
-      const occupy = (end) => nightEnd.set(night, Math.max(nightEnd.get(night) ?? 0, end));
-      // Already moved, and an earlier slot runs into it tonight: held out.
-      if (start < slot.startMinutes && before !== null && start < before) {
-        tbd.add(`${slot.id}|${date}`);
-        continue;
-      }
-      if (start + duration <= limit) {
+
+  const sweep = (occupyFlagged) => {
+    /** slotId -> [[date, start, duration]] of each retiming */
+    const retimes = new Map();
+    /** `slotId|date` of every flagged slot-date */
+    const flagged = new Set();
+    /** `surfaceId|date` -> the latest end of the slots already swept that night */
+    const nightEnd = new Map();
+    for (const slot of ordered) {
+      let start = slot.startMinutes;
+      let duration = slot.durationMinutes;
+      const list = [];
+      for (const date of unlit.get(slot.id)) {
+        const limit = limitOn(date);
+        const night = `${slot.surfaceId}|${date}`;
+        const before = nightEnd.has(night) ? nightEnd.get(night) : null;
+        const occupy = (end) => nightEnd.set(night, Math.max(nightEnd.get(night) ?? 0, end));
+        // Already moved, and an earlier slot runs into it tonight: flagged, and
+        // it stays where it is.
+        if (start < slot.startMinutes && before !== null && start < before) {
+          flagged.add(`${slot.id}|${date}`);
+          if (occupyFlagged) occupy(start + duration);
+          continue;
+        }
+        if (start + duration <= limit) {
+          occupy(start + duration);
+          continue;
+        }
+        let saved = false;
+        if (start === slot.startMinutes) {
+          let rung = duration;
+          while (start + rung > limit && rung > 0) rung -= STEP;
+          if (rung >= MINIMUM) {
+            duration = rung;
+            saved = true;
+          }
+        }
+        if (!saved) {
+          let moved = start;
+          while (moved + duration > limit) moved -= STEP;
+          const floor = FLOOR_WEEKDAYS.includes(slot.weekday) ? FLOOR : null;
+          if (floor !== null && moved >= floor && (before === null || moved >= before)) {
+            start = moved;
+            saved = true;
+          }
+        }
+        if (!saved) {
+          // Flagged tonight and kept as scheduled: still on the surface, so it
+          // holds its minutes against the slots after it.
+          flagged.add(`${slot.id}|${date}`);
+          if (occupyFlagged) occupy(start + duration);
+          continue;
+        }
+        list.push([date, start, duration]);
         occupy(start + duration);
-        continue;
       }
-      let saved = false;
-      if (start === slot.startMinutes) {
-        let rung = duration;
-        while (start + rung > limit && rung > 0) rung -= STEP;
-        if (rung >= MINIMUM) {
-          duration = rung;
-          saved = true;
-        }
-      }
-      if (!saved) {
-        let moved = start;
-        while (moved + duration > limit) moved -= STEP;
-        const floor = FLOOR_WEEKDAYS.includes(slot.weekday) ? FLOOR : null;
-        if (floor !== null && moved >= floor && (before === null || moved >= before)) {
-          start = moved;
-          saved = true;
-        }
-      }
-      if (!saved) {
-        // TIME TBD tonight: not on the surface, so it occupies nothing.
-        tbd.add(`${slot.id}|${date}`);
-        continue;
-      }
-      list.push([date, start, duration]);
-      occupy(start + duration);
+      retimes.set(slot.id, list);
     }
-    retimes.set(slot.id, list);
-  }
-  const notSurviving = new Set([...tbd].map((key) => key.split('|')[0]));
-  return { unlit, limitOn, retimes, tbd, notSurviving };
+    const notSurviving = new Set([...flagged].map((key) => key.split('|')[0]));
+    return { retimes, flagged, notSurviving };
+  };
+
+  return { unlit, limitOn, ...sweep(true), withoutOccupancy: sweep(false) };
 })();
+
+/** A slot's flagged dates in date order, from the independent sweep of the plan. */
+const flaggedDatesOf = (slotId) =>
+  [...independent.flagged]
+    .map((key) => key.split('|'))
+    .filter(([id]) => id === slotId)
+    .map(([, date]) => date)
+    .sort();
 
 /** The G5 coverage meta-assertion, against the independent universe. */
 function assertCoversEveryUnlitSlot(report, universe) {
@@ -1157,10 +1352,17 @@ describe('G5: survival and fixes on the season-2026 corpus', () => {
     expect(corpus().survival.meta.slotsSurviving).toBeGreaterThan(0);
   });
 
-  it('every non-survivor names its D8 truncation date and all four fix kinds, with what was not checked', () => {
+  it('every non-survivor names its first flagged date, every flagged date and all four fix kinds, with what was not checked', () => {
+    let named = 0;
     for (const row of corpus().survival.rows) {
       if (row.verdict !== PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE) continue;
-      expect(row.d8.tbdFrom).toBe(row.failingDates[0]);
+      named += 1;
+      // The dates come from the independent sweep of the plan, not from the report.
+      const expectedDates = flaggedDatesOf(row.slotId);
+      expect(expectedDates.length).toBeGreaterThan(0);
+      expect(row.flaggedDates).toEqual(expectedDates);
+      expect(row.firstFlaggedDate).toBe(expectedDates[0]);
+      expect('d8' in row).toBe(false);
       expect(row.fixes.map((f) => f.kind)).toEqual(Object.values(PRACTICE_SURVIVAL_FIX_KIND));
       for (const fix of row.fixes) expect(fix.unchecked.length).toBeGreaterThan(0);
       const earlier = row.fixes.find((f) => f.kind === PRACTICE_SURVIVAL_FIX_KIND.EARLIER_START);
@@ -1169,6 +1371,20 @@ describe('G5: survival and fixes on the season-2026 corpus', () => {
         expect(earlier.startMinutesAtMinimumDuration).toBe(tightest - MINIMUM);
         expect(earlier.startMinutesAtMinimumDuration).toBeGreaterThanOrEqual(FLOOR);
       }
+    }
+    expect(named).toBe(independent.notSurviving.size);
+  });
+
+  it('a slot that survives, or has nothing to judge, names no flagged date', () => {
+    const others = corpus().survival.rows.filter(
+      (row) => row.verdict !== PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE
+    );
+    expect(others.length).toBeGreaterThan(0);
+    for (const row of others) {
+      expect(row.flaggedDates).toEqual([]);
+      expect(row.firstFlaggedDate).toBeNull();
+      expect(row.refusals).toEqual([]);
+      expect(flaggedDatesOf(row.slotId)).toEqual([]);
     }
   });
 });
@@ -1191,6 +1407,75 @@ describe('G3/G4 on the season-2026 corpus', () => {
     for (const code of Object.values(PRACTICE_RETIME_REFUSAL)) {
       expect(meta.retimeRefusals[code]).toBeGreaterThan(0);
     }
+  });
+
+  it('a flagged practice occupies its surface: the module equals the occupying sweep and differs from the one that forgets', () => {
+    // Plant (P1): leave a flagged practice off the night. The module then equals
+    // the forgetting sweep and this goes red.
+    const phasesOf = (schedule) =>
+      new Map(
+        schedule.slotPhases.map((timeline) => [
+          timeline.slotId,
+          timeline.phases
+            .filter((p) => p.source === PRACTICE_PHASE_SOURCE.DERIVED)
+            .map((p) => [p.effectiveFrom, p.startMinutes, p.durationMinutes]),
+        ])
+      );
+    const forgetting = independent.withoutOccupancy.retimes;
+    const differing = [...independent.retimes].filter(
+      ([slotId, expected]) => JSON.stringify(forgetting.get(slotId)) !== JSON.stringify(expected)
+    );
+    // The rule is exercised on this corpus (it moves slots), or it proves nothing.
+    expect(differing.length).toBeGreaterThan(0);
+    const got = phasesOf(corpus().schedule);
+    for (const [slotId] of differing) {
+      expect(got.get(slotId)).toEqual(independent.retimes.get(slotId));
+      expect(got.get(slotId)).not.toEqual(forgetting.get(slotId));
+    }
+    // And it only ever flags MORE dates, never fewer, than forgetting does.
+    for (const key of independent.withoutOccupancy.flagged) {
+      expect(independent.flagged.has(key)).toBe(true);
+    }
+    expect(independent.flagged.size).toBeGreaterThan(independent.withoutOccupancy.flagged.size);
+  });
+
+  it('every flagged slot-date is a flag entry, none dropped and none extra, equal to the independent sweep', () => {
+    // Plant (P2): drop the entry (`flagged.push` removed from both branches).
+    // The dates are still past sunset under the schedule, but the report no
+    // longer says so, and this is the only place that notices.
+    const actual = new Set(
+      corpus().schedule.slotPhases.flatMap((timeline) =>
+        timeline.flagged.map((entry) => `${timeline.slotId}|${entry.date}`)
+      )
+    );
+    expect(actual.size).toBeGreaterThan(0);
+    expect([...actual].sort()).toEqual([...independent.flagged].sort());
+    expect(corpus().schedule.meta.slotDatesFlagged).toBe(independent.flagged.size);
+    // Each entry says what refused it, and no date is flagged twice.
+    for (const timeline of corpus().schedule.slotPhases) {
+      const dates = timeline.flagged.map((entry) => entry.date);
+      expect(new Set(dates).size).toBe(dates.length);
+      expect([...dates].sort()).toEqual(dates);
+      for (const entry of timeline.flagged) {
+        expect(entry.shiftRefused).not.toBeNull();
+        expect(entry.code).toBe(AVAILABILITY_REASON.PRACTICE_PAST_SUNSET);
+        expect(entry.reason).toMatch(/kept as scheduled and flagged$/);
+      }
+    }
+    // The refusal counters add up to the entries: one shift refusal per flagged
+    // date, plus one ladder refusal where the ladder was tried.
+    const { retimeRefusals } = corpus().schedule.meta;
+    const entries = corpus().schedule.slotPhases.flatMap((timeline) => timeline.flagged);
+    expect(entries.length).toBe(independent.flagged.size);
+    expect(entries.filter((entry) => entry.shortenRefused !== null).length).toBe(
+      retimeRefusals[PRACTICE_RETIME_REFUSAL.BELOW_MINIMUM]
+    );
+  });
+
+  it('no report on the corpus says a date is lost', () => {
+    expect(staleWordsIn(corpus().schedule)).toEqual([]);
+    expect(staleWordsIn(corpus().compression)).toEqual([]);
+    expect(staleWordsIn(corpus().survival)).toEqual([]);
   });
 
   it('W18: phases only shorten by 10k from the slot’s own length, never below 40, and never walk back', () => {
@@ -1238,7 +1523,7 @@ describe('G3/G4 on the season-2026 corpus', () => {
     expect(derived).toBeGreaterThan(0);
   });
 
-  it('hold-starts = the independent sweep of the expanded schedule = the TIME TBD set, non-empty', () => {
+  it('hold-starts = the independent sweep of the expanded schedule = the flagged set, non-empty', () => {
     const expanded = expandPracticeSlotsForSeason({
       slots: corpus().schedule.slots,
       seasonPhases: corpus().schedule.seasonPhases,
@@ -1263,8 +1548,10 @@ describe('G3/G4 on the season-2026 corpus', () => {
     );
     expect(actual.size).toBeGreaterThan(0);
     expect([...actual].sort()).toEqual([...expected].sort());
-    expect([...actual].sort()).toEqual([...independent.tbd].sort());
-    expect(corpus().schedule.meta.slotDatesHeldOut).toBe(independent.tbd.size);
+    // On the corpus no flag is an overlap alone, so every flagged date ends past
+    // sunset at the schedule's timing and the two sets are one.
+    expect([...actual].sort()).toEqual([...independent.flagged].sort());
+    expect(corpus().schedule.meta.slotDatesFlagged).toBe(independent.flagged.size);
     expect(corpus().survival.meta.slotsUnknown).toBe(0);
   });
 

@@ -72,6 +72,14 @@ Nothing is built. The line references were read on `e6e1d35`.
 7. Repair keeps refusing partly-legal candidates.
 8. G3 stays core-only until the UI PR.
 
+**Note under defaults 6 and 8, 2026-11-02 (owner: "Wire the durationPhases as recommended.", reading A: "Go with A on durationPhases").**
+Default 6's "D8's truncate-to-TIME-TBD stays for now" and the TIME TBD of default 3 and the operator answers below are superseded for
+`practice/durationPhases.js`: the Edge stopped truncating on 2026-10-27, and a sunset condition is a warning, never a refusal, so a
+date neither a shorter practice nor an earlier start can save is **flagged and kept as scheduled** (it still happens, so it holds its
+surface), not held out. Default 6's "applying needs a stored 'retimed' representation, which would be a later PR E" stands: nothing is
+applied. Default 8 is answered: G3 is called by a read-only outlook page (the next PR), through `practice/durationPhaseAdapter.js`,
+with no feature flag. The text above is left as written. Plan: `docs/changes/2026-11-02-duration-phases-wiring.md`.
+
 ## Operator answers (2026-09-29)
 
 - **Minimum practice length: 40 minutes.** Shortening stops at 40. Below it the slot shifts earlier if the floor allows; otherwise it is TIME TBD with its date.

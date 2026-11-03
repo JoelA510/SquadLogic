@@ -127,7 +127,8 @@ describe('the browser copy of the demo fence list', () => {
       const sql = readFileSync(path.join(migrationsDir, file), 'utf8');
       if (!/CREATE (OR REPLACE )?FUNCTION public\.demo_fence_player_write\(\)/.test(sql)) continue;
       const names = listIn(sql, /c_allowed constant text\[\] := ARRAY\[([^\]]*)\]/);
-      if (names) found = { file, names };
+      // A later definition without a list is not skipped: it is the newest, and the test says so.
+      found = { file, names };
     }
     return found;
   };
@@ -140,6 +141,7 @@ describe('the browser copy of the demo fence list', () => {
     ).not.toBeNull();
     // The newest definition is the one that dropped the column, not the one that created the function.
     expect(server.file >= '20261118010000').toBe(true);
+    expect(server.names, `${server.file} defines the fence with a c_allowed list`).not.toBeNull();
     const browser = listIn(
       readFileSync(path.join(repoRoot, 'frontend', 'src', 'lib', 'demo.js'), 'utf8'),
       /DEMO_EDITABLE_PLAYER_FIELDS = Object\.freeze\(\[([^\]]*)\]\)/
@@ -152,6 +154,7 @@ describe('the browser copy of the demo fence list', () => {
 
   it('names no dropped column, and every name on it is editable in a demo', () => {
     const server = newestFence();
+    expect(server.names).not.toBeNull();
     expect(server.names).not.toContain('placement_eligible');
     for (const name of server.names.filter((n) => n !== 'updated_at')) {
       expect(canEditPlayerField(true, name), name).toBe(true);

@@ -49,6 +49,7 @@ const FeaturesSetupPage = lazy(() => import('./pages/FeaturesSetupPage.jsx'));
 const PlayerRecordPage = lazy(() => import('./pages/PlayerRecordPage.jsx'));
 const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx'));
 const PracticeLightingPage = lazy(() => import('./pages/PracticeLightingPage.jsx'));
+const PracticeDaylightPage = lazy(() => import('./pages/PracticeDaylightPage.jsx'));
 const HeatForecastPage = lazy(() => import('./pages/HeatForecastPage.jsx'));
 const PermitsPage = lazy(() => import('./pages/PermitsPage.jsx'));
 const DemoStartPage = lazy(() => import('./pages/DemoStartPage.jsx'));
@@ -328,6 +329,14 @@ function AppContent() {
             element={
               <ProtectedRoute requiredPermission={PERMISSIONS.VIEW_SCHEDULE}>
                 <PracticeSchedulingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/schedule/practice-daylight"
+            element={
+              <ProtectedRoute requiredPermission={PERMISSIONS.VIEW_SCHEDULE}>
+                <PracticeDaylightPage />
               </ProtectedRoute>
             }
           />

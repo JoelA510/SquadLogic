@@ -39,7 +39,12 @@ How to add, gate, and retire an organization-level feature flag safely.
    rule that reads it (`BUDDY_RULES` in `buddyLinking.js`, `SPREAD_COACHING_LEADS_FLAG` in
    `coachingLeads.js`), with a test holding the two equal and a page test from a stored value
    for each state. Settings the domain reads today: `buddy_rule`, `teaming_spread_coaching_leads`,
-   `years_played` and `player_rating` (the balance signal).
+   `years_played` and `player_rating` (the balance signal), and `play_down` (off unless turned on, no
+   `FEATURE_DEFAULTS` entry; the Teams page reads it once and hands the placement a boolean,
+   `allowPlayDown`, so `PLAY_DOWN_FLAG` in `playUp.js` only has to equal the registry key, and a
+   census fails a placement call that leaves it out). A setting that changes where a player plays
+   must also say what it does to a roster that exists: the placement keeps a rostered player on
+   their roster (`heldSeats`) rather than let a re-run drop them.
 7. A setting the server enforces is read in SQL with `org_flag(org, key, default)`, its default
    the same as `FEATURE_DEFAULTS` (absent there is off), and the mock RPC reads the stored flags
    the same way (`update_org_feature_flags` stores them in the mock). Settings the server reads

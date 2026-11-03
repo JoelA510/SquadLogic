@@ -48,9 +48,10 @@ import { buildDivisionIndex, isEligibilityBlocked, isWaitlisted } from './playUp
  * @property {number} playingUp - play here, in a division whose band is above their age (the
  *   waitlisted included, so every request is visible)
  * @property {number} playingDown - play here, in a division whose band is below their age. Zero
- *   from the placement while nothing honours a play-down (the age rule moves such a player to their
- *   own age division); what makes it non-zero is a roster edit, which can put any player on any team
- *   (plan finding 2), or a setting that honours it (PR 3)
+ *   from the placement while the Play-down setting is off (the age rule moves such a player to their
+ *   own age division); non-zero when it is on (`PLAY_DOWN_FLAG`), when a held seat keeps a player on
+ *   a roster the rule would now move them off (`heldSeats`), or after a roster edit, which can put
+ *   any player on any team (plan finding 2)
  * @property {number} askedToPlayUp - registered here and play here, asked to play up, and there is
  *   nothing to honour: in their own division, or the age (or the band) is unknown. A request by a
  *   player the age rule moved is not counted here: they are shown as moved

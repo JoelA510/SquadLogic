@@ -62,6 +62,7 @@ import {
   buildTeamReviewSnapshot,
   firstString,
   getPlayerExternalId,
+  heldSeatsFromSnapshot,
   isUuid,
 } from '../utils/teamReviewPersistence.js';
 
@@ -606,6 +607,8 @@ function isWaitlistedRow(row) {
 
 /** No stored players are known: the read has not arrived, or it was refused. */
 const NO_DURABLE_PLAYERS = /** @type {any[]} */ ([]);
+/** No roster is saved: nobody is held on a seat. */
+const NO_HELD_SEATS = /** @type {Map<string, string>} */ (new Map());
 
 /**
  * Where each row of the file plays: THE one place the page asks core's placement
@@ -631,6 +634,10 @@ const NO_DURABLE_PLAYERS = /** @type {any[]} */ ([]);
  * @param {any[]} [params.durablePlayers] - the stored players `fetchDurablePlayers` returned
  * @param {boolean} [params.waitlist] - the Waitlist option: a waitlisted row carries
  *   `status: 'waitlist'`, which generation seats nowhere
+ * @param {boolean} [params.allowPlayDown] - the Play-down setting: a player registered in a younger
+ *   division plays there, listed (off: in their own age division)
+ * @param {Map<string, string>} [params.heldSeats] - the saved rosters' seats by stored player id
+ *   (`heldSeatsFromSnapshot`): a player on a roster that exists keeps that seat when a rule changed
  * @param {Array<Object>|null} params.divisionDescriptors - `buildDivisionDescriptors`, every
  *   division, or null before they are read
  * @param {any} params.seasonYear - the season's rule, as the page reads it
@@ -643,6 +650,8 @@ function placeImportRows({
   entries,
   durablePlayers = NO_DURABLE_PLAYERS,
   waitlist = false,
+  allowPlayDown = false,
+  heldSeats = NO_HELD_SEATS,
   divisionDescriptors,
   seasonYear,
   cutoffMode,
@@ -650,9 +659,13 @@ function placeImportRows({
   cutoffDay,
 }) {
   const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
+  // The placement keys its players by the row's id, the roster seats by the stored player's.
+  const heldByRow = new Map();
   const players = entries.map(({ row, sourceIndex }) => {
     const durable = matchDurablePlayer(row, byId, byExternalId);
     const generationRow = durable ? withDurableIdentity(row, durable) : row;
+    const held = durable ? heldSeats.get(String(durable.id)) : undefined;
+    if (held !== undefined) heldByRow.set(`row-${sourceIndex}`, held);
     return {
       ...toGeneratorPlayer(generationRow, sourceIndex, resolveDivisionId(row), { waitlist }),
       id: `row-${sourceIndex}`,
@@ -666,6 +679,8 @@ function placeImportRows({
     cutoffMode,
     cutoffMonth,
     cutoffDay,
+    allowPlayDown,
+    heldSeats: heldByRow,
   }).players;
 }
 
@@ -996,6 +1011,13 @@ export default function TeamAnalysisPage() {
   const coachingInterestEnabled = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
   const waitlistEnabled = isEnabled(FEATURE_FLAGS.WAITLIST);
   const skillTierEnabled = isEnabled(FEATURE_FLAGS.SKILL_TIER);
+  // Off unless an admin turns it on (an absent key is off): the one reader of the Play-down setting.
+  const playDownEnabled = isEnabled(FEATURE_FLAGS.PLAY_DOWN);
+  // Who is on a roster that was already saved: a re-run keeps them there when a rule changed.
+  const heldSeats = useMemo(
+    () => heldSeatsFromSnapshot(persistenceSnapshot),
+    [persistenceSnapshot]
+  );
   const [isEditMode, setIsEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
@@ -1114,6 +1136,8 @@ export default function TeamAnalysisPage() {
       entries,
       durablePlayers,
       waitlist: waitlistEnabled,
+      allowPlayDown: playDownEnabled,
+      heldSeats,
       divisionDescriptors,
       seasonYear: seasonYearSetting,
       cutoffMode: cutoffModeSetting,
@@ -1132,6 +1156,8 @@ export default function TeamAnalysisPage() {
     registeredDivisions,
     durablePlayers,
     waitlistEnabled,
+    playDownEnabled,
+    heldSeats,
     seasonYearSetting,
     cutoffModeSetting,
     cutoffMonthSetting,
@@ -1758,6 +1784,8 @@ export default function TeamAnalysisPage() {
       const placedOthers = placeImportRows({
         entries: others,
         durablePlayers: otherDurable,
+        allowPlayDown: playDownEnabled,
+        heldSeats,
         divisionDescriptors,
         seasonYear,
         cutoffMode,
@@ -1787,6 +1815,8 @@ export default function TeamAnalysisPage() {
         cutoffMode,
         cutoffMonth,
         cutoffDay,
+        allowPlayDown: playDownEnabled,
+        heldSeats,
       });
       // The pipeline places each player in the division they play in; this run seats the ones
       // who play in this program. The rest of the registrants are in the listing only.
@@ -1943,6 +1973,8 @@ export default function TeamAnalysisPage() {
     coachingInterestEnabled,
     waitlistEnabled,
     skillTierEnabled,
+    playDownEnabled,
+    heldSeats,
     configs,
     canManageTeams,
     features,

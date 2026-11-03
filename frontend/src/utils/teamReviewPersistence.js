@@ -531,3 +531,37 @@ export function buildExistingSnapshotForRerun(baseSnapshot, { divisionKey } = {}
     teamsByDivision,
   };
 }
+
+/**
+ * The seats the saved rosters hold: for every division with a saved run, each rostered player
+ * mapped to that division's key. The Teams page hands this to the placement (`heldSeats`), so a
+ * rule that changed (a cleared play-up request, the play-down setting turned on or off) does not
+ * move a player off a roster that already exists: a re-run reads such a player as one who left the
+ * division and removes them (`droppedPlayersRemoved`). Read from every division's own latest
+ * payload, not the one division being re-run, because a player held in another division must also
+ * stay out of this one. A player on two saved rosters (a stale run) keeps the first one read, in
+ * the order of the divisions' keys. Pure.
+ *
+ * @param {any} baseSnapshot - the persisted snapshot `useTeamPersistence` exposes
+ * @returns {Map<string, string>} player id to the division key of the roster they are on
+ */
+export function heldSeatsFromSnapshot(baseSnapshot) {
+  const keys = new Set(Object.keys(baseSnapshot?.payloadByDivision ?? {}));
+  for (const team of Array.isArray(baseSnapshot?.payload?.teamRows)
+    ? baseSnapshot.payload.teamRows
+    : []) {
+    keys.add(String(team?.division ?? team?.division_id ?? 'unknown'));
+  }
+  /** @type {Map<string, string>} */
+  const seats = new Map();
+  for (const divisionKey of [...keys].sort()) {
+    const existing = buildExistingSnapshotForRerun(baseSnapshot, { divisionKey });
+    for (const team of existing?.teamsByDivision?.[divisionKey] ?? []) {
+      for (const player of team.players) {
+        const id = String(player.id);
+        if (!seats.has(id)) seats.set(id, divisionKey);
+      }
+    }
+  }
+  return seats;
+}

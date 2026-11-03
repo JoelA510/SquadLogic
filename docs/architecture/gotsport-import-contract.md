@@ -443,7 +443,21 @@ decides.
   played in, whether a parent coaches (a `coach_team_requests` link of an active or
   pending-confirmation coach) and whether a buddy is in the division.
 - **Play down** (registered in a younger division): the player plays in their own age
-  division and is listed.
+  division and is listed. With the organization setting **Play-down** on (Settings,
+  Features; `play_down` in `organizations.feature_flags`, off unless an admin turns it on)
+  they play in the division they registered for instead, whatever the gap, and are listed
+  all the same: no import column asks for a play-down, so the registration is the request
+  (owner, 2026-11-03, `docs/changes/2026-11-03-play-down-default-and-flags.md`). The page
+  hands the placement a boolean (`allowPlayDown`). A play-up is unaffected: it stays by
+  request.
+- **A roster that exists is not reshuffled by a rule that changed.** A player already on a
+  reviewed, published or locked roster keeps that seat when the setting is turned on or
+  off, or a play-up request is cleared or set; a re-run would otherwise read them as having
+  left the division and remove them from the roster. The page reads the seats of the saved
+  rosters (`heldSeatsFromSnapshot`) and the placement keeps a player on the roster's division
+  when that is a seat the rule itself could give them (the division registered for, or their
+  own age division), listing them with what a new roster would do. A roster in any other
+  division (the registration changed, a move by hand) is not held.
 - **Only a player no division can hold** is not placed: none in the import covers
   their natural age with the same gender (or a co-ed division). A girl registered in
   U12 Girls never moves to U10 Boys. Listed under "Not placed" with the reason.

@@ -45,6 +45,10 @@ buddy)." Code read at `origin/main` e655449 (_statically reviewed_).
    play-up, registered in their own division" for the admin to move.
 3. **Play-down** (a division younger than natural age) is not honoured: the player is placed in
    their own division and listed, as today's flag says, but no longer held out.
+   _Note, 2026-11-03 (play-down plan, PR 3):_ this holds unless the organization setting
+   **Play-down** is on (Settings, Features; off unless an admin turns it on). Then a player
+   registered in a younger division plays in the division they registered for and is listed
+   as a play-down. See `docs/changes/2026-11-03-play-down-default-and-flags.md`.
 4. **The fixed sanction rule goes** (routes A and B, the buddy sanction #671 adjusted, the
    `play_up_blocked` hold). Eligibility blocking remains only where a division cannot hold the
    player at all (no division for their age): listed, not placed, with the reason.
@@ -80,7 +84,7 @@ revert, smoke, pgTAP, harness plant, snapshot, as usual. Production has 0 player
 1. **Unrequested play-up**: place in their own division and list it (recommended), or keep them
    in the registered division and list it.
 2. **Play-down**: place in their own division and list it (recommended), or honour it like a
-   requested play-up.
+   requested play-up. _(Still the default; an organization can now turn on honouring it, 2026-11-03.)_
 3. **Waitlist exception**: the player comes off the waitlist when the teams are saved
    (recommended), or stays waitlisted on paper while placed.
 

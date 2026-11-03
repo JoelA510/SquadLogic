@@ -8,13 +8,23 @@ const anchorId = (division, part) => `play-up-${division}-${part}`.replace(/[^A-
 function placementText(entry) {
   const registered = entry.registeredDivisionName || entry.registeredDivision || 'their division';
   const played = entry.playedDivisionName || entry.playedDivision || registered;
+  // A roster that exists is not reshuffled when a rule changes (a cleared request, the Play-down
+  // setting), so the player stays on it and the admin is told what a new roster would do.
+  if (entry.heldSeat) {
+    const rule = entry.ruleDivisionName || entry.ruleDivision || 'another division';
+    return `Stays on the roster they are on in ${played}: a team that exists is not reshuffled. A new roster would place them in ${rule}.`;
+  }
   switch (entry.kind) {
     case 'play-up':
       return entry.requested
         ? `Plays in ${played}, the older division they registered for.`
         : `Registered in ${registered} but plays in ${played} (no play-up request).`;
     case 'play-down':
-      return `Registered in ${registered} but plays in ${played}.`;
+      // With the Play-down setting on, a play-down plays in the division they registered for.
+      return String(entry.registeredDivision).toLowerCase() ===
+        String(entry.playedDivision).toLowerCase()
+        ? `Plays in ${played}, the younger division they registered for.`
+        : `Registered in ${registered} but plays in ${played}.`;
     case 'requested-own-division':
       return `Requested a play-up but is registered in ${registered}, their own division. Move them by hand if the club agrees.`;
     case 'requested-age-unknown':

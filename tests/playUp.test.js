@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { applyPlayUpEligibility, PLACEMENT } from '../packages/core/src/playUp.js';
+import { applyPlayUpEligibility, PLACEMENT, PLAY_DOWN_FLAG } from '../packages/core/src/playUp.js';
+import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 import { seatsFromPlacedPlayers, summarizeSeats } from '../packages/core/src/playUpSeats.js';
 
 const MODE = 'birth_year'; // exact ages: age = 2026 - birthYear
@@ -279,4 +280,142 @@ test('the same gender is found when it exists, and a co-ed division is accepted'
     divisions: [coedTwelve, boysTen],
   }).players[0];
   assert.equal(moved.placement, PLACEMENT.NO_DIVISION);
+});
+
+// ---------------------------------------------------------------------------------------------
+// The play-down setting (play-down plan, 2026-11-03, PR 3, task C1). Off unless an admin turns it
+// on: a player registered in a younger division then plays in the division they registered for,
+// listed as a play-down and counted as playing down. Play-up is untouched: it stays by request.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Every kind of player, with where each plays with the setting off (today's behaviour: the
+ * expectations here are the ones the tests above already pin, written out by hand) and on.
+ * [id, registered division, date of birth, extra fields, plays off, plays on, placement]
+ *
+ * @type {Array<[string, string, string | undefined, Record<string, any>, string, string, string]>}
+ */
+const SETTING_CASES = [
+  ['in', 'U10B', AGE_10, {}, 'U10B', 'U10B', PLACEMENT.IN_BAND],
+  ['upAsked', 'U10B', AGE_9, { play_up_requested: 'yes' }, 'U10B', 'U10B', PLACEMENT.PLAY_UP],
+  ['upNotAsked', 'U10B', AGE_9, {}, 'U9B', 'U9B', PLACEMENT.PLAY_UP],
+  ['down', 'U10B', AGE_11, {}, 'U12B', 'U10B', PLACEMENT.PLAY_DOWN],
+  // A play-down has no request to honour: asking changes nothing in either state.
+  ['downAsked', 'U10B', AGE_11, { play_up_requested: 'yes' }, 'U12B', 'U10B', PLACEMENT.PLAY_DOWN],
+  // Ages 13 and 16 are held by no division. Off, they are the one hold-out: blocked, listed, not
+  // placed. On, a play-down plays where it registered whatever the gap, and is flagged.
+  ['downNoOwn', 'U10B', '2013-04-01', {}, 'U10B', 'U10B', PLACEMENT.PLAY_DOWN],
+  ['tooOld', 'U10B', '2010-04-01', {}, 'U10B', 'U10B', PLACEMENT.PLAY_DOWN],
+  // Age 7 registered in U10B is a play-up nobody asked for, and no division holds 7: blocked in both.
+  ['tooYoung', 'U10B', '2019-04-01', {}, 'U10B', 'U10B', PLACEMENT.NO_DIVISION],
+  ['noAge', 'U10B', undefined, {}, 'U10B', 'U10B', PLACEMENT.UNKNOWN],
+];
+const settingPlayers = () =>
+  SETTING_CASES.map(([id, division, dob, extra]) => ({ id, division, dob, ...extra }));
+const where = (players) => Object.fromEntries(players.map((p) => [p.id, p.division]));
+
+test('the setting off, absent or false, plays everyone as today, case by case', () => {
+  const expectedOff = Object.fromEntries(SETTING_CASES.map(([id, , , , off]) => [id, off]));
+  for (const options of [{}, { allowPlayDown: false }, { allowPlayDown: undefined }]) {
+    const { players } = run(settingPlayers(), options);
+    assert.deepEqual(where(players), expectedOff, JSON.stringify(options));
+  }
+  const { players } = run(settingPlayers());
+  const placements = Object.fromEntries(players.map((p) => [p.id, p.placement]));
+  assert.equal(placements.down, PLACEMENT.PLAY_DOWN);
+  // Off, a play-down no division holds is the one hold-out: blocked, listed, not placed.
+  assert.equal(placements.downNoOwn, PLACEMENT.NO_DIVISION);
+  assert.equal(placements.tooOld, PLACEMENT.NO_DIVISION);
+});
+
+test('the setting on plays a play-down in the division registered for, and only a play-down', () => {
+  const { players } = run(settingPlayers(), { allowPlayDown: true });
+  const expectedOn = Object.fromEntries(SETTING_CASES.map(([id, , , , , on]) => [id, on]));
+  assert.deepEqual(where(players), expectedOn);
+  const byId = Object.fromEntries(players.map((p) => [p.id, p]));
+  for (const id of ['down', 'downAsked', 'downNoOwn', 'tooOld']) {
+    assert.equal(byId[id].division, 'U10B', id);
+    assert.equal(byId[id].registeredDivision, 'U10B', id);
+  }
+  assert.equal(byId.down.placement, PLACEMENT.PLAY_DOWN);
+  // A play-down no division holds is no longer blocked: it is seated, and flagged.
+  assert.equal(byId.downNoOwn.placement, PLACEMENT.PLAY_DOWN);
+  assert.equal(byId.downNoOwn.needsReview, true);
+  // The others are exactly as with the setting off.
+  const off = Object.fromEntries(run(settingPlayers()).players.map((p) => [p.id, p]));
+  for (const id of ['in', 'upAsked', 'upNotAsked', 'tooYoung', 'noAge']) {
+    assert.deepEqual(byId[id], off[id], id);
+  }
+});
+
+test('the setting on lists a play-down as played in the division registered, and counts it', () => {
+  const { players, diagnostics } = run(settingPlayers(), { allowPlayDown: true });
+  const entry = diagnostics.listing.find((e) => e.playerId === 'down');
+  assert.equal(entry.kind, 'play-down');
+  assert.equal(entry.registeredDivision, 'U10B');
+  assert.equal(entry.playedDivision, 'U10B');
+  assert.equal(entry.playedDivisionName, 'U10 Boys');
+  assert.ok(!('heldSeat' in entry));
+  assert.equal(
+    players.find((p) => p.id === 'down').reviewReason,
+    'registered in a younger division; plays there, as the play-down setting is on'
+  );
+  // Counted by the division played: four players play down in U10B (ages 11, 11, 13 and 16 against
+  // a band of 10), none is moved, and only the player no division can hold stays not eligible.
+  const { byDivision, league } = counted(players);
+  assert.equal(byDivision.get('U10B').playingDown, 4);
+  assert.equal(league.playingDown, 4);
+  assert.equal(byDivision.get('U12B').movedIn, 0);
+  assert.equal(byDivision.get('U10B').notEligible, 1);
+  // Off, the same league has no one playing down, the two players a division holds are moved to
+  // U12B, and the three no division holds are not eligible.
+  const off = counted(run(settingPlayers()).players);
+  assert.equal(off.league.playingDown, 0);
+  assert.equal(off.byDivision.get('U12B').movedIn, 2);
+  assert.equal(off.byDivision.get('U10B').notEligible, 3);
+});
+
+test('the setting on honours the registered division’s gender: a girl stays in her girls division', () => {
+  const girls = [
+    ...divisions,
+    { id: 'U10G', name: 'U10 Girls', minAge: 10, maxAge: 10, gender_policy: 'girls' },
+  ];
+  // Age 11, registered in U10 Girls; the only division holding 11 is boys: off, no suitable division.
+  const off = run([{ id: 'g', division: 'U10G', dob: AGE_11 }], { divisions: girls });
+  assert.equal(off.players[0].placement, PLACEMENT.NO_DIVISION);
+  const on = run([{ id: 'g', division: 'U10G', dob: AGE_11 }], {
+    divisions: girls,
+    allowPlayDown: true,
+  });
+  assert.equal(on.players[0].placement, PLACEMENT.PLAY_DOWN);
+  assert.equal(on.players[0].division, 'U10G');
+});
+
+test('the setting reaches the placement through the pipeline, and keeps a buddy pair together', () => {
+  const pair = [
+    { id: 'a', division: 'U10B', dob: AGE_11, buddyId: 'b' },
+    { id: 'b', division: 'U10B', dob: AGE_10, buddyId: 'a' },
+  ];
+  const input = (extra) => ({
+    players: pair,
+    divisions,
+    seasonYear: SEASON,
+    cutoffMode: MODE,
+    ...extra,
+  });
+  const off = prepareTeamingInput(input({}));
+  assert.equal(off.players.find((p) => p.id === 'a').division, 'U12B');
+  // Played apart, so the pair is told apart (as today).
+  assert.ok(off.diagnostics.buddyLinking.some((d) => d.code === 'buddy-played-apart'));
+  const on = prepareTeamingInput(input({ allowPlayDown: true }));
+  assert.equal(on.players.find((p) => p.id === 'a').division, 'U10B');
+  assert.ok(!on.diagnostics.buddyLinking.some((d) => d.code === 'buddy-played-apart'));
+  assert.equal(
+    on.diagnostics.playUp.listing.find((e) => e.playerId === 'a').playedDivision,
+    'U10B'
+  );
+});
+
+test('the setting’s key is play_down', () => {
+  assert.equal(PLAY_DOWN_FLAG, 'play_down');
 });

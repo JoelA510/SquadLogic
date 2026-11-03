@@ -166,7 +166,8 @@ owner now asks for the same treatment, "from the same place, with the same contr
   nowhere else. **Nothing writes it** (not the import allowlist, a finalizer or an RPC) **and nothing
   reads it**, so every row holds `true`. It is not a second source of truth, because nothing consults
   it; it is a field declared and never honoured. **Owner decision:** drop it (a migration), or give it
-  a meaning; this change does neither, and the advice does not read it.
+  a meaning; this change does neither, and the advice does not read it. _(Decided 2026-11-03: drop it;
+  `docs/changes/2026-11-03-drop-placement-eligible.md`.)_
 - So there is **one** source of truth for "not eligible", and the Teams page already calls it twice
   (`destinationPrograms`, and generation). None of the stop conditions in the brief holds: no schema,
   CHECK or column change; nothing in core changes, so team generation and the season fixture cannot

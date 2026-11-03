@@ -4861,8 +4861,9 @@ echo "=== dropping players.placement_eligible: refused while a player holds fals
 DP_ID=20261118010000
 DP_FILE="$(ls "$REPO"/supabase/migrations/${DP_ID}_*.sql 2>/dev/null | head -n 1)"
 DP_PREV="$(ls "$REPO"/supabase/migrations/*.sql | sort | grep -B1 "/${DP_ID}_" | head -n 1 | xargs -r basename | cut -c1-14)"
-# Every column of every planted player but the dropped one and the clock: the same figure before the refusal,
-# after it, and after the drop, so "everything else was left as it was" is a comparison and not a sentence.
+# Every column of every planted player but the dropped one: the same figure before the refusal, after it, and
+# (taken again once the false row has been set to true) after the drop, so "everything else was left as it was"
+# is a comparison and not a sentence.
 DP_FP="SELECT md5(string_agg((to_jsonb(p) - 'placement_eligible')::text, ',' ORDER BY p.id)) || ':' || count(*) FROM public.players p WHERE p.organization_id = 'dd000000-0000-4000-8000-00000000000a'"
 if [ -z "$DP_FILE" ] || [ -z "$DP_PREV" ] || [ "$DP_PREV" = "$DP_ID" ]; then
   echo "FAIL drop ${DP_ID}: could not find the migration or the one before it (${DP_FILE:-none} / ${DP_PREV:-none})"; STATUS=1

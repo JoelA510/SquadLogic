@@ -35,6 +35,7 @@
 
 import { buildDurationPhaseInput } from '@squadlogic/core/practice/durationPhaseAdapter.js';
 import {
+  PRACTICE_PHASE_SOURCE,
   PRACTICE_RETIME_KIND,
   PRACTICE_RETIME_REFUSAL,
   PRACTICE_SURVIVAL_FIX_KIND,
@@ -175,12 +176,13 @@ export function clockChangeNote(date, clockChanges, day) {
  */
 
 /**
- * The slot as it is planned (the first phase of its timeline).
+ * The slot as it is planned: its own start and length (a timeline's `plannedStartMinutes` and
+ * `plannedDurationMinutes`), never a phase's, which may already be a proposal.
  *
- * @param {{ startMinutes: number, durationMinutes: number }} phase
+ * @param {{ startMinutes: number, durationMinutes: number }} planned
  */
-export function describePlan(phase) {
-  return `As planned: ${clock(phase.startMinutes)} to ${clock(phase.startMinutes + phase.durationMinutes)} (${phase.durationMinutes} min).`;
+export function describePlan(planned) {
+  return `As planned: ${clock(planned.startMinutes)} to ${clock(planned.startMinutes + planned.durationMinutes)} (${planned.durationMinutes} min).`;
 }
 
 /**
@@ -765,7 +767,10 @@ export function buildDaylightOutlook({ rows, season }) {
     if (timeline.flagged.length !== row.flaggedDates.length) {
       throw new Error(`slot ${row.slotId}: the reports disagree on its flagged dates`);
     }
-    const retimes = timeline.phases.slice(1);
+    // The proposed changes are the phases the module DERIVED, found by their source and never by
+    // their place in the list: a retiming on the season's first date REPLACES the base phase
+    // (`supersedes` names it), so the first phase is then a proposal, not the plan.
+    const retimes = timeline.phases.filter((phase) => phase.source !== PRACTICE_PHASE_SOURCE.BASE);
     const flaggedEntries = timeline.flagged;
     let key;
     if (row.verdict === PRACTICE_SURVIVAL_VERDICT.EXEMPT) key = OUTLOOK_VERDICT.EXEMPT;
@@ -784,6 +789,8 @@ export function buildDaylightOutlook({ rows, season }) {
       overlapOnly: flaggedEntries.filter(isOverlapOnly).length,
       firstFlaggedDate: row.firstFlaggedDate,
       unknown: row.unknownDates.length,
+      // The module appends phases in date order (a later phase on a date replaces the one there),
+      // so the first proposal is the earliest.
       firstPhaseDate: retimes[0]?.effectiveFrom ?? null,
     };
     const venueName = names.venue(row.venueId);
@@ -806,7 +813,11 @@ export function buildDaylightOutlook({ rows, season }) {
       ground: names.surface(row.surfaceId),
       teams: teamNames.length > 0 ? listSome(teamNames) : 'no team assigned',
       verdict: describeVerdict(key, facts, day),
-      plan: describePlan(timeline.phases[0]),
+      // The slot's own timing, from the timeline's planned fields, never from a phase.
+      plan: describePlan({
+        startMinutes: timeline.plannedStartMinutes,
+        durationMinutes: timeline.plannedDurationMinutes,
+      }),
       phases: retimes.map((phase) => ({
         date: phase.effectiveFrom,
         text: describePhase(phase, ctx),
@@ -816,7 +827,7 @@ export function buildDaylightOutlook({ rows, season }) {
           ? null
           : {
               dates: flaggedEntries.length,
-              first: flaggedEntries[0].date,
+              first: /** @type {string} */ (row.firstFlaggedDate),
               items: flaggedEntries.map((entry) => ({
                 date: entry.date,
                 text: describeFlaggedDate(entry, ctx),

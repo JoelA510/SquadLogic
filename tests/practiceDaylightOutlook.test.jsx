@@ -394,6 +394,35 @@ describe('the empty and unusual estates', () => {
     ).toBeGreaterThan(0);
   });
 
+  it('a proposal on the first date of the season is drawn, and the plan is the slot as planned', () => {
+    // Tuesday 18:00 to 19:00, season from Tue 22 Sep: the limit that day is 18:56, so it is shortened
+    // to 50 minutes from that very date (the module replaces the base phase with the proposal).
+    const rows = estateRows();
+    renderOutlook(
+      {
+        ...rows,
+        practiceSlots: rows.practiceSlots
+          .filter((s) => s.id === ID.dark)
+          .map((s) => ({ ...s, valid_from: null, valid_until: null })),
+        practiceAssignments: [],
+        lightingOverrides: [],
+      },
+      { ...SEASON, season_start: '2026-09-22', season_end: '2026-09-28' }
+    );
+    const row = screen.getByTestId('daylight-row');
+    expect(row).toHaveAttribute('data-verdict', 'retimed');
+    expect(within(row).getByTestId('daylight-verdict')).toHaveTextContent(
+      'Retime to stay in daylight'
+    );
+    expect(row).not.toHaveTextContent('Ends by sunset all season');
+    expect(row).toHaveTextContent('As planned: 18:00 to 19:00 (60 min).');
+    expect(
+      within(row)
+        .getAllByTestId('daylight-phase')
+        .map((li) => li.textContent)
+    ).toEqual(['From Tue 22 Sep: 50 min, 18:00 to 18:50. The latest it may end is 18:56.']);
+  });
+
   it('a slot dated by the season is said so', () => {
     const rows = estateRows();
     renderOutlook({

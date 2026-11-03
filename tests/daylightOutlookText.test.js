@@ -339,6 +339,83 @@ describe('variants of the estate: the teams, a venue with no stated lighting, th
     expect(teams(ID.unknown)).toBe('no team assigned');
   });
 
+  describe('a proposal on the first date of the season', () => {
+    // A Tuesday 18:00 to 19:00 practice. On Tue 22 Sep the latest it may end is 18:56 (core's sunset
+    // helper, below), so it must be shortened to 50 minutes from that very date. The module then
+    // REPLACES the slot's base phase with the proposal, so the first phase is a proposal, and a page
+    // that reads the plan from the first phase or skips it by position hides it.
+    const only = (r) => ({
+      ...r,
+      practiceSlots: r.practiceSlots
+        .filter((slot) => slot.id === ID.dark)
+        .map((slot) => ({ ...slot, valid_from: null, valid_until: null })),
+      practiceAssignments: [],
+      lightingOverrides: [],
+    });
+    const outlookFor = (from, to) =>
+      buildDaylightOutlook({
+        rows: rowsWith(only),
+        season: { ...SEASON, season_start: from, season_end: to },
+      });
+
+    it('is arithmetic first: 18:00 + 60 minutes is past the limit on 22 Sep, 18:00 + 50 is inside it', () => {
+      const limit = sunsetEnforcementMinutes(
+        sunsetOnDate({ date: '2026-09-22', latitude: 40, longitude: -75, timeZone: ZONE })
+      );
+      expect(clock(limit)).toBe('18:56');
+      expect(18 * 60 + 60).toBeGreaterThan(limit);
+      expect(18 * 60 + 50).toBeLessThanOrEqual(limit);
+    });
+
+    it('shows the proposal from the first date, and the plan as the slot is planned', () => {
+      const [row] = outlookFor('2026-09-22', '2026-09-28').rows;
+      expect(row.plan).toBe('As planned: 18:00 to 19:00 (60 min).');
+      expect(row.phases.map((p) => [p.date, p.text])).toEqual([
+        ['2026-09-22', 'From Tue 22 Sep: 50 min, 18:00 to 18:50. The latest it may end is 18:56.'],
+      ]);
+      expect(row.verdict).toEqual({
+        key: 'retimed',
+        label: 'Retime to stay in daylight',
+        tone: 'info',
+        headline:
+          'As planned it would end past sunset from Tue 22 Sep; the changes below keep it inside ' +
+          'daylight on every date.',
+      });
+      expect(row.fixesNote).toBe('The proposed changes are enough.');
+    });
+
+    it('control: a first date that needs nothing proposes nothing, and says it ends by sunset all season', () => {
+      // Tue 15 Sep: the limit is later than 19:00, so the planned hour fits.
+      const limit = sunsetEnforcementMinutes(
+        sunsetOnDate({ date: '2026-09-15', latitude: 40, longitude: -75, timeZone: ZONE })
+      );
+      expect(18 * 60 + 60).toBeLessThanOrEqual(limit);
+      const [row] = outlookFor('2026-09-15', '2026-09-15').rows;
+      expect(row.plan).toBe('As planned: 18:00 to 19:00 (60 min).');
+      expect(row.phases).toEqual([]);
+      expect(row.verdict.label).toBe('Ends by sunset all season');
+      expect(row.verdict.headline).toBe('It ends by sunset on every date as planned.');
+    });
+
+    it('control: a proposal that starts later is the same proposal, with the same plan', () => {
+      const [row] = outlookFor('2026-09-15', '2026-09-28').rows;
+      expect(row.plan).toBe('As planned: 18:00 to 19:00 (60 min).');
+      expect(row.phases.map((p) => p.date)).toEqual(['2026-09-22']);
+      expect(row.phases[0].text).toBe(
+        'From Tue 22 Sep: 50 min, 18:00 to 18:50. The latest it may end is 18:56.'
+      );
+    });
+
+    it('a later proposal still follows the earlier one: from the first date to the next', () => {
+      const [row] = outlookFor('2026-09-22', '2026-09-29').rows;
+      expect(row.plan).toBe('As planned: 18:00 to 19:00 (60 min).');
+      expect(row.phases.map((p) => p.date)).toEqual(['2026-09-22', '2026-09-29']);
+      expect(row.phases[1].text).toBe(
+        'From Tue 29 Sep: 40 min, 18:00 to 18:40. The latest it may end is 18:45.'
+      );
+    });
+  });
+
   it('says a venue whose lighting is not stated is judged as unlit, and still counts it as unlit', () => {
     const rows = rowsWith((r) => ({
       ...r,

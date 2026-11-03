@@ -424,14 +424,25 @@ stopped saying nothing calls the module):
   left out and a partial one shows its dates. (6) A clock change on the season's first day is named (the
   events are read from the day before it). (7) The stale TIME TBD sentence in the D14 constants' doc
   (`practice/schemas.js`) now says what the module does.
+- **Found by Codex on the pushed head, fixed in the next push.** A retiming on the season's first date
+  REPLACES the slot's base phase in `slotPhases[].phases` (its `supersedes` names the base), so the first
+  phase is then a proposal. The page took the proposals as `phases.slice(1)` and the plan from
+  `phases[0]`: a Tuesday 18:00 to 19:00 practice in a season that starts on Tue 22 Sep read "Ends by sunset
+  all season", "As planned: 18:00 to 18:50" and no proposed change (executed). The proposals are now the
+  phases whose source is not `base`, and the plan is built from the timeline's own `plannedStartMinutes` and
+  `plannedDurationMinutes`. Searched for other positional readings: the first flagged date is now the survival
+  row's `firstFlaggedDate`; the first proposal's date (for "would end past sunset from") is the earliest
+  because the module appends phases in date order; nothing else reads a phase's place or treats a phase as
+  the plan.
 - **Observed in PR A's adapter, not changed here** (executed on throwaway rows; each shows as a message,
   never as a clean report): an approved lighting window on a slot whose field was not read makes the
   adapter throw `facility: unknown surface` (the reads are all-or-nothing and the foreign key holds, so
   the page does not reach it), and a `team_id` of null would become the team "null" (the column is NOT
   NULL).
-- **Plants** (the owner's cap is three): P4 (a failed read made an empty one: 22 tests red), P5 (a frontend
-  importer with no census entry: 4 red) and one of the builder's choice, the overlap sentence replaced by the
-  past-sunset one (2 red); each reverted and confirmed byte-identical.
+- **Plants** (the owner's cap is three; a fourth was allowed for the Codex fix): P4 (a failed read made an
+  empty one: 22 tests red), P5 (a frontend importer with no census entry: 4 red), the overlap sentence replaced
+  by the past-sunset one (2 red), and proposals selected by position again (3 red); each reverted and
+  confirmed byte-identical.
 
 **Reading B, sized only** (a separate plan, not these tasks): (1) a migration widening
 `practice_exceptions_kind_check` and its shape CHECK, or a phases table, with revert, smoke, harness plants

@@ -368,24 +368,151 @@ describe('the add and edit dialogs', () => {
     );
   });
 
-  it('editing a pending must says that Prefer keeps it and Must accepts it, and defaults to keeping it', async () => {
-    asRole('admin');
-    renderPage();
-    await rulesTab();
-    fireEvent.click(screen.getByRole('button', { name: /^Edit .*Wednesday$/ }));
-    const dialog = await screen.findByRole('dialog', { name: 'Edit a rule' });
-    expect(within(dialog).getByTestId('edit-pending-note')).toHaveTextContent(
-      'Saving it as Prefer keeps it as prefer; saving it as Must accepts it'
-    );
-    expect(within(dialog).getByLabelText('Level')).toHaveValue('prefer');
-    expect(within(dialog).getByText(/came from an import file/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save rule' }));
-    await waitFor(() =>
-      expect(supabase.rpc).toHaveBeenCalledWith(
+  // 20261116010000: saving a pending must no longer decides it. The editor shows "Still pending" with the level
+  // as text, offers the two decisions as buttons of their own, and acts on the saved rule only.
+  describe('editing a pending must (it stays pending; deciding is a separate act)', () => {
+    const openPending = async () => {
+      asRole('admin');
+      renderPage();
+      await rulesTab();
+      fireEvent.click(screen.getByRole('button', { name: /^Edit .*Wednesday$/ }));
+      return screen.findByRole('dialog', { name: 'Edit a rule' });
+    };
+
+    it('shows "Still pending", the level as text and Accept and Keep as buttons of their own', async () => {
+      const dialog = await openPending();
+      const note = within(dialog).getByTestId('edit-pending-note');
+      expect(note).toHaveTextContent('Still pending');
+      expect(note).toHaveTextContent('Saving your changes does not decide it');
+      // No Level control to set by accident, and nothing that says Prefer or Must decides it.
+      expect(within(dialog).queryByLabelText('Level')).not.toBeInTheDocument();
+      expect(within(dialog).getByTestId('edit-r1-level-locked')).toHaveTextContent(
+        'Prefer for now'
+      );
+      expect(within(dialog).queryByText(/keeps it as prefer; saving it as Must/)).toBeNull();
+      expect(within(dialog).getByRole('button', { name: 'Accept as must…' })).toBeEnabled();
+      expect(within(dialog).getByRole('button', { name: 'Keep as prefer' })).toBeEnabled();
+      expect(within(dialog).queryByTestId('decide-hint')).not.toBeInTheDocument();
+      expect(within(dialog).getByText(/came from an import file/)).toBeInTheDocument();
+    });
+
+    it('Save sends the level in force and says the rule is still waiting', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue(
+        /** @type {any} */ ({ data: { must_decision: 'pending' }, error: null })
+      );
+      const dialog = await openPending();
+      fireEvent.click(within(dialog).getByLabelText('Thursday'));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save rule' }));
+      await waitFor(() =>
+        expect(supabase.rpc).toHaveBeenCalledWith(
+          'admin_edit_practice_preference',
+          expect.objectContaining({
+            p_preference_id: 'r1',
+            p_level: 'prefer',
+            p_weekdays: ['WED', 'THU'],
+          })
+        )
+      );
+      expect(
+        await screen.findByText('Rule saved. It is still waiting for your decision.')
+      ).toBeTruthy();
+      // Saving decided nothing: no decision RPC was called.
+      expect(supabase.rpc).not.toHaveBeenCalledWith(
+        'admin_decide_must_preference',
+        expect.anything()
+      );
+    });
+
+    it('says what the database answered when it decided the rule anyway (a database without 20261116010000)', async () => {
+      vi.mocked(supabase.rpc).mockResolvedValue(
+        /** @type {any} */ ({ data: { must_decision: 'kept_prefer' }, error: null })
+      );
+      const dialog = await openPending();
+      fireEvent.click(within(dialog).getByLabelText('Thursday'));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save rule' }));
+      expect(
+        await screen.findByText('Rule saved. It was kept as prefer, not left pending.')
+      ).toBeTruthy();
+      expect(screen.queryByText(/still waiting for your decision/)).not.toBeInTheDocument();
+    });
+
+    it('Accept and Keep act on the saved rule, so they wait for Save while the form has changes', async () => {
+      const dialog = await openPending();
+      fireEvent.click(within(dialog).getByLabelText('Thursday'));
+      const accept = within(dialog).getByRole('button', { name: 'Accept as must…' });
+      const keep = within(dialog).getByRole('button', { name: 'Keep as prefer' });
+      expect(accept).toBeDisabled();
+      expect(keep).toBeDisabled();
+      expect(within(dialog).getByTestId('decide-hint')).toHaveTextContent(
+        'Save your changes first'
+      );
+      expect(accept).toHaveAccessibleDescription(/Save your changes first/);
+      // Putting the form back to what is saved turns them on again.
+      fireEvent.click(within(dialog).getByLabelText('Thursday'));
+      expect(accept).toBeEnabled();
+      expect(keep).toBeEnabled();
+      expect(within(dialog).queryByTestId('decide-hint')).not.toBeInTheDocument();
+      expect(supabase.rpc).not.toHaveBeenCalled();
+    });
+
+    it('Keep as prefer decides the saved rule on its own and closes the editor', async () => {
+      const dialog = await openPending();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Keep as prefer' }));
+      await waitFor(() =>
+        expect(supabase.rpc).toHaveBeenCalledWith('admin_decide_must_preference', {
+          p_preference_id: 'r1',
+          p_decision: 'keep_prefer',
+        })
+      );
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Edit a rule' })).not.toBeInTheDocument()
+      );
+      expect(supabase.rpc).not.toHaveBeenCalledWith(
         'admin_edit_practice_preference',
-        expect.objectContaining({ p_preference_id: 'r1', p_level: 'prefer' })
-      )
-    );
+        expect.anything()
+      );
+    });
+
+    it('Accept as must… hands over to the Accept dialog and its impact preview, and decides nothing yet', async () => {
+      const dialog = await openPending();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Accept as must…' }));
+      const accept = await screen.findByRole('dialog', { name: 'Accept as must' });
+      expect(screen.queryByRole('dialog', { name: 'Edit a rule' })).not.toBeInTheDocument();
+      expect(within(accept).getAllByTestId('unsatisfiable-series')).toHaveLength(1);
+      expect(supabase.rpc).not.toHaveBeenCalled();
+      fireEvent.click(within(accept).getByRole('button', { name: 'Accept as must' }));
+      await waitFor(() =>
+        expect(supabase.rpc).toHaveBeenCalledWith('admin_decide_must_preference', {
+          p_preference_id: 'r1',
+          p_decision: 'accept',
+        })
+      );
+    });
+
+    it('a must that was already decided keeps its Level control and its wording', async () => {
+      tables.coach_practice_preferences.push(
+        ruleRow({
+          id: 'r4',
+          team_id: T2,
+          weekdays: ['FRI'],
+          requested_level: 'must',
+          must_decision: 'kept_prefer',
+          created_at: '2026-09-18T10:00:00Z',
+        })
+      );
+      asRole('admin');
+      renderPage();
+      await rulesTab();
+      fireEvent.click(screen.getByRole('button', { name: /^Edit .*Friday$/ }));
+      const dialog = await screen.findByRole('dialog', { name: 'Edit a rule' });
+      expect(within(dialog).queryByText('Still pending')).not.toBeInTheDocument();
+      expect(within(dialog).queryByTestId('edit-pending-note')).not.toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Level')).toHaveValue('prefer');
+      expect(dialog).toHaveTextContent(
+        'This rule was asked for as a must (it is kept as prefer). Saving it as Prefer keeps it as prefer; saving it as Must accepts it.'
+      );
+      expect(within(dialog).queryByRole('button', { name: 'Keep as prefer' })).toBeNull();
+    });
   });
 });
 

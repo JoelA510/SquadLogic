@@ -278,10 +278,15 @@ practice and game." "The rule is hard" (D1 above, and the 2026-09-27 ruling) is 
 placeholder nobody has stated; `waivable: false`; the retype is in its `history`), and the evaluator's status for
 a past-sunset practice is `compromised`. Behaviour is unchanged: the Edge pass and the repair have kept and
 flagged such a practice since 2026-10-27, and no number moves. The rule itself (end by `floor(sunset)`, margin 0)
-is unchanged. **Game half: approved by the owner on 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds.") and
-the next PR, not changed here** (it turns `infeasible` into `feasible` and moves the season-2026 corpus results,
-which that PR rewrites from the plan). Plan: `docs/changes/2026-11-02-sunset-compromise.md`; lesson 85. The D1 row and
-the 2026-09-27 entry above are left as written.
+is unchanged. **Game half, built in the following change (lesson 88): the owner approved it on 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds.")**:
+`SUNSET_MARGIN_VIOLATED` is a compromise, the `sunset-margin` claim is `soft` (weight 1, a placeholder), a
+past-sunset kickoff is legal, placeable and counted and carries a warning, and the clean bound is the only place
+the daylight limit still stops anything. It turns `infeasible` into `feasible` and moves the season-2026 corpus
+results, which that change rewrites from the plan. Plan: `docs/changes/2026-11-02-sunset-compromise.md`; lessons 85
+and 88. The D1 row and the 2026-09-27 entry above are left as written.
+
+**D7, 2026-11-02:** "Live game path sunset: out of 8.9; stated unenforced" is unchanged: the live game scheduler
+still reads no sunset. What changed is the core's answer for a game past it: a compromise, not a block.
 
 **D8 and G3 to G5, 2026-11-02 (owner):** "Wire the durationPhases as recommended." and, of the two readings offered,
 "Go with A on durationPhases" (a read-only outlook; applying retimed lengths is not part of this). The principle of the D4 note

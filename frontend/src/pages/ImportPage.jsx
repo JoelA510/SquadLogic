@@ -1,5 +1,6 @@
 import React from 'react';
 import ImportPanel from '../components/ImportPanel.jsx';
+import PracticePreferencesPointer from '../components/preferences/PracticePreferencesPointer.jsx';
 import { useNavigate } from 'react-router-dom';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 
@@ -27,6 +28,8 @@ export default function ImportPage() {
         )}
       </div>
       <ImportPanel onImport={handleContinue} />
+      {/* Practice preferences have their own importer: this points an admin to it (it renders nothing otherwise). */}
+      <PracticePreferencesPointer />
     </div>
   );
 }

@@ -169,9 +169,11 @@ export const WAIVER_REASON = Object.freeze({
   /**
    * The waiver excepts a constraint whose record says `waivable: false`.
    *
-   * `blocking`, and the waiver is **not** applied. "No unlit game ends within
-   * 15 minutes of sunset" is not a rule anybody may sign away, and a ledger
-   * that thinks otherwise must fail loudly rather than dim the light.
+   * `blocking`, and the waiver is **not** applied. "No game sits outside its
+   * venue permit" is not a rule anybody may sign away, and a ledger that thinks
+   * otherwise must fail loudly. (The sunset margin was the other example; since
+   * the owner's decision of 2026-11-02 it is a compromise, so there is nothing to
+   * waive there, and its record stays `waivable: false`.)
    */
   WAIVER_CONSTRAINT_NOT_WAIVABLE: 'WAIVER_CONSTRAINT_NOT_WAIVABLE',
   /**

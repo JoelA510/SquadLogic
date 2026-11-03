@@ -45,6 +45,8 @@
  */
 
 import { latestLegalKickoff } from '../availability/kickoff.js';
+import { AVAILABILITY_REASON, availabilitySeverityOf } from '../availability/reasonCodes.js';
+import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
 import { applyRegistrySeverity, effectiveSeverityTable } from '../constraints/severity.js';
 import { getSurface } from '../facility/facilityGraph.js';
 import { coCoachesOf } from '../people/roster.js';
@@ -177,6 +179,31 @@ function underRegistry(context, where, findings) {
       table
     ).findings
   );
+}
+
+/**
+ * Does running past the daylight limit block a kickoff **here, under this context's registry**?
+ *
+ * `latestLegalKickoff()` reads the frozen severity table by default. A what-if that retypes the
+ * sunset margin `hard` makes the registry re-severity the sunset finding to blocking, and the
+ * claims below are built from that view, so the search has to be told or it advertises a kickoff
+ * (the permit's) that its own sunset claim calls blocking. Asked the way the claims are asked
+ * ({@link underRegistry}), so the boundary and the claims read one severity.
+ *
+ * @param {import('./types.js').AttributionContext} context
+ * @param {{ surfaceId: string, venueId: string|null, date: string, divisionLabel?: string|null }} where
+ * @returns {boolean}
+ */
+function sunsetBlocksUnderRegistry(context, where) {
+  const [judged] = underRegistry(context, where, [
+    /** @type {import('./types.js').AttributionFinding} */ ({
+      code: AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED,
+      severity: availabilitySeverityOf(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED),
+      message: '',
+      details: {},
+    }),
+  ]);
+  return judged.severity === CONSTRAINT_SEVERITY.BLOCKING;
 }
 
 /**
@@ -633,7 +660,15 @@ export function explainLatestKickoff(context, rawQuery) {
       notAfterMinutes: query.notAfterMinutes,
       ignoreBookingIds: [query.gameId],
     },
-    { existingBookings: bookingsOn(context.state, game.date, query.gameId) }
+    {
+      existingBookings: bookingsOn(context.state, game.date, query.gameId),
+      sunsetBlocks: sunsetBlocksUnderRegistry(context, {
+        surfaceId: game.surfaceId,
+        venueId: game.venueId,
+        date: game.date,
+        divisionLabel: game.divisionLabel ?? null,
+      }),
+    }
   );
   meta.boundaryQueriesRun += 1;
 

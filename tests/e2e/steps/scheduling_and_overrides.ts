@@ -138,7 +138,7 @@ const teamIdOf = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-'
  */
 async function importPlayers(
   page: Page,
-  groups: Array<{ count: number; program: string; waitlisted?: number }>
+  groups: Array<{ count: number; program: string; waitlisted?: number; tooOld?: number }>
 ) {
   await waitForMockClient(page);
   await page.evaluate(
@@ -153,14 +153,17 @@ async function importPlayers(
         if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
       }
       let next = 0;
-      const rows = groups.flatMap(({ count, program, waitlisted = 0 }) =>
+      const rows = groups.flatMap(({ count, program, waitlisted = 0, tooOld = 0 }) =>
         Array.from({ length: count }, (_, position) => {
           const index = next++;
+          // The last `tooOld` players of the group are older than any division holds: their age is
+          // the file's natural age (a row carries a birth date or an age, and a birth date wins).
+          const isTooOld = position >= count - tooOld;
           return {
             id: `pillar1-player-${index + 1}`,
             'First Name': 'Player',
             'Last Name': String(index + 1),
-            Birthdate: '2015-03-01',
+            ...(isTooOld ? { natural_age: 24 } : { Birthdate: '2015-03-01' }),
             Gender: 'm',
             division: program,
             'Skill Rating': (index % 5) + 1,
@@ -203,6 +206,13 @@ Given(
   '{int} players are imported into the {string} program and {int} of them are on the waitlist',
   async ({ page }, count: number, program: string, waitlisted: number) => {
     await importPlayers(page, [{ count, program, waitlisted }]);
+  }
+);
+
+Given(
+  '{int} players are imported into the {string} program and {int} of them are too old for every division',
+  async ({ page }, count: number, program: string, tooOld: number) => {
+    await importPlayers(page, [{ count, program, tooOld }]);
   }
 );
 
@@ -295,6 +305,21 @@ Then(
     await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
     await expect(await programCell(page, program, 'Players')).toHaveText(
       new RegExp(`^${seatable}\\s*${waitlisted} on the waitlist$`)
+    );
+  }
+);
+
+Then(
+  'the program overview shows {int} players and {int} not eligible for {string}, and recommends the fewest teams that hold them at {int} each',
+  async ({ page }, seatable: number, notEligible: number, program: string, perTeam: number) => {
+    // The expectation is the step's arithmetic, never the page's output: a player no division can
+    // hold is seated on no team, so the advice is for the others. Counting everyone registered
+    // would recommend more, and the step requires the difference to be real.
+    const expected = Math.ceil(seatable / perTeam);
+    expect(expected).toBeLessThan(Math.ceil((seatable + notEligible) / perTeam));
+    await expect(await programCell(page, program, 'Recommended')).toHaveText(String(expected));
+    await expect(await programCell(page, program, 'Players')).toHaveText(
+      new RegExp(`^${seatable}\\s*${notEligible} not eligible$`)
     );
   }
 );

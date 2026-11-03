@@ -33,7 +33,9 @@ import { describe, it, expect } from 'vitest';
 import {
   AVAILABILITY_CONSTRAINT,
   AVAILABILITY_REASON,
+  availabilitySeverityOf,
   buildAvailabilityCalendarFromSeason2026,
+  daylightLimitMinutes,
   latestLegalKickoff,
   resolveLighting,
   resolvePermitWindow,
@@ -47,6 +49,8 @@ import {
   SEASON_2026_CONSTRAINT_ID,
   buildConstraintRegistry,
   buildSeason2026ConstraintRegistry,
+  effectiveSeverityTable,
+  whatIfConstraintType,
 } from '@squadlogic/core/constraints/index.js';
 import {
   FACILITY_REASON,
@@ -79,6 +83,7 @@ import {
   TIMING_REASON,
   buildFormatTimingTableFromSeason2026,
   earliestKickoffWithWarmup,
+  formatTimingOrUnknown,
 } from '@squadlogic/core/timing/index.js';
 
 import {
@@ -531,10 +536,12 @@ describe('attribution :: "why is this game at this time and not that one?"', () 
 describe('attribution :: "why can\'t this game go later?"', () => {
   /**
    * The game with the least room against the daylight limit, found in the
-   * corpus by reading the attributions rather than chosen here.
+   * corpus by reading the attributions rather than chosen here. Since the owner's decision of
+   * 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have
+   * portable lighting or other workarounds.") the daylight limit is where a warning starts and
+   * not what binds, so it is found by its claim, not by its being the binding kind.
    */
   const sunsetBound = sweep.attributions
-    .filter((attribution) => attribution.bindingKinds.includes(AVAILABILITY_CONSTRAINT.SUNSET))
     .map((attribution) => ({
       attribution,
       claim: /** @type {Object} */ (
@@ -544,13 +551,13 @@ describe('attribution :: "why can\'t this game go later?"', () => {
     .filter((entry) => entry.claim && typeof entry.claim.slackMinutes === 'number')
     .sort((a, b) => a.claim.slackMinutes - b.claim.slackMinutes)[0];
 
-  it('answers "sunset margin, not permit close" — with both numbers', () => {
+  it('answers "the permit close, with the sunset margin as the warning line" — with both numbers', () => {
     expect(sunsetBound).toBeDefined();
     const answer = explainLatestKickoff(context, { gameId: sunsetBound.attribution.gameId });
 
     expect(answer.question).toBe(ATTRIBUTION_QUESTION.WHY_NOT_LATER);
-    expect(answer.status).toBe(ATTRIBUTION_STATUS.ALLOWED);
-    expect(answer.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
+    // The permit is what stops the game going later; sunset only warns.
+    expect(answer.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.PERMIT]);
     expect(answer.kickoffMinutes).not.toBeNull();
     expect(answer.headroomMinutes).toBeGreaterThanOrEqual(0);
 
@@ -566,8 +573,8 @@ describe('attribution :: "why can\'t this game go later?"', () => {
     expect(sunset).toBeDefined();
     expect(permit).toBeDefined();
     expect(answer.claims.indexOf(sunset)).toBeLessThan(answer.claims.indexOf(permit));
-    expect(sunset.binding).toBe(true);
-    expect(permit.binding).toBe(false);
+    expect(sunset.binding).toBe(false);
+    expect(permit.binding).toBe(true);
 
     // The instance, not the category: the sunset record for that date, the
     // margin it was reduced by, the permit record and its close minute.
@@ -580,11 +587,14 @@ describe('attribution :: "why can\'t this game go later?"', () => {
     );
     expect(permit.constraintIds).toEqual([SEASON_2026_CONSTRAINT_ID.PERMIT_WINDOW]);
     expect(permit.computed.closeMinutes).toBeGreaterThan(sunset.computed.limitMinutes);
-    expect(permit.slackMinutes).toBeGreaterThan(/** @type {number} */ (sunset.slackMinutes));
 
-    // The boundary itself is the sunset limit less the occupancy, which is the
-    // availability module's arithmetic and is only read back here.
-    expect(answer.kickoffMinutes).toBe(sunset.computed.latestKickoffMinutes);
+    // The boundary itself is the permit close less the occupancy, which is the availability
+    // module's arithmetic and is only read back here; the answer ends exactly at the close, so
+    // the permit has no room left and the sunset limit is broken by the gap between the two.
+    expect(answer.kickoffMinutes).toBe(permit.computed.latestKickoffMinutes);
+    expect(permit.slackMinutes).toBe(0);
+    expect(sunset.slackMinutes).toBe(sunset.computed.limitMinutes - permit.computed.closeMinutes);
+    expect(sunset.slackMinutes).toBeLessThan(0);
 
     // And the edges that do not bound it say why, rather than being absent.
     expect(answer.notApplicable.map((entry) => entry.kind)).toContain(
@@ -992,9 +1002,11 @@ describe('attribution :: acceptance 2 — a minimal blocking set, not the regist
     slot: over.slot,
   });
 
-  it('is over-constrained in the first place, by three separate things', () => {
+  it('is over-constrained in the first place, by two separate things, and warned about a third', () => {
     // The meta-assertion this whole block rests on. A placement blocked by one
-    // constraint would produce a "minimal set" of one and prove nothing.
+    // constraint would produce a "minimal set" of one and prove nothing. Since the owner's
+    // decision of 2026-11-02 the sunset margin is not one of the blockers: the slot still ends
+    // past it, and says so as a warning.
     const placement = checkPlacement(
       { graph, table, calendar, registry },
       over.stackedContext.state,
@@ -1002,25 +1014,30 @@ describe('attribution :: acceptance 2 — a minimal blocking set, not the regist
       over.slot
     );
     expect(placement.legal).toBe(false);
-    expect(placement.blockingCodes.length).toBeGreaterThanOrEqual(3);
+    expect(placement.blockingCodes.length).toBeGreaterThanOrEqual(2);
     expect(placement.blockingCodes).toContain(AVAILABILITY_REASON.PERMIT_CLOSE_EXCEEDED);
-    expect(placement.blockingCodes).toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
     expect(placement.blockingCodes).toContain('OCCUPIED_SAME_SURFACE');
+    expect(placement.blockingCodes).not.toContain(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+    const warned = placement.findings.filter(
+      (finding) => finding.code === AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED
+    );
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe(CONSTRAINT_SEVERITY.COMPROMISE);
   });
 
-  it('names 3 constraints out of the registry’s 14, each with its own numbers', () => {
+  it('names 2 constraints out of the registry’s 14, each with its own numbers, and not the sunset margin', () => {
     expect(result.blocked).toBe(true);
-    expect(result.constraintIds.length).toBeGreaterThanOrEqual(2);
-    expect(result.constraintIds.length).toBeLessThanOrEqual(3);
     expect(result.constraintIds).toEqual(
       [
         SEASON_2026_CONSTRAINT_ID.FIELD_SAME_GROUND_EXCLUSIVE,
         SEASON_2026_CONSTRAINT_ID.PERMIT_WINDOW,
-        SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
       ].sort()
     );
-    // "Do not dump the whole registry": the denominator is reported so three of
-    // fourteen is legible as three of fourteen.
+    // A warning is not a blocker: the sunset margin is in the placement's findings and not in
+    // the set that makes it illegal.
+    expect(result.constraintIds).not.toContain(SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN);
+    // "Do not dump the whole registry": the denominator is reported so two of
+    // fourteen is legible as two of fourteen.
     expect(result.proof.registryConstraintsHeld).toBe(registry.constraintIds.length);
     expect(result.constraintIds.length).toBeLessThan(registry.constraintIds.length);
     expect(result.ungovernedBlockingCodes).toEqual([]);
@@ -1307,7 +1324,14 @@ describe('attribution :: every blocking code in an answer is carried by a claim'
     // comparison is exact rather than approximately right.
     expect(withConsequential).toBeGreaterThan(100);
     expect(population.size).toBeGreaterThan(1);
-    for (const code of population) expect(registry.idsByReasonCode[code], code).toBeUndefined();
+    // The registry may govern a code (the sunset margin does) but must not re-severity it: the
+    // effective severity is the owner module's, so this comparison is exact.
+    const effective = effectiveSeverityTable(registry, {});
+    expect(effective.overrides.filter((override) => override.changed)).toEqual([]);
+    for (const code of population) {
+      const governed = effective.severityByCode[code];
+      if (governed !== undefined) expect(governed, code).toBe(availabilitySeverityOf(code));
+    }
     expect(orphaned).toEqual([]);
   });
 });
@@ -1548,6 +1572,73 @@ describe('attribution :: the boundary answers honour the registry too', () => {
     expect(fromBoundary.severity).toBe(fromPlacement.severity);
     expect(fromBoundary.binding).toBe(fromPlacement.binding);
     expect(fromBoundary.constraintIds).toEqual(['lining-is-hard-this-season']);
+  });
+
+  it('searches inside daylight when the registry retypes the sunset margin hard (review of #697)', () => {
+    // `explainLatestKickoff()` re-severities its claims through the context's registry, so a
+    // what-if that makes the sunset margin `hard` turned its sunset claim `blocking` while the
+    // search, reading the frozen table, still offered the permit's 18:30: an answer whose own
+    // claim called it illegal. Both ends are now asked of the registry.
+    const hardRegistry = whatIfConstraintType(
+      registry,
+      SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
+      CONSTRAINT_TYPE.HARD
+    ).projectedRegistry;
+    const hardContext = buildAttributionContext({
+      graph,
+      table,
+      calendar,
+      registry: hardRegistry,
+      schedule,
+      verification: runRuleEngine(schedule, {
+        registry: hardRegistry,
+        resources: { graph, timingTable: table, calendar, venueComplexes },
+      }),
+      venueComplexes,
+      roster,
+    });
+    // The oracle never calls the boundary search: the latest minute at which the registry's own
+    // placement check calls the slot legal, scanned from the end of the day down.
+    const latestLegalByScan = (registryUnderTest, game) => {
+      for (let minute = 24 * 60; minute >= game.startMinutes; minute -= 1) {
+        const placement = checkPlacement(
+          { graph, table, calendar, registry: registryUnderTest },
+          context.state,
+          game.id,
+          { date: game.date, surfaceId: game.surfaceId, startMinutes: minute }
+        );
+        if (placement.legal) return minute;
+      }
+      return null;
+    };
+    const gameNamed = (id) =>
+      /** @type {Object} */ (schedule.games.find((entry) => entry.id === id));
+
+    // #671: the case the review reproduced. Unretyped, 18:30; retyped, the permit's 18:30 and the
+    // daylight bound beyond the games already on the pitch are both out, so it is earlier.
+    // #2: a game with the ground to itself, where the answer is the daylight bound.
+    for (const id of ['combined_schedule.csv#671', 'combined_schedule.csv#2']) {
+      const game = gameNamed(id);
+      const control = explainLatestKickoff(context, { gameId: id });
+      const hard = explainLatestKickoff(hardContext, { gameId: id });
+      expect(control.kickoffMinutes, id).toBe(latestLegalByScan(registry, game));
+      expect(hard.kickoffMinutes, id).toBe(latestLegalByScan(hardRegistry, game));
+      expect(hard.kickoffMinutes, id).toBeLessThan(control.kickoffMinutes);
+      // The answer is legal by its own claims: nothing blocking is broken at the minute it names.
+      for (const claim of hard.claims) {
+        if (claim.severity === ATTRIBUTION_SEVERITY.BLOCKING) {
+          expect(claim.slackMinutes, `${id} ${claim.kind}`).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
+    // Where the ground is free the retyped answer is the daylight bound, bound by sunset.
+    const free = explainLatestKickoff(hardContext, { gameId: 'combined_schedule.csv#2' });
+    const freeGame = gameNamed('combined_schedule.csv#2');
+    expect(free.kickoffMinutes).toBe(
+      daylightLimitMinutes(calendar, freeGame.date) -
+        formatTimingOrUnknown(table, freeGame.format).occupancyMinutes.scheduled
+    );
+    expect(free.bindingKinds).toEqual([AVAILABILITY_CONSTRAINT.SUNSET]);
   });
 
   it('re-severities "the earliest kickoff with a full warm-up" the same way', () => {
@@ -1882,15 +1973,15 @@ describe('attribution :: a claim names the module that raised it', () => {
       slot: over.slot,
     });
     const bySource = Object.fromEntries(answer.claims.map((claim) => [claim.kind, claim.source]));
-    // The headline example of this phase: a permit close and a daylight margin
-    // are `availability/`'s findings; only the overlap is `facility/`'s.
+    // The headline example of this phase: a permit close is `availability/`'s
+    // finding; only the overlap is `facility/`'s.
     expect(bySource[AVAILABILITY_REASON.PERMIT_CLOSE_EXCEEDED]).toBe(
       ATTRIBUTION_SOURCE.AVAILABILITY
     );
-    expect(bySource[AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]).toBe(
-      ATTRIBUTION_SOURCE.AVAILABILITY
-    );
     expect(bySource[FACILITY_REASON.OCCUPIED_SAME_SURFACE]).toBe(ATTRIBUTION_SOURCE.FACILITY);
+    // A daylight margin is `availability/`'s finding too, and no longer a member of the set: it
+    // warns (owner, 2026-11-02), so it has no claim here to source.
+    expect(bySource[AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]).toBeUndefined();
   });
 
   it('holds for every finding-derived claim the corpus produces', () => {

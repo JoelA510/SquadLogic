@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import Button from '../ui/Button.jsx';
+import Badge from '../ui/Badge.jsx';
 import Modal from '../ui/Modal.jsx';
 import {
   addPracticePreference,
@@ -17,9 +18,13 @@ import RuleForm, { checkRuleForm, emptyRuleForm, formOfRow } from './RuleForm.js
  * shows). Adding picks the coach and one of the teams that coach coaches today (what the RPC
  * accepts); editing keeps the coach and the team.
  *
- * Saving a rule that was asked for as a must decides the request: Prefer keeps it as prefer, Must
- * accepts it. The dialog says so, because the RPC takes only the level and a person editing the days
- * of a pending must should not accept it by accident.
+ * **A rule still waiting for a decision stays waiting when it is saved** (20261116010000): the form
+ * shows it as "Still pending", with its level as text, and Save sends the level in force (prefer), which
+ * the database no longer reads as a decision. Deciding it is a separate act on the saved rule, with its
+ * own buttons here: Accept as must (which hands over to the Accept dialog and its impact preview) and
+ * Keep as prefer. They are off while the form holds unsaved changes, because they act on the rule as it
+ * is saved. A rule that was requested as a must and has been decided keeps its Level control: saving it
+ * at Prefer keeps it as prefer, at Must accepts it.
  */
 export default function RuleDialog({
   row = null,
@@ -34,6 +39,8 @@ export default function RuleDialog({
   teamName,
   onClose,
   onDone,
+  onAccept = null,
+  onKeepPrefer = null,
   toast,
 }) {
   const editing = row !== null;
@@ -77,14 +84,30 @@ export default function RuleDialog({
     : null;
   const wasRequestedMust = editing && row.requested_level === 'must';
   const pending = editing && row.must_decision === 'pending';
+  // The form differs from the saved rule: Accept and Keep act on the saved rule, so they wait for Save.
+  const dirty = useMemo(
+    () => pending && JSON.stringify(form) !== JSON.stringify(formOfRow(row)),
+    [pending, form, row]
+  );
 
   const save = async () => {
     if (!checked.ok) return;
     setBusy(true);
     try {
       if (editing) {
-        await editPracticePreference(row, checked.input);
-        toast('Rule saved', 'success');
+        const saved = await editPracticePreference(row, checked.input);
+        // Say what the database answered, not what was expected: against a database that has not yet
+        // applied 20261116010000 a pending rule saved at prefer comes back kept as prefer.
+        if (pending && saved?.must_decision === 'pending') {
+          toast('Rule saved. It is still waiting for your decision.', 'success');
+        } else if (pending && saved?.must_decision) {
+          toast(
+            `Rule saved. It was ${saved.must_decision === 'accepted' ? 'accepted as a must' : 'kept as prefer'}, not left pending.`,
+            'success'
+          );
+        } else {
+          toast('Rule saved', 'success');
+        }
       } else {
         await addPracticePreference({ coachId, teamId, ...checked.input });
         toast('Rule added', 'success');
@@ -96,6 +119,17 @@ export default function RuleDialog({
         err?.message || (editing ? 'The rule could not be saved' : 'The rule could not be added'),
         'warning'
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Keep as prefer is the parent's act (it toasts, refreshes and closes this dialog on success); busy
+  // covers the wait so a second click cannot send a second decision.
+  const keepAsPrefer = async () => {
+    setBusy(true);
+    try {
+      await onKeepPrefer(row);
     } finally {
       setBusy(false);
     }
@@ -185,10 +219,53 @@ export default function RuleDialog({
           (editing || coachId !== '') && (
             <>
               {pending && (
-                <p className="text-sm m-0" data-testid="edit-pending-note">
-                  This rule was asked for as a must and is waiting for your decision. Saving it as
-                  Prefer keeps it as prefer; saving it as Must accepts it.
-                </p>
+                <div
+                  className="flex flex-col gap-3 rounded-md border border-border-subtle p-3"
+                  data-testid="edit-pending-note"
+                  role="group"
+                  aria-labelledby={`${idPrefix}-pending-heading`}
+                >
+                  <p id={`${idPrefix}-pending-heading`} className="text-sm m-0">
+                    <Badge tone="warning">Still pending</Badge>{' '}
+                    <span>
+                      This rule was asked for as a must and counts as a prefer until you decide.
+                      Saving your changes does not decide it.
+                    </span>
+                  </p>
+                  {onAccept && onKeepPrefer && (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={busy || dirty}
+                          aria-describedby={dirty ? `${idPrefix}-decide-hint` : undefined}
+                          onClick={() => onAccept(row)}
+                        >
+                          Accept as must…
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy || dirty}
+                          aria-describedby={dirty ? `${idPrefix}-decide-hint` : undefined}
+                          onClick={keepAsPrefer}
+                        >
+                          Keep as prefer
+                        </Button>
+                      </div>
+                      {dirty && (
+                        <p
+                          id={`${idPrefix}-decide-hint`}
+                          className="text-xs text-text-muted m-0"
+                          data-testid="decide-hint"
+                        >
+                          Save your changes first: Accept and Keep act on the rule as it is saved.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
               {wasRequestedMust && !pending && (
                 <p className="text-sm m-0">
@@ -209,6 +286,7 @@ export default function RuleDialog({
                 onChange={setForm}
                 locations={locations}
                 disabled={busy}
+                levelLocked={pending}
               />
               {checked.ok ? (
                 <p className="text-sm m-0" data-testid="rule-summary">
@@ -252,5 +330,9 @@ RuleDialog.propTypes = {
   teamName: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
   onDone: PropTypes.func.isRequired,
+  /** Hand a pending rule to the Accept dialog (with its impact preview); with `onKeepPrefer`, shows both buttons. */
+  onAccept: PropTypes.func,
+  /** Keep a pending rule as prefer; resolves once the parent has refreshed and closed this dialog. */
+  onKeepPrefer: PropTypes.func,
   toast: PropTypes.func.isRequired,
 };

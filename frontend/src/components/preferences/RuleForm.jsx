@@ -181,8 +181,16 @@ Check.propTypes = {
  * @param {(next: RuleFormState) => void} props.onChange
  * @param {Array<{ id: string, name: string }>} props.locations
  * @param {boolean} [props.disabled]
+ * @param {boolean} [props.levelLocked] - show the level as text: a requested must still pending
  */
-export default function RuleForm({ idPrefix, form, onChange, locations, disabled = false }) {
+export default function RuleForm({
+  idPrefix,
+  form,
+  onChange,
+  locations,
+  disabled = false,
+  levelLocked = false,
+}) {
   const set = (patch) => onChange({ ...form, ...patch });
   const toggle = (list, value, on) =>
     on ? [...new Set([...list, value])] : list.filter((item) => item !== value);
@@ -190,22 +198,33 @@ export default function RuleForm({ idPrefix, form, onChange, locations, disabled
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="field">
-          <label htmlFor={`${idPrefix}-level`}>Level</label>
-          <select
-            id={`${idPrefix}-level`}
-            className="select"
-            value={form.level}
-            disabled={disabled}
-            onChange={(event) => set({ level: event.target.value })}
-          >
-            {['prefer', 'must'].map((level) => (
-              <option key={level} value={level}>
-                {LEVEL_LABEL[level]}
-              </option>
-            ))}
-          </select>
-        </div>
+        {levelLocked ? (
+          // A requested must still waiting for a decision: it is in force as prefer, and its level is
+          // changed only by deciding it (Accept as must, Keep as prefer), never by saving the form.
+          <div className="field" data-testid={`${idPrefix}-level-locked`}>
+            <span className="text-xs font-semibold text-text-secondary">Level</span>
+            <p className="text-sm m-0">
+              {LEVEL_LABEL.prefer} for now, until you decide the must that was asked for
+            </p>
+          </div>
+        ) : (
+          <div className="field">
+            <label htmlFor={`${idPrefix}-level`}>Level</label>
+            <select
+              id={`${idPrefix}-level`}
+              className="select"
+              value={form.level}
+              disabled={disabled}
+              onChange={(event) => set({ level: event.target.value })}
+            >
+              {['prefer', 'must'].map((level) => (
+                <option key={level} value={level}>
+                  {LEVEL_LABEL[level]}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="field">
           <label htmlFor={`${idPrefix}-priority`}>Coach&apos;s priority</label>
           <select
@@ -364,4 +383,5 @@ RuleForm.propTypes = {
   locations: PropTypes.arrayOf(PropTypes.shape({ id: PropTypes.string, name: PropTypes.string }))
     .isRequired,
   disabled: PropTypes.bool,
+  levelLocked: PropTypes.bool,
 };

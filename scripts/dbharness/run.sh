@@ -980,6 +980,22 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving a completed season takes no preference import"; STATUS=1
       fi
     fi
+    # **Editing a pending must leaves it pending (20261116010000; plan docs/changes/2026-11-02-preference-followups.md,
+    # item 1).** Two claims, each with a plant in prove.sh. The smoke RAISES on each; these fail if its evidence stops
+    # printing. (The refusals of the replaced body, 3 of 3, RAISE in the same smoke and print as a NOTICE above; the
+    # earlier smoke of the rules covers the same refusals at head, so they carry no plant of their own here.)
+    if [ "$id" = "20261116010000" ]; then
+      if grep -qF "pending stays pending: a requested must saved at prefer, and again with the level left out, kept must_decision pending, level prefer, requested_level must and no decided_by or decided_at while its days, priority and window were replaced; 2 of 2 edit audit rows say pending before and after; Keep as prefer then decided it" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a requested must that is still pending stays pending when it is saved at prefer: it is not decided, nobody is stamped as deciding it, and the audit says pending before and after"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an edit leaves a pending must pending"; STATUS=1
+      fi
+      if grep -qF "explicit decisions: a pending must saved at must was accepted and stamped by the admin; an accepted must saved at prefer was kept as prefer and re-stamped; a rule kept as prefer saved at prefer stayed kept; a rule nobody asked a must of has no decision at prefer and is accepted at must" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an edit still decides where the admin changed the level: a pending must saved at must is accepted, an accepted must saved at prefer is kept as prefer, and a rule kept as prefer or never asked as a must is given no new decision"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an edit that changes the level still decides"; STATUS=1
+      fi
+    fi
     # **8.6 3b PR 11d-2: enacting a blackout recommendation (plan §5, B8-B11,
     # and the Q10 retirement lock).** One claim per plant in prove.sh. The
     # smoke RAISEs on each; these fail if its evidence stops. (The FOR SHARE
@@ -1338,7 +1354,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2163,6 +2179,39 @@ for id in "${REVERT_CHECKS[@]}"; do
     fi
   fi
 
+  # **20261116010000's revert gives an edit its old meaning back**, so the check is a rule it must decide again: a
+  # requested must that is pending, in an organization with an admin, is planted, and after the revert an edit of
+  # it at prefer (as that admin) must keep it as prefer (decided) where the migration left it pending. A revert
+  # that restored nothing, or the wrong body, leaves it pending. Inserted as the table owner; every name is
+  # synthetic.
+  if [ "$id" = "20261116010000" ]; then
+    if ! psql_cmd "INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+                ('ef000000-0000-4000-8000-0000000000a0','pending-revert-admin@example.test', jsonb_build_object('password_length', 16));
+              INSERT INTO public.profiles (id, email) VALUES
+                ('ef000000-0000-4000-8000-0000000000a0','pending-revert-admin@example.test') ON CONFLICT DO NOTHING;
+              INSERT INTO public.organizations (id, name, slug) VALUES
+                ('ef000000-0000-4000-8000-00000000000a','Pending Revert Org','pending-revert');
+              INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+                ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a0','admin');
+              INSERT INTO public.season_settings (id, organization_id, name, status) VALUES
+                ('ef000000-0000-4000-8000-0000000000a1','ef000000-0000-4000-8000-00000000000a','Pending Revert Season','active');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('ef000000-0000-4000-8000-0000000000a2','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Pending Revert Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a2','Pending Revert Team');
+              INSERT INTO public.coaches (id, organization_id, season_settings_id, full_name, email, status) VALUES
+                ('ef000000-0000-4000-8000-0000000000c1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Pending Revert Coach','pending-revert-c@example.test','active');
+              INSERT INTO public.team_coach_assignments (organization_id, team_id, coach_id, role, effective_from, started_via) VALUES
+                ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-0000000000c1','lead', current_date - 30, 'harness');
+              INSERT INTO public.coach_practice_preferences
+                (id, organization_id, coach_id, team_id, weekdays, level, requested_level, must_decision, status, source) VALUES
+                ('ef000000-0000-4000-8000-0000000000d1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c1','ef000000-0000-4000-8000-0000000000b1', ARRAY['WED'], 'prefer','must','pending','in_force','import');" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the organization, admin and pending must the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   # **20261112010000's revert writes the rules back as scalar rows**, so it REFUSES (55000) while it would
   # have to guess: a rule holding more than one value in a condition, and two rules of one coach that disagree
   # on a dimension. Seeded: six rules in force (two of them pending musts, one accepted must) for two coaches
@@ -2441,6 +2490,56 @@ NEEDLES
       echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
       dump 15 $SCRATCH/harness_reapply; STATUS=1
     fi
+  fi
+
+  # **20261117010000 codifies an index production already has**, so the case that matters is not the
+  # build from scratch (the smoke) but the migration applied onto a database that holds the index, which
+  # is production. This database is built up to the migration, so the index is there. Three things are
+  # measured, each of which a smoke run afterwards cannot reach (it cannot run the migration again):
+  # applying it again succeeds and does not rebuild the index (an unchanged relfilenode: a rebuild would
+  # lock `players` for writes in production); an index of the same name that is not the GIN index (a btree
+  # here) is refused, because IF NOT EXISTS compares the name alone; and the GIN index put back afterwards
+  # is what the revert check below finds.
+  if [ "$id" = "20261117010000" ]; then
+    v_gin_mig="$REPO/supabase/migrations/20261117010000_players_custom_attributes_gin_index.sql"
+    v_gin_q="SELECT relfilenode FROM pg_class WHERE oid = 'public.players_custom_attributes_gin_idx'::regclass;"
+    v_gin_node="$(psql_cmd "$v_gin_q" 2>$SCRATCH/harness_gin_node)"
+    if [ -z "$v_gin_node" ]; then
+      echo "FAIL ${id}: the index the migration creates is not there on a database built up to it"
+      dump 5 $SCRATCH/harness_gin_node; STATUS=1; continue
+    fi
+    if ! psql_file "$v_gin_mig" >$SCRATCH/harness_gin_reapply 2>&1; then
+      echo "FAIL ${id}: re-applied onto a database that already holds the index, the migration failed"
+      dump 10 $SCRATCH/harness_gin_reapply; STATUS=1
+    else
+      v_gin_after="$(psql_cmd "$v_gin_q" 2>/dev/null)"
+      if [ "$v_gin_after" != "$v_gin_node" ]; then
+        echo "FAIL ${id}: re-applied onto a database that already holds the index, the migration rebuilt it (relfilenode ${v_gin_node} became ${v_gin_after})"
+        STATUS=1
+      else
+        echo "  migration ${id}: applied again onto a database that already holds the index it leaves it as it was (not rebuilt)"
+      fi
+    fi
+    if ! psql_cmd "DROP INDEX public.players_custom_attributes_gin_idx; CREATE INDEX players_custom_attributes_gin_idx ON public.players USING btree (custom_attributes);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the btree index of the same name the refusal check requires was never created"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$v_gin_mig" >$SCRATCH/harness_gin_refuse 2>&1; then
+      echo "FAIL ${id}: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration accepted it"
+      STATUS=1
+    elif ! grep -qF 'players_custom_attributes_gin_idx is not the GIN index on public.players (custom_attributes) that production holds: it is a btree index' $SCRATCH/harness_gin_refuse; then
+      echo "FAIL ${id}: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration failed without naming the index and the access method"
+      dump 10 $SCRATCH/harness_gin_refuse; STATUS=1
+    else
+      echo "  migration ${id}: applied onto a btree index of the same name it refuses, naming the index and the access method"
+    fi
+    if ! psql_cmd "DROP INDEX public.players_custom_attributes_gin_idx; CREATE INDEX players_custom_attributes_gin_idx ON public.players USING gin (custom_attributes);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the GIN index could not be put back after the refusal check"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    v_gin_node="$(psql_cmd "$v_gin_q" 2>/dev/null)"
   fi
 
   if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev 2>&1; then
@@ -3798,6 +3897,56 @@ PROBE
       else
         echo "FAIL revert ${id}: the demo-fall revert did not restore the season rule as at 20261114010000"
         dump 10 $SCRATCH/harness_demofall; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261116010000" ]; then
+      # What the revert must leave: the edit function as 20261112010000 created it (md5 of its body without
+      # carriage returns, its only signature, a definer with its search path and time zone pinned, executable by
+      # authenticated and not anon, the old comment), and its OLD MEANING, run as the planted admin: an edit of the
+      # planted pending must at prefer keeps it as prefer, where the migration left it pending.
+      if psql_cmd "SELECT set_config('request.jwt.claim.sub', 'ef000000-0000-4000-8000-0000000000a0', false);
+             SELECT 'EDITPENDING-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.coach_practice_preferences
+                      WHERE id = 'ef000000-0000-4000-8000-0000000000d1' AND must_decision = 'pending') <> 1 THEN 'seed-lost'
+               WHEN (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                                                    AND proname = 'admin_edit_practice_preference') <> 1 THEN 'signatures-wrong'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',')
+                       FROM pg_proc p WHERE p.oid = to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'))
+                    <> '4d909e3ea286460367c2ca7c8671f89d:true:search_path=public,TimeZone=UTC' THEN 'body-wrong'
+               WHEN NOT has_function_privilege('authenticated', to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'), 'EXECUTE')
+                 OR has_function_privilege('anon', to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'), 'EXECUTE') THEN 'grants-wrong'
+               WHEN (SELECT obj_description(to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'), 'pg_proc'))
+                    <> 'Admin-only: replace an in-force rule''s conditions, level, priority and window (the coach and team stay). Audited as practice_preference.edited with before and after. 20261112010000.' THEN 'comment-wrong'
+               WHEN public.admin_edit_practice_preference('ef000000-0000-4000-8000-0000000000d1'::uuid, 'prefer', ARRAY['THU']) ->> 'must_decision'
+                    IS DISTINCT FROM 'kept_prefer' THEN 'meaning-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_editpending 2>&1 && grep -q 'EDITPENDING-VERDICT:restored' $SCRATCH/harness_editpending; then
+        echo "  revert ${id}: the pending-edit revert restores the edit function as at 20261112010000 (its body, comment and grants) and an edit of a pending must at prefer decides it again"
+      else
+        echo "FAIL revert ${id}: the pending-edit revert did not restore the edit function or its old meaning"
+        dump 10 $SCRATCH/harness_editpending; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261117010000" ]; then
+      # A revert that changes nothing, because the index exists in production independently of the
+      # migration: it must say so, and leave the index there, the same GIN index, valid and not rebuilt
+      # (the relfilenode read after the check above put the GIN index back).
+      if ! grep -q 'this revert changes nothing: players_custom_attributes_gin_idx is present' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: the revert did not say it changes nothing and that the index is present"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'GININDEX-VERDICT:' || CASE
+               WHEN to_regclass('public.players_custom_attributes_gin_idx') IS NULL THEN 'index-dropped'
+               WHEN (SELECT relfilenode FROM pg_class WHERE oid = 'public.players_custom_attributes_gin_idx'::regclass) <> ${v_gin_node}::oid THEN 'index-rebuilt'
+               WHEN pg_get_indexdef('public.players_custom_attributes_gin_idx'::regclass)
+                    <> 'CREATE INDEX players_custom_attributes_gin_idx ON public.players USING gin (custom_attributes)' THEN 'definition-changed'
+               WHEN NOT (SELECT indisvalid AND indisready FROM pg_index WHERE indexrelid = 'public.players_custom_attributes_gin_idx'::regclass) THEN 'not-valid'
+               ELSE 'left-alone' END;" \
+         >$SCRATCH/harness_gin_verdict 2>&1 && grep -q 'GININDEX-VERDICT:left-alone' $SCRATCH/harness_gin_verdict; then
+        echo "  revert ${id}: the revert changes nothing: the GIN index on players (custom_attributes) is still there, valid, not rebuilt and as production defines it"
+      else
+        echo "FAIL revert ${id}: the revert did not leave players_custom_attributes_gin_idx as it was"
+        dump 10 $SCRATCH/harness_gin_verdict; STATUS=1
       fi
     fi
     if [ "$id" = "20261112010000" ]; then

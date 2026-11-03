@@ -322,6 +322,27 @@ test('a division is found by id or by name, in any case, as the placement finds 
   assert.deepEqual([...byDivision.keys()], ['U8', 'U10', 'U12', 'OPEN']);
 });
 
+test('two divisions whose ids differ only in case stay two, each with its own band', () => {
+  // A file that spells a division two ways registers players in both, and the page lists both.
+  const { byDivision, league } = summarizeSeats({
+    seats: [
+      seat('c1', 10, 'U10', 'U10'),
+      seat('c2', 12, 'u10', 'u10'),
+      seat('c3', 10, 'u10', 'u10'),
+    ],
+    divisions: [
+      { id: 'U10', name: 'U10', min_age: 9, max_age: 10 },
+      { id: 'u10', name: 'u10', min_age: 11, max_age: 12 },
+    ],
+  });
+  assert.equal(byDivision.size, 2);
+  assert.deepEqual(byDivision.get('U10'), counts({ seated: 1 }));
+  // u10's band here is 11 to 12: age 12 is in band, and age 10 is a play-up in the division that
+  // held it as 11 to 12, which a merged key would have read as U10's 9 to 10.
+  assert.deepEqual(byDivision.get('u10'), counts({ seated: 2, playingUp: 1 }));
+  assert.equal(league.movedIn, 0);
+});
+
 /* -------------------------------------------------------------------------- */
 /* Seats from the placement: one seat for every player, in order               */
 /* -------------------------------------------------------------------------- */

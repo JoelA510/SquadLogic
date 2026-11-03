@@ -118,7 +118,11 @@ function nonEmpty(value) {
 export function summarizeSeats({ seats, divisions = [] }) {
   if (!Array.isArray(seats)) throw new TypeError('seats must be an array');
   const index = buildDivisionIndex(divisions);
-  const entryOf = (ref) => index.byKey.get(String(ref).toLowerCase()) ?? null;
+  // A listed id wins exactly as written, so two divisions whose ids differ only in case stay two;
+  // any other reference is found by id or name, in any case, as the placement finds it.
+  const exact = new Map(index.list.map((entry) => [String(entry.id), entry]));
+  const entryOf = (ref) =>
+    exact.get(String(ref)) ?? index.byKey.get(String(ref).toLowerCase()) ?? null;
   const keyOf = (ref) => {
     const entry = entryOf(ref);
     return entry ? String(entry.id) : String(ref);

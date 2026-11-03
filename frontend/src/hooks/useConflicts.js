@@ -3,9 +3,15 @@ import { getCanonicalBuddyId } from '@squadlogic/core/buddyLinking.js';
 
 /**
  * Reactive conflict detection hook for roster assignments.
- * Scans teams and players for buddy separations, gender mismatches, and age mismatches.
- * Buddy links are read through the core canonical helper so `buddyId` and `buddy_id`
- * variants are treated identically to generation.
+ * Scans teams and players for buddy separations and gender mismatches. Buddy links are read through
+ * the core canonical helper so `buddyId` and `buddy_id` variants are treated identically to
+ * generation.
+ *
+ * A play-up or play-down is not here: it is a flag, not an error, and the check that lived here read
+ * `team.minAge`/`maxAge` and `player.playUpRequested`, which the Teams page never filled in (a team row
+ * has no age band, the `teams` table has no age column), so it could not fire in production. The roster
+ * editor's own list counts the seats on the rosters by the division's saved band instead
+ * (`rosterAgeFlags.js`, play-down plan, 2026-11-03, PR 2).
  *
  * @param {Array} teams - Array of team objects with { id, name, gender, minAge, maxAge, players[] }
  * @returns {{ conflicts: Array, hasConflicts: boolean }}
@@ -90,34 +96,6 @@ export function useConflicts(teams) {
             severity: 'error',
             p1,
           });
-        }
-      }
-
-      // --- Age Mismatch Check ---
-      // A play-up or play-down is the admin's call (the Teams page's Play-up section lists them
-      // and the app approves or refuses nothing), so a roster that has one is flagged for a
-      // second look, never as an error. A requested play-up is not a mismatch.
-      if (p1.teamId && p1.age != null) {
-        const team = teams.find((t) => t && t.id === p1.teamId);
-        if (team) {
-          const playingDown = team.maxAge != null && p1.age > team.maxAge;
-          const playingUp = team.minAge != null && p1.age < team.minAge;
-
-          if (playingDown) {
-            detected.push({
-              type: 'age',
-              message: `Play-down: ${p1.name} (Age ${p1.age}) assigned to ${team.name} (U${team.maxAge})`,
-              severity: 'warning',
-              p1,
-            });
-          } else if (playingUp && p1.playUpRequested !== true) {
-            detected.push({
-              type: 'age',
-              message: `Play-up: ${p1.name} (Age ${p1.age}) assigned to ${team.name} (min U${team.minAge}); no play-up was requested`,
-              severity: 'warning',
-              p1,
-            });
-          }
         }
       }
     });

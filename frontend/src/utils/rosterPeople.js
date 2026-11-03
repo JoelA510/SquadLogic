@@ -18,7 +18,8 @@ const hasName = (name) => !PLACEHOLDER_NAMES.has(String(name ?? '').trim());
 
 /**
  * @param {any} player
- * @param {Map<string, { name: string, rating: number | null, skillTier?: string | null }>} people
+ * @param {Map<string, { name: string, rating: number | null, skillTier?: string | null,
+ *   naturalAge?: number | null, playUpRequested?: boolean }>} people
  * @param {{ skillTier: boolean }} options
  */
 function withPlayerDetails(player, people, { skillTier }) {
@@ -43,10 +44,16 @@ function withPlayerDetails(player, people, { skillTier }) {
     next.skill = String(known.rating);
     next.skillIsRating = true;
   }
+  // What the play-up and play-down list judges the seat by: the stored natural age (null when the
+  // record has none: unknown, never 0) and whether a play-up was requested.
+  if (known.naturalAge !== undefined) next.naturalAge = known.naturalAge;
+  if (known.playUpRequested !== undefined) next.playUpRequested = known.playUpRequested;
   return next.name === player.name &&
     next.skill === player.skill &&
     next.rating === player.rating &&
-    next.skillIsRating === player.skillIsRating
+    next.skillIsRating === player.skillIsRating &&
+    next.naturalAge === player.naturalAge &&
+    next.playUpRequested === player.playUpRequested
     ? player
     : next;
 }
@@ -71,7 +78,8 @@ function withCoachNames(team, coaches) {
 
 /**
  * @param {any[]} teams
- * @param {{ players: Map<string, { name: string, rating: number | null, skillTier?: string | null }>, coaches: Map<string, string> }} directory
+ * @param {{ players: Map<string, { name: string, rating: number | null, skillTier?: string | null,
+ *   naturalAge?: number | null, playUpRequested?: boolean }>, coaches: Map<string, string> }} directory
  * @param {{ skillTier?: boolean }} [options] - `skillTier`: the Skill Tier option is on
  * @returns {any[]}
  */

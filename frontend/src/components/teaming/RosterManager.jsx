@@ -20,7 +20,9 @@ import { GripVertical, ShieldAlert, ArrowRight, ArrowRightLeft } from 'lucide-re
 import Badge from '../ui/Badge.jsx';
 import Button from '../ui/Button.jsx';
 import MovePlayerDialog from './MovePlayerDialog.jsx';
+import RosterAgeFlags from './RosterAgeFlags.jsx';
 import { useConflicts } from '../../hooks/useConflicts.js';
+import { moveFlagNote, rosterAgeFlags } from '../../utils/rosterAgeFlags.js';
 import { coachLabel } from '../../utils/teamCoaches.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import { FEATURE_FLAGS } from '../../constants/featureFlags.js';
@@ -199,7 +201,16 @@ export function TeamColumn({ team, players, onRequestMove }) {
 
 const ALL_DIVISIONS = '';
 
-export default function RosterManager({ initialTeams, onTeamsChange }) {
+/**
+ * The manual roster editor. `seasonDivisions` are the season's divisions as the page read them (each with its
+ * saved age band): with them the editor lists who is playing up or down on the rosters it shows, as
+ * they stand after every move (`rosterAgeFlags`), and says so when a move changes it. `null` while they
+ * are not loaded (the list says it has not checked); left out, the list is not shown.
+ *
+ * @param {{ initialTeams: any[], onTeamsChange?: (teams: any[]) => void,
+ *   seasonDivisions?: Array<Object> | null }} props
+ */
+export default function RosterManager({ initialTeams, onTeamsChange, seasonDivisions }) {
   const [teams, setTeams] = useState(initialTeams);
   const [syncedFrom, setSyncedFrom] = useState(initialTeams);
   const [activePlayer, setActivePlayer] = useState(null);
@@ -208,6 +219,11 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
   const [division, setDivision] = useState(ALL_DIVISIONS);
   const focusAfterMove = useRef(null);
   const { conflicts, hasConflicts } = useConflicts(teams);
+  const ageFlags = useMemo(
+    () =>
+      Array.isArray(seasonDivisions) ? rosterAgeFlags({ teams, divisions: seasonDivisions }) : null,
+    [teams, seasonDivisions]
+  );
 
   // CRITICAL FIX: Sync state when async mock data finishes loading (adjusted while rendering,
   // the pattern React documents for state that follows a prop).
@@ -277,7 +293,17 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
     setMoving(null);
     if (!player || !source || !dest) return;
     focusAfterMove.current = player.id;
-    commitTeams(movePlayerToTeam(current, player.id, destTeamId));
+    const next = movePlayerToTeam(current, player.id, destTeamId);
+    commitTeams(next);
+    // A move to a team of another division can make the player play up or down (or stop): say so.
+    const flagNote = Array.isArray(seasonDivisions)
+      ? moveFlagNote(
+          rosterAgeFlags({ teams: current, divisions: seasonDivisions }).entries,
+          rosterAgeFlags({ teams: next, divisions: seasonDivisions }).entries,
+          player.id,
+          playerNameOf(player)
+        )
+      : '';
     // A destination the division filter hides would unmount the player's row with nothing to
     // take focus (WCAG 2.4.3): show the destination's division, so the row is there to focus.
     const destDivision = dest.division ? String(dest.division) : ALL_DIVISIONS;
@@ -289,7 +315,8 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
           ? destDivision === ALL_DIVISIONS
             ? '. Showing all divisions.'
             : `. Now showing ${destDivision}.`
-          : '')
+          : '') +
+        (flagNote ? ` ${flagNote}` : '')
     );
   };
 
@@ -365,6 +392,8 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
           </ul>
         </section>
       )}
+
+      {seasonDivisions !== undefined && <RosterAgeFlags flags={ageFlags} />}
 
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {announcement}

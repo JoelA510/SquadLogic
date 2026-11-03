@@ -43,6 +43,10 @@ buddy)." Code read at `origin/main` e655449 (_statically reviewed_).
    coach-to-child link), and whether a buddy is in it. Nothing is approved or refused by the app.
    A request with no older division to play in (registered in their own) is listed as "requested
    play-up, registered in their own division" for the admin to move.
+   _Counted by seat (2026-11-03, `docs/changes/2026-11-03-play-down-default-and-flags.md`, PR 2):_
+   the Play-up section's sentence counts the division each listed player plays in, not the kind they
+   were listed as, so an unrequested play-up (who plays in their own age division) is "moved", and
+   "playing up" is a requested play-up. The Teams overview and the roster editor flag the same seats.
 3. **Play-down** (a division younger than natural age) is not honoured: the player is placed in
    their own division and listed, as today's flag says, but no longer held out.
 4. **The fixed sanction rule goes** (routes A and B, the buddy sanction #671 adjusted, the

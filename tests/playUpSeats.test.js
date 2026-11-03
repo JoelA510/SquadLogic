@@ -355,6 +355,88 @@ test('two divisions whose ids differ only in case stay two, each with its own ba
 });
 
 /* -------------------------------------------------------------------------- */
+/* The flagged seats: who is playing up, down or not checked, one entry each     */
+/* -------------------------------------------------------------------------- */
+
+test('lists every seat that is not in band, once, with the verdict the counts used', () => {
+  const { flagged, league } = summarizeSeats({ seats, divisions });
+  const byPlayer = new Map(flagged.map((entry) => [entry.playerId, entry]));
+
+  // Worked from the seats above. In band, so not flagged: d, e, f (moved), g, o, p, q, and i and j (no
+  // seat to judge). Playing up: a, b, c, h (age under the band they play in). Not checked: k and l
+  // (no age), m and n (OPEN has no band).
+  assert.deepEqual([...byPlayer.keys()].sort(), ['a', 'b', 'c', 'h', 'k', 'l', 'm', 'n']);
+  for (const id of ['a', 'b', 'c', 'h']) assert.equal(byPlayer.get(id).verdict, 'up');
+  for (const id of ['k', 'l', 'm', 'n']) assert.equal(byPlayer.get(id).verdict, 'unknown');
+
+  // Each entry says where the player plays, where they registered, and what the seat carried.
+  assert.deepEqual(byPlayer.get('a'), {
+    playerId: 'a',
+    naturalAge: 10,
+    registeredDivision: 'U12',
+    seatedDivision: 'U12',
+    verdict: 'up',
+    requested: true,
+    waitlisted: false,
+  });
+  // The waitlisted are listed (owner decision 4), and a seat with no age has a null age, not 0.
+  assert.equal(byPlayer.get('h').waitlisted, true);
+  assert.equal(byPlayer.get('k').naturalAge, null);
+  assert.equal(byPlayer.get('l').requested, true);
+
+  // The list and the counts come out of one pass, so they cannot disagree.
+  const tally = (verdict) => flagged.filter((entry) => entry.verdict === verdict).length;
+  assert.equal(tally('up'), league.playingUp);
+  assert.equal(tally('down'), league.playingDown);
+  assert.equal(tally('unknown'), league.notChecked);
+  assert.equal(flagged.length, league.playingUp + league.playingDown + league.notChecked);
+});
+
+test('a player seated below their age is flagged as playing down, whoever registered them', () => {
+  const { flagged } = summarizeSeats({
+    seats: [seat('r', 12, 'U10', 'U10'), seat('s', 12, 'U12', 'U10'), seat('t', 12, 'U12')],
+    divisions,
+  });
+  assert.deepEqual(
+    flagged.map((entry) => [entry.playerId, entry.verdict, entry.registeredDivision]),
+    [
+      ['r', 'down', 'U10'],
+      ['s', 'down', 'U12'],
+    ]
+  );
+});
+
+test('a seat with no registered division is flagged by where it plays (a player on a roster)', () => {
+  const { flagged, league } = summarizeSeats({
+    seats: [seat('roster', 10, null, 'U12'), seat('rostered', 12, null, 'U10')],
+    divisions,
+  });
+  assert.deepEqual(
+    flagged.map((entry) => [entry.playerId, entry.verdict, entry.registeredDivision]),
+    [
+      ['roster', 'up', null],
+      ['rostered', 'down', null],
+    ]
+  );
+  // Nobody registered anywhere, so nobody moved.
+  assert.equal(league.movedIn, 0);
+});
+
+test('the flagged list names the division as the caller listed it, not as the seat spelled it', () => {
+  const { flagged } = summarizeSeats({ seats: [seat('x', 10, 'u12', 'u12')], divisions });
+  assert.equal(flagged[0].seatedDivision, 'U12');
+  assert.equal(flagged[0].registeredDivision, 'U12');
+});
+
+test('a held-back or empty league flags nobody', () => {
+  assert.deepEqual(summarizeSeats({ seats: [], divisions }).flagged, []);
+  assert.deepEqual(
+    summarizeSeats({ seats: [seat('j', 15, 'U12', null), seat('p', 9, 'U10')], divisions }).flagged,
+    []
+  );
+});
+
+/* -------------------------------------------------------------------------- */
 /* Seats from the placement: one seat for every player, in order               */
 /* -------------------------------------------------------------------------- */
 

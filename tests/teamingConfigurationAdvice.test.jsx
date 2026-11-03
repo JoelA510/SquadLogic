@@ -78,6 +78,8 @@ const page = vi.hoisted(() => ({
   rows: [],
   /** @type {any[]} the saved `divisions` rows */
   divisions: [],
+  /** @type {any[]} the season's `programs` rows */
+  programs: [],
   /** @type {any[]} every `admin_upsert_division_settings` call's params */
   saves: [],
   /** @type {any[]} the stored `players` rows the page's lookups return */
@@ -143,7 +145,11 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
       const chain = createChainMock(
         table === 'divisions' && page.divisionsError
           ? { data: null, error: page.divisionsError }
-          : { data: table === 'divisions' ? page.divisions : [], error: null }
+          : {
+              data:
+                table === 'divisions' ? page.divisions : table === 'programs' ? page.programs : [],
+              error: null,
+            }
       );
       if (table === 'divisions' && page.divisionsGate) {
         // Held back until the test lets the season's divisions arrive.
@@ -919,8 +925,9 @@ describe('The advice counts the division a player plays in (play-down plan, PR 1
         /^24\s*6 registered here, placed in their own age division$/
       )
     );
+    // The two who asked to play up from their own division are their own line (PR 2).
     expect(overviewCell('U12', 'Players')).toHaveTextContent(
-      /^30\s*6 moved here from other divisions$/
+      /^30\s*6 moved here from other divisions\s*2 asked to play up, registered in their own division$/
     );
     expect(Math.ceil(24 / 12)).toBe(2);
     expect(Math.ceil(30 / 12)).toBe(3);
@@ -1082,8 +1089,17 @@ describe('The advice counts the division a player plays in (play-down plan, PR 1
     await renderPage();
     await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
     expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
-    expect(overviewCell('U12', 'Players')).toHaveTextContent(/^24$/);
-    expect(screen.queryByText(/moved here|placed in their own age division/)).toBeNull();
+    // Nobody moved, so no moved note; the 24 requests are in band, so they are their own line and not
+    // a play-up (PR 2).
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^24\s*24 asked to play up, registered in their own division$/
+    );
+    expect(overviewCell('U12', 'Play-up and play-down')).toHaveTextContent(/^None$/);
+    expect(
+      within(screen.getByRole('table', { name: 'Division Overview' })).queryByText(
+        /moved here|placed in their own age division/
+      )
+    ).toBeNull();
     expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
       /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
     );
@@ -1209,5 +1225,227 @@ describe('TeamingConfiguration practice settings', () => {
     renderPanel({ ...limits, teamCountOverride: 3, practicesPerWeek: '', practiceMinutes: null });
     expect(screen.getByLabelText('Practices per week')).toHaveValue(null);
     expect(screen.getByLabelText('Practices per week')).toHaveAttribute('aria-invalid', 'true');
+  });
+});
+
+/*
+ * Play-down plan, PR 2: every play-up and play-down is flagged and counted, by division, by program and
+ * for the league (docs/changes/2026-11-03-play-down-default-and-flags.md, section 4). The page is real,
+ * and so are the overview, the pipeline and the seat count; its data hooks and Supabase are stand-ins.
+ * Every figure is worked out below from the rows, never read back from the page.
+ *
+ *   Junior: U8 (ages 7 to 8) and U10 (9 to 10).   Senior: U12 (11 to 12).   No program: U14 (13 to 14).
+ *
+ *   U8   8 aged 7                                    in band: seated 8, nobody flagged
+ *   U10  20 aged 10                                  in band
+ *        3 aged 12 (registered younger than their    placed in U12, their own age division: moved out
+ *          age)                                       of U10; playing down is not available
+ *        1 aged 8, asked to play up                  U10's band is 9 to 10, so age 8 is a play-up
+ *   U12  20 aged 12                                  in band
+ *        2 aged 10, asked to play up                 under U12's 11 to 12: playing up
+ *        1 aged 10, did not ask                      placed in U10, their own age division: moved
+ *        1 aged 11, asked to play up                 in band: asked, with nothing to honour
+ *        1 with no age on file                       nothing to compare: not checked
+ *   U14  12 aged 13                                  in band
+ *        1 aged 11, asked to play up                 under U14's 13 to 14: playing up
+ *
+ * Seated: U8 8; U10 20 + 1 + 1 moved in from U12 = 22; U12 20 + 2 + 1 + 1 + 3 moved in from U10 = 27;
+ * U14 13. Playing up: U10 1, U12 2, U14 1. Not checked: U12 1. Asked: U12 1. Playing down: none.
+ * Junior = U8 + U10: 1 playing up, and 1 moved in from Senior (U12 -> U10 is across programs).
+ * Senior = U12: 2 playing up, 1 not checked, 1 asked, and 3 moved in from Junior.
+ * No program = U14: 1 playing up. League: 4 playing up, 0 playing down, 1 not checked, 1 asked.
+ */
+describe('The overview flags every play-up and play-down, with counts (play-down plan, PR 2)', () => {
+  const resetState = () => {
+    page.rows = [];
+    page.divisions = [];
+    page.programs = [];
+    page.saves = [];
+    page.players = [];
+    page.playersError = null;
+    page.playerReads = 0;
+    page.divisionsGate = null;
+    page.divisionsError = null;
+    page.flags = {};
+    sessionStorage.clear();
+  };
+  beforeEach(resetState);
+  afterEach(() => {
+    cleanup();
+    resetState();
+    vi.restoreAllMocks();
+  });
+
+  const JUNIOR = { id: 'program-junior', name: 'Junior', is_default: false };
+  const SENIOR = { id: 'program-senior', name: 'Senior', is_default: false };
+  const DEFAULT = { id: 'program-default', name: 'No program', is_default: true };
+  const band = (name, min_age, max_age, program) =>
+    savedDivision(name, { min_age, max_age, program_id: program?.id ?? null });
+
+  const league = () => [
+    ...importRows('U8', 8, () => ({ natural_age: 7 })),
+    ...importRows('U10', 24, (i) =>
+      i < 20
+        ? { natural_age: 10 }
+        : i < 23
+          ? { natural_age: 12 }
+          : { natural_age: 8, play_up: 'yes' }
+    ),
+    ...importRows('U12', 25, (i) =>
+      i < 20
+        ? { natural_age: 12 }
+        : i < 22
+          ? { natural_age: 10, play_up: 'yes' }
+          : i === 22
+            ? { natural_age: 10 }
+            : i === 23
+              ? { natural_age: 11, play_up: 'yes' }
+              : {}
+    ),
+    ...importRows('U14', 13, (i) =>
+      i < 12 ? { natural_age: 13 } : { natural_age: 11, play_up: 'yes' }
+    ),
+  ];
+  const withPrograms = () => {
+    page.programs = [DEFAULT, JUNIOR, SENIOR];
+    page.divisions = [
+      band('U8', 7, 8, JUNIOR),
+      band('U10', 9, 10, JUNIOR),
+      band('U12', 11, 12, SENIOR),
+      // In the season's default program, which is "in none".
+      band('U14', 13, 14, DEFAULT),
+    ];
+  };
+  const flagsOf = (name) => overviewCell(name, 'Play-up and play-down');
+  const headings = () =>
+    screen
+      .queryAllByRole('rowheader')
+      .map((th) => th.textContent)
+      .filter(Boolean);
+
+  it('counts each division by the seat, with None where nobody plays up or down', async () => {
+    withPrograms();
+    page.rows = league();
+    await renderPage();
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Players')).toHaveTextContent(/^22\s*1 moved here/)
+    );
+
+    expect(overviewCell('U8', 'Players').textContent).toBe('8');
+    expect(flagsOf('U8').textContent).toBe('None');
+
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(
+      /^22\s*1 moved here from another division\s*3 registered here, placed in their own age division$/
+    );
+    expect(flagsOf('U10').textContent).toBe('1 playing up');
+
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^27\s*3 moved here from other divisions\s*1 registered here, placed in their own age division\s*1 asked to play up, registered in their own division$/
+    );
+    expect(flagsOf('U12')).toHaveTextContent(
+      /^2 playing up\s*1 not checked \(no age, or no age band\)$/
+    );
+
+    expect(overviewCell('U14', 'Players').textContent).toBe('13');
+    expect(flagsOf('U14').textContent).toBe('1 playing up');
+
+    // Playing down is in no division: nobody is placed below their age.
+    expect(screen.queryByText(/[1-9]\d* playing down/)).toBeNull();
+  });
+
+  it('counts each program under its heading, and the league above the table', async () => {
+    withPrograms();
+    page.rows = league();
+    await renderPage();
+    await waitFor(() => expect(headings()).toHaveLength(3));
+    expect(headings()).toEqual([
+      'Junior: 1 playing up, 0 playing down (1 moved in from another program)',
+      'Senior: 2 playing up, 0 playing down, 1 not checked, 1 asked to play up from their own division (3 moved in from other programs)',
+      'No program: 1 playing up, 0 playing down',
+    ]);
+    expect(screen.getByTestId('play-flags-league').textContent).toBe(
+      'League: 4 playing up, 0 playing down, 1 not checked, 1 asked to play up from their own division.'
+    );
+  });
+
+  it('shows a league with no program of its own the league line and no heading', async () => {
+    page.divisions = [
+      band('U8', 7, 8),
+      band('U10', 9, 10),
+      band('U12', 11, 12),
+      band('U14', 13, 14),
+    ];
+    page.rows = league();
+    await renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId('play-flags-league')).toHaveTextContent('4 playing up')
+    );
+    expect(headings()).toEqual([]);
+    expect(screen.getByTestId('play-flags-league').textContent).toBe(
+      'League: 4 playing up, 0 playing down, 1 not checked, 1 asked to play up from their own division.'
+    );
+    expect(flagsOf('U12')).toHaveTextContent(/^2 playing up/);
+  });
+
+  it('says not checked, never None, until the season’s divisions have been read', async () => {
+    let release = () => {};
+    page.divisionsGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    withPrograms();
+    page.rows = league();
+    render(
+      <MemoryRouter>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    await screen.findByRole('heading', { name: 'Division Overview' });
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    // No age band is known yet, so nothing was compared: not zero, not "None", and no request is
+    // called one with nothing to honour.
+    expect(flagsOf('U12').textContent).toBe('Not checked yet');
+    expect(flagsOf('U8').textContent).toBe('Not checked yet');
+    expect(screen.getByTestId('play-flags-league').textContent).toBe('League: not checked yet.');
+    expect(screen.queryByText(/asked to play up, registered in their own division/)).toBeNull();
+
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(flagsOf('U12')).toHaveTextContent(/^2 playing up/));
+    expect(flagsOf('U8').textContent).toBe('None');
+  });
+
+  it('says not checked, never None, when the divisions cannot be read', async () => {
+    page.divisionsError = { message: 'permission denied for table divisions', code: '42501' };
+    page.rows = league();
+    await renderPage().catch(() => {});
+    await screen.findByRole('heading', { name: 'Division Overview' });
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    expect(screen.getByTestId('play-flags-league').textContent).toBe('League: not checked yet.');
+    expect(flagsOf('U10').textContent).toBe('Not checked yet');
+  });
+
+  it('flags a play-up by a stored request, as generation would read it', async () => {
+    // The file does not say who asked; the record says one U12-registered age-10 player did.
+    page.divisions = [band('U10', 9, 10), band('U12', 11, 12)];
+    page.rows = [
+      ...importRows('U10', 12, () => ({ natural_age: 10 })),
+      ...importRows('U12', 12, (i) => ({ natural_age: i === 0 ? 10 : 12 })),
+    ];
+    page.players = [
+      {
+        id: `${IDS.division}-player-1`,
+        external_registration_id: 'U12-REG-1',
+        division_id: `${IDS.division}-U12`,
+        first_name: 'Kid1',
+        last_name: 'Placeholder1',
+        natural_age: 10,
+        play_up_requested: true,
+      },
+    ];
+    await renderPage();
+    await waitFor(() => expect(flagsOf('U12')).toHaveTextContent(/^1 playing up$/));
+    expect(flagsOf('U10').textContent).toBe('None');
+    expect(overviewCell('U10', 'Players').textContent).toBe('12');
   });
 });

@@ -2269,6 +2269,8 @@ export default function TeamAnalysisPage() {
         id: teamRow.id,
         name: teamRow.name,
         division: teamRow.division || teamRow.division_id,
+        // The division row the team is in: what the roster list judges its players' ages by.
+        divisionId: teamRow.division_id,
         minAge: teamRow.min_age,
         maxAge: teamRow.max_age,
         gender: teamRow.gender,
@@ -2288,6 +2290,7 @@ export default function TeamAnalysisPage() {
 
     return activeTeamData.teams.map((t) => ({
       ...t,
+      divisionId: t.division_id,
       players: teamPlayers
         .filter((tp) => tp.team_id === t.id)
         .map((tp) => {
@@ -2565,7 +2568,11 @@ export default function TeamAnalysisPage() {
                     {`${unnamedRosterPlayers} roster ${unnamedRosterPlayers === 1 ? 'entry has' : 'entries have'} no matching player record, so ${unnamedRosterPlayers === 1 ? 'it is' : 'they are'} shown as Unknown Player.`}
                   </p>
                 )}
-                <RosterManager initialTeams={rosterTeams} onTeamsChange={handleRosterTeamsChange} />
+                <RosterManager
+                  initialTeams={rosterTeams}
+                  onTeamsChange={handleRosterTeamsChange}
+                  seasonDivisions={divisionsRead ? divisionRows : null}
+                />
               </>
             )}
           </div>

@@ -80,12 +80,18 @@ describe('useRosterDirectory', () => {
       name: 'First1259 Last1259',
       rating: null,
       skillTier: 'advanced',
+      // The rows here carry no age or request (the columns the play-up list reads, PR 2): unknown, and
+      // no request, rather than 0 and a guess.
+      naturalAge: null,
+      playUpRequested: false,
     });
     // Most players have no stored tier: none, not a blank or a guess.
     expect(result.current.players.get('p00000')).toEqual({
       name: 'First1 Last1',
       rating: null,
       skillTier: null,
+      naturalAge: null,
+      playUpRequested: false,
     });
     // A coach with no name is not in the map (the page counts them, never prints an id).
     expect([...result.current.coaches]).toEqual([['c1', 'Coach One']]);

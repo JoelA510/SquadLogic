@@ -294,6 +294,13 @@ test('the subject set is the seats given: none is dropped, and a repeated player
   const { league } = summarizeSeats({ seats, divisions });
   // A division count that skips the held-back players (waitlisted, not eligible) would not sum to 17.
   assert.equal(league.seated + league.waitlisted + league.notEligible, 17);
+  // A seat with no player to count it for is refused too, however it is missing.
+  for (const bad of [null, {}, { playerId: '' }]) {
+    assert.throws(
+      () => summarizeSeats({ seats: /** @type {any} */ ([bad]), divisions }),
+      /every seat needs a playerId/
+    );
+  }
   assert.throws(
     () => summarizeSeats({ seats: [seat('dup', 10, 'U10'), seat('dup', 10, 'U10')], divisions }),
     /more than one seat.*dup/

@@ -17,10 +17,12 @@
  *    `resolve/applyChangeRequest()` that strands a game on the corpus's own
  *    permit blackout, with a positive control proving the accounting catches a
  *    dropped fixture.
- * 3. **The capacity report reproduces the ReserveCapacity figures**: 14-18 slots
- *    per week against a 10-game cap, conditional slots counted separately from
- *    unconditional ones, and sunset identified as what trims the two November
- *    dates to the bare minimum.
+ * 3. **The capacity report reproduces the ReserveCapacity figures, as the permits
+ *    derive them**: slots per week against a 10-game cap, conditional slots counted
+ *    separately from unconditional ones, and the permit as what caps every date.
+ *    (Before the owner's decision of 2026-11-02 the report was 14-18 slots a week
+ *    and sunset trimmed the two November dates to the bare minimum; sunset now only
+ *    warns, so it trims nothing.)
  *
  * Where a scenario had to be built rather than found, the test says so in the
  * word "constructed" and says what the corpus supplied.
@@ -28,7 +30,10 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { buildAvailabilityCalendarFromSeason2026 } from '@squadlogic/core/availability/index.js';
+import {
+  buildAvailabilityCalendarFromSeason2026,
+  daylightLimitMinutes,
+} from '@squadlogic/core/availability/index.js';
 import {
   SEASON_2026_CONSTRAINT_ID,
   buildSeason2026ConstraintRegistry,
@@ -59,9 +64,14 @@ import {
   season2026ExternalFixtureChanges,
 } from '@squadlogic/core/resolve/index.js';
 import { toSeason2026Schedule } from '@squadlogic/core/ruleEngine/index.js';
-import { buildFormatTimingTableFromSeason2026 } from '@squadlogic/core/timing/index.js';
+import {
+  buildFormatTimingTableFromSeason2026,
+  requireFormatTiming,
+} from '@squadlogic/core/timing/index.js';
 
 import { SCHEDULE_EXPORT_HEADERS } from '@squadlogic/core/outputGeneration.js';
+
+import { expectedReserveKickoffs, expectedSunsetWarnedKickoffs } from './helpers/reserveOracle.js';
 
 import {
   CONDITION_VERDICT,
@@ -139,6 +149,42 @@ const teamUniverse = season.teams.map((team) => String(team.id));
 const slots = season2026ReservedSlots(season.combinedGames, { graph, teamUniverse });
 const capacityInput = season2026ReserveCapacityInput(season, { graph, table });
 const report = buildReserveCapacityReport({ graph, table, calendar, registry }, capacityInput);
+
+/**
+ * What the plan says each surface holds on each date, derived from the permit rows and the
+ * format's timing alone (`helpers/reserveOracle.js`), never from `report`. Owner, 2026-11-02:
+ * "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting
+ * or other workarounds." So sunset trims no slot; the permit does.
+ */
+const RESERVE_OCCUPANCY = requireFormatTiming(table, capacityInput.format).occupancyMinutes
+  .scheduled;
+const expectedKickoffs = (date, surfaceId, overrides = {}) =>
+  expectedReserveKickoffs({
+    graph,
+    calendar,
+    surfaceId,
+    date,
+    occupancyMinutes: RESERVE_OCCUPANCY,
+    earliestKickoffMinutes: capacityInput.earliestKickoffMinutes,
+    cadenceMinutes: capacityInput.cadenceMinutes,
+    ...overrides,
+  });
+const expectedWarnedKickoffs = (date, surfaceId, overrides = {}) =>
+  expectedSunsetWarnedKickoffs({
+    graph,
+    calendar,
+    surfaceId,
+    date,
+    occupancyMinutes: RESERVE_OCCUPANCY,
+    earliestKickoffMinutes: capacityInput.earliestKickoffMinutes,
+    cadenceMinutes: capacityInput.cadenceMinutes,
+    ...overrides,
+  });
+const expectedSlotsOn = (date) =>
+  capacityInput.surfaceIds.reduce(
+    (sum, surfaceId) => sum + expectedKickoffs(date, surfaceId).length,
+    0
+  );
 
 const selectTeamIds = season2026SelectTeamIds(season.teams);
 const unnamed = slots.filter((slot) => slot.kind === RESERVE_KIND.UNNAMED_FIXTURE);
@@ -921,12 +967,23 @@ describe('acceptance 3 :: the reserve capacity report', () => {
     ).toBe(true);
   });
 
-  it('reproduces 14-18 slots per week against a 10-game cap', () => {
-    expect(report.minSlots).toBe(14);
-    expect(report.maxSlots).toBe(18);
+  it('holds as many slots a week as the permits allow, against a 10-game cap', () => {
+    // Every figure is derived from the permit rows and the format's timing
+    // (`helpers/reserveOracle.js`), not from the report: since the owner's decision of 2026-11-02
+    // sunset only warns, so the permit is all that stops a day's slots.
+    const expectedByDate = capacityInput.dates.map((date) => expectedSlotsOn(date));
+    expect(report.minSlots).toBe(Math.min(...expectedByDate));
+    expect(report.maxSlots).toBe(Math.max(...expectedByDate));
+    // Meta-assertion: the oracle saw a real week (the requirement is met with room to spare, and
+    // the dates differ), so agreeing with it is not agreeing about nothing.
+    expect(report.maxSlots).toBeGreaterThan(report.minSlots);
+    expect(report.minSlots).toBeGreaterThanOrEqual(
+      season2026CapacityRequirement(season.teams).slots
+    );
     expect(report.dates).toHaveLength(10);
 
     for (const dateRow of report.dates) {
+      expect(dateRow.slots, dateRow.date).toBe(expectedSlotsOn(dateRow.date));
       // The cap is what limits the *reserved* number, not the facility.
       expect(dateRow.reserved).toBe(SEASON_2026_LEAGUE_CAP_PER_DATE);
       expect(dateRow.atCap).toBe(true);
@@ -940,6 +997,33 @@ describe('acceptance 3 :: the reserve capacity report', () => {
       expect(dateRow.meetsRequirement).toBe(true);
       expect(dateRow.slots).toBe(dateRow.unconditionalSlots + dateRow.conditionalSlots);
     }
+
+    // The slots that end past the daylight limit are counted AND kept: a caller can tell daylight
+    // capacity from capacity that needs a lighting workaround (review of #697). Derived from the
+    // sunset rows, surface by surface.
+    let warnedTotal = 0;
+    for (const dateRow of report.dates) {
+      let warnedHere = 0;
+      for (const row of dateRow.bySurface) {
+        const expected = expectedWarnedKickoffs(dateRow.date, row.surfaceId);
+        expect(row.sunsetWarnedKickoffMinutes, `${dateRow.date} ${row.surfaceId}`).toEqual(
+          expected
+        );
+        expect(row.sunsetWarnedSlots).toBe(expected.length);
+        // A warned slot is one of the slots, never an extra one.
+        for (const kickoff of row.sunsetWarnedKickoffMinutes) {
+          expect(row.kickoffMinutes).toContain(kickoff);
+        }
+        warnedHere += expected.length;
+      }
+      expect(dateRow.sunsetWarnedSlots, dateRow.date).toBe(warnedHere);
+      warnedTotal += warnedHere;
+    }
+    expect(report.sunsetWarnedSlots).toBe(warnedTotal);
+    // Meta-assertion: some capacity is daylight and some is not, so neither count is vacuous.
+    const allSlots = report.dates.reduce((sum, dateRow) => sum + dateRow.slots, 0);
+    expect(warnedTotal).toBeGreaterThan(0);
+    expect(warnedTotal).toBeLessThan(allSlots);
 
     // The requirement is derived from the roster, not typed in.
     expect(report.requirement.slots).toBe(selectTeamIds.length);
@@ -971,21 +1055,65 @@ describe('acceptance 3 :: the reserve capacity report', () => {
 
     // The two columns really do differ: on the dates the rec layer occupies
     // Alder Pitch 1, conditional ground is worth less than it looks, and the
-    // report says so rather than counting it as free.
+    // report says so rather than counting it as free. The verdicts are derived
+    // here from the games themselves: a slot on Pitch 2 depends on Pitch 1 and its halves, a
+    // slot on Pitch 3 on Pitch 4 and its halves (the geometry's overlap pairs), and is blocked by a
+    // published game there whose clock overlaps it, undecidable if that game has no footprint.
+    const DEPENDS_ON = {
+      [pitch2]: ['Pitch 1', 'Pitch 1A', 'Pitch 1B'],
+      [pitch3]: ['Pitch 4', 'Pitch 4A', 'Pitch 4B'],
+    };
+    const verdictsOn = (date) => {
+      const tally = { satisfied: 0, blocked: 0, undecidable: 0, unconditional: 0 };
+      for (const surfaceId of capacityInput.surfaceIds) {
+        const kickoffs = expectedKickoffs(date, surfaceId);
+        if (!DEPENDS_ON[surfaceId]) {
+          tally.unconditional += kickoffs.length;
+          continue;
+        }
+        const standing = season.combinedGames.filter(
+          (row) =>
+            row.date === date &&
+            row.venue === 'Alder Park' &&
+            DEPENDS_ON[surfaceId].includes(row.field)
+        );
+        for (const kickoff of kickoffs) {
+          const end = kickoff + RESERVE_OCCUPANCY;
+          const overlaps = standing.map((row) =>
+            row.endMinutes === null ? null : kickoff < row.endMinutes && row.kickoffMinutes < end
+          );
+          if (overlaps.includes(true)) tally.blocked += 1;
+          else if (overlaps.includes(null)) tally.undecidable += 1;
+          else tally.satisfied += 1;
+        }
+      }
+      return tally;
+    };
+    for (const dateRow of report.dates) {
+      const expected = verdictsOn(dateRow.date);
+      expect(dateRow.unconditionalSlots, dateRow.date).toBe(expected.unconditional);
+      expect(dateRow.conditionSatisfied, dateRow.date).toBe(expected.satisfied);
+      expect(dateRow.conditionBlocked, dateRow.date).toBe(expected.blocked);
+      expect(dateRow.conditionUndecidable, dateRow.date).toBe(expected.undecidable);
+    }
     const shortfalls = report.dates.filter((dateRow) => dateRow.available < dateRow.slots);
     expect(shortfalls.length).toBeGreaterThan(0);
     for (const dateRow of shortfalls) {
       expect(dateRow.conditionBlocked).toBeGreaterThan(0);
     }
-    // Five dates clear the requirement on the slot count and fail it once the
-    // conditions are evaluated. They are exactly the rec Saturdays on which the
-    // 9v9 layer stands on Alder Pitch 1 — 10/10 has no rec games at all and is
-    // the control that shows the shortfall is caused by the rec layer rather
+    // The dates that clear the requirement on the slot count and fail it once the conditions are
+    // evaluated are exactly those where the derived available count falls short. 10/10 has no rec
+    // games at all and is the control that shows a shortfall is caused by the rec layer rather
     // than by the model.
+    const expectedFailing = capacityInput.dates.filter((date) => {
+      const tally = verdictsOn(date);
+      return tally.unconditional + tally.satisfied < report.requirement.slots;
+    });
     const failing = report.dates
       .filter((dateRow) => !dateRow.availableMeetsRequirement)
       .map((dateRow) => dateRow.date);
-    expect(failing).toEqual(['2026-09-19', '2026-09-26', '2026-10-03', '2026-10-17', '2026-10-31']);
+    expect(failing).toEqual(expectedFailing);
+    expect(failing).not.toContain('2026-10-10');
     const noRecGames = /** @type {Object} */ (
       report.dates.find((dateRow) => dateRow.date === '2026-10-10')
     );
@@ -1004,60 +1132,139 @@ describe('acceptance 3 :: the reserve capacity report', () => {
     ).toHaveLength(failing.length);
   });
 
-  it('identifies sunset as what trims the two November dates to the bare minimum', () => {
-    // The bare-minimum dates are found, not named: they are the dates whose slot
-    // count equals the requirement exactly.
-    expect(report.bareMinimumDates).toEqual(['2026-11-07', '2026-11-14']);
-    for (const date of report.bareMinimumDates) {
-      const dateRow = /** @type {Object} */ (report.dates.find((row) => row.date === date));
-      expect(dateRow.slots).toBe(report.requirement.slots);
-      expect(dateRow.spare).toBe(report.requirement.slots - SEASON_2026_LEAGUE_CAP_PER_DATE);
-
-      const sunset = dateRow.cappedBy.find((entry) => entry.kind === 'sunset');
-      expect(sunset).toBeTruthy();
-      // Three surfaces lost one slot each to daylight; adding them back would
-      // put the date at 17 and clear of the requirement, which is precisely
-      // what "trims it to the bare minimum" means.
-      expect(/** @type {Object} */ (sunset).slotsLostVsBest).toBe(3);
-      expect(dateRow.slots + /** @type {Object} */ (sunset).slotsLostVsBest).toBeGreaterThan(
-        report.requirement.slots
-      );
-      // Every surface sunset capped is unlit ground, and each really did offer
-      // fewer slots here than on any other date in the report.
-      for (const surfaceId of /** @type {Object} */ (sunset).surfaceIds) {
-        const surfaceRow = dateRow.bySurface.find((row) => row.surfaceId === surfaceId);
-        expect(surfaceRow.slots).toBeLessThan(report.bestSlotsBySurface[surfaceId]);
-        // Strictly fewer than on every date that is *not* at the bare minimum.
-        // The two November dates are equal to each other, which is the point:
-        // they are the pair sunset trims, and nothing else.
-        for (const other of report.dates) {
-          if (report.bareMinimumDates.includes(other.date)) continue;
-          const otherRow = other.bySurface.find((row) => row.surfaceId === surfaceId);
-          expect(surfaceRow.slots).toBeLessThan(otherRow.slots);
-        }
-      }
-      // The lit stadium is capped by its permit, not by daylight, and holds the
-      // same count it holds on eight other dates.
-      const stadium = dateRow.bySurface.find(
-        (row) => row.surfaceId === season2026SurfaceId('Summit HS', 'Stadium')
-      );
-      expect(stadium.cappedByKinds).toEqual(['permit']);
-    }
-
-    // The claim is checkable against `sunsets.csv`: these two dates carry the
-    // earliest sunsets of the season.
-    const bySunset = [...sunsets].sort((a, b) => a.sunsetMinutes - b.sunsetMinutes);
-    expect(
-      bySunset
-        .slice(0, 2)
-        .map((entry) => entry.date)
-        .sort()
-    ).toEqual(report.bareMinimumDates);
-    // …and the report says the bare minimum out loud.
-    const atRequirement = report.findings.filter(
-      (finding) => finding.code === RESERVE_REASON.RESERVE_CAPACITY_AT_REQUIREMENT
+  it('finds that sunset trims nothing: the two earliest-sunset dates hold what their permits allow', () => {
+    // Before the owner's decision of 2026-11-02 the two November dates were the bare minimum,
+    // each unlit surface losing a slot to daylight. Now a kickoff past the daylight limit is
+    // legal with a warning, so those dates are found, not named, the same way: they are the dates
+    // whose slot count (derived from the permit rows) equals the requirement.
+    const requirement = report.requirement.slots;
+    const expectedBare = capacityInput.dates.filter(
+      (date) => expectedSlotsOn(date) === requirement
     );
-    expect(atRequirement).toHaveLength(2);
+    expect(report.bareMinimumDates).toEqual(expectedBare);
+    expect(expectedBare).toEqual([]);
+
+    // The claim is checkable against `sunsets.csv`: these two dates carry the earliest sunsets of
+    // the season, and the lit/unlit split is what the daylight limit would have trimmed. On them
+    // every surface still holds exactly what its permit allows...
+    const earliestSunsets = [...sunsets]
+      .sort((a, b) => a.sunsetMinutes - b.sunsetMinutes)
+      .slice(0, 2)
+      .map((entry) => entry.date)
+      .sort();
+    expect(earliestSunsets).toEqual(['2026-11-07', '2026-11-14']);
+    for (const date of earliestSunsets) {
+      const dateRow = /** @type {Object} */ (report.dates.find((row) => row.date === date));
+      for (const row of dateRow.bySurface) {
+        expect(row.kickoffMinutes, `${date} ${row.surfaceId}`).toEqual(
+          expectedKickoffs(date, row.surfaceId)
+        );
+      }
+      // ...and a daylight-bound count would have been lower on the unlit ground: the last slot
+      // of each unlit surface ends after sunset less the margin (a warning, not a loss).
+      const daylightLimit =
+        sunsets.find((entry) => entry.date === date).sunsetMinutes - calendar.sunsetMarginMinutes;
+      const unlitRows = dateRow.bySurface.filter((row) => {
+        const last = row.kickoffMinutes[row.kickoffMinutes.length - 1];
+        return last + RESERVE_OCCUPANCY > daylightLimit;
+      });
+      expect(unlitRows.length).toBeGreaterThan(0);
+      // Nothing the report calls capping is sunset.
+      expect(dateRow.cappedBy.some((entry) => entry.kind === 'sunset')).toBe(false);
+    }
+    // No date is at the requirement, so the report says nothing about a bare minimum.
+    expect(
+      report.findings.filter(
+        (finding) => finding.code === RESERVE_REASON.RESERVE_CAPACITY_AT_REQUIREMENT
+      )
+    ).toHaveLength(0);
+  });
+
+  it('says the bare minimum out loud when a date is exactly at the requirement (constructed)', () => {
+    // The corpus no longer has such a date, so the finding is shown on a constructed requirement
+    // equal to what one date derivably holds, with the control one slot lower.
+    const date = capacityInput.dates[0];
+    const held = expectedSlotsOn(date);
+    const at = buildReserveCapacityReport(
+      { graph, table, calendar, registry },
+      {
+        ...capacityInput,
+        dates: [date],
+        reservedSlots: capacityInput.reservedSlots.filter((slot) => slot.date === date),
+        requirement: { ...capacityInput.requirement, slots: held },
+      }
+    );
+    expect(at.bareMinimumDates).toEqual([date]);
+    expect(
+      observe(at.findings).filter(
+        (finding) => finding.code === RESERVE_REASON.RESERVE_CAPACITY_AT_REQUIREMENT
+      )
+    ).toHaveLength(1);
+
+    const below = buildReserveCapacityReport(
+      { graph, table, calendar, registry },
+      {
+        ...capacityInput,
+        dates: [date],
+        reservedSlots: capacityInput.reservedSlots.filter((slot) => slot.date === date),
+        requirement: { ...capacityInput.requirement, slots: held - 1 },
+      }
+    );
+    expect(below.bareMinimumDates).toEqual([]);
+    expect(
+      below.findings.filter(
+        (finding) => finding.code === RESERVE_REASON.RESERVE_CAPACITY_AT_REQUIREMENT
+      )
+    ).toHaveLength(0);
+  });
+
+  it('keeps the sunset warning of a slot it counts: capacity that needs a lighting workaround (constructed)', () => {
+    // The review's own case. Unlit Alder Pitch 3 on 2026-11-14 (sunset 16:41, so the daylight
+    // limit is 16:26), an 11v11 grid of 17:00 and 18:30, and a requirement of one slot: both
+    // slots are legal and counted (owner, 2026-11-02: legal with a warning, because some
+    // organisations have portable lighting or other workarounds) and the report used to say
+    // nothing about the sunset at all.
+    const pitch3 = season2026SurfaceId('Alder Park', 'Pitch 3');
+    const date = '2026-11-14';
+    const ask = (overrides) =>
+      buildReserveCapacityReport(
+        { graph, table, calendar, registry },
+        {
+          ...capacityInput,
+          dates: [date],
+          surfaceIds: [pitch3],
+          reservedSlots: [],
+          bookings: [],
+          requirement: { ...capacityInput.requirement, slots: 1 },
+          cadenceMinutes: 90,
+          ...overrides,
+        }
+      );
+    const grid = { earliestKickoffMinutes: 17 * 60 };
+    const late = ask(grid);
+    const row = late.dates[0].bySurface[0];
+    // The two slots, from the oracle's grid, and each ends after the daylight limit.
+    const limit = daylightLimitMinutes(calendar, date);
+    expect(row.kickoffMinutes).toEqual(
+      expectedKickoffs(date, pitch3, { ...grid, cadenceMinutes: 90 })
+    );
+    expect(row.kickoffMinutes).toEqual([17 * 60, 18 * 60 + 30]);
+    for (const kickoff of row.kickoffMinutes) {
+      expect(kickoff + RESERVE_OCCUPANCY, String(kickoff)).toBeGreaterThan(limit);
+    }
+    expect(late.dates[0].slots).toBe(2);
+    expect(late.dates[0].meetsRequirement).toBe(true);
+    // Still legal and still counted; now also said.
+    expect(row.sunsetWarnedKickoffMinutes).toEqual(row.kickoffMinutes);
+    expect(late.dates[0].sunsetWarnedSlots).toBe(2);
+    expect(late.sunsetWarnedSlots).toBe(2);
+
+    // The control: the same ground and day on a grid inside daylight warns about nothing.
+    const early = ask({ earliestKickoffMinutes: 9 * 60, latestKickoffMinutes: 10 * 60 + 30 });
+    expect(early.dates[0].slots).toBe(2);
+    expect(early.dates[0].bySurface[0].kickoffMinutes).toEqual([9 * 60, 10 * 60 + 30]);
+    expect(early.dates[0].bySurface[0].sunsetWarnedKickoffMinutes).toEqual([]);
+    expect(early.sunsetWarnedSlots).toBe(0);
   });
 
   it('names the constraint that caps every date, and no date is left unattributed', () => {
@@ -1068,26 +1275,24 @@ describe('acceptance 3 :: the reserve capacity report', () => {
         // the searched day; the first is what we assert, because the second
         // would mean nothing bounded it.
         expect(row.firstRejectedKickoffMinutes).not.toBeNull();
-        expect(row.cappedByKinds.length).toBeGreaterThan(0);
+        // The first rejected kickoff is the one after the last slot the permit allows, derived
+        // from the oracle's grid rather than read back.
+        const expected = expectedKickoffs(dateRow.date, row.surfaceId);
+        // (A date with no slots at all, the blackout, is rejected at its very first candidate.)
+        expect(row.firstRejectedKickoffMinutes, `${dateRow.date} ${row.surfaceId}`).toBe(
+          expected.length > 0
+            ? expected[expected.length - 1] + capacityInput.cadenceMinutes
+            : capacityInput.earliestKickoffMinutes
+        );
+        // What caps a day is the permit and nothing else: sunset only warns (owner, 2026-11-02).
+        expect(row.cappedByKinds).toEqual(['permit']);
         expect(row.blockingCodes.length).toBeGreaterThan(0);
+        expect(row.constraintIds).toEqual([SEASON_2026_CONSTRAINT_ID.PERMIT_WINDOW]);
         // The slack is Phase 1.3's number, read back rather than recomputed:
         // negative, because the candidate that ended the run broke its bound.
         if (row.slots > 0) expect(row.slackMinutes).toBeLessThan(0);
       }
     }
-
-    // The registry is consulted for the codes, not second-guessed: the sunset
-    // margin constraint is the one that claims `SUNSET_MARGIN_VIOLATED`.
-    const november = /** @type {Object} */ (report.dates.find((row) => row.date === '2026-11-07'));
-    const unlit = november.bySurface.filter((row) => row.cappedByKinds.includes('sunset'));
-    expect(unlit.length).toBe(3);
-    for (const row of unlit) {
-      expect(row.constraintIds).toContain(SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN);
-    }
-    const stadium = november.bySurface.find(
-      (row) => row.surfaceId === season2026SurfaceId('Summit HS', 'Stadium')
-    );
-    expect(stadium.constraintIds).toContain(SEASON_2026_CONSTRAINT_ID.PERMIT_WINDOW);
   });
 
   it('reports the permit blackout as what caps 09/19, and the early open as what lifts 09/12', () => {
@@ -1096,12 +1301,17 @@ describe('acceptance 3 :: the reserve capacity report', () => {
     const stadiumOnBlackout = blackout.bySurface.find((row) => row.surfaceId === stadiumId);
     expect(stadiumOnBlackout.slots).toBe(0);
     expect(stadiumOnBlackout.cappedByKinds).toEqual(['permit']);
-    expect(blackout.slots).toBe(15);
+    // The blackout date is the stadium's whole day lost: every other surface keeps what its
+    // permit allows, so the date holds exactly the oracle's count and the stadium's share is 0.
+    expect(blackout.slots).toBe(expectedSlotsOn('2026-09-19'));
+    expect(expectedKickoffs('2026-09-19', stadiumId)).toEqual([]);
 
     const early = /** @type {Object} */ (report.dates.find((row) => row.date === '2026-09-12'));
     const stadiumOnEarly = early.bySurface.find((row) => row.surfaceId === stadiumId);
+    expect(stadiumOnEarly.kickoffMinutes).toEqual(expectedKickoffs('2026-09-12', stadiumId));
     expect(stadiumOnEarly.slots).toBe(3);
     expect(early.slots).toBe(report.maxSlots);
+    expect(early.slots).toBe(expectedSlotsOn('2026-09-12'));
     // The extra slot exists because that one date's permit opens at 14:00
     // instead of 17:00 — a date-scoped exception, read by the availability
     // calendar rather than by this module.

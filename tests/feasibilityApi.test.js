@@ -34,6 +34,7 @@ import {
   buildAvailabilityCalendarFromSeason2026,
   daylightLimitMinutes,
   latestLegalKickoff,
+  resolveLighting,
   resolvePermitWindow,
   sunsetOn,
 } from '@squadlogic/core/availability/index.js';
@@ -490,7 +491,7 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
         .map((game) => game.id),
     });
 
-  it('08/22 at Alder Park: the permit close and the daylight limit bind together', () => {
+  it('08/22 at Alder Park: the permit close bounds the hard answer; the daylight limit ties the clean one', () => {
     const answer = boundsOn('2026-08-22', ALDER_2);
     const close = permitCloseOn('alder-park', '2026-08-22');
     const daylight = daylightLimitMinutes(calendar, '2026-08-22');
@@ -501,14 +502,25 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
     expect(rawSunset).toBe(20 * 60);
     expect(daylight).toBe(close - calendar.sunsetMarginMinutes);
 
-    expect(answer.latestHard.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
-    expect(answer.latestHard.kickoffMinutes).toBe(18 * 60 + 15);
+    // Owner, 2026-11-02: "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs
+    // have portable lighting or other workarounds." The hard answer is the permit's; the daylight
+    // limit (here tied with the permit's comfort margin, both 15) bounds the clean one.
+    expect(answer.latestHard.kickoffMinutes).toBe(close - ELEVEN_OCCUPANCY);
+    expect(answer.latestHard.kickoffMinutes).toBe(18 * 60 + 30);
+    expect(answer.latestClean.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
     expect(answer.latestClean.kickoffMinutes).toBe(18 * 60 + 15);
-    expect(answer.tightBandMinutes).toBe(0);
+    expect(close - calendar.permitMarginMinutes).toBe(daylight); // the tie, derived
+    expect(answer.latestHard.binding.map((bound) => bound.kind)).toEqual([
+      AVAILABILITY_CONSTRAINT.PERMIT,
+    ]);
+    expect(answer.tightBandMinutes).toBe(
+      answer.latestHard.kickoffMinutes - answer.latestClean.kickoffMinutes
+    );
+    expect(answer.tightBandMinutes).toBe(calendar.sunsetMarginMinutes);
     expect(answer.verdict).toBe(FEASIBILITY_VERDICT.FEASIBLE);
   });
 
-  it('11/14 at Alder Park: sunset binds, hours before the permit closes', () => {
+  it('11/14 at Alder Park: sunset bounds the clean answer, hours before the permit closes the legal one', () => {
     const answer = boundsOn('2026-11-14', ALDER_2);
     const close = permitCloseOn('alder-park', '2026-11-14');
     const daylight = daylightLimitMinutes(calendar, '2026-11-14');
@@ -517,12 +529,21 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
     // back to main's exactly.
     expect(sunsetOn(calendar, '2026-11-14').sunsetMinutes).toBe(16 * 60 + 41);
 
-    expect(answer.latestHard.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
-    expect(answer.latestHard.kickoffMinutes).toBe(14 * 60 + 56);
+    // Sunset only warns (owner, 2026-11-02): the clean latest is the daylight limit less the
+    // occupancy and sunset binds it; the hard latest is the permit's and the permit binds it.
+    expect(answer.latestClean.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
     expect(answer.latestClean.kickoffMinutes).toBe(14 * 60 + 56);
-    expect(answer.latestHard.binding.map((bound) => bound.kind)).toEqual([
+    expect(answer.latestClean.binding.map((bound) => bound.kind)).toEqual([
       AVAILABILITY_CONSTRAINT.SUNSET,
     ]);
+    expect(answer.latestHard.kickoffMinutes).toBe(close - ELEVEN_OCCUPANCY);
+    expect(answer.latestHard.kickoffMinutes).toBe(18 * 60 + 30);
+    expect(answer.latestHard.binding.map((bound) => bound.kind)).toEqual([
+      AVAILABILITY_CONSTRAINT.PERMIT,
+    ]);
+    // The gap between them is the model's own 214 minutes (close less the daylight limit), and it
+    // is the tight band.
+    expect(answer.tightBandMinutes).toBe(close - daylight);
     // "199 minutes before the close" is the *raw* sunset against the close; the
     // model's own gap is measured against the daylight limit it actually applies.
     expect(close - sunsetOn(calendar, '2026-11-14').sunsetMinutes).toBe(199);
@@ -552,19 +573,19 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
     expect(/** @type {{ reason: string }} */ (sunsetNote).reason).toMatch(/lit/);
   });
 
-  it('the two 15-minute margins do not have the same status, and the model says which', () => {
+  it('the two 15-minute margins now have the same status, and the clean latest sits 15 minutes inside the raw sunset', () => {
     // **The assumption this corpus refuses.** `permitMarginMinutes` and
-    // `sunsetMarginMinutes` are both 15, so it is natural to read the hard
+    // `sunsetMarginMinutes` are both 15, so it is natural to read the clean
     // latest at Alder on 11/14 as 15:11 — sunset itself, less the occupancy.
     // The model puts it at 14:56, because `sunsets.csv` states "unlit games must
-    // end 15 min before sunset" as a *rule*: `daylightLimitMinutes()` bakes the
-    // margin into the limit and `SUNSET_MARGIN_VIOLATED` is `blocking`, while
-    // the permit's 15 minutes is a comfort and `PERMIT_MARGIN_TIGHT` is
-    // `compromise`. Both readings are derived here so the difference is visible
-    // rather than argued.
+    // end 15 min before sunset": `daylightLimitMinutes()` bakes the margin into
+    // the limit. Before the owner's decision of 2026-11-02 the two margins also differed in
+    // status (`SUNSET_MARGIN_VIOLATED` blocking, `PERMIT_MARGIN_TIGHT` compromise); now both are
+    // compromises, and what still separates them is where each sits: the permit's margin is a
+    // comfort band inside a close that still blocks, the sunset margin is the whole limit.
     expect(calendar.sunsetMarginMinutes).toBe(calendar.permitMarginMinutes);
     expect(feasibilitySeverityLike(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED)).toBe(
-      CONSTRAINT_SEVERITY.BLOCKING
+      CONSTRAINT_SEVERITY.COMPROMISE
     );
     expect(feasibilitySeverityLike(AVAILABILITY_REASON.PERMIT_MARGIN_TIGHT)).toBe(
       CONSTRAINT_SEVERITY.COMPROMISE
@@ -573,7 +594,11 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
     const answer = boundsOn('2026-11-14', ALDER_2);
     const rawSunset = sunsetOn(calendar, '2026-11-14').sunsetMinutes;
     expect(rawSunset - ELEVEN_OCCUPANCY).toBe(15 * 60 + 11);
-    expect(answer.latestHard.kickoffMinutes).toBe(rawSunset - ELEVEN_OCCUPANCY - 15);
+    expect(answer.latestClean.kickoffMinutes).toBe(rawSunset - ELEVEN_OCCUPANCY - 15);
+    // The hard latest is not inside the sunset margin at all: only the permit stops it.
+    expect(answer.latestHard.kickoffMinutes).toBe(
+      permitCloseOn('alder-park', '2026-11-14') - ELEVEN_OCCUPANCY
+    );
   });
 });
 
@@ -677,33 +702,39 @@ describe('feasibility :: restore controls — the sunset correction moved exactl
     const today = alderBoundsIn(context, '2026-11-14');
     expect(rebuilt.latestHard.kickoffMinutes).toBe(today.latestHard.kickoffMinutes);
     expect(rebuilt.latestClean.kickoffMinutes).toBe(today.latestClean.kickoffMinutes);
-    expect(rebuilt.latestHard.kickoffMinutes).toBe(14 * 60 + 56);
+    // The daylight limit bounds the clean answer; the hard one is the permit's.
+    expect(rebuilt.latestClean.kickoffMinutes).toBe(14 * 60 + 56);
+    expect(rebuilt.latestHard.kickoffMinutes).toBe(
+      permitCloseOn('alder-park', '2026-11-14') - ELEVEN_OCCUPANCY
+    );
   });
 
-  it("11/14 at Alder Park: main's 16:35, 14:50, 205 and 220, each exactly 6 minutes from today's", () => {
+  it("11/14 at Alder Park: main's 16:35, 14:50, 205 and 220, the clean answer exactly 6 minutes from today's and the hard one not moved", () => {
     const answer = alderBoundsIn(restored, '2026-11-14');
     const sunset = sunsetOn(restoredCalendar, '2026-11-14').sunsetMinutes;
     const daylight = daylightLimitMinutes(restoredCalendar, '2026-11-14');
     expect(sunset).toBe(16 * 60 + 35);
-    expect(answer.latestHard.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
-    expect(answer.latestHard.kickoffMinutes).toBe(14 * 60 + 50);
+    // The correction moved the daylight limit, which bounds the clean answer...
+    expect(answer.latestClean.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
     expect(answer.latestClean.kickoffMinutes).toBe(14 * 60 + 50);
-    expect(answer.latestHard.binding.map((bound) => bound.kind)).toEqual([
+    expect(answer.latestClean.binding.map((bound) => bound.kind)).toEqual([
       AVAILABILITY_CONSTRAINT.SUNSET,
     ]);
     expect(close - sunset).toBe(205);
     expect(close - daylight).toBe(220);
+    // ...and the hard answer is the permit's, which sunset never moves.
+    expect(answer.latestHard.kickoffMinutes).toBe(close - ELEVEN_OCCUPANCY);
 
     const today = alderBoundsIn(context, '2026-11-14');
     expect(sunsetOn(calendar, '2026-11-14').sunsetMinutes - sunset).toBe(6);
-    expect(today.latestHard.kickoffMinutes - answer.latestHard.kickoffMinutes).toBe(6);
     expect(today.latestClean.kickoffMinutes - answer.latestClean.kickoffMinutes).toBe(6);
+    expect(today.latestHard.kickoffMinutes - answer.latestHard.kickoffMinutes).toBe(0);
   });
 
-  it("the two 15-minute margins: main's 15:05 and the hard latest 15 minutes inside it", () => {
+  it("the two 15-minute margins: main's 15:05 and the clean latest 15 minutes inside it", () => {
     const rawSunset = sunsetOn(restoredCalendar, '2026-11-14').sunsetMinutes;
     expect(rawSunset - ELEVEN_OCCUPANCY).toBe(15 * 60 + 5);
-    expect(alderBoundsIn(restored, '2026-11-14').latestHard.kickoffMinutes).toBe(
+    expect(alderBoundsIn(restored, '2026-11-14').latestClean.kickoffMinutes).toBe(
       rawSunset - ELEVEN_OCCUPANCY - 15
     );
   });
@@ -763,7 +794,7 @@ describe('feasibility :: acceptance 2 — two constraints binding at one minute 
   it('reports both the permit and the daylight limit at the clean boundary', () => {
     // 08/22 is the sharp case: Alder's permit closes at 20:00 and sunset is
     // 20:00, and both carry a 15-minute margin, so the last *clean* kickoff is
-    // the same minute for both. One more minute and the daylight rule blocks
+    // the same minute for both. One more minute and the daylight rule warns
     // while the permit margin goes tight — two constraints speaking at once.
     expect(answer.latestClean.kickoffMinutes).toBe(18 * 60 + 15);
     expect(answer.latestClean.binding.map((bound) => bound.kind).sort()).toEqual([
@@ -774,7 +805,7 @@ describe('feasibility :: acceptance 2 — two constraints binding at one minute 
   });
 
   it('says out loud that the bound is joint, rather than picking a winner', () => {
-    // The hard boundary is *not* joint here — only the daylight rule blocks — so
+    // The hard boundary is *not* joint here — only the permit blocks — so
     // the joint finding is the clean boundary's, and it exists precisely because
     // both boundaries report their own bound rather than only the first.
     expect(answer.latestHard.binding).toHaveLength(1);
@@ -822,11 +853,11 @@ describe('feasibility :: acceptance 2 — two constraints binding at one minute 
     expect(byKind[AVAILABILITY_CONSTRAINT.PERMIT].raises.map((entry) => entry.code)).toEqual([
       AVAILABILITY_REASON.PERMIT_MARGIN_TIGHT,
     ]);
-    // …and the two raise findings of *different* severity, which is precisely
-    // why an answer that named one of them would be claiming a precision it
-    // does not have.
+    // …and the two raise findings of the same severity since the owner's decision of 2026-11-02
+    // (both compromises) under different codes and different margins, which is still why an
+    // answer that named one of them would be claiming a precision it does not have.
     expect(byKind[AVAILABILITY_CONSTRAINT.SUNSET].raises[0].severity).toBe(
-      CONSTRAINT_SEVERITY.BLOCKING
+      CONSTRAINT_SEVERITY.COMPROMISE
     );
     expect(byKind[AVAILABILITY_CONSTRAINT.PERMIT].raises[0].severity).toBe(
       CONSTRAINT_SEVERITY.COMPROMISE
@@ -1358,19 +1389,38 @@ describe('feasibility :: acceptance 9 — "can this team play at 6pm in November
     expect(answerOf().carrierGameId).not.toBeNull();
   });
 
-  it('answers no, because November sunset is hours before six', () => {
-    // Every one of the dates has a sunset earlier than a 6pm kickoff plus a 9v9
-    // footprint, so the whole grid is illegal — and the answer names sunset
-    // rather than shrugging.
+  it('answers yes, with the sunset warning, because November sunset is hours before six but only warns', () => {
+    // Owner, 2026-11-02: "Yes to legal-with-a-warning for kickoffs after sunset, because some orgs
+    // have portable lighting or other workarounds." Every one of the dates has a sunset earlier
+    // than a 6pm kickoff plus a 9v9 footprint, so the whole grid is past the daylight limit (derived
+    // below from the sunset rows) — and each cell is feasible where the permit holds the game,
+    // carrying a sunset compromise, with the permit's room as the margin.
+    const nineOccupancy = formatTimingOrUnknown(table, '9v9').occupancyMinutes.scheduled;
+    for (const date of november) {
+      expect(18 * 60 + nineOccupancy, date).toBeGreaterThan(daylightLimitMinutes(calendar, date));
+    }
     const answer = answerOf();
-    expect(answer.verdict).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
-    expect(answer.verdictCounts[FEASIBILITY_VERDICT.FEASIBLE]).toBe(0);
+    expect(answer.verdict).toBe(FEASIBILITY_VERDICT.FEASIBLE);
+    expect(answer.tight).toBe(FEASIBILITY_TIGHTNESS.TIGHT);
+    expect(answer.verdictCounts[FEASIBILITY_VERDICT.INFEASIBLE]).toBe(0);
+    expect(answer.verdictCounts[FEASIBILITY_VERDICT.FEASIBLE]).toBe(answer.candidates.length);
     for (const candidate of answer.candidates) {
-      expect(candidate.verdict).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
-      expect(candidate.binding.map((bound) => bound.kind)).toContain(
-        AVAILABILITY_CONSTRAINT.SUNSET
+      expect(candidate.verdict).toBe(FEASIBILITY_VERDICT.FEASIBLE);
+      // The margin is the permit's room (close less the end of the game), derived from the permit
+      // rows; it is not the sunset limit, which this cell is past.
+      const venueId = candidate.surfaceId.split('/')[0];
+      expect(candidate.binding.map((bound) => bound.kind)).toEqual([
+        AVAILABILITY_CONSTRAINT.PERMIT,
+      ]);
+      expect(candidate.marginMinutes, `${candidate.date} ${candidate.surfaceId}`).toBe(
+        permitCloseOn(venueId, candidate.date) - (18 * 60 + nineOccupancy)
       );
-      expect(candidate.marginMinutes).toBeLessThan(0);
+      // ...and the answer says out loud that it is past sunset: a compromise claim, broken.
+      const sunsetClaim = candidate.blockers.find(
+        (claim) => claim.kind === AVAILABILITY_CONSTRAINT.SUNSET
+      );
+      expect(sunsetClaim?.severity).toBe(CONSTRAINT_SEVERITY.COMPROMISE);
+      expect(sunsetClaim?.slackMinutes).toBeLessThan(0);
     }
   });
 
@@ -1812,7 +1862,11 @@ describe('feasibility :: finding 1 — "no clean position exists" is not "not ti
       date: '2026-08-22',
       format: NINE,
     });
-    expect(answer.latestHard.kickoffMinutes).toBe(18 * 60 + 40);
+    // The permit close less the 9v9 footprint (sunset only warns: owner, 2026-11-02).
+    expect(answer.latestHard.kickoffMinutes).toBe(
+      permitCloseOn('alder-park', '2026-08-22') -
+        formatTimingOrUnknown(table, NINE).occupancyMinutes.scheduled
+    );
     expect(answer.latestClean.kickoffMinutes).toBeNull();
     expect(answer.tightBandMinutes).toBeNull();
     expect(answer.verdict).toBe(FEASIBILITY_VERDICT.FEASIBLE);
@@ -1875,9 +1929,51 @@ describe('feasibility :: finding 1 — "no clean position exists" is not "not ti
     let noClean = 0;
     let banded = 0;
     let judged = 0;
+    // The same corpus asked in the world as it was before the owner's decision of 2026-11-02:
+    // the sunset margin retyped `hard` through `whatIfConstraintType()`, which projects a registry
+    // and adopts nothing. This is the review's own population, reproduced from the data rather than
+    // remembered, and the decision's whole effect is the difference between the two worlds.
+    const projected = whatIfConstraintType(
+      registry,
+      SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
+      CONSTRAINT_TYPE.HARD
+    ).projectedRegistry;
+    const sunsetHard = buildAttributionContext({
+      graph,
+      table,
+      calendar,
+      registry: projected,
+      schedule,
+      verification: runRuleEngine(schedule, {
+        registry: projected,
+        resources: { graph, timingTable: table, calendar, venueComplexes },
+      }),
+      venueComplexes,
+      roster,
+    });
+    let noCleanSunsetHard = 0;
+    let hardBoundsRaised = 0;
+    /** @type {Array<{ surfaceId: string, date: string, format: string }>} */
+    const daylightOnly = [];
     for (const cell of boundsCorpus()) {
       const answer = feasibleKickoffBounds(context, cell);
+      const before = feasibleKickoffBounds(sunsetHard, cell);
       const label = `${cell.surfaceId} ${cell.date} ${cell.format}`;
+      const beforeNoClean =
+        before.verdict === FEASIBILITY_VERDICT.FEASIBLE &&
+        before.latestClean.kickoffMinutes === null;
+      if (beforeNoClean) noCleanSunsetHard += 1;
+      // Sunset can only have taken legal minutes away: the hard answer is never earlier now...
+      if (before.latestHard.kickoffMinutes !== null) {
+        expect(answer.latestHard.kickoffMinutes, label).toBeGreaterThanOrEqual(
+          before.latestHard.kickoffMinutes
+        );
+        if (answer.latestHard.kickoffMinutes > before.latestHard.kickoffMinutes) {
+          hardBoundsRaised += 1;
+        }
+        // ...and it moves no clean position: the clean answer is the same in both worlds.
+        expect(answer.latestClean.kickoffMinutes, label).toBe(before.latestClean.kickoffMinutes);
+      }
       if (answer.verdict !== FEASIBILITY_VERDICT.FEASIBLE) {
         expect(answer.tight, label).toBeNull();
         continue;
@@ -1886,6 +1982,7 @@ describe('feasibility :: finding 1 — "no clean position exists" is not "not ti
       if (answer.latestClean.kickoffMinutes === null) {
         noClean += 1;
         expect(answer.tight, label).toBe(FEASIBILITY_TIGHTNESS.NO_CLEAN_POSITION);
+        if (!beforeNoClean) daylightOnly.push(cell);
         continue;
       }
       banded += 1;
@@ -1893,13 +1990,24 @@ describe('feasibility :: finding 1 — "no clean position exists" is not "not ti
         answer.tightBandMinutes > 0 ? FEASIBILITY_TIGHTNESS.TIGHT : FEASIBILITY_TIGHTNESS.CLEAN
       );
     }
-    // Meta-assertions: both arms of the rule were exercised, and the
-    // population is the one the review measured — 772 of the corpus's
-    // surface-date-format combinations reach a hard bound with nothing clean
-    // beneath it, and every one of them used to read as "not tight".
+    // Meta-assertions: both arms of the rule were exercised, and the population is the one the
+    // review measured — 772 of the corpus's surface-date-format combinations reach a hard bound
+    // with nothing clean beneath it, and every one of them used to read as "not tight". The
+    // sunset-hard world reproduces exactly those 772. The cells added on top are the ones where a
+    // game fits the permit but never fits inside daylight (so they had no legal kickoff before and
+    // have only warned ones now), and every one is unlit or undeclared ground.
     expect(judged).toBeGreaterThan(0);
     expect(banded).toBeGreaterThan(0);
-    expect(noClean).toBe(772);
+    expect(noCleanSunsetHard).toBe(772);
+    expect(hardBoundsRaised).toBeGreaterThan(0);
+    expect(daylightOnly.length).toBeGreaterThan(0);
+    expect(noClean).toBe(noCleanSunsetHard + daylightOnly.length);
+    for (const cell of daylightOnly) {
+      expect(
+        resolveLighting(graph, calendar, cell.surfaceId).lit,
+        `${cell.surfaceId} ${cell.date} ${cell.format}`
+      ).not.toBe(true);
+    }
   }, 120_000);
 
   it('is a named value from a frozen table, so `if (answer.tight)` cannot decide it', () => {
@@ -2493,11 +2601,23 @@ describe('feasibility :: finding 8 — the unknown counter counts each unknown o
   );
 
   it('counts the grid’s unknowns once, not once per cell and again in the roll-up', () => {
+    // A grid whose roll-up carries unknowns too: one the permit closes on, so the verdict is a
+    // definite no and the unknowns stay on it ("no, and these were not checked either"). The 9v9
+    // team at 6pm in November used to be that grid because sunset blocked it; since the owner's
+    // decision of 2026-11-02 sunset only warns, so it is a feasible grid with nothing to roll up.
+    // A 10pm kickoff is past every permit close in the season (derived from the permit rows).
+    const lateKickoff = 22 * 60;
+    for (const date of november) {
+      for (const venueId of ['alder-park', 'summit-hs']) {
+        expect(lateKickoff, `${venueId} ${date}`).toBeGreaterThan(permitCloseOn(venueId, date));
+      }
+    }
     const answer = canTeamPlay(
       context,
-      { teamId: nineTeam, dates: november, kickoffMinutes: 18 * 60 },
+      { teamId: nineTeam, dates: november, kickoffMinutes: lateKickoff },
       { venueComplexes }
     );
+    expect(answer.verdict).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
     const perCell = answer.candidates.reduce(
       (total, candidate) => total + candidate.unknowns.length,
       0
@@ -2751,6 +2871,27 @@ describe('feasibility :: round 2, finding 1 — a blocking blocker is never a fe
       );
     }
 
+    // **Constructed:** a caller's own ceiling, set before anything warns. Since the owner's
+    // decision of 2026-11-02 no corpus cell's hard bound reads clean any more (the hard bound is
+    // the permit close, where the permit's own margin is tight, or an occupancy bound), so the
+    // bounds arm's "info-only answers read clean" row would be matched against nothing without a
+    // cell the caller bounds earlier than the daylight limit.
+    const callerBounded = ['2026-08-22', '2026-11-14'].map((date) => ({
+      surfaceId: ALDER_2,
+      date,
+      format: '11v11',
+      notAfterMinutes: 10 * 60,
+    }));
+    for (const cell of callerBounded) {
+      const answer = feasibleKickoffBounds(context, cell);
+      rule(
+        'bounds',
+        `bounds ${cell.surfaceId} ${cell.date} ${cell.format} no later than 10:00`,
+        answer,
+        answer.latestHard.claims
+      );
+    }
+
     expect(offenders).toEqual([]);
     // Meta-assertions. The three arms that judge a *position* must each have
     // actually seen answers carrying a blocking blocker, or the rule above
@@ -2758,7 +2899,9 @@ describe('feasibility :: round 2, finding 1 — a blocking blocker is never a fe
     expect(arms.standing[CONSTRAINT_SEVERITY.BLOCKING].checked).toBe(schedule.games.length);
     expect(arms.moved[CONSTRAINT_SEVERITY.BLOCKING].checked).toBe(schedule.games.length);
     expect(arms.teamCell[CONSTRAINT_SEVERITY.BLOCKING].checked).toBeGreaterThan(1000);
-    expect(arms.bounds[CONSTRAINT_SEVERITY.BLOCKING].checked).toBe(boundsCorpus().length);
+    expect(arms.bounds[CONSTRAINT_SEVERITY.BLOCKING].checked).toBe(
+      boundsCorpus().length + callerBounded.length
+    );
     // **Per arm and per severity.** Every arm must have seen a real answer at
     // every level, or that cell of the table is a rule matched against nothing.
     // The bounds arm carrying a *blocking* blocker is not obvious: `latestHard`
@@ -4338,7 +4481,10 @@ describe('feasibility :: round 6, finding 1 — an answer publishes the severity
     expect(offenders).toHaveLength(0);
     // Meta-assertion: the population is the one the reviews measured, so a
     // sweep that stopped meeting it fails rather than passing quietly.
-    expect(stated).toBe(772);
+    // Owner, 2026-11-02: the 772 reviewed cells all still say it (the whole-corpus rule above
+    // reproduces them in a sunset-hard world), and the cells where a game never fits inside
+    // daylight say it too. Every one of them is explained above.
+    expect(stated).toBeGreaterThan(772);
   }, 300_000);
 });
 

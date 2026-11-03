@@ -42,6 +42,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 import {
   buildAvailabilityCalendar,
+  daylightLimitMinutes,
+  resolveLighting,
   resolvePermitWindow,
   weekdayCodeOf,
 } from '@squadlogic/core/availability/index.js';
@@ -50,6 +52,7 @@ import {
   CONSTRAINT_SEVERITY,
   CONSTRAINT_TYPE,
   SEASON_2026_CONSTRAINTS,
+  SEASON_2026_CONSTRAINT_ID,
   buildSeason2026ConstraintRegistry,
 } from '@squadlogic/core/constraints/index.js';
 import {
@@ -78,6 +81,7 @@ import { runRuleEngine } from '@squadlogic/core/ruleEngine/index.js';
 import { toSeason2026Schedule } from '@squadlogic/core/ruleEngine/adapters/season2026Schedule.js';
 import {
   buildFormatTimingTableFromSeason2026,
+  requireFormatTiming,
   toFormatTimingInput,
 } from '@squadlogic/core/timing/index.js';
 import { verifySnapshotDigest } from '@squadlogic/core/publication/index.js';
@@ -268,6 +272,40 @@ const branchProbe = () => createPlacementProbe({ schedule, engines: result.mater
 /** The same branch, with the search switched off. */
 const control = runScenario(inputs, scenario, { ...runOptions, relocations: false });
 
+/**
+ * The same withdrawal in the world as it was before the owner's decision of 2026-11-02 ("Yes to
+ * legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or
+ * other workarounds."): the sunset margin retyped `hard` inside the branch, through the same
+ * override a board would use. It reproduces what the acceptance report said then from the data,
+ * rather than from a remembered number, and the decision's whole effect is the difference. It is
+ * also the branch that strands games, which the plain withdrawal no longer does (the games sunset
+ * used to shelve are legal with a warning), so the TIME TBD accounting is asserted over it.
+ */
+const sunsetHard = runScenario(
+  inputs,
+  makeScenario({
+    id: `${scenario.id}-sunset-hard`,
+    name: `${scenario.name}, with the sunset margin hard`,
+    baselineId: inputs.id,
+    rationale: 'the world before the 2026-11-02 decision: sunset blocks a kickoff',
+    requestedBy: REQUESTED_BY,
+    createdAt: REQUESTED_AT,
+    overrides: [
+      ...scenario.overrides,
+      {
+        kind: SCENARIO_OVERRIDE_KIND.RETYPE,
+        recordSet: SCENARIO_RECORD_SET.CONSTRAINTS,
+        recordId: SEASON_2026_CONSTRAINT_ID.SUNSET_MARGIN,
+        type: CONSTRAINT_TYPE.HARD,
+        by: REQUESTED_BY,
+        at: REQUESTED_AT,
+        reason: 'ask the withdrawal in the world where a kickoff past sunset is refused',
+      },
+    ],
+  }),
+  runOptions
+);
+
 const capacitySubjects = season2026CapacitySubjects({
   graph,
   table,
@@ -451,14 +489,31 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
     // **Two grades**, which is what makes "added compromises" a real column.
     const grades = new Set(result.relocations.proposals.map((p) => p.grade));
     expect([...grades].sort()).toEqual([REPLACEMENT_GRADE.CLEAN, REPLACEMENT_GRADE.COMPROMISED]);
-    // The clean ground is lined for the format; the compromised ground is not.
+    // The ground the owner's decision opened up: lined ground whose only compromise is the sunset
+    // warning (graded compromised although nothing is wrong with its lining).
+    const linedButWarned = result.relocations.proposals.filter(
+      (p) =>
+        checkLining(graph, { surfaceId: p.to.surfaceId, format: AFFECTED_FORMAT }).status ===
+          FACILITY_STATUS.ALLOWED && p.grade === REPLACEMENT_GRADE.COMPROMISED
+    );
+    expect(linedButWarned.length).toBeGreaterThan(0);
+    for (const proposal of linedButWarned) {
+      expect(proposal.compromiseCodes, proposal.gameId).toContain('SUNSET_MARGIN_VIOLATED');
+    }
+    // A proposal is graded clean exactly when it carries no compromise at all; the lining
+    // mismatch is one compromise among several, present exactly when the ground is not lined for
+    // the format (since the owner's decision of 2026-11-02 lined ground can still be compromised,
+    // by the sunset warning).
     for (const proposal of result.relocations.proposals) {
       const lining = checkLining(graph, {
         surfaceId: proposal.to.surfaceId,
         format: AFFECTED_FORMAT,
       });
-      expect(lining.status === FACILITY_STATUS.ALLOWED, proposal.to.surfaceId).toBe(
-        proposal.grade === REPLACEMENT_GRADE.CLEAN
+      expect(proposal.compromiseCodes.includes('LINING_MISMATCH'), proposal.to.surfaceId).toBe(
+        lining.status !== FACILITY_STATUS.ALLOWED
+      );
+      expect(proposal.grade === REPLACEMENT_GRADE.CLEAN, proposal.gameId).toBe(
+        proposal.compromiseCodes.length === 0
       );
     }
     const finding = result.findings.find(
@@ -473,22 +528,59 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
       (p) => p.grade === REPLACEMENT_GRADE.COMPROMISED
     );
     expect(compromised.length).toBeGreaterThan(0);
+    // The sunset warning is derived here, not read: a proposal carries it exactly when its game
+    // ends after the daylight limit on ground that is not lit (owner, 2026-11-02: legal with a
+    // warning, so it no longer shelves the game).
+    const occupancy = requireFormatTiming(table, AFFECTED_FORMAT).occupancyMinutes.scheduled;
+    const pastDaylight = (proposal) =>
+      resolveLighting(graph, calendar, proposal.to.surfaceId).lit !== true &&
+      proposal.to.startMinutes + occupancy > daylightLimitMinutes(calendar, proposal.to.date);
+    for (const proposal of result.relocations.proposals) {
+      expect(proposal.compromiseCodes.includes('SUNSET_MARGIN_VIOLATED'), proposal.gameId).toBe(
+        pastDaylight(proposal)
+      );
+    }
+    const sunsetWarned = result.relocations.proposals.filter(pastDaylight);
+    expect(sunsetWarned.length).toBeGreaterThan(0);
+
     const codes = [...new Set(compromised.flatMap((p) => p.compromiseCodes))].sort();
     // Since #53 a grade is `resolve/`'s facility model's verdict plus the coach
     // evaluator's travel compromise, not a one-code list of the proposer's own:
-    // measured on this withdrawal, 46 lining mismatches, 6 neighbours with an
-    // unknown footprint, 3 journeys too short between venues.
+    // lining mismatches, neighbours with an unknown footprint, journeys too short between
+    // venues, and (since 2026-11-02) kickoffs past the daylight limit.
     expect(codes).toEqual([
       'LINING_MISMATCH',
       'OCCUPANCY_FOOTPRINT_UNKNOWN',
+      'SUNSET_MARGIN_VIOLATED',
       'TRAVEL_BETWEEN_VENUES_TOO_SHORT',
     ]);
     const lined = compromised.filter((p) => p.compromiseCodes.includes('LINING_MISMATCH'));
     // The rule engine agrees, independently: the branch's schedule carries
-    // exactly that many more of the code than the baseline did.
+    // exactly that many more of each code than the baseline did.
     expect(diff.constraints.byCode.LINING_MISMATCH.delta).toBe(lined.length);
     expect(diff.constraints.newlyViolated).toContain('LINING_MISMATCH');
+    expect(diff.constraints.byCode.SUNSET_MARGIN_VIOLATED.delta).toBe(sunsetWarned.length);
+    expect(diff.constraints.newlyViolated).toContain('SUNSET_MARGIN_VIOLATED');
     expect(codesOf(result.findings)).toContain(SCENARIO_REASON.SCENARIO_RELOCATION_COMPROMISED);
+  });
+
+  it('places every game the sunset margin used to shelve, with the warning', () => {
+    // In the world before the decision (sunset hard) some displaced games had nowhere to go and
+    // stayed TIME TBD; now every displaced game relocates, and each of those carries the warning.
+    const shelved = sunsetHard.relocations.unrelocatable.map((game) => game.gameId);
+    expect(shelved.length).toBeGreaterThan(0);
+    expect(result.relocations.unrelocatable).toEqual([]);
+    expect(result.unplaced).toEqual([]);
+    expect(result.relocations.proposals.length).toBe(result.displaced.length);
+    const warned = new Set(
+      result.relocations.proposals
+        .filter((p) => p.compromiseCodes.includes('SUNSET_MARGIN_VIOLATED'))
+        .map((p) => p.gameId)
+    );
+    for (const gameId of shelved) expect(warned.has(gameId), gameId).toBe(true);
+    // And nothing else moved: the games the hard world did place go where they went.
+    const hardPlaced = new Map(sunsetHard.relocations.proposals.map((p) => [p.gameId, p]));
+    expect(hardPlaced.size + shelved.length).toBe(result.displaced.length);
   });
 
   it('reports "undersized" as unreachable rather than manufacturing it', () => {
@@ -514,9 +606,13 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
   });
 
   it('keeps every fixture it cannot place visible, with a reason (incident 10)', () => {
-    expect(result.relocations.unrelocatable.length).toBeGreaterThan(0);
-    expect(result.unplaced.length).toBe(result.relocations.unrelocatable.length);
-    for (const fixture of result.unplaced) {
+    // On the branch that strands games: the same withdrawal with the sunset margin hard. The plain
+    // withdrawal strands none since the 2026-11-02 decision (the games sunset used to shelve are
+    // legal with a warning), so the incident-10 accounting is asserted over the world where it did.
+    expect(result.unplaced).toEqual([]);
+    expect(sunsetHard.relocations.unrelocatable.length).toBeGreaterThan(0);
+    expect(sunsetHard.unplaced.length).toBe(sunsetHard.relocations.unrelocatable.length);
+    for (const fixture of sunsetHard.unplaced) {
       expect(fixture.timeStatus).toBe(PUBLICATION_TBD.TIME);
       expect(fixture.locationStatus).toBe(PUBLICATION_TBD.LOCATION);
       expect(fixture.reason.length).toBeGreaterThan(20);
@@ -528,13 +624,15 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
     }
     // …and nothing was silently dropped: the accounting is against the
     // baseline's own ids, never against the run's output.
-    expect(result.accounting.missingFixtureIds).toEqual([]);
-    expect(result.accounting.doubleCountedFixtureIds).toEqual([]);
-    expect(result.accounting.totals.expected).toBe(schedule.games.length);
-    expect(result.accounting.totals.accounted).toBe(schedule.games.length);
-    expect(result.accounting.meta.fixturesAccountedFor).toBe(schedule.games.length);
-    expect(result.accounting.meta.fixturesTimeTbd).toBe(result.unplaced.length);
-    expect(result.schedule.games.length).toBe(schedule.games.length - result.unplaced.length);
+    expect(sunsetHard.accounting.missingFixtureIds).toEqual([]);
+    expect(sunsetHard.accounting.doubleCountedFixtureIds).toEqual([]);
+    expect(sunsetHard.accounting.totals.expected).toBe(schedule.games.length);
+    expect(sunsetHard.accounting.totals.accounted).toBe(schedule.games.length);
+    expect(sunsetHard.accounting.meta.fixturesAccountedFor).toBe(schedule.games.length);
+    expect(sunsetHard.accounting.meta.fixturesTimeTbd).toBe(sunsetHard.unplaced.length);
+    expect(sunsetHard.schedule.games.length).toBe(
+      schedule.games.length - sunsetHard.unplaced.length
+    );
   });
 
   it('accounts for every displaced game as either relocated or TIME TBD', () => {
@@ -1582,11 +1680,14 @@ describe('nothing a branch loses is answered by silence', () => {
     // `result.accounting`, and then dropped before `result.status` was derived.
     // A branch that lost a game read `ok`, and `promoteScenario()` would have
     // promoted it.
-    expect(result.accounting.findings.length).toBeGreaterThan(0);
-    const carried = codesOf(result.findings);
-    for (const finding of result.accounting.findings) {
+    // On the branch that strands games (the sunset-hard one): the plain withdrawal strands none
+    // after the 2026-11-02 decision.
+    expect(sunsetHard.accounting.findings.length).toBeGreaterThan(0);
+    const carried = codesOf(sunsetHard.findings);
+    for (const finding of sunsetHard.accounting.findings) {
       expect(carried, finding.code).toContain(finding.code);
     }
+    expect(sunsetHard.status).not.toBe('allowed');
 
     // The consequence, on the run that shows it most plainly: the negative
     // control shelves every displaced game and must not read as a clean branch.
@@ -2308,19 +2409,22 @@ describe('the relocation counters are counts something could have made non-zero'
     // `options.length === 0` — structurally always nought, against a run-wide
     // `meta.candidatesConsidered` in the thousands. `CLAUDE.md` §3 names this
     // shape by name: a meta-assertion you cannot make fail is not one.
-    expect(result.relocations.unrelocatable.length).toBeGreaterThan(0);
-    for (const game of result.relocations.unrelocatable) {
+    // (The branch that strands games: the same withdrawal with the sunset margin hard.)
+    expect(sunsetHard.relocations.unrelocatable.length).toBeGreaterThan(0);
+    for (const game of sunsetHard.relocations.unrelocatable) {
       expect(game.candidatesConsidered, game.gameId).toBeGreaterThan(0);
     }
     // The run-wide counter is the sum of the per-game ones, so neither can drift
     // from the other without the reconciliation failing.
-    const perGame = [
-      ...result.relocations.proposals.map((proposal) => proposal.candidatesConsidered),
-      ...result.relocations.unrelocatable.map((game) => game.candidatesConsidered),
-    ];
-    expect(perGame.reduce((sum, count) => sum + count, 0)).toBe(
-      result.relocations.meta.candidatesConsidered
-    );
+    for (const run of [result, sunsetHard]) {
+      const perGame = [
+        ...run.relocations.proposals.map((proposal) => proposal.candidatesConsidered),
+        ...run.relocations.unrelocatable.map((game) => game.candidatesConsidered),
+      ];
+      expect(perGame.reduce((sum, count) => sum + count, 0)).toBe(
+        run.relocations.meta.candidatesConsidered
+      );
+    }
   });
 
   it('counts a reserved slot when it reaches the booking table, not when it arrives', () => {

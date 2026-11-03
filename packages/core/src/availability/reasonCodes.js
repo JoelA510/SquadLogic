@@ -194,7 +194,13 @@ export const AVAILABILITY_REASON = Object.freeze({
    * block: the practice stands and is flagged.
    */
   PRACTICE_PAST_SUNSET: 'PRACTICE_PAST_SUNSET',
-  /** Worst-case occupancy runs past sunset less the safety margin. */
+  /**
+   * Worst-case occupancy runs past sunset less the safety margin. A `compromise`
+   * (owner, 2026-11-02), not a block: the kickoff is legal and carries this
+   * warning, because some organisations have portable lighting or other
+   * workarounds. It no longer bounds `latestLegalKickoff()` or the slots a day
+   * holds; the clean bound (`latestClean`) still stops at it.
+   */
   SUNSET_MARGIN_VIOLATED: 'SUNSET_MARGIN_VIOLATED',
   /** The ground is lit, so sunset does not bound it. Provenance. */
   SUNSET_NOT_BINDING_WHEN_LIT: 'SUNSET_NOT_BINDING_WHEN_LIT',
@@ -325,14 +331,15 @@ export const AVAILABILITY_REASON_SEVERITY = Object.freeze({
   [AVAILABILITY_REASON.LIGHTS_OFF_EXCEEDED]: AVAILABILITY_SEVERITY.BLOCKING,
 
   [AVAILABILITY_REASON.SUNSET_UNKNOWN]: AVAILABILITY_SEVERITY.COMPROMISE,
-  [AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]: AVAILABILITY_SEVERITY.BLOCKING,
+  // A compromise, not a block (owner, 2026-11-02): a kickoff past the limit is legal and carries a
+  // warning (docs/changes/2026-11-02-sunset-compromise.md). The practice twin below was relabelled
+  // the same day.
+  [AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]: AVAILABILITY_SEVERITY.COMPROMISE,
   [AVAILABILITY_REASON.SUNSET_NOT_BINDING_WHEN_LIT]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.SUNSET_PRECEDENCE_AMBIGUOUS]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE]: AVAILABILITY_SEVERITY.COMPROMISE,
   // A compromise, not a block (owner, 2026-11-02): a practice past sunset is kept and flagged for the
-  // admin to decide, as the Edge pass and the repair have done since 2026-10-27. The game's
-  // SUNSET_MARGIN_VIOLATED above is not changed here; the owner approved the same relabel for it as
-  // a separate change (docs/changes/2026-11-02-sunset-compromise.md).
+  // admin to decide, as the Edge pass and the repair have done since 2026-10-27.
   [AVAILABILITY_REASON.PRACTICE_PAST_SUNSET]: AVAILABILITY_SEVERITY.COMPROMISE,
 
   [AVAILABILITY_REASON.OCCUPANCY_BOUND_BY_BOOKING]: AVAILABILITY_SEVERITY.INFO,

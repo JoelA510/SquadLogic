@@ -218,8 +218,9 @@ export function withoutWaiver(ledger, id) {
  * - the constraint is **not in the registry** (`blocking`). A rename or a
  *   rebuild leaves the record on disk governing nothing at all, which is
  *   exactly how the original waiver was lost;
- * - the constraint says **`waivable: false`** (`blocking`). Sunset margins and
- *   permit windows are not anybody's to sign away;
+ * - the constraint says **`waivable: false`** (`blocking`). Permit windows are
+ *   not anybody's to sign away (a sunset margin is a compromise since the owner's
+ *   decision of 2026-11-02, so there is nothing to waive);
  * - the waiver names **reason codes the constraint does not govern**
  *   (`compromise`). It would cover nothing while looking specific.
  *

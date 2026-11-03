@@ -3207,6 +3207,19 @@ harvest(
   })
 );
 harvest(
+  // Owner, 2026-11-02: sunset only warns, so no date of the published season is at the bare
+  // minimum any more (the two November dates used to be). The finding is driven from a requirement
+  // equal to what the leanest date holds.
+  'buildReserveCapacityReport(a requirement exactly what the leanest date holds)',
+  buildReserveCapacityReport(capacityEngines, {
+    ...capacityInput,
+    requirement: {
+      ...capacityInput.requirement,
+      slots: /** @type {number} */ (capacityReport.minSlots),
+    },
+  })
+);
+harvest(
   'buildReserveCapacityReport(a reservation on ground the report does not cover)',
   buildReserveCapacityReport(
     capacityEngines,

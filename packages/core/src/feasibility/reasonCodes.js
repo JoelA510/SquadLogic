@@ -220,22 +220,25 @@ export const MOVE_REQUEST_ENTITY = Object.freeze({
 /**
  * The two thresholds every bounded answer distinguishes.
  *
- * The corpus states two different 15-minute numbers and they do **not** have the
- * same status, which is the trap this enum exists to keep open:
+ * The corpus states two different 15-minute numbers, and this enum keeps the
+ * difference between a bound and a comfort open:
  *
  * - Past a bound is `blocking` — `PERMIT_CLOSE_EXCEEDED`, `LIGHTS_OFF_EXCEEDED`,
- *   `SUNSET_MARGIN_VIOLATED`, an `OCCUPIED_*` clash. That is {@link HARD}.
- * - Eating into a stated comfort margin is `compromise` —
- *   `PERMIT_MARGIN_TIGHT`. That is the difference between {@link HARD} and
- *   {@link CLEAN}.
+ *   an `OCCUPIED_*` clash. That is {@link HARD}.
+ * - Eating into a stated margin is `compromise` — `PERMIT_MARGIN_TIGHT`, and
+ *   since the owner's decision of 2026-11-02 ("Yes to legal-with-a-warning for
+ *   kickoffs after sunset, because some orgs have portable lighting or other
+ *   workarounds.") `SUNSET_MARGIN_VIOLATED`. That is the difference between
+ *   {@link HARD} and {@link CLEAN}.
  *
- * Note that the club's daylight margin is **already inside** the hard bound:
- * `daylightLimitMinutes()` returns sunset less the margin and
- * `SUNSET_MARGIN_VIOLATED` is `blocking`, because `sunsets.csv` states "unlit
- * games must end 15 min before sunset" as a rule rather than as a comfort. The
- * permit's 15 minutes is a comfort. This module does not re-decide either; it
- * reads both off the severities their owners assign, which is why it can carry
- * the asymmetry without encoding it.
+ * Note that the club's daylight margin is **already inside** the limit:
+ * `daylightLimitMinutes()` returns sunset less the margin, because `sunsets.csv`
+ * states "unlit games must end 15 min before sunset". Before 2026-11-02 that
+ * limit was a hard bound (`SUNSET_MARGIN_VIOLATED` was `blocking`); now it is
+ * the clean bound's, and the permit alone bounds the hard answer on unlit
+ * ground. This module does not re-decide either; it reads both off the
+ * severities their owners assign, which is why it can carry the asymmetry
+ * without encoding it.
  *
  * @readonly
  * @enum {string}

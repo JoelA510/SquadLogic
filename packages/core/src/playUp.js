@@ -297,7 +297,9 @@ export function withFinalBuddyFacts(listing, players, divisions) {
  * @param {string} [params.cutoffMode]
  * @param {number|null} [params.cutoffMonth] - the season's custom cutoff month
  * @param {number|null} [params.cutoffDay] - and day
- * @returns {{ players: Array<Object>, diagnostics: { listing: PlayUpListing[], counts: Object } }}
+ * @returns {{ players: Array<Object>, diagnostics: { listing: PlayUpListing[] } }} The players, each
+ *   placed, and the listing of those an admin should know about. Counts of who plays up or down,
+ *   by the division played, are `summarizeSeats` (`playUpSeats.js`), not part of this.
  */
 export function applyPlayUpEligibility({
   players,
@@ -355,26 +357,12 @@ export function applyPlayUpEligibility({
 
   const diagnostics = {
     listing: /** @type {PlayUpListing[]} */ ([]),
-    counts: {
-      inBand: 0,
-      playUpRequested: 0,
-      playUpUnrequested: 0,
-      playDown: 0,
-      noDivision: 0,
-      unknown: 0,
-    },
   };
   const nameOfDivision = (ref) => resolveDivisionEntry(index, ref)?.name ?? null;
 
   const resultPlayers = players.map((player) => {
     const info = decided.get(String(player.id));
     const { naturalAge, requested, placement, played, kind } = info;
-    if (placement === PLACEMENT.IN_BAND) diagnostics.counts.inBand += 1;
-    else if (placement === PLACEMENT.PLAY_UP) {
-      diagnostics.counts[requested ? 'playUpRequested' : 'playUpUnrequested'] += 1;
-    } else if (placement === PLACEMENT.PLAY_DOWN) diagnostics.counts.playDown += 1;
-    else if (placement === PLACEMENT.NO_DIVISION) diagnostics.counts.noDivision += 1;
-    else diagnostics.counts.unknown += 1;
 
     let reviewReason = null;
     if (kind !== null) {

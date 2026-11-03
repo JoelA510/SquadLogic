@@ -1,6 +1,7 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import Badge from '../ui/Badge.jsx';
+import { movedAwayNote, movedHereNote } from '../../utils/seatNotes.js';
 
 /** The settings panel's warnings (`assessTeamCount`), in a few words for the overview's table. */
 const WARNING_LABELS = {
@@ -12,12 +13,18 @@ const WARNING_LABELS = {
 
 /**
  * Why a program with registrants has nobody to seat: all on the waitlist, none eligible for the
- * division, or both kinds (no team is built for any of them).
- * @param {{ waitlistedCount?: number, notEligibleCount?: number }} program
+ * division, all placed in other divisions (their own age division), or a mix of those (no team is
+ * built for any of them).
+ * @param {{ waitlistedCount?: number, notEligibleCount?: number, movedOutCount?: number }} program
  */
 function nobodyToSeat(program) {
-  if (!(Number(program.notEligibleCount) > 0)) return 'All on the waitlist';
-  return Number(program.waitlistedCount) > 0 ? 'Nobody to seat' : 'None eligible';
+  const waitlisted = Number(program.waitlistedCount) > 0;
+  const notEligible = Number(program.notEligibleCount) > 0;
+  const movedOut = Number(program.movedOutCount) > 0;
+  if (waitlisted && !notEligible && !movedOut) return 'All on the waitlist';
+  if (notEligible && !waitlisted && !movedOut) return 'None eligible';
+  if (movedOut && !waitlisted && !notEligible) return 'All placed in other divisions';
+  return 'Nobody to seat';
 }
 
 /**
@@ -109,6 +116,16 @@ export default function ProgramOverview({
               {program.notEligibleCount} not eligible
             </span>
           )}
+          {program.movedInCount > 0 && (
+            <span className="block text-xs text-text-muted">
+              {movedHereNote(program.movedInCount)}
+            </span>
+          )}
+          {program.movedOutCount > 0 && (
+            <span className="block text-xs text-text-muted">
+              {movedAwayNote(program.movedOutCount)}
+            </span>
+          )}
         </td>
         <td className="p-4 text-text-secondary">
           {/* Generation refuses rules the advice calls blocked: no count to estimate. */}
@@ -118,7 +135,9 @@ export default function ProgramOverview({
         <td className="p-4 text-text-secondary">{program.avgRosterSize}</td>
         <td className="p-4">
           {program.playerCount === 0 &&
-          (program.waitlistedCount > 0 || program.notEligibleCount > 0) ? (
+          (program.waitlistedCount > 0 ||
+            program.notEligibleCount > 0 ||
+            program.movedOutCount > 0) ? (
             // Nobody to seat: no team is built, so "fits the limits" would say nothing true.
             <Badge tone="warning">{nobodyToSeat(program)}</Badge>
           ) : (
@@ -204,6 +223,8 @@ ProgramOverview.propTypes = {
       playerCount: PropTypes.number,
       waitlistedCount: PropTypes.number,
       notEligibleCount: PropTypes.number,
+      movedInCount: PropTypes.number,
+      movedOutCount: PropTypes.number,
       estimatedTeams: PropTypes.number,
       avgRosterSize: PropTypes.number,
       assessment: PropTypes.object,

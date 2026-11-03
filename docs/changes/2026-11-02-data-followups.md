@@ -236,7 +236,10 @@ Adopted for the not-eligible:
   program's advised count and what generation seats there differ by them (and `destinationPrograms`
   adds only to divisions the file has no registrant in). That predates this change and is not the
   not-eligible, who are seated nowhere. **Owner decision** whether the advice should count by the
-  division played in.
+  division played in. **Resolved 2026-11-03** (owner: "As recommended on all of them, start PR 1"; PR 1
+  of `docs/changes/2026-11-03-play-down-default-and-flags.md`): the advice counts by the division
+  played, through one placement and one count of the seats (`placeImportRows`, `summarizeSeats`), and
+  the Players cell says who moved.
 - A player the record places in another division than the file's (`division_id` differs) is read as
   generation reads the "others"; the selected program's narrower match (a stored player in a different
   division is refused) is a generation error, not an advice count.

@@ -517,6 +517,16 @@ there it is a no-op), and the snapshot loses their rows: at that version the ope
 no `only_in_snapshot` row for either, and a `present` view of either name in production would be
 new drift.
 
+**Indexes, columns and constraints are not in the snapshot.** Compare them by hand, read-only, in the same
+way: per table, `SELECT tablename, count(*), md5(string_agg(indexname || '|' || indexdef, E'\n' ORDER BY
+indexname COLLATE "C")) FROM pg_indexes WHERE schemaname = 'public' GROUP BY tablename` on production and on
+a harness build, then list the indexes of any table whose hash differs (the same shape over
+`pg_attribute`/`pg_attrdef` and `pg_constraint` compares columns and constraints). Measured on 2026-11-02 at
+`228980a`: production had two GIN indexes no migration made, `players_custom_attributes_gin_idx` (codified
+by `20261117010000_players_custom_attributes_gin_index.sql`) and `teams_custom_attributes_gin_idx`
+(reported and not codified); every column, constraint and row-security flag of all 57 tables was equal
+(`docs/changes/2026-11-02-data-followups.md`, item 1).
+
 ## Real-backend E2E (`e2e-real-backend.yml`)
 
 [`.github/workflows/e2e-real-backend.yml`](../../.github/workflows/e2e-real-backend.yml),

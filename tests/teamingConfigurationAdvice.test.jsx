@@ -86,6 +86,10 @@ const page = vi.hoisted(() => ({
   playersError: null,
   /** how many times the page read `players` */
   playerReads: 0,
+  /** @type {null | Promise<void>} while set, the `divisions` read waits for it */
+  divisionsGate: null,
+  /** @type {any} the error the `divisions` read returns */
+  divisionsError: null,
   /** @type {any} the organization's stored feature flags, parsed by the schema */
   flags: {},
 }));
@@ -136,13 +140,34 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
             : { data: page.players, error: null }
         );
       }
-      return createChainMock({ data: table === 'divisions' ? page.divisions : [], error: null });
+      const chain = createChainMock(
+        table === 'divisions' && page.divisionsError
+          ? { data: null, error: page.divisionsError }
+          : { data: table === 'divisions' ? page.divisions : [], error: null }
+      );
+      if (table === 'divisions' && page.divisionsGate) {
+        // Held back until the test lets the season's divisions arrive.
+        const gate = page.divisionsGate;
+        chain.then = (...args) =>
+          gate.then(() => ({ data: page.divisions, error: null })).then(...args);
+      }
+      return chain;
     },
     rpc: async (name, params) => {
       if (name !== 'admin_upsert_division_settings') return { data: null, error: null };
       page.saves.push(params);
+      // The RPC returns the whole division row, its age band and gender included.
+      const existing =
+        page.divisions.find(
+          (row) => row.id === params.p_division_id || row.name === params.p_name
+        ) ?? {};
       return {
         data: {
+          min_age: existing.min_age ?? null,
+          max_age: existing.max_age ?? null,
+          gender_policy: existing.gender_policy ?? null,
+          birthdate_start: existing.birthdate_start ?? null,
+          birthdate_end: existing.birthdate_end ?? null,
           id: params.p_division_id || `${IDS.division}-${params.p_name}`,
           organization_id: IDS.organization,
           season_settings_id: IDS.season,
@@ -212,7 +237,11 @@ const overviewRow = (program) =>
   /** @type {HTMLElement} */ (screen.getByRole('button', { name: program }).closest('tr'));
 /** A cell of that row, by its column header. */
 function overviewCell(program, header) {
-  const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
+  // Only the overview's own headers: a banner above it can carry a table of its own.
+  const table = screen.getByRole('table', { name: 'Division Overview' });
+  const headers = within(table)
+    .getAllByRole('columnheader')
+    .map((th) => th.textContent);
   return within(overviewRow(program)).getAllByRole('cell')[headers.indexOf(header)];
 }
 
@@ -479,7 +508,7 @@ describe('The waitlisted are left out of the advice (follow-ups F1)', () => {
     expect(overviewCell('U12', 'Status')).toHaveTextContent('Fits the limits');
   });
 
-  it('with the Waitlist option off counts every player and reads nothing new', async () => {
+  it('with the Waitlist option off counts every player, whatever status the record holds', async () => {
     page.flags = { waitlist: false };
     page.rows = importRows('U10', 30, (i) => (i < 6 ? { waitlist: 'yes' } : {}));
     page.divisions = [savedDivision('U10')];
@@ -491,8 +520,10 @@ describe('The waitlisted are left out of the advice (follow-ups F1)', () => {
     );
     expect(screen.getByTestId('team-count-recommendation')).not.toHaveTextContent('waitlist');
     expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
-    // The page reads `players` at generation only; with the option off it makes no read to load.
-    expect(page.playerReads).toBe(0);
+    // The stored players are read once either way now (the record decides who a division can hold,
+    // data follow-ups item 2), but their status is not looked at with the option off.
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    expect(screen.getByTestId('team-count-recommendation')).not.toHaveTextContent('waitlist');
   });
 
   it('a program with nobody waitlisted reads exactly as before', async () => {
@@ -515,7 +546,7 @@ describe('The waitlisted are left out of the advice (follow-ups F1)', () => {
     await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
     await waitFor(() =>
       expect(error.mock.calls.map((call) => call.map(String).join(' ')).join('\n')).toMatch(
-        /waitlist.*permission denied for table players/i
+        /stored players.*permission denied for table players/i
       )
     );
     expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
@@ -539,6 +570,284 @@ describe('The waitlisted are left out of the advice (follow-ups F1)', () => {
     });
     await screen.findByText('Team Review Pending');
     expect(screen.getByText('Team review staged: 2 teams.', { exact: false })).toBeInTheDocument();
+  });
+});
+
+/*
+ * Data follow-ups, item 2 (docs/changes/2026-11-02-data-followups.md): the advice also counted the
+ * players no division can hold, whom generation seats nowhere (`isEligibilityBlocked`, B2). They are
+ * left out the way the waitlisted are. A division's band is explicit here (U10 holds ages 9 to 10,
+ * U12 holds 11 to 12), a player's age is the row's `natural_age`, and every expected count is worked
+ * out from the rows and the limits (target 12, minimum 10, maximum 14: 24 players are 2 teams, 28
+ * are 2, 30 are 3), never read back from the page.
+ */
+describe('The players no division can hold are left out of the advice (data follow-ups)', () => {
+  const resetState = () => {
+    page.rows = [];
+    page.divisions = [];
+    page.saves = [];
+    page.players = [];
+    page.playersError = null;
+    page.playerReads = 0;
+    page.divisionsGate = null;
+    page.divisionsError = null;
+    page.flags = {};
+    sessionStorage.clear();
+  };
+  beforeEach(resetState);
+  afterEach(() => {
+    cleanup();
+    resetState();
+    vi.restoreAllMocks();
+  });
+
+  const U10 = () => savedDivision('U10', { min_age: 9, max_age: 10 });
+  const U12 = () => savedDivision('U12', { min_age: 11, max_age: 12 });
+  /** Older than every division here: nobody holds a 14-year-old. */
+  const TOO_OLD = 14;
+  /** The stored player of an import row, as `finalize_import_job` keeps it. */
+  const stored = (program, n, fields) => ({
+    id: `${IDS.division}-player-${n}`,
+    external_registration_id: `${program}-REG-${n}`,
+    division_id: `${IDS.division}-${program}`,
+    first_name: `Kid${n}`,
+    last_name: `Placeholder${n}`,
+    ...fields,
+  });
+
+  it('recommends for the players a division can hold, and says how many are not eligible', async () => {
+    // Thirty registered in U10 (ages 9 to 10), six of them 14: no division holds a 14-year-old, so
+    // 24 are seated, ceil(24 / 12) = 2 teams. Counting all thirty gives ceil(30 / 12) = 3.
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? TOO_OLD : 9 }));
+    page.divisions = [U10()];
+    expect(Math.ceil(24 / 12)).toBe(2);
+    expect(Math.ceil(30 / 12)).toBe(3);
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players (6 not eligible for the division are not counted)'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^24\s*6 not eligible$/);
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('2');
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent('2');
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent('12');
+  });
+
+  it('agrees with what generation makes on the same rows, and with who it does not place', async () => {
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? TOO_OLD : 9 }));
+    page.divisions = [U10()];
+    await renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players'
+      )
+    );
+    const generate = screen.getByRole('button', { name: /Generate Teams/ });
+    await waitFor(() => expect(generate).toBeEnabled());
+    await act(async () => {
+      fireEvent.click(generate);
+    });
+    await screen.findByText('Team Review Pending');
+    expect(screen.getByText('Team review staged: 2 teams.', { exact: false })).toBeInTheDocument();
+    // The six the advice left out are the six the run did not place for want of a division.
+    expect(
+      screen.getByText(/U10: 6 not placed \(6 not eligible for the division/, { exact: false })
+    ).toBeInTheDocument();
+  });
+
+  it('takes the record over the file: a play-up the record requests is seated, as generation seats it', async () => {
+    // The file shows two 4-year-olds in U10: below its band and below every division, so not eligible
+    // by the file alone (28 seated, 2 teams). The record has the play-up requested for both, so they
+    // stay in the division they registered for and are seated: 30, 3 teams.
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 2 ? 4 : 9 }));
+    page.divisions = [U10()];
+    page.players = [
+      stored('U10', 1, { natural_age: 4, play_up_requested: true }),
+      stored('U10', 2, { natural_age: 4, play_up_requested: true }),
+    ];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 3 teams for 30 players'
+      )
+    );
+    expect(screen.getByTestId('team-count-recommendation')).not.toHaveTextContent('not eligible');
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+  });
+
+  it("takes the record's age over the file's: a player the record makes too old is left out", async () => {
+    // The file says all thirty are 9. The record has two of them at 14 (an admin corrected the age):
+    // no division holds them, so 28 are seated and the advice is 2 teams, not the 3 that 30 gives.
+    page.rows = importRows('U10', 30, () => ({ natural_age: 9 }));
+    page.divisions = [U10()];
+    page.players = [
+      stored('U10', 7, { natural_age: TOO_OLD }),
+      stored('U10', 8, { natural_age: TOO_OLD }),
+    ];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 28 players (2 not eligible for the division are not counted)'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^28\s*2 not eligible$/);
+  });
+
+  it('counts a player both waitlisted and not eligible once, as not eligible', async () => {
+    // Thirty-six in U10: 2 waitlisted and too old, 4 waitlisted only, 6 too old only, 24 seated
+    // (2 teams of 12). Counted once as not eligible: 8 not eligible (2 + 6) and 4 on the waitlist.
+    // Counted as waitlisted instead it would read 6 and 6; counted in both, 6 and 8.
+    page.rows = importRows('U10', 36, (i) => ({
+      natural_age: i < 2 || (i >= 6 && i < 12) ? TOO_OLD : 9,
+      ...(i < 6 ? { waitlist: 'yes' } : {}),
+    }));
+    page.divisions = [U10()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players (4 on the waitlist and 8 not eligible for the division are not counted)'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(
+      /^24\s*4 on the waitlist\s*8 not eligible$/
+    );
+  });
+
+  it('a program with nobody left to seat advises no team, and says why', async () => {
+    // U10: all twelve too old. U12: six 11-year-olds in band, all waitlisted, beside six too old, so
+    // nobody is left to seat of either kind.
+    page.rows = [
+      ...importRows('U10', 12, () => ({ natural_age: TOO_OLD })),
+      ...importRows('U12', 12, (i) =>
+        i < 6 ? { natural_age: 11, waitlist: 'yes' } : { natural_age: TOO_OLD }
+      ),
+    ];
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() => expect(overviewCell('U10', 'Status')).toHaveTextContent('None eligible'));
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^0\s*12 not eligible$/);
+    expect(overviewCell('U10', 'Est. Teams')).toHaveTextContent(/^0$/);
+    expect(overviewCell('U10', 'Recommended')).toHaveTextContent('—');
+    expect(overviewCell('U10', 'Avg Roster')).toHaveTextContent(/^0$/);
+    expect(overviewRow('U10')).not.toHaveTextContent('Fits the limits');
+
+    expect(overviewCell('U12', 'Status')).toHaveTextContent('Nobody to seat');
+    expect(overviewCell('U12', 'Players')).toHaveTextContent(
+      /^0\s*6 on the waitlist\s*6 not eligible$/
+    );
+    expect(overviewCell('U12', 'Est. Teams')).toHaveTextContent(/^0$/);
+  });
+
+  it('does not call a player not eligible who another division can hold', async () => {
+    // Six of the thirty are 11: too old for U10, but U12 holds them, so they play there and are not
+    // "not eligible". (The advice still counts them in the program they registered in; that is the
+    // gap the plan lists, not a not-eligible player.)
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? 11 : 9 }));
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 3 teams for 30 players'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    expect(screen.queryByText(/not eligible/)).toBeNull();
+  });
+
+  it('counts everyone until the season’s divisions arrive, then leaves the not-eligible out', async () => {
+    let release = () => {};
+    page.divisionsGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? TOO_OLD : 9 }));
+    page.divisions = [U10()];
+    render(
+      <MemoryRouter>
+        <TeamAnalysisPage />
+      </MemoryRouter>
+    );
+    await screen.findByRole('heading', { name: 'Division Overview' });
+    // The divisions are still being read: nothing can be judged yet, so the advice is as it was.
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    expect(screen.queryByText(/not eligible/)).toBeNull();
+
+    await act(async () => {
+      release();
+    });
+    await waitFor(() =>
+      expect(overviewCell('U10', 'Players')).toHaveTextContent(/^24\s*6 not eligible$/)
+    );
+  });
+
+  it('leaves nobody out when the season\u2019s divisions cannot be read, whatever a name would imply', async () => {
+    // The read is refused. The saved band (U10 holds 9 to 10) is unknown, and a band guessed from the
+    // name "U10" is 10 alone, which would call every 9-year-old too young and the whole division "None
+    // eligible". A failed read is not an empty season: the advice is what it was before this change.
+    page.divisionsError = { message: 'permission denied for table divisions', code: '42501' };
+    page.rows = importRows('U10', 30, () => ({ natural_age: 9 }));
+    page.divisions = [U10()];
+    await renderPage();
+
+    expect(await screen.findByText(/permission denied for table divisions/)).toBeInTheDocument();
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
+    expect(overviewCell('U10', 'Status')).not.toHaveTextContent('None eligible');
+    expect(screen.queryByText(/not eligible/)).toBeNull();
+  });
+
+  it('still judges by the name when the read succeeds and the season has no divisions', async () => {
+    // An empty season is a read that worked: a division with no saved row is held to the band its name
+    // gives (U10 is 10), as generation holds it. Thirty registered: six aged 14, whom nothing holds, and
+    // twenty-four aged 10.
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? TOO_OLD : 10 }));
+    page.divisions = [];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+        'Recommended: 2 teams for 24 players (6 not eligible for the division are not counted)'
+      )
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^24\s*6 not eligible$/);
+  });
+
+  it('falls back to the file when the stored players cannot be read, and logs it', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    page.playersError = { message: 'permission denied for table players', code: '42501' };
+    page.rows = importRows('U10', 30, (i) => ({ natural_age: i < 6 ? TOO_OLD : 9 }));
+    page.divisions = [U10()];
+    await renderPage();
+
+    await waitFor(() => expect(page.playerReads).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(error.mock.calls.map((call) => call.map(String).join(' ')).join('\n')).toMatch(
+        /stored players.*permission denied for table players/i
+      )
+    );
+    // The file's own ages still leave the six out.
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      'Recommended: 2 teams for 24 players'
+    );
+  });
+
+  it('a program where nobody is waitlisted or too old reads exactly as before', async () => {
+    page.rows = importRows('U10', 30, () => ({ natural_age: 9 }));
+    page.divisions = [U10()];
+    await renderPage();
+    expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
+      /^Recommended: 3 teams for 30 players\. Each volunteer head coach gets a team, which can add more\.$/
+    );
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(/^30$/);
   });
 });
 

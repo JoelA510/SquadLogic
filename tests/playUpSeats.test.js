@@ -298,9 +298,13 @@ test('the subject set is the seats given: none is dropped, and a repeated player
     () => summarizeSeats({ seats: [seat('dup', 10, 'U10'), seat('dup', 10, 'U10')], divisions }),
     /more than one seat.*dup/
   );
-  assert.throws(() => summarizeSeats({ seats: 'nope', divisions }), TypeError);
+  assert.throws(() => summarizeSeats({ seats: /** @type {any} */ ('nope'), divisions }), TypeError);
   assert.throws(
-    () => summarizeSeats({ seats: [{ playerId: 'lost', naturalAge: 10 }], divisions }),
+    () =>
+      summarizeSeats({
+        seats: /** @type {any} */ ([{ playerId: 'lost', naturalAge: 10 }]),
+        divisions,
+      }),
     /neither a registered nor a seated division/
   );
   // No seats is a league with nobody in it, not an error.
@@ -419,5 +423,5 @@ test('a player nobody has placed is seated where they registered', () => {
       ['8', 'U10', 'U10', true],
     ]
   );
-  assert.throws(() => seatsFromPlacedPlayers(null), TypeError);
+  assert.throws(() => seatsFromPlacedPlayers(/** @type {any} */ (null)), TypeError);
 });

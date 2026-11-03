@@ -1,17 +1,19 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { cannotBePlaced } from '../packages/core/src/playUp.js';
+import { applyPlayUpEligibility, cannotBePlaced } from '../packages/core/src/playUp.js';
 import { seatsFromPlacedPlayers, summarizeSeats } from '../packages/core/src/playUpSeats.js';
 import { generateTeams } from '../packages/core/src/teamGeneration.js';
 import { prepareTeamingInput } from '../packages/core/src/teamingPipeline.js';
 
 /*
- * Advice and generation cannot disagree: shown, not stated (plan section 4.1, "Parity is the
- * guarantee"). A league with every kind of player goes through the real pipeline and the real
- * generator, division by division, as the Teams page runs it. The count made from the PLACEMENT
- * (what the advice is built on) must equal the count made from the ROSTERS generation saved, per
- * division and per program, and the players generation held back (the waitlisted, the not
- * eligible) must be the ones the placement counts as such.
+ * Advice and generation agree: shown, not stated (plan section 4.1, "Parity is the guarantee"). A
+ * league with every kind of player goes through the real pipeline and the real generator, division
+ * by division, as the Teams page runs it. The count made from the PLACEMENT (`applyPlayUpEligibility`
+ * on the registrants, which is what the page's advice is built on: `placeImportRows`) must equal the
+ * count made from the ROSTERS generation saved, per division and per program, and the players
+ * generation held back (the waitlisted, the not eligible) must be the ones the placement counts as
+ * such. The one known exception is written out in the last test, not hidden: a waitlisted buddy of a
+ * coach's child, whom the pipeline takes off the waitlist after the placement.
  *
  * Every player is written below with the division they registered in and the age they are judged
  * by, and the expectation is worked from the rule, not read back from either side.
@@ -58,13 +60,21 @@ const registrants = [
 ];
 
 /** Run the league as the page does: one placement for everyone, then one generation per division. */
-function runLeague() {
+function runLeague(input = registrants, { coaches = [] } = {}) {
   const prepared = prepareTeamingInput({
-    players: registrants.map((player) => ({ ...player })),
+    players: input.map((player) => ({ ...player })),
+    coaches,
     divisions,
     seasonYear: 2026,
     cutoffMode: 'birth_year',
   }).players;
+  // What the page's advice sees: the placement of the same registrants, with nothing after it.
+  const { players: placed } = applyPlayUpEligibility({
+    players: input.map((player) => ({ ...player })),
+    divisions,
+    seasonYear: 2026,
+    cutoffMode: 'birth_year',
+  });
 
   const teams = [];
   const held = { waitlisted: 0, 'eligibility-blocked': 0 };
@@ -85,7 +95,7 @@ function runLeague() {
       held[entry.reason] += entry.players.length;
     }
   }
-  return { prepared, teams, held };
+  return { prepared, placed, teams, held };
 }
 
 /** The seats the saved rosters hold: what a reload would count, with no placement in sight. */
@@ -105,8 +115,8 @@ function rosterSeats(teams) {
 const plain = (map) => Object.fromEntries(map);
 
 test('the league has every kind of player the parity must cover', () => {
-  const { prepared } = runLeague();
-  const { league } = summarizeSeats({ seats: seatsFromPlacedPlayers(prepared), divisions });
+  const { placed } = runLeague();
+  const { league } = summarizeSeats({ seats: seatsFromPlacedPlayers(placed), divisions });
   // Worked from the registrants above: t6, u4 play up; t5, s4, t7, u5 are moved; t8 and t11 are not
   // eligible; t10 is waitlisted; t9 cannot be checked; u6 asked with nothing to honour. A league
   // that lost a kind would compare nothing about it.
@@ -122,11 +132,11 @@ test('the league has every kind of player the parity must cover', () => {
 });
 
 test('the count from the placement equals the count from the saved rosters, per division and program', () => {
-  const { prepared, teams } = runLeague();
+  const { placed, teams } = runLeague();
 
   // The placement side: every registrant, then only those generation can seat.
-  const placement = summarizeSeats({ seats: seatsFromPlacedPlayers(prepared), divisions });
-  const seatable = prepared.filter((player) => !cannotBePlaced(player));
+  const placement = summarizeSeats({ seats: seatsFromPlacedPlayers(placed), divisions });
+  const seatable = placed.filter((player) => !cannotBePlaced(player));
   const fromPlacement = summarizeSeats({ seats: seatsFromPlacedPlayers(seatable), divisions });
 
   // The roster side: the seats of the teams the run built, from the rosters alone.
@@ -158,8 +168,8 @@ test('the count from the placement equals the count from the saved rosters, per 
 });
 
 test('the players generation held back are the ones the placement counts as waitlisted or not eligible', () => {
-  const { prepared, held } = runLeague();
-  const { league } = summarizeSeats({ seats: seatsFromPlacedPlayers(prepared), divisions });
+  const { placed, held } = runLeague();
+  const { league } = summarizeSeats({ seats: seatsFromPlacedPlayers(placed), divisions });
   // From the generator's own overflow: t10 waitlisted; t8 and t11 blocked (t11 is also waitlisted, and
   // the generator reports it once, as blocked, as the placement counts it).
   assert.equal(league.waitlisted, held.waitlisted);
@@ -168,8 +178,8 @@ test('the players generation held back are the ones the placement counts as wait
 });
 
 test('the parity can fail: a player moved by hand to another division is counted where they now sit', () => {
-  const { prepared, teams } = runLeague();
-  const seatable = prepared.filter((player) => !cannotBePlaced(player));
+  const { placed, teams } = runLeague();
+  const seatable = placed.filter((player) => !cannotBePlaced(player));
   const fromPlacement = summarizeSeats({ seats: seatsFromPlacedPlayers(seatable), divisions });
 
   // s1 is aged 8 and plays U8 (band 7 to 8). Move them to a U12 team, as the roster editor can.
@@ -201,4 +211,29 @@ test('the parity can fail: a player moved by hand to another division is counted
     fromRosters.byProgram.get('junior').movedOut,
     fromPlacement.byProgram.get('junior').movedOut + 1
   );
+});
+
+test('the one known disagreement: a waitlisted buddy of a coach’s child is seated by generation, waitlisted by the advice', () => {
+  // data follow-ups "Not covered": the pipeline takes a waitlisted player a coach asked for off the
+  // waitlist (`applyWaitlistException`) AFTER the placement, and the page's advice reads the status the
+  // file or the record holds, so it counts them as waitlisted until the page's save makes them active.
+  // Written out so that closing the gap flips this test on purpose, and so nobody reads the parity
+  // above as covering it.
+  const input = [
+    kid('child', 'U10', 10, { buddyId: 'buddy' }),
+    kid('buddy', 'U10', 10, { buddyId: 'child', status: 'waitlist' }),
+    kid('other1', 'U10', 10),
+    kid('other2', 'U10', 9),
+  ];
+  const { placed, teams } = runLeague(input, {
+    coaches: [{ id: 'coachA', children: [{ player_id: 'child' }] }],
+  });
+  const placement = summarizeSeats({ seats: seatsFromPlacedPlayers(placed), divisions });
+  const fromRosters = summarizeSeats({ seats: rosterSeats(teams), divisions });
+  // The advice: three seated, the buddy on the waitlist.
+  assert.equal(placement.byDivision.get('U10').seated, 3);
+  assert.equal(placement.byDivision.get('U10').waitlisted, 1);
+  // Generation: all four are on teams, the buddy beside the child.
+  assert.equal(fromRosters.byDivision.get('U10').seated, 4);
+  assert.ok(teams.some((team) => team.players.some((player) => player.id === 'buddy')));
 });

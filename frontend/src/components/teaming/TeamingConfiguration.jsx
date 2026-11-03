@@ -1,7 +1,7 @@
 import React from 'react';
 import { assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import Button from '../ui/Button.jsx';
-import { movedAwayNote, movedHereNote } from '../../utils/seatNotes.js';
+import { movedHereNote } from '../../utils/seatNotes.js';
 
 /**
  * The recommendation's note on who is registered but not counted, because no team seats them: those on
@@ -22,7 +22,7 @@ function leftOutNote(program) {
 /**
  * The recommendation's note on who moved: the advice counts a player where they play, so players
  * registered elsewhere who play here are in the count, and players registered here who play in their
- * own age division elsewhere are not. Empty when nobody moved.
+ * own age division elsewhere are not, and the sentence says so. Empty when nobody moved.
  * @param {{ movedInCount?: number, movedOutCount?: number }} program
  */
 function movedNote(program) {
@@ -30,7 +30,11 @@ function movedNote(program) {
   const movedOut = Number(program.movedOutCount) || 0;
   const parts = [];
   if (movedIn > 0) parts.push(movedHereNote(movedIn));
-  if (movedOut > 0) parts.push(movedAwayNote(movedOut));
+  if (movedOut > 0) {
+    parts.push(
+      `${movedOut} registered here ${movedOut === 1 ? 'is' : 'are'} placed in their own age division and not counted`
+    );
+  }
   return parts.length > 0 ? ` (${parts.join('; ')})` : '';
 }
 

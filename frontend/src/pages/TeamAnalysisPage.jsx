@@ -181,8 +181,14 @@ function registeredDivisionsOf(rows) {
  * A row for each division the file registers players in, then, last, each division of the season the
  * file has no registrants in but whose rules take players from it (a U4 whose birth-date window holds
  * a U3 registrant; `incoming`): programs too, with the players that would play there, so they can be
- * seen and generated. Their id is the division's own, which is the id the age placement gives them. A
- * division only the waitlisted would play in is no row.
+ * seen and generated, and so a player who moved is shown somewhere even when they are waitlisted
+ * (that row reads "All on the waitlist"). Their id is the division's own, which is the id the age
+ * placement gives them.
+ *
+ * `totalPlayers` is every registrant the row accounts for: the players who play here, seated or on
+ * the waitlist, and the ones registered here whom no division holds. A player who moved out is in the
+ * row they moved to, not this one. Nothing reads it (it was "everyone registered" before the advice
+ * counted by the division played).
  *
  * @param {Object} params
  * @param {Array<{ id: string, name: string }>} params.registeredDivisions - `registeredDivisionsOf`
@@ -211,7 +217,10 @@ function derivePrograms({ registeredDivisions, byDivision, incomingDescriptors =
   return [
     ...registeredDivisions.map(({ id, name }) => toProgram(id, name)),
     ...incomingDescriptors
-      .filter((descriptor) => (byDivision.get(descriptor.id)?.seated ?? 0) > 0)
+      .filter((descriptor) => {
+        const counts = byDivision.get(descriptor.id);
+        return counts !== undefined && counts.seated + counts.waitlisted > 0;
+      })
       .map((descriptor) => toProgram(descriptor.id, String(descriptor.name), { incoming: true })),
   ];
 }

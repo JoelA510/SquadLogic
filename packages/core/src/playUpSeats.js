@@ -47,9 +47,13 @@ import { buildDivisionIndex, isEligibilityBlocked, isWaitlisted } from './playUp
  * @property {number} notEligible - registered here, and no division can hold their age
  * @property {number} playingUp - play here, in a division whose band is above their age (the
  *   waitlisted included, so every request is visible)
- * @property {number} playingDown - play here, in a division whose band is below their age
+ * @property {number} playingDown - play here, in a division whose band is below their age. Zero
+ *   from the placement while nothing honours a play-down (the age rule moves such a player to their
+ *   own age division); what makes it non-zero is a roster edit, which can put any player on any team
+ *   (plan finding 2), or a setting that honours it (PR 3)
  * @property {number} askedToPlayUp - registered here and play here, asked to play up, and there is
- *   nothing to honour: in their own division, or the age (or the band) is unknown
+ *   nothing to honour: in their own division, or the age (or the band) is unknown. A request by a
+ *   player the age rule moved is not counted here: they are shown as moved
  * @property {number} notChecked - play here, and the age or the division's band is unknown: nothing
  *   was compared, which is never read as "in band" (lesson 47)
  * @property {number} movedIn - registered in another division, play here
@@ -71,16 +75,14 @@ function emptyCounts() {
   };
 }
 
-/** Fields a program sums over its divisions. A move is added separately: only across programs. */
-const SUMMED_FIELDS = Object.freeze([
-  'seated',
-  'waitlisted',
-  'notEligible',
-  'playingUp',
-  'playingDown',
-  'askedToPlayUp',
-  'notChecked',
-]);
+/**
+ * Fields a program sums over its divisions: every count but the moves, which are added separately
+ * (only across programs). Derived from the counts themselves, so a field added to them cannot be
+ * left out of a program's total.
+ */
+const SUMMED_FIELDS = Object.freeze(
+  Object.keys(emptyCounts()).filter((field) => field !== 'movedIn' && field !== 'movedOut')
+);
 
 function nonEmpty(value) {
   return value === undefined || value === null || value === '' ? null : String(value);

@@ -338,21 +338,86 @@ merges (the repository allows two). At the time of writing two Dependabot pull r
 **PR 1: one placement, one count, the advice by the division played** (core and Teams page; no setting, no UI beyond
 the Players cell)
 
-- [ ] A1 (M) `packages/core/src/playUpSeats.js` (`summarizeSeats`), replacing the unread `diagnostics.counts`
+- [x] A1 (M) `packages/core/src/playUpSeats.js` (`summarizeSeats`), replacing the unread `diagnostics.counts`
       (flagged refactor: 8 assertions in `tests/playUp.test.js` and `tests/teamingPipeline.test.js` move to the new
       function). Test: `tests/playUpSeats.test.js` (new), expected counts worked from the rule by hand for a small
       league (U10 ages 9 to 10 and U12 ages 11 to 12 in two programs; three requested play-ups, two unrequested, one
       registered-younger, one waitlisted, one no-division, one unknown age, one division with no band): the partition
       sums to the rows; program counts equal the sum of their divisions; an unknown age and a bandless division are
       `notChecked` and never `playingUp`; a move inside a program nets to zero at program level.
-- [ ] A2 (L) `placeImportRows` and the advice by seat (`derivePrograms`, `destinationPrograms`, `playsHere`,
+- [x] A2 (L) `placeImportRows` and the advice by seat (`derivePrograms`, `destinationPrograms`, `playsHere`,
       `notEligibleRowIndexes`). Tests: `tests/teamingConfigurationAdvice.test.jsx` gains the moved-player cases (the
       finding 4 league worked by hand: advised teams equal the teams **Generate** makes, for both divisions); a census
       test fails when `applyPlayUpEligibility` is called anywhere in `frontend/src` but the helper; the existing
       advice cases (24 of 30, waitlist, refused reads) pass unchanged.
-- [ ] A3 (S) The Players cell notes and the matching sentence in `TeamingConfiguration`. Test: a new
+- [x] A3 (S) The Players cell notes and the matching sentence in `TeamingConfiguration`. Test: a new
       `tests/programOverviewPlayUp.test.jsx`: the notes appear only when there are moved players and the cell reads
       byte for byte as before when there are none.
+
+**What PR 1 did differently from the tasks above** (built 2026-11-03; where the plan and the code disagreed,
+the code won and the difference is here, so PR 2 and PR 3 start from what is true):
+
+- **The parity test moved from PR 2 (B5) into PR 1, at core level.** `tests/playUpSeatsParity.test.js` runs a
+  21-registrant league with every kind of player through the real pipeline and generator, division by division,
+  and requires the count from the placement (`applyPlayUpEligibility`, what the advice is built on) to equal the
+  count from the rosters generation saved, per division and per program, and the held-back players to be the
+  waitlisted and not-eligible the placement counts. It has a negative control (a player moved by hand to
+  another division changes the roster count where it should). B5 keeps only what the page can add: reading
+  saved rosters after a reload (with B3).
+- **The one known disagreement is pinned, not hidden.** A waitlisted buddy of a coach's child is taken off the
+  waitlist by the pipeline after the placement (`applyWaitlistException`), so generation seats them and the
+  advice counts them as waitlisted until the page's save makes them active (the data follow-ups' "Not covered").
+  The first draft of the parity test built the placement side from the pipeline's output, which already
+  includes the exception, and so could not have shown it; review found the overstatement. Closing the gap is
+  not in this plan; the test flips when someone does.
+- **`summarizeSeats`' shape.** Divisions carry their program as `program_id` or `programId`; the result is
+  `{ byDivision, byProgram, league }` (Maps, every listed division an entry; `byProgram` in order of first
+  appearance with the no-program group last under `null`; `league` the plain sum, so its moves are every
+  player who plays elsewhere than they registered). A listed id is matched exactly before folding case, so two
+  divisions that differ only in case stay two. `seatsFromPlacedPlayers` (added) makes one seat per player from
+  the placement, so a held-back player cannot vanish from a count. A request by a player the age rule moved is
+  a move, not an `askedToPlayUp`. `playingUp`, `playingDown`, `askedToPlayUp` and `notChecked` are computed and
+  tested in PR 1 but have no reader on screen until PR 2 (the page reads `seated`, `waitlisted`, `notEligible`,
+  `movedIn`, `movedOut`); `playingDown` is zero from the placement by construction.
+- **The page: one helper, more removed than named.** `placeImportRows` is the page's only call of
+  `applyPlayUpEligibility` (census test). Generation's "who plays here" now places the other programs' rows
+  through it (the old call also placed the selected program's own players, whose result nothing read). Gone
+  with it: `waitlistedRowIndexes`, `notEligibleRowIndexes`, `destinationPrograms`, `fileProgramsBase` and the two
+  empty-set constants; the waitlist is read from the generator player's status (the same `isWaitlistedRow`
+  predicate). The destination rows now apply the stored player over the file's row, as generation does (they
+  used the file's row alone).
+- **Waitlisted players who move are counted on the waitlist of the division they would play in**, and a division
+  the file has no registrants in gets a row when only waitlisted players would play there (it reads "All on the
+  waitlist"), so the file's count reconciles on screen. (The plan's rule was "a division with a seated player".)
+- **A division whose registrants all moved on says "All placed in other divisions".** `assessTeamCount` returns
+  no warnings for zero players, so without a status of its own such a division read "Fits the limits"; any mix
+  with the waitlisted or not eligible reads "Nobody to seat".
+- **The settings sentence words the move-out note differently from the cell.** The cell keeps the plan's
+  words ("N registered here, placed in their own age division"); the sentence says "N registered here are placed
+  in their own age division and not counted", because beside "for 24 players" the cell's words read as if they
+  were among the 24.
+- **`totalPlayers` on a program row is kept and its meaning written down** (the players who play here, seated or
+  waitlisted, and the registrants no division holds); nothing reads it. It was "everyone registered" before.
+- **Two existing tests pinned the old counting and moved on purpose:** `tests/teamingConfigurationAdvice.test.jsx`
+  "does not call a player not eligible who another division can hold" (U10 advised 3 teams for 30; it is 2 for 24
+  with U12 gaining the six) and `tests/teamAnalysisDivisionWindow.test.jsx` (U3 `9` is `8`, with "1 moved here"
+  on U4). No test of a league without a moved player changed.
+- **The consumer census** also pins the importers of `playUpSeats.js` to the Teams page (the plan listed it
+  under "What stays unchanged"); PR 2 adds its consumers there on purpose.
+- **Not done in PR 1, left for the docs pass of PR 3 (C4):** the stale words in `teamGeneration.js:55`,
+  `constants.js:28` and the fixture string in `tests/placementReview.test.jsx:63`, and the notes in
+  `gotsport-import-contract.md` and `2026-10-27-play-up-by-request.md` (they describe the setting and the
+  flags, which PR 1 does not add). `docs/changes/2026-11-02-data-followups.md` "Not covered", first bullet, is
+  marked resolved here.
+
+**PR 1, executed (2026-11-03, throwaway script outside the repository over the core functions):** on the season
+fixture (1,153 registrations, bands read off the data) and the demo league (1,259), counting by seat gives the
+same player count and the same recommended team count in every division as counting by registration (0 of 21
+and 0 of 17 divisions differ; 0 moved, 29 and 33 requests registered in their own division). With ten of the
+season fixture's players re-registered (six age-12 players into U10B, four age-10 players into U12B, one
+requesting) the registered counts are U10B 81 and U12B 91, the seated counts are 77 and 95, and the advised
+teams at a maximum roster of 10 are 9 against 8 for U10B and 10 against 10 for U12B. (The plan's 78 and 94 came
+from a different choice of ten players; 9 against 8 is the same.)
 
 **PR 2: flags and counts in the views** (after PR 1)
 

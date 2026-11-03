@@ -11,8 +11,8 @@
  * an export, a coach page) must be added here on purpose, not by an import nobody noticed.
  *
  * A census that walked nothing would pass by looking at zero files, so the walk is held to a floor,
- * and the scanner is run on constructed sources first: it must find a call, ignore a comment and
- * an import, and count two calls as two.
+ * and the scanner is run on constructed sources first: it must find a call, ignore an import and
+ * the definition, count two calls as two, and see an alias that would hide a call.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -35,43 +35,46 @@ function listSources(dir) {
   });
 }
 
-/** The source without its comments, so a mention in prose is not a call. */
-function withoutComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
-}
-
 /**
- * How many times `source` calls `name(`. An import, a re-export, a comment and the function's own
- * definition are not calls.
+ * How many times `source` calls `name(`, read from the raw text: a mention of the call in a comment
+ * counts too, because over-counting only ever fails the census where under-counting would let a second
+ * call through (a stripped comment once hid code behind a `//` inside a string). An import, a
+ * re-export and the function's own definition are not calls, so prose here must not spell the call as
+ * `name(`.
  */
 function callCount(source, name) {
   const call = new RegExp(`(?<!function\\s+)\\b${name}\\s*\\(`, 'g');
-  return (withoutComments(source).match(call) ?? []).length;
+  return (source.match(call) ?? []).length;
+}
+
+/** Does `source` bind `name` to another name (`import { name as other }`), which hides its calls? */
+function aliasesImport(source, name) {
+  return new RegExp(`\\b${name}\\s+as\\s+\\w`).test(source);
 }
 
 /** Does `source` import from a module whose path ends in `file`? */
 function importsFrom(source, file) {
   const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`from\\s+['"][^'"]*${escaped}['"]`).test(withoutComments(source));
+  return new RegExp(`from\\s+['"][^'"]*${escaped}['"]`).test(source);
 }
 
 const sources = SOURCE_ROOTS.flatMap(listSources);
 const read = (file) => readFileSync(path.join(ROOT, file), 'utf8');
 
 describe('the scanner itself finds what it must, and only that', () => {
-  it('finds a call, ignores a comment, an import and a mention in a string of prose', () => {
+  it('finds a call, and ignores an import, a re-export and the definition', () => {
     expect(
       callCount('const a = applyPlayUpEligibility({ players });', 'applyPlayUpEligibility')
     ).toBe(1);
     expect(callCount('x = applyPlayUpEligibility ({ a })', 'applyPlayUpEligibility')).toBe(1);
+    expect(callCount('x = playUp.applyPlayUpEligibility({ a })', 'applyPlayUpEligibility')).toBe(1);
     expect(
       callCount(
         [
           "import { applyPlayUpEligibility } from '@squadlogic/core/playUp.js';",
-          '// the one call: applyPlayUpEligibility(players) is made in the helper',
-          '/** placed by `applyPlayUpEligibility` and by applyPlayUpEligibility(x) too */',
           'export { applyPlayUpEligibility };',
           'export function applyPlayUpEligibility({ players }) {}',
+          'const note = `placed by applyPlayUpEligibility, once`;',
         ].join('\n'),
         'applyPlayUpEligibility'
       )
@@ -83,12 +86,31 @@ describe('the scanner itself finds what it must, and only that', () => {
     expect(callCount(twice, 'applyPlayUpEligibility')).toBe(2);
   });
 
+  it('does not let a call hide behind a // inside a string or after a comment-looking prefix', () => {
+    const sneaky = "const s = 'a // b'; applyPlayUpEligibility({ p });";
+    expect(callCount(sneaky, 'applyPlayUpEligibility')).toBe(1);
+  });
+
+  it('sees an alias, which would hide every call from the count', () => {
+    expect(
+      aliasesImport(
+        "import { applyPlayUpEligibility as place } from '@squadlogic/core/playUp.js';",
+        'applyPlayUpEligibility'
+      )
+    ).toBe(true);
+    expect(
+      aliasesImport(
+        "import { applyPlayUpEligibility } from '@squadlogic/core/playUp.js';",
+        'applyPlayUpEligibility'
+      )
+    ).toBe(false);
+  });
+
   it('reads an import by the end of its path', () => {
     expect(
       importsFrom("import { x } from '@squadlogic/core/playUpSeats.js';", 'playUpSeats.js')
     ).toBe(true);
     expect(importsFrom("import { x } from './playUpSeatsOther.js';", 'playUpSeats.js')).toBe(false);
-    expect(importsFrom("// from '@squadlogic/core/playUpSeats.js'", 'playUpSeats.js')).toBe(false);
   });
 });
 
@@ -106,10 +128,16 @@ describe('the placement and the seat count have one caller each', () => {
       .filter(([, count]) => count > 0);
     // The positive control: the call exists, so a rename that hid it would fail here, not pass.
     expect(callers).toEqual([['frontend/src/pages/TeamAnalysisPage.jsx', 1]]);
+    // And no file binds the function to another name, which would hide a call from the count.
+    expect(
+      sources
+        .filter((file) => file.startsWith('frontend/src/'))
+        .filter((file) => aliasesImport(read(file), 'applyPlayUpEligibility'))
+    ).toEqual([]);
 
     // And it is inside `placeImportRows`: the text from that function's start to the next top-level
     // function holds the one call.
-    const page = withoutComments(read('frontend/src/pages/TeamAnalysisPage.jsx'));
+    const page = read('frontend/src/pages/TeamAnalysisPage.jsx');
     const start = page.indexOf('function placeImportRows(');
     expect(start).toBeGreaterThan(-1);
     const next = page.indexOf('\nfunction ', start + 1);

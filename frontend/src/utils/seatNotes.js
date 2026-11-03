@@ -4,6 +4,10 @@
  * in, as generation seats them, and a player the age rule moved to their own age division plays in
  * another division than the one they registered in. One wording, for the overview's Players cell and
  * the settings panel's recommendation. A count of zero has no note.
+ *
+ * The words say the age rule placed them: that is the only way a seat differs from a registration
+ * while the seats come from the placement. A player moved by hand in the roster editor is worded by
+ * the roster list (PR 2), not here.
  */
 
 /**

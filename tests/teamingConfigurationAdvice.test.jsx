@@ -1031,6 +1031,29 @@ describe('The advice counts the division a player plays in (play-down plan, PR 1
     expect(overviewCell('U12', 'Recommended')).toHaveTextContent(/^2$/);
   });
 
+  it('shows a waitlisted player who moves into a division the file has no registrants in', async () => {
+    // U10: twenty-four aged 10 and one aged 12 on the waitlist. Nobody registered in U12, which holds
+    // the 12-year-old, so U12 is a row of its own with nobody to seat: the player is on its waitlist.
+    // Without that row the file's twenty-five would not reconcile with the twenty-four advised.
+    page.rows = importRows('U10', 25, (i) => ({
+      natural_age: i === 0 ? 12 : 10,
+      ...(i === 0 ? { waitlist: 'yes' } : {}),
+    }));
+    page.divisions = [U10(), U12()];
+    await renderPage();
+
+    await waitFor(() =>
+      expect(overviewCell('U12', 'Players')).toHaveTextContent(
+        /^0\s*1 on the waitlist\s*1 moved here from another division$/
+      )
+    );
+    expect(overviewCell('U12', 'Status')).toHaveTextContent('All on the waitlist');
+    expect(overviewCell('U12', 'Est. Teams')).toHaveTextContent(/^0$/);
+    expect(overviewCell('U10', 'Players')).toHaveTextContent(
+      /^24\s*1 registered here, placed in their own age division$/
+    );
+  });
+
   it('says in the settings panel who moved, in the words of the overview', async () => {
     page.rows = [
       ...importRows('U10', 30, (i) => ({ natural_age: i < 6 ? 12 : 10 })),
@@ -1040,7 +1063,7 @@ describe('The advice counts the division a player plays in (play-down plan, PR 1
     await renderPage();
     await waitFor(() =>
       expect(screen.getByTestId('team-count-recommendation')).toHaveTextContent(
-        'Recommended: 2 teams for 24 players (6 registered here, placed in their own age division)'
+        'Recommended: 2 teams for 24 players (6 registered here are placed in their own age division and not counted)'
       )
     );
     fireEvent.click(screen.getByRole('button', { name: 'U12' }));

@@ -164,18 +164,22 @@ describe('the settings sentence says who moved, in the same words', () => {
   };
 
   it('adds one parenthesis for the moves, after the waitlist note', () => {
+    expect(sentence({ playerCount: 24, movedOutCount: 1 })).toHaveTextContent(
+      'Recommended: 2 teams for 24 players (1 registered here is placed in their own age division and not counted)'
+    );
+    cleanup();
     expect(sentence({ movedInCount: 6 })).toHaveTextContent(
       'Recommended: 3 teams for 30 players (6 moved here from other divisions)'
     );
     cleanup();
     expect(sentence({ playerCount: 24, movedOutCount: 6 })).toHaveTextContent(
-      'Recommended: 2 teams for 24 players (6 registered here, placed in their own age division)'
+      'Recommended: 2 teams for 24 players (6 registered here are placed in their own age division and not counted)'
     );
     cleanup();
     expect(
       sentence({ playerCount: 28, waitlistedCount: 2, movedInCount: 1, movedOutCount: 3 })
     ).toHaveTextContent(
-      'Recommended: 2 teams for 28 players (2 on the waitlist are not counted) (1 moved here from another division; 3 registered here, placed in their own age division)'
+      'Recommended: 2 teams for 28 players (2 on the waitlist are not counted) (1 moved here from another division; 3 registered here are placed in their own age division and not counted)'
     );
   });
 

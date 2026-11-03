@@ -571,7 +571,9 @@ disagreed):
   and the real page in jsdom, both states, in the advice and in generation.
 - **Left alone, report only:** a player moved by hand to a roster that is neither the division registered nor
   their own age division is still dropped from it by a re-run of that division, as before; Team Builder; the
-  advice reads the saved rosters only once they have loaded, so it can change once as they arrive.
+  advice reads the saved rosters only once they have loaded, so it can change once as they arrive. The buddy
+  list's "played apart" sentence still says a play-up or play-down put one buddy in their own age division; a held
+  seat can also put a pair in two divisions.
 
 **Plants** (three per pull request; each must turn the named test red, then is reverted). PR 1: the advice counts by
 registered division (A2's parity case); `summarizeSeats` classifies from the registration, not the seat (A1); the

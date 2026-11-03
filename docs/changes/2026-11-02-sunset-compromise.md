@@ -271,7 +271,7 @@ breach` now also asserts there is no `SUNSET_MARGIN_VIOLATED` at any severity, w
 
 ### 10.4 Plants (three, each red then reverted, _executed_), and what they do not reach
 
-L-P1 `SUNSET_MARGIN_VIOLATED` back to `BLOCKING` (42 tests red); L-P2 the claim back to `hard` with no weight (25 red);
+L-P1 `SUNSET_MARGIN_VIOLATED` back to `BLOCKING` (44 tests red); L-P2 the claim back to `hard` with no weight (27 red);
 L-P3 `sunsetBlocks()` always true (28 red). Every test changed or added for the decision is red under at least one, **except**
 these, which are inputs moved to keep a premise rather than relabel-detectors, each guarded by its own meta-assertion:
 `counts the grid's unknowns once` (a grid the permit closes on, because the 6pm grid is now feasible with nothing to roll up),
@@ -286,6 +286,6 @@ withdrawal strands none, asserted in `keeps every fixture`, which is red under a
 - `canGameMove` now answers `feasible` with a negative margin for a kickoff past the daylight limit. By the sign convention the
   margin is the compromise bound broken by that many minutes; the verdict is `feasible` and `tight`. Say if a past-sunset move
   should read differently.
-- Three existing tests carry explicit per-test timeouts for whole-corpus scans (120 s and 300 s in `feasibilityApi`) and
-  `scenarioBranching` raises its file timeout to 30 s; they were not mine and are unchanged. The changed whole-corpus rule now
-  runs two scans (about twice as long).
+- Whole-corpus scans in `feasibilityApi` already carry explicit per-test timeouts in the source (`120_000` on the changed
+  rule, `300_000` on its sibling) and `scenarioBranching` raises its file timeout to 30 s; none is a command-line override
+  and I did not add one. The changed whole-corpus rule now runs two scans, so it takes about twice as long as before.

@@ -3,6 +3,9 @@
  * formatting, how a refusal from `start_demo_session()` is worded, the hosted-service line's rule,
  * the result of the RPC read at the trust boundary, and the mock client's twin of the RPC.
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rpc = vi.hoisted(() => vi.fn());
@@ -82,7 +85,6 @@ describe('canEditPlayerField', () => {
       'years_played',
       'jersey_number',
       'willing_to_coach',
-      'placement_eligible',
     ]) {
       expect(canEditPlayerField(true, field), field).toBe(true);
     }
@@ -94,8 +96,65 @@ describe('canEditPlayerField', () => {
       'grade',
       'notes',
       'buddy_request',
+      'play_up_requested',
+      // Dropped by 20261118010000: nothing read or wrote it, and a column that no longer exists is not
+      // editable in a demo (the fence's list no longer names it either).
+      'placement_eligible',
     ]) {
       expect(canEditPlayerField(true, field), field).toBe(false);
+    }
+  });
+});
+
+/**
+ * The browser's list of editable demo player fields is a second copy of the server fence's list
+ * (`demo_fence_player_write`'s `c_allowed`, less `updated_at`, which the server stamps itself), and a column
+ * list is a second copy of the schema: the dropped `placement_eligible` stayed on both for as long as nothing
+ * compared them. This reads the newest migration that defines the function and the library's own source.
+ */
+describe('the browser copy of the demo fence list', () => {
+  const listIn = (text, pattern) => {
+    const match = pattern.exec(text);
+    return match ? [...match[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : null;
+  };
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const migrationsDir = path.join(repoRoot, 'supabase', 'migrations');
+  const newestFence = () => {
+    let found = null;
+    for (const file of readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()) {
+      const sql = readFileSync(path.join(migrationsDir, file), 'utf8');
+      if (!/CREATE (OR REPLACE )?FUNCTION public\.demo_fence_player_write\(\)/.test(sql)) continue;
+      const names = listIn(sql, /c_allowed constant text\[\] := ARRAY\[([^\]]*)\]/);
+      if (names) found = { file, names };
+    }
+    return found;
+  };
+
+  it('equals the newest server definition of the list, less updated_at', () => {
+    const server = newestFence();
+    expect(
+      server,
+      'a migration defining demo_fence_player_write with a c_allowed list'
+    ).not.toBeNull();
+    // The newest definition is the one that dropped the column, not the one that created the function.
+    expect(server.file >= '20261118010000').toBe(true);
+    const browser = listIn(
+      readFileSync(path.join(repoRoot, 'frontend', 'src', 'lib', 'demo.js'), 'utf8'),
+      /DEMO_EDITABLE_PLAYER_FIELDS = Object\.freeze\(\[([^\]]*)\]\)/
+    );
+    expect(browser, 'the list in demo.js').not.toBeNull();
+    expect(server.names).toContain('updated_at');
+    expect(server.names.filter((n) => n !== 'updated_at')).toEqual(browser);
+    expect(browser.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it('names no dropped column, and every name on it is editable in a demo', () => {
+    const server = newestFence();
+    expect(server.names).not.toContain('placement_eligible');
+    for (const name of server.names.filter((n) => n !== 'updated_at')) {
+      expect(canEditPlayerField(true, name), name).toBe(true);
     }
   });
 });

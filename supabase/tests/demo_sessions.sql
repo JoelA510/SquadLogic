@@ -38,7 +38,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(117);
+SELECT plan(123);
 
 -- ── 0. Setup (as the test's own superuser role) ─────────────────────────────
 -- Anonymous visitors V1-V6 and a real user, Dave. The password-length trigger asks every new auth user
@@ -331,6 +331,25 @@ SELECT is(
     'inactive',
     'and the player is inactive afterwards'
 );
+-- 20261118010000 dropped players.placement_eligible and replaced the fence with its name off the list: each other
+-- listed column still changes (rating and status are exercised above), and a column that is not listed is still
+-- refused.
+SELECT lives_ok(
+    $$SELECT public.admin_update_player((SELECT id FROM t_ids WHERE name = 'p1'), '{"years_played": 4}')$$,
+    'control: years played changes (a listed column, with the dropped one off the list)'
+);
+SELECT lives_ok(
+    $$SELECT public.admin_update_player((SELECT id FROM t_ids WHERE name = 'p1'), '{"jersey_number": 9}')$$,
+    'control: a jersey number changes'
+);
+SELECT lives_ok(
+    $$SELECT public.admin_update_player((SELECT id FROM t_ids WHERE name = 'p1'), '{"willing_to_coach": true}')$$,
+    'control: willing to coach changes'
+);
+SELECT throws_ok(
+    $$SELECT public.admin_update_player((SELECT id FROM t_ids WHERE name = 'p1'), '{"play_up_requested": true}')$$,
+    '42501', NULL, 'a sibling of the dropped column that is not on the fence''s list, play_up_requested, is still refused'
+);
 SELECT lives_ok(
     $$SELECT public.admin_delete_team((SELECT id FROM t_ids WHERE name = 'tDelete'))$$,
     'control: a team is deleted (its players are unassigned: a players write the fence lets through)'
@@ -388,6 +407,13 @@ SELECT throws_ok(
 );
 RESET role;
 SELECT ok(NOT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'link_my_coach_record'), 'no function links a sign-in to a coach record (20261104010000)');
+SELECT hasnt_column('public', 'players', 'placement_eligible', 'players.placement_eligible is gone (20261118010000), so the demo starts and the fence runs without it');
+SELECT is(
+    (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND p.prosrc ~* '\mplacement_eligible\M'),
+    0,
+    'no function body names the dropped column (a body that did would fail on its first call, not when the column went)'
+);
 SELECT throws_ok(
     $$UPDATE public.coaches SET full_name = 'Typed' WHERE id = (SELECT id FROM t_ids WHERE name = 'coach1')$$,
     '42501', NULL, 'the fence holds for the table''s owner too: a coach''s name is read-only whoever writes'

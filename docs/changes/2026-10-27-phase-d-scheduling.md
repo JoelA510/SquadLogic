@@ -681,7 +681,8 @@ Each PR runs the season fixture suite and the full Definition of Done.
   a table of one Add button per coach (130 in production). (4) **Editing a rule that was asked for as a must decides the
   request**: `admin_edit_practice_preference` takes only the level, so Prefer keeps it as prefer and Must accepts it;
   the editor says so and defaults to the level in force (Prefer for a pending must), so editing its days cannot
-  accept it by accident. (5) **Remove asks first** (C1's button removed at once; there is no undo in the app).
+  accept it by accident. **Superseded by `docs/changes/2026-11-02-preference-followups.md` (`20261116010000`):** an edit saved at Prefer now
+  leaves a pending must pending, and the editor decides it only through its own Accept and Keep as prefer buttons. (5) **Remove asks first** (C1's button removed at once; there is no undo in the app).
   (6) **A rule the scheduler is not judging says so** ("Not applied today": its coach no longer coaches the team, or
   its window is closed), which C1's gap list had declared and not shown. (7) **Conflicts are listed for musts
   only**; prefer rules that disagree only cost breaches, and the page says so. (8) **No axe in Vitest**: `axe-core` is

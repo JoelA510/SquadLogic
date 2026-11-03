@@ -228,6 +228,11 @@ R63="$REPO/docs/sql/20261114010000_revert.sql"
 # replaces `demo_seed.season_window`, so the two plants that aimed at that body in $M63 are re-aimed here.
 M64="$REPO/supabase/migrations/20261115010000_demo_fall_window.sql"
 R64="$REPO/docs/sql/20261115010000_revert.sql"
+# Editing a pending must leaves it pending (an edit saved at prefer no longer decides a requested must), the
+# function replaced on its deployed body, and the revert. Plan docs/changes/2026-11-02-preference-followups.md.
+# No existing plant aims at the body of `admin_edit_practice_preference` in $M61, so none is re-aimed.
+M65="$REPO/supabase/migrations/20261116010000_edit_keeps_must_pending.sql"
+R65="$REPO/docs/sql/20261116010000_revert.sql"
 # The GIN index on players.custom_attributes that production had and no migration created, codified with
 # CREATE INDEX IF NOT EXISTS behind a check of its shape, its no-op revert and its smoke. Plan
 # docs/changes/2026-11-02-data-followups.md, item 1. M65/R65 are the preference follow-ups' (20261116010000).
@@ -5324,6 +5329,93 @@ plant "R64 the revert restores a six-week fall that is not the deployed body" "$
   "            v_month := 8; v_day := 2; v_weeks := 5;" \
   "revert 20261115010000"
 
+# Editing a pending must leaves it pending (20261116010000; plan docs/changes/2026-11-02-preference-followups.md).
+# The smoke 20261116010000 runs the real RPC as a real admin over a rule in each state (a pending must twice, an
+# accepted must, a must kept as prefer, a rule nobody asked a must of); the migration's own end-state check holds the
+# shape (one signature, a pinned definer, the grants, the new comment, that the pending branch is in the body at all).
+# Every plant below that is aimed at the smoke keeps the end-state check's text in the body and breaks what the
+# body does, so the check that catches it is the smoke and not the text.
+#   - the pending branch sits after the kept-as-prefer branch, so it never fires: a pending must saved at prefer is
+#     decided again (the old behaviour);
+#   - the pending branch sits before the accepted branch: a save at must leaves the rule pending and the CHECK
+#     refuses a must nobody accepted;
+#   - a save of a pending rule stamps `decided_by`, or `decided_at`, as if it had decided it;
+#   - an accepted must saved at prefer is no longer kept as prefer (the CHECK refuses a requested must with no
+#     decision);
+#   - the end-state check: the pending branch deleted; the pinned search path lost; the rule granted to anon; and the
+#     md5 guard expecting a different body (so it refuses the deployed one).
+plant "M65 the pending branch sits after the kept-as-prefer branch" "$M65" \
+  "           must_decision = CASE WHEN v_level = 'must' THEN 'accepted'
+                                WHEN must_decision = 'pending' THEN 'pending'
+                                WHEN requested_level = 'must' THEN 'kept_prefer'" \
+  "           must_decision = CASE WHEN v_level = 'must' THEN 'accepted'
+                                WHEN requested_level = 'must' THEN 'kept_prefer'
+                                WHEN must_decision = 'pending' THEN 'pending'" \
+  "smoke 20261116010000"
+
+plant "M65 the pending branch sits before the accepted branch" "$M65" \
+  "           must_decision = CASE WHEN v_level = 'must' THEN 'accepted'
+                                WHEN must_decision = 'pending' THEN 'pending'" \
+  "           must_decision = CASE WHEN must_decision = 'pending' THEN 'pending'
+                                WHEN v_level = 'must' THEN 'accepted'" \
+  "smoke 20261116010000"
+
+plant "M65 a pending edit stamps decided_by" "$M65" \
+  "           decided_by = CASE WHEN v_level = 'must'
+                                  OR (requested_level = 'must' AND must_decision IS DISTINCT FROM 'pending')" \
+  "           decided_by = CASE WHEN v_level = 'must' OR requested_level = 'must'" \
+  "smoke 20261116010000"
+
+plant "M65 a pending edit stamps decided_at" "$M65" \
+  "           decided_at = CASE WHEN v_level = 'must'
+                                  OR (requested_level = 'must' AND must_decision IS DISTINCT FROM 'pending')" \
+  "           decided_at = CASE WHEN v_level = 'must' OR requested_level = 'must'" \
+  "smoke 20261116010000"
+
+plant "M65 an accepted must saved at prefer is no longer kept as prefer" "$M65" \
+  "                                WHEN requested_level = 'must' THEN 'kept_prefer'
+" \
+  "" \
+  "smoke 20261116010000"
+
+plant "M65 the pending branch is deleted" "$M65" \
+  "                                WHEN must_decision = 'pending' THEN 'pending'
+" \
+  "" \
+  "applying 20261116010000_edit_keeps_must_pending.sql"
+
+plant "M65 the replaced body loses its pinned search path" "$M65" \
+  "SET search_path TO 'public'
+SET \"TimeZone\" TO 'UTC'
+AS \$function\$" \
+  "SET \"TimeZone\" TO 'UTC'
+AS \$function\$" \
+  "applying 20261116010000_edit_keeps_must_pending.sql"
+
+plant "M65 the replaced edit RPC is granted to anon" "$M65" \
+  "COMMENT ON FUNCTION public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date) IS" \
+  "GRANT EXECUTE ON FUNCTION public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date) TO anon;
+
+COMMENT ON FUNCTION public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date) IS" \
+  "applying 20261116010000_edit_keeps_must_pending.sql"
+
+plant "M65 the md5 guard expects a different body" "$M65" \
+  "    IF v_md5 IS DISTINCT FROM '4d909e3ea286460367c2ca7c8671f89d' THEN" \
+  "    IF v_md5 IS DISTINCT FROM '4d909e3ea286460367c2ca7c8671f89e' THEN" \
+  "applying 20261116010000_edit_keeps_must_pending.sql"
+
+# Its revert restores the deployed body behind its md5 and the old comment, and the harness then runs the old
+# meaning as the planted admin (an edit of a pending must at prefer decides it).
+plant "R65 the revert restores a body that is not the deployed one" "$R65" \
+  "    SELECT * INTO v_before FROM public.coach_practice_preferences WHERE id = p_preference_id FOR UPDATE;" \
+  "    SELECT * INTO v_before FROM public.coach_practice_preferences WHERE id = p_preference_id;" \
+  "revert 20261116010000"
+
+plant "R65 the revert leaves the new comment" "$R65" \
+  "  'Admin-only: replace an in-force rule''s conditions, level, priority and window (the coach and team stay). Audited as practice_preference.edited with before and after. 20261112010000.';" \
+  "  'Admin-only: replace an in-force rule''s conditions, level, priority and window (the coach and team stay). A requested must that is still pending stays pending when it is saved at prefer. 20261116010000.';" \
+  "revert 20261116010000"
+
 # The GIN index on players.custom_attributes (docs/changes/2026-11-02-data-followups.md, item 1). The migration
 # must do nothing where the index exists (production), refuse a same-named index of another shape, and its revert
 # must leave the index alone. run.sh builds the database up to the migration, applies it again, swaps the index for
@@ -5528,6 +5620,8 @@ declare -A CLAIM_PROVER=(
   ["(checked) a preference file makes one rule per row and team (a blank team for a coach of two teams makes two), lists an unknown coach or team and creates neither, and keeps a coach's email off the job"]="M61 a blank team expands to one team only"
   ["(checked) a re-import replaces the imported rules of the teams the file names and leaves admin rules and other teams alone"]="M61 a re-import replaces admin rules too"
   ["(checked) a preference file is refused for a completed season"]="M61 a completed season takes a preference file"
+  ["(checked) a requested must that is still pending stays pending when it is saved at prefer: it is not decided, nobody is stamped as deciding it, and the audit says pending before and after"]="M65 the pending branch sits after the kept-as-prefer branch|M65 a pending edit stamps decided_by|M65 a pending edit stamps decided_at"
+  ["(checked) an edit still decides where the admin changed the level: a pending must saved at must is accepted, an accepted must saved at prefer is kept as prefer, and a rule kept as prefer or never asked as a must is given no new decision"]="M65 the pending branch sits before the accepted branch|M65 an accepted must saved at prefer is no longer kept as prefer"
   ["(checked) the backfill gives each old preference row one rule per team its coach coaches today, keeps the old id on the first copy, drops a dont_care row, and keeps a pending, superseded, rejected or teamless row as history"]="M61 the backfill copies a dont_care row"
 )
 

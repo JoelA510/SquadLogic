@@ -130,7 +130,9 @@ function OutlookTableRow({ row }) {
                   </li>
                 ))}
               </ul>
-              <p className="m-0 mt-2 text-xs text-text-muted">{FIXES_UNCHECKED}</p>
+              {row.candidatesUnchecked && (
+                <p className="m-0 mt-2 text-xs text-text-muted">{FIXES_UNCHECKED}</p>
+              )}
             </>
           ) : (
             <p className="m-0 text-text-muted">{row.fixesNote}</p>

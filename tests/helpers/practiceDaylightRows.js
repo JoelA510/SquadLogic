@@ -204,3 +204,111 @@ export function estateTables(rows = estateRows()) {
     teams: rows.teams,
   };
 }
+
+/**
+ * The demo league's practice grid as stored rows (`DEMO_GRID` of
+ * `scripts/build-demo-seed.mjs`, the grid `fixtures/demo-2026/fields.csv` is
+ * generated from): nine unlit grounds of two halves, one lit ground of two
+ * halves, U4's Saturday sessions, and 128 teams on them. Synthetic coordinates
+ * (round numbers, one pair per venue), the demo's zone and its fall window.
+ *
+ * It is the heaviest real grid there is, so the outlook is timed over it.
+ *
+ * @param {{ weekdays: readonly string[], lit: readonly string[],
+ *   unlitGrounds: ReadonlyArray<readonly string[]>, unlitSlots: ReadonlyArray<readonly string[]>,
+ *   litGround: { venue: string, ground: string, slots: ReadonlyArray<readonly string[]> },
+ *   u4: { venue: string, ground: string, sessions: ReadonlyArray<readonly string[]> } }} grid
+ * @returns {{ rows: Record<string, any[]>, season: Record<string, any> }}
+ */
+export function demoGridRows(grid) {
+  let next = 10_000;
+  const mint = () => uuid(next++);
+  const venues = new Map();
+  const venue = (/** @type {string} */ name, lit) => {
+    if (!venues.has(name)) {
+      venues.set(name, {
+        id: mint(),
+        organization_id: ORG,
+        name,
+        lighting_available: lit,
+        latitude: String(33 + venues.size),
+        longitude: String(-117 - venues.size),
+      });
+    }
+    return venues.get(name);
+  };
+  const fields = [];
+  const fieldSubunits = [];
+  const practiceSlots = [];
+  const days = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  const ground = (
+    /** @type {string} */ venueName,
+    name,
+    lit,
+    times,
+    weekdays,
+    halves = ['A', 'B']
+  ) => {
+    const v = venue(venueName, lit);
+    const field = { id: mint(), organization_id: ORG, location_id: v.id, name };
+    fields.push(field);
+    for (const half of halves) {
+      const sub = { id: mint(), organization_id: ORG, field_id: field.id, label: half };
+      fieldSubunits.push(sub);
+      for (const day of weekdays) {
+        for (const [start, end] of times) {
+          practiceSlots.push({
+            id: mint(),
+            organization_id: ORG,
+            field_id: null,
+            field_subunit_id: sub.id,
+            day_of_week: day,
+            start_time: `${start}:00`,
+            end_time: `${end}:00`,
+            valid_from: null,
+            valid_until: null,
+          });
+        }
+      }
+    }
+  };
+  ground(grid.litGround.venue, grid.litGround.ground, true, grid.litGround.slots, days);
+  for (const [venueName, name] of grid.unlitGrounds) {
+    ground(venueName, name, false, grid.unlitSlots, days);
+  }
+  ground(grid.u4.venue, grid.u4.ground, false, grid.u4.sessions, ['sat'], ['A']);
+
+  const teams = Array.from({ length: 128 }, (_, i) => ({
+    id: uuid(50_000 + i),
+    organization_id: ORG,
+    name: `Team ${i + 1}`,
+  }));
+  const practiceAssignments = teams.map((team, i) => ({
+    id: uuid(60_000 + i),
+    organization_id: ORG,
+    team_id: team.id,
+    practice_slot_id: practiceSlots[(i * 2) % practiceSlots.length].id,
+    effective_date_range: '[2026-08-17,2026-11-01)',
+  }));
+  return {
+    rows: {
+      locations: [...venues.values()],
+      fields,
+      fieldSubunits,
+      practiceSlots,
+      practiceAssignments,
+      lightingOverrides: [],
+      teams,
+    },
+    season: {
+      id: SEASON_ID,
+      organization_id: ORG,
+      name: 'Demo fall',
+      status: 'active',
+      season_start: '2026-08-17',
+      season_end: '2026-10-31',
+      timezone: 'America/Los_Angeles',
+      school_day_end: '16:00:00',
+    },
+  };
+}

@@ -35,55 +35,9 @@ const h = vi.hoisted(() => ({
   org: /** @type {any} */ ({}),
 }));
 
-vi.mock('../frontend/src/lib/supabaseClient.js', () => {
-  const WRITES = ['insert', 'update', 'upsert', 'delete'];
-  const from = (table) => {
-    let rows = h.tables[table] ?? [];
-    let columns = '*';
-    const q = {
-      select: (cols) => {
-        columns = cols;
-        return q;
-      },
-      eq: (col, val) => {
-        // An embedded filter (`teams.divisions.season_settings_id`) is the server's.
-        if (!col.includes('.')) rows = rows.filter((r) => String(r[col]) === String(val));
-        return q;
-      },
-      order: () => q,
-      range: (lo, hi) => {
-        h.reads.push({ table, columns });
-        if (h.fail === table) {
-          return h.failAs === 'throw'
-            ? Promise.reject(new Error(`${table}: connection reset`))
-            : Promise.resolve({ data: null, error: { message: `${table}: permission denied` } });
-        }
-        // Only the columns asked for; an embed (`teams!inner(...)`) is not a column of the row.
-        const asked = columns.split(',').map((c) => c.trim());
-        const names = asked.filter((c) => !c.includes('!') && !c.includes('('));
-        const projected = rows
-          .slice(lo, hi + 1)
-          .map((row) => Object.fromEntries(names.map((name) => [name, row[name]])));
-        return Promise.resolve({ data: projected, error: null });
-      },
-    };
-    for (const method of WRITES) {
-      q[method] = () => {
-        h.writes.push([table, method]);
-        return q;
-      };
-    }
-    return q;
-  };
-  return {
-    supabase: {
-      from,
-      rpc: (name) => {
-        h.writes.push(['rpc', name]);
-        return Promise.resolve({ data: null, error: null });
-      },
-    },
-  };
+vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
+  const { fakeDaylightClient } = await import('./helpers/fakeDaylightClient.js');
+  return { supabase: fakeDaylightClient(h) };
 });
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({

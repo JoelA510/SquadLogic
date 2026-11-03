@@ -525,6 +525,7 @@ function listSome(names, shown = 4) {
  * @property {string|null} unknown
  * @property {string|null} exempt
  * @property {Array<{ kind: string, text: string, link: 'lighting' | 'fields' | null }>} fixes
+ * @property {boolean} candidatesUnchecked - the fixes include the module's, whose permits, size and room are not checked
  * @property {string|null} fixesNote - what to say when there is no fix to list
  */
 
@@ -706,6 +707,7 @@ export function buildDaylightOutlook({ rows, season }) {
               },
             ]),
       ],
+      candidatesUnchecked: row.fixes.some((fix) => fix.available),
       fixesNote: null,
     };
     if (view.fixes.length === 0) {

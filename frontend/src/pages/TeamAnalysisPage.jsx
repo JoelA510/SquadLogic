@@ -11,7 +11,8 @@ import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TeamOverviewPanel from '../components/TeamOverviewPanel.jsx';
 import ProgramOverview from '../components/teaming/ProgramOverview.jsx';
-import { groupByProgram } from '../utils/programGroups.js';
+import { NO_PROGRAM_KEY, groupByProgram, ownProgramIdOf } from '../utils/programGroups.js';
+import { flagCountsOf } from '../utils/seatNotes.js';
 import TeamingConfiguration from '../components/teaming/TeamingConfiguration.jsx';
 import RosterManager from '../components/teaming/RosterManager.jsx';
 import { useRosterDirectory } from '../hooks/useRosterDirectory.js';
@@ -196,8 +197,10 @@ function registeredDivisionsOf(rows) {
  * @param {Map<string, import('@squadlogic/core/playUpSeats.js').SeatCounts>} params.byDivision
  * @param {Array<Object>} [params.incomingDescriptors] - the season's divisions no program of the
  *   file is (`buildDivisionDescriptors`' `otherDescriptors`); none until the divisions are read
+ * @param {boolean} [params.checked] - the seats were compared with the divisions' age bands, which
+ *   needs the season's divisions to have been read; until then the flag counts say they are not known
  */
-function derivePrograms({ registeredDivisions, byDivision, incomingDescriptors = [] }) {
+function derivePrograms({ registeredDivisions, byDivision, incomingDescriptors = [], checked }) {
   const toProgram = (id, name, extra = {}) => {
     const counts = /** @type {import('@squadlogic/core/playUpSeats.js').SeatCounts} */ (
       byDivision.get(id)
@@ -210,6 +213,8 @@ function derivePrograms({ registeredDivisions, byDivision, incomingDescriptors =
       notEligibleCount: counts.notEligible,
       movedInCount: counts.movedIn,
       movedOutCount: counts.movedOut,
+      // Who plays up or down in this division, counted by the same seats (play-down plan, PR 2).
+      flags: flagCountsOf(counts, checked === true),
       coachCount: 0,
       totalPlayers: counts.seated + counts.waitlisted + counts.notEligible,
       ...extra,
@@ -1121,16 +1126,25 @@ export default function TeamAnalysisPage() {
   // division's name, and a guess must not decide who is left out or moved. A read that worked and
   // returned no divisions is still judged by the names, as generation judges it. The advice is what it
   // was until then: everyone where they registered, less the waitlisted.
-  const seatCount = useMemo(() => {
-    const entries = importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }));
-    const { divisionDescriptors, otherDescriptors } =
-      divisionsRead && importedPlayerRows.length > 0
+  // Every division a player's age is counted against, once the season's divisions have been read; the
+  // same set the Play-up section judges a run's listing by, so the two cannot be given different bands.
+  const descriptorSet = useMemo(
+    () =>
+      divisionsRead
         ? buildDivisionDescriptors({
             programs: registeredDivisions,
             divisionRows,
             selectedProgramKey: null,
             savedDivision: null,
           })
+        : { divisionDescriptors: null, otherDescriptors: [] },
+    [divisionsRead, registeredDivisions, divisionRows]
+  );
+  const placement = useMemo(() => {
+    const entries = importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }));
+    const { divisionDescriptors, otherDescriptors } =
+      importedPlayerRows.length > 0
+        ? descriptorSet
         : { divisionDescriptors: null, otherDescriptors: [] };
     const placed = placeImportRows({
       entries,
@@ -1144,16 +1158,10 @@ export default function TeamAnalysisPage() {
       cutoffMonth: cutoffMonthSetting,
       cutoffDay: cutoffDaySetting,
     });
-    const { byDivision } = summarizeSeats({
-      seats: seatsFromPlacedPlayers(placed),
-      divisions: divisionDescriptors ?? [],
-    });
-    return { byDivision, otherDescriptors };
+    return { placed, divisionDescriptors, otherDescriptors };
   }, [
-    divisionsRead,
-    divisionRows,
+    descriptorSet,
     importedPlayerRows,
-    registeredDivisions,
     durablePlayers,
     waitlistEnabled,
     playDownEnabled,
@@ -1163,12 +1171,38 @@ export default function TeamAnalysisPage() {
     cutoffMonthSetting,
     cutoffDaySetting,
   ]);
+  // The count of those seats, by division, by program and for the league. A division is in a program
+  // of the league's own, or in none (the same rule as the overview's headings, `ownProgramIdOf`), so a
+  // program's counts are the sum of the divisions under its heading. `checked` is false until the
+  // divisions have been read: no age band is known then, and the flags say so rather than "None".
+  const seatCount = useMemo(() => {
+    const { placed, divisionDescriptors, otherDescriptors } = placement;
+    const divisions = (divisionDescriptors ?? []).map((descriptor) => ({
+      ...descriptor,
+      program_id: ownProgramIdOf(
+        findDivisionRowForProgram(descriptor, divisionRows ?? [])?.program_id,
+        seasonPrograms
+      ),
+    }));
+    const { byDivision, byProgram, league } = summarizeSeats({
+      seats: seatsFromPlacedPlayers(placed),
+      divisions,
+    });
+    return {
+      byDivision,
+      byProgram,
+      league,
+      otherDescriptors,
+      checked: divisionDescriptors !== null,
+    };
+  }, [placement, divisionRows, seasonPrograms]);
   const basePrograms = useMemo(
     () =>
       derivePrograms({
         registeredDivisions,
         byDivision: seatCount.byDivision,
         incomingDescriptors: seatCount.otherDescriptors,
+        checked: seatCount.checked,
       }),
     [registeredDivisions, seatCount]
   );
@@ -1228,15 +1262,27 @@ export default function TeamAnalysisPage() {
 
   // E2: the divisions under the program each is in, only when the league has a program of its
   // own with one of them in it; otherwise null and the overview is a flat list, no heading.
-  const overviewGroups = useMemo(
-    () =>
-      groupByProgram({
-        items: programs,
-        programIdOf: (program) =>
-          findDivisionRowForProgram(program, divisionRows ?? [])?.program_id,
-        programs: seasonPrograms,
-      }),
-    [programs, divisionRows, seasonPrograms]
+  const overviewGroups = useMemo(() => {
+    const groups = groupByProgram({
+      items: programs,
+      programIdOf: (program) => findDivisionRowForProgram(program, divisionRows ?? [])?.program_id,
+      programs: seasonPrograms,
+    });
+    // Each heading carries its program's play-up and play-down counts (a program with no count is not
+    // shown as zero: the heading says it is not checked).
+    return (
+      groups?.map((group) => {
+        const counts = seatCount.byProgram.get(group.key === NO_PROGRAM_KEY ? null : group.key);
+        return {
+          ...group,
+          flags: counts ? flagCountsOf(counts, seatCount.checked) : { checked: false },
+        };
+      }) ?? null
+    );
+  }, [programs, divisionRows, seasonPrograms, seatCount]);
+  const leagueFlags = useMemo(
+    () => (programs.length > 0 ? flagCountsOf(seatCount.league, seatCount.checked) : null),
+    [programs.length, seatCount]
   );
 
   const selectedProgram = useMemo(
@@ -1940,7 +1986,9 @@ export default function TeamAnalysisPage() {
         [
           teamSizeAnnouncement(summarizeTeamSizeReview(snapshot.runMetadata.results)),
           placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results)),
-          playUpAnnouncement(summarizePlayUpReview(snapshot.runMetadata.results)),
+          playUpAnnouncement(
+            summarizePlayUpReview(snapshot.runMetadata.results, divisionDescriptors)
+          ),
         ]
           .filter(Boolean)
           .join(' ')
@@ -2253,6 +2301,8 @@ export default function TeamAnalysisPage() {
         id: teamRow.id,
         name: teamRow.name,
         division: teamRow.division || teamRow.division_id,
+        // The division row the team is in: what the roster list judges its players' ages by.
+        divisionId: teamRow.division_id,
         minAge: teamRow.min_age,
         maxAge: teamRow.max_age,
         gender: teamRow.gender,
@@ -2272,6 +2322,7 @@ export default function TeamAnalysisPage() {
 
     return activeTeamData.teams.map((t) => ({
       ...t,
+      divisionId: t.division_id,
       players: teamPlayers
         .filter((tp) => tp.team_id === t.id)
         .map((tp) => {
@@ -2461,6 +2512,7 @@ export default function TeamAnalysisPage() {
               <ProgramOverview
                 programs={programs}
                 groups={overviewGroups}
+                league={leagueFlags}
                 onSelectProgram={setSelectedProgramId}
                 selectedProgramId={selectedProgramId}
               />
@@ -2548,7 +2600,11 @@ export default function TeamAnalysisPage() {
                     {`${unnamedRosterPlayers} roster ${unnamedRosterPlayers === 1 ? 'entry has' : 'entries have'} no matching player record, so ${unnamedRosterPlayers === 1 ? 'it is' : 'they are'} shown as Unknown Player.`}
                   </p>
                 )}
-                <RosterManager initialTeams={rosterTeams} onTeamsChange={handleRosterTeamsChange} />
+                <RosterManager
+                  initialTeams={rosterTeams}
+                  onTeamsChange={handleRosterTeamsChange}
+                  seasonDivisions={divisionsRead ? divisionRows : null}
+                />
               </>
             )}
           </div>
@@ -2567,6 +2623,7 @@ export default function TeamAnalysisPage() {
           />
           <PlayUpList
             results={displayPersistenceSnapshot?.runMetadata?.results}
+            divisions={descriptorSet.divisionDescriptors}
             playDown={playDownEnabled}
           />
           <PlacementReviewList results={displayPersistenceSnapshot?.runMetadata?.results} />

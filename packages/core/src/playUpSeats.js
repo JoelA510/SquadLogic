@@ -36,6 +36,21 @@ import { buildDivisionIndex, isEligibilityBlocked, isWaitlisted } from './playUp
  */
 
 /**
+ * A seat that was compared with its division's band and was not in it, or could not be compared: one
+ * entry for each, so a list of players and the counts above come out of the same pass.
+ * @typedef {Object} FlaggedSeat
+ * @property {string} playerId
+ * @property {number|null} naturalAge
+ * @property {string|null} registeredDivision - as listed in `divisions` when it is there; null for
+ *   a seat that does not say (a player on a roster)
+ * @property {string} seatedDivision - where they play, as listed in `divisions` when it is there
+ * @property {'up'|'down'|'unknown'} verdict - the age is under the band (`playingUp`), over it
+ *   (`playingDown`), or the age or the band is unknown (`notChecked`)
+ * @property {boolean} requested - a play-up was requested
+ * @property {boolean} waitlisted
+ */
+
+/**
  * What is counted, each a count of the players it says. Every registrant is in exactly one of
  * `seated`, `waitlisted` and `notEligible` (a player both waitlisted and not eligible is counted
  * once, as not eligible: lesson 87); the rest are overlays on that partition.
@@ -116,7 +131,12 @@ function nonEmpty(value) {
  *   byDivision: Map<string, SeatCounts>,
  *   byProgram: Map<string|null, SeatCounts>,
  *   league: SeatCounts,
+ *   flagged: Array<FlaggedSeat>,
  * }}
+ *
+ * `flagged` lists the seated players the counts `playingUp`, `playingDown` and `notChecked` count, in
+ * the order of `seats`: the list and the counts come out of one pass, so a page that shows both cannot
+ * show two answers. A player held back (not eligible) has no seat to judge and is not in it.
  */
 export function summarizeSeats({ seats, divisions = [] }) {
   if (!Array.isArray(seats)) throw new TypeError('seats must be an array');
@@ -152,6 +172,8 @@ export function summarizeSeats({ seats, divisions = [] }) {
   const programOf = (key) => programOfKey.get(key) ?? null;
 
   const league = emptyCounts();
+  /** @type {Array<FlaggedSeat>} */
+  const flagged = [];
   /** @type {Array<[string, string]>} [registered, seated] of each move, for the program level */
   const moves = [];
   const bump = (key, field) => {
@@ -194,6 +216,17 @@ export function summarizeSeats({ seats, divisions = [] }) {
     if (verdict === 'up') bump(seatedKey, 'playingUp');
     else if (verdict === 'down') bump(seatedKey, 'playingDown');
     else if (verdict === 'unknown') bump(seatedKey, 'notChecked');
+    if (verdict !== 'in_band') {
+      flagged.push({
+        playerId,
+        naturalAge,
+        registeredDivision: registeredKey,
+        seatedDivision: seatedKey,
+        verdict,
+        requested: seat.requested === true,
+        waitlisted: seat.waitlisted === true,
+      });
+    }
 
     if (registeredKey !== null && registeredKey !== seatedKey) {
       division(seatedKey).movedIn += 1;
@@ -228,7 +261,7 @@ export function summarizeSeats({ seats, divisions = [] }) {
     /** @type {SeatCounts} */ (byProgram.get(programOf(from))).movedOut += 1;
   }
 
-  return { byDivision, byProgram, league };
+  return { byDivision, byProgram, league, flagged };
 }
 
 /**

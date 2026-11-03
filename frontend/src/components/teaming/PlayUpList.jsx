@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import PropTypes from 'prop-types';
 import { playUpPlaysWhereNote } from '../../utils/playDownNote.js';
-import { summarizePlayUpReview } from '../../utils/playUpReview.js';
+import { playUpSentence, summarizePlayUpReview } from '../../utils/playUpReview.js';
 
 const anchorId = (division, part) => `play-up-${division}-${part}`.replace(/[^A-Za-z0-9_-]/g, '-');
 
@@ -67,11 +67,14 @@ const coachPossessive = (name) => (name ? `Coach ${name}'s child` : "a coach's c
  * waitlist. The facts are the admin's to weigh against the club's own rules; the app approves or
  * refuses nothing. Read from the run's `results`, so a staged or synced run shows it after a
  * reload. Announced by the page's polite live region, once per generation, not here.
+ *
+ * The sentence above the rows counts SEATS by the division played (`summarizeSeats`, through
+ * `summarizePlayUpReview`), which needs the season's divisions for their age bands: `divisions` are
+ * the rows the page read, or null before they are (the sentence then says it has not checked).
  */
-export default function PlayUpList({ results, playDown = false }) {
-  const summary = useMemo(() => summarizePlayUpReview(results), [results]);
+export default function PlayUpList({ results, divisions = null, playDown = false }) {
+  const summary = useMemo(() => summarizePlayUpReview(results, divisions), [results, divisions]);
   if (!summary) return null;
-  const { totals } = summary;
   return (
     <section
       className="bg-bg-surface border border-border-subtle rounded-xl p-6"
@@ -81,9 +84,7 @@ export default function PlayUpList({ results, playDown = false }) {
         Play-up
       </h3>
       <p className="text-sm text-text-secondary mb-4">
-        {`${totals.playUps} play-up${totals.playUps === 1 ? '' : 's'} (${totals.requested} requested, ${totals.unrequested} not), ${totals.playDowns} play-down${totals.playDowns === 1 ? '' : 's'}${
-          totals.takenOffWaitlist > 0 ? `, ${totals.takenOffWaitlist} taken off the waitlist` : ''
-        }. Nothing here is approved or refused: ${playUpPlaysWhereNote(playDown)}. Check each against your club's rules.`}
+        {`${playUpSentence(summary)}. Nothing here is approved or refused: ${playUpPlaysWhereNote(playDown)}. Check each against your club's rules.`}
       </p>
       <div className="space-y-6">
         {summary.divisions.map(({ division, divisionName, entries, takenOffWaitlist }) => (
@@ -164,6 +165,7 @@ export default function PlayUpList({ results, playDown = false }) {
 }
 
 PlayUpList.propTypes = {
+  divisions: PropTypes.arrayOf(PropTypes.object),
   /** The Play-down setting is on: the sentence says where a play-down plays. */
   playDown: PropTypes.bool,
   results: PropTypes.shape({

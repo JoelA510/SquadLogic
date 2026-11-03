@@ -2,8 +2,8 @@
 
 Kind: FEATURE (a setting, flags and counts) with a defect fix (the team-count advice counts by the wrong
 division) · Drawn up: 2026-11-03 against `origin/main` `2ae6333` · Owner: the repository owner · Status:
-**APPROVED 2026-11-03: every decision of section 7 as recommended (record in section 7); PR 1 is in build, PR 2
-and PR 3 are not started.** AGENTS.md rule 14 applies (the change touches what team generation seats, which is
+**APPROVED 2026-11-03: every decision of section 7 as recommended (record in section 7); PR 1 is merged (#700),
+PR 2 is in review, PR 3 is not started.** AGENTS.md rule 14 applies (the change touches what team generation seats, which is
 the domain model); the owner's approval is the plan it asked for. Persistence is touched only by an existing
 JSONB column through an existing audited RPC: no migration is planned.
 
@@ -421,22 +421,87 @@ from a different choice of ten players; 9 against 8 is the same.)
 
 **PR 2: flags and counts in the views** (after PR 1)
 
-- [ ] B1 (M) `ProgramOverview` column, caption, league line and program heading counts. Test:
+- [x] B1 (M) `ProgramOverview` column, caption, league line and program heading counts. Test:
       `tests/programOverviewPlayUp.test.jsx`: a league with two programs and a division in none; counts equal the
       hand-worked numbers; a flat league shows the league line and no heading; "None" and "not checked" read as
       words; axe clean.
-- [ ] B2 (S) The Play-up section sentence and announcement from `summarizeSeats`. Test:
+- [x] B2 (S) The Play-up section sentence and announcement from `summarizeSeats`. Test:
       `tests/teamAnalysisPlayUp.test.jsx` (the pinned sentence at `:250` changes, deliberately, in this commit) and
       `tests/playUpReview.test.js`.
-- [ ] B3 (M) The roster list (4.7) and a repaired `useConflicts`. Tests: `tests/rosterAgeFlags.test.jsx` (new): a
+- [x] B3 (M) The roster list (4.7) and a repaired `useConflicts`. Tests: `tests/rosterAgeFlags.test.jsx` (new): a
       persisted-shape team row with **no** age keys and a cross-division move is flagged; a requested move says so;
       the directory's column list holds the two new columns (the double refuses a select without them);
       `tests/e2e/steps/team_and_roster.ts` no longer forges the band.
-- [ ] B4 (M) One mock E2E scenario in `tests/e2e/features/play_up_by_request.feature`: the overview shows the counts
+- [x] B4 (M) One mock E2E scenario in `tests/e2e/features/play_up_by_request.feature`: the overview shows the counts
       by division and by program, then after Generate the Play-up section and the roster list agree with them; axe in
       both themes with the flags on screen. Run after `bddgen`.
-- [ ] B5 (S) The parity test (4.1): generate, count the rosters, equal to the placement count, per division and
-      program. Test: `tests/playUpSeatsParity.test.jsx`.
+- [x] B5 (S) The parity test (4.1): done in PR 1 at core level (`tests/playUpSeatsParity.test.js`); the page-level
+      agreement is B4's scenario. See "What PR 2 did differently".
+
+**What PR 2 did differently from the tasks above** (built 2026-11-03; where the plan and the code disagreed, the
+code won, so PR 3 starts from what is true):
+
+- **B5 is PR 1's test plus B4, not a third test.** The core parity test already generates a league with every
+  kind of player and requires the count from the placement to equal the count from the saved rosters. A jsdom
+  page test that generates, saves and re-reads would be over 40 lines and show what B4 shows through the real
+  page: the scenario reads the overview's play-up count for U12 Boys, the Play-up section's, and the roster
+  list's (and counts the list's entries rather than trusting its summary) and requires the three equal.
+- **`summarizeSeats` also returns `flagged`**: the seated players behind `playingUp`, `playingDown` and
+  `notChecked`, each with the verdict the counts used, in one pass (a test requires the tallies equal the
+  counts). The roster list needs players, not counts, and "(N requested)" in the section's sentence is read
+  from it, so no second derivation of who plays up exists. Additive: PR 1's tests and every field of
+  `SeatCounts` are unchanged.
+- **The caption says "Play-down is not available", not "off", and has no link.** The setting and its page do
+  not exist until PR 3, which turns the sentence into the off or on one and adds "Turn on play-down in Settings
+  > Features". Nothing is pre-wired. The league line and the program headings also say `not checked` and `asked
+to play up from their own division` when those counts are not zero (plan 4.4 had the up and down counts only),
+  > and a heading says `moved in from other programs` but not the move out (the plan's wording).
+- **A state the plan did not have: "Not checked yet".** The overview mounts before the season's divisions are
+  read, and with no band known every seat is "unknown": a first draft would have read "None", and every request
+  "nothing to honour". The column, the league line and the headings say `Not checked yet` until `divisionsRead`
+  (and when the read fails), and a row from a caller with no counts says it too; tested both ways (lesson 47).
+- **One rule for "in a program".** `ownProgramIdOf` (in `programGroups.js`, which `groupByProgram` now calls) is
+  the rule the headings group by and the id `summarizeSeats` is given, so a heading and its counts are about the
+  same divisions (the season's default program is "in none").
+- **B2 judges a run's listing by the same divisions as the placement** (`summarizePlayUpReview(results,
+divisions)`; the page passes its descriptor set, which is also what the placement uses, and the announcement
+  the run's own). With no divisions the sentence says it has not checked. The by-kind totals the function used to
+  return are gone (nothing else read them); the sentence and the announcement are one function
+  (`playUpSentence`; the announcement used to join its parts with semicolons), and the sentence also says `not
+checked` and `not placed` when there are any (the old announcement had the second). A player listed under two
+  divisions is one seat; a listing that names no division still has one.
+- **B3 removes the age check from `useConflicts` rather than repairing it.** A flag is not an error (decision 6),
+  so the list is the repaired check: `rosterAgeFlags` counts the seats on the rosters through `summarizeSeats`,
+  by the team's `division_id` (or the division name it carries) against `divisionRows`' saved band, and by the
+  stored natural age and request the directory now reads (`natural_age`, `play_up_requested`). An age the record
+  lacks, an entry the table has no row for, and a division with no band are `Not checked`. `mappedTeams` gain
+  `divisionId`. The editor's announcement says what a move changed ("Pia is now playing up."). The E2E
+  scenario that asserted the banner (`roster_conflict_detection.feature`, "Age mismatch") is replaced by one that
+  saves a division with its band and puts a stored player on the seeded team, and asserts the list.
+- **No jsdom axe.** The repository has no jsdom axe (only `@axe-core/playwright`, and adding `axe-core` is a
+  dependency). The jsdom tests hold the structure axe would check (column headers, `scope`, row group headers,
+  names, a description for the table); axe itself runs in Chromium, in both themes, at three stages of B4
+  (overview, Play-up section, roster list), with no known violation to excuse.
+- **A layout found by looking:** in the narrow Teams column the overview scrolls sideways, and a program
+  heading as wide as the table read cut off; it is now sticky and wraps (`77543dc`).
+- **Existing tests that moved on purpose:** two of PR 1's Players-cell pins gained the new `asked` line (their
+  leagues have requests in their own division); the overview tests find cells by header (a column was added) and
+  scope a "no note" check to the table (the caption says "placed in their own age division" in a sentence);
+  `useRosterDirectory`'s entry shape; the section's pinned sentence; the census's importers of `playUpSeats.js`
+  (the page, `playUpReview.js`, `rosterAgeFlags.js`).
+- **Not done, left for PR 3 (C4):** the stale words in `teamGeneration.js:55`, `constants.js:28`, the fixture
+  string in `tests/placementReview.test.jsx:63`, and the notes in `gotsport-import-contract.md`.
+
+**PR 2, executed (2026-11-03, throwaway script outside the repository over the core functions and the page's
+own helpers, on this branch):** the new column, the league line and the section sentence on the season fixture
+(1,153 registrations, 21 divisions, bands read off the data) and the demo league (1,259, 21 divisions). As they
+ship, both read `None` in all 21 divisions and `League: 0 playing up, 0 playing down, 29 (season fixture) and 33
+(demo) asked to play up from their own division`; the section's sentence was `0 play-ups (0 requested, 0 not),
+0 play-downs` and is `0 playing up, 0 playing down, N asked to play up from their own division`. With ten of
+the season fixture's players re-registered (six age-12 players into U10B, four age-10 players into U12B, one
+asking), the section's sentence was `4 play-ups (1 requested, 3 not), 6 play-downs` and is `1 playing up (1
+requested), 0 playing down, 9 moved to their own age division, 28 asked to play up from their own division`;
+the column reads `1 playing up` for U12B and `None` for the other 20 divisions.
 
 **PR 3: the setting** (after PR 1; only if decision 2 says build it)
 

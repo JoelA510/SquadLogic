@@ -920,6 +920,30 @@ describe('practice import: a slot is a ground, a weekday, a start and a date', (
     expect(whole.rows[0].flags).toEqual([]);
   });
 
+  it('names every partner of a row, not the first: a team on half A in two windows and on half B (/code-review)', () => {
+    const out = resolve([
+      row({ Subunit: 'A', 'Valid From': '2026-09-07', 'Valid Until': '2026-10-15' }),
+      row({ Subunit: 'B', 'Valid From': '2026-09-07', 'Valid Until': '2026-11-20' }),
+      row({ Subunit: 'A', 'Valid From': '2026-10-16', 'Valid Until': '2026-11-20' }),
+    ]);
+    const partners = out.rows.map((r) =>
+      r.flags.filter((f) => f.code === 'team-on-both-halves').map((f) => f.details.withRows)
+    );
+    expect(partners).toEqual([[[2]], [[1, 3]], [[2]]]);
+    expect(out.rows[1].flags).toHaveLength(1); // one flag per row, naming both
+    expect(out.rows[1].flags[0].details.withRow).toBe(1);
+    expect(out.rows[1].flags[0].message).toMatch(/rows 1 and 3/);
+    expect(out.counts.flags['team-on-both-halves']).toEqual({ rows: 3, teams: 1 });
+    // a hold over two slots names both
+    const held = resolve([
+      row({ Team: '', Division: '', Subunit: 'A' }),
+      row({ Team: '', Division: '', Subunit: 'B' }),
+      row({ Team: '', Division: '', Use: 'hold', Subunit: '' }),
+    ]);
+    expect(held.rows[2].flags.map((f) => f.details.withRows)).toEqual([[1, 2]]);
+    expect(held.rows[2].flags[0].details.withRow).toBe(1);
+  });
+
   it('does not flag two different teams on two halves, or one team on one half at two times', () => {
     const out = resolve([
       row({ Subunit: 'A' }),
@@ -954,6 +978,37 @@ describe('practice import: a slot is a ground, a weekday, a start and a date', (
     expect(
       resolve([row(), row({ Team: 'Lions', End: '17:30', Start: '16:30' })]).rows[1].reason
     ).toBe('slot-overlaps-another');
+  });
+
+  it('keeps the slot that holds a team over an open one, whichever comes first in the file (/code-review)', () => {
+    // An open whole-field slot and a team on half A at the same time clash: something must give, and it
+    // is the empty slot, not the team's practice. The verdict does not depend on the row order.
+    const open = row({ Team: '', Division: '', Subunit: '' });
+    const placed = row({ Team: 'Lions', Subunit: 'A' });
+    for (const rows of [
+      [open, placed],
+      [placed, open],
+    ]) {
+      const out = resolve(rows);
+      const verdict = Object.fromEntries(out.rows.map((r) => [r.teamLabel || 'open', r.reason]));
+      expect(verdict).toEqual({ Lions: null, open: 'slot-overlaps-another' });
+      const refused = out.rows.find((r) => r.reason === 'slot-overlaps-another');
+      expect(refused.teamLabel).toBe('');
+      expect(refused.message).toMatch(/row \d/);
+      expect(out.creations.slots.map((s) => [s.subunitId, s.placements])).toEqual([['sub:a1a', 1]]);
+    }
+    // two slots that both hold a team: the earlier row still wins, as before
+    const both = resolve([
+      row({ Team: 'Sharks', Subunit: 'A' }),
+      row({ Team: 'Lions', Subunit: '' }),
+    ]);
+    expect(both.rows.map((r) => r.reason)).toEqual([null, 'slot-overlaps-another']);
+    // and two open slots too
+    const empty = resolve([
+      row({ Team: '', Division: '', Subunit: 'A' }),
+      row({ Team: '', Division: '', Subunit: '' }),
+    ]);
+    expect(empty.rows.map((r) => r.reason)).toEqual([null, 'slot-overlaps-another']);
   });
 
   it('allows back to back, two halves at one time, and other fields, weekdays and locations', () => {
@@ -1105,6 +1160,48 @@ describe('practice import: a slot is a ground, a weekday, a start and a date', (
       subunit: 'sub:b1a',
     });
     expect(otherField.rows[1].flags).toEqual([]);
+  });
+
+  it('never gives a hold ground that would be created: a stored create for a label only the hold names (/code-review)', () => {
+    // No entry is shown for a label only a hold names, so a stored `create` for it is stale. It must not
+    // turn into a placeholder id no slot can have: the hold is not compared, and says so by `ids: null`.
+    const out = resolvePracticeRows({
+      rows: parsed([
+        row({ Team: '', Division: '', Subunit: '' }),
+        row({ Team: '', Division: '', Use: 'hold', Location: 'The Annex', Field: 'Main' }),
+      ]),
+      league: league(),
+      decisions: {
+        locations: { [practiceLocationDecisionKey('The Annex')]: { action: 'create' } },
+        fields: { [practiceFieldDecisionKey('The Annex', 'Main')]: { action: 'create' } },
+      },
+    });
+    expect(out.rows[1].ids).toBeNull();
+    expect(JSON.stringify(out)).not.toContain('new:location');
+    expect(out.creations.locations).toEqual([]);
+    // a `create` for a label that other rows use too is the admin's, and the hold follows it
+    const shared = resolvePracticeRows({
+      rows: parsed([
+        row({ Team: '', Division: '', Subunit: '', Location: 'The Annex', Field: 'Main' }),
+        row({
+          Team: '',
+          Division: '',
+          Use: 'hold',
+          Subunit: '',
+          Location: 'The Annex',
+          Field: 'Main',
+          Start: '16:30',
+          End: '17:30',
+        }),
+      ]),
+      league: league(),
+      decisions: {
+        locations: { [practiceLocationDecisionKey('The Annex')]: { action: 'create' } },
+        fields: { [practiceFieldDecisionKey('The Annex', 'Main')]: { action: 'create' } },
+      },
+    });
+    expect(shared.rows[1].ids.field).toBe(shared.rows[0].ids.field);
+    expect(shared.rows[1].flags.map((f) => f.code)).toEqual(['hold-over-open-slot']);
   });
 
   it('gives a hold the admin’s own decision when other rows use the same label', () => {

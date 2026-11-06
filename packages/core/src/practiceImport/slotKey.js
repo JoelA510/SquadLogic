@@ -66,8 +66,11 @@ const WEEKDAY_INDEX = Object.freeze({ mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sa
 /** @param {string} iso `YYYY-MM-DD` @returns {number} days since 1970-01-01 */
 const dayNumberOf = (iso) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_PER_DAY);
 
-/** @param {string} hhmm */
-const minutesOf = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+/**
+ * Minutes past midnight of an `HH:mm` wall time.
+ * @param {string} hhmm
+ */
+export const minutesOf = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 
 /**
  * @typedef {Object} PracticeWindow  when a slot happens
@@ -126,4 +129,33 @@ export function practiceSlotsOverlap(a, b) {
   if (a.fieldId !== b.fieldId) return false;
   const sameGround = a.subunitId == null || b.subunitId == null || a.subunitId === b.subunitId;
   return sameGround && practiceWindowsOverlap(a, b);
+}
+
+/**
+ * The most practices a team has in one scheduling week: the database's own `count` rule
+ * (`practice_new_auto_row_refusals`, `20261105010000`). A scheduling week is Monday to Sunday, and the
+ * practices a team has in it are the rows with a date on their weekday in that week. Two rows of one
+ * team that are never in force together (a slot moved mid-season) are one a week, not two; a Monday and a
+ * Wednesday row of one week are two though no date is shared. A window that holds no date on its weekday
+ * never happens and counts in no week.
+ *
+ * @param {Array<{ day: string, validFrom: string, validUntil: string }>} rows  one team's rows
+ * @returns {number}
+ */
+export function practicePeakPerWeek(rows) {
+  if (rows.length === 0) return 0;
+  const spans = rows.map((r) => {
+    const dow = WEEKDAY_INDEX[r.day];
+    if (dow === undefined) throw new TypeError(`practicePeakPerWeek: "${r.day}" is not a day`);
+    return { dow, from: dayNumberOf(r.validFrom), until: dayNumberOf(r.validUntil) };
+  });
+  const first = Math.min(...spans.map((x) => x.from));
+  const last = Math.max(...spans.map((x) => x.until));
+  let peak = 0;
+  for (let monday = first - weekdayOf(first); monday <= last; monday += 7) {
+    let n = 0;
+    for (const x of spans) if (monday + x.dow >= x.from && monday + x.dow <= x.until) n += 1;
+    peak = Math.max(peak, n);
+  }
+  return peak;
 }

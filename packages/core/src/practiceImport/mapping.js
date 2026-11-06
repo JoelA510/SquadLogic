@@ -16,7 +16,8 @@
  * There is one normaliser (`practiceLabelKey`, which is `normaliseExternalLabel`): trim, collapse
  * whitespace, fold case, **drop no word**. `Park Back` and `Park Front` are two venues; `Park` is neither.
  * A team is judged inside its division, a field inside its location, a subunit inside its field. An
- * outside club (`is_external`) is never a practice team.
+ * outside club (`is_external`) is never a practice team, but it holds its name: a `create` is checked
+ * against every team of the division (`UNIQUE (division_id, name)`).
  *
  * ## Proposals, in this order, none applied without the admin (F17, decision 30)
  *
@@ -49,8 +50,10 @@
  * `hold` row makes none. A slot is found by `(field, subunit or the whole field, weekday, start, valid
  * from)` (`slotKey.js`). Rows of one slot must agree on its End, Valid Until and Capacity, or the later
  * row is `slot-overlaps-another`; two different slots that claim one ground at overlapping times are
- * the database's supply rule (`practice_slot_conflicts`), and the LATER slot is refused, whole. This
- * module sees only the rows of the file: a clash with a slot already stored is PR 10's.
+ * the database's supply rule (`practice_slot_conflicts`), and one of them is refused, whole: the slot a
+ * team is placed in is kept over an empty one whichever row comes first (a team's practice is never
+ * dropped for an unused slot), else the earlier row. This module sees only the rows of the file: a clash
+ * with a slot already stored is PR 10's.
  *
  * ## Flags judged here
  *
@@ -64,7 +67,9 @@
 
 import { PRACTICE_IMPORT_LIMITS, PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
 import {
+  minutesOf,
   practiceLabelKey,
+  practicePeakPerWeek,
   practiceSlotKey,
   practiceSlotsOverlap,
   practiceTuple as tuple,
@@ -210,6 +215,12 @@ function decisionFor(decisions, kind, key) {
  * @property {'unknown-id' | 'invalid-decision' | 'name-exists' | 'name-taken-by-outside-club'} [problem]  why the label has no usable decision
  */
 
+/**
+ * @typedef {{ has: (k: string) => boolean, get: (k: string) => any, set: (k: string, v: any) => unknown }} RefMap
+ *   what a reference book holds for one kind: a `Map` is one, and so is a layered view of two
+ * @typedef {Record<'division' | 'location' | 'field' | 'subunit' | 'team', RefMap>} RefBook
+ */
+
 /** What a label resolves to once decisions are applied. */
 const SKIP = Object.freeze({ type: 'skip' });
 
@@ -218,9 +229,12 @@ const SKIP = Object.freeze({ type: 'skip' });
  * base's after, and `set` writes only its own. A hold reads what the other rows resolved (so the admin's
  * decisions hold for it) and adds only the ground nothing else named.
  *
- * @template T
- * @param {Record<string, Map<string, T>>} base
- * @returns {Record<string, { has: (k: string) => boolean, get: (k: string) => T | undefined, set: (k: string, v: T) => unknown }>}
+ * A reference the hold pass makes is kept only if it is an EXISTING record: a hold never creates
+ * anything, and a placeholder id for a record only the hold names could match no slot, so such a
+ * reference is stored as unresolved.
+ *
+ * @param {RefBook} base
+ * @returns {RefBook}
  */
 function layered(base) {
   /** @type {Record<string, any>} */
@@ -230,10 +244,11 @@ function layered(base) {
     view[kind] = {
       has: (/** @type {string} */ k) => own.has(k) || base[kind].has(k),
       get: (/** @type {string} */ k) => (own.has(k) ? own.get(k) : base[kind].get(k)),
-      set: (/** @type {string} */ k, /** @type {any} */ v) => own.set(k, v),
+      set: (/** @type {string} */ k, /** @type {any} */ v) =>
+        own.set(k, v && v.type === 'existing' ? v : null),
     };
   }
-  return view;
+  return /** @type {RefBook} */ (view);
 }
 
 /**
@@ -261,7 +276,8 @@ function analyse({ rows, league, decisions, aliases, previous }) {
     subunit: new Map(),
     team: new Map(),
   };
-  /** key -> a reference (or SKIP, or null when unresolved) */
+  /** key -> a reference (or SKIP, or null when unresolved)
+   * @type {RefBook} */
   const refs = {
     division: new Map(),
     location: new Map(),
@@ -402,7 +418,7 @@ function analyse({ rows, league, decisions, aliases, previous }) {
    * The five passes over some rows, into some entries and some references.
    * @param {Array<any>} list
    * @param {typeof entries} into
-   * @param {typeof refs} book
+   * @param {RefBook} book
    */
   function runPasses(list, into, book) {
     const asking = list;
@@ -906,14 +922,11 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
   }
 
   // ---- Slots ----------------------------------------------------------------------------------------
-  /** @type {PracticeSlot[]} */
-  const slots = [];
-  /** @type {Map<string, PracticeSlot>} */
-  const slotByKey = new Map();
-  /** @type {Map<string, number>} the slot keys refused, and the row they clashed with */
-  const refusedKey = new Map();
-  /** @type {Map<string, PracticeSlot[]>} accepted slots by ground and weekday, so a new one meets few */
-  const onGround = new Map();
+  // The rows that name one slot are a group (its key). When two slots claim one ground something must
+  // give, and it is the slot nothing is placed in, never a team's practice, whichever row comes first:
+  // the groups that hold a team are taken before the empty ones, each in file order (the sort is stable).
+  /** @type {Map<string, Array<{ item: { row: any }, key: string }>>} */
+  const groups = new Map();
   for (const item of resolved) {
     const r = item.row;
     if (!r.ids || (r.status !== 'placement' && r.status !== 'open')) continue;
@@ -924,67 +937,79 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
       startTime: r.startTime,
       validFrom: r.validFrom,
     });
+    groups.set(key, [...(groups.get(key) ?? []), { item, key }]);
+  }
+  /** @param {{ row: any }} a @param {{ row: any }} b does b describe the same slot a does */
+  const agrees = (a, b) =>
+    a.row.endTime === b.row.endTime &&
+    a.row.validUntil === b.row.validUntil &&
+    a.row.capacity === b.row.capacity;
+  const holdsTeam = (/** @type {Array<{ item: { row: any } }>} */ group) =>
+    group.some((g) => g.item.row.status === 'placement' && agrees(g.item, group[0].item));
+  const ordered = [...groups.values()].sort(
+    (a, b) => Number(!holdsTeam(a)) - Number(!holdsTeam(b))
+  );
+
+  /** @type {PracticeSlot[]} */
+  const slots = [];
+  /** @type {Map<string, PracticeSlot[]>} accepted slots by ground and weekday, so a new one meets few */
+  const onGround = new Map();
+  for (const group of ordered) {
+    const first = group[0].item.row;
     const candidate = {
-      key,
-      locationId: r.ids.location,
-      fieldId: r.ids.field,
-      subunitId: r.ids.subunit,
-      day: r.day,
-      startTime: r.startTime,
-      endTime: r.endTime,
-      validFrom: r.validFrom,
-      validUntil: r.validUntil,
-      capacity: r.capacity,
-      rowNumbers: [r.rowNumber],
-      placements: r.status === 'placement' ? 1 : 0,
+      key: group[0].key,
+      locationId: first.ids.location,
+      fieldId: first.ids.field,
+      subunitId: first.ids.subunit,
+      day: first.day,
+      startTime: first.startTime,
+      endTime: first.endTime,
+      validFrom: first.validFrom,
+      validUntil: first.validUntil,
+      capacity: first.capacity,
+      rowNumbers: /** @type {number[]} */ ([]),
+      placements: 0,
     };
-    const same = slotByKey.get(key);
-    if (same) {
-      if (
-        same.endTime === candidate.endTime &&
-        same.validUntil === candidate.validUntil &&
-        same.capacity === candidate.capacity
-      ) {
-        same.rowNumbers.push(r.rowNumber);
-        same.placements += candidate.placements;
-        r.slotKey = key;
-      } else {
+    const groundKey = tuple(candidate.fieldId, candidate.day);
+    const clash = (onGround.get(groundKey) ?? []).find((s) => practiceSlotsOverlap(s, candidate));
+    if (clash) {
+      for (const { item } of group) {
         refuseRow(
           item,
           R.SLOT_OVERLAPS_ANOTHER,
-          `This is the same slot as row ${same.rowNumbers[0]} with a different End, Valid Until or Capacity. A slot is one of each: make the rows agree.`
+          `This slot overlaps the slot of row ${clash.rowNumbers[0]} on the same ground at the same time. Two slots cannot claim one ground: the one a team is placed in is imported, else the earlier row.`
         );
       }
       continue;
     }
-    const earlier = refusedKey.get(key);
-    if (earlier !== undefined) {
-      refuseRow(
-        item,
-        R.SLOT_OVERLAPS_ANOTHER,
-        `This is the same slot as row ${earlier}'s clash: it overlaps another slot on the same ground and is not written.`
-      );
-      continue;
-    }
-    const groundKey = tuple(candidate.fieldId, candidate.day);
-    const clash = (onGround.get(groundKey) ?? []).find((s) => practiceSlotsOverlap(s, candidate));
-    if (clash) {
-      refusedKey.set(key, r.rowNumber);
-      refuseRow(
-        item,
-        R.SLOT_OVERLAPS_ANOTHER,
-        `This slot overlaps the slot of row ${clash.rowNumbers[0]} on the same ground at the same time. Two slots cannot claim one ground; the earlier row is the one imported.`
-      );
-      continue;
+    for (const { item } of group) {
+      const r = item.row;
+      if (!agrees(item, group[0].item)) {
+        refuseRow(
+          item,
+          R.SLOT_OVERLAPS_ANOTHER,
+          `This is the same slot as row ${first.rowNumber} with a different End, Valid Until or Capacity. A slot is one of each: make the rows agree.`
+        );
+        continue;
+      }
+      candidate.rowNumbers.push(r.rowNumber);
+      if (r.status === 'placement') candidate.placements += 1;
+      r.slotKey = candidate.key;
     }
     slots.push(candidate);
-    slotByKey.set(key, candidate);
     onGround.set(groundKey, [...(onGround.get(groundKey) ?? []), candidate]);
-    r.slotKey = key;
   }
+  slots.sort((a, b) => a.rowNumbers[0] - b.rowNumbers[0]); // file order, as the rows were listed
 
   // ---- Flags judged here -------------------------------------------------------------------------------
-  // A team on two halves of one field at one time.
+  /** @param {number[]} list `row 3`, `rows 1 and 3`, `rows 1, 3 and 4` */
+  const rowsPhrase = (list) =>
+    list.length === 1
+      ? `row ${list[0]}`
+      : `rows ${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+
+  // A team on two halves of one field at one time. A row can have more than one partner (the same half in
+  // two windows against the other half), and the flag names them all.
   /** @type {Map<string, any[]>} */
   const byTeam = new Map();
   for (const { row: r } of resolved) {
@@ -993,6 +1018,8 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
   }
   /** @type {Set<string>} */
   const teamsOnBothHalves = new Set();
+  /** @type {Map<any, Set<number>>} row -> the row numbers it is on both halves with */
+  const partners = new Map();
   for (const [teamId, list] of byTeam) {
     for (let i = 0; i < list.length; i += 1) {
       for (let j = i + 1; j < list.length; j += 1) {
@@ -1005,21 +1032,21 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
           a.ids.subunit !== b.ids.subunit;
         if (!bothHalves || !practiceWindowsOverlap(a, b)) continue;
         teamsOnBothHalves.add(teamId);
-        for (const [x, y] of [
-          [a, b],
-          [b, a],
-        ]) {
-          if (x.flags.some((f) => f.code === R.TEAM_ON_BOTH_HALVES)) continue;
-          x.flags.push({
-            code: R.TEAM_ON_BOTH_HALVES,
-            message: `The team is on both halves of this field at the same time (row ${y.rowNumber}). That is the whole field: leave Subunit blank for the whole field.`,
-            details: { withRow: y.rowNumber },
-          });
-        }
+        partners.set(a, (partners.get(a) ?? new Set()).add(b.rowNumber));
+        partners.set(b, (partners.get(b) ?? new Set()).add(a.rowNumber));
       }
     }
   }
-  // A hold over a slot of the same file.
+  for (const [r, set] of partners) {
+    const withRows = [...set].sort((x, y) => x - y);
+    r.flags.push({
+      code: R.TEAM_ON_BOTH_HALVES,
+      message: `The team is on both halves of this field at the same time (${rowsPhrase(withRows)}). That is the whole field: leave Subunit blank for the whole field.`,
+      details: { withRow: withRows[0], withRows },
+    });
+  }
+
+  // A hold over the slots of the same file, named all.
   for (const { row: r } of resolved) {
     if (r.status !== 'hold' || !r.ids) continue;
     const held = {
@@ -1031,17 +1058,16 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
       validFrom: r.validFrom,
       validUntil: r.validUntil,
     };
-    const over = (onGround.get(tuple(held.fieldId, held.day)) ?? []).find((s) =>
+    const over = (onGround.get(tuple(held.fieldId, held.day)) ?? []).filter((s) =>
       practiceSlotsOverlap(s, held)
     );
-    if (!over) continue;
+    if (over.length === 0) continue;
+    const withRows = over.map((s) => s.rowNumbers[0]).sort((x, y) => x - y);
+    const used = over.some((s) => s.placements > 0);
     r.flags.push({
       code: R.HOLD_OVER_OPEN_SLOT,
-      message:
-        over.placements === 0
-          ? `This cell is held for a non-team activity, but row ${over.rowNumbers[0]} makes an open slot there. The hold makes no slot and does not remove it.`
-          : `This cell is held for a non-team activity, but row ${over.rowNumbers[0]} places a team there. The hold makes no slot and does not move the team.`,
-      details: { withRow: over.rowNumbers[0], used: over.placements > 0 },
+      message: `This cell is held for a non-team activity, but ${rowsPhrase(withRows)} ${over.length === 1 ? 'is a slot' : 'are slots'} there${used ? ', with a team in it' : ''}. The hold makes no slot, and removes or moves nothing.`,
+      details: { withRow: withRows[0], withRows, used },
     });
   }
 
@@ -1123,7 +1149,6 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
 /* Division practice settings (decision 26)                                    */
 /* -------------------------------------------------------------------------- */
 
-const minutesOf = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 const {
   MIN_PRACTICES_PER_WEEK,
   MAX_PRACTICES_PER_WEEK,
@@ -1134,8 +1159,11 @@ const {
 /**
  * For each division in the file, the practice settings the file suggests, beside what is stored:
  *
- * - `practicesPerWeek`: the **most common count of rows per team** (a team is what its rows resolve to,
- *   so stray whitespace or a mapped alias does not split one); **a tie proposes nothing**.
+ * - `practicesPerWeek`: the **most common count, per team, of its practices in a scheduling week** (a team
+ *   is what its rows resolve to, so stray whitespace or a mapped alias does not split one). That is the
+ *   database's own `count` rule (`practicePeakPerWeek`), and it is the team's number of rows whenever its
+ *   rows share their dates, which the plan's wording ("the most common count of rows per team") means;
+ *   a slot moved mid-season is two rows and one practice a week. **A tie proposes nothing.**
  * - `practiceMinutes`: the slot length when every placement of the division has one length, else `'any'`
  *   (`NULL` in the column).
  *
@@ -1150,8 +1178,9 @@ const {
  */
 export function proposeDivisionSettings({ rows, league }) {
   requireArray(rows, 'rows');
-  const world = indexLeague(league);
-  /** @type {Map<string, { divisionId: string, label: string, labelKey: string, teams: Map<string, number>, lengths: Set<number> }>} */
+  const divisions = requireArray(league?.divisions, 'league.divisions');
+  const divisionsById = new Map(divisions.map((d) => [d.id, d]));
+  /** @type {Map<string, { divisionId: string, label: string, labelKey: string, teams: Map<string, Array<{ day: string, validFrom: string, validUntil: string }>>, lengths: Set<number> }>} */
   const byDivision = new Map();
   for (const r of rows) {
     if (r.status !== 'placement' || !r.ids?.division || !r.ids.team) continue;
@@ -1166,20 +1195,26 @@ export function proposeDivisionSettings({ rows, league }) {
       };
       byDivision.set(r.ids.division, d);
     }
-    d.teams.set(r.ids.team, (d.teams.get(r.ids.team) ?? 0) + 1);
+    d.teams.set(r.ids.team, [
+      ...(d.teams.get(r.ids.team) ?? []),
+      { day: r.day, validFrom: r.validFrom, validUntil: r.validUntil },
+    ]);
     d.lengths.add(minutesOf(r.endTime) - minutesOf(r.startTime));
   }
 
   return [...byDivision.values()]
     .sort((a, b) => (a.labelKey < b.labelKey ? -1 : a.labelKey > b.labelKey ? 1 : 0))
     .map((d) => {
-      const stored = world.divisionsById.get(d.divisionId);
+      const stored = divisionsById.get(d.divisionId);
       const storedPerWeek = stored?.practicesPerWeek ?? null;
       const storedMinutes = stored?.practiceMinutes ?? null;
 
-      /** @type {Record<number, number>} teams holding N rows */
+      /** @type {Record<number, number>} teams having N practices in their busiest scheduling week */
       const histogram = {};
-      for (const n of d.teams.values()) histogram[n] = (histogram[n] ?? 0) + 1;
+      for (const windows of d.teams.values()) {
+        const n = practicePeakPerWeek(windows);
+        histogram[n] = (histogram[n] ?? 0) + 1;
+      }
       const top = Math.max(...Object.values(histogram));
       const modal = Object.keys(histogram)
         .map(Number)
@@ -1203,7 +1238,7 @@ export function proposeDivisionSettings({ rows, league }) {
         label: d.label,
         isNew: d.divisionId.startsWith('new:'),
         teams: d.teams.size,
-        rows: [...d.teams.values()].reduce((a, b) => a + b, 0),
+        rows: [...d.teams.values()].reduce((n, windows) => n + windows.length, 0),
         practicesPerWeek: {
           proposed: perWeek,
           tie,

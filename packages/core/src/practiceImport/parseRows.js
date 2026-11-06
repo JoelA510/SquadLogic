@@ -532,10 +532,17 @@ function parseRow({ row, index, cell, bounds }) {
 }
 
 /**
- * A team label the file puts in two divisions, and the same practice twice. A team is in one division
- * (`UNIQUE (division_id, name)`), and the file cannot say which of two divisions a label belongs to, so
- * EVERY row of the label is refused (the verdict does not depend on the order of the file). Of two
- * identical rows the first wins and the repeat is listed.
+ * A team label the file puts in two divisions, and the same practice twice.
+ *
+ * `team-in-two-divisions` is plan 4.11.4's reason, and a conservative one. The database would allow two
+ * teams of one name in two divisions (`UNIQUE (division_id, name)` is per division), so this is NOT a rule
+ * of the schema: it is the file that cannot say, from a label alone, whether `Lions` under two divisions
+ * is two real teams or one team and a typo in a Division cell, and a wrong guess puts a team's practices
+ * in a team that is not theirs. EVERY row of the label is refused (the verdict does not depend on the
+ * order of the file), and the message says how to go on: make the labels differ in the file, then map
+ * each to its team. A league that holds a team of one name in two divisions meets this, which is an open
+ * question for the owner (PR 9, deviation 3), not a settled rule. Of two identical rows the first wins
+ * and the repeat is listed.
  *
  * @param {ParsedPracticeRow[]} parsed  changed in place
  */
@@ -557,7 +564,7 @@ function refuseRepeats(parsed) {
     r.status = 'refused';
     r.reason = R.TEAM_IN_TWO_DIVISIONS;
     r.flags = [];
-    r.message = `The team ${quoted(r.teamLabel)} is in more than one division in this file. A team is in one: fix the Division, or make the two labels differ.`;
+    r.message = `The team ${quoted(r.teamLabel)} is under more than one division in this file, and a label alone cannot say whether that is two teams or a typo. Fix the Division, or make the labels differ (then map each to its team).`;
   }
 
   /** @type {Map<string, number>} content key -> the row number that holds it */

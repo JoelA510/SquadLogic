@@ -194,6 +194,64 @@ describe('practice import settings: practices a week', () => {
     expect(boys(settings).teams).toBe(2);
   });
 
+  it('counts a team’s practices in a scheduling week, not its rows: a slot moved mid-season is one a week (/code-review)', () => {
+    // Lions practise once a week: Monday 17:00 until 15 Oct, then Monday 18:00 from 16 Oct. Two rows,
+    // never in force together. Counted as rows they would propose two a week for a one-a-week division.
+    const moved = [
+      row({
+        Team: 'T1',
+        'Valid From': '2026-09-07',
+        'Valid Until': '2026-10-15',
+        Start: '17:00',
+        End: '18:00',
+      }),
+      row({
+        Team: 'T1',
+        'Valid From': '2026-10-16',
+        'Valid Until': '2026-11-20',
+        Start: '18:00',
+        End: '19:00',
+      }),
+      row({ Team: 'T2', Day: 'Tue' }),
+    ];
+    const { settings } = propose(moved);
+    expect(boys(settings).practicesPerWeek).toMatchObject({ proposed: 1, histogram: { 1: 2 } });
+    expect(boys(settings).rows).toBe(3); // the rows are still all there, and still counted as rows
+    // controls: rows in force together are counted together (the database's own `count` rule: the rows
+    // with a date on their weekday in one Monday-to-Sunday week)
+    const together = propose([
+      row({ Team: 'T1', Day: 'Mon' }),
+      row({ Team: 'T1', Day: 'Wed' }),
+      row({ Team: 'T2', Day: 'Mon' }),
+      row({ Team: 'T2', Day: 'Wed' }),
+    ]).settings;
+    expect(boys(together).practicesPerWeek).toMatchObject({ proposed: 2, histogram: { 2: 2 } });
+    // two rows on one weekday whose windows overlap are two in the weeks they share
+    const overlap = propose([
+      row({
+        Team: 'T1',
+        'Valid From': '2026-09-07',
+        'Valid Until': '2026-10-15',
+        Start: '17:00',
+        End: '18:00',
+      }),
+      row({
+        Team: 'T1',
+        'Valid From': '2026-10-05',
+        'Valid Until': '2026-11-20',
+        Start: '19:00',
+        End: '20:00',
+      }),
+    ]).settings;
+    expect(boys(overlap).practicesPerWeek.proposed).toBe(2);
+    // a window that holds no date on its weekday never happens, and is not a practice in any week
+    const never = propose([
+      row({ Team: 'T1', Day: 'Wed', 'Valid From': '2026-09-07', 'Valid Until': '2026-09-08' }),
+      row({ Team: 'T1', Day: 'Fri' }),
+    ]).settings;
+    expect(boys(never).practicesPerWeek.proposed).toBe(1);
+  });
+
   it('counts a division by what it resolves to, not by the label the file wrote', () => {
     const rows = [
       row({ Team: 'T1', Division: 'U10 Boys', Day: 'Mon' }),

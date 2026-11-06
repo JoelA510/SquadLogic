@@ -1105,13 +1105,13 @@ function invalidRows() {
       'team-in-two-divisions',
     ],
     [
-      { Team: 'U07B-01', Division: 'U06 Girls', Location: 'Venue B', Field: 'Field 1', Day: 'Mon' },
+      { Team: 'U07B-01', Division: 'U07 Boys', Location: 'Venue B', Field: 'Field 1', Day: 'Mon' },
       'ok',
     ],
     [
       {
         Team: 'U07B-02',
-        Division: 'U06 Girls',
+        Division: 'U07 Boys',
         Location: 'Venue B',
         Field: 'Field 1',
         Subunit: '',
@@ -1123,13 +1123,13 @@ function invalidRows() {
     ],
     [{}, 'duplicate-row'],
     [
-      { Team: 'U08B-01', Division: 'U06 Girls', Location: 'Venue B', Field: 'Field 2', Day: 'Tue' },
+      { Team: 'U08B-01', Division: 'U08 Boys', Location: 'Venue B', Field: 'Field 2', Day: 'Tue' },
       'team-on-both-halves',
     ],
     [
       {
         Team: 'U08B-01',
-        Division: 'U06 Girls',
+        Division: 'U08 Boys',
         Location: 'Venue B',
         Field: 'Field 2',
         Subunit: 'B',

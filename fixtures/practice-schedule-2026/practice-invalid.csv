@@ -25,11 +25,11 @@ U05B-01,U05 Boys,Mon,22:00,23:00,,Venue A,Field 9,A,2026-09-14,2026-11-20,,,expe
 U05B-01,U05 Boys,Tue,21:00,22:00,,Venue A,Field 1,C,2026-09-14,2026-11-20,,,expect: unknown-subunit
 U06B-01,U06 Boys,Mon,16:00,17:00,,Venue B,Field 3,A,2026-09-14,2026-11-20,,,expect: team-in-two-divisions
 U06B-01,U06 Girls,Wed,16:00,17:00,,Venue B,Field 3,A,2026-09-14,2026-11-20,,,expect: team-in-two-divisions
-U07B-01,U06 Girls,Mon,16:00,17:00,,Venue B,Field 1,A,2026-09-14,2026-11-20,,,expect: ok
-U07B-02,U06 Girls,Mon,16:30,17:30,,Venue B,Field 1,,2026-09-14,2026-11-20,,,expect: slot-overlaps-another
+U07B-01,U07 Boys,Mon,16:00,17:00,,Venue B,Field 1,A,2026-09-14,2026-11-20,,,expect: ok
+U07B-02,U07 Boys,Mon,16:30,17:30,,Venue B,Field 1,,2026-09-14,2026-11-20,,,expect: slot-overlaps-another
 U05B-01,U05 Boys,Mon,16:00,17:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: duplicate-row
-U08B-01,U06 Girls,Tue,16:00,17:00,,Venue B,Field 2,A,2026-09-14,2026-11-20,,,expect: team-on-both-halves
-U08B-01,U06 Girls,Tue,16:00,17:00,,Venue B,Field 2,B,2026-09-14,2026-11-20,,,expect: team-on-both-halves
+U08B-01,U08 Boys,Tue,16:00,17:00,,Venue B,Field 2,A,2026-09-14,2026-11-20,,,expect: team-on-both-halves
+U08B-01,U08 Boys,Tue,16:00,17:00,,Venue B,Field 2,B,2026-09-14,2026-11-20,,,expect: team-on-both-halves
 ,U05 Boys,Wed,17:00,18:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: division-not-reserved
 ,,Wed,16:00,17:00,,Venue C,Field 1,A,2026-09-14,2026-11-20,,,expect: open
 ,,Wed,16:00,17:00,,Venue C,Field 1,A,2026-09-14,2026-11-20,,hold,expect: hold-over-open-slot

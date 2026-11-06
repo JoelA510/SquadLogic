@@ -25,6 +25,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { publishedOmissions } from '../packages/core/src/gamePublished.js';
 import { buildDivisionRoundRobins } from '../packages/core/src/gameScheduling.js';
+import { mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { seedMockDb } from './helpers/seedMockDb.js';
 
 const ORG = '00000000-0000-4000-8000-0000000000e3';
@@ -319,4 +320,48 @@ describe('with nothing Published the page does what it always did', () => {
       }
     });
   }
+});
+
+describe('when the saved games cannot be read the page does not generate', () => {
+  /** A `game_assignments` read the server refuses, whatever the page asks for. */
+  function refuseSavedGames() {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      if (table !== 'game_assignments') return realFrom(table);
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        order: () => builder,
+        range: () => builder,
+        then: (resolve, reject) =>
+          Promise.resolve({ data: null, error: new Error('saved games refused') }).then(
+            resolve,
+            reject
+          ),
+      };
+      return builder;
+    });
+  }
+
+  it('Generate stays off and says why: it could not know which games are Published', async () => {
+    seed(true);
+    refuseSavedGames();
+    render(
+      <MemoryRouter>
+        <GameSchedulingPage />
+      </MemoryRouter>
+    );
+    // The refusal has been read (the page's banner carries it) before anything is judged: while the
+    // read is still loading the button is off for another reason.
+    expect((await screen.findAllByText(/saved games refused/)).length).toBeGreaterThan(0);
+    const run = screen.getByRole('button', {
+      name: 'Auto-Generate: run auto-scheduler optimization',
+    });
+    expect(run).toBeDisabled();
+    expect(
+      screen.getByText(/saved game schedule could not be read.*not generated.*Published/)
+    ).toBeInTheDocument();
+    fireEvent.click(run);
+    expect(screen.queryByRole('button', { name: /apply schedule/i })).not.toBeInTheDocument();
+  });
 });

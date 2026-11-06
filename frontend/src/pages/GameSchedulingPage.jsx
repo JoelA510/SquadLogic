@@ -332,6 +332,8 @@ import { describeUnplaceableSlots, isSeasonClockLoading } from '../utils/seasonC
  * @param {boolean} input.seasonClockLoading
  * @param {number} [input.practiceOnlyTeamCount] - teams in practice-only divisions (D2), not
  *   counted in `teamCount`
+ * @param {string|null} [input.savedScheduleError] - why the saved schedule could not be read; a new
+ *   schedule is not generated without it (it holds the Published games and who hosts)
  * @returns {string|null}
  */
 export function composeSchedulerReadinessMessage({
@@ -341,11 +343,19 @@ export function composeSchedulerReadinessMessage({
   unplaceableSlotCount,
   seasonClockLoading,
   practiceOnlyTeamCount = 0,
+  savedScheduleError = null,
 }) {
+  // A new schedule is built around the saved one: who hosts, and the Published games it must keep.
+  // Without a saved schedule it could read, it would build one that moves them and the save would
+  // refuse it, so it is not built.
+  const unreadable = savedScheduleError
+    ? 'The saved game schedule could not be read, so a new one is not generated: it could not keep the Published games or who hosts.'
+    : null;
   const parts = seasonClockLoading
-    ? [referenceError, 'Loading this season\u2019s settings\u2026']
+    ? [referenceError, unreadable, 'Loading this season\u2019s settings\u2026']
     : [
         referenceError,
+        unreadable,
         // D2: teams that exist but all play no games are not "no teams".
         teamCount === 0 && practiceOnlyTeamCount > 0
           ? 'Every generated team is in a practice-only division, so there are no games to schedule.'
@@ -916,7 +926,10 @@ export default function GameSchedulingPage() {
     seasonClockLoading ||
     !gameTeams.length ||
     !gameSlots.length ||
-    Boolean(referenceError);
+    Boolean(referenceError) ||
+    // The saved schedule is where the Published games come from (`publishedGames`): generating
+    // without it would re-solve every one of them, and the save would refuse the result.
+    Boolean(errors.game);
 
   // The unplaceable summary is NOT part of this sentence; it has its own line
   // below. See `composeSchedulerReadinessMessage` for why both halves of that
@@ -928,6 +941,7 @@ export default function GameSchedulingPage() {
     placeableSlotCount: gameSlots.length,
     unplaceableSlotCount: unplaceableSlots.length,
     seasonClockLoading,
+    savedScheduleError: errors.game,
   });
 
   const reviewSnapshot = useMemo(() => {

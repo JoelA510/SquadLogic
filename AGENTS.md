@@ -138,6 +138,8 @@ copy to match): `squadlogic-evaluator-designer` (teaming evaluators),
   reason.
 - Incremental team generation never reshuffles a reviewed, published or locked roster, and keeps
   persisted team UUIDs; the invariants are in `docs/architecture/incremental-teaming-hardening.md`.
+- Regeneration never moves a Published game: the generator takes saved Published games as `pinned`
+  and returns them unchanged (`docs/architecture/game-scheduling.md`); unpublished games are re-solved.
 - Incident background for all of the above: [`fixtures/season-2026/README.md`](fixtures/season-2026/README.md).
 
 ### Verification conventions (learned from Phase 0-3 reviews)

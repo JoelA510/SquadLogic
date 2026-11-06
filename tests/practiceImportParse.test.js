@@ -704,18 +704,19 @@ describe('practice import: only the allowlisted columns are read', () => {
 });
 
 describe('practice import: repeats, stray whitespace, and a label that differs by a word', () => {
-  it('folds trailing whitespace, case and runs of spaces to one team', () => {
+  it('reads a label trimmed, and keys it with stray whitespace and case folded away', () => {
     const result = parse([
       row({ Team: 'U10B-03 ' }),
       row({ Team: ' u10b-03', Day: 'Wed' }),
       row({ Team: 'U10B  -03', Day: 'Fri' }),
     ]);
-    // three rows, three different cells: all placements, and (the mapping step shows) one team key
     expect(result.rows.map((r) => r.status)).toEqual(['placement', 'placement', 'placement']);
+    // the cell is trimmed where it is read; the key folds case and collapses runs of spaces
+    expect(result.rows.map((r) => r.teamLabel)).toEqual(['U10B-03', 'u10b-03', 'U10B  -03']);
     expect(practiceImport.practiceLabelKey('U10B-03 ')).toBe(
       practiceImport.practiceLabelKey(' u10b-03')
     );
-    // 'U10B  -03' keeps its space before the hyphen after collapsing, so it is not the same label
+    // a run of spaces collapses to ONE space, it is not dropped: 'U10B  -03' is 'u10b -03', not 'u10b-03'
     expect(practiceImport.practiceLabelKey('U10B  -03')).not.toBe(
       practiceImport.practiceLabelKey('U10B-03')
     );

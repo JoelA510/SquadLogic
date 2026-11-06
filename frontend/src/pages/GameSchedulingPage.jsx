@@ -434,6 +434,24 @@ function formatUnscheduledMatchup(entry) {
   return `${entry.matchup?.homeTeamId ?? 'Home'} vs ${entry.matchup?.awayTeamId ?? 'Away'}`;
 }
 
+/** Chronological, then by division, slot and home team: the order the generator returns its games in. */
+function compareGamesByTime(a, b) {
+  return (
+    a.weekIndex - b.weekIndex ||
+    String(a.division).localeCompare(String(b.division)) ||
+    Date.parse(a.start) - Date.parse(b.start) ||
+    String(getAssignmentSlotId(a)).localeCompare(String(getAssignmentSlotId(b))) ||
+    String(getAssignmentHomeTeamId(a)).localeCompare(String(getAssignmentHomeTeamId(b)))
+  );
+}
+
+/** What a regeneration says about the games it did not touch. */
+function describeKeptPublished(count) {
+  return count === 1
+    ? '1 Published game kept as it is.'
+    : `${count} Published games kept as they are.`;
+}
+
 function summarizeGameResult({ assignments, byes, unscheduled }) {
   const totalMatchups = assignments.length + unscheduled.length;
   return {
@@ -751,6 +769,23 @@ export default function GameSchedulingPage() {
       ),
     [game?.assignments]
   );
+  // The saved Published games (PR 1's `game_assignments.published`; a database that does not have the
+  // column yet returns none, so nothing is held and generating is exactly what it was). A regeneration
+  // keeps each one where it is: the generator takes them as `pinned` and hands them back as `carried`
+  // (plan `docs/changes/2026-11-03-schedule-expansion.md`, 3.5). Read from the saved run only, never
+  // from a staged or discarded review, as `keepSides` is.
+  const publishedGames = useMemo(
+    () =>
+      (game?.assignments ?? [])
+        .filter((assignment) => assignment?.published === true)
+        .map((assignment) => ({
+          ...assignment,
+          slotId: getAssignmentSlotId(assignment),
+          homeTeamId: getAssignmentHomeTeamId(assignment),
+          awayTeamId: getAssignmentAwayTeamId(assignment),
+        })),
+    [game?.assignments]
+  );
   const divisionPlan = useMemo(
     () => buildDivisionRoundRobins(schedulerTeams, { keepSides }),
     [keepSides, schedulerTeams]
@@ -930,22 +965,31 @@ export default function GameSchedulingPage() {
     try {
       const { roundRobinByDivision } = divisionPlan;
       const start = performance.now();
-      const result = scheduleGames({
+      // The Published games come back as `carried`, unchanged, beside the new games: the review is
+      // all of them, because the save must carry every Published game of the season (it refuses one
+      // that is left out) and keeps a row, and its id, only for a game that comes back with the same
+      // slot, week and sides. Evaluated and summarised as the whole schedule they are.
+      const { carried, ...result } = scheduleGames({
         teams: gameTeams,
         slots: gameSlots,
         roundRobinByDivision,
+        // Nothing Published: the very call this page always made, not an empty list.
+        pinned: publishedGames.length > 0 ? publishedGames : undefined,
       });
+      const scheduled = carried?.length
+        ? [...carried, ...result.assignments].sort(compareGamesByTime)
+        : result.assignments;
       const evaluation = evaluateGameSchedule({
-        assignments: result.assignments,
+        assignments: scheduled,
         teams: gameTeams,
         byes: result.byes,
         unscheduled: result.unscheduled,
         sharedSlotUsage: result.sharedSlotUsage,
       });
       const elapsedMs = Math.round(performance.now() - start);
-      const summary = summarizeGameResult(result);
+      const summary = summarizeGameResult({ ...result, assignments: scheduled });
       const generatedAt = new Date().toISOString();
-      const nextAssignments = result.assignments.map((assignment, index) =>
+      const nextAssignments = scheduled.map((assignment, index) =>
         buildDisplayAssignment({
           assignment,
           index,
@@ -984,13 +1028,23 @@ export default function GameSchedulingPage() {
       });
       setSchedulerStatus('completed');
       setApplyStatus('review');
+      if (carried?.length) setStatusMessage(describeKeptPublished(carried.length));
     } catch (err) {
       setSchedulerStatus('failed');
       setSchedulerError(err.message || 'Game schedule generation failed.');
       setApplyStatus('error');
       setApplyError(err.message || 'Game schedule generation failed.');
     }
-  }, [divisionPlan, fieldById, gameSlots, gameTeams, schedulerDisabled, slotById, teamById]);
+  }, [
+    divisionPlan,
+    fieldById,
+    gameSlots,
+    gameTeams,
+    publishedGames,
+    schedulerDisabled,
+    slotById,
+    teamById,
+  ]);
 
   // Auto-run when arriving from the dashboard "Run Game Scheduling" button.
   // Fires once the page is ready (teams + slots loaded, permission granted);

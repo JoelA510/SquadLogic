@@ -438,6 +438,112 @@ describe('schedule import: a Length is elapsed time from the resolved start (Cod
   });
 });
 
+describe('schedule import: review round: TBD repeats, a derived end in the repeated hour, midnight', () => {
+  const tbd = (over = {}) => ({ 'Start Time': '', 'End Time': '', Field: '', ...over });
+  const lengthHeaders = HEADERS.filter((h) => h !== 'End Time').concat('Length');
+  const parseLen = (over) => {
+    const r = row({ Week: '', ...over });
+    delete r['End Time'];
+    return parseScheduleRows({ headers: lengthHeaders, rows: [r], season: SEASON }).rows[0];
+  };
+
+  it('keeps two TIME TBD games of one pair on one day apart when their Game IDs differ (a rematch)', () => {
+    const result = parse([
+      row(tbd({ 'Game ID': 'A' })),
+      row(tbd({ 'Game ID': 'B' })),
+      row(tbd({ 'Game ID': 'A' })), // the same game listed again
+    ]);
+    expect(result.rows.map((r) => [r.status, r.reason])).toEqual([
+      ['tbd', null],
+      ['tbd', null],
+      ['refused', 'duplicate-row'],
+    ]);
+  });
+
+  it('still calls two identical TIME TBD rows with no Game ID one game', () => {
+    const result = parse([row(tbd({ 'Game ID': '' })), row(tbd({ 'Game ID': '' }))]);
+    expect(result.rows.map((r) => r.reason)).toEqual([null, 'duplicate-row']);
+  });
+
+  it('does not tell TIME TBD games apart by the venue and field the file named (they are not placed)', () => {
+    const result = parse([
+      row(tbd({ 'Game ID': 'A', Venue: 'Venue A' })),
+      row(tbd({ 'Game ID': 'A', Venue: 'Venue B' })),
+    ]);
+    expect(result.rows.map((r) => r.reason)).toEqual([null, 'duplicate-row']);
+  });
+
+  it('flags a Length end that falls in the repeated hour, and says which time round', () => {
+    const first = parseLen({ Date: '2026-11-01', 'Start Time': '00:30', Length: '60' });
+    expect(first.status).toBe('ok');
+    const flagFirst = first.flags.find((f) => f.code === 'time-ambiguous');
+    expect(flagFirst).toBeDefined();
+    expect(flagFirst.details).toMatchObject({ end: true, endOccurrence: 'first' });
+    const second = parseLen({ Date: '2026-11-01', 'Start Time': '00:30', Length: '120' });
+    const flagSecond = second.flags.find((f) => f.code === 'time-ambiguous');
+    expect(flagSecond.details).toMatchObject({ end: true, endOccurrence: 'second' });
+    expect(flagSecond.message).toMatch(/second time round/);
+    expect(second.end).toBe('2026-11-01T01:30:00-08:00'); // the instant is exact
+    // and a Length that ends outside the repeated hour carries no flag
+    expect(parseLen({ Date: '2026-11-01', 'Start Time': '03:00', Length: '60' }).flags).toEqual([]);
+    expect(parseLen({ Date: '2026-11-01', 'Start Time': '00:00', Length: '30' }).flags).toEqual([]);
+  });
+
+  it('reads a Length end exactly as the End Time of the same instant, away from a clock change', () => {
+    // a parity check between the end a Length derives and the end `resolveZonedInstant` gives, so the
+    // two spellings of an offset cannot drift apart
+    const zones = [
+      ['America/Los_Angeles', '2026-09-12'],
+      ['Australia/Sydney', '2026-07-04'],
+      ['Asia/Kolkata', '2026-09-12'],
+      ['Pacific/Auckland', '2026-12-05'],
+      ['America/St_Johns', '2026-09-12'],
+    ];
+    for (const [timeZone, date] of zones) {
+      const season = { timeZone, startDate: '2026-01-05', endDate: '2027-03-31' };
+      for (const [start, length, end] of [
+        ['09:00', '55', '09:55'],
+        ['13:15', '90', '14:45'],
+        ['00:05', '1', '00:06'],
+        ['22:00', '119', '23:59'],
+      ]) {
+        const viaLength = parseScheduleRows({
+          headers: lengthHeaders,
+          rows: [
+            {
+              ...row({ Date: date, 'Start Time': start, Week: '', Length: length }),
+              'End Time': undefined,
+            },
+          ],
+          season,
+        }).rows[0];
+        const viaEnd = parseScheduleRows({
+          headers: HEADERS,
+          rows: [row({ Date: date, 'Start Time': start, 'End Time': end, Week: '' })],
+          season,
+        }).rows[0];
+        expect([timeZone, viaLength.status, viaLength.end, viaLength.endTime]).toEqual([
+          timeZone,
+          'ok',
+          viaEnd.end,
+          viaEnd.endTime,
+        ]);
+      }
+    }
+  });
+
+  it('says why a game that ends at midnight is refused, instead of a misleading reason', () => {
+    const endMidnight = parse([row({ 'Start Time': '10:00 PM', 'End Time': '12:00 AM' })]).rows[0];
+    expect(endMidnight).toMatchObject({ status: 'refused', reason: 'end-not-after-start' });
+    expect(endMidnight.message).toMatch(/midnight/);
+    const lengthMidnight = parseLen({ 'Start Time': '23:30', Length: '30' });
+    expect(lengthMidnight).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    expect(lengthMidnight.message).toMatch(/midnight/);
+    // one minute short of it is fine
+    expect(parseLen({ 'Start Time': '23:30', Length: '29' }).status).toBe('ok');
+  });
+});
+
 describe('schedule import: a row with no time becomes TIME TBD, never a dropped row', () => {
   it('blank start and end: imported-without-time', () => {
     const r = one({ 'Start Time': '', 'End Time': '' });

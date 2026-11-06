@@ -871,6 +871,103 @@ describe('schedule mapping: records the import creates are one record per parent
   });
 });
 
+describe('schedule mapping: review round: TBD repeats, decisions that cannot be read, names that exist', () => {
+  it('does not call two TIME TBD games one because their Field labels are not asked about', () => {
+    const tbd = { 'Start Time': '', 'End Time': '', 'Game ID': '' };
+    const out = resolve([
+      fileRow({ ...tbd, 'Game ID': 'A', Field: 'Field 1' }),
+      fileRow({ ...tbd, 'Game ID': 'B', Field: 'Field 2' }),
+    ]).rows;
+    expect(out.map((r) => [r.status, r.reason])).toEqual([
+      ['tbd', null],
+      ['tbd', null],
+    ]);
+    // two TBD rows of one Game ID that differ only in an unread field are the same game
+    const same = resolve([
+      fileRow({ ...tbd, 'Game ID': 'A', Venue: 'Venue A' }),
+      fileRow({ ...tbd, 'Game ID': 'A', Venue: 'Venue B' }),
+    ]).rows;
+    expect(same.map((r) => r.reason)).toEqual([null, 'duplicate-row']);
+  });
+
+  it('keeps a decision it cannot read from falling back to the proposal, and says so', () => {
+    const rows = [fileRow({ 'Home Team': 'Lions' })];
+    for (const bad of [
+      { action: 'skp' },
+      { action: 'outside' },
+      { action: 'map' /* no id */ },
+      'skip',
+    ]) {
+      const decisions = { divisions: { [divisionDecisionKey('U10 Boys')]: bad } };
+      const entry = propose(rows, baseLeague(), decisions).divisions[0];
+      expect(entry.status).toBe('match'); // the proposal exists...
+      expect(entry.problem).toBe('invalid-decision'); // a map with no id is unreadable too
+      expect(entry.effective).toBeNull(); // ...and is NOT used in place of what was decided
+      const out = resolve(rows, baseLeague(), decisions).rows[0];
+      expect(out.status).toBe('refused');
+      expect(out.reason).toBe('unknown-division');
+      expect(out.message).toMatch(/decision/i);
+    }
+    // an outside decision is valid on a team, so the control is accepted
+    const ok = resolve(rows, baseLeague(), {
+      divisions: { [divisionDecisionKey('U10 Boys')]: { action: 'map', id: 'd10' } },
+    }).rows[0];
+    expect(ok.status).toBe('ok');
+  });
+
+  it('refuses to create a record whose name is already taken under the same parent', () => {
+    const cases = [
+      [
+        'team',
+        { teams: { [teamDecisionKey('U10 Boys', 'Cubs')]: { action: 'create', name: 'lions' } } },
+        'unknown-team',
+        { 'Home Team': 'Cubs' },
+      ],
+      [
+        'division',
+        { divisions: { [divisionDecisionKey('U10B')]: { action: 'create', name: ' u10  boys ' } } },
+        'unknown-division',
+        { Division: 'U10B' },
+      ],
+      [
+        'venue',
+        { venues: { [venueDecisionKey('The Park')]: { action: 'create', name: 'venue a' } } },
+        'unknown-venue',
+        { Venue: 'The Park' },
+      ],
+      [
+        'field',
+        { fields: { [fieldDecisionKey('Venue A', 'F1')]: { action: 'create', name: 'field 1' } } },
+        'unknown-field',
+        { Field: 'F1' },
+      ],
+    ];
+    for (const [kind, decisions, reason, over] of cases) {
+      const out = resolve([fileRow(over)], baseLeague(), decisions);
+      expect([kind, out.rows[0].status, out.rows[0].reason]).toEqual([kind, 'refused', reason]);
+      expect(out.rows[0].message).toMatch(/already exists/);
+      expect(out.creations.teamShells).toEqual([]);
+      expect(out.creations.divisions).toEqual([]);
+    }
+    // a new name in the same place is fine, and so is the same name under another parent
+    const fine = resolve([fileRow({ 'Home Team': 'Cubs' })], baseLeague(), {
+      teams: { [teamDecisionKey('U10 Boys', 'Cubs')]: { action: 'create', name: 'Lions' } },
+    });
+    expect(fine.rows[0].reason).toBe('unknown-team'); // U10 has a Lions: refused
+    const other = resolve(
+      [fileRow({ Division: 'U14 Boys', 'Home Team': 'Cubs', 'Away Team': 'Rays' })],
+      baseLeague({ divisions: [...baseLeague().divisions, { id: 'd14', name: 'U14 Boys' }] }),
+      {
+        teams: {
+          [teamDecisionKey('U14 Boys', 'Cubs')]: { action: 'create', name: 'Lions' },
+          [teamDecisionKey('U14 Boys', 'Rays')]: { action: 'create' },
+        },
+      }
+    );
+    expect(other.rows[0].status).toBe('ok'); // d14 has no Lions
+  });
+});
+
 describe('schedule mapping: the fixture', () => {
   const fixture = loadScheduleFixture();
   const result = parseScheduleRows({

@@ -150,24 +150,33 @@ function indexLeague(league) {
 }
 
 /**
- * A decision as the admin made it, or null when there is none or it is not one of the kind's actions.
+ * The decision stored under a key, and whether one was stored that cannot be read.
+ *
+ * A decision that is there but is not one of the kind's actions (a typo, `outside` on a division, a
+ * `map` with no id) is `invalid`, and the label then has NO effective decision: it must not fall back
+ * to the proposal the admin chose not to take. Only the three fields this module reads are kept, and a
+ * name only if it is non-blank text (a decision is stored data).
  *
  * @param {Record<string, any> | undefined} decisions
  * @param {'division' | 'venue' | 'field' | 'team'} kind
  * @param {string} key
+ * @returns {{ decision: { action: string, id?: string, name?: string } | null, invalid: boolean }}
  */
 function decisionFor(decisions, kind, key) {
   const group = decisions?.[GROUP_OF[kind]];
-  const decision = group && Object.hasOwn(group, key) ? group[key] : null;
-  if (!decision || typeof decision !== 'object') return null;
-  if (!ACTIONS[kind].includes(decision.action)) return null;
-  // A decision is stored data: keep the three fields this module reads, and a name only if it is text.
+  if (!group || !Object.hasOwn(group, key)) return { decision: null, invalid: false };
+  const raw = group[key];
+  const readable =
+    raw !== null &&
+    typeof raw === 'object' &&
+    ACTIONS[kind].includes(raw.action) &&
+    (raw.action !== 'map' || typeof raw.id === 'string');
+  if (!readable) return { decision: null, invalid: true };
   /** @type {{ action: string, id?: string, name?: string }} */
-  const kept = { action: decision.action };
-  if (typeof decision.id === 'string') kept.id = decision.id;
-  if (typeof decision.name === 'string' && decision.name.trim() !== '')
-    kept.name = decision.name.trim();
-  return kept;
+  const kept = { action: raw.action };
+  if (typeof raw.id === 'string') kept.id = raw.id;
+  if (typeof raw.name === 'string' && raw.name.trim() !== '') kept.name = raw.name.trim();
+  return { decision: kept, invalid: false };
 }
 
 /**
@@ -184,7 +193,9 @@ function decisionFor(decisions, kind, key) {
  * @property {{ action: string, id?: string, name?: string } | null} decision  the admin's
  * @property {{ action: string, id?: string, name?: string } | null} effective  the decision, else the proposal
  * @property {string[]} options
- * @property {string} [problem]  `unknown-id` when a `map` decision names a record that is not there
+ * @property {'unknown-id' | 'invalid-decision' | 'name-exists'} [problem]  why the label has no usable
+ *   decision: a `map` names a record that is not there, the stored decision cannot be read, or a `create`
+ *   names a record that already exists under the same parent
  */
 
 /** What a label resolves to once decisions are applied. */
@@ -221,7 +232,7 @@ function analyse({ rows, league, decisions }) {
       entry.rowCount += 1;
       return entry;
     }
-    const decision = decisionFor(decisions, kind, key);
+    const { decision, invalid } = decisionFor(decisions, kind, key);
     const status =
       candidates.length === 0 ? 'none' : candidates.length === 1 ? 'match' : 'ambiguous';
     const proposed = status === 'match' ? { action: 'map', id: candidates[0].id } : null;
@@ -235,8 +246,9 @@ function analyse({ rows, league, decisions }) {
       candidates: candidates.map((c) => ({ id: c.id, name: c.name })),
       proposed,
       decision,
-      effective: decision ?? proposed,
+      effective: invalid ? null : (decision ?? proposed),
       options: [...ACTIONS[kind]],
+      ...(invalid ? { problem: 'invalid-decision' } : {}),
     };
     entries.set(key, entry);
     return entry;
@@ -273,11 +285,17 @@ function analyse({ rows, league, decisions }) {
    * @param {MappingEntry} entry
    * @param {string[]} parents  the ids of the records it lives under, outermost first (a created
    *   parent's id is its own placeholder, so a created team under a created division coalesces too)
-   * @param {Record<string, string>} [extra]
+   * @param {Record<string, string>} extra
+   * @param {(nameKey: string) => unknown[]} existingNamed  the records of this kind already under the
+   *   parent with that name: creating one more would meet `UNIQUE (parent, name)` in the writer
    */
-  function createdRef(kind, entry, parents, extra = {}) {
+  function createdRef(kind, entry, parents, extra, existingNamed) {
     const name = entry.effective?.name ?? entry.label;
     const key = scheduleLabelKey(name);
+    if (existingNamed(key).length > 0) {
+      entry.problem = 'name-exists';
+      return null;
+    }
     return {
       type: kind === 'outside' ? 'outside' : 'create',
       id: `new:${kind}:${tuple(...parents, key)}`,
@@ -305,7 +323,14 @@ function analyse({ rows, league, decisions }) {
           entry,
           (id) => world.divisionsById.has(id),
           (id) => ({ type: 'existing', id }),
-          () => createdRef('division', entry, [])
+          () =>
+            createdRef(
+              'division',
+              entry,
+              [],
+              {},
+              (k) => world.divisionsByName.get(tuple('', k)) ?? []
+            )
         )
       );
     }
@@ -329,7 +354,14 @@ function analyse({ rows, league, decisions }) {
           venueEntry,
           (id) => world.venuesById.has(id),
           (id) => ({ type: 'existing', id }),
-          () => createdRef('venue', venueEntry, [])
+          () =>
+            createdRef(
+              'venue',
+              venueEntry,
+              [],
+              {},
+              (k) => world.venuesByName.get(tuple('', k)) ?? []
+            )
         )
       );
     }
@@ -360,7 +392,12 @@ function analyse({ rows, league, decisions }) {
           entry,
           (id) => world.fieldsById.get(id)?.venueId === venueRef.id,
           (id) => ({ type: 'existing', id }),
-          () => createdRef('field', entry, [venueRef.id], { venueId: venueRef.id })
+          () =>
+            createdRef('field', entry, [venueRef.id], { venueId: venueRef.id }, (k) =>
+              venueRef.type === 'existing'
+                ? (world.fieldsByName.get(tuple(venueRef.id, k)) ?? [])
+                : []
+            )
         )
       );
     }
@@ -377,6 +414,11 @@ function analyse({ rows, league, decisions }) {
       const candidates =
         divisionRef.type === 'existing'
           ? (world.teamsByName.get(tuple(divisionRef.id, teamKey)) ?? [])
+          : [];
+      /** the teams (own or outside) already in the division with a given name */
+      const namedHere = (/** @type {string} */ k) =>
+        divisionRef.type === 'existing'
+          ? (world.teamsByName.get(tuple(divisionRef.id, k)) ?? [])
           : [];
       const entry = entryFor(teamEntries, {
         kind: 'team',
@@ -398,7 +440,13 @@ function analyse({ rows, league, decisions }) {
         } else {
           refs.team.set(
             key,
-            createdRef('outside', entry, [divisionRef.id], { divisionId: divisionRef.id })
+            createdRef(
+              'outside',
+              entry,
+              [divisionRef.id],
+              { divisionId: divisionRef.id },
+              namedHere
+            )
           );
         }
         continue;
@@ -413,7 +461,8 @@ function analyse({ rows, league, decisions }) {
             id,
             outside: world.teamsById.get(id)?.isExternal === true,
           }),
-          () => createdRef('team', entry, [divisionRef.id], { divisionId: divisionRef.id })
+          () =>
+            createdRef('team', entry, [divisionRef.id], { divisionId: divisionRef.id }, namedHere)
         )
       );
     }
@@ -470,7 +519,31 @@ export function proposeScheduleMapping({ rows, league, decisions = {} }) {
  * }}
  */
 export function resolveScheduleRows({ rows, league, decisions = {} }) {
-  const { refs } = analyse({ rows, league, decisions });
+  const { refs, divisionEntries, venueEntries, fieldEntries, teamEntries } = analyse({
+    rows,
+    league,
+    decisions,
+  });
+  /**
+   * Why a label is unresolved, in words: a decision that cannot be read or a name that is taken says
+   * so, instead of the generic "not one of yours".
+   * @param {Map<string, MappingEntry>} entries
+   */
+  const whyNot = (entries, key, kind, label, fallback) => {
+    const problem = entries.get(key)?.problem;
+    const quoted = JSON.stringify(label);
+    if (problem === 'invalid-decision') {
+      return `The decision saved for the ${kind} ${quoted} is not one this step can read. Decide again.`;
+    }
+    if (problem === 'unknown-id') {
+      return `The record chosen for the ${kind} ${quoted} is not one of yours. Decide again.`;
+    }
+    if (problem === 'name-exists') {
+      const name = JSON.stringify(entries.get(key)?.effective?.name ?? label);
+      return `A ${kind} named ${name} already exists here. Map ${quoted} to it instead of creating another.`;
+    }
+    return fallback;
+  };
 
   /** @type {Array<{ row: any, refs?: any }>} */
   const resolved = rows.map((row) => {
@@ -497,7 +570,13 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
     if (!division) {
       return refuse(
         R.UNKNOWN_DIVISION,
-        `The division ${JSON.stringify(row.divisionLabel)} is not one of yours. Map it to a division, create it, or skip its rows.`
+        whyNot(
+          divisionEntries,
+          divisionKey,
+          'division',
+          row.divisionLabel,
+          `The division ${JSON.stringify(row.divisionLabel)} is not one of yours. Map it to a division, create it, or skip its rows.`
+        )
       );
     }
 
@@ -511,7 +590,13 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
       if (!venue) {
         return refuse(
           R.UNKNOWN_VENUE,
-          `The venue ${JSON.stringify(row.venueLabel)} is not one of yours. Map it to a venue, create it, or skip its rows.`
+          whyNot(
+            venueEntries,
+            venueKey,
+            'venue',
+            row.venueLabel,
+            `The venue ${JSON.stringify(row.venueLabel)} is not one of yours. Map it to a venue, create it, or skip its rows.`
+          )
         );
       }
       const fieldRef = refs.field.get(fieldDecisionKey(row.venueLabel, row.fieldLabel));
@@ -519,7 +604,13 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
       if (!fieldRef) {
         return refuse(
           R.UNKNOWN_FIELD,
-          `The field ${JSON.stringify(row.fieldLabel)} is not one of ${JSON.stringify(row.venueLabel)}'s. Map it to a field, create it, or skip its rows.`
+          whyNot(
+            fieldEntries,
+            fieldDecisionKey(row.venueLabel, row.fieldLabel),
+            'field',
+            row.fieldLabel,
+            `The field ${JSON.stringify(row.fieldLabel)} is not one of ${JSON.stringify(row.venueLabel)}'s. Map it to a field, create it, or skip its rows.`
+          )
         );
       }
       field = fieldRef;
@@ -538,7 +629,13 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
       if (!team) {
         return refuse(
           R.UNKNOWN_TEAM,
-          `The team ${JSON.stringify(label)} is not one of your teams in ${JSON.stringify(row.divisionLabel)}. Map it to a team, create it, mark it an outside club, or skip its rows.`
+          whyNot(
+            teamEntries,
+            teamDecisionKey(row.divisionLabel, label),
+            'team',
+            label,
+            `The team ${JSON.stringify(label)} is not one of your teams in ${JSON.stringify(row.divisionLabel)}. Map it to a team, create it, mark it an outside club, or skip its rows.`
+          )
         );
       }
       if (team.type === 'own-name') {
@@ -580,7 +677,12 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
     const r = item.row;
     if (!r.ids || (r.status !== 'ok' && r.status !== 'tbd')) continue;
     // null stays null in the tuple, so a game with no field or time is never an id spelled "tbd"
-    const key = JSON.stringify([r.ids.home, r.ids.away, r.ids.field, r.date, r.startTime]);
+    // A TIME TBD game is not placed (no field), and two of one pair on one day are told apart by their
+    // Game ID, as in the parse.
+    const key =
+      r.status === 'tbd'
+        ? JSON.stringify(['tbd', r.ids.home, r.ids.away, r.date, r.startTime, r.gameId])
+        : JSON.stringify([r.ids.home, r.ids.away, r.ids.field, r.date, r.startTime]);
     if (seen.has(key)) {
       Object.assign(r, {
         status: 'refused',

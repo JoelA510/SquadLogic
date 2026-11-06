@@ -510,7 +510,9 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
   if (startMin !== null && endGiven !== null && endGiven <= startMin) {
     return refuse(
       R.END_NOT_AFTER_START,
-      `The game ends (${hhmm(endGiven)}) at or before it starts (${hhmm(startMin)}).`
+      endGiven === 0
+        ? `An end at midnight (${quoted(endText)}) is not an end this import stores: it reads as the start of the day. The latest end is 23:59.`
+        : `The game ends (${hhmm(endGiven)}) at or before it starts (${hhmm(startMin)}).`
     );
   }
   if (startMin !== null) out.startTime = hhmm(startMin);
@@ -579,6 +581,8 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
       );
     }
     const startMs = Date.parse(startAt.iso);
+    /** @type {'first' | 'second' | null} */
+    let derivedEndRound = null;
     if (endAt !== null) {
       const elapsed = (Date.parse(endAt.iso) - startMs) / MS_PER_MINUTE;
       if (elapsed <= 0) {
@@ -593,7 +597,12 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
       out.end = endAt.iso;
     } else {
       const ends = wallOfInstant(startMs + lengthMin * MS_PER_MINUTE, timeZone);
-      if (ends.date !== date) return refuse(R.BAD_TIME, 'The game would run past midnight.');
+      if (ends.date !== date) {
+        return refuse(
+          R.BAD_TIME,
+          'The game would reach or pass midnight. The latest end this import stores is 23:59.'
+        );
+      }
       if (ends.time <= out.startTime) {
         return refuse(
           R.END_NOT_AFTER_START,
@@ -602,18 +611,38 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
       }
       out.endTime = ends.time;
       out.end = ends.iso;
+      // The end is an instant first. If its wall reading is one the clocks show twice, a reader that
+      // takes the wall time back to an instant (as `resolveZonedInstant` does) gets the first one, so
+      // say which time round this end is.
+      const probe = resolveZonedInstant({ date, time: ends.time, timeZone, label: 'End Time' });
+      if (probe.findings.some((f) => f.code === TIMING_REASON.WALL_TIME_AMBIGUOUS)) {
+        derivedEndRound = probe.iso === ends.iso ? 'first' : 'second';
+      }
     }
     out.start = startAt.iso;
     const ambiguous = [startAt, endAt].filter(
       (p) => p !== null && p.findings.some((f) => f.code === TIMING_REASON.WALL_TIME_AMBIGUOUS)
     );
-    if (ambiguous.length > 0) {
+    if (ambiguous.length > 0 || derivedEndRound !== null) {
+      const taken = ambiguous.map((p) => (p.which === 'start' ? out.startTime : out.endTime));
+      const parts = [];
+      if (taken.length > 0) {
+        parts.push(
+          `The clocks repeat ${taken.join(' and ')} on ${date}; the first occurrence was taken.`
+        );
+      }
+      if (derivedEndRound !== null) {
+        parts.push(
+          `The clocks repeat ${out.endTime} on ${date}, and this game's end, ${lengthMin} minutes after its start, is the ${derivedEndRound} time round. The instants are exact; the clock time alone is not.`
+        );
+      }
       out.flags.push({
         code: R.TIME_AMBIGUOUS,
-        message: `The clocks repeat ${ambiguous.map((p) => (p.which === 'start' ? out.startTime : out.endTime)).join(' and ')} on ${date}; the first occurrence was taken.`,
+        message: parts.join(' '),
         details: {
           start: ambiguous.some((p) => p.which === 'start'),
-          end: ambiguous.some((p) => p.which === 'end'),
+          end: ambiguous.some((p) => p.which === 'end') || derivedEndRound !== null,
+          ...(derivedEndRound === null ? {} : { endOccurrence: derivedEndRound }),
         },
       });
     }
@@ -641,15 +670,29 @@ function refuseRepeats(parsed) {
     if (r.status === 'refused') continue;
     // A tuple, not a delimited string: labels may contain the delimiter, and two different games
     // must never be one key. A missing start time stays null, never a word that is also a label.
-    const content = JSON.stringify([
-      scheduleLabelKey(r.divisionLabel),
-      scheduleLabelKey(r.homeLabel),
-      scheduleLabelKey(r.awayLabel),
-      scheduleLabelKey(r.venueLabel),
-      scheduleLabelKey(r.fieldLabel),
-      r.date,
-      r.startTime,
-    ]);
+    // A TIME TBD game is not placed, so the venue and field the file named are not part of what it
+    // is; with no time to tell two of one pair on one day apart, its Game ID is (a rematch or a
+    // doubleheader awaiting times is two games, not one listed twice).
+    const content =
+      r.status === 'tbd'
+        ? JSON.stringify([
+            'tbd',
+            scheduleLabelKey(r.divisionLabel),
+            scheduleLabelKey(r.homeLabel),
+            scheduleLabelKey(r.awayLabel),
+            r.date,
+            r.startTime,
+            r.gameId,
+          ])
+        : JSON.stringify([
+            scheduleLabelKey(r.divisionLabel),
+            scheduleLabelKey(r.homeLabel),
+            scheduleLabelKey(r.awayLabel),
+            scheduleLabelKey(r.venueLabel),
+            scheduleLabelKey(r.fieldLabel),
+            r.date,
+            r.startTime,
+          ]);
     const reason = contentKeys.has(content)
       ? R.DUPLICATE_ROW
       : r.gameId !== null && gameIds.has(r.gameId)

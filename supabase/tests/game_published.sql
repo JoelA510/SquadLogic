@@ -35,7 +35,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(145);
+SELECT plan(150);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -83,14 +83,27 @@ EXCEPTION WHEN OTHERS THEN
     RETURN 'ERROR ' || SQLSTATE;
 END
 $f$;
--- try: run a statement and swallow its error (seeding the Published flag, which the code before the
--- migration cannot do: the assertions then fail one by one instead of the file aborting).
-CREATE FUNCTION pg_temp.try(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
+-- lock_probe: Org B's game lock as THIS backend holds it before and after a statement, read from pg_locks (the key is
+-- restated here, not read from the functions), and undone. A lock held already would make "after" prove nothing, so
+-- the probe is only used on an organization nothing else in the transaction has called the writers for.
+CREATE FUNCTION pg_temp.lock_probe(p_sql text) RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE
+    k constant bigint := hashtextextended('game_published:b2222222-2222-2222-2222-222222222222', 0);
+    n_before integer;
+    n_after integer;
 BEGIN
-    EXECUTE p_sql;
-    RETURN 'ok';
-EXCEPTION WHEN OTHERS THEN
-    RETURN 'ERROR ' || SQLSTATE;
+    SELECT count(*) INTO n_before FROM pg_locks l
+     WHERE l.locktype = 'advisory' AND l.pid = pg_backend_pid() AND l.granted AND l.mode = 'ExclusiveLock'
+       AND l.objsubid = 1 AND l.classid::bigint = (k >> 32) & 4294967295 AND l.objid::bigint = k & 4294967295;
+    BEGIN
+        EXECUTE p_sql;
+        SELECT count(*) INTO n_after FROM pg_locks l
+         WHERE l.locktype = 'advisory' AND l.pid = pg_backend_pid() AND l.granted AND l.mode = 'ExclusiveLock'
+           AND l.objsubid = 1 AND l.classid::bigint = (k >> 32) & 4294967295 AND l.objid::bigint = k & 4294967295;
+        RAISE EXCEPTION 'before=% after=%', n_before, n_after USING ERRCODE = 'P1119';
+    EXCEPTION WHEN SQLSTATE 'P1119' THEN
+        RETURN SQLERRM;
+    END;
 END
 $f$;
 -- g: a saved game as a persist_game_schedule payload item.
@@ -127,8 +140,8 @@ BEGIN
     END;
 END
 $f$;
-GRANT EXECUTE ON FUNCTION pg_temp.err(text), pg_temp.errx(text), pg_temp.msg(text), pg_temp.val(text), pg_temp.try(text),
-    pg_temp.g(uuid), pg_temp.save(jsonb, text), pg_temp.probe_move() TO PUBLIC;
+GRANT EXECUTE ON FUNCTION pg_temp.err(text), pg_temp.errx(text), pg_temp.msg(text), pg_temp.val(text),
+    pg_temp.g(uuid), pg_temp.save(jsonb, text), pg_temp.probe_move(), pg_temp.lock_probe(text) TO PUBLIC;
 
 -- ── Seed (no signed-in user) ───────────────────────────────────────────────
 SET LOCAL "request.jwt.claims" TO '{}';
@@ -235,9 +248,18 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE publi
     'and none carries a published time or actor');
 
 -- The Published rows P, Q, R and the Org E game, set with no signed-in user (the seed, not the switch under test).
-SELECT pg_temp.try($$UPDATE public.game_assignments SET published = true
-    WHERE id IN ('a1111111-1111-1111-1111-0000000c0e01', 'a1111111-1111-1111-1111-0000000c0e03', 'a1111111-1111-1111-1111-0000000c0e04',
-                 'b2222222-2222-2222-2222-0000000c0e01', 'e5555555-5555-5555-5555-5555555e0e01')$$);
+-- A DO block and not a SELECT: a SELECT would print its result row ("ok") into the TAP stream, where pg_prove reads
+-- it as an extra test (146 run of 145 planned, test 145 failed, in CI on the first push). The error is swallowed so
+-- the file still loads before the migration, where the column is missing and the assertions fail one by one.
+DO $seed$
+BEGIN
+    UPDATE public.game_assignments SET published = true
+     WHERE id IN ('a1111111-1111-1111-1111-0000000c0e01', 'a1111111-1111-1111-1111-0000000c0e03', 'a1111111-1111-1111-1111-0000000c0e04',
+                  'b2222222-2222-2222-2222-0000000c0e01', 'e5555555-5555-5555-5555-5555555e0e01');
+EXCEPTION WHEN undefined_column THEN
+    NULL;   -- before the migration there is no such column; the assertions below say so
+END
+$seed$;
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE published$$), '5',
     'control: the seed Published five games (P, Q, C1, R and the Org E game)');
 
@@ -417,6 +439,37 @@ SELECT is(pg_temp.msg($$SELECT public.admin_delete_team('a1111111-1111-1111-1111
     'and the message counts the Published games');
 SELECT is(pg_temp.errx($$SELECT public.admin_delete_team('a1111111-1111-1111-1111-0000000c0004')$$),
     'no error', 'control: a team whose games are unpublished is deleted');
+
+-- ── 4b. The save and the switch take one lock per organization ─────────────
+-- Codex's P2 on #707: the save's omission check reads `published`, the switch locks only the rows it changes, and the
+-- save never touches a row it leaves out, so a publish and a save that omits that game could both commit. A race
+-- needs two sessions and one pgTAP transaction has one; this holds what it can. The lock is read from pg_locks for an
+-- organization (B) nothing above has called either writer for, with a control that a call which takes no lock leaves
+-- it unheld; the two sources take it before they read or lock a game; that two sessions then wait on each other is the
+-- documented behaviour of an exclusive advisory lock on one key (statically reviewed). The race itself was reproduced
+-- and shown closed with two psql sessions on a scratch cluster (PR body), not in this file.
+SET LOCAL "request.jwt.claims" TO '{"sub":"22222222-2222-2222-2222-222222222222"}';
+SELECT is(pg_temp.lock_probe($$SELECT count(*) FROM public.get_schedule_audit_log('b2222222-2222-2222-2222-222222222222')$$),
+    'before=0 after=0', 'control: a call that takes no organization lock leaves it unheld (the probe can say 0)');
+SELECT is(pg_temp.lock_probe($$SELECT public.persist_game_schedule(
+        jsonb_build_object('organization_id', 'b2222222-2222-2222-2222-222222222222', 'season_settings_id', 'b2222222-2222-2222-2222-222222222bbb',
+                           'run_type', 'game', 'status', 'completed'),
+        jsonb_build_array(pg_temp.g('b2222222-2222-2222-2222-0000000c0e01')))$$),
+    'before=0 after=1', 'the save takes the organization''s game lock, and holds it to the end of the transaction');
+SELECT is(pg_temp.lock_probe($$SELECT public.admin_set_games_published('b2222222-2222-2222-2222-222222222222', ARRAY['b2222222-2222-2222-2222-0000000c0e01']::uuid[], true)$$),
+    'before=0 after=1', 'the switch takes the organization''s game lock, and holds it to the end of the transaction');
+SELECT ok(COALESCE((SELECT position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || v_org_id::text, 0))' IN p.prosrc) > 0
+                       AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || v_org_id::text, 0))' IN p.prosrc) < position('INSERT INTO public.scheduler_runs' IN p.prosrc)
+                       AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || v_org_id::text, 0))' IN p.prosrc) < position('WITH payload AS' IN p.prosrc)
+                      FROM pg_proc p WHERE p.oid = 'public.persist_game_schedule(jsonb,jsonb)'::regprocedure), false),
+    'the save takes the lock after its admin check and before it writes a run or reads the Published games');
+SELECT ok(COALESCE((SELECT position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) > position('admin_required' IN p.prosrc)
+                       AND position('admin_required' IN p.prosrc) > 0
+                       AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) < position('FROM public.game_assignments ga WHERE ga.id = ANY' IN p.prosrc)
+                       AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) < position('FOR UPDATE' IN p.prosrc)
+                      FROM pg_proc p WHERE p.oid = to_regprocedure('public.admin_set_games_published(uuid,uuid[],boolean,text,text,jsonb)')), false),
+    'the switch takes it after its admin gate and before it reads or locks a game');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
 -- ── 5. 3.4, the gates of admin_set_games_published ─────────────────────────
 -- Gate 1: a signed-in caller.

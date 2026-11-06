@@ -26,7 +26,10 @@
 --     game of its season (of the organization, when the run names no season): a row trigger cannot see an absence, and
 --     the older run's rows would be orphaned and vanish from the page. 22023, DETAIL
 --     `game_published_omitted count=<n> ids=<the first 50 ids, in id order>`. Nothing is written. A payload that moves a
---     Published row is refused by the trigger above.
+--     Published row is refused by the trigger above. **Concurrency:** the save and the switch take one advisory lock per
+--     organization (`pg_advisory_xact_lock(hashtextextended('game_published:' || <organization id>, 0))`) as their first
+--     lock, held to the end of the transaction, so a publish and a save that omits that game cannot both commit
+--     (reproduced with two sessions before the lock; Codex's P2 on #707). Order everywhere: that lock, then rows.
 --     **Identity, said plainly.** The save keys its upsert on the matchup tuple (home, away, slot, week) and never
 --     writes or reads an `id` (its INSERT lists no id and its DO UPDATE does not touch one), so the omission check and
 --     the guard work on that tuple too. A save that changes a Published row in place (same tuple, another field, start
@@ -147,8 +150,8 @@ COMMENT ON FUNCTION public.game_assignments_published_guard() IS
 -- 4. persist_game_schedule: a save carries every Published game of its season.
 -- ---------------------------------------------------------------------------
 --
--- Copied whole from 20261108020000 (its latest body, found by search, R19). Added: the two variables and the check
--- before the upsert. The pin is as that migration stated it.
+-- Copied whole from 20261108020000 (its latest body, found by search, R19). Added: the two variables, the
+-- organization lock and the check before the upsert. The pin is as that migration stated it.
 
 CREATE OR REPLACE FUNCTION public.persist_game_schedule(
     run_data jsonb,
@@ -294,6 +297,17 @@ BEGIN
         RAISE EXCEPTION 'caller is not an admin of organization %', v_org_id
             USING ERRCODE = '42501';
     END IF;
+
+    -- 20261119010000: SERIALIZED WITH THE SWITCH. The omission check below reads `published`, and
+    -- admin_set_games_published locks only the rows it changes, which a save never touches when it leaves a game out:
+    -- without a shared lock a publish and a save that omits that game could both commit, and the game would be
+    -- Published and absent from the new run (reproduced with two sessions, Codex on #707). Both take this one lock,
+    -- per organization, as their FIRST lock and hold it to the end of the transaction, so the second waits for the
+    -- first and its next statement sees the first's commit (READ COMMITTED). Lock order everywhere: this advisory
+    -- lock, then rows (the switch in id order, the save as its upsert goes). The guard trigger takes no lock, and
+    -- cancel and delete team take none of this one: a publish racing them meets the trigger, which judges the
+    -- latest committed row.
+    PERFORM pg_advisory_xact_lock(hashtextextended('game_published:' || v_org_id::text, 0));
 
     IF EXISTS (
         SELECT 1
@@ -1164,6 +1178,10 @@ BEGIN
         RAISE EXCEPTION 'Access denied: only an administrator of the organization sets whether its games are Published'
             USING ERRCODE = '42501', DETAIL = 'admin_required';
     END IF;
+
+    -- The organization's lock, shared with persist_game_schedule (see there for why), before any game is read or
+    -- locked, so what the gates below read is what the other writer committed.
+    PERFORM pg_advisory_xact_lock(hashtextextended('game_published:' || p_organization_id::text, 0));
 
     -- Gate 3: 1 to 2,400 distinct ids, all existing, all in the organization.
     IF p_assignment_ids IS NULL OR cardinality(p_assignment_ids) = 0 THEN

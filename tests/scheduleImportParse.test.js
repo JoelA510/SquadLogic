@@ -340,6 +340,7 @@ describe('schedule import: a row with no time becomes TIME TBD, never a dropped 
     const r = one({ 'Start Time': '', 'End Time': '' });
     expect(r.status).toBe('tbd');
     expect(r.tbdReason).toBe('imported-without-time');
+    reached.add('imported-without-time');
     expect(r.reason).toBeNull();
     expect(r.start).toBeNull();
     expect(r.date).toBe('2026-09-12'); // the rest of the row is kept
@@ -393,6 +394,7 @@ describe('schedule import: the season clock decides instants (named dates, four 
     expect(r.start).toBe('2026-11-01T01:30:00-07:00');
     expect(r.end).toBe('2026-11-01T02:30:00-08:00');
     expect(r.flags.map((f) => f.code)).toEqual(['time-ambiguous']);
+    reached.add('time-ambiguous');
     // one flag per row even when both ends are ambiguous
     const both = one({ Week: '', Date: '2026-11-01', 'Start Time': '01:15', 'End Time': '01:45' });
     expect(both.flags.map((f) => f.code)).toEqual(['time-ambiguous']);
@@ -947,5 +949,9 @@ describe('schedule import: every reason of the closed list was reached', () => {
     ]);
     const missingFile = SCHEDULE_IMPORT_FILE_REFUSALS.filter((code) => !reached.has(code));
     expect(missingFile).toEqual([]);
+    // the flags and the TIME TBD reason that the parse and the mapping produce (the audit's four are
+    // produced in tests/scheduleImportAudit.test.js)
+    for (const code of ['time-ambiguous', 'week-differs', 'imported-without-time'])
+      expect(reached.has(code)).toBe(true);
   });
 });

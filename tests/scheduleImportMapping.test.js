@@ -556,7 +556,6 @@ describe('schedule mapping: what will be created is listed, and only what a surv
   it('rejects input that is not what it says', () => {
     // @ts-expect-error -- deliberately not an array
     expect(() => resolveScheduleRows({ rows: 'x', league: baseLeague() })).toThrow(TypeError);
-    // @ts-expect-error -- deliberately not a league
     expect(() => resolveScheduleRows({ rows: [], league: null })).toThrow(TypeError);
     // @ts-expect-error -- deliberately a league missing its lists
     expect(() => proposeScheduleMapping({ rows: [], league: { teams: [] } })).toThrow(TypeError);

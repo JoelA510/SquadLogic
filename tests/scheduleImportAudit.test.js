@@ -499,7 +499,6 @@ describe('schedule audit: the report it wraps, and what it refuses', () => {
     ];
     // @ts-expect-error -- deliberately not an array
     expect(() => auditSchedule({ games: 'x', teams })).toThrow(TypeError);
-    // @ts-expect-error -- deliberately not an array
     expect(() => auditSchedule({ games: [game], teams: null })).toThrow(TypeError);
     expect(() => auditSchedule({ games: [{ ...game, key: '' }], teams })).toThrow(/key/);
     expect(() => auditSchedule({ games: [game, { ...game }], teams })).toThrow(/g1/);
@@ -573,5 +572,40 @@ describe('schedule audit: the report it wraps, and what it refuses', () => {
     expect(ours.counts['coach-conflict']).toBe(1);
     expect(theirs.warnings.filter((w) => w.type === 'coach-conflict')).toHaveLength(1);
     expect(ours.flags[0].subjectId).toBe('k2');
+  });
+});
+
+describe('schedule audit: every type it reports was produced', () => {
+  it('produced all four, from the planted fixture and from an own team behaving as an outside club may', () => {
+    const seen = new Set();
+    for (const [type, n] of Object.entries(planted.audit.counts)) if (n > 0) seen.add(type);
+    // team-double-booked is not planted in the fixture (an own team is never in two places at
+    // once there); an own team standing in for the visitor of the outside-club tests produces it
+    const at = (day, h) => `2026-09-${day}T${h}:00:00-07:00`;
+    const game = (key, field, home) => ({
+      key,
+      weekIndex: 1,
+      division: 'D',
+      fieldId: field,
+      start: at('12', '09'),
+      end: at('12', '10'),
+      homeTeamId: home,
+      awayTeamId: 'twice',
+    });
+    const doubled = auditSchedule({
+      games: [game('a', 'f1', 'o1'), game('b', 'f2', 'o2')],
+      teams: ['o1', 'o2', 'twice'].map((id) => ({ id, division: 'D', coachIds: [] })),
+    });
+    for (const [type, n] of Object.entries(doubled.counts)) if (n > 0) seen.add(type);
+    expect([...seen].sort()).toEqual(Object.keys(ZERO).sort());
+    // the check can fail: without the second source one type is missing
+    const withoutDoubled = new Set(
+      Object.entries(planted.audit.counts)
+        .filter(([, n]) => n > 0)
+        .map(([type]) => type)
+    );
+    expect(Object.keys(ZERO).filter((type) => !withoutDoubled.has(type))).toEqual([
+      'team-double-booked',
+    ]);
   });
 });

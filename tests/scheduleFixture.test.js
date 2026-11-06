@@ -492,8 +492,9 @@ describe('schedule fixture: placeholders only', () => {
       expect(r['Game ID']).toMatch(/^X-\d{3}$/);
       expect(r.Notes).toMatch(/^expect: [a-z-]+( [a-z-]+)?$/);
       for (const label of [r['Home Team'], r['Away Team']])
+        // case and spacing may differ on purpose (the same-team row), the words may not
         expect(label).toMatch(
-          /^U\d\d[BG] Team \d\d$|^Visiting Club [A-Z]{1,2}$|^Unlisted Team \d\d$/
+          /^U\d\d[BG]\s+Team\s+\d\d$|^Visiting Club [A-Z]{1,2}$|^Unlisted Team \d\d$/i
         );
     }
   });
@@ -597,8 +598,10 @@ describe('schedule fixture: the plants, counted from the CSV', () => {
     const changed = SCHEDULE.rows
       .filter((r, i) => JSON.stringify(r) !== JSON.stringify(controlSchedule.rows[i]))
       .map((r) => r['Game ID']);
-    expect(new Set(changed)).toEqual(touched);
-    expect(changed.length).toBeGreaterThan(0);
+    // A clash names both its games; only the moved one differs from the control. So every changed
+    // game is one a plant names, and there is one changed game per plant count.
+    for (const id of changed) expect(touched.has(id)).toBe(true);
+    expect(changed).toHaveLength(Object.values(PLANT_COUNTS).reduce((a, b) => a + b, 0));
     // the control carries no row without a time
     expect(controlSchedule.rows.filter((r) => r['Start Time'] === '')).toHaveLength(0);
     expect(SCHEDULE.rows.filter((r) => r['Start Time'] === '')).toHaveLength(1);

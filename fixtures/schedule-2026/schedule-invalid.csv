@@ -1,0 +1,25 @@
+Game ID,Date,Start Time,End Time,Venue,Field,Division,Home Team,Away Team,Week,Notes
+X-001,2026-09-12,09:00,10:00,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,1,expect: ok
+X-002,9/19/2026,9:00 AM,10:00 AM,Venue A,Field 1,U05 Boys,U05B Team 03,U05B Team 04,,expect: ok
+X-003,10/3/2026,12:30 PM,1:30 PM,Venue A,Field 2,U05 Boys,U05B Team 05,U05B Team 06,,expect: ok
+X-004,13/04/2026,09:00,10:00,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,,expect: bad-date
+X-005,2026-02-30,09:00,10:00,Venue A,Field 2,U05 Boys,U05B Team 01,U05B Team 02,,expect: bad-date
+X-006,2026-09-12,25:00,26:00,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,,expect: bad-time
+X-007,2026-09-12,09:00,noon,Venue A,Field 2,U05 Boys,U05B Team 01,U05B Team 02,,expect: bad-time
+X-008,2026-09-12,10:00,09:30,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,,expect: end-not-after-start
+X-009,2026-09-12,09:00,10:00,Venue A,Field 1,U05 Boys,U05B Team 01,u05b  team 01,,expect: same-team
+X-010,2027-03-14,02:30,03:30,Venue A,Field 3,U05 Boys,U05B Team 01,U05B Team 02,,expect: time-in-dst-gap
+X-011,2026-08-29,09:00,10:00,Venue A,Field 3,U05 Boys,U05B Team 01,U05B Team 02,,expect: outside-season-window
+X-012,2026-09-12,09:00,10:00,Venue A,Field 1,U99 Boys,U05B Team 01,U05B Team 02,,expect: unknown-division
+X-013,2026-09-12,09:00,10:00,Venue A,Field 4,U05 Boys,Unlisted Team 01,U05B Team 02,,expect: unknown-team
+X-014,2026-09-12,09:00,10:00,Venue Z,Field 1,U05 Boys,U05B Team 01,U05B Team 02,,expect: unknown-venue
+X-015,2026-09-12,10:15,11:15,Venue A,Field 9,U05 Boys,U05B Team 01,U05B Team 02,,expect: unknown-field
+X-016,2026-09-12,10:15,11:15,Venue A,Field 4,U05 Boys,U05B Team 01,U05B Team 08,,expect: label-is-own-team
+X-017,2026-09-26,09:00,10:00,Venue A,Field 1,U05 Boys,U05B Team 05,U05B Team 06,3,expect: ok
+X-017,2026-09-26,09:00,10:00,Venue A,Field 1,U05 Boys,U05B Team 05,U05B Team 06,3,expect: duplicate-row
+X-018,2026-10-17,09:00,10:00,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 03,6,expect: ok
+X-018,2026-10-17,10:15,11:15,Venue A,Field 1,U05 Boys,U05B Team 02,U05B Team 04,6,expect: game-id-reused
+X-019,2026-10-24,09:00,10:00,Venue A,Field 2,U05 Boys,U05B Team 01,U05B Team 02,three,expect: bad-week
+X-020,2026-10-24,,,Venue A,Field 1,U05 Boys,U05B Team 07,U05B Team 06,,expect: tbd
+X-021,2026-11-01,01:30,02:30,Venue A,Field 3,U05 Boys,U05B Team 07,U05B Team 04,,expect: time-ambiguous
+X-022,2026-09-12,09:00,10:00,Venue A,Field 3,U05 Boys,U05B Team 03,U05B Team 04,3,expect: week-differs

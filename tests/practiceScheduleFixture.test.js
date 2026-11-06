@@ -83,11 +83,12 @@ const SCHEDULE_HEADERS = [
 
 /** The produced shape, pinned. The plan's targets (4.11.1) are beside each as a comment. */
 const SHAPE = {
+  rows: 710, // 726 timed cells in the grid; a whole-field placement is one row, not two
+  open: 473,
   venues: 8, // 8
   fields: 29,
   labelledRows: 58, // 58 (16 + 42)
   usedLabelledRows: 49, // 49
-  teams: 132, // 132
   singlePractice: 29, // 29
   twoPractice: 103, // 103
   twoWeekday: 98, // 98
@@ -177,7 +178,22 @@ describe('practice fixture: every cell is a placeholder', () => {
     expect(DIVISIONS.fields).toEqual(['Division', 'Practices Per Week', 'Practice Minutes']);
     expect(SURFACES.fields).toEqual(['Location', 'Field', 'Subunit']);
     expect(ALIASES.fields).toEqual(['Alias', 'Location', 'Field', 'Subunit']);
-    expect(INVALID.fields).toEqual([...SCHEDULE_HEADERS.filter((h) => h !== 'Block'), 'Notes']);
+    expect(INVALID.fields).toEqual([
+      'Team',
+      'Division',
+      'Day',
+      'Start',
+      'End',
+      'Length',
+      'Location',
+      'Field',
+      'Subunit',
+      'Valid From',
+      'Valid Until',
+      'Capacity',
+      'Use',
+      'Notes',
+    ]);
   });
 
   it('shapes every cell of practice-schedule.csv (a team label may carry stray whitespace)', () => {
@@ -188,8 +204,8 @@ describe('practice fixture: every cell is a placeholder', () => {
       expect(r.Start).toMatch(/^\d\d:\d\d$/);
       expect(r.End).toMatch(/^\d\d:\d\d$/);
       expect(r.Location).toMatch(/^(Venue [A-H]|Venue G Annex)$/);
-      expect(r.Field).toMatch(/^(Field \d|Pitch [C-H]\d( North| South)?)$/);
-      expect(r.Subunit).toMatch(/^[AB]?$/);
+      expect(r.Field).toMatch(/^(Field \d|Pitch [C-G]\d)$/);
+      expect(r.Subunit).toMatch(/^([AB]|H1 North|H1 South)?$/);
       expect(r['Valid From']).toBe('');
       expect(r['Valid Until']).toBe('');
       expect(r.Capacity).toMatch(/^[12]?$/);
@@ -217,7 +233,7 @@ describe('practice fixture: every cell is a placeholder', () => {
       expect(s.Subunit).toMatch(/^[AB]$/);
     }
     for (const a of ALIASES.rows) {
-      expect(a.Alias).toMatch(/^(Pitch [C-H]\d( North| South)?|Venue G Annex|Annex Pitch)$/);
+      expect(a.Alias).toMatch(/^(Pitch [C-G]\d|Venue G Annex|Annex Pitch|H1 North|H1 South)$/);
       expect(a.Location).toMatch(/^Venue [A-H]$/);
     }
   });
@@ -276,10 +292,13 @@ describe('practice fixture: the shape (counts only, near plan 4.11.1)', () => {
     expect([...starts45].sort()).toEqual(['16:00', '16:45', '17:30']);
   });
 
-  it('writes 20 of the 29 fields in an alias spelling the alias file resolves', () => {
+  it('writes 17 fields, one venue and two halves in a spelling the alias file resolves', () => {
     const labels = new Set(
-      SCHEDULE.rows.flatMap((r) => [r.Location, r.Field]).filter((l) => /Pitch|Annex/.test(l))
+      SCHEDULE.rows
+        .flatMap((r) => [r.Location, r.Field, r.Subunit])
+        .filter((l) => /Pitch|Annex|North|South/.test(l))
     );
+    expect(labels.size).toBe(17 + 1 + 2);
     const aliasKeys = new Set(ALIASES.rows.map((a) => a.Alias));
     expect([...labels].filter((l) => !aliasKeys.has(l))).toEqual([]);
     expect(ALIASES.rows).toHaveLength(21);
@@ -344,7 +363,7 @@ describe('practice fixture: the plants are counted from the CSV', () => {
     const shape = shapeOf(parseCsv(clean.files['practice-schedule.csv']).rows);
     expect(shape.placements).toBe(264); // 132 teams, two practices each
     expect(shape.singlePractice).toBe(0);
-    expect(shape.wholeFieldPlacements).toBe(22); // 11 teams, both days; the plants split one
+    expect(shape.wholeFieldPlacements).toBe(21); // 10 teams on both days, and one team's first day
     // the plan's other pre-plant facts: a clean control is not an empty file
     expect(shape.rows).toBeGreaterThan(600);
   });

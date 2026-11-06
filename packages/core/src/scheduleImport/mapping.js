@@ -1,0 +1,643 @@
+/**
+ * Mapping a schedule file's labels to the organization's divisions, venues, fields and teams (plan
+ * `docs/changes/2026-11-03-schedule-expansion.md` sections 4.5 and 4.6; PR 4, task D2).
+ *
+ * A game needs two teams, a team needs a division, a slot needs a field, and an organization that
+ * arrives with a schedule may have none of them yet. This module says, for every distinct label in the
+ * file, what the organization has that it could mean, proposes only when that is certain, and then
+ * resolves each row against the admin's decisions. It never creates anything: it lists what a
+ * confirmed import would create (`creations`) and the writer (PR 5) does it.
+ *
+ * ## The one rule, and what it will not do
+ *
+ * There is exactly one normalisation, `normaliseExternalLabel` (`externalImport/mapping.js`):
+ * trim, collapse runs of whitespace to one space, fold case. It removes **no word**. `Park Back` and
+ * `Park Front` are two venues; `Park` is neither of them. A matcher that treats `Back` as decoration
+ * gets one file right and merges two real places in the next (the lesson is in that module's header);
+ * so a label that is not exactly one record's name is not proposed, however close it looks.
+ *
+ * - **Exactly one match** is proposed (`status: 'match'`) and is effective unless the admin decides
+ *   otherwise.
+ * - **More than one** is `ambiguous`; **none** is `none`. Neither is proposed, and their rows stay
+ *   `unknown-*` until the admin decides: pick a record, create one, skip, or (a team only) say it is
+ *   an outside club.
+ * - **A team is judged inside its division** (`UNIQUE (division_id, name)`: two divisions may each
+ *   have a `Lions`), a **field inside its venue**.
+ * - **An outside club** (decision 5) is a team row flagged `is_external`, one per division and club
+ *   label. An outside label that is the name of an own team in that division is
+ *   `label-is-own-team`, never an outside club; a game between two outside clubs is not one of yours.
+ *   An outside team that already exists (a previous import made it) is found and reused.
+ * - **Skipped is not refused.** Rows of a label the admin skips are listed apart from the rows the
+ *   import refuses.
+ *
+ * ## What a decision is
+ *
+ * `{ action: 'map', id }`, `{ action: 'create', name? }`, `{ action: 'skip' }`, and for a team
+ * `{ action: 'outside' }`, kept under the key a `*DecisionKey` function builds from the labels as
+ * typed. A decision naming an id the league does not hold is not trusted: the row is `unknown-*`.
+ *
+ * ## Ids
+ *
+ * A resolved row carries `ids`. An existing record has its own id; one the import would create has
+ * a stable placeholder (`new:team:u10 boys|sharks`), so the conflict audit can run on the rows before
+ * anything is written and run again, over the saved rows, after.
+ */
+
+import { normaliseExternalLabel } from '../externalImport/mapping.js';
+import { SCHEDULE_IMPORT_REASON as R } from './reasonCodes.js';
+
+/**
+ * The key a label is matched and decided under.
+ *
+ * @param {unknown} label
+ * @returns {string}  `''` for a blank or missing label
+ */
+export function scheduleLabelKey(label) {
+  return label === undefined || label === null ? '' : normaliseExternalLabel(String(label));
+}
+
+/** @param {string} divisionLabel */
+export const divisionDecisionKey = (divisionLabel) => scheduleLabelKey(divisionLabel);
+/** @param {string} venueLabel */
+export const venueDecisionKey = (venueLabel) => scheduleLabelKey(venueLabel);
+/** @param {string} venueLabel @param {string} fieldLabel */
+export const fieldDecisionKey = (venueLabel, fieldLabel) =>
+  `${scheduleLabelKey(venueLabel)}|${scheduleLabelKey(fieldLabel)}`;
+/** @param {string} divisionLabel @param {string} teamLabel */
+export const teamDecisionKey = (divisionLabel, teamLabel) =>
+  `${scheduleLabelKey(divisionLabel)}|${scheduleLabelKey(teamLabel)}`;
+
+const ACTIONS = Object.freeze({
+  division: ['map', 'create', 'skip'],
+  venue: ['map', 'create', 'skip'],
+  field: ['map', 'create', 'skip'],
+  team: ['map', 'create', 'outside', 'skip'],
+});
+const GROUP_OF = Object.freeze({
+  division: 'divisions',
+  venue: 'venues',
+  field: 'fields',
+  team: 'teams',
+});
+
+/**
+ * @typedef {Object} LeagueView  what the organization has, as the mapping step reads it
+ * @property {Array<{ id: string, name: string }>} divisions
+ * @property {Array<{ id: string, name: string, divisionId: string, isExternal?: boolean }>} teams
+ * @property {Array<{ id: string, name: string }>} venues
+ * @property {Array<{ id: string, venueId: string, name: string }>} fields
+ */
+
+/** @param {unknown} value @param {string} what */
+function requireArray(value, what) {
+  if (!Array.isArray(value))
+    throw new TypeError(`scheduleImport mapping: ${what} must be an array`);
+  return value;
+}
+
+/** @param {LeagueView} league */
+function indexLeague(league) {
+  if (!league || typeof league !== 'object') {
+    throw new TypeError('scheduleImport mapping: league must be an object');
+  }
+  const divisions = requireArray(league.divisions, 'league.divisions');
+  const teams = requireArray(league.teams, 'league.teams');
+  const venues = requireArray(league.venues, 'league.venues');
+  const fields = requireArray(league.fields, 'league.fields');
+  /** @param {Array<any>} list @param {(x: any) => string} scope */
+  const groupBy = (list, scope) => {
+    const out = new Map();
+    for (const item of list) {
+      const key = `${scope(item)}\u0000${scheduleLabelKey(item.name)}`;
+      out.set(key, [...(out.get(key) ?? []), item]);
+    }
+    return out;
+  };
+  return {
+    divisionsById: new Map(divisions.map((d) => [d.id, d])),
+    teamsById: new Map(teams.map((t) => [t.id, t])),
+    venuesById: new Map(venues.map((v) => [v.id, v])),
+    fieldsById: new Map(fields.map((f) => [f.id, f])),
+    divisionsByName: groupBy(divisions, () => ''),
+    venuesByName: groupBy(venues, () => ''),
+    teamsByName: groupBy(teams, (t) => t.divisionId),
+    fieldsByName: groupBy(fields, (f) => f.venueId),
+  };
+}
+
+/**
+ * A decision as the admin made it, or null when there is none or it is not one of the kind's actions.
+ *
+ * @param {Record<string, any> | undefined} decisions
+ * @param {'division' | 'venue' | 'field' | 'team'} kind
+ * @param {string} key
+ */
+function decisionFor(decisions, kind, key) {
+  const group = decisions?.[GROUP_OF[kind]];
+  const decision = group && Object.hasOwn(group, key) ? group[key] : null;
+  if (!decision || typeof decision !== 'object') return null;
+  return ACTIONS[kind].includes(decision.action) ? decision : null;
+}
+
+/**
+ * @typedef {Object} MappingEntry  one distinct label of the file and what can be done with it
+ * @property {'division' | 'venue' | 'field' | 'team'} kind
+ * @property {string} key  the key to put a decision under
+ * @property {string} label  the first spelling seen, trimmed
+ * @property {string} [venueLabel]  for a field
+ * @property {string} [divisionLabel]  for a team
+ * @property {number} rowCount
+ * @property {'match' | 'ambiguous' | 'none'} status
+ * @property {Array<{ id: string, name: string }>} candidates
+ * @property {{ action: string, id?: string } | null} proposed  only for an exact, single match
+ * @property {{ action: string, id?: string, name?: string } | null} decision  the admin's
+ * @property {{ action: string, id?: string, name?: string } | null} effective  the decision, else the proposal
+ * @property {string[]} options
+ * @property {string} [problem]  `unknown-id` when a `map` decision names a record that is not there
+ */
+
+/** What a label resolves to once decisions are applied. */
+const SKIP = Object.freeze({ type: 'skip' });
+
+/**
+ * Everything the mapping step knows: the entries to show and the references rows resolve through.
+ *
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ */
+function analyse({ rows, league, decisions }) {
+  requireArray(rows, 'rows');
+  const world = indexLeague(league);
+  const usable = rows.filter((r) => r.status === 'ok' || r.status === 'tbd');
+
+  /** @type {Map<string, MappingEntry>} */
+  const divisionEntries = new Map();
+  /** @type {Map<string, MappingEntry>} */
+  const venueEntries = new Map();
+  /** @type {Map<string, MappingEntry>} */
+  const fieldEntries = new Map();
+  /** @type {Map<string, MappingEntry>} */
+  const teamEntries = new Map();
+  /** key -> a reference (or SKIP, or null when unresolved) */
+  const refs = { division: new Map(), venue: new Map(), field: new Map(), team: new Map() };
+
+  /**
+   * @param {Map<string, MappingEntry>} entries
+   * @param {Object} spec
+   */
+  function entryFor(entries, { kind, key, label, extra, candidates }) {
+    let entry = entries.get(key);
+    if (entry) {
+      entry.rowCount += 1;
+      return entry;
+    }
+    const decision = decisionFor(decisions, kind, key);
+    const status =
+      candidates.length === 0 ? 'none' : candidates.length === 1 ? 'match' : 'ambiguous';
+    const proposed = status === 'match' ? { action: 'map', id: candidates[0].id } : null;
+    entry = {
+      kind,
+      key,
+      label,
+      ...extra,
+      rowCount: 1,
+      status,
+      candidates: candidates.map((c) => ({ id: c.id, name: c.name })),
+      proposed,
+      decision,
+      effective: decision ?? proposed,
+      options: [...ACTIONS[kind]],
+    };
+    entries.set(key, entry);
+    return entry;
+  }
+
+  /**
+   * The reference an entry's effective decision gives, or null when the label is unresolved.
+   * @param {MappingEntry} entry
+   * @param {(id: string) => boolean} holds  does the league hold this id, in this scope
+   * @param {(id: string) => any} existing  the reference for an id
+   * @param {() => any} created  the reference for a record the import would create
+   */
+  function refOf(entry, holds, existing, created) {
+    const e = entry.effective;
+    if (!e) return null;
+    if (e.action === 'skip') return SKIP;
+    if (e.action === 'map') {
+      if (typeof e.id === 'string' && holds(e.id)) return existing(e.id);
+      entry.problem = 'unknown-id';
+      return null;
+    }
+    if (e.action === 'create') return created();
+    return null;
+  }
+
+  // Divisions, then venues, then fields (a field is judged in its venue), then teams (in their division).
+  for (const r of usable) {
+    const key = scheduleLabelKey(r.divisionLabel);
+    if (key === '') continue;
+    const entry = entryFor(divisionEntries, {
+      kind: 'division',
+      key,
+      label: r.divisionLabel,
+      extra: {},
+      candidates: world.divisionsByName.get(`\u0000${key}`) ?? [],
+    });
+    if (!refs.division.has(key)) {
+      refs.division.set(
+        key,
+        refOf(
+          entry,
+          (id) => world.divisionsById.has(id),
+          (id) => ({ type: 'existing', id }),
+          () => ({
+            type: 'create',
+            id: `new:division:${key}`,
+            key,
+            name: entry.effective?.name ?? entry.label,
+          })
+        )
+      );
+    }
+  }
+
+  for (const r of usable) {
+    if (r.status !== 'ok') continue; // a TIME TBD game is not placed, so no venue or field is asked of it
+    const venueKey = scheduleLabelKey(r.venueLabel);
+    if (venueKey === '') continue;
+    const venueEntry = entryFor(venueEntries, {
+      kind: 'venue',
+      key: venueKey,
+      label: r.venueLabel,
+      extra: {},
+      candidates: world.venuesByName.get(`\u0000${venueKey}`) ?? [],
+    });
+    if (!refs.venue.has(venueKey)) {
+      refs.venue.set(
+        venueKey,
+        refOf(
+          venueEntry,
+          (id) => world.venuesById.has(id),
+          (id) => ({ type: 'existing', id }),
+          () => ({
+            type: 'create',
+            id: `new:venue:${venueKey}`,
+            key: venueKey,
+            name: venueEntry.effective?.name ?? venueEntry.label,
+          })
+        )
+      );
+    }
+  }
+
+  for (const r of usable) {
+    if (r.status !== 'ok') continue;
+    const venueKey = scheduleLabelKey(r.venueLabel);
+    const fieldKey = scheduleLabelKey(r.fieldLabel);
+    const venueRef = refs.venue.get(venueKey);
+    if (venueKey === '' || fieldKey === '' || !venueRef || venueRef === SKIP) continue;
+    const key = `${venueKey}|${fieldKey}`;
+    const candidates =
+      venueRef.type === 'existing'
+        ? (world.fieldsByName.get(`${venueRef.id}\u0000${fieldKey}`) ?? [])
+        : [];
+    const entry = entryFor(fieldEntries, {
+      kind: 'field',
+      key,
+      label: r.fieldLabel,
+      extra: { venueLabel: r.venueLabel },
+      candidates,
+    });
+    if (!refs.field.has(key)) {
+      refs.field.set(
+        key,
+        refOf(
+          entry,
+          (id) => world.fieldsById.get(id)?.venueId === venueRef.id,
+          (id) => ({ type: 'existing', id }),
+          () => ({
+            type: 'create',
+            id: `new:field:${key}`,
+            key: fieldKey,
+            venueKey,
+            name: entry.effective?.name ?? entry.label,
+          })
+        )
+      );
+    }
+  }
+
+  for (const r of usable) {
+    const divisionKey = scheduleLabelKey(r.divisionLabel);
+    const divisionRef = refs.division.get(divisionKey);
+    if (!divisionRef || divisionRef === SKIP) continue;
+    for (const label of [r.homeLabel, r.awayLabel]) {
+      const teamKey = scheduleLabelKey(label);
+      if (teamKey === '') continue;
+      const key = `${divisionKey}|${teamKey}`;
+      const candidates =
+        divisionRef.type === 'existing'
+          ? (world.teamsByName.get(`${divisionRef.id}\u0000${teamKey}`) ?? [])
+          : [];
+      const entry = entryFor(teamEntries, {
+        kind: 'team',
+        key,
+        label,
+        extra: { divisionLabel: r.divisionLabel },
+        candidates,
+      });
+      if (refs.team.has(key)) continue;
+      const e = entry.effective;
+      if (e?.action === 'outside') {
+        // An outside club already on file is reused; an own team's name is not an outside club.
+        const own = candidates.filter((c) => !c.isExternal);
+        const external = candidates.filter((c) => c.isExternal);
+        if (own.length > 0) {
+          refs.team.set(key, { type: 'own-name', label });
+        } else if (external.length === 1) {
+          refs.team.set(key, { type: 'existing', id: external[0].id, outside: true });
+        } else {
+          refs.team.set(key, {
+            type: 'outside',
+            id: `new:outside:${key}`,
+            key: teamKey,
+            divisionKey,
+            name: e.name ?? entry.label,
+          });
+        }
+        continue;
+      }
+      refs.team.set(
+        key,
+        refOf(
+          entry,
+          (id) => world.teamsById.get(id)?.divisionId === divisionRef.id,
+          (id) => ({
+            type: 'existing',
+            id,
+            outside: world.teamsById.get(id)?.isExternal === true,
+          }),
+          () => ({
+            type: 'create',
+            id: `new:team:${key}`,
+            key: teamKey,
+            divisionKey,
+            name: e?.name ?? entry.label,
+          })
+        )
+      );
+    }
+  }
+
+  return { world, refs, divisionEntries, venueEntries, fieldEntries, teamEntries };
+}
+
+/** @param {Map<string, MappingEntry>} entries */
+const sortedEntries = (entries) =>
+  [...entries.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+
+/**
+ * For every distinct label of the file: what the organization has that it could mean, what is
+ * proposed (only an exact, single match), what the admin decided, and what is therefore in effect.
+ *
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ *   `rows` are the parse's rows; only the ones it accepted are asked about
+ * @returns {{ divisions: MappingEntry[], venues: MappingEntry[], fields: MappingEntry[], teams: MappingEntry[] }}
+ */
+export function proposeScheduleMapping({ rows, league, decisions = {} }) {
+  const { divisionEntries, venueEntries, fieldEntries, teamEntries } = analyse({
+    rows,
+    league,
+    decisions,
+  });
+  return {
+    divisions: sortedEntries(divisionEntries),
+    venues: sortedEntries(venueEntries),
+    fields: sortedEntries(fieldEntries),
+    teams: sortedEntries(teamEntries),
+  };
+}
+
+/**
+ * @typedef {Object} ResolvedScheduleRow  a parsed row, resolved
+ * @property {string | null} reason
+ * @property {{ division: string, field: string | null, home: string, away: string } | null} ids
+ *   an existing record's id, or a `new:` placeholder for one the import would create
+ * @property {{ kind: string, label: string } | null} skippedBecause
+ */
+
+/**
+ * Resolve every row of a parse against the league and the admin's decisions.
+ *
+ * Order within a row: division, venue, field, home team, away team, then the two teams as a pair.
+ * The first to fail is the row's reason; a label the admin skipped makes the row `skipped`.
+ *
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @returns {{
+ *   rows: Array<any>,
+ *   creations: { divisions: any[], venues: any[], fields: any[], teamShells: any[], outsideTeams: any[] },
+ *   counts: { rows: number, ok: number, tbd: number, refused: number, skipped: number, byReason: Record<string, number> },
+ * }}
+ */
+export function resolveScheduleRows({ rows, league, decisions = {} }) {
+  const { refs } = analyse({ rows, league, decisions });
+
+  /** @type {Array<{ row: any, refs?: any }>} */
+  const resolved = rows.map((row) => {
+    if (row.status === 'refused') return { row: { ...row, ids: null, skippedBecause: null } };
+    const keep = (changes) => ({ ...row, ids: null, skippedBecause: null, ...changes });
+    const refuse = (reason, message) => ({
+      row: keep({ status: 'refused', reason, message, tbdReason: null, flags: [] }),
+    });
+    const skip = (kind, label) => ({
+      row: keep({
+        status: 'skipped',
+        reason: null,
+        message: null,
+        tbdReason: null,
+        flags: [],
+        skippedBecause: { kind, label },
+      }),
+    });
+
+    const divisionKey = scheduleLabelKey(row.divisionLabel);
+    if (divisionKey === '') return refuse(R.UNKNOWN_DIVISION, 'The Division is blank.');
+    const division = refs.division.get(divisionKey);
+    if (division === SKIP) return skip('division', row.divisionLabel);
+    if (!division) {
+      return refuse(
+        R.UNKNOWN_DIVISION,
+        `The division ${JSON.stringify(row.divisionLabel)} is not one of yours. Map it to a division, create it, or skip its rows.`
+      );
+    }
+
+    /** @type {any} */
+    let field = null;
+    if (row.status === 'ok') {
+      const venueKey = scheduleLabelKey(row.venueLabel);
+      if (venueKey === '') return refuse(R.UNKNOWN_VENUE, 'The Venue is blank.');
+      const venue = refs.venue.get(venueKey);
+      if (venue === SKIP) return skip('venue', row.venueLabel);
+      if (!venue) {
+        return refuse(
+          R.UNKNOWN_VENUE,
+          `The venue ${JSON.stringify(row.venueLabel)} is not one of yours. Map it to a venue, create it, or skip its rows.`
+        );
+      }
+      const fieldRef = refs.field.get(`${venueKey}|${scheduleLabelKey(row.fieldLabel)}`);
+      if (fieldRef === SKIP) return skip('field', row.fieldLabel);
+      if (!fieldRef) {
+        return refuse(
+          R.UNKNOWN_FIELD,
+          `The field ${JSON.stringify(row.fieldLabel)} is not one of ${JSON.stringify(row.venueLabel)}'s. Map it to a field, create it, or skip its rows.`
+        );
+      }
+      field = fieldRef;
+    }
+
+    /** @type {any[]} */
+    const sides = [];
+    for (const [which, label] of [
+      ['Home', row.homeLabel],
+      ['Away', row.awayLabel],
+    ]) {
+      const teamKey = scheduleLabelKey(label);
+      if (teamKey === '') return refuse(R.UNKNOWN_TEAM, `The ${which} Team is blank.`);
+      const team = refs.team.get(`${divisionKey}|${teamKey}`);
+      if (team === SKIP) return skip('team', label);
+      if (!team) {
+        return refuse(
+          R.UNKNOWN_TEAM,
+          `The team ${JSON.stringify(label)} is not one of your teams in ${JSON.stringify(row.divisionLabel)}. Map it to a team, create it, mark it an outside club, or skip its rows.`
+        );
+      }
+      if (team.type === 'own-name') {
+        return refuse(
+          R.LABEL_IS_OWN_TEAM,
+          `${JSON.stringify(label)} was marked as an outside club, but ${JSON.stringify(row.divisionLabel)} has a team of that name. Map it to that team instead.`
+        );
+      }
+      sides.push(team);
+    }
+    const [home, away] = sides;
+    const outside = (t) => t.type === 'outside' || t.outside === true;
+    if (outside(home) && outside(away)) {
+      return refuse(
+        R.UNKNOWN_TEAM,
+        'Neither team is one of yours: both are outside clubs. A game needs at least one of your teams.'
+      );
+    }
+    if (home.id === away.id) {
+      return refuse(R.SAME_TEAM, 'The home and away teams were mapped to the same team.');
+    }
+    return {
+      row: keep({
+        ids: {
+          division: division.id,
+          field: field ? field.id : null,
+          home: home.id,
+          away: away.id,
+        },
+      }),
+      refs: { division, field, home, away },
+    };
+  });
+
+  // The same game twice by the admin's own mapping (two labels mapped onto one team): the first
+  // wins, as in the parse, which compared the labels as typed.
+  const seen = new Set();
+  for (const item of resolved) {
+    const r = item.row;
+    if (!r.ids || (r.status !== 'ok' && r.status !== 'tbd')) continue;
+    const key = [r.ids.home, r.ids.away, r.ids.field ?? 'tbd', r.date, r.startTime ?? 'tbd'].join(
+      '|'
+    );
+    if (seen.has(key)) {
+      Object.assign(r, {
+        status: 'refused',
+        reason: R.DUPLICATE_ROW,
+        message:
+          'After mapping, this is the same game as an earlier row; the earlier row is the one imported.',
+        tbdReason: null,
+        flags: [],
+        ids: null,
+      });
+      item.refs = undefined;
+    } else {
+      seen.add(key);
+    }
+  }
+
+  const creations = {
+    divisions: new Map(),
+    venues: new Map(),
+    fields: new Map(),
+    teamShells: new Map(),
+    outsideTeams: new Map(),
+  };
+  for (const { row, refs: used } of resolved) {
+    if (!used || (row.status !== 'ok' && row.status !== 'tbd')) continue;
+    if (used.division.type === 'create') {
+      creations.divisions.set(used.division.id, {
+        key: used.division.key,
+        name: used.division.name,
+      });
+    }
+    if (used.field && used.field.type === 'create') {
+      creations.fields.set(used.field.id, {
+        venueKey: used.field.venueKey,
+        key: used.field.key,
+        name: used.field.name,
+      });
+    }
+    for (const side of [used.home, used.away]) {
+      if (side.type === 'create') {
+        creations.teamShells.set(side.id, {
+          divisionKey: side.divisionKey,
+          key: side.key,
+          name: side.name,
+        });
+      } else if (side.type === 'outside') {
+        creations.outsideTeams.set(side.id, {
+          divisionKey: side.divisionKey,
+          key: side.key,
+          name: side.name,
+        });
+      }
+    }
+  }
+  // A venue is created when a surviving row's field is in it (or the venue was created for its field).
+  for (const { row, refs: used } of resolved) {
+    if (!used || row.status !== 'ok' || !used.field) continue;
+    const venueKey = scheduleLabelKey(row.venueLabel);
+    const venue = refs.venue.get(venueKey);
+    if (venue && venue !== SKIP && venue.type === 'create') {
+      creations.venues.set(venue.id, { key: venue.key, name: venue.name });
+    }
+  }
+  const listed = (map) =>
+    [...map.values()].sort((a, b) =>
+      `${a.divisionKey ?? a.venueKey ?? ''}|${a.key}` <
+      `${b.divisionKey ?? b.venueKey ?? ''}|${b.key}`
+        ? -1
+        : 1
+    );
+
+  const out = resolved.map((x) => x.row);
+  const counts = { rows: out.length, ok: 0, tbd: 0, refused: 0, skipped: 0, byReason: {} };
+  for (const r of out) {
+    counts[r.status] += 1;
+    if (r.status === 'refused' && r.reason)
+      counts.byReason[r.reason] = (counts.byReason[r.reason] ?? 0) + 1;
+  }
+  return {
+    rows: out,
+    creations: {
+      divisions: listed(creations.divisions),
+      venues: listed(creations.venues),
+      fields: listed(creations.fields),
+      teamShells: listed(creations.teamShells),
+      outsideTeams: listed(creations.outsideTeams),
+    },
+    counts,
+  };
+}

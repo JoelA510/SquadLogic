@@ -587,6 +587,7 @@ describe('schedule import: the file', () => {
       'week',
     ];
     const r = row();
+    /** @type {Record<string, string>} */
     const mapped = {};
     HEADERS.forEach((h, i) => {
       mapped[headers[i]] = r[h];

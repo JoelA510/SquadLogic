@@ -105,7 +105,10 @@ const SATURDAYS = [
   '2026-10-31',
   '2026-11-07',
 ];
-/** Venue, fields, first start, game block in minutes. Venue G hosts only the outside clubs. */
+/**
+ * Venue, fields, first start, game block in minutes. Venue G hosts only the outside clubs.
+ * @type {ReadonlyArray<readonly [string, number, string, number]>}
+ */
 const VENUES = [
   ['A', 4, '08:00', 60],
   ['B', 4, '08:00', 60],
@@ -463,8 +466,10 @@ function addOutsideFixtures({ games, league, roundRobinByDivision, rnd }) {
  */
 function reportCounts(games, teams) {
   const own = new Set(teams.map((t) => t.label));
+  /** @type {any[]} */
   const scheduleTeams = teams.map((t) => ({
     id: t.label,
+    name: t.label,
     division: t.division,
     coachId: `coach-${t.coachPersons[0]}`,
     assistantCoachIds: t.coachPersons.slice(1).map((p) => `coach-${p}`),
@@ -478,7 +483,7 @@ function reportCounts(games, teams) {
       const id = idOf(g, label);
       if (!seen.has(id)) {
         seen.add(id);
-        scheduleTeams.push({ id, division: g.divisionCode });
+        scheduleTeams.push({ id, name: id, division: g.divisionCode });
       }
     }
     assignments.push({

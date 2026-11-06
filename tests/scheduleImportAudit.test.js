@@ -284,7 +284,9 @@ describe('schedule audit: a team with no coach is not judged, never clear', () =
     expect(result.coverage.teams.coachJudged).toBe(2);
     expect(result.coverage.teams.coachNotJudged).toEqual([{ teamId: 'x', reason: 'no-coach' }]);
     expect(result.checks.coachOverlap).toBe('partly-judged');
-    expect(result.counts).toEqual(ZERO);
+    // x visits both times, so the hosting check does flag x (the only thing found)
+    expect(result.counts).toEqual({ ...ZERO, 'home-away-imbalance': 1 });
+    expect(result.flags.map((f) => f.subjectId)).toEqual(['x']);
   });
 
   it('a coach on a team with no timed game is not judged either, for a different reason', () => {
@@ -492,7 +494,9 @@ describe('schedule audit: the report it wraps, and what it refuses', () => {
       { id: 'a', division: 'D', coachIds: [] },
       { id: 'b', division: 'D', coachIds: [] },
     ];
+    // @ts-expect-error -- deliberately not an array
     expect(() => auditSchedule({ games: 'x', teams })).toThrow(TypeError);
+    // @ts-expect-error -- deliberately not an array
     expect(() => auditSchedule({ games: [game], teams: null })).toThrow(TypeError);
     expect(() => auditSchedule({ games: [{ ...game, key: '' }], teams })).toThrow(/key/);
     expect(() => auditSchedule({ games: [game, { ...game }], teams })).toThrow(/g1/);
@@ -557,10 +561,10 @@ describe('schedule audit: the report it wraps, and what it refuses', () => {
     const theirs = evaluateGameSchedule({
       assignments: games.map((x) => ({ ...x, slotId: x.key, id: x.key })),
       teams: [
-        { id: 'a', division: 'D', coachId: 'k1', assistantCoachIds: ['k2'] },
-        { id: 'b', division: 'D' },
-        { id: 'c', division: 'D', coachId: 'k2' },
-        { id: 'd', division: 'D' },
+        { id: 'a', name: 'a', division: 'D', coachId: 'k1', assistantCoachIds: ['k2'] },
+        { id: 'b', name: 'b', division: 'D' },
+        { id: 'c', name: 'c', division: 'D', coachId: 'k2' },
+        { id: 'd', name: 'd', division: 'D' },
       ],
     });
     expect(ours.counts['coach-conflict']).toBe(1);

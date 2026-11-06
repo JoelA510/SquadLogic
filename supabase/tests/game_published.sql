@@ -23,13 +23,19 @@
 -- `errx`, which undoes what the statement did, so the same Published row and its twin are tried again.
 -- A two-session race is not reproducible in one pgTAP transaction; the rows are locked in id order
 -- (asserted from the source) and that is what this file can say about it.
+--
+-- Identity: persist_game_schedule keys its upsert on the matchup tuple (home, away, slot, week) and writes no id, so
+-- "moves a Published game" below is the SAME-tuple case (another field, start or end), and a move to another slot is
+-- another tuple: a new row, and the Published original is then an omission. Nothing here says a game's id, its
+-- Published flag or its audit rows follow it through a move; one assertion pins that they do not (today's behaviour of
+-- the save, outside this PR's scope).
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(144);
+SELECT plan(145);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -102,8 +108,27 @@ LANGUAGE sql AS $f$
                                              'season_settings_id', p_season, 'run_type', 'game', 'status', 'completed')),
         p_items)::text
 $f$;
+-- probe_move: save an unpublished game under another slot, read what the save made of it, undo it all.
+CREATE FUNCTION pg_temp.probe_move() RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE r text;
+BEGIN
+    BEGIN
+        PERFORM pg_temp.save(jsonb_build_array(pg_temp.g('a1111111-1111-1111-1111-0000000c0e01'),
+            pg_temp.g('a1111111-1111-1111-1111-0000000c0e02') || '{"game_slot_id": "a1111111-1111-1111-1111-0000000c00d3"}'));
+        SELECT 'rows=' || count(*) || ' old_id_kept=' || bool_or(id = 'a1111111-1111-1111-1111-0000000c0e02')
+               || ' new_id_differs=' || bool_or(id <> 'a1111111-1111-1111-1111-0000000c0e02')
+          INTO r
+          FROM public.game_assignments
+         WHERE home_team_id = 'a1111111-1111-1111-1111-0000000c0004' AND away_team_id = 'a1111111-1111-1111-1111-0000000c0005'
+           AND week_index = 1;
+        RAISE EXCEPTION '%', r USING ERRCODE = 'P1119';
+    EXCEPTION WHEN SQLSTATE 'P1119' THEN
+        RETURN SQLERRM;
+    END;
+END
+$f$;
 GRANT EXECUTE ON FUNCTION pg_temp.err(text), pg_temp.errx(text), pg_temp.msg(text), pg_temp.val(text), pg_temp.try(text),
-    pg_temp.g(uuid), pg_temp.save(jsonb, text) TO PUBLIC;
+    pg_temp.g(uuid), pg_temp.save(jsonb, text), pg_temp.probe_move() TO PUBLIC;
 
 -- ── Seed (no signed-in user) ───────────────────────────────────────────────
 SET LOCAL "request.jwt.claims" TO '{}';
@@ -252,7 +277,7 @@ SELECT ok((SELECT count(*) FROM pg_proc p
             WHERE p.oid IN (to_regprocedure('public.admin_set_games_published(uuid,uuid[],boolean,text,text,jsonb)'),
                             to_regprocedure('public.get_schedule_audit_log(uuid,uuid,integer)'),
                             to_regprocedure('public.game_assignments_published_guard()'))
-              AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public', 'timezone=UTC']) = 3,
+              AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC']) = 3,
     'the two RPCs and the trigger function are definer functions pinned to search_path=public and timezone=UTC');
 SELECT ok(COALESCE((SELECT p.prosecdef AND p.proconfig @> ARRAY['search_path=public', 'TimeZone=UTC'] FROM pg_proc p
                      WHERE p.oid = 'public.persist_game_schedule(jsonb,jsonb)'::regprocedure), false)
@@ -372,6 +397,8 @@ SELECT is(pg_temp.errx($$SELECT pg_temp.save(jsonb_build_array(pg_temp.g('a11111
     'no error', 'control: carrying all of them is accepted');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(jsonb_build_array(pg_temp.g('a1111111-1111-1111-1111-0000000c0e03')), 'a1111111-1111-1111-1111-1111111100b1')$$),
     'no error', 'a save for season B carries Q and does not need season A''s P');
+SELECT is(pg_temp.probe_move(), 'rows=2 old_id_kept=true new_id_differs=true',
+    'identity is the matchup tuple: moving an unpublished game to another slot adds a row with a new id and leaves the old one behind (what a game''s id keys does not follow a move)');
 SELECT is((SELECT count(*)::int FROM public.scheduler_runs) - (SELECT n FROM runs_before), 1,
     'the refusals wrote nothing: of all the saves above only the first, accepted one left a scheduler run');
 

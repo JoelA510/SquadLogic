@@ -1,119 +1,119 @@
 Team,Division,Day,Start,End,Location,Field,Subunit,Valid From,Valid Until,Capacity,Use,Block
-U05B-06,U05 Boys,Tue,16:00,16:45,Venue A,Field 1,A,,,,,45
-,,Tue,16:00,16:45,Venue A,Field 1,B,,,,,45
+U05G-04,U05 Girls,Tue,16:00,16:45,Venue A,Field 1,A,,,,,45
+U05G-06,U05 Girls,Tue,16:00,16:45,Venue A,Field 1,B,,,,,45
 ,,Tue,16:45,17:30,Venue A,Field 1,A,,,,,45
-U05G-01,U05 Girls,Tue,16:45,17:30,Venue A,Field 1,B,,,,,45
-,,Tue,17:30,18:15,Venue A,Field 1,A,,,,,45
-U05G-07,U05 Girls,Tue,17:30,18:15,Venue A,Field 1,B,,,,,45
-U05B-06,U05 Boys,Thu,16:00,16:45,Venue A,Field 1,A,,,,,45
-,,Thu,16:00,16:45,Venue A,Field 1,B,,,,,45
+U05G-05,U05 Girls,Tue,16:45,17:30,Venue A,Field 1,B,,,,,45
+U06B-02,U06 Boys,Tue,17:30,18:15,Venue A,Field 1,A,,,,,45
+,,Tue,17:30,18:15,Venue A,Field 1,B,,,,,45
+U05G-04,U05 Girls,Thu,16:00,16:45,Venue A,Field 1,A,,,,,45
+U05G-06,U05 Girls,Thu,16:00,16:45,Venue A,Field 1,B,,,,,45
 ,,Thu,16:45,17:30,Venue A,Field 1,A,,,,,45
-U05G-01,U05 Girls,Thu,16:45,17:30,Venue A,Field 1,B,,,,,45
-,,Thu,17:30,18:15,Venue A,Field 1,A,,,,,45
-U05G-07,U05 Girls,Thu,17:30,18:15,Venue A,Field 1,B,,,,,45
+U05G-05,U05 Girls,Thu,16:45,17:30,Venue A,Field 1,B,,,,,45
+U06B-02,U06 Boys,Thu,17:30,18:15,Venue A,Field 1,A,,,,,45
+,,Thu,17:30,18:15,Venue A,Field 1,B,,,,,45
 U05G-02,U05 Girls,Tue,16:00,16:45,Venue A,Field 2,,,,,,45
 ,,Tue,16:45,17:30,Venue A,Field 2,A,,,,,45
 ,,Tue,16:45,17:30,Venue A,Field 2,B,,,,,45
 ,,Tue,17:30,18:15,Venue A,Field 2,A,,,,,45
-U06B-01,U06 Boys,Tue,17:30,18:15,Venue A,Field 2,B,,,,,45
+,,Tue,17:30,18:15,Venue A,Field 2,B,,,,,45
 U05G-02,U05 Girls,Thu,16:00,16:45,Venue A,Field 2,,,,,,45
 ,,Thu,16:45,17:30,Venue A,Field 2,A,,,,,45
 ,,Thu,16:45,17:30,Venue A,Field 2,B,,,,,45
 ,,Thu,17:30,18:15,Venue A,Field 2,A,,,,,45
-U06B-01,U06 Boys,Thu,17:30,18:15,Venue A,Field 2,B,,,,,45
-U06B-05,U06 Boys,Tue,16:00,16:45,Venue A,Field 3,A,,,,,45
-U06B-04,U06 Boys,Tue,16:00,16:45,Venue A,Field 3,B,,,,,45
+,,Thu,17:30,18:15,Venue A,Field 2,B,,,,,45
+,,Tue,16:00,16:45,Venue A,Field 3,A,,,,,45
+,,Tue,16:00,16:45,Venue A,Field 3,B,,,,,45
 ,,Tue,16:45,17:30,Venue A,Field 3,A,,,,,45
-,,Tue,16:45,17:30,Venue A,Field 3,B,,,,,45
-,,Tue,17:30,18:15,Venue A,Field 3,A,,,,,45
-,,Tue,17:30,18:15,Venue A,Field 3,B,,,,,45
+U05B-04,U05 Boys,Tue,16:45,17:30,Venue A,Field 3,B,,,,,45
+U05B-01,U05 Boys,Tue,17:30,18:15,Venue A,Field 3,A,,,,,45
+U06B-01,U06 Boys,Tue,17:30,18:15,Venue A,Field 3,B,,,,,45
 ,,Thu,16:00,16:45,Venue A,Field 3,A,,,,,45
-U06B-04,U06 Boys,Thu,16:00,16:45,Venue A,Field 3,B,,,,,45
+,,Thu,16:00,16:45,Venue A,Field 3,B,,,,,45
 ,,Thu,16:45,17:30,Venue A,Field 3,A,,,,,45
-,,Thu,16:45,17:30,Venue A,Field 3,B,,,,,45
-,,Thu,17:30,18:15,Venue A,Field 3,A,,,,,45
-,,Thu,17:30,18:15,Venue A,Field 3,B,,,,,45
-U06B-03,U06 Boys,Tue,16:00,16:45,Venue A,Field 4,A,,,,,45
+U05B-04,U05 Boys,Thu,16:45,17:30,Venue A,Field 3,B,,,,,45
+U05B-01,U05 Boys,Thu,17:30,18:15,Venue A,Field 3,A,,,,,45
+U06B-01,U06 Boys,Thu,17:30,18:15,Venue A,Field 3,B,,,,,45
+U05G-07,U05 Girls,Tue,16:00,16:45,Venue A,Field 4,A,,,,,45
 ,,Tue,16:00,16:45,Venue A,Field 4,B,,,,,45
-U05G-05,U05 Girls,Tue,16:45,17:30,Venue A,Field 4,A,,,,,45
+,,Tue,16:45,17:30,Venue A,Field 4,A,,,,,45
 ,,Tue,16:45,17:30,Venue A,Field 4,B,,,,,45
 ,,Tue,17:30,18:15,Venue A,Field 4,A,,,,,45
 ,,Tue,17:30,18:15,Venue A,Field 4,B,,,,,45
-U06B-03,U06 Boys,Thu,16:00,16:45,Venue A,Field 4,A,,,,,45
+U05G-07,U05 Girls,Thu,16:00,16:45,Venue A,Field 4,A,,,,,45
 ,,Thu,16:00,16:45,Venue A,Field 4,B,,,,,45
-U05G-05,U05 Girls,Thu,16:45,17:30,Venue A,Field 4,A,,,,,45
+,,Thu,16:45,17:30,Venue A,Field 4,A,,,,,45
 ,,Thu,16:45,17:30,Venue A,Field 4,B,,,,,45
 ,,Thu,17:30,18:15,Venue A,Field 4,A,,,,,45
 ,,Thu,17:30,18:15,Venue A,Field 4,B,,,,,45
 ,,Tue,16:00,16:45,Venue B,Field 1,A,,,,,45
-,,Tue,16:00,16:45,Venue B,Field 1,B,,,,,45
-U05G-06,U05 Girls,Tue,16:45,17:30,Venue B,Field 1,A,,,,,45
-U05G-04,U05 Girls,Tue,16:45,17:30,Venue B,Field 1,B,,,,,45
-U05B-04,U05 Boys,Tue,17:30,18:15,Venue B,Field 1,A,,,,,45
+U05B-02,U05 Boys,Tue,16:00,16:45,Venue B,Field 1,B,,,,,45
+,,Tue,16:45,17:30,Venue B,Field 1,A,,,,,45
+,,Tue,16:45,17:30,Venue B,Field 1,B,,,,,45
+U06B-04,U06 Boys,Tue,17:30,18:15,Venue B,Field 1,A,,,,,45
 ,,Tue,17:30,18:15,Venue B,Field 1,B,,,,,45
 ,,Thu,16:00,16:45,Venue B,Field 1,A,,,,,45
-,,Thu,16:00,16:45,Venue B,Field 1,B,,,,,45
-U05G-06,U05 Girls,Thu,16:45,17:30,Venue B,Field 1,A,,,,,45
-U05G-04,U05 Girls,Thu,16:45,17:30,Venue B,Field 1,B,,,,,45
-U05B-04,U05 Boys,Thu,17:30,18:15,Venue B,Field 1,A,,,,,45
+U05B-02,U05 Boys,Thu,16:00,16:45,Venue B,Field 1,B,,,,,45
+,,Thu,16:45,17:30,Venue B,Field 1,A,,,,,45
+,,Thu,16:45,17:30,Venue B,Field 1,B,,,,,45
+U06B-04,U06 Boys,Thu,17:30,18:15,Venue B,Field 1,A,,,,,45
 ,,Thu,17:30,18:15,Venue B,Field 1,B,,,,,45
-,,Tue,16:00,16:45,Venue B,Field 2,A,,,,,45
-,,Tue,16:00,16:45,Venue B,Field 2,B,,,,,45
+U05B-07,U05 Boys,Tue,16:00,16:45,Venue B,Field 2,A,,,,,45
+U05G-01,U05 Girls,Tue,16:00,16:45,Venue B,Field 2,B,,,,,45
 ,,Tue,16:45,17:30,Venue B,Field 2,A,,,,,45
-,,Tue,16:45,17:30,Venue B,Field 2,B,,,,,45
-U05G-03,U05 Girls,Tue,17:30,18:15,Venue B,Field 2,A,,,,,45
-U05B-02,U05 Boys,Tue,17:30,18:15,Venue B,Field 2,B,,,,,45
-,,Thu,16:00,16:45,Venue B,Field 2,A,,,,,45
-,,Thu,16:00,16:45,Venue B,Field 2,B,,,,,45
+U05B-05,U05 Boys,Tue,16:45,17:30,Venue B,Field 2,B,,,,,45
+U05B-03,U05 Boys,Tue,17:30,18:15,Venue B,Field 2,A,,,,,45
+,,Tue,17:30,18:15,Venue B,Field 2,B,,,,,45
+U05B-07,U05 Boys,Thu,16:00,16:45,Venue B,Field 2,A,,,,,45
+U05G-01,U05 Girls,Thu,16:00,16:45,Venue B,Field 2,B,,,,,45
 ,,Thu,16:45,17:30,Venue B,Field 2,A,,,,,45
-,,Thu,16:45,17:30,Venue B,Field 2,B,,,,,45
-U05G-03,U05 Girls,Thu,17:30,18:15,Venue B,Field 2,A,,,,,45
-U05B-02,U05 Boys,Thu,17:30,18:15,Venue B,Field 2,B,,,,,45
-U06B-02,U06 Boys,Tue,16:00,16:45,Venue B,Field 3,A,,,,,45
-U05B-01,U05 Boys,Tue,16:00,16:45,Venue B,Field 3,B,,,,,45
+U05B-05,U05 Boys,Thu,16:45,17:30,Venue B,Field 2,B,,,,,45
+U05B-03,U05 Boys,Thu,17:30,18:15,Venue B,Field 2,A,,,,,45
+,,Thu,17:30,18:15,Venue B,Field 2,B,,,,,45
+,,Tue,16:00,16:45,Venue B,Field 3,A,,,,,45
+U06B-05,U06 Boys,Tue,16:00,16:45,Venue B,Field 3,B,,,,,45
 ,,Tue,16:45,17:30,Venue B,Field 3,A,,,,,45
-U05B-07,U05 Boys,Tue,16:45,17:30,Venue B,Field 3,B,,,,,45
-U05B-05,U05 Boys,Tue,17:30,18:15,Venue B,Field 3,A,,,,,45
+,,Tue,16:45,17:30,Venue B,Field 3,B,,,,,45
+U05G-03,U05 Girls,Tue,17:30,18:15,Venue B,Field 3,A,,,,,45
 ,,Tue,17:30,18:15,Venue B,Field 3,B,,,,,45
-U06B-02,U06 Boys,Thu,16:00,16:45,Venue B,Field 3,A,,,,,45
-U05B-01,U05 Boys,Thu,16:00,16:45,Venue B,Field 3,B,,,,,45
+,,Thu,16:00,16:45,Venue B,Field 3,A,,,,,45
+,,Thu,16:00,16:45,Venue B,Field 3,B,,,,,45
 ,,Thu,16:45,17:30,Venue B,Field 3,A,,,,,45
-U05B-07,U05 Boys,Thu,16:45,17:30,Venue B,Field 3,B,,,,,45
-U05B-05,U05 Boys,Thu,17:30,18:15,Venue B,Field 3,A,,,,,45
+,,Thu,16:45,17:30,Venue B,Field 3,B,,,,,45
+U05G-03,U05 Girls,Thu,17:30,18:15,Venue B,Field 3,A,,,,,45
 ,,Thu,17:30,18:15,Venue B,Field 3,B,,,,,45
 ,,Tue,16:00,16:45,Venue B,Field 4,A,,,,,45
 ,,Tue,16:00,16:45,Venue B,Field 4,B,,,,,45
-,,Tue,16:45,17:30,Venue B,Field 4,A,,,,,45
+U05B-06,U05 Boys,Tue,16:45,17:30,Venue B,Field 4,A,,,,,45
 ,,Tue,16:45,17:30,Venue B,Field 4,B,,,,,45
-U05B-03,U05 Boys,Tue,17:30,18:15,Venue B,Field 4,A,,,,,45
+U06B-03,U06 Boys,Tue,17:30,18:15,Venue B,Field 4,A,,,,,45
 ,,Tue,17:30,18:15,Venue B,Field 4,B,,,,,45
 ,,Thu,16:00,16:45,Venue B,Field 4,A,,,,,45
 ,,Thu,16:00,16:45,Venue B,Field 4,B,,,,,45
-,,Thu,16:45,17:30,Venue B,Field 4,A,,,,,45
+U05B-06,U05 Boys,Thu,16:45,17:30,Venue B,Field 4,A,,,,,45
 ,,Thu,16:45,17:30,Venue B,Field 4,B,,,,,45
-U05B-03,U05 Boys,Thu,17:30,18:15,Venue B,Field 4,A,,,,,45
+U06B-03,U06 Boys,Thu,17:30,18:15,Venue B,Field 4,A,,,,,45
 ,,Thu,17:30,18:15,Venue B,Field 4,B,,,,,45
 U16G-04,U16 Girls,Mon,16:00,17:00,Venue C,Pitch C1,,,,,,60
-U06G-07,U06 Girls,Mon,17:00,18:00,Venue C,Pitch C1,A,,,,,60
+U14B-02,U14 Boys,Mon,17:00,18:00,Venue C,Pitch C1,A,,,,,60
 ,,Mon,17:00,18:00,Venue C,Pitch C1,B,,,,,60
-,,Mon,18:00,19:00,Venue C,Pitch C1,A,,,,,60
-U12G-07,U12 Girls,Mon,18:00,19:00,Venue C,Pitch C1,B,,,,,60
+U10G-04,U10 Girls,Mon,18:00,19:00,Venue C,Pitch C1,A,,,,,60
+U08G-01,U08 Girls,Mon,18:00,19:00,Venue C,Pitch C1,B,,,,,60
 ,,Tue,16:00,17:00,Venue C,Pitch C1,A,,,,,60
-,,Tue,16:00,17:00,Venue C,Pitch C1,B,,,,,60
-U06G-05,U06 Girls,Tue,17:00,18:00,Venue C,Pitch C1,A,,,,,60
-U07B-04,U07 Boys,Tue,17:00,18:00,Venue C,Pitch C1,B,,,,,60
-U19G-03,U19 Girls,Tue,18:00,19:00,Venue C,Pitch C1,A,,,,,60
-U08G-02,U08 Girls,Tue,18:00,19:00,Venue C,Pitch C1,B,,,,,60
+U08B-04,U08 Boys,Tue,16:00,17:00,Venue C,Pitch C1,B,,,,,60
+U16G-03,U16 Girls,Tue,17:00,18:00,Venue C,Pitch C1,A,,,,,60
+U10G-07,U10 Girls,Tue,17:00,18:00,Venue C,Pitch C1,B,,,,,60
+,,Tue,18:00,19:00,Venue C,Pitch C1,A,,,,,60
+,,Tue,18:00,19:00,Venue C,Pitch C1,B,,,,,60
 U16G-04,U16 Girls,Wed,16:00,17:00,Venue C,Pitch C1,,,,,,60
-U06G-07,U06 Girls,Wed,17:00,18:00,Venue C,Pitch C1,A,,,,,60
-U14B-04,U14 Boys,Wed,17:00,18:00,Venue C,Pitch C1,B,,,,,60
+,,Wed,17:00,18:00,Venue C,Pitch C1,A,,,,,60
+,,Wed,17:00,18:00,Venue C,Pitch C1,B,,,,,60
 ,,Wed,18:00,19:00,Venue C,Pitch C1,A,,,,,60
-U12G-07,U12 Girls,Wed,18:00,19:00,Venue C,Pitch C1,B,,,,,60
+,,Wed,18:00,19:00,Venue C,Pitch C1,B,,,,,60
 ,,Thu,16:00,17:00,Venue C,Pitch C1,A,,,,,60
-,,Thu,16:00,17:00,Venue C,Pitch C1,B,,,,,60
-U06G-05,U06 Girls,Thu,17:00,18:00,Venue C,Pitch C1,A,,,,,60
+U08B-04,U08 Boys,Thu,16:00,17:00,Venue C,Pitch C1,B,,,,,60
+U16G-03,U16 Girls,Thu,17:00,18:00,Venue C,Pitch C1,A,,,,,60
 ,,Thu,17:00,18:00,Venue C,Pitch C1,B,,,,,60
-U19G-03,U19 Girls,Thu,18:00,19:00,Venue C,Pitch C1,A,,,,,60
+,,Thu,18:00,19:00,Venue C,Pitch C1,A,,,,,60
 ,,Thu,18:00,19:00,Venue C,Pitch C1,B,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C1,A,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C1,B,,,,,60
@@ -121,87 +121,87 @@ U19G-03,U19 Girls,Thu,18:00,19:00,Venue C,Pitch C1,A,,,,,60
 ,,Fri,17:00,18:00,Venue C,Pitch C1,B,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C1,A,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C1,B,,,,,60
-U09G-03,U09 Girls,Mon,16:00,17:00,Venue C,Pitch C2,A,,,,,60
-U10B-03,U10 Boys,Mon,16:00,17:00,Venue C,Pitch C2,B,,,,,60
-,,Mon,17:00,18:00,Venue C,Pitch C2,A,,,,,60
-,,Mon,17:00,18:00,Venue C,Pitch C2,B,,,,,60
-,,Mon,18:00,19:00,Venue C,Pitch C2,A,,,,,60
-U16B-06,U16 Boys,Mon,18:00,19:00,Venue C,Pitch C2,B,,,,,60
-U19G-04,U19 Girls,Tue,16:00,17:00,Venue C,Pitch C2,A,,,,,60
-U14G-03,U14 Girls,Tue,16:00,17:00,Venue C,Pitch C2,B,,,,,60
-U10G-07,U10 Girls,Tue,17:00,18:00,Venue C,Pitch C2,A,,,,,60
-,,Tue,17:00,18:00,Venue C,Pitch C2,B,,,,,60
+U06G-03,U06 Girls,Mon,16:00,17:00,Venue C,Pitch C2,A,,,,,60
+U16B-02,U16 Boys,Mon,16:00,17:00,Venue C,Pitch C2,B,,,,,60
+U10G-05,U10 Girls,Mon,17:00,18:00,Venue C,Pitch C2,,,,,,60
+U10G-01,U10 Girls,Mon,18:00,19:00,Venue C,Pitch C2,A,,,,,60
+U06G-07,U06 Girls,Mon,18:00,19:00,Venue C,Pitch C2,B,,,,,60
+,,Tue,16:00,17:00,Venue C,Pitch C2,A,,,,,60
+,,Tue,16:00,17:00,Venue C,Pitch C2,B,,,,,60
+,,Tue,17:00,18:00,Venue C,Pitch C2,A,,,,,60
+U19B-01,U19 Boys,Tue,17:00,18:00,Venue C,Pitch C2,B,,,,,60
 ,,Tue,18:00,19:00,Venue C,Pitch C2,A,,,,,60
-,,Tue,18:00,19:00,Venue C,Pitch C2,B,,,,,60
-U09G-03,U09 Girls,Wed,16:00,17:00,Venue C,Pitch C2,A,,,,,60
-U10B-03,U10 Boys,Wed,16:00,17:00,Venue C,Pitch C2,B,,,,,60
+U08G-02,U08 Girls,Tue,18:00,19:00,Venue C,Pitch C2,B,,,,,60
+U06G-03,U06 Girls,Wed,16:00,17:00,Venue C,Pitch C2,A,,,,,60
+,,Wed,16:00,17:00,Venue C,Pitch C2,B,,,,,60
 U10G-05,U10 Girls,Wed,17:00,18:00,Venue C,Pitch C2,,,,,,60
-,,Wed,18:00,19:00,Venue C,Pitch C2,A,,,,,60
-U16B-06,U16 Boys,Wed,18:00,19:00,Venue C,Pitch C2,B,,,,,60
-U19G-04,U19 Girls,Thu,16:00,17:00,Venue C,Pitch C2,A,,,,,60
-U14G-03,U14 Girls,Thu,16:00,17:00,Venue C,Pitch C2,B,,,,,60
+U10G-01,U10 Girls,Wed,18:00,19:00,Venue C,Pitch C2,A,,,,,60
+U06G-07,U06 Girls,Wed,18:00,19:00,Venue C,Pitch C2,B,,,,,60
+,,Thu,16:00,17:00,Venue C,Pitch C2,A,,,,,60
+,,Thu,16:00,17:00,Venue C,Pitch C2,B,,,,,60
 ,,Thu,17:00,18:00,Venue C,Pitch C2,A,,,,,60
 ,,Thu,17:00,18:00,Venue C,Pitch C2,B,,,,,60
 ,,Thu,18:00,19:00,Venue C,Pitch C2,A,,,,,60
 ,,Thu,18:00,19:00,Venue C,Pitch C2,B,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C2,A,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C2,B,,,,,60
-U10G-05,U10 Girls,Fri,17:00,18:00,Venue C,Pitch C2,,,,,,60
+,,Fri,17:00,18:00,Venue C,Pitch C2,A,,,,,60
+,,Fri,17:00,18:00,Venue C,Pitch C2,B,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C2,A,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C2,B,,,,,60
-U16B-02,U16 Boys,Mon,16:00,17:00,Venue C,Pitch C3,A,,,,,60
-,,Mon,16:00,17:00,Venue C,Pitch C3,B,,,,,60
-U09G-07,U09 Girls,Mon,17:00,18:00,Venue C,Pitch C3,A,,,,,60
-U08B-06,U08 Boys,Mon,17:00,18:00,Venue C,Pitch C3,B,,,,,60
+,,Mon,16:00,17:00,Venue C,Pitch C3,A,,,,,60
+U10B-02,U10 Boys,Mon,16:00,17:00,Venue C,Pitch C3,B,,,,,60
+,,Mon,17:00,18:00,Venue C,Pitch C3,A,,,,,60
+U06G-02,U06 Girls,Mon,17:00,18:00,Venue C,Pitch C3,B,,,,,60
 ,,Mon,18:00,19:00,Venue C,Pitch C3,A,,,,,60
 ,,Mon,18:00,19:00,Venue C,Pitch C3,B,,,,,60
-U12G-04,U12 Girls,Tue,16:00,17:00,Venue C,Pitch C3,A,,,,,60
+U14B-03,U14 Boys,Tue,16:00,17:00,Venue C,Pitch C3,A,,,,,60
 ,,Tue,16:00,17:00,Venue C,Pitch C3,B,,,,,60
-U16G-01,U16 Girls,Tue,17:00,18:00,Venue C,Pitch C3,A,,,,,60
-U08B-07,U08 Boys,Tue,17:00,18:00,Venue C,Pitch C3,B,,,,,60
-,,Tue,18:00,19:00,Venue C,Pitch C3,A,,,,,60
-U19B-01,U19 Boys,Tue,18:00,19:00,Venue C,Pitch C3,B,,,,,60
-U10G-02,U10 Girls,Wed,16:00,17:00,Venue C,Pitch C3,A,,,,,60
-,,Wed,16:00,17:00,Venue C,Pitch C3,B,,,,,60
+U07B-04,U07 Boys,Tue,17:00,18:00,Venue C,Pitch C3,A,,,,,60
+,,Tue,17:00,18:00,Venue C,Pitch C3,B,,,,,60
+U12B-05,U12 Boys,Tue,18:00,19:00,Venue C,Pitch C3,A,,,,,60
+,,Tue,18:00,19:00,Venue C,Pitch C3,B,,,,,60
+,,Wed,16:00,17:00,Venue C,Pitch C3,A,,,,,60
+U16G-05,U16 Girls,Wed,16:00,17:00,Venue C,Pitch C3,B,,,,,60
 ,,Wed,17:00,18:00,Venue C,Pitch C3,A,,,,,60
-U08B-06,U08 Boys,Wed,17:00,18:00,Venue C,Pitch C3,B,,,,,60
-,,Wed,18:00,19:00,Venue C,Pitch C3,A,,,,,60
-U16G-05,U16 Girls,Wed,18:00,19:00,Venue C,Pitch C3,B,,,,,60
+U06G-02,U06 Girls,Wed,17:00,18:00,Venue C,Pitch C3,B,,,,,60
+U16B-02,U16 Boys,Wed,18:00,19:00,Venue C,Pitch C3,A,,,,,60
+,,Wed,18:00,19:00,Venue C,Pitch C3,B,,,,,60
 ,,Thu,16:00,17:00,Venue C,Pitch C3,A,,,,,60
 ,,Thu,16:00,17:00,Venue C,Pitch C3,B,,,,,60
-U16G-01,U16 Girls,Thu,17:00,18:00,Venue C,Pitch C3,A,,,,,60
+,,Thu,17:00,18:00,Venue C,Pitch C3,A,,,,,60
 ,,Thu,17:00,18:00,Venue C,Pitch C3,B,,,,,60
-,,Thu,18:00,19:00,Venue C,Pitch C3,A,,,,,60
-,,Thu,18:00,19:00,Venue C,Pitch C3,B,,,,,60
+U12B-05,U12 Boys,Thu,18:00,19:00,Venue C,Pitch C3,A,,,,,60
+U12G-04,U12 Girls,Thu,18:00,19:00,Venue C,Pitch C3,B,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C3,A,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C3,B,,,,,60
 ,,Fri,17:00,18:00,Venue C,Pitch C3,A,,,,,60
 ,,Fri,17:00,18:00,Venue C,Pitch C3,B,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C3,A,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C3,B,,,,,60
-,,Mon,16:00,17:00,Venue C,Pitch C4,A,,,,,60
+U16B-06,U16 Boys,Mon,16:00,17:00,Venue C,Pitch C4,A,,,,,60
 ,,Mon,16:00,17:00,Venue C,Pitch C4,B,,,,,60
-U10G-02,U10 Girls,Mon,17:00,18:00,Venue C,Pitch C4,A,,,,,60
+,,Mon,17:00,18:00,Venue C,Pitch C4,A,,,,,60
 ,,Mon,17:00,18:00,Venue C,Pitch C4,B,,,,,60
 ,,Mon,18:00,19:00,Venue C,Pitch C4,A,,,,,60
 ,,Mon,18:00,19:00,Venue C,Pitch C4,B,,,,,60
-,,Tue,16:00,17:00,Venue C,Pitch C4,A,,,,,60
+"U14G-03 ",U14 Girls,Tue,16:00,17:00,Venue C,Pitch C4,A,,,,,60
 ,,Tue,16:00,17:00,Venue C,Pitch C4,B,,,,,60
 ,,Tue,17:00,18:00,Venue C,Pitch C4,A,,,,,60
 ,,Tue,17:00,18:00,Venue C,Pitch C4,B,,,,,60
 ,,Tue,18:00,19:00,Venue C,Pitch C4,A,,,,,60
 ,,Tue,18:00,19:00,Venue C,Pitch C4,B,,,,,60
-,,Wed,16:00,17:00,Venue C,Pitch C4,A,,,,,60
+U16B-06,U16 Boys,Wed,16:00,17:00,Venue C,Pitch C4,A,,,,,60
 ,,Wed,16:00,17:00,Venue C,Pitch C4,B,,,,,60
-U07B-03,U07 Boys,Wed,17:00,18:00,Venue C,Pitch C4,A,,,,,60
+U10B-01,U10 Boys,Wed,17:00,18:00,Venue C,Pitch C4,A,,,,,60
 ,,Wed,17:00,18:00,Venue C,Pitch C4,B,,,,,60
 U14B-01,U14 Boys,Wed,18:00,19:00,Venue C,Pitch C4,A,,,,,60
 ,,Wed,18:00,19:00,Venue C,Pitch C4,B,,,,,60
-,,Thu,16:00,17:00,Venue C,Pitch C4,A,,,,,60
+U14G-03,U14 Girls,Thu,16:00,17:00,Venue C,Pitch C4,A,,,,,60
 ,,Thu,16:00,17:00,Venue C,Pitch C4,B,,,,,60
 ,,Thu,17:00,18:00,Venue C,Pitch C4,A,,,,,60
 ,,Thu,17:00,18:00,Venue C,Pitch C4,B,,,,,60
-,,Thu,18:00,19:00,Venue C,Pitch C4,A,,,,,60
+U08B-07,U08 Boys,Thu,18:00,19:00,Venue C,Pitch C4,A,,,,,60
 ,,Thu,18:00,19:00,Venue C,Pitch C4,B,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C4,A,,,,,60
 ,,Fri,16:00,17:00,Venue C,Pitch C4,B,,,,,60
@@ -209,26 +209,26 @@ U14B-01,U14 Boys,Wed,18:00,19:00,Venue C,Pitch C4,A,,,,,60
 ,,Fri,17:00,18:00,Venue C,Pitch C4,B,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C4,A,,,,,60
 ,,Fri,18:00,19:00,Venue C,Pitch C4,B,,,,,60
-U12B-02,U12 Boys,Mon,16:00,17:00,Venue D,Pitch D1,A,,,,,60
-,,Mon,16:00,17:00,Venue D,Pitch D1,B,,,,,60
-U16B-05,U16 Boys,Mon,17:00,18:00,Venue D,Pitch D1,A,,,,,60
-U16B-04,U16 Boys,Mon,17:00,18:00,Venue D,Pitch D1,B,,,,,60
+,,Mon,16:00,17:00,Venue D,Pitch D1,A,,,,,60
+U10B-06,U10 Boys,Mon,16:00,17:00,Venue D,Pitch D1,B,,,,,60
+U07B-05,U07 Boys,Mon,17:00,18:00,Venue D,Pitch D1,,,,,,60
 ,,Mon,18:00,19:00,Venue D,Pitch D1,A,,,,,60
-,,Mon,18:00,19:00,Venue D,Pitch D1,B,,,,,60
-U19B-06,U19 Boys,Tue,16:00,17:00,Venue D,Pitch D1,A,,,,,60
-U08G-05,U08 Girls,Tue,16:00,17:00,Venue D,Pitch D1,B,,,,,60
-U07G-05,U07 Girls,Tue,17:00,18:00,Venue D,Pitch D1,,,,,,60
+U09G-07,U09 Girls,Mon,18:00,19:00,Venue D,Pitch D1,B,,,,,60
+,,Tue,16:00,17:00,Venue D,Pitch D1,A,,,,,60
+,,Tue,16:00,17:00,Venue D,Pitch D1,B,,,,,60
+U19G-05,U19 Girls,Tue,17:00,18:00,Venue D,Pitch D1,A,,,,,60
+,,Tue,17:00,18:00,Venue D,Pitch D1,B,,,,,60
 ,,Tue,18:00,19:00,Venue D,Pitch D1,A,,,,,60
 ,,Tue,18:00,19:00,Venue D,Pitch D1,B,,,,,60
-U12B-02,U12 Boys,Wed,16:00,17:00,Venue D,Pitch D1,A,,,,,60
-U07B-06,U07 Boys,Wed,16:00,17:00,Venue D,Pitch D1,B,,,,,60
-U16B-05,U16 Boys,Wed,17:00,18:00,Venue D,Pitch D1,A,,,,,60
-,,Wed,17:00,18:00,Venue D,Pitch D1,B,,,,,60
-,,Wed,18:00,19:00,Venue D,Pitch D1,A,,,,,60
+,,Wed,16:00,17:00,Venue D,Pitch D1,A,,,,,60
+,,Wed,16:00,17:00,Venue D,Pitch D1,B,,,,,60
+U07B-05,U07 Boys,Wed,17:00,18:00,Venue D,Pitch D1,,,,,,60
+U12B-06,U12 Boys,Wed,18:00,19:00,Venue D,Pitch D1,A,,,,,60
 ,,Wed,18:00,19:00,Venue D,Pitch D1,B,,,,,60
-U19B-06,U19 Boys,Thu,16:00,17:00,Venue D,Pitch D1,A,,,,,60
-U08G-05,U08 Girls,Thu,16:00,17:00,Venue D,Pitch D1,B,,,,,60
-U07G-05,U07 Girls,Thu,17:00,18:00,Venue D,Pitch D1,,,,,,60
+,,Thu,16:00,17:00,Venue D,Pitch D1,A,,,,,60
+U10B-06,U10 Boys,Thu,16:00,17:00,Venue D,Pitch D1,B,,,,,60
+U19G-05,U19 Girls,Thu,17:00,18:00,Venue D,Pitch D1,A,,,,,60
+,,Thu,17:00,18:00,Venue D,Pitch D1,B,,,,,60
 ,,Thu,18:00,19:00,Venue D,Pitch D1,A,,,,,60
 ,,Thu,18:00,19:00,Venue D,Pitch D1,B,,,,,60
 ,,Fri,16:00,17:00,Venue D,Pitch D1,A,,,,,60
@@ -237,55 +237,53 @@ U07G-05,U07 Girls,Thu,17:00,18:00,Venue D,Pitch D1,,,,,,60
 ,,Fri,17:00,18:00,Venue D,Pitch D1,B,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D1,A,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D1,B,,,,,60
-U12G-06,U12 Girls,Mon,16:00,17:00,Venue D,Pitch D2,A,,,,,60
+,,Mon,16:00,17:00,Venue D,Pitch D2,A,,,,,60
 ,,Mon,16:00,17:00,Venue D,Pitch D2,B,,,,,60
-,,Mon,17:00,18:00,Venue D,Pitch D2,A,,,,,60
-U09B-07,U09 Boys,Mon,17:00,18:00,Venue D,Pitch D2,B,,,,,60
+U16B-04,U16 Boys,Mon,17:00,18:00,Venue D,Pitch D2,A,,,,,60
+U14G-06,U14 Girls,Mon,17:00,18:00,Venue D,Pitch D2,B,,,,,60
 ,,Mon,18:00,19:00,Venue D,Pitch D2,A,,,,,60
-U14G-01,U14 Girls,Mon,18:00,19:00,Venue D,Pitch D2,B,,,,,60
+U19B-04,U19 Boys,Mon,18:00,19:00,Venue D,Pitch D2,B,,,,,60
 ,,Tue,16:00,17:00,Venue D,Pitch D2,A,,,,,60
-U10G-03,U10 Girls,Tue,16:00,17:00,Venue D,Pitch D2,B,,,,,60
+U19G-03,U19 Girls,Tue,16:00,17:00,Venue D,Pitch D2,B,,,,,60
 U07B-07,U07 Boys,Tue,17:00,18:00,Venue D,Pitch D2,A,,,,,60
 ,,Tue,17:00,18:00,Venue D,Pitch D2,B,,,,,60
-,,Tue,18:00,19:00,Venue D,Pitch D2,A,,,,,60
-U14G-02,U14 Girls,Tue,18:00,19:00,Venue D,Pitch D2,B,,,,,60
+U12B-03,U12 Boys,Tue,18:00,19:00,Venue D,Pitch D2,,,,,,60
 ,,Wed,16:00,17:00,Venue D,Pitch D2,A,,,,,60
-U07G-02,U07 Girls,Wed,16:00,17:00,Venue D,Pitch D2,B,,,,,60
-U09B-07,U09 Boys,Wed,17:00,18:00,Venue D,Pitch D2,A,,,,,60
-,,Wed,17:00,18:00,Venue D,Pitch D2,B,,,,,60
-U10B-01,U10 Boys,Wed,18:00,19:00,Venue D,Pitch D2,A,,,,,60
-U14G-01,U14 Girls,Wed,18:00,19:00,Venue D,Pitch D2,B,,,,,60
+,,Wed,16:00,17:00,Venue D,Pitch D2,B,,,,,60
+,,Wed,17:00,18:00,Venue D,Pitch D2,A,,,,,60
+U14G-06,U14 Girls,Wed,17:00,18:00,Venue D,Pitch D2,B,,,,,60
+U10B-05,U10 Boys,Wed,18:00,19:00,Venue D,Pitch D2,A,,,,,60
+U19B-04,U19 Boys,Wed,18:00,19:00,Venue D,Pitch D2,B,,,,,60
 ,,Thu,16:00,17:00,Venue D,Pitch D2,A,,,,,60
-,,Thu,16:00,17:00,Venue D,Pitch D2,B,,,,,60
+U19G-03,U19 Girls,Thu,16:00,17:00,Venue D,Pitch D2,B,,,,,60
 U07B-07,U07 Boys,Thu,17:00,18:00,Venue D,Pitch D2,A,,,,,60
 ,,Thu,17:00,18:00,Venue D,Pitch D2,B,,,,,60
-,,Thu,18:00,19:00,Venue D,Pitch D2,A,,,,,60
-U14G-02,U14 Girls,Thu,18:00,19:00,Venue D,Pitch D2,B,,,,,60
+U12B-03,U12 Boys,Thu,18:00,19:00,Venue D,Pitch D2,,,,,,60
 ,,Fri,16:00,17:00,Venue D,Pitch D2,A,,,,,60
 ,,Fri,16:00,17:00,Venue D,Pitch D2,B,,,,,60
 ,,Fri,17:00,18:00,Venue D,Pitch D2,A,,,,,60
 ,,Fri,17:00,18:00,Venue D,Pitch D2,B,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D2,A,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D2,B,,,,,60
-U10G-01,U10 Girls,Mon,16:00,17:00,Venue D,Pitch D3,A,,,,,60
+,,Mon,16:00,17:00,Venue D,Pitch D3,A,,,,,60
 ,,Mon,16:00,17:00,Venue D,Pitch D3,B,,,,,60
-U19B-04,U19 Boys,Mon,17:00,18:00,Venue D,Pitch D3,A,,,,,60
-U16G-02,U16 Girls,Mon,17:00,18:00,Venue D,Pitch D3,B,,,,,60
+U09G-03,U09 Girls,Mon,17:00,18:00,Venue D,Pitch D3,A,,,,,60
+U16B-05,U16 Boys,Mon,17:00,18:00,Venue D,Pitch D3,B,,,,,60
 ,,Mon,18:00,19:00,Venue D,Pitch D3,A,,,,,60
-U14B-02,U14 Boys,Mon,18:00,19:00,Venue D,Pitch D3,B,,,,,60
-U08G-03,U08 Girls,Tue,16:00,17:00,Venue D,Pitch D3,A,,,,,60
-,,Tue,16:00,17:00,Venue D,Pitch D3,B,,,,,60
+,,Mon,18:00,19:00,Venue D,Pitch D3,B,,,,,60
+U07G-07,U07 Girls,Tue,16:00,17:00,Venue D,Pitch D3,A,,,,,60
+U08B-05,U08 Boys,Tue,16:00,17:00,Venue D,Pitch D3,B,,,,,60
 U14B-06,U14 Boys,Tue,17:00,18:00,Venue D,Pitch D3,,,,,,60
-,,Tue,18:00,19:00,Venue D,Pitch D3,A,,,,,60
+U09G-01,U09 Girls,Tue,18:00,19:00,Venue D,Pitch D3,A,,,,,60
 ,,Tue,18:00,19:00,Venue D,Pitch D3,B,,,,,60
-U10G-01,U10 Girls,Wed,16:00,17:00,Venue D,Pitch D3,A,,,,,60
+,,Wed,16:00,17:00,Venue D,Pitch D3,A,,,,,60
 ,,Wed,16:00,17:00,Venue D,Pitch D3,B,,,,,60
-U19B-04,U19 Boys,Wed,17:00,18:00,Venue D,Pitch D3,A,,,,,60
-,,Wed,17:00,18:00,Venue D,Pitch D3,B,,,,,60
+U09G-03,U09 Girls,Wed,17:00,18:00,Venue D,Pitch D3,A,,,,,60
+U16B-05,U16 Boys,Wed,17:00,18:00,Venue D,Pitch D3,B,,,,,60
 ,,Wed,18:00,19:00,Venue D,Pitch D3,A,,,,,60
 ,,Wed,18:00,19:00,Venue D,Pitch D3,B,,,,,60
-U08G-03,U08 Girls,Thu,16:00,17:00,Venue D,Pitch D3,A,,,,,60
-,,Thu,16:00,17:00,Venue D,Pitch D3,B,,,,,60
+U07G-07,U07 Girls,Thu,16:00,17:00,Venue D,Pitch D3,A,,,,,60
+U08B-05,U08 Boys,Thu,16:00,17:00,Venue D,Pitch D3,B,,,,,60
 U14B-06,U14 Boys,Thu,17:00,18:00,Venue D,Pitch D3,,,,,,60
 ,,Thu,18:00,19:00,Venue D,Pitch D3,A,,,,,60
 ,,Thu,18:00,19:00,Venue D,Pitch D3,B,,,,,60
@@ -295,115 +293,114 @@ U14B-06,U14 Boys,Thu,17:00,18:00,Venue D,Pitch D3,,,,,,60
 ,,Fri,17:00,18:00,Venue D,Pitch D3,B,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D3,A,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D3,B,,,,,60
-,,Mon,16:00,17:00,Venue D,Pitch D4,A,,,,,60
+U16G-02,U16 Girls,Mon,16:00,17:00,Venue D,Pitch D4,A,,,,,60
 ,,Mon,16:00,17:00,Venue D,Pitch D4,B,,,,,60
 ,,Mon,17:00,18:00,Venue D,Pitch D4,A,,,,,60
 ,,Mon,17:00,18:00,Venue D,Pitch D4,B,,,,,60
-U09G-06,U09 Girls,Mon,18:00,19:00,Venue D,Pitch D4,A,,,,,60
+U19G-01,U19 Girls,Mon,18:00,19:00,Venue D,Pitch D4,A,,,,,60
 ,,Mon,18:00,19:00,Venue D,Pitch D4,B,,,,,60
-,,Tue,16:00,17:00,Venue D,Pitch D4,A,,,,,60
+U09B-06,U09 Boys,Tue,16:00,17:00,Venue D,Pitch D4,A,,,,,60
 ,,Tue,16:00,17:00,Venue D,Pitch D4,B,,,,,60
 ,,Tue,17:00,18:00,Venue D,Pitch D4,A,,,,,60
 ,,Tue,17:00,18:00,Venue D,Pitch D4,B,,,,,60
 ,,Tue,18:00,19:00,Venue D,Pitch D4,A,,,,,60
 ,,Tue,18:00,19:00,Venue D,Pitch D4,B,,,,,60
-U12G-02,U12 Girls,Wed,16:00,17:00,Venue D,Pitch D4,A,,,,,60
+,,Wed,16:00,17:00,Venue D,Pitch D4,A,,,,,60
 ,,Wed,16:00,17:00,Venue D,Pitch D4,B,,,,,60
-U09G-04,U09 Girls,Wed,17:00,18:00,Venue D,Pitch D4,A,,,,,60
+U19B-03,U19 Boys,Wed,17:00,18:00,Venue D,Pitch D4,A,,,,,60
 ,,Wed,17:00,18:00,Venue D,Pitch D4,B,,,,,60
 ,,Wed,18:00,19:00,Venue D,Pitch D4,A,,,,,60
 ,,Wed,18:00,19:00,Venue D,Pitch D4,B,,,,,60
-,,Thu,16:00,17:00,Venue D,Pitch D4,A,,,,,60
+U09B-06,U09 Boys,Thu,16:00,17:00,Venue D,Pitch D4,A,,,,,60
 ,,Thu,16:00,17:00,Venue D,Pitch D4,B,,,,,60
-,,Thu,17:00,18:00,Venue D,Pitch D4,A,,,,,60
+U14B-03,U14 Boys,Thu,17:00,18:00,Venue D,Pitch D4,A,,,,,60
 ,,Thu,17:00,18:00,Venue D,Pitch D4,B,,,,,60
-U08B-07,U08 Boys,Thu,18:00,19:00,Venue D,Pitch D4,A,,,,,60
+,,Thu,18:00,19:00,Venue D,Pitch D4,A,,,,,60
 ,,Thu,18:00,19:00,Venue D,Pitch D4,B,,,,,60
-,,Thu,18:30,19:30,Venue D,Pitch D4,A,,,,,60
 ,,Fri,16:00,17:00,Venue D,Pitch D4,A,,,,,60
 ,,Fri,16:00,17:00,Venue D,Pitch D4,B,,,,,60
-U09G-04,U09 Girls,Fri,17:00,18:00,Venue D,Pitch D4,A,,,,,60
+,,Fri,17:00,18:00,Venue D,Pitch D4,A,,,,,60
 ,,Fri,17:00,18:00,Venue D,Pitch D4,B,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D4,A,,,,,60
 ,,Fri,18:00,19:00,Venue D,Pitch D4,B,,,,,60
-U14G-06,U14 Girls,Mon,16:00,17:00,Venue E,Pitch E1,A,,,,,60
-U08B-01,U08 Boys,Mon,16:00,17:00,Venue E,Pitch E1,B,,,,,60
+U09B-04,U09 Boys,Mon,16:00,17:00,Venue E,Pitch E1,A,,,,,60
+,,Mon,16:00,17:00,Venue E,Pitch E1,B,,,,,60
 ,,Mon,17:00,18:00,Venue E,Pitch E1,A,,,,,60
-,,Mon,17:00,18:00,Venue E,Pitch E1,B,,,,,60
+U09G-05,U09 Girls,Mon,17:00,18:00,Venue E,Pitch E1,B,,,,,60
 ,,Mon,18:00,19:00,Venue E,Pitch E1,A,,,,,60
 ,,Mon,18:00,19:00,Venue E,Pitch E1,B,,,,,60
-U14B-03,U14 Boys,Tue,16:00,17:00,Venue E,Pitch E1,A,,,,,60
-,,Tue,16:00,17:00,Venue E,Pitch E1,B,,,,,60
-U19G-05,U19 Girls,Tue,17:00,18:00,Venue E,Pitch E1,A,,,,,60
-,,Tue,17:00,18:00,Venue E,Pitch E1,B,,,,,60
-U16G-03,U16 Girls,Tue,18:00,19:00,Venue E,Pitch E1,A,,,,,60
-U10B-04,U10 Boys,Tue,18:00,19:00,Venue E,Pitch E1,B,,,,,60
-U14G-06,U14 Girls,Wed,16:00,17:00,Venue E,Pitch E1,A,,,,,60
+"U08G-03 ",U08 Girls,Tue,16:00,17:00,Venue E,Pitch E1,A,,,,,60
+U19G-04,U19 Girls,Tue,16:00,17:00,Venue E,Pitch E1,B,,,,,60
+,,Tue,17:00,18:00,Venue E,Pitch E1,A,,,,,60
+U08B-07,U08 Boys,Tue,17:00,18:00,Venue E,Pitch E1,B,,,,,60
+U08G-05,U08 Girls,Tue,18:00,19:00,Venue E,Pitch E1,A,,,,,60
+,,Tue,18:00,19:00,Venue E,Pitch E1,B,,,,,60
+U09B-04,U09 Boys,Wed,16:00,17:00,Venue E,Pitch E1,A,,,,,60
 ,,Wed,16:00,17:00,Venue E,Pitch E1,B,,,,,60
-,,Wed,17:00,18:00,Venue E,Pitch E1,A,,,,,60
-U16B-02,U16 Boys,Wed,17:00,18:00,Venue E,Pitch E1,B,,,,,60
-,,Wed,18:00,19:00,Venue E,Pitch E1,A,,,,,60
+U07G-02,U07 Girls,Wed,17:00,18:00,Venue E,Pitch E1,A,,,,,60
+U09G-05,U09 Girls,Wed,17:00,18:00,Venue E,Pitch E1,B,,,,,60
+U07G-04,U07 Girls,Wed,18:00,19:00,Venue E,Pitch E1,A,,,,,60
 ,,Wed,18:00,19:00,Venue E,Pitch E1,B,,,,,60
-U08G-06,U08 Girls,Thu,16:00,17:00,Venue E,Pitch E1,A,,,,,60
-,,Thu,16:00,17:00,Venue E,Pitch E1,B,,,,,60
-U19G-05,U19 Girls,Thu,17:00,18:00,Venue E,Pitch E1,A,,,,,60
+U08G-03,U08 Girls,Thu,16:00,17:00,Venue E,Pitch E1,A,,,,,60
+U19G-04,U19 Girls,Thu,16:00,17:00,Venue E,Pitch E1,B,,,,,60
+,,Thu,17:00,18:00,Venue E,Pitch E1,A,,,,,60
 ,,Thu,17:00,18:00,Venue E,Pitch E1,B,,,,,60
-U16G-03,U16 Girls,Thu,18:00,19:00,Venue E,Pitch E1,A,,,,,60
-U10B-04,U10 Boys,Thu,18:00,19:00,Venue E,Pitch E1,B,,,,,60
+U08G-05,U08 Girls,Thu,18:00,19:00,Venue E,Pitch E1,A,,,,,60
+U08G-06,U08 Girls,Thu,18:00,19:00,Venue E,Pitch E1,B,,,,,60
 ,,Fri,16:00,17:00,Venue E,Pitch E1,A,,,,,60
 ,,Fri,16:00,17:00,Venue E,Pitch E1,B,,,,,60
 ,,Fri,17:00,18:00,Venue E,Pitch E1,A,,,,,60
-U12G-05,U12 Girls,Fri,17:00,18:00,Venue E,Pitch E1,B,,,,,60
+,,Fri,17:00,18:00,Venue E,Pitch E1,B,,,,,60
 ,,Fri,18:00,19:00,Venue E,Pitch E1,A,,,,,60
 ,,Fri,18:00,19:00,Venue E,Pitch E1,B,,,,,60
-U10B-07,U10 Boys,Mon,16:00,17:00,Venue E,Pitch E2,A,,,,,60
+U10B-01,U10 Boys,Mon,16:00,17:00,Venue E,Pitch E2,A,,,,,60
 ,,Mon,16:00,17:00,Venue E,Pitch E2,B,,,,,60
 ,,Mon,17:00,18:00,Venue E,Pitch E2,A,,,,,60
-,,Mon,17:00,18:00,Venue E,Pitch E2,B,,,,,60
-U07G-02,U07 Girls,Mon,18:00,19:00,Venue E,Pitch E2,A,,,,,60
-U07G-02,U07 Girls,Mon,18:00,19:00,Venue E,Pitch E2,B,,,,,60
-,,Tue,16:00,17:00,Venue E,Pitch E2,A,,,,,60
-,,Tue,16:00,17:00,Venue E,Pitch E2,B,,,,,60
-U08B-04,U08 Boys,Tue,17:00,18:00,Venue E,Pitch E2,A,,,,,60
-U16B-01,U16 Boys,Tue,17:00,18:00,Venue E,Pitch E2,B,,,,,60
+U10G-02,U10 Girls,Mon,17:00,18:00,Venue E,Pitch E2,B,,,,,60
+U09B-07,U09 Boys,Mon,18:00,19:00,Venue E,Pitch E2,A,,,,,60
+U09B-02,U09 Boys,Mon,18:00,19:00,Venue E,Pitch E2,B,,,,,60
+U07G-03,U07 Girls,Mon,18:00,19:00,Venue E,Pitch E2,B,,,,,60
+U16B-03,U16 Boys,Tue,16:00,17:00,Venue E,Pitch E2,A,,,,,60
+U09G-02,U09 Girls,Tue,16:00,17:00,Venue E,Pitch E2,B,,,,,60
+U09B-05,U09 Boys,Tue,17:00,18:00,Venue E,Pitch E2,A,,,,,60
+,,Tue,17:00,18:00,Venue E,Pitch E2,B,,,,,60
 ,,Tue,18:00,19:00,Venue E,Pitch E2,A,,,,,60
-U08G-06,U08 Girls,Tue,18:00,19:00,Venue E,Pitch E2,B,,,,,60
-U10B-07,U10 Boys,Wed,16:00,17:00,Venue E,Pitch E2,A,,,,,60
+U14G-04,U14 Girls,Tue,18:00,19:00,Venue E,Pitch E2,B,,,,,60
+U12G-03,U12 Girls,Wed,16:00,17:00,Venue E,Pitch E2,A,,,,,60
 ,,Wed,16:00,17:00,Venue E,Pitch E2,B,,,,,60
-U07B-03,U07 Boys,Wed,17:00,18:00,Venue E,Pitch E2,A,,,,,60
-U12B-06,U12 Boys,Wed,17:00,18:00,Venue E,Pitch E2,B,,,,,60
-U10G-06,U10 Girls,Wed,18:00,19:00,Venue E,Pitch E2,A,,,,,60
-,,Wed,18:00,19:00,Venue E,Pitch E2,B,,,,,60
-,,Thu,16:00,17:00,Venue E,Pitch E2,A,,,,,60
-,,Thu,16:00,17:00,Venue E,Pitch E2,B,,,,,60
-U08B-04,U08 Boys,Thu,17:00,18:00,Venue E,Pitch E2,A,,,,,60
-U16B-01,U16 Boys,Thu,17:00,18:00,Venue E,Pitch E2,B,,,,,60
+,,Wed,17:00,18:00,Venue E,Pitch E2,A,,,,,60
+,,Wed,17:00,18:00,Venue E,Pitch E2,B,,,,,60
+,,Wed,18:00,19:00,Venue E,Pitch E2,A,,,,,60
+U09B-02,U09 Boys,Wed,18:00,19:00,Venue E,Pitch E2,B,,,,,60
+U16B-03,U16 Boys,Thu,16:00,17:00,Venue E,Pitch E2,A,,,,,60
+U09G-02,U09 Girls,Thu,16:00,17:00,Venue E,Pitch E2,B,,,,,60
+,,Thu,17:00,18:00,Venue E,Pitch E2,A,,,,,60
+,,Thu,17:00,18:00,Venue E,Pitch E2,B,,,,,60
 ,,Thu,18:00,19:00,Venue E,Pitch E2,A,,,,,60
 ,,Thu,18:00,19:00,Venue E,Pitch E2,B,,,,,60
 ,,Fri,16:00,17:00,Venue E,Pitch E2,A,,,,,60
 ,,Fri,16:00,17:00,Venue E,Pitch E2,B,,,,,60
 ,,Fri,17:00,18:00,Venue E,Pitch E2,A,,,,,60
 ,,Fri,17:00,18:00,Venue E,Pitch E2,B,,,,,60
-U10G-06,U10 Girls,Fri,18:00,19:00,Venue E,Pitch E2,A,,,,,60
+,,Fri,18:00,19:00,Venue E,Pitch E2,A,,,,,60
 ,,Fri,18:00,19:00,Venue E,Pitch E2,B,,,,,60
-,,Mon,16:00,17:00,Venue E,Pitch E3,A,,,,,60
+U12B-02,U12 Boys,Mon,16:00,17:00,Venue E,Pitch E3,A,,,,,60
 ,,Mon,16:00,17:00,Venue E,Pitch E3,B,,,,,60
 ,,Mon,17:00,18:00,Venue E,Pitch E3,A,,,,,60
 ,,Mon,17:00,18:00,Venue E,Pitch E3,B,,,,,60
-,,Mon,18:00,19:00,Venue E,Pitch E3,A,,,,,60
+U07G-01,U07 Girls,Mon,18:00,19:00,Venue E,Pitch E3,A,,,,,60
 ,,Mon,18:00,19:00,Venue E,Pitch E3,B,,,,,60
-U08B-03,U08 Boys,Tue,16:00,17:00,Venue E,Pitch E3,A,,,,,60
+U10G-03,U10 Girls,Tue,16:00,17:00,Venue E,Pitch E3,A,,,,,60
 ,,Tue,16:00,17:00,Venue E,Pitch E3,B,,,,,60
 ,,Tue,17:00,18:00,Venue E,Pitch E3,A,,,,,60
 ,,Tue,17:00,18:00,Venue E,Pitch E3,B,,,,,60
 ,,Tue,18:00,19:00,Venue E,Pitch E3,A,,,,,60
 ,,Tue,18:00,19:00,Venue E,Pitch E3,B,,,,,60
-,,Wed,16:00,17:00,Venue E,Pitch E3,A,,,,,60
+U12B-02,U12 Boys,Wed,16:00,17:00,Venue E,Pitch E3,A,,,,,60
 ,,Wed,16:00,17:00,Venue E,Pitch E3,B,,,,,60
-,,Wed,17:00,18:00,Venue E,Pitch E3,A,,,,,60
+U12G-02,U12 Girls,Wed,17:00,18:00,Venue E,Pitch E3,A,,,,,60
 ,,Wed,17:00,18:00,Venue E,Pitch E3,B,,,,,60
-U06G-01,U06 Girls,Wed,18:00,19:00,Venue E,Pitch E3,A,,,2,,60
-U07B-01,U07 Boys,Wed,18:00,19:00,Venue E,Pitch E3,A,,,2,,60
+,,Wed,18:00,19:00,Venue E,Pitch E3,A,,,,,60
 ,,Wed,18:00,19:00,Venue E,Pitch E3,B,,,,,60
 ,,Thu,16:00,17:00,Venue E,Pitch E3,A,,,,,60
 ,,Thu,16:00,17:00,Venue E,Pitch E3,B,,,,,60
@@ -413,179 +410,182 @@ U07B-01,U07 Boys,Wed,18:00,19:00,Venue E,Pitch E3,A,,,2,,60
 ,,Thu,18:00,19:00,Venue E,Pitch E3,B,,,,,60
 ,,Fri,16:00,17:00,Venue E,Pitch E3,A,,,,,60
 ,,Fri,16:00,17:00,Venue E,Pitch E3,B,,,,,60
-,,Fri,17:00,18:00,Venue E,Pitch E3,A,,,,,60
+U12G-05,U12 Girls,Fri,17:00,18:00,Venue E,Pitch E3,A,,,,,60
 ,,Fri,17:00,18:00,Venue E,Pitch E3,B,,,,,60
-U06G-01,U06 Girls,Fri,18:00,19:00,Venue E,Pitch E3,A,,,2,,60
-U07B-01,U07 Boys,Fri,18:00,19:00,Venue E,Pitch E3,A,,,2,,60
+,,Fri,18:00,19:00,Venue E,Pitch E3,A,,,,,60
 ,,Fri,18:00,19:00,Venue E,Pitch E3,B,,,,,60
 ,,Mon,16:00,17:00,Venue F,Pitch F1,A,,,,,60
-U12B-07,U12 Boys,Mon,16:00,17:00,Venue F,Pitch F1,B,,,,,60
+U09B-01,U09 Boys,Mon,16:00,17:00,Venue F,Pitch F1,B,,,,,60
 ,,Mon,17:00,18:00,Venue F,Pitch F1,A,,,,,60
 ,,Mon,17:00,18:00,Venue F,Pitch F1,B,,,,,60
 ,,Mon,18:00,19:00,Venue F,Pitch F1,A,,,,,60
-U08G-07,U08 Girls,Mon,18:00,19:00,Venue F,Pitch F1,B,,,,,60
-U09G-02,U09 Girls,Tue,16:00,17:00,Venue F,Pitch F1,A,,,,,60
+U14G-05,U14 Girls,Mon,18:00,19:00,Venue F,Pitch F1,B,,,,,60
+U19G-06,U19 Girls,Tue,16:00,17:00,Venue F,Pitch F1,A,,,,,60
 ,,Tue,16:00,17:00,Venue F,Pitch F1,B,,,,,60
-U12B-05,U12 Boys,Tue,17:00,18:00,Venue F,Pitch F1,A,,,,,60
+U08B-03,U08 Boys,Tue,17:00,18:00,Venue F,Pitch F1,A,,,,,60
 ,,Tue,17:00,18:00,Venue F,Pitch F1,B,,,,,60
-U07B-05,U07 Boys,Tue,18:00,19:00,Venue F,Pitch F1,,,,,,60
-U12G-03,U12 Girls,Wed,16:00,17:00,Venue F,Pitch F1,A,,,,,60
-U12B-07,U12 Boys,Wed,16:00,17:00,Venue F,Pitch F1,B,,,,,60
+U07B-03,U07 Boys,Tue,18:00,19:00,Venue F,Pitch F1,,,,,,60
+U07B-06,U07 Boys,Wed,16:00,17:00,Venue F,Pitch F1,A,,,,,60
+,,Wed,16:00,17:00,Venue F,Pitch F1,B,,,,,60
 ,,Wed,17:00,18:00,Venue F,Pitch F1,A,,,,,60
-,,Wed,17:00,18:00,Venue F,Pitch F1,B,,,,,60
+U09G-04,U09 Girls,Wed,17:00,18:00,Venue F,Pitch F1,B,,,,,60
 ,,Wed,18:00,19:00,Venue F,Pitch F1,A,,,,,60
-U08G-07,U08 Girls,Wed,18:00,19:00,Venue F,Pitch F1,B,,,,,60
-U09G-02,U09 Girls,Thu,16:00,17:00,Venue F,Pitch F1,A,,,,,60
+U14G-05,U14 Girls,Wed,18:00,19:00,Venue F,Pitch F1,B,,,,,60
+,,Thu,16:00,17:00,Venue F,Pitch F1,A,,,,,60
 ,,Thu,16:00,17:00,Venue F,Pitch F1,B,,,,,60
-U12B-05,U12 Boys,Thu,17:00,18:00,Venue F,Pitch F1,A,,,,,60
+,,Thu,17:00,18:00,Venue F,Pitch F1,A,,,,,60
 ,,Thu,17:00,18:00,Venue F,Pitch F1,B,,,,,60
-U07B-05,U07 Boys,Thu,18:00,19:00,Venue F,Pitch F1,,,,,,60
+U07B-03,U07 Boys,Thu,18:00,19:00,Venue F,Pitch F1,,,,,,60
 ,,Fri,16:00,17:00,Venue F,Pitch F1,A,,,,,60
 ,,Fri,16:00,17:00,Venue F,Pitch F1,B,,,,,60
 ,,Fri,17:00,18:00,Venue F,Pitch F1,A,,,,,60
-,,Fri,17:00,18:00,Venue F,Pitch F1,B,,,,,60
+U09G-04,U09 Girls,Fri,17:00,18:00,Venue F,Pitch F1,B,,,,,60
 ,,Fri,18:00,19:00,Venue F,Pitch F1,A,,,,,60
 ,,Fri,18:00,19:00,Venue F,Pitch F1,B,,,,,60
-,,Mon,16:00,17:00,Venue F,Pitch F2,A,,,,,60
-U07G-04,U07 Girls,Mon,16:00,17:00,Venue F,Pitch F2,B,,,,,60
-U19B-03,U19 Boys,Mon,17:00,18:00,Venue F,Pitch F2,A,,,,,60
-U19B-02,U19 Boys,Mon,17:00,18:00,Venue F,Pitch F2,B,,,,,60
-U07G-03,U07 Girls,Mon,17:00,18:00,Venue F,Pitch F2,B,,,,,60
-U14G-05,U14 Girls,Mon,18:00,19:00,Venue F,Pitch F2,A,,,,,60
-,,Mon,18:00,19:00,Venue F,Pitch F2,B,,,,,60
-,,Tue,16:00,17:00,Venue F,Pitch F2,A,,,,,60
+U12B-01,U12 Boys,Mon,16:00,17:00,Venue F,Pitch F2,A,,,,,60
+U16G-02,U16 Girls,Mon,16:00,17:00,Venue F,Pitch F2,B,,,,,60
+U07G-02,U07 Girls,Mon,17:00,18:00,Venue F,Pitch F2,A,,,,,60
+U07G-02,U07 Girls,Mon,17:00,18:00,Venue F,Pitch F2,B,,,,,60
+,,Mon,18:00,19:00,Venue F,Pitch F2,A,,,,,60
+U10B-07,U10 Boys,Mon,18:00,19:00,Venue F,Pitch F2,B,,,,,60
+U12G-04,U12 Girls,Tue,16:00,17:00,Venue F,Pitch F2,A,,,,,60
 ,,Tue,16:00,17:00,Venue F,Pitch F2,B,,,,,60
 ,,Tue,17:00,18:00,Venue F,Pitch F2,A,,,,,60
-U07G-07,U07 Girls,Tue,17:00,18:00,Venue F,Pitch F2,B,,,,,60
-U16B-03,U16 Boys,Tue,18:00,19:00,Venue F,Pitch F2,A,,,,,60
-,,Tue,18:00,19:00,Venue F,Pitch F2,B,,,,,60
-,,Wed,16:00,17:00,Venue F,Pitch F2,A,,,,,60
+,,Tue,17:00,18:00,Venue F,Pitch F2,B,,,,,60
+U19B-06,U19 Boys,Tue,18:00,19:00,Venue F,Pitch F2,A,,,,,60
+U09B-03,U09 Boys,Tue,18:00,19:00,Venue F,Pitch F2,B,,,,,60
+U12B-01,U12 Boys,Wed,16:00,17:00,Venue F,Pitch F2,A,,,,,60
 ,,Wed,16:00,17:00,Venue F,Pitch F2,B,,,,,60
 ,,Wed,17:00,18:00,Venue F,Pitch F2,A,,,,,60
-U19B-02,U19 Boys,Wed,17:00,18:00,Venue F,Pitch F2,B,,,,,60
-U14G-05,U14 Girls,Wed,18:00,19:00,Venue F,Pitch F2,A,,,,,60
-U19B-03,U19 Boys,Wed,18:00,19:00,Venue F,Pitch F2,B,,,,,60
+U07G-03,U07 Girls,Wed,17:00,18:00,Venue F,Pitch F2,B,,,,,60
+,,Wed,18:00,19:00,Venue F,Pitch F2,A,,,,,60
+U10B-07,U10 Boys,Wed,18:00,19:00,Venue F,Pitch F2,B,,,,,60
 ,,Thu,16:00,17:00,Venue F,Pitch F2,A,,,,,60
 ,,Thu,16:00,17:00,Venue F,Pitch F2,B,,,,,60
-U12G-04,U12 Girls,Thu,17:00,18:00,Venue F,Pitch F2,A,,,,,60
-U07G-07,U07 Girls,Thu,17:00,18:00,Venue F,Pitch F2,B,,,,,60
-U16B-03,U16 Boys,Thu,18:00,19:00,Venue F,Pitch F2,A,,,,,60
-,,Thu,18:00,19:00,Venue F,Pitch F2,B,,,,,60
+,,Thu,17:00,18:00,Venue F,Pitch F2,A,,,,,60
+,,Thu,17:00,18:00,Venue F,Pitch F2,B,,,,,60
+U19B-06,U19 Boys,Thu,18:00,19:00,Venue F,Pitch F2,A,,,,,60
+U09B-03,U09 Boys,Thu,18:00,19:00,Venue F,Pitch F2,B,,,,,60
 ,,Fri,16:00,17:00,Venue F,Pitch F2,A,,,,,60
 ,,Fri,16:00,17:00,Venue F,Pitch F2,B,,,,,60
 ,,Fri,17:00,18:00,Venue F,Pitch F2,A,,,,,60
 ,,Fri,17:00,18:00,Venue F,Pitch F2,B,,,,,60
 ,,Fri,18:00,19:00,Venue F,Pitch F2,A,,,,,60
 ,,Fri,18:00,19:00,Venue F,Pitch F2,B,,,,,60
-U08G-01,U08 Girls,Mon,16:00,17:00,Venue F,Pitch F3,A,,,,,60
+,,Mon,16:00,17:00,Venue F,Pitch F3,A,,,,,60
 ,,Mon,16:00,17:00,Venue F,Pitch F3,B,,,,,60
-U10B-01,U10 Boys,Mon,17:00,18:00,Venue F,Pitch F3,A,,,,,60
+,,Mon,17:00,18:00,Venue F,Pitch F3,A,,,,,60
 ,,Mon,17:00,18:00,Venue F,Pitch F3,B,,,,,60
-U10B-02,U10 Boys,Mon,18:00,19:00,Venue F,Pitch F3,A,,,,,60
+U19G-02,U19 Girls,Mon,18:00,19:00,Venue F,Pitch F3,A,,,,,60
 ,,Mon,18:00,19:00,Venue F,Pitch F3,B,,,,,60
 ,,Tue,16:00,17:00,Venue F,Pitch F3,A,,,,,60
 ,,Tue,16:00,17:00,Venue F,Pitch F3,B,,,,,60
-,,Tue,17:00,18:00,Venue F,Pitch F3,A,,,,,60
+U10B-04,U10 Boys,Tue,17:00,18:00,Venue F,Pitch F3,A,,,,,60
 ,,Tue,17:00,18:00,Venue F,Pitch F3,B,,,,,60
-U16G-06,U16 Girls,Tue,18:00,19:00,Venue F,Pitch F3,A,,,,,60
+,,Tue,18:00,19:00,Venue F,Pitch F3,A,,,,,60
 ,,Tue,18:00,19:00,Venue F,Pitch F3,B,,,,,60
 ,,Wed,16:00,17:00,Venue F,Pitch F3,A,,,,,60
 ,,Wed,16:00,17:00,Venue F,Pitch F3,B,,,,,60
-,,Wed,17:00,18:00,Venue F,Pitch F3,A,,,,,60
+U09G-06,U09 Girls,Wed,17:00,18:00,Venue F,Pitch F3,A,,,,,60
 ,,Wed,17:00,18:00,Venue F,Pitch F3,B,,,,,60
-"U08B-02 ",U08 Boys,Wed,18:00,19:00,Venue F,Pitch F3,A,,,,,60
+U19G-02,U19 Girls,Wed,18:00,19:00,Venue F,Pitch F3,A,,,,,60
 ,,Wed,18:00,19:00,Venue F,Pitch F3,B,,,,,60
 ,,Thu,16:00,17:00,Venue F,Pitch F3,A,,,,,60
 ,,Thu,16:00,17:00,Venue F,Pitch F3,B,,,,,60
-,,Thu,17:00,18:00,Venue F,Pitch F3,A,,,,,60
+U10B-04,U10 Boys,Thu,17:00,18:00,Venue F,Pitch F3,A,,,,,60
 ,,Thu,17:00,18:00,Venue F,Pitch F3,B,,,,,60
-,,Thu,18:00,19:00,Venue F,Pitch F3,A,,,,,60
+U10B-02,U10 Boys,Thu,18:00,19:00,Venue F,Pitch F3,A,,,,,60
 ,,Thu,18:00,19:00,Venue F,Pitch F3,B,,,,,60
 ,,Fri,16:00,17:00,Venue F,Pitch F3,A,,,,,60
 ,,Fri,16:00,17:00,Venue F,Pitch F3,B,,,,,60
 ,,Fri,17:00,18:00,Venue F,Pitch F3,A,,,,,60
 ,,Fri,17:00,18:00,Venue F,Pitch F3,B,,,,,60
-U08B-02,U08 Boys,Fri,18:00,19:00,Venue F,Pitch F3,A,,,,,60
+,,Fri,18:00,19:00,Venue F,Pitch F3,A,,,,,60
 ,,Fri,18:00,19:00,Venue F,Pitch F3,B,,,,,60
-U07G-01,U07 Girls,Mon,16:00,17:00,Venue G Annex,Pitch G1,A,,,,,60
-U06G-03,U06 Girls,Mon,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
-U14B-05,U14 Boys,Mon,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
-U09G-07,U09 Girls,Mon,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
-,,Mon,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
-U06G-02,U06 Girls,Mon,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
+,,Mon,16:00,17:00,Venue G Annex,Pitch G1,A,,,,,60
+,,Mon,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
+,,Mon,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
+,,Mon,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
+U12G-07,U12 Girls,Mon,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
+U08G-07,U08 Girls,Mon,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
 ,,Tue,16:00,17:00,Venue G Annex,Pitch G1,A,,,,,60
-,,Tue,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
-U09B-05,U09 Boys,Tue,17:00,18:00,Venue G Annex,Pitch G1,,,,,,60
-U08G-04,U08 Girls,Tue,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
-,,Tue,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
-,,Wed,16:00,17:00,Venue G Annex,Pitch G1,A,,,,,60
-U06G-03,U06 Girls,Wed,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
-U14B-05,U14 Boys,Wed,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
-,,Wed,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
-,,Wed,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
-U06G-02,U06 Girls,Wed,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
+U06G-06,U06 Girls,Tue,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
+,,Tue,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
+U06G-05,U06 Girls,Tue,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
+,,Tue,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
+U08G-06,U08 Girls,Tue,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
+U06G-01,U06 Girls,Wed,16:00,17:00,Venue G Annex,Pitch G1,A,,,2,,60
+U07B-01,U07 Boys,Wed,16:00,17:00,Venue G Annex,Pitch G1,A,,,2,,60
+,,Wed,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
+U12G-02,U12 Girls,Wed,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
+U12G-05,U12 Girls,Wed,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
+U12G-07,U12 Girls,Wed,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
+U08G-07,U08 Girls,Wed,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
 ,,Thu,16:00,17:00,Venue G Annex,Pitch G1,A,,,,,60
-,,Thu,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
-U09B-05,U09 Boys,Thu,17:00,18:00,Venue G Annex,Pitch G1,,,,,,60
+U06G-06,U06 Girls,Thu,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
+,,Thu,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
+U06G-05,U06 Girls,Thu,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
 ,,Thu,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
 ,,Thu,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
-,,Fri,16:00,17:00,Venue G Annex,Pitch G1,A,,,,,60
+U06G-01,U06 Girls,Fri,16:00,17:00,Venue G Annex,Pitch G1,A,,,2,,60
+U07B-01,U07 Boys,Fri,16:00,17:00,Venue G Annex,Pitch G1,A,,,2,,60
 ,,Fri,16:00,17:00,Venue G Annex,Pitch G1,B,,,,,60
 ,,Fri,17:00,18:00,Venue G Annex,Pitch G1,A,,,,,60
 ,,Fri,17:00,18:00,Venue G Annex,Pitch G1,B,,,,,60
 ,,Fri,18:00,19:00,Venue G Annex,Pitch G1,A,,,,,60
 ,,Fri,18:00,19:00,Venue G Annex,Pitch G1,B,,,,,60
-U12B-03,U12 Boys,Mon,16:00,17:00,Venue G Annex,Pitch G2,,,,,,60
-U19B-05,U19 Boys,Mon,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
-U19G-01,U19 Girls,Mon,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
-U09B-02,U09 Boys,Mon,18:00,19:00,Venue G Annex,Pitch G2,A,,,,,60
-U10B-06,U10 Boys,Mon,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
+,,Mon,16:00,17:00,Venue G Annex,Pitch G2,A,,,,,60
+,,Mon,16:00,17:00,Venue G Annex,Pitch G2,B,,,,,60
+U14B-02,U14 Boys,Mon,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
+U08B-06,U08 Boys,Mon,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
+,,Mon,18:00,19:00,Venue G Annex,Pitch G2,A,,,,,60
+,,Mon,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
 ,,Tue,16:00,17:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Tue,16:00,17:00,Venue G Annex,Pitch G2,B,,,,,60
 ,,Tue,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Tue,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
 ,,Tue,18:00,19:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Tue,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
-U12B-03,U12 Boys,Wed,16:00,17:00,Venue G Annex,Pitch G2,,,,,,60
-U12G-01,U12 Girls,Wed,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
-,,Wed,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
-U09B-02,U09 Boys,Wed,18:00,19:00,Venue G Annex,Pitch G2,A,,,,,60
-,,Wed,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
+U12G-01,U12 Girls,Wed,16:00,17:00,Venue G Annex,Pitch G2,A,,,,,60
+U14B-04,U14 Boys,Wed,16:00,17:00,Venue G Annex,Pitch G2,B,,,,,60
+U06G-04,U06 Girls,Wed,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
+U08B-06,U08 Boys,Wed,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
+U07G-05,U07 Girls,Wed,18:00,19:00,Venue G Annex,Pitch G2,,,,,,60
+,,Wed,18:30,19:30,Venue G Annex,Pitch G2,A,,,,,60
 ,,Thu,16:00,17:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Thu,16:00,17:00,Venue G Annex,Pitch G2,B,,,,,60
-U19B-05,U19 Boys,Thu,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
+,,Thu,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Thu,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
 ,,Thu,18:00,19:00,Venue G Annex,Pitch G2,A,,,,,60
-U10B-06,U10 Boys,Thu,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
+,,Thu,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
 ,,Fri,16:00,17:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Fri,16:00,17:00,Venue G Annex,Pitch G2,B,,,,,60
-,,Fri,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
+U06G-04,U06 Girls,Fri,17:00,18:00,Venue G Annex,Pitch G2,A,,,,,60
 ,,Fri,17:00,18:00,Venue G Annex,Pitch G2,B,,,,,60
-,,Fri,18:00,19:00,Venue G Annex,Pitch G2,A,,,,,60
-,,Fri,18:00,19:00,Venue G Annex,Pitch G2,B,,,,,60
+U07G-05,U07 Girls,Fri,18:00,19:00,Venue G Annex,Pitch G2,,,,,,60
 ,,Mon,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Mon,16:00,17:00,Venue G Annex,Pitch G3,B,,,,,60
-,,Mon,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
+U10B-03,U10 Boys,Mon,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Mon,17:00,18:00,Venue G Annex,Pitch G3,B,,,,,60
-U09B-04,U09 Boys,Mon,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
+U09G-06,U09 Girls,Mon,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Mon,18:00,19:00,Venue G Annex,Pitch G3,B,,,,,60
 ,,Tue,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Tue,16:00,17:00,Venue G Annex,Pitch G3,B,,,,,60
-U14G-04,U14 Girls,Tue,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
+U16G-01,U16 Girls,Tue,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Tue,17:00,18:00,Venue G Annex,Pitch G3,B,,,,,60
-U08G-02,U08 Girls,Tue,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
+U16B-01,U16 Boys,Tue,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Tue,18:00,19:00,Venue G Annex,Pitch G3,B,,,,,60
-U07G-04,U07 Girls,Wed,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
+U09B-07,U09 Boys,Wed,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Wed,16:00,17:00,Venue G Annex,Pitch G3,B,,,,,60
-,,Wed,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
+U10B-03,U10 Boys,Wed,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Wed,17:00,18:00,Venue G Annex,Pitch G3,B,,,,,60
-U09B-04,U09 Boys,Wed,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
+,,Wed,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Wed,18:00,19:00,Venue G Annex,Pitch G3,B,,,,,60
-U10B-02,U10 Boys,Thu,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
+,,Thu,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Thu,16:00,17:00,Venue G Annex,Pitch G3,B,,,,,60
-,,Thu,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
+U16G-01,U16 Girls,Thu,17:00,18:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Thu,17:00,18:00,Venue G Annex,Pitch G3,B,,,,,60
-,,Thu,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
+U16B-01,U16 Boys,Thu,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Thu,18:00,19:00,Venue G Annex,Pitch G3,B,,,,,60
 ,,Fri,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Fri,16:00,17:00,Venue G Annex,Pitch G3,B,,,,,60
@@ -594,80 +594,80 @@ U10B-02,U10 Boys,Thu,16:00,17:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Fri,18:00,19:00,Venue G Annex,Pitch G3,A,,,,,60
 ,,Fri,18:00,19:00,Venue G Annex,Pitch G3,B,,,,,60
 U07B-02,U07 Boys,Mon,16:00,17:00,Venue H,Field 1,,,,,,60
-,,Mon,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
+U08B-01,U08 Boys,Mon,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
 ,,Mon,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
 ,,Mon,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
-U09B-01,U09 Boys,Mon,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
+U14G-01,U14 Girls,Mon,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 1,H1 North,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 1,H1 South,,,,,60
-U19G-06,U19 Girls,Tue,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
-U09B-03,U09 Boys,Tue,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
-,,Tue,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
-U09B-06,U09 Boys,Tue,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
+,,Tue,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
+,,Tue,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
+U16G-06,U16 Girls,Tue,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
+U14G-02,U14 Girls,Tue,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
 U07B-02,U07 Boys,Wed,16:00,17:00,Venue H,Field 1,,,,,,60
 ,,Wed,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
-,,Wed,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
-U06G-04,U06 Girls,Wed,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
-,,Wed,18:00,19:00,Venue H,Field 1,H1 South,,,,hold,60
+U12B-04,U12 Boys,Wed,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
+,,Wed,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
+U14G-01,U14 Girls,Wed,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
 ,,Thu,16:00,17:00,Venue H,Field 1,H1 North,,,,,60
 ,,Thu,16:00,17:00,Venue H,Field 1,H1 South,,,,,60
 ,,Thu,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
-U09B-03,U09 Boys,Thu,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
+,,Thu,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
 ,,Thu,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
-U09B-06,U09 Boys,Thu,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
+U14G-02,U14 Girls,Thu,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
 ,,Fri,16:00,17:00,Venue H,Field 1,H1 North,,,,,60
 ,,Fri,16:00,17:00,Venue H,Field 1,H1 South,,,,,60
 ,,Fri,17:00,18:00,Venue H,Field 1,H1 North,,,,,60
 ,,Fri,17:00,18:00,Venue H,Field 1,H1 South,,,,,60
-U06G-04,U06 Girls,Fri,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
+,,Fri,18:00,19:00,Venue H,Field 1,H1 North,,,,,60
 ,,Fri,18:00,19:00,Venue H,Field 1,H1 South,,,,,60
-,,Mon,16:00,17:00,Venue H,Field 2,A,,,,,60
-U10G-04,U10 Girls,Mon,16:00,17:00,Venue H,Field 2,B,,,,,60
-U10B-05,U10 Boys,Mon,17:00,18:00,Venue H,Field 2,,,,,,60
+U14B-05,U14 Boys,Mon,16:00,17:00,Venue H,Field 2,A,,,,,60
+U19B-05,U19 Boys,Mon,16:00,17:00,Venue H,Field 2,B,,,,,60
+,,Mon,17:00,18:00,Venue H,Field 2,A,,,,,60
+,,Mon,17:00,18:00,Venue H,Field 2,B,,,,,60
 ,,Mon,18:00,19:00,Venue H,Field 2,A,,,,,60
-U09G-05,U09 Girls,Mon,18:00,19:00,Venue H,Field 2,B,,,,,60
+U19B-02,U19 Boys,Mon,18:00,19:00,Venue H,Field 2,B,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 2,A,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 2,B,,,,,60
-U09G-01,U09 Girls,Tue,17:00,18:00,Venue H,Field 2,A,,,,,60
-,,Tue,17:00,18:00,Venue H,Field 2,B,,,,,60
-U06G-06,U06 Girls,Tue,18:00,19:00,Venue H,Field 2,A,,,,,60
-U08G-04,U08 Girls,Tue,18:00,19:00,Venue H,Field 2,B,,,,,60
-U12G-02,U12 Girls,Wed,16:00,17:00,Venue H,Field 2,A,,,,,60
-,,Wed,16:00,17:00,Venue H,Field 2,B,,,,,60
-U10B-05,U10 Boys,Wed,17:00,18:00,Venue H,Field 2,,,,,,60
-U12B-04,U12 Boys,Wed,18:00,19:00,Venue H,Field 2,A,,,,,60
-U09G-05,U09 Girls,Wed,18:00,19:00,Venue H,Field 2,B,,,,,60
+U08G-04,U08 Girls,Tue,17:00,18:00,Venue H,Field 2,,,,,,60
+,,Tue,18:00,19:00,Venue H,Field 2,A,,,,,60
+,,Tue,18:00,19:00,Venue H,Field 2,B,,,,,60
+U14B-05,U14 Boys,Wed,16:00,17:00,Venue H,Field 2,A,,,,,60
+U10G-06,U10 Girls,Wed,16:00,17:00,Venue H,Field 2,B,,,,,60
+U07G-06,U07 Girls,Wed,17:00,18:00,Venue H,Field 2,A,,,,,60
+,,Wed,17:00,18:00,Venue H,Field 2,B,,,,hold,60
+,,Wed,18:00,19:00,Venue H,Field 2,A,,,,,60
+U19B-02,U19 Boys,Wed,18:00,19:00,Venue H,Field 2,B,,,,,60
 ,,Thu,16:00,17:00,Venue H,Field 2,A,,,,,60
-,,Thu,16:00,17:00,Venue H,Field 2,B,,,,,60
-,,Thu,17:00,18:00,Venue H,Field 2,A,,,,,60
-,,Thu,17:00,18:00,Venue H,Field 2,B,,,,,60
-U06G-06,U06 Girls,Thu,18:00,19:00,Venue H,Field 2,A,,,,,60
+U19B-05,U19 Boys,Thu,16:00,17:00,Venue H,Field 2,B,,,,,60
+U08G-04,U08 Girls,Thu,17:00,18:00,Venue H,Field 2,,,,,,60
+,,Thu,18:00,19:00,Venue H,Field 2,A,,,,,60
 ,,Thu,18:00,19:00,Venue H,Field 2,B,,,,,60
 ,,Fri,16:00,17:00,Venue H,Field 2,A,,,,,60
-,,Fri,16:00,17:00,Venue H,Field 2,B,,,,,60
+U10G-06,U10 Girls,Fri,16:00,17:00,Venue H,Field 2,B,,,,,60
 ,,Fri,17:00,18:00,Venue H,Field 2,A,,,,,60
 ,,Fri,17:00,18:00,Venue H,Field 2,B,,,,,60
 ,,Fri,18:00,19:00,Venue H,Field 2,A,,,,,60
 ,,Fri,18:00,19:00,Venue H,Field 2,B,,,,,60
-"U12B-01 ",U12 Boys,Mon,16:00,17:00,Venue H,Field 3,A,,,,,60
+U12G-06,U12 Girls,Mon,16:00,17:00,Venue H,Field 3,A,,,,,60
 ,,Mon,16:00,17:00,Venue H,Field 3,B,,,,,60
 ,,Mon,17:00,18:00,Venue H,Field 3,A,,,,,60
 ,,Mon,17:00,18:00,Venue H,Field 3,B,,,,,60
 ,,Mon,18:00,19:00,Venue H,Field 3,A,,,,,60
 ,,Mon,18:00,19:00,Venue H,Field 3,B,,,,,60
-U08B-05,U08 Boys,Tue,16:00,17:00,Venue H,Field 3,A,,,,,60
+U10G-03,U10 Girls,Tue,16:00,17:00,Venue H,Field 3,A,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 3,B,,,,,60
 ,,Tue,17:00,18:00,Venue H,Field 3,A,,,,,60
 ,,Tue,17:00,18:00,Venue H,Field 3,B,,,,,60
 ,,Tue,18:00,19:00,Venue H,Field 3,A,,,,,60
 ,,Tue,18:00,19:00,Venue H,Field 3,B,,,,,60
-U12B-01,U12 Boys,Wed,16:00,17:00,Venue H,Field 3,A,,,,,60
+,,Wed,16:00,17:00,Venue H,Field 3,A,,,,,60
 ,,Wed,16:00,17:00,Venue H,Field 3,B,,,,,60
-U12G-05,U12 Girls,Wed,17:00,18:00,Venue H,Field 3,A,,,,,60
+U08B-02,U08 Boys,Wed,17:00,18:00,Venue H,Field 3,A,,,,,60
 ,,Wed,17:00,18:00,Venue H,Field 3,B,,,,,60
-U09G-06,U09 Girls,Wed,18:00,19:00,Venue H,Field 3,A,,,,,60
+U10G-02,U10 Girls,Wed,18:00,19:00,Venue H,Field 3,A,,,,,60
 ,,Wed,18:00,19:00,Venue H,Field 3,B,,,,,60
-U08B-05,U08 Boys,Thu,16:00,17:00,Venue H,Field 3,A,,,,,60
+,,Thu,16:00,17:00,Venue H,Field 3,A,,,,,60
 ,,Thu,16:00,17:00,Venue H,Field 3,B,,,,,60
 ,,Thu,17:00,18:00,Venue H,Field 3,A,,,,,60
 ,,Thu,17:00,18:00,Venue H,Field 3,B,,,,,60
@@ -675,15 +675,15 @@ U08B-05,U08 Boys,Thu,16:00,17:00,Venue H,Field 3,A,,,,,60
 ,,Thu,18:00,19:00,Venue H,Field 3,B,,,,,60
 ,,Fri,16:00,17:00,Venue H,Field 3,A,,,,,60
 ,,Fri,16:00,17:00,Venue H,Field 3,B,,,,,60
-,,Fri,17:00,18:00,Venue H,Field 3,A,,,,,60
+U08B-02,U08 Boys,Fri,17:00,18:00,Venue H,Field 3,A,,,,,60
 ,,Fri,17:00,18:00,Venue H,Field 3,B,,,,,60
 ,,Fri,18:00,19:00,Venue H,Field 3,A,,,,,60
 ,,Fri,18:00,19:00,Venue H,Field 3,B,,,,,60
-U19G-02,U19 Girls,Mon,16:00,17:00,Venue H,Field 4,A,,,,,60
+U19B-03,U19 Boys,Mon,16:00,17:00,Venue H,Field 4,A,,,,,60
 ,,Mon,16:00,17:00,Venue H,Field 4,B,,,,,60
-,,Mon,17:00,18:00,Venue H,Field 4,A,,,,,60
+U07G-04,U07 Girls,Mon,17:00,18:00,Venue H,Field 4,A,,,,,60
 ,,Mon,17:00,18:00,Venue H,Field 4,B,,,,,60
-,,Mon,18:00,19:00,Venue H,Field 4,A,,,,,60
+U12B-07,U12 Boys,Mon,18:00,19:00,Venue H,Field 4,A,,,,,60
 ,,Mon,18:00,19:00,Venue H,Field 4,B,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 4,A,,,,,60
 ,,Tue,16:00,17:00,Venue H,Field 4,B,,,,,60
@@ -691,15 +691,15 @@ U19G-02,U19 Girls,Mon,16:00,17:00,Venue H,Field 4,A,,,,,60
 ,,Tue,17:00,18:00,Venue H,Field 4,B,,,,,60
 ,,Tue,18:00,19:00,Venue H,Field 4,A,,,,,60
 ,,Tue,18:00,19:00,Venue H,Field 4,B,,,,,60
-U19G-02,U19 Girls,Wed,16:00,17:00,Venue H,Field 4,A,,,,,60
+U12G-03,U12 Girls,Wed,16:00,17:00,Venue H,Field 4,A,,,,,60
 ,,Wed,16:00,17:00,Venue H,Field 4,B,,,,,60
-U07G-03,U07 Girls,Wed,17:00,18:00,Venue H,Field 4,A,,,,,60
+,,Wed,17:00,18:00,Venue H,Field 4,A,,,,,60
 ,,Wed,17:00,18:00,Venue H,Field 4,B,,,,,60
-U07G-06,U07 Girls,Wed,18:00,19:00,Venue H,Field 4,A,,,,,60
+U12B-07,U12 Boys,Wed,18:00,19:00,Venue H,Field 4,A,,,,,60
 ,,Wed,18:00,19:00,Venue H,Field 4,B,,,,,60
 ,,Thu,16:00,17:00,Venue H,Field 4,A,,,,,60
 ,,Thu,16:00,17:00,Venue H,Field 4,B,,,,,60
-U14B-03,U14 Boys,Thu,17:00,18:00,Venue H,Field 4,A,,,,,60
+,,Thu,17:00,18:00,Venue H,Field 4,A,,,,,60
 ,,Thu,17:00,18:00,Venue H,Field 4,B,,,,,60
 ,,Thu,18:00,19:00,Venue H,Field 4,A,,,,,60
 ,,Thu,18:00,19:00,Venue H,Field 4,B,,,,,60

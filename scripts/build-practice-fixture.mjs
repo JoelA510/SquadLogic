@@ -123,6 +123,8 @@ const DIVISION_SIZES = [7, 7, 5, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 6, 6, 6,
 const SHORT_DIVISIONS = 3;
 const SECOND_COACHES = 60;
 const SHARED_COACHES = 19;
+/** At most this many short teams in any division (of 5 to 7 teams): two a week stays its mode. */
+const MAX_SHORT_PER_DIVISION = 2;
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 /** The two blocks of plan 4.11.1: weekdays and starts. */
@@ -130,7 +132,10 @@ const BLOCKS = {
   45: { days: ['Tue', 'Thu'], starts: ['16:00', '16:45', '17:30'] },
   60: { days: WEEK, starts: ['16:00', '17:00', '18:00'] },
 };
-/** Venue letter, fields, block. 29 fields (8 in the 45-minute block, 21 in the 60-minute block). */
+/**
+ * Venue letter, fields, block. 29 fields (8 in the 45-minute block, 21 in the 60-minute block).
+ * @type {ReadonlyArray<readonly [string, number, number]>}
+ */
 const VENUES = [
   ['A', 4, 45],
   ['B', 4, 45],
@@ -453,8 +458,24 @@ function buildCleanGrid(league, rnd) {
     for (const t of chosen) role.set(t.label, name);
     return chosen;
   };
-  take(short, ROLE_COUNTS.dropShort, 'drop');
-  take(long, ROLE_COUNTS.drop, 'drop');
+  // A team that loses a practice is "short", and the file's own proposal for a division's count is the
+  // most common count of rows per team: no division may hold so many short teams that one a week
+  // becomes its mode or ties with two (the settings proposal reads the plan's 29 as exceptions).
+  /** @type {Map<string, number>} */
+  const shortPer = new Map();
+  const takeShort = (list, n) => {
+    let got = 0;
+    for (const t of list) {
+      if (got === n) break;
+      if (role.has(t.label) || (shortPer.get(t.division) ?? 0) >= MAX_SHORT_PER_DIVISION) continue;
+      role.set(t.label, 'drop');
+      shortPer.set(t.division, (shortPer.get(t.division) ?? 0) + 1);
+      got += 1;
+    }
+    if (got !== n) throw new Error('not enough teams to drop a practice from');
+  };
+  takeShort(short, ROLE_COUNTS.dropShort);
+  takeShort(long, ROLE_COUNTS.drop);
   take(long, ROLE_COUNTS.double, 'double');
   take(short, ROLE_COUNTS.wholeTwinShort, 'wholeTwin');
   take(long, ROLE_COUNTS.wholeTwin, 'wholeTwin');
@@ -581,7 +602,12 @@ function buildCleanGrid(league, rnd) {
     return cands;
   };
 
-  const placeTwin = (team, d1, d2, extra = () => true) => {
+  const placeTwin = (
+    team,
+    d1,
+    d2,
+    extra = (/** @type {Cell} */ _a, /** @type {Cell} */ _b) => true
+  ) => {
     const cands = [];
     for (const f of fieldsOf(team.minutes))
       for (const sub of ['A', 'B']) {

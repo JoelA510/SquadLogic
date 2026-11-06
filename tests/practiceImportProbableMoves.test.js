@@ -228,6 +228,10 @@ describe('probable moves: paired at team level', () => {
   });
 });
 
+// Calls with arguments of the wrong type are the point of the refusal tests below.
+const pairLoose = /** @type {(...args: any[]) => any} */ (pairProbableMoves);
+const selectLoose = /** @type {(...args: any[]) => any} */ (selectedArrivals);
+
 describe('probable moves: the admin ticks to add', () => {
   const result = pairProbableMoves({
     leaving: freeze([r('s1', 'sharks', 'mon'), r('s2', 'sharks', 'wed')]),
@@ -259,9 +263,9 @@ describe('probable moves: the admin ticks to add', () => {
 
   it('refuses a tick it cannot place or read, rather than skip it', () => {
     expect(() => selectedArrivals(result, { nope: true })).toThrow(/nope/);
-    expect(() => selectedArrivals(result, { f1: 'yes' })).toThrow(/boolean/);
-    expect(() => selectedArrivals(result, { f1: 1 })).toThrow(/boolean/);
-    expect(() => selectedArrivals(result, null)).toThrow(TypeError);
+    expect(() => selectLoose(result, { f1: 'yes' })).toThrow(/boolean/);
+    expect(() => selectLoose(result, { f1: 1 })).toThrow(/boolean/);
+    expect(() => selectLoose(result, null)).toThrow(TypeError);
   });
 });
 
@@ -269,16 +273,14 @@ describe('probable moves: input that a dry run cannot return', () => {
   const ok = () => freeze([r('a', 't1', 'mon')]);
 
   it('is refused, naming the defect', () => {
-    expect(() => pairProbableMoves({ leaving: ok(), arriving: undefined })).toThrow(TypeError);
-    expect(() => pairProbableMoves({ leaving: 'rows', arriving: [] })).toThrow(TypeError);
-    expect(() => pairProbableMoves({ leaving: [{ rowKey: 'a' }], arriving: [] })).toThrow(/teamId/);
-    expect(() => pairProbableMoves({ leaving: [{ teamId: 't1' }], arriving: [] })).toThrow(
-      /rowKey/
+    expect(() => pairLoose({ leaving: ok(), arriving: undefined })).toThrow(TypeError);
+    expect(() => pairLoose({ leaving: 'rows', arriving: [] })).toThrow(TypeError);
+    expect(() => pairLoose({ leaving: [{ rowKey: 'a' }], arriving: [] })).toThrow(/teamId/);
+    expect(() => pairLoose({ leaving: [{ teamId: 't1' }], arriving: [] })).toThrow(/rowKey/);
+    expect(() => pairLoose({ leaving: [{ rowKey: 'a', teamId: '' }], arriving: [] })).toThrow(
+      /teamId/
     );
-    expect(() =>
-      pairProbableMoves({ leaving: [{ rowKey: 'a', teamId: '' }], arriving: [] })
-    ).toThrow(/teamId/);
-    expect(() => pairProbableMoves({ leaving: [null], arriving: [] })).toThrow(TypeError);
+    expect(() => pairLoose({ leaving: [null], arriving: [] })).toThrow(TypeError);
   });
 
   it('refuses a row listed twice, and a row on both sides', () => {

@@ -94,8 +94,11 @@ const league = (over = {}) => ({
 /**
  * One row per (team, k): each practice of each team in its own cell so that nothing overlaps.
  * `plan` is `{ T1: 2, T2: 1 }`: practices per team. `minutes` is the slot length (60 by default).
+ *
+ * @param {Record<string, number>} plan
+ * @param {{ division?: string, minutes?: (team: string, k: number) => number, extra?: Array<Record<string, string>> }} [options]
  */
-function fileFor(plan, { division = 'U10 Boys', minutes = (team, k) => 60, extra = [] } = {}) {
+function fileFor(plan, { division = 'U10 Boys', minutes = () => 60, extra = [] } = {}) {
   let cell = 0;
   const rows = [];
   for (const [team, n] of Object.entries(plan)) {

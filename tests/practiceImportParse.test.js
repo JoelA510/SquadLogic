@@ -98,7 +98,7 @@ const note = (result) => {
 };
 
 describe('practice import: the reason codes', () => {
-  const all = Object.values(PRACTICE_IMPORT_REASON);
+  const all = /** @type {string[]} */ (Object.values(PRACTICE_IMPORT_REASON));
 
   it('are a frozen identity table, and every code has a sentence', () => {
     expect(Object.isFrozen(PRACTICE_IMPORT_REASON)).toBe(true);
@@ -648,9 +648,11 @@ describe('practice import: the file', () => {
   });
 
   it('rejects input that is not a header row and rows', () => {
+    // @ts-expect-error a string is not a header row
     expect(() => parsePracticeRows({ headers: 'Team', rows: [], season: SEASON })).toThrow(
       TypeError
     );
+    // @ts-expect-error an object is not rows
     expect(() => parsePracticeRows({ headers: HEADERS, rows: {}, season: SEASON })).toThrow(
       TypeError
     );
@@ -984,10 +986,17 @@ describe('practice import: the Edge function’s header alias map (reported, not
     }
   });
 
-  it('does not take what only the practice file adds: Half, Side, Length, Team, Division, Use', () => {
-    // PR 11 adds what it needs. `division` must NOT be aliased onto the fields CSV's reservation key:
-    // there it reserves a slot for a division, here it names the team's division (plan 4.11.2).
-    for (const header of ['half', 'side', 'length', 'team', 'division', 'use']) {
+  it('already takes Division, as `division_name`: the fields CSV’s reservation key (a finding for PR 10/11)', () => {
+    // In the fields CSV `Division` RESERVES a slot for a division (`20261029010000`, section 5). In the
+    // practice file it names the team’s division and this import never writes a reservation (plan 4.11.2).
+    // The same header reaches the Edge function under the same key, so PR 11’s practice import type must
+    // read `division_name` as the team’s division and its allowlist must not carry it to a reservation.
+    expect(map.get('division')).toBe('division_name');
+  });
+
+  it('does not take what only the practice file adds: Half, Side, Length, Team, Use', () => {
+    // PR 11 adds what it needs; if one of these moves, update this test on purpose.
+    for (const header of ['half', 'side', 'length', 'team', 'use']) {
       expect([header, map.has(header)]).toEqual([header, false]);
     }
   });

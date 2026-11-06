@@ -203,10 +203,11 @@ describe('practice import mapping: exact matches are proposed, nothing else is',
       rows: parsed([
         row({ Team: 'Sharks', Division: 'U10 Girls' }),
         row({ Team: 'Lions', Division: 'U10 Girls', Day: 'Tue' }),
-        row({ Location: 'Venue B', Field: 'Field 1', Day: 'Wed' }),
-        row({ Location: 'Venue B', Field: 'Field 2', Day: 'Thu' }),
-        row({ Subunit: 'B', Day: 'Fri' }),
-        row({ Location: 'Venue B', Subunit: 'B', Day: 'Sat' }),
+        // the ground rows use a team of their own: one label in two divisions is the parse's refusal
+        row({ Team: 'Cubs', Location: 'Venue B', Field: 'Field 1', Day: 'Wed' }),
+        row({ Team: 'Cubs', Location: 'Venue B', Field: 'Field 2', Day: 'Thu' }),
+        row({ Team: 'Cubs', Subunit: 'B', Day: 'Fri' }),
+        row({ Team: 'Cubs', Location: 'Venue B', Subunit: 'B', Day: 'Sat' }),
       ]),
       league: league(),
     });
@@ -769,9 +770,13 @@ describe('practice import mapping: reading an alias file', () => {
       code: 'missing-column',
       column: 'Location',
     });
-    expect(read('Alias,Alias,Location\nx,y,Venue A').refusal).toMatchObject({
-      code: 'duplicate-column',
-    });
+    // (papaparse renames a repeated header, so a repeat is handed over as the header row)
+    expect(
+      readPracticeAliases({ headers: ['Alias', 'Alias', 'Location'], rows: [], league: lg }).refusal
+    ).toMatchObject({ code: 'duplicate-column', column: 'Alias' });
+    expect(
+      readPracticeAliases({ headers: ['Alias', 'Location', 'Venue'], rows: [], league: lg }).refusal
+    ).toMatchObject({ code: 'duplicate-column', column: 'Location' });
     const venue = read('Alias,Venue,Note\nThe Annex,Venue A,SECRET');
     expect(venue.ok).toBe(true);
     expect(venue.droppedColumns).toEqual(['Note']);
@@ -791,7 +796,7 @@ describe('practice import mapping: reading an alias file', () => {
     const twice = league({ locations: [...lg.locations, { id: 'loc:a2', name: 'VENUE A' }] });
     const out = readPracticeAliases({ ...readCsvText('Alias,Location\nx,Venue A'), league: twice });
     expect(out.rows[0]).toMatchObject({ status: 'refused', reason: 'unknown-location' });
-    expect(out.rows[0].message).toMatch(/more than one/);
+    expect(out.rows[0].message).toMatch(/more than one/i);
   });
 });
 
@@ -969,7 +974,7 @@ describe('practice import: a slot is a ground, a weekday, a start and a date', (
     const out = resolve([
       row(),
       row({ Team: 'Lions', Subunit: '', Start: '16:30', End: '17:30' }),
-      row({ Team: 'Cubs', Subunit: '', Start: '16:30', End: '17:30', Division: 'U10 Boys' }),
+      row({ Team: 'Sharks', Subunit: '', Start: '16:30', End: '17:30', Division: 'U10 Boys' }),
     ]);
     expect(out.rows.map((r) => r.reason)).toEqual([
       null,
@@ -1067,7 +1072,7 @@ describe('practice import: slotKey’s overlap rule is the database’s supply r
       [slot(), slot({ day: 'tue' }), false],
       [slot(), slot({ validFrom: '2026-11-21', validUntil: '2026-12-01' }), false],
     ];
-    for (const [a, b, clash] of pairs) {
+    for (const [a, b, clash] of /** @type {Array<[any, any, boolean]>} */ (pairs)) {
       expect([practiceSlotsOverlap(a, b), practiceSlotsOverlap(b, a)]).toEqual([clash, clash]);
     }
   });

@@ -1456,7 +1456,10 @@ auto/preserve-existing/preserve-or-expand/preserve-with-overflow —
 previously published schedule (`frontend/src/pages/GameSchedulingPage.jsx:399-474`) and clears any
 staged review (`setReviewAssignments(null)` at `:407`). There is no freeze scope, no per-game lock
 honored by the solver, no diff against a published baseline, and no term in any ranking function
-that rewards leaving a game where it was.
+that rewards leaving a game where it was. *(Changed 2026-11-06, PRs 1 and 2 of
+`docs/changes/2026-11-03-schedule-expansion.md`: a Published game is a per-game lock the solver honours,
+`scheduleGames({ pinned })`, and the database refuses to move one. Games that are not Published are still
+re-solved from scratch.)*
 
 This is incident #1 — the 366-game reshuffle — and nothing in the current architecture prevents it
 recurring. It is also incident #2: even for practices, where locks _do_ exist, the corpus records

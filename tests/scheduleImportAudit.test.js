@@ -340,6 +340,9 @@ describe('schedule audit: a team with no coach is not judged, never clear', () =
     });
     expect(result.coverage.teams.withoutGames).toEqual(['lonely']);
     expect(result.coverage.teams.onSchedule).toBe(2);
+    // and the sentence does not let "2 of 2 teams" read as the whole roster
+    expect(result.sentence).toContain('(2 of 2 teams).');
+    expect(result.sentence).toContain('1 rostered team has no game in this file');
   });
 });
 

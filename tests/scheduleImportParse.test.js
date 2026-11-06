@@ -560,6 +560,18 @@ describe('schedule import: the week rule (decision 17)', () => {
     expect(open.status).toBe('ok');
   });
 
+  it('refuses a season date that is present and is not a date, instead of turning the rule off', () => {
+    expect(() => parse([row()], { season: { ...SEASON, startDate: '2026-09-31' } })).toThrow(
+      /season\.startDate/
+    );
+    expect(() => parse([row()], { season: { ...SEASON, endDate: 'soon' } })).toThrow(
+      /season\.endDate/
+    );
+    // blank or missing is "no date", as the season row has it before it is set
+    expect(() => parse([row()], { season: { ...SEASON, endDate: '' } })).not.toThrow();
+    expect(() => parse([row()], { season: { ...SEASON, endDate: null } })).not.toThrow();
+  });
+
   it('with no season start, the Week column is required: a blank cell is missing-week', () => {
     const noStart = { timeZone: SEASON.timeZone };
     const r = refused({ Week: '' }, 'missing-week', { season: noStart });

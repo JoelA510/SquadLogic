@@ -136,7 +136,14 @@ function decisionFor(decisions, kind, key) {
   const group = decisions?.[GROUP_OF[kind]];
   const decision = group && Object.hasOwn(group, key) ? group[key] : null;
   if (!decision || typeof decision !== 'object') return null;
-  return ACTIONS[kind].includes(decision.action) ? decision : null;
+  if (!ACTIONS[kind].includes(decision.action)) return null;
+  // A decision is stored data: keep the three fields this module reads, and a name only if it is text.
+  /** @type {{ action: string, id?: string, name?: string }} */
+  const kept = { action: decision.action };
+  if (typeof decision.id === 'string') kept.id = decision.id;
+  if (typeof decision.name === 'string' && decision.name.trim() !== '')
+    kept.name = decision.name.trim();
+  return kept;
 }
 
 /**

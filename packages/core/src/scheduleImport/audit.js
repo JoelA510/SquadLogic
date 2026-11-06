@@ -237,6 +237,12 @@ export function auditSchedule({ games, teams }) {
       `${n} outside ${plural(n, 'team is', 'teams are')} not judged for team overlap or hosting balance.`
     );
   }
+  if (withoutGames.length > 0) {
+    const n = withoutGames.length;
+    sentences.push(
+      `${n} rostered ${plural(n, 'team has', 'teams have')} no game in this file, so ${plural(n, 'it was', 'they were')} not checked at all.`
+    );
+  }
   if (gamesNotJudged.length > 0) {
     const n = gamesNotJudged.length;
     sentences.push(

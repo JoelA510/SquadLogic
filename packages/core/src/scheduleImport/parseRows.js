@@ -321,8 +321,20 @@ export function parseScheduleRows({ headers, rows, season }) {
       `This season’s time zone, ${quoted(timeZone)}, is not one this system knows. Set a valid time zone, then import again.`
     );
   }
-  const seasonStart = parseScheduleDate(season?.startDate ?? '');
-  const seasonEnd = parseScheduleDate(season?.endDate ?? '');
+  // The season's dates come from the database, so one that is present and not a date is a defect in
+  // the caller, not something to read as "no start" (which would turn the week rule off in silence).
+  const seasonDate = (value, what) => {
+    if (value === undefined || value === null || value === '') return null;
+    const date = parseScheduleDate(value);
+    if (date === null) {
+      throw new TypeError(
+        `parseScheduleRows: season.${what} must be YYYY-MM-DD, got ${JSON.stringify(value)}`
+      );
+    }
+    return date;
+  };
+  const seasonStart = seasonDate(season?.startDate, 'startDate');
+  const seasonEnd = seasonDate(season?.endDate, 'endDate');
   if (!header.has(C.WEEK) && seasonStart === null) {
     return fileRefusal(
       R.MISSING_WEEK,

@@ -363,6 +363,22 @@ describe('schedule mapping: what the admin decides', () => {
     expect(out.creations.teamShells.map((t) => t.name)).toEqual(['Rays', 'Sharks']);
   });
 
+  it('uses a created record\u2019s name when the decision gives one, and ignores a name that is not text', () => {
+    const rows = [fileRow({ 'Home Team': 'Sharks' })];
+    const named = resolve(rows, baseLeague(), {
+      teams: {
+        [teamDecisionKey('U10 Boys', 'Sharks')]: { action: 'create', name: '  Sharks FC ' },
+      },
+    });
+    expect(named.creations.teamShells.map((t) => t.name)).toEqual(['Sharks FC']);
+    for (const bad of ['', '   ', 7, { x: 1 }, null]) {
+      const out = resolve(rows, baseLeague(), {
+        teams: { [teamDecisionKey('U10 Boys', 'Sharks')]: { action: 'create', name: bad } },
+      });
+      expect(out.creations.teamShells.map((t) => t.name)).toEqual(['Sharks']);
+    }
+  });
+
   it('a field in a created venue can only be created (the venue has none yet)', () => {
     const rows = [fileRow({ Venue: 'Venue Q', Field: 'Field 1' })];
     const noField = first(rows, baseLeague(), {

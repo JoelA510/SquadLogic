@@ -966,6 +966,32 @@ describe('schedule mapping: review round: TBD repeats, decisions that cannot be 
     );
     expect(other.rows[0].status).toBe('ok'); // d14 has no Lions
   });
+
+  it('counts an outside club that holds a name: a create onto it is name-exists, as UNIQUE (division_id, name) says', () => {
+    // Sibling check for the practice import's Codex P2 (PR 9): there the candidates exclude outside clubs,
+    // and the creation check once did too. Here a team's candidates and the creation check both see every
+    // team of the division, so a create named like an outside club is refused. This pins that.
+    const league = baseLeague({
+      teams: [
+        ...baseLeague().teams,
+        { id: 't-visitor-10', name: 'Visitor', divisionId: 'd10', isExternal: true },
+      ],
+    });
+    const decisions = {
+      teams: { [teamDecisionKey('U10 Boys', 'Cubs')]: { action: 'create', name: 'visitor' } },
+    };
+    const out = resolve([fileRow({ 'Home Team': 'Cubs' })], league, decisions);
+    expect([out.rows[0].status, out.rows[0].reason]).toEqual(['refused', 'unknown-team']);
+    expect(out.rows[0].message).toMatch(/already exists/);
+    expect(out.creations.teamShells).toEqual([]);
+    expect(out.creations.outsideTeams).toEqual([]);
+    // the label itself, typed as the club's name, is found and reused as an outside club, not created
+    const reuse = resolve([fileRow({ 'Away Team': 'Visitor' })], league, {
+      teams: { [teamDecisionKey('U10 Boys', 'Visitor')]: { action: 'outside' } },
+    });
+    expect(reuse.rows[0].status).toBe('ok');
+    expect(reuse.creations.outsideTeams).toEqual([]);
+  });
 });
 
 describe('schedule mapping: the fixture', () => {

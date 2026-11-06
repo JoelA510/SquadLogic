@@ -245,6 +245,51 @@ describe('practice import mapping: exact matches are proposed, nothing else is',
     ]);
   });
 
+  it('refuses to create a team onto the name of an outside club in its division (Codex P2)', () => {
+    // UNIQUE (division_id, name) covers outside clubs too, though they are never a practice team's
+    // candidates: a `create` named like one would meet the constraint in the writer.
+    const rows = parsed([row({ Team: 'Visiting' })]);
+    const key = practiceTeamDecisionKey('U10 Boys', 'Visiting');
+    const created = resolvePracticeRows({
+      rows,
+      league: league(),
+      decisions: { teams: { [key]: { action: 'create' } } },
+    });
+    expect([created.rows[0].status, created.rows[0].reason]).toEqual(['refused', 'unknown-team']);
+    expect(created.rows[0].message).toMatch(/outside club/);
+    expect(created.creations.teamShells).toEqual([]);
+    // the same by a name chosen for the shell, in other spelling
+    const renamed = resolvePracticeRows({
+      rows: parsed([row({ Team: 'Cubs' })]),
+      league: league(),
+      decisions: {
+        teams: {
+          [practiceTeamDecisionKey('U10 Boys', 'Cubs')]: { action: 'create', name: ' VISITING ' },
+        },
+      },
+    });
+    expect(renamed.rows[0].reason).toBe('unknown-team');
+    // controls: the outside club is still no candidate, a free name is created, and the same name in
+    // another division (which has no outside club of that name) is created too
+    const entry = proposePracticeMapping({ rows, league: league() }).teams[0];
+    expect([entry.status, entry.candidates]).toEqual(['none', []]);
+    const free = resolvePracticeRows({
+      rows: parsed([row({ Team: 'Cubs' })]),
+      league: league(),
+      decisions: { teams: { [practiceTeamDecisionKey('U10 Boys', 'Cubs')]: { action: 'create' } } },
+    });
+    expect(free.rows[0].status).toBe('placement');
+    const elsewhere = resolvePracticeRows({
+      rows: parsed([row({ Team: 'Visiting', Division: 'U10 Girls' })]),
+      league: league(),
+      decisions: {
+        teams: { [practiceTeamDecisionKey('U10 Girls', 'Visiting')]: { action: 'create' } },
+      },
+    });
+    expect(elsewhere.rows[0].status).toBe('placement');
+    expect(elsewhere.creations.teamShells.map((t) => t.divisionId)).toEqual(['div:girls']);
+  });
+
   it('asks about a division only for a row that has a team, and about ground for no hold', () => {
     const p = proposePracticeMapping({
       rows: parsed([
@@ -1020,6 +1065,71 @@ describe('practice import: a slot is a ground, a weekday, a start and a date', (
     expect(out.rows[3].flags[0].details).toMatchObject({ withRow: 3, used: true });
     expect(out.rows[4].flags).toEqual([]);
     expect(out.counts.flags['hold-over-open-slot']).toEqual({ rows: 2 });
+  });
+
+  it('compares a hold with existing ground that only the hold names (Codex P2)', () => {
+    // An open WHOLE-field slot, and a hold on half A: the league has the half, no slot names it.
+    const rows = [
+      row({ Team: '', Division: '', Subunit: '' }),
+      row({ Team: '', Division: '', Use: 'hold', Subunit: 'A', Start: '16:30', End: '17:30' }),
+    ];
+    const out = resolve(rows);
+    expect(out.rows[1].ids).toMatchObject({ field: 'field:a1', subunit: 'sub:a1a', team: null });
+    expect(out.rows[1].flags.map((f) => f.code)).toEqual(['hold-over-open-slot']);
+    expect(out.rows[1].flags[0].details).toMatchObject({ withRow: 1, used: false });
+    // …and a hold still makes no slot, and asks for no mapping
+    expect(out.creations.slots).toHaveLength(1);
+    expect(out.holds.map((h) => h.rowNumber)).toEqual([2]);
+    const asked = proposePracticeMapping({ rows: parsed(rows), league: league() });
+    expect(asked.subunits).toEqual([]);
+    // controls: a half the league has, held at another time, is resolved and not flagged; a half the
+    // league does not have cannot be compared; a half of a field the file does not use is resolved too
+    const apart = resolve([
+      row({ Team: '', Division: '', Subunit: '' }),
+      row({ Team: '', Division: '', Use: 'hold', Subunit: 'A', Start: '18:00', End: '19:00' }),
+    ]);
+    expect(apart.rows[1].ids).toMatchObject({ subunit: 'sub:a1a' });
+    expect(apart.rows[1].flags).toEqual([]);
+    const unknown = resolve([
+      row({ Team: '', Division: '', Subunit: '' }),
+      row({ Team: '', Division: '', Use: 'hold', Subunit: 'Z', Start: '16:30', End: '17:30' }),
+    ]);
+    expect(unknown.rows[1].ids).toBeNull();
+    const otherField = resolve([
+      row({ Team: '', Division: '', Subunit: '' }),
+      row({ Team: '', Division: '', Use: 'hold', Location: 'Venue B', Subunit: 'A' }),
+    ]);
+    expect(otherField.rows[1].ids).toMatchObject({
+      location: 'loc:b',
+      field: 'field:b1',
+      subunit: 'sub:b1a',
+    });
+    expect(otherField.rows[1].flags).toEqual([]);
+  });
+
+  it('gives a hold the admin’s own decision when other rows use the same label', () => {
+    // 'Venue A' is decided to be Venue B for the open row; the hold that says 'Venue A' follows it.
+    const decisions = {
+      locations: { [practiceLocationDecisionKey('Venue A')]: { action: 'map', id: 'loc:b' } },
+      fields: {
+        [practiceFieldDecisionKey('Venue A', 'Field 1')]: { action: 'map', id: 'field:b1' },
+      },
+    };
+    const out = resolvePracticeRows({
+      rows: parsed([
+        row({ Team: '', Division: '', Subunit: '' }),
+        row({ Team: '', Division: '', Use: 'hold', Subunit: 'A', Start: '16:30', End: '17:30' }),
+      ]),
+      league: league(),
+      decisions,
+    });
+    expect(out.rows[0].ids).toMatchObject({ location: 'loc:b', field: 'field:b1' });
+    expect(out.rows[1].ids).toMatchObject({
+      location: 'loc:b',
+      field: 'field:b1',
+      subunit: 'sub:b1a',
+    });
+    expect(out.rows[1].flags.map((f) => f.code)).toEqual(['hold-over-open-slot']);
   });
 
   it('does not compare a hold whose ground the file never names for a slot', () => {

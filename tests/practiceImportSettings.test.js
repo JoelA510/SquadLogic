@@ -24,7 +24,11 @@
  * `any` is written there.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { PRACTICE_IMPORT_LIMITS } from '../packages/core/src/practiceImport/reasonCodes.js';
 import {
   divisionSettingsToApply,
   practiceDivisionDecisionKey,
@@ -343,6 +347,106 @@ describe('practice import settings: beside the stored values, and applied only w
     expect(divisionSettingsToApply(same, ['div:girls'])).toEqual([]);
     // a tick for a division the file never named is a defect in the caller, not something to skip
     expect(() => divisionSettingsToApply(settings, ['div:nowhere'])).toThrow(/div:nowhere/);
+  });
+});
+
+describe('practice import settings: a value the database would refuse is withheld, not emitted (Codex P2)', () => {
+  // admin_upsert_division_settings: 0 to 7 practices a week; a practice length of 15 to 240 minutes
+  // (0 for any) - `20261105010000`, lines 1573-1580.
+  const lengthOf = (m) => boxed(fileFor({ T1: 2, T2: 2 }, { minutes: () => m }));
+  const boxed = (rows) => propose(rows).settings;
+
+  it('takes its ranges from the RPC’s own text, so a change there fails here', () => {
+    const sql = readFileSync(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'supabase/migrations/20261105010000_practices_per_division.sql'
+      ),
+      'utf8'
+    );
+    const week = /v_ppw NOT BETWEEN (\d+) AND (\d+)/.exec(sql);
+    const minutes = /v_min NOT BETWEEN (\d+) AND (\d+)/.exec(sql);
+    expect(week).not.toBeNull(); // the scan found the RPC's checks
+    expect(minutes).not.toBeNull();
+    expect([Number(week[1]), Number(week[2])]).toEqual([
+      PRACTICE_IMPORT_LIMITS.MIN_PRACTICES_PER_WEEK,
+      PRACTICE_IMPORT_LIMITS.MAX_PRACTICES_PER_WEEK,
+    ]);
+    expect([Number(minutes[1]), Number(minutes[2])]).toEqual([
+      PRACTICE_IMPORT_LIMITS.MIN_PRACTICE_MINUTES,
+      PRACTICE_IMPORT_LIMITS.MAX_PRACTICE_MINUTES,
+    ]);
+  });
+
+  it('does not emit a length outside 15 to 240, and says what it withheld', () => {
+    const settings = lengthOf(10);
+    expect(boys(settings).practiceMinutes).toMatchObject({ proposed: 10, storable: false });
+    const patch = divisionSettingsToApply(settings, ['div:boys']);
+    expect(patch).toEqual([
+      {
+        divisionId: 'div:boys',
+        isNew: false,
+        practicesPerWeek: 2, // the count is storable and still applied
+        withheld: [
+          { setting: 'practiceMinutes', proposed: 10, why: 'out-of-range', min: 15, max: 240 },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(patch)).not.toMatch(/"practiceMinutes":10/);
+  });
+
+  it('keeps a division with only an unstorable value in the answer, so the screen can say so', () => {
+    const rows = fileFor({ T1: 2, T2: 2 }, { minutes: () => 10 });
+    const lg = league({
+      divisions: [
+        { id: 'div:boys', name: 'U10 Boys', practicesPerWeek: 2, practiceMinutes: 60 },
+        { id: 'div:girls', name: 'U10 Girls', practicesPerWeek: 2, practiceMinutes: 60 },
+      ],
+    });
+    const settings = propose(rows, lg).settings;
+    expect(divisionSettingsToApply(settings, ['div:boys'])).toEqual([
+      {
+        divisionId: 'div:boys',
+        isNew: false,
+        withheld: [
+          { setting: 'practiceMinutes', proposed: 10, why: 'out-of-range', min: 15, max: 240 },
+        ],
+      },
+    ]);
+  });
+
+  it('stores 15 and 240, refuses 14 and 241, and always stores "any"', () => {
+    const stored = (m) => boys(lengthOf(m)).practiceMinutes.storable;
+    expect([stored(15), stored(240), stored(14), stored(241)]).toEqual([true, true, false, false]);
+    const mixed = boys(
+      boxed(fileFor({ T1: 2, T2: 2 }, { minutes: (team, k) => (k === 0 ? 10 : 60) }))
+    ).practiceMinutes;
+    expect([mixed.proposed, mixed.storable]).toEqual(['any', true]);
+    // a length that is storable carries no `withheld`
+    expect(divisionSettingsToApply(lengthOf(15), ['div:boys'])[0]).not.toHaveProperty('withheld');
+    expect(divisionSettingsToApply(lengthOf(240), ['div:boys'])[0].practiceMinutes).toBe(240);
+  });
+
+  it('applies the same rule to practices a week: 0 to 7', () => {
+    const seven = boys(boxed(fileFor({ T1: 7, T2: 7 }))).practicesPerWeek;
+    expect([seven.proposed, seven.storable]).toEqual([7, true]);
+    const eight = boxed(fileFor({ T1: 8, T2: 8 }));
+    expect(boys(eight).practicesPerWeek).toMatchObject({ proposed: 8, storable: false });
+    const patch = divisionSettingsToApply(eight, ['div:boys']);
+    expect(patch).toEqual([
+      {
+        divisionId: 'div:boys',
+        isNew: false,
+        practiceMinutes: 60,
+        withheld: [
+          { setting: 'practicesPerWeek', proposed: 8, why: 'out-of-range', min: 0, max: 7 },
+        ],
+      },
+    ]);
+    // a tie proposes nothing, and a proposal of nothing is not "unstorable"
+    const tie = boys(boxed(fileFor({ T1: 1, T2: 2 }))).practicesPerWeek;
+    expect([tie.proposed, tie.storable]).toEqual([null, true]);
   });
 });
 

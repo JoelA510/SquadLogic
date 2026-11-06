@@ -168,6 +168,15 @@ export const PRACTICE_IMPORT_LIMITS = Object.freeze({
   MAX_ROWS: SCHEDULE_IMPORT_LIMITS.MAX_ROWS,
   /** `practice_slots.capacity` is a smallint. */
   MAX_CAPACITY: 32767,
+  /**
+   * What `admin_upsert_division_settings` accepts (`20261105010000`, lines 1573-1580): 0 to 7 practices a
+   * week, and a practice length of 15 to 240 minutes (or none, any slot length). A proposal outside
+   * these is shown and never offered as a change.
+   */
+  MIN_PRACTICES_PER_WEEK: 0,
+  MAX_PRACTICES_PER_WEEK: 7,
+  MIN_PRACTICE_MINUTES: 15,
+  MAX_PRACTICE_MINUTES: 240,
 });
 
 const DESCRIPTIONS = Object.freeze({

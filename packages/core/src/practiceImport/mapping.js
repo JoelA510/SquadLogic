@@ -62,7 +62,7 @@
  * (it has neither, plan finding 18), and the stored slots, reservations and counts the database judges.
  */
 
-import { PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
+import { PRACTICE_IMPORT_LIMITS, PRACTICE_IMPORT_REASON as R } from './reasonCodes.js';
 import {
   practiceLabelKey,
   practiceSlotKey,
@@ -148,6 +148,9 @@ function indexLeague(league) {
       teams.filter((t) => t.isExternal !== true),
       (t) => t.divisionId
     ),
+    // ...but it holds its name: `UNIQUE (division_id, name)` covers every team of the division, so a
+    // `create` is checked against all of them
+    allTeamsByName: groupBy(teams, (t) => t.divisionId),
     fieldsByName: groupBy(fields, (f) => f.locationId),
     subunitsByName: groupBy(subunits, (s) => s.fieldId),
   };
@@ -204,11 +207,34 @@ function decisionFor(decisions, kind, key) {
  * @property {{ action: string, id?: string, name?: string, source: string } | null} effective  the decision, else
  *   an exact match nothing disagrees with
  * @property {string[]} options
- * @property {'unknown-id' | 'invalid-decision' | 'name-exists'} [problem]  why the label has no usable decision
+ * @property {'unknown-id' | 'invalid-decision' | 'name-exists' | 'name-taken-by-outside-club'} [problem]  why the label has no usable decision
  */
 
 /** What a label resolves to once decisions are applied. */
 const SKIP = Object.freeze({ type: 'skip' });
+
+/**
+ * A reference book that falls back to another: `get` and `has` read its own references first and the
+ * base's after, and `set` writes only its own. A hold reads what the other rows resolved (so the admin's
+ * decisions hold for it) and adds only the ground nothing else named.
+ *
+ * @template T
+ * @param {Record<string, Map<string, T>>} base
+ * @returns {Record<string, { has: (k: string) => boolean, get: (k: string) => T | undefined, set: (k: string, v: T) => unknown }>}
+ */
+function layered(base) {
+  /** @type {Record<string, any>} */
+  const view = {};
+  for (const kind of Object.keys(base)) {
+    const own = new Map();
+    view[kind] = {
+      has: (/** @type {string} */ k) => own.has(k) || base[kind].has(k),
+      get: (/** @type {string} */ k) => (own.has(k) ? own.get(k) : base[kind].get(k)),
+      set: (/** @type {string} */ k, /** @type {any} */ v) => own.set(k, v),
+    };
+  }
+  return view;
+}
 
 /**
  * Everything the mapping step knows: the entries to show and the references rows resolve through.
@@ -224,9 +250,8 @@ function analyse({ rows, league, decisions, aliases, previous }) {
   requireArray(rows, 'rows');
   const world = indexLeague(league);
   // The rows that ask for ground: a placement and an open slot. A hold makes no slot, so it asks for
-  // nothing (it is compared with the slots afterwards, by the references the others made).
+  // nothing; it is compared with the slots afterwards, by ground found for it below.
   const asking = rows.filter((r) => r.status === 'placement' || r.status === 'open');
-  const placing = asking.filter((r) => r.status === 'placement');
 
   /** @type {Record<keyof typeof GROUP_OF, Map<string, PracticeMappingEntry>>} */
   const entries = {
@@ -250,6 +275,7 @@ function analyse({ rows, league, decisions, aliases, previous }) {
     group && typeof group === 'object' && Object.hasOwn(group, key) ? group[key] : null;
 
   /**
+   * @param {typeof entries} into  the entries this label is recorded in
    * @param {keyof typeof GROUP_OF} kind
    * @param {Object} spec
    * @param {string} spec.key
@@ -260,8 +286,8 @@ function analyse({ rows, league, decisions, aliases, previous }) {
    * @param {(id: string) => boolean} spec.exists  does the league hold this id at all
    * @param {(id: string) => boolean} spec.holds  does the league hold it in the parent this label is in
    */
-  function entryFor(kind, { key, label, extra, candidates, aliasId, exists, holds }) {
-    const map = entries[kind];
+  function entryFor(into, kind, { key, label, extra, candidates, aliasId, exists, holds }) {
+    const map = into[kind];
     let entry = map.get(key);
     if (entry) {
       entry.rowCount += 1;
@@ -354,188 +380,228 @@ function analyse({ rows, league, decisions, aliases, previous }) {
    * @param {string[]} parents  the ids of the records it lives under, outermost first (a created parent’s
    *   id is its own placeholder, so a created team under a created division coalesces too)
    * @param {Record<string, string>} extra
-   * @param {(nameKey: string) => unknown[]} existingNamed  the records of this kind already under the
-   *   parent with that name: creating one more would meet `UNIQUE (parent, name)` in the writer
+   * @param {(nameKey: string) => Array<{ isExternal?: boolean }>} existingNamed  the records of this kind
+   *   already under the parent with that name, whatever they are (an outside club too): creating one
+   *   more would meet `UNIQUE (parent, name)` in the writer
    */
   function createdRef(kind, entry, parents, extra, existingNamed) {
     const name = entry.effective?.name ?? entry.label;
     const key = practiceLabelKey(name);
-    if (existingNamed(key).length > 0) {
-      entry.problem = 'name-exists';
+    const taken = existingNamed(key);
+    if (taken.length > 0) {
+      // a name held only by an outside club is told apart: mapping to it is not on offer
+      entry.problem = taken.every((t) => t.isExternal === true)
+        ? 'name-taken-by-outside-club'
+        : 'name-exists';
       return null;
     }
     return { type: 'create', id: `new:${kind}:${tuple(...parents, key)}`, key, name, ...extra };
   }
 
-  // Divisions (a team has one), then locations, then fields (judged in their location), then subunits
-  // (in their field), then teams (in their division).
-  for (const r of placing) {
-    const key = practiceLabelKey(r.divisionLabel);
-    if (key === '') continue;
-    const entry = entryFor('division', {
-      key,
-      label: r.divisionLabel,
-      extra: {},
-      candidates: world.divisionsByName.get(tuple('', key)) ?? [],
-      aliasId: null,
-      exists: (id) => world.divisionsById.has(id),
-      holds: (id) => world.divisionsById.has(id),
-    });
-    if (!refs.division.has(key)) {
-      refs.division.set(
+  /**
+   * The five passes over some rows, into some entries and some references.
+   * @param {Array<any>} list
+   * @param {typeof entries} into
+   * @param {typeof refs} book
+   */
+  function runPasses(list, into, book) {
+    const asking = list;
+    const placing = list.filter((r) => r.status === 'placement');
+    // Divisions (a team has one), then locations, then fields (judged in their location), then subunits
+    // (in their field), then teams (in their division).
+    for (const r of placing) {
+      const key = practiceLabelKey(r.divisionLabel);
+      if (key === '') continue;
+      const entry = entryFor(into, 'division', {
         key,
-        refOf(
-          entry,
-          (id) => world.divisionsById.has(id),
-          (id) => ({ type: 'existing', id }),
-          () =>
-            createdRef(
-              'division',
-              entry,
-              [],
-              {},
-              (k) => world.divisionsByName.get(tuple('', k)) ?? []
-            )
-        )
-      );
+        label: r.divisionLabel,
+        extra: {},
+        candidates: world.divisionsByName.get(tuple('', key)) ?? [],
+        aliasId: null,
+        exists: (id) => world.divisionsById.has(id),
+        holds: (id) => world.divisionsById.has(id),
+      });
+      if (!book.division.has(key)) {
+        book.division.set(
+          key,
+          refOf(
+            entry,
+            (id) => world.divisionsById.has(id),
+            (id) => ({ type: 'existing', id }),
+            () =>
+              createdRef(
+                'division',
+                entry,
+                [],
+                {},
+                (k) => world.divisionsByName.get(tuple('', k)) ?? []
+              )
+          )
+        );
+      }
     }
-  }
 
-  for (const r of asking) {
-    const key = practiceLabelKey(r.locationLabel);
-    if (key === '') continue;
-    const target = aliasOf(aliases?.locations, key);
-    const entry = entryFor('location', {
-      key,
-      label: r.locationLabel,
-      extra: {},
-      candidates: world.locationsByName.get(tuple('', key)) ?? [],
-      aliasId: typeof target?.locationId === 'string' ? target.locationId : null,
-      exists: (id) => world.locationsById.has(id),
-      holds: (id) => world.locationsById.has(id),
-    });
-    if (!refs.location.has(key)) {
-      refs.location.set(
+    for (const r of asking) {
+      const key = practiceLabelKey(r.locationLabel);
+      if (key === '') continue;
+      const target = aliasOf(aliases?.locations, key);
+      const entry = entryFor(into, 'location', {
         key,
-        refOf(
-          entry,
-          (id) => world.locationsById.has(id),
-          (id) => ({ type: 'existing', id }),
-          () =>
-            createdRef(
-              'location',
-              entry,
-              [],
-              {},
-              (k) => world.locationsByName.get(tuple('', k)) ?? []
-            )
-        )
-      );
+        label: r.locationLabel,
+        extra: {},
+        candidates: world.locationsByName.get(tuple('', key)) ?? [],
+        aliasId: typeof target?.locationId === 'string' ? target.locationId : null,
+        exists: (id) => world.locationsById.has(id),
+        holds: (id) => world.locationsById.has(id),
+      });
+      if (!book.location.has(key)) {
+        book.location.set(
+          key,
+          refOf(
+            entry,
+            (id) => world.locationsById.has(id),
+            (id) => ({ type: 'existing', id }),
+            () =>
+              createdRef(
+                'location',
+                entry,
+                [],
+                {},
+                (k) => world.locationsByName.get(tuple('', k)) ?? []
+              )
+          )
+        );
+      }
     }
-  }
 
-  for (const r of asking) {
-    const locationKey = practiceLabelKey(r.locationLabel);
-    const fieldKey = practiceLabelKey(r.fieldLabel);
-    const loc = refs.location.get(locationKey);
-    if (locationKey === '' || fieldKey === '' || !loc || loc === SKIP) continue;
-    const key = practiceFieldDecisionKey(r.locationLabel, r.fieldLabel);
-    const target = aliasOf(aliases?.fields, fieldKey);
-    const entry = entryFor('field', {
-      key,
-      label: r.fieldLabel,
-      extra: { locationLabel: r.locationLabel },
-      candidates:
-        loc.type === 'existing' ? (world.fieldsByName.get(tuple(loc.id, fieldKey)) ?? []) : [],
-      aliasId:
-        loc.type === 'existing' && typeof target?.fieldId === 'string' ? target.fieldId : null,
-      exists: (id) => world.fieldsById.has(id),
-      holds: (id) => world.fieldsById.get(id)?.locationId === loc.id,
-    });
-    if (!refs.field.has(key)) {
-      refs.field.set(
+    for (const r of asking) {
+      const locationKey = practiceLabelKey(r.locationLabel);
+      const fieldKey = practiceLabelKey(r.fieldLabel);
+      const loc = book.location.get(locationKey);
+      if (locationKey === '' || fieldKey === '' || !loc || loc === SKIP) continue;
+      const key = practiceFieldDecisionKey(r.locationLabel, r.fieldLabel);
+      const target = aliasOf(aliases?.fields, fieldKey);
+      const entry = entryFor(into, 'field', {
         key,
-        refOf(
-          entry,
-          (id) => world.fieldsById.get(id)?.locationId === loc.id,
-          (id) => ({ type: 'existing', id }),
-          () =>
-            createdRef('field', entry, [loc.id], { locationId: loc.id }, (k) =>
-              loc.type === 'existing' ? (world.fieldsByName.get(tuple(loc.id, k)) ?? []) : []
-            )
-        )
-      );
+        label: r.fieldLabel,
+        extra: { locationLabel: r.locationLabel },
+        candidates:
+          loc.type === 'existing' ? (world.fieldsByName.get(tuple(loc.id, fieldKey)) ?? []) : [],
+        aliasId:
+          loc.type === 'existing' && typeof target?.fieldId === 'string' ? target.fieldId : null,
+        exists: (id) => world.fieldsById.has(id),
+        holds: (id) => world.fieldsById.get(id)?.locationId === loc.id,
+      });
+      if (!book.field.has(key)) {
+        book.field.set(
+          key,
+          refOf(
+            entry,
+            (id) => world.fieldsById.get(id)?.locationId === loc.id,
+            (id) => ({ type: 'existing', id }),
+            () =>
+              createdRef('field', entry, [loc.id], { locationId: loc.id }, (k) =>
+                loc.type === 'existing' ? (world.fieldsByName.get(tuple(loc.id, k)) ?? []) : []
+              )
+          )
+        );
+      }
     }
-  }
 
-  for (const r of asking) {
-    const subunitKey = practiceLabelKey(r.subunitLabel);
-    if (subunitKey === '') continue; // the whole field
-    const loc = refs.location.get(practiceLabelKey(r.locationLabel));
-    const fld = refs.field.get(practiceFieldDecisionKey(r.locationLabel, r.fieldLabel));
-    if (!loc || loc === SKIP || !fld || fld === SKIP) continue;
-    const key = practiceSubunitDecisionKey(r.locationLabel, r.fieldLabel, r.subunitLabel);
-    const target = aliasOf(aliases?.subunits, subunitKey);
-    const entry = entryFor('subunit', {
-      key,
-      label: r.subunitLabel,
-      extra: { locationLabel: r.locationLabel, fieldLabel: r.fieldLabel },
-      candidates:
-        fld.type === 'existing' ? (world.subunitsByName.get(tuple(fld.id, subunitKey)) ?? []) : [],
-      aliasId:
-        fld.type === 'existing' && typeof target?.subunitId === 'string' ? target.subunitId : null,
-      exists: (id) => world.subunitsById.has(id),
-      holds: (id) => world.subunitsById.get(id)?.fieldId === fld.id,
-    });
-    if (!refs.subunit.has(key)) {
-      refs.subunit.set(
+    for (const r of asking) {
+      const subunitKey = practiceLabelKey(r.subunitLabel);
+      if (subunitKey === '') continue; // the whole field
+      const loc = book.location.get(practiceLabelKey(r.locationLabel));
+      const fld = book.field.get(practiceFieldDecisionKey(r.locationLabel, r.fieldLabel));
+      if (!loc || loc === SKIP || !fld || fld === SKIP) continue;
+      const key = practiceSubunitDecisionKey(r.locationLabel, r.fieldLabel, r.subunitLabel);
+      const target = aliasOf(aliases?.subunits, subunitKey);
+      const entry = entryFor(into, 'subunit', {
         key,
-        refOf(
-          entry,
-          (id) => world.subunitsById.get(id)?.fieldId === fld.id,
-          (id) => ({ type: 'existing', id }),
-          () =>
-            createdRef('subunit', entry, [fld.id], { fieldId: fld.id }, (k) =>
-              fld.type === 'existing' ? (world.subunitsByName.get(tuple(fld.id, k)) ?? []) : []
-            )
-        )
-      );
+        label: r.subunitLabel,
+        extra: { locationLabel: r.locationLabel, fieldLabel: r.fieldLabel },
+        candidates:
+          fld.type === 'existing'
+            ? (world.subunitsByName.get(tuple(fld.id, subunitKey)) ?? [])
+            : [],
+        aliasId:
+          fld.type === 'existing' && typeof target?.subunitId === 'string'
+            ? target.subunitId
+            : null,
+        exists: (id) => world.subunitsById.has(id),
+        holds: (id) => world.subunitsById.get(id)?.fieldId === fld.id,
+      });
+      if (!book.subunit.has(key)) {
+        book.subunit.set(
+          key,
+          refOf(
+            entry,
+            (id) => world.subunitsById.get(id)?.fieldId === fld.id,
+            (id) => ({ type: 'existing', id }),
+            () =>
+              createdRef('subunit', entry, [fld.id], { fieldId: fld.id }, (k) =>
+                fld.type === 'existing' ? (world.subunitsByName.get(tuple(fld.id, k)) ?? []) : []
+              )
+          )
+        );
+      }
     }
-  }
 
-  for (const r of placing) {
-    const teamKey = practiceLabelKey(r.teamLabel);
-    const div = refs.division.get(practiceLabelKey(r.divisionLabel));
-    if (teamKey === '' || !div || div === SKIP) continue;
-    const key = practiceTeamDecisionKey(r.divisionLabel, r.teamLabel);
-    const named = (/** @type {string} */ k) =>
-      div.type === 'existing' ? (world.teamsByName.get(tuple(div.id, k)) ?? []) : [];
-    const holds = (/** @type {string} */ id) => {
-      const t = world.teamsById.get(id);
-      return t !== undefined && t.divisionId === div.id && t.isExternal !== true;
-    };
-    const entry = entryFor('team', {
-      key,
-      label: r.teamLabel,
-      extra: { divisionLabel: r.divisionLabel },
-      candidates: named(teamKey),
-      aliasId: null,
-      exists: (id) => world.teamsById.has(id),
-      holds,
-    });
-    if (refs.team.has(key)) continue;
-    refs.team.set(
-      key,
-      refOf(
-        entry,
+    for (const r of placing) {
+      const teamKey = practiceLabelKey(r.teamLabel);
+      const div = book.division.get(practiceLabelKey(r.divisionLabel));
+      if (teamKey === '' || !div || div === SKIP) continue;
+      const key = practiceTeamDecisionKey(r.divisionLabel, r.teamLabel);
+      const named = (/** @type {string} */ k) =>
+        div.type === 'existing' ? (world.teamsByName.get(tuple(div.id, k)) ?? []) : [];
+      const taken = (/** @type {string} */ k) =>
+        div.type === 'existing' ? (world.allTeamsByName.get(tuple(div.id, k)) ?? []) : [];
+      const holds = (/** @type {string} */ id) => {
+        const t = world.teamsById.get(id);
+        return t !== undefined && t.divisionId === div.id && t.isExternal !== true;
+      };
+      const entry = entryFor(into, 'team', {
+        key,
+        label: r.teamLabel,
+        extra: { divisionLabel: r.divisionLabel },
+        candidates: named(teamKey),
+        aliasId: null,
+        exists: (id) => world.teamsById.has(id),
         holds,
-        (id) => ({ type: 'existing', id }),
-        () => createdRef('team', entry, [div.id], { divisionId: div.id }, named)
-      )
-    );
+      });
+      if (book.team.has(key)) continue;
+      book.team.set(
+        key,
+        refOf(
+          entry,
+          holds,
+          (id) => ({ type: 'existing', id }),
+          () => createdRef('team', entry, [div.id], { divisionId: div.id }, taken)
+        )
+      );
+    }
   }
 
-  return { world, refs, entries };
+  runPasses(asking, entries, refs);
+
+  // A hold asks for no mapping and creates nothing, but it names ground, and ground the league already
+  // has must be found even when no slot names it (a half only the hold mentions). The hold reads the
+  // references the other rows made, so the admin's decisions hold for it too, and adds only what they
+  // did not; its entries are not shown and its references create no record.
+  const holdRefs = layered(refs);
+  runPasses(
+    rows.filter((r) => r.status === 'hold'),
+    {
+      division: new Map(),
+      location: new Map(),
+      field: new Map(),
+      subunit: new Map(),
+      team: new Map(),
+    },
+    holdRefs
+  );
+
+  return { world, refs, holdRefs, entries };
 }
 
 /** @param {Map<string, PracticeMappingEntry>} map */
@@ -587,8 +653,9 @@ export function proposePracticeMapping({ rows, league, decisions = {}, aliases, 
  *
  * Order within a row: division (a placement), location, field, subunit, team. The first to fail is the row's
  * reason; a label the admin skipped makes the row `skipped`. A `hold` row is never refused here: it makes
- * no slot, and is compared with the slots by the references the other rows made (`ids` is null when its
- * ground is one the file names nowhere else).
+ * no slot and asks for no mapping, and is compared with the slots by the ground found for it (the
+ * references the other rows made, else existing records by their exact names; `ids` is null when the
+ * league has no such ground).
  *
  * @param {Object} input
  * @param {Array<any>} input.rows  the parse's rows (not changed)
@@ -604,7 +671,7 @@ export function proposePracticeMapping({ rows, league, decisions = {}, aliases, 
  * }}
  */
 export function resolvePracticeRows({ rows, league, decisions = {}, aliases, previous }) {
-  const { refs, entries } = analyse({ rows, league, decisions, aliases, previous });
+  const { refs, holdRefs, entries } = analyse({ rows, league, decisions, aliases, previous });
 
   /**
    * Why a label is unresolved, in words: a decision that cannot be read, a name that is taken, or
@@ -619,6 +686,10 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
     }
     if (entry?.problem === 'unknown-id') {
       return `The record chosen for the ${kind} ${quoted} is not one of yours. Decide again.`;
+    }
+    if (entry?.problem === 'name-taken-by-outside-club') {
+      const name = JSON.stringify(entry.effective?.name ?? label);
+      return `An outside club named ${name} is already in this division, and a team cannot share its name. Create ${quoted} under another name.`;
     }
     if (entry?.problem === 'name-exists') {
       const name = JSON.stringify(entry.effective?.name ?? label);
@@ -644,18 +715,19 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
     if (row.status === 'refused') return { row: keep({}) };
 
     if (row.status === 'hold') {
-      // Lenient: a hold asks for no mapping. Use the references other rows made, when the ground is theirs.
-      const loc = refs.location.get(practiceLabelKey(row.locationLabel));
-      const fld = refs.field.get(practiceFieldDecisionKey(row.locationLabel, row.fieldLabel));
-      const sub =
-        practiceLabelKey(row.subunitLabel) === ''
-          ? null
-          : refs.subunit.get(
-              practiceSubunitDecisionKey(row.locationLabel, row.fieldLabel, row.subunitLabel)
-            );
+      // A hold is never refused here and asks for no mapping: it uses the ground found for it (the
+      // references the other rows made, else existing records by their exact names). `ids` is null
+      // when its ground is nowhere to be found, and no flag is possible then.
+      const loc = holdRefs.location.get(practiceLabelKey(row.locationLabel));
+      const fld = holdRefs.field.get(practiceFieldDecisionKey(row.locationLabel, row.fieldLabel));
+      const whole = practiceLabelKey(row.subunitLabel) === '';
+      const sub = whole
+        ? null
+        : holdRefs.subunit.get(
+            practiceSubunitDecisionKey(row.locationLabel, row.fieldLabel, row.subunitLabel)
+          );
       const usable = (ref) => ref && ref !== SKIP;
-      const known =
-        usable(loc) && usable(fld) && (practiceLabelKey(row.subunitLabel) === '' || usable(sub));
+      const known = usable(loc) && usable(fld) && (whole || usable(sub));
       return {
         row: keep({
           ids: known
@@ -1052,9 +1124,12 @@ export function resolvePracticeRows({ rows, league, decisions = {}, aliases, pre
 /* -------------------------------------------------------------------------- */
 
 const minutesOf = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
-/** `divisions.practice_minutes` is `NULL` (any slot length) or 15 to 240 (`20261105010000:104`). */
-const MIN_PRACTICE_MINUTES = 15;
-const MAX_PRACTICE_MINUTES = 240;
+const {
+  MIN_PRACTICES_PER_WEEK,
+  MAX_PRACTICES_PER_WEEK,
+  MIN_PRACTICE_MINUTES,
+  MAX_PRACTICE_MINUTES,
+} = PRACTICE_IMPORT_LIMITS;
 
 /**
  * For each division in the file, the practice settings the file suggests, beside what is stored:
@@ -1115,11 +1190,14 @@ export function proposeDivisionSettings({ rows, league }) {
 
       const lengths = [...d.lengths].sort((a, b) => a - b);
       const minutes = lengths.length === 0 ? null : lengths.length === 1 ? lengths[0] : 'any';
-      const storable =
+      // a proposal the RPC would refuse is shown, and never offered as a change (`storable`)
+      const minutesStorable =
+        minutes === null ||
         minutes === 'any' ||
-        (typeof minutes === 'number' &&
-          minutes >= MIN_PRACTICE_MINUTES &&
-          minutes <= MAX_PRACTICE_MINUTES);
+        (minutes >= MIN_PRACTICE_MINUTES && minutes <= MAX_PRACTICE_MINUTES);
+      const perWeekStorable =
+        perWeek === null ||
+        (perWeek >= MIN_PRACTICES_PER_WEEK && perWeek <= MAX_PRACTICES_PER_WEEK);
       return {
         divisionId: d.divisionId,
         label: d.label,
@@ -1133,6 +1211,7 @@ export function proposeDivisionSettings({ rows, league }) {
           histogram,
           stored: storedPerWeek,
           differs: perWeek !== null && perWeek !== storedPerWeek,
+          storable: perWeekStorable,
         },
         practiceMinutes: {
           proposed: minutes,
@@ -1140,21 +1219,30 @@ export function proposeDivisionSettings({ rows, league }) {
           stored: storedMinutes,
           // NULL in the column means any slot length
           differs: minutes !== null && minutes !== (storedMinutes ?? 'any'),
-          storable,
+          storable: minutesStorable,
         },
       };
     });
 }
 
 /**
- * The settings to apply for the divisions the admin ticked: only the values the file proposes and that
- * differ from what is stored, and nothing for a division left unticked (decision 26: never silent).
- * `'any'` is the proposal's word for "no length"; how it reaches `admin_upsert_division_settings` is
- * PR 10's.
+ * The settings to apply for the divisions the admin ticked: only the values the file proposes, that
+ * differ from what is stored, **and that the database would accept**, and nothing for a division left
+ * unticked (decision 26: never silent). A proposal outside what `admin_upsert_division_settings` takes
+ * (0 to 7 practices a week; a length of 15 to 240 minutes) is **withheld, not emitted**: it is listed
+ * in the division's `withheld` with its range, so the screen can say why it was not offered, and a
+ * division with only withheld values is still in the answer. `'any'` is the proposal's word for "no
+ * length"; how it reaches the RPC is PR 10's.
  *
  * @param {ReturnType<typeof proposeDivisionSettings>} proposals
  * @param {Iterable<string>} ticked  division ids
- * @returns {Array<{ divisionId: string, isNew: boolean, practicesPerWeek?: number, practiceMinutes?: number | 'any' }>}
+ * @returns {Array<{
+ *   divisionId: string,
+ *   isNew: boolean,
+ *   practicesPerWeek?: number,
+ *   practiceMinutes?: number | 'any',
+ *   withheld?: Array<{ setting: 'practicesPerWeek' | 'practiceMinutes', proposed: number, why: 'out-of-range', min: number, max: number }>,
+ * }>}
  * @throws {TypeError} on a ticked id that is not among the proposals
  */
 export function divisionSettingsToApply(proposals, ticked) {
@@ -1170,15 +1258,42 @@ export function divisionSettingsToApply(proposals, ticked) {
   const out = [];
   for (const p of proposals) {
     if (!wanted.has(p.divisionId)) continue;
-    /** @type {{ divisionId: string, isNew: boolean, practicesPerWeek?: number, practiceMinutes?: number | 'any' }} */
+    /** @type {any} */
     const patch = { divisionId: p.divisionId, isNew: p.isNew };
-    if (p.practicesPerWeek.differs)
-      patch.practicesPerWeek = /** @type {number} */ (p.practicesPerWeek.proposed);
-    if (p.practiceMinutes.differs) {
-      patch.practiceMinutes = /** @type {number | 'any'} */ (p.practiceMinutes.proposed);
+    /** @type {Array<{ setting: string, proposed: number, why: 'out-of-range', min: number, max: number }>} */
+    const withheld = [];
+    if (p.practicesPerWeek.differs) {
+      if (p.practicesPerWeek.storable) patch.practicesPerWeek = p.practicesPerWeek.proposed;
+      else {
+        withheld.push({
+          setting: 'practicesPerWeek',
+          proposed: /** @type {number} */ (p.practicesPerWeek.proposed),
+          why: 'out-of-range',
+          min: MIN_PRACTICES_PER_WEEK,
+          max: MAX_PRACTICES_PER_WEEK,
+        });
+      }
     }
-    if (patch.practicesPerWeek !== undefined || patch.practiceMinutes !== undefined)
+    if (p.practiceMinutes.differs) {
+      if (p.practiceMinutes.storable) patch.practiceMinutes = p.practiceMinutes.proposed;
+      else {
+        withheld.push({
+          setting: 'practiceMinutes',
+          proposed: /** @type {number} */ (p.practiceMinutes.proposed),
+          why: 'out-of-range',
+          min: MIN_PRACTICE_MINUTES,
+          max: MAX_PRACTICE_MINUTES,
+        });
+      }
+    }
+    if (withheld.length > 0) patch.withheld = withheld;
+    if (
+      patch.practicesPerWeek !== undefined ||
+      patch.practiceMinutes !== undefined ||
+      withheld.length > 0
+    ) {
       out.push(patch);
+    }
   }
   return out;
 }

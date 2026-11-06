@@ -1,11 +1,45 @@
 # Schedule expansion: a per-game "Published" switch, a schedule import, and the scheduling tools a spreadsheet scheduler has that this product lacks
 
-Kind: FEATURE (eight pull requests, two migrations) · Drawn up: 2026-11-03 against `origin/main` `c3d190d` (the
-owner's brief was written against `a3395eb`; #703 landed since, and nothing below depends on it) · Owner: the
-repository owner · Status: **PROPOSED. Plan only: no code, migration, fixture or test is written by this change.** The
-owner approved the scope on 2026-11-03; this plan is what AGENTS.md rule 14 asks to be shown and agreed before any
-PR below starts. Order of work after this plan (owner, 2026-11-03): this expansion, then dependency updates, then a
-test-suite audit, then the desktop build (the desktop build is **not** in this plan).
+Kind: FEATURE (fourteen pull requests: 1 to 8 drawn up 2026-11-03, 9 to 14 added 2026-11-06; four migrations, a
+fifth only if decision 28 chooses a stored hold) · Drawn up: 2026-11-03 against `origin/main` `c3d190d` (the
+owner's brief was written against `a3395eb`; #703 landed since, and nothing below depends on it); amended 2026-11-06,
+`origin/main` still `c3d190d` · Owner: the repository owner · Status: **PROPOSED. Plan only: no code, migration,
+fixture or test is written by this change.** The owner approved the scope on 2026-11-03 and the practice-side
+additions on 2026-11-06; this plan is what AGENTS.md rule 14 asks to be shown and agreed before any PR below starts.
+**The owner's hold stands: nothing below starts, for any PR, without an explicit go from the owner for that PR.**
+Order of work after this plan (owner, 2026-11-03): this expansion, then dependency updates, then a test-suite audit,
+then the desktop build (the desktop build, including the Windows version, is **not** in this plan).
+
+## Amendments (2026-11-06)
+
+The owner approved adding the practice side, drawn from a second workbook (a hand-built weekly practice grid).
+Findings F1 to F12, verification findings 1 to 11, decisions 1 to 18 and PRs 1 to 8 keep their numbers; everything
+new is appended.
+
+- **Added:** findings F13 to F17 (section 1; designs in 4.11, 5.7, 5.8, 5.9, and a sentence in 5.1); verification
+  findings 12 to 18 (above section 1); section 2.1 (the practice side today); PR 9 to 14, and task G2b in PR 7
+  (section 7); decisions 19 to 31 (section 10); receipts R12 to R30 and the second workbook's counts (section 11);
+  lessons (section 12); section 6.1 and 8.1 (behaviour and "already exists" for practices).
+- **Corrected, section 4.10:** the `import_application_records` CHECK edits were listed as gaining `locations` and
+  `fields`. Both, and `field_subunits`, `practice_slots` and `game_slots`, are already on the `target_table` list
+  (`20260522120000:19-24`, statically reviewed; no later migration redefines it). The games import adds
+  `game_assignments`, `teams` and `divisions`; the `import_type` list there is `coaches`, `fields`,
+  `field_availability` and gains `games` (and `practice_schedule`, PR 10).
+- **Corrected, sections 2, 3.3 and 14 (and the PR 1 task A1 by reference):** the plan said `admin_delete_team` is
+  copied whole from `20261108020000`. Its **latest** body is `20261112010000:1413` (it also counts the practice
+  preference rules its cascade takes, `coach_practice_preferences_deleted`); a copy of the older body would silently
+  drop that (lessons 70 and 87: replace from the latest body). `persist_game_schedule` (`20261108020000:1763`) and
+  `admin_cancel_game_assignment` (`20260613000003`) are the latest of theirs (`rg` over `supabase/migrations`, R19).
+- **Updated, not wrong:** counts and orderings that were true for eight PRs: the header, the size verdict, the
+  opening of section 7 (waves, migrations, rule 14), the dependency diagram, section 9, the "silence" sentence and
+  the blocker list of section 10, sections 13 and 14. Each now covers PR 9 to 14.
+- **Reported, not fixed:** `docs/operations/ingestion-pipeline.md` section 2.3 says a practice slot "starts less than
+  15 minutes from" another on the same ground is refused; the migration's own default turnover is 0, back-to-back
+  slots are allowed (owner, 2026-10-25), and the field import passes no turnover (`20261029010000:31-35`, `:577-588`).
+  The doc is stale; PR 10's docs task fixes it. Also reported: the writer's double-booking check does not look inside
+  one payload (verification finding 13).
+
+## Labels and method
 
 Every claim about the code is _statically reviewed_ (read) unless marked _executed_. _Executed_ means a search or a
 script was run in a clean worktree of `c3d190d` (on 2026-11-03; the last file checks on 2026-11-04, the session crossed midnight), or a web page was fetched on 2026-11-03; nothing in this plan comes from
@@ -14,7 +48,8 @@ something; the positive control is named beside it. Figures about the owner's wo
 recomputed by scratch scripts kept outside the repository (section 11); **no name, venue, team, coach or value from
 those files is in this plan, and none may enter a fixture, a test or a commit** (the real-name guard
 `tests/realNameDenylist.test.js` scans `docs/` and fails on a hit). The workbooks are the owner's data and stay outside
-the repository.
+the repository. The second workbook's figures were recomputed on 2026-11-06 (_executed_); where a figure of the
+owner's brief for it was not re-run, it says "from the coordinator's scripted read, not re-run".
 
 ## Owner requirement (2026-11-03, verbatim intent)
 
@@ -29,15 +64,24 @@ The findings are what a spreadsheet scheduler (a template and a filled example, 
 this product may lack. The ten findings F1 to F10 are in section 1; two more that verification turned up are F11 and
 F12.
 
+**Owner addition (2026-11-06; the scope as approved, not a verbatim quote).** A second workbook, a hand-built weekly
+practice grid, shows the same story on the practice side: an organization that already has a practice schedule should
+be able to bring it in. Added as findings F13 to F17: a practice-schedule import as a second import kind sharing the
+machinery planned for games; an optional "paired days, same slot" pattern; a labelled non-team slot hold; a
+capacity-versus-demand panel; and alias mapping with a coach lookup that shows practices. Recorded and not built:
+coach shirt and bag tracking, and the holiday-week copy (5.10). The Windows desktop version is not in scope.
+
 ## Size verdict (prompts/plan-change.md, Step 0)
 
-Planned, not small. It meets: spans more than one pull request (eight are proposed); changes a data model and
-migrations (two migrations: a per-game flag and a guard, and a new import kind with its columns); changes what is
-stored (games gain a flag, a provenance column and a reference; teams gain an external marker); changes behaviour
-other code and people rely on (what a save, a cancel, a drag and a regeneration may do to a game); touches the solver
-(`scheduleGames` gains an input; rule 14). It does not meet: no new dependency (reading `.xlsx` would add one and is
-deferred, decision 8), no service, no environment variable, no new authorization model (every write is an admin RPC
-that checks `is_org_admin` and a signed-in user, as the practice writer does).
+Planned, not small. It meets: spans more than one pull request (fourteen are proposed); changes a data model and
+migrations (four migrations: a per-game flag and a guard, a games import kind with its columns, a practice import
+kind, and a per-division pairing setting; a fifth only for a stored slot hold); changes what is stored (games gain a
+flag, a provenance column and a reference; teams gain an external marker; divisions may gain a pairing setting);
+changes behaviour other code and people rely on (what a save, a cancel, a drag and a regeneration may do to a game; how
+a practice schedule can arrive); touches the solver (`scheduleGames` gains an input; the practice solver may gain an
+optional per-division rule; rule 14). It does not meet: no new dependency (reading `.xlsx` would add one and is
+deferred, decisions 8 and 21), no service, no environment variable, no new authorization model (every write is an
+admin RPC that checks `is_org_admin` and a signed-in user, as the practice writer does).
 
 ## Findings that change the question
 
@@ -125,6 +169,55 @@ that checks `is_org_admin` and a signed-in user, as the practice writer does).
     `awayTeamId` or `away_team_id` (_executed_). The example has 31 labels on its schedule that are not on its `Teams` sheet and 39 games that name one,
     always as the away side, on one venue, in six divisions; its `Fixed Games` sheet has 43 rows. Representation:
     section 4.6, decision 5.
+12. **The practice side has no "latest run hides the rest" problem, but its writer is the wrong door for an import.**
+    Every practice reader is keyed on the season, not on a run (`useSeasonPracticeAssignments.js`: "writer v3 is
+    add-only, so the season holds rows from every earlier save under their own run ids"), and
+    `practice_assignments.run_id` is nullable (`20260503020000:5`), so a row an import writes is visible to every
+    reader at once and needs no run (games did, finding 3). `persist_practice_schedule` is a whole-season replace with
+    lock-by-default: an empty payload is refused (`20261108020000:715`), a team's auto row the payload omits is pruned
+    only if listed in `unlock` with a reason (`:1186-1209`), and its gate judges only a new row that is both
+    `source = 'auto'` and `assigned_via = 'auto'` (`:1470`, `:1485`); "manual, repair, recommendation and override
+    rows keep today's checks" (`:1481-1484`). An import is additive and must accept what the gate would refuse, so it
+    gets a writer of its own that only inserts (4.11.4). _Statically reviewed._
+13. **The writer's own double-booking check does not look inside one payload.** "A new key must not double-book its
+    team" compares the payload's keys with rows already **stored** (`20261108020000:1324-1368`; the payload's own rows
+    are inserted after it, `:1370-1473`), and the gate skips manual rows, so two new manual rows of one team on one
+    weekday at overlapping times in one save both pass. `docs/PLAN_GRID_OVERRIDE_PROMPT.md` 1.1 says such a row
+    "refuses the same way"; that holds for a row against a stored one, which is what the grid sends (one row at a
+    time). _Statically reviewed, not executed._ PR 10's first pgTAP case turns it into a fact (smallest input: one
+    team, two slots on one weekday and time, both `manual`, one payload). Reported, not fixed (rule 2); it matters here
+    because the import must judge its own team clashes, and does (4.11.4).
+14. **A grid is not a file.** In the owner's practice grid the weekday sits only in a header merged over three
+    columns; there are two blocks with different time headers (the 45-minute block has times on two of the five
+    weekdays, the 60-minute block on all five); two rows hold a `.` marker; two team names carry stray whitespace; and
+    20 of the 235 team cells are merged over two field rows (two halves of one field, so the whole field). A reader that
+    takes each merged range's top-left cell records those 20 on the first half only and sees the second half as free.
+    There is no division column: the team name carries an age and gender code. _Executed_ (R12 to R15). This is why
+    the import takes a flat file (4.11.2).
+15. **The TIME TBD refresh is an importer's only door to the TIME TBD list, and "fill the gaps only" already exists for
+    practices.** `sync_schedule_tbd_practices` refuses any caller but `persist_practice_schedule` and
+    `refresh_schedule_tbd_practices` (a `PG_CONTEXT` check, `20261108020000:236-240`), so the import calls the refresh
+    (signed-in admin, same season lock, `:347-440`); the example's 29 one-practice teams then appear in the TIME TBD
+    list with `missing_count` by the existing roster-times-division-count rule, with no new code. The next
+    auto-scheduler run fills them and touches nothing else: `planTeamsForRun` gives a team `max(target - held, 0)`
+    units, leaves a team at or over its count `locked`, and reports an over-count (`overTarget`) without trimming it
+    (`supabase/functions/_shared/engines/practice-lock.ts:232-275`, "maximum freeze"). _Statically reviewed._
+16. **Capacity 0 is not a hold.** It looks like a no-schema way to keep a time free: the writer gate refuses a new auto
+    row on a slot whose peak exceeds `COALESCE(capacity, 1)` (`20261105010000:167-178`) and the solver's capacity rule
+    does the same (`practice-coaches.ts:310`). But the Practices page raises 0 to 1 when it builds a run's slots
+    (`PracticeSchedulingPage.jsx:209`), the core loader throws on a non-positive capacity (`practiceSupabase.js:98-102`)
+    and the fields CSV refuses `Capacity` below 1 (`import-validation/index.ts:443`). Refuted; F15 builds on that.
+    _Statically reviewed._
+17. **The workbook's alias tab cannot be tied to its grid by a plain match.** It has 21 rows and 20 distinct targets;
+    none of its 21 names occurs on any other tab, and 4 of its 20 targets occur as row labels on the main grid
+    (_executed_, R13). What it aliases is unknown; the question that resolves it: which list is "the schedule" in its
+    header. The import's existing `HEADER_ALIASES` (`import-validation/index.ts`) aliases column headers, a different
+    thing from a value alias.
+18. **A venue the import creates is unlit and has no coordinates.** The field import creates a location with
+    `lighting_available` false unless the row says otherwise (`20261029010000:629`), undeclared lighting is unlit, and
+    no coordinates reads "sunset unknown", never "within daylight" (`docs/architecture/practice-scheduling.md`, Daylight).
+    A practice import that creates venues therefore makes every practice there read sunset-unknown on the Practice
+    daylight page until the admin enters coordinates; the confirm step says so (4.11.5). _Statically reviewed._
 
 ## 1. The findings: what exists, what is absent, what to do
 
@@ -145,6 +238,15 @@ whether the item needs a migration.
 | F10 | Import an already generated schedule          | No schedule importer (`ARCHITECTURE.md:1547`). Machinery to reuse: job lifecycle, staging, application records and rollback (`20260503060000`), find-or-create game slot (`20261029010000:1008-1100`), dry-run finalizer (lesson 74).                                                                                                                                    | The import kind, mapping, preview, rollback, fixture                                  | **Build** (PR 4 to 6), as section 4 designs it; CSV, not `.xlsx`.                                                                                                                                                        | L      | Yes (PR 5)                                                                  |
 | F11 | _Found:_ team page, feed, scores read `games` | See finding 5 and R1/R2.                                                                                                                                                                                                                                                                                                                                                 | Any writer of `games` from a saved schedule                                           | **Report; its own plan** (decision 12). Not fixed here; this plan does not read `games`.                                                                                                                                 | M      | Probably (a view, or readers moved)                                         |
 | F12 | _Found:_ shared space and travel buffer       | Modelled and enforced for **practice** slots (`practice_slot_conflicts`, `20261029010000`; `ingestion-pipeline.md:164`); modelled but unwired for games (finding 8).                                                                                                                                                                                                     | Games honouring shared space or a travel buffer                                       | **Do not build now.** The import audit says what it did not check. Revisit with the date-indexed bridge (GAP-32).                                                                                                        | L      | No                                                                          |
+| F13 | Import a practice schedule already made       | No importer for placements (`import_type` list: players, coaches, fields, field_availability, practice_preferences, evaluations, `import-validation/index.ts:524`; R17). The fields CSV makes practice slots (`finalize_field_import_job`). The writer locks everything saved and gates only new `auto` rows (`20261108020000:1485`); readers are keyed on the season.   | The import kind, mapping, preview, flags, rollback, fixture                           | **Build** (PR 9 to 11): a flat CSV, an additive writer, accept-and-flag, rows arrive locked; shares PR 4 to 6's machinery (4.11).                                                                                        | L      | Yes (PR 10): types, RPCs; no column on assignments                          |
+| F14 | Paired days, same slot, per division          | A team's practices must fall on different weekdays (`practice-coaches.ts:280-345`; writer rule `weekday`, `20261105010000:192`). No pairing or same-slot rule (R20; control: the weekday rule matches). `keepVenue` is a per-coach rule (`coachPreferences.js:130`). In the example, 83 of 98 two-weekday teams use one field and start on both days.                    | A per-division setting, and the solver and writer honouring it                        | **Build later** (PR 12): optional, off by default so nothing changes for existing leagues; solver and writer rule (rule 14); decision 27.                                                                                | L      | Yes (a division column; a gate rule)                                        |
+| F15 | Labelled recurring non-team slot hold         | Date-based `field_blackouts` (no weekday; the practice solver never reads them, R21), division reservations (need a division), `practice_slots.label`, and `Clinic` as a field size option (`FieldManagementPage.jsx:1009`). Capacity 0 is refuted (finding 16).                                                                                                         | A way to keep a weekly time free for a non-team activity                              | **Now** (S, inside PR 10 and 11): a non-team cell makes no slot and is listed. **Later** (PR 14, M): a stored hold, decision 28.                                                                                         | S, M   | No now; yes for a stored hold                                               |
+| F16 | Capacity versus demand, before a run          | After a run only: readiness shows manual actions and reasons (`PracticeReadinessPanel.jsx:134-139`); the run lists per-team shortfalls; `get_schedule_tbd` lists short teams. `slotUtilization` is computed (`practiceMetrics.js:748`) and no component renders it (R24).                                                                                                | A per-division view of slots against need, before a run                               | **Build** (PR 13): a read-only panel on the Practices page, labelled an upper bound, with no schema; decision 29.                                                                                                        | M      | No                                                                          |
+| F17 | Alias mapping; Coach Lookup shows practices   | `externalImport/mapping.js` has one normaliser and no alias table (R25). The Coaches page lists a coach's teams; its `multi` badge is the stored flag (`CoachesPage.jsx:131, 570`), not derived from the teams. No practices or games per coach.                                                                                                                         | Alias proposals; practices and derived multi-team coaches in the coach view           | **Build**: alias file and last-job proposals in the mapping step (PR 9, decision 30); practices in F3's coach schedule (PR 7, task G2b, decision 31).                                                                    | S      | No                                                                          |
+
+F13 to F17 were added on 2026-11-06 from the second workbook. Their designs are 4.11 (F13, with the F17 mapping), 5.7
+(F14), 5.8 (F15), 5.9 (F16) and the last paragraph of 5.1 (F17's coach lookup); two things from the workbook are
+recorded and **not** built (5.10).
 
 ## 2. Today: who writes and reads a game, and what already guards something
 
@@ -156,7 +258,7 @@ lesson 64 "a lock that only some writers take is not a lock", lesson 73 "walk th
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | `persist_game_schedule(run_data, assignments)`              | Inserts a run, upserts every assignment on `(home, away, slot, week)`, replaces the TIME TBD list                          | `20261108020000:1763`, upsert `:2289`, TIME TBD `:2313`   |
 | `admin_cancel_game_assignment(id)`                          | Hard `DELETE`, audited `game.cancelled`; the page asks with `window.confirm`                                               | `20260613000003:68`; `GameSchedulingPage.jsx:1374`        |
-| Cascade from `teams` (`admin_delete_team`)                  | Deletes the team's assignments (home and away keys are `ON DELETE CASCADE`)                                                | `20261108020000` (delete team); `20260503030000:76`       |
+| Cascade from `teams` (`admin_delete_team`)                  | Deletes the team's assignments (home and away keys are `ON DELETE CASCADE`)                                                | `20261112010000:1413` (latest); `20260503030000:76`       |
 | Cascade from `game_slots` (field import rollback, etc.)     | Deletes assignments on the slot; already refused while the slot is booked                                                  | `20260909000000` (rollback booking guard)                 |
 | Field delete or retire (`field_id` is `ON DELETE SET NULL`) | An update of `field_id` by the foreign-key action; refused first by `field_bookings`, so the Published guard is a backstop | `20260907000000`; `20260503030000:65`                     |
 | Cascade from `organizations`; no-signed-in-user jobs        | Retention and demo purge reach every row                                                                                   | `20261111010000:520-630` (the same exemptions, lesson 56) |
@@ -174,6 +276,40 @@ panel's "Publish" uploads the files and records an **immutable baseline** (`publ
 monotonic `baseline_version`, `admin_publish_schedule_baseline`, audited `publication.baseline_recorded`); parity says
 "the working schedule has moved since publication vN" and names the rows (`checkBaselineParity`,
 `OutputGenerationPanel.jsx:279-410`). None of these stops a single game from being moved in a live season.
+
+### 2.1 The practice side today: who writes and reads a practice (added 2026-11-06)
+
+_Statically reviewed_ unless marked. The census the practice import has to join (lesson 64: the practice lock lives in
+the writer's body, not in a trigger, so every other writer is a place the lock does not reach; lesson 73).
+
+**Writers of `practice_assignments`** (latest definitions):
+
+| Writer                                                   | What it does to a practice row                                                                                                                                          | Reference                                                                               |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `persist_practice_schedule` v3 (invoker; admin)          | Upserts on `(team, slot, range)`; deletes, re-ranges or withdraws an exception only for rows listed in `unlock` with a reason; gates new `auto` rows; rebuilds TIME TBD | `20261108020000:515`; lock `:1186-1209`; insert `:1425`; gate `:1485`; TIME TBD `:1638` |
+| `admin_delete_team`                                      | Deletes the team's assignments                                                                                                                                          | `20261112010000:1413` (delete at `:1497`)                                               |
+| Cascades from `teams`, `practice_slots`, `organizations` | Delete assignments (the field import's rollback is refused while a slot is booked)                                                                                      | `20260331000000:522-535`; `20260909000000`                                              |
+| Demo seeds                                               | Insert the demo league's practices                                                                                                                                      | `20261110010000:861`; `20261114010000:401`                                              |
+| Completed seasons                                        | Every signed-in write is refused by trigger (no-user jobs and org-gone cascades pass)                                                                                   | `20261111010000:641`                                                                    |
+
+**What the writer accepts and what its gate judges.** `source` is `auto` or `manual`; `assigned_via` is `auto`,
+`manual`, `repair`, `recommendation` or `override` (`20261108020000:866-870`; the table CHECK, `20260929000000:100`). A
+new row that is not both `auto` and `auto` skips the gate. The gate, `practice_new_auto_row_refusals`
+(`20261105010000:115-215`, read-only, invoker), judges five rules (capacity, reservation, length, weekday, count) and
+takes any assignment ids: it judges whatever source they carry (`judged AS ... WHERE l.id = ANY (p_assignment_ids)`,
+`:161-166`); the writer decides which rows to hand it. The writer is where "lock by default" lives: everything saved
+is held, whatever its `source` (`PracticeAssignmentList.jsx` says so beside the lock button: "Provenance, not a lock").
+
+**Readers and what the Practices page shows.** The page lists the season's assignments as a **table** (team and
+division, day and time and field, date range, a lock toggle and a cancel button: `PracticeAssignmentList.jsx`); there is
+**no field-by-day grid** on it (`GameScheduleGrid.jsx` and `FieldColumn.jsx` are the Games page's; `DataGrid` serves the
+players, coaches, blackouts and scores pages), so this plan proposes no new list of assignments. Readiness is
+`PracticeReadinessPanel.jsx:134-139` (manual actions, reasons, data-quality warnings, after a run). The Practice
+daylight and lighting pages read slots and assignments and write nothing. Every reader is keyed on the season, not a
+run (`useSeasonPracticeAssignments.js`).
+
+**The solver, for an import's sake.** It holds saved rows (finding 15): a team needs `max(target - held, 0)` more, so
+imported rows are never moved by a run and a team short of its division's count is what the next run fills.
 
 ## 3. Design A: the Published switch (F9)
 
@@ -213,7 +349,9 @@ is untouched.
 | Import (PR 5)                                                                  | n/a                           | A row that would change a Published game is `skipped-published` in the preview and not written, unless the admin has allowed changes for that game first. New games arrive Published by default (decision 4).                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Score entry, TIME TBD list, exports, baselines                                 | Unchanged                     | Unchanged: scores live on `games`; the flag is per assignment; an export reads it nowhere.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
-`persist_game_schedule` and `admin_delete_team` are replaced whole (copied from `20261108020000`); that is a flagged
+`persist_game_schedule` and `admin_delete_team` are replaced whole (`persist_game_schedule` copied from
+`20261108020000:1763`; `admin_delete_team` from `20261112010000:1413`, its **latest** body, which counts the practice
+preference rules its cascade takes: amended 2026-11-06, see the Amendments); that is a flagged
 cost: replacing a function moves every mutation plant aimed at its old body (lesson 70), so PR 1 re-aims them and its
 description lists them. `admin_cancel_game_assignment` is re-created from `20260613000003`.
 
@@ -492,12 +630,257 @@ fail); that `--check` is clean; and that `schedule-invalid.csv` reaches every re
 
 PR 5's first test enumerates these from the catalogue and the code, and fails until each has `games`: the
 `import_jobs.job_type` CHECK; `staging_import_rows.import_type` CHECK; `import_application_records.import_type` and
-`target_table` CHECKs (gain `game_assignments`, `teams`, `divisions`, `locations`, `fields` as needed);
-`create_import_job`'s type list; the deferred-apply status pair; the allowlist's copies (`importAllowlist.js`,
+`target_table` CHECKs (the `target_table` list already holds `locations`, `fields`, `field_subunits`, `practice_slots`
+and `game_slots`, `20260522120000:19-24`; it gains `game_assignments`, `teams` and `divisions`, and the `import_type`
+list, today `coaches`, `fields`, `field_availability`, gains `games`; amended 2026-11-06); `create_import_job`'s type list; the deferred-apply status pair; the allowlist's copies (`importAllowlist.js`,
 `_shared/import-allowlist.ts`, `import_allowed_keys`, `ALLOWLIST_ENTITY_TYPES`); the Edge `import_type` enum,
 `REQUIRED_FIELDS` and the sensitive-type list; the demo fence's census of writers; `fail_stale_import_jobs`; the Import
 panel's tab list and telemetry; the mock finalizer; and the harness plants (re-aimed at any body the migration
 replaces, lesson 70).
+
+### 4.11 A second import kind: the practice schedule (F13, with F17's mapping; added 2026-11-06)
+
+An organization that already has a practice schedule should be able to bring it in, as one that has a game schedule
+can (this section's parent, section 4). This is a **second import kind on the same machinery** (job lifecycle,
+staging, application records, rollback, the mapping step, team shells, the placeholder-fixture approach: PR 4 to 6),
+not a second pipeline. Read 2.1 first. The practice side differs from games in four ways that shape everything below:
+readers are keyed on the season, so no run needs re-pointing (finding 12); the writer's lock is by default, so there is
+no new Published concept (finding 2); the stored rows are weekdays and wall times, so there is no instant to convert
+(4.11.6); and the supply side, practice slots, is already importable by the fields CSV.
+
+#### 4.11.1 What the owner's practice workbook is (counts only; _executed_ 2026-11-06, R12 to R16)
+
+A weekly grid: field halves and sides down the side, Monday to Friday across the top (each weekday one header merged
+over three columns), a team in each used cell. Two blocks: a 45-minute block (16 labelled field rows; starts 16:00,
+16:45, 17:30; time headers on two of the five weekdays only) and a 60-minute block (42 labelled rows; starts 16:00,
+17:00, 18:00 on all five weekdays). 726 timed cells hold 236 non-empty ones: 235 team placements (37 and 198) and one
+non-team activity. 132 distinct teams: 103 with two practices a week and 29 with one. Of the 103, 98 are on two
+different weekdays (Tue+Thu 49, Mon+Wed 38, Wed+Fri 8, Mon+Thu 3) and 5 hold both placements at one weekday and start
+(a team in two places at once); 83 of the 98 use the same field and start on both days. No cell is used twice. 49 of the
+58 labelled field rows are used, over about 8 venues (a prefix reading of free-text labels: an estimate); 217 of the 235
+placements are on a half or side; 20 are merged over two rows of one field. There is no division column. 14 tabs, 3
+visible and 11 hidden, among them a field alias table (21 rows), a per-division planning summary, older versions, a
+holiday-week copy, and a by-team list with the coaches (219 named coaches, 19 on two or more teams, one of those on two
+teams at the same start; all 132 grid teams are on it). A coach-choice legend, a "do not change, published" note and
+equipment tracking were reported by the coordinator's scripted read and **were not re-run**.
+
+#### 4.11.2 The file: one flat CSV (decision 21)
+
+| Column                      | Required           | Accepted                                                                                    | Stored as                                |
+| --------------------------- | ------------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `Team`                      | no                 | A label; blank is an **open slot** (supply, no team). Normalised as in 4.5, no word dropped | `team_id`, mapped (4.11.5)               |
+| `Division`                  | when `Team` is set | A division name of the season; never derived from a team name                               | The team's division; the count rule      |
+| `Day`                       | yes                | `Mon` to `Sun` or the full name, any case                                                   | `practice_slots.day_of_week`             |
+| `Start`                     | yes                | `HH:mm` or `h:mm AM/PM`                                                                     | `start_time` (a wall time, no zone)      |
+| `End` or `Length`           | one of the two     | A time, or minutes                                                                          | `end_time`                               |
+| `Location`, `Field`         | yes                | Names (`Venue` accepted for `Location`), mapped (4.11.5)                                    | `locations`, `fields`                    |
+| `Subunit`                   | no                 | A half or side label (`Half`, `Side` accepted); blank is the whole field                    | `field_subunits`                         |
+| `Valid From`, `Valid Until` | no                 | `YYYY-MM-DD` or `M/D/YYYY`; else the confirm step's two dates (4.11.6)                      | Slot validity and the assignment's range |
+| `Capacity`                  | no                 | An integer from 1; default 1                                                                | `practice_slots.capacity`                |
+| `Use`                       | no                 | Blank, or `hold`: a cell held for a non-team activity (a closed value, never free text)     | Nothing: counted and listed (4.11.3)     |
+| anything else               | no                 | **Dropped before staging and never stored** (the allowlist; data minimisation)              | nowhere                                  |
+
+The names are the fields CSV's own (`Location`, `Field`, `Subunit`, `Day`, `Start`, `End`, `Capacity`, `Valid From`,
+`Valid Until`; the header of `fixtures/demo-2026/fields.csv`), so one vocabulary serves both files; PR 9 checks that the
+Edge function's header alias map takes the aliases above. A coach, an email, a phone or a free-text note is never read.
+One word means two things: `Division` in the fields CSV **reserves a slot** for a division (`20261029010000`, section
+5), and here it names **the team's division**. This import never writes a reservation (an admin sets those on Field
+Management), and its template and README say so beside the column.
+
+**Why a flat file, not the grid** (the measured reasons are finding 14): the grid is a parser of one layout. Its
+weekday lives in a merged header, its time header differs by block, 20 of 235 team cells span two rows, marker and
+blank rows are data, and stray whitespace is in the names; a reader that takes each merged range's top-left cell loses
+the second half of 20 placements without a word, and it breaks silently when the owner rearranges the sheet. A flat row
+is one fact in its own columns and fails with its own reason. The cost is a conversion step (one row per timed cell, 726
+in the example, under the 2,400 cap of 4.8): a pivot or a formula in the owner's own spreadsheet. **Unknown:** whether
+the owner's spreadsheet can emit it in one step (not tried; what resolves it: the owner tries the fixture's shape).
+Reading the grid itself needs `.xlsx` (a new dependency, decision 8) and a layout parser; not recommended now.
+
+#### 4.11.3 How rows become slots and assignments
+
+- **A slot** is found by the fields import's own key, `(location, field, subunit or the whole field, weekday, start,
+valid from)` (the lookup, insert and update at `20261029010000:892-1009`, copied into `ensure_practice_slot`, not
+  extracted: rule 2), or made, only on the confirm list (decision 22). **A slot that exists is found, never modified**
+  (its capacity, dates and reservation stay). One that exists with other dates for the same surface, weekday and time is
+  a clash by the supply rule below: the row is listed `slot-overlaps-another` naming it, and the admin sets the confirm
+  step's dates to match or fixes the slot on Field Management. **Unknown:** how often a league's existing slots carry
+  dates other than its season's; what resolves it: the owner's fields file.
+- **Every timed row is a slot, used or not**: the example has 726 timed cells for 235 placements. The 491 open ones are
+  the capacity the next run fills; without them the 29 one-practice teams have nowhere to go and the run answers
+  `no-slot-available`. A row with a blank `Team` makes a slot and no assignment.
+- **A new slot is judged by the supply rule the fields CSV already enforces**, `practice_slot_conflicts`: same surface,
+  same weekday, overlapping dates and times, a whole field against each of its halves, back-to-back allowed (turnover
+  0). A clash is **not written** and the row is listed `slot-overlaps-another`; it is not accept-and-flag, because it
+  is two slots claiming one ground, not a judgement about a team.
+- **A team on both halves of one field at one time** is two rows, two half slots and one team in two places: flagged
+  `team-on-both-halves` with the hint "leave Subunit blank for the whole field". Nothing is merged on the admin's behalf
+  (nothing guessed); the owner's 20 merged cells become 20 whole-field rows in the converted file.
+- **A non-team cell** (`Use = hold`): no slot, no assignment; counted and listed (F15, 5.8, decision 28). If an open slot
+  already exists at that cell it is flagged `hold-over-open-slot`.
+- **An assignment** is `(team, slot, range)`, the table's unique key
+  (`practice_assignments_team_practice_slot_range_unique`, `20260503010000:5`).
+
+#### 4.11.4 Writing it: an additive writer, accept and flag (decisions 20, 23, 24)
+
+Owner's rule, as for games (4.4): conflicts in the imported schedule are **accepted and flagged, not rejected**, and an
+unplaceable row is never silently dropped (AGENTS.md section 3). The existing writer cannot do that (finding 12), and
+changing it would mean replacing `persist_practice_schedule` whole (a migration; lesson 70 moves its plants) for a
+mode only an import wants. So the import has an **additive writer of its own** and the existing writer and its gate are
+not touched. The migration adds the new functions and the lists of 4.11.8; it does not change a column of
+`practice_assignments`.
+
+`apply_practice_import_job(job, dry_run)` (SECURITY DEFINER, `SET search_path = public`, `SET timezone = 'UTC'`, revoked
+from `PUBLIC` and `anon`). Gates, in order, each a test: a signed-in caller (the audit needs an actor); `is_org_admin`;
+the job's season is the organization's active season (draft or completed refuses 22023; the completed-season trigger,
+`20261111010000:641`, is the backstop); the mapping is stored and complete. Then it takes the **writer's own season
+lock**, `pg_advisory_xact_lock(hashtextextended('persist_practice_schedule:' || org || ':' || season, 0))`
+(`20261108020000:722-724`; the TIME TBD refresh uses the same key, `:380-383`), so an import and a save cannot interleave
+(lesson 72), and in one transaction:
+
+1. team shells (through `persist_team_schedule`, as 4.5), divisions, locations, fields and subunits, as confirmed;
+2. slots, by `ensure_practice_slot` (internal; no client role may execute it, as `practice_slot_conflicts`);
+3. assignments: `INSERT ... ON CONFLICT (team_id, practice_slot_id, effective_date_range) DO NOTHING` with
+   `source = 'manual'`, `assigned_via = 'manual'` and `run_id` NULL. It **never updates or deletes a saved row**, so
+   the writer's lock-by-default cannot be bypassed by it. No `scheduler_runs` row is made: the readiness panel and the
+   dashboard read the latest practice run (`usePracticeSummary.js` through `useSchedulerRun('practice', ...)`), and an
+   import's row would replace a solver run's results there;
+4. one `import_application_records` row per insert (the before and after images), for rollback;
+5. the **flags**, read by SQL from the rows the file names (inserted now or already there, so a re-import reports the
+   same flags): the five gate rules by calling `practice_new_auto_row_refusals(org, ids)` read-only (it judges rows of
+   any source, 2.1); plus the checks the gate does not have: `coach-conflict` (a coach of two teams in overlapping slots
+   on one weekday on shared dates, through `team_coach_assignments`, per coach), `team-on-both-halves` and
+   `hold-over-open-slot`;
+6. `refresh_schedule_tbd_practices(season)` (finding 15): teams short of their division's count join the TIME TBD list;
+7. the audit: `import.completed` (existing action) with `import_type = 'practice_schedule'`, the counts and the flags
+   by rule; `schedule_tbd.refreshed` comes from the refresh; no new audit action.
+
+**The preview is the dry run**: steps 1 to 7 run in a sub-block that ends in a sentinel exception after the counts and
+the flag list are copied into variables, so every write rolls back and the function returns them. The preview, the
+apply and the gate therefore cannot disagree. This is lesson 74's aim in a different form (the flags read the rows an
+apply inserts, which a single "writes off" statement cannot), and it needs no browser twin (lesson 77) for the
+SQL-checkable rules. PR 10's first test reads every table back to the last column after a dry run and requires them
+byte-equal, and requires dry-run counts equal to apply counts over one file that reaches every outcome (each count
+non-zero first). If the sentinel form cannot carry the flag list, stop and report with the smallest input (one team,
+two slots, both `manual`). Cost: the dry run takes the season lock and does the writes (at most 2,400 rows); PR 10 times
+it with coverage on (lesson 59).
+
+**Closed lists.**
+
+- **File refused** (nothing staged): a missing required column (`missing-column`, naming it); more than 2,400 rows
+  (`too-many-rows`).
+- **Row listed with its reason and not written** (the rest imports): `bad-day`, `bad-time`, `bad-length`,
+  `end-not-after-start`, `bad-date`, `valid-until-before-from`, `outside-season-window`, `missing-dates` (no dates in
+  the row and none on the season), `capacity-not-positive`, `unknown-division`, `unknown-team`, `unknown-location`,
+  `unknown-field`, `unknown-subunit` (until the mapping resolves or creates them), `team-in-two-divisions` (one label,
+  two divisions in the file), `slot-overlaps-another`, `duplicate-row` (the first wins, the repeat is listed).
+- **Accepted and flagged** (written, shown in the preview and the result, audited): `capacity` (more teams in a cell than
+  its capacity), `reservation` (the slot is reserved to another division), `length` (the division's practice length is
+  not the slot's), `weekday` (a team twice on one weekday on shared dates: the example's 5 double-placed teams are this),
+  `count` (more practices in a scheduling week than the division's count), `coach-conflict`, `team-on-both-halves`,
+  `hold-over-open-slot`, and, once PR 12 exists, `pairing-differs`.
+- **Not a flag but a list**: a team holding fewer rows than its division's count is on the TIME TBD list
+  (`missing_count`): the example's 29. The next run fills them (finding 15).
+- **Coverage is stated, never implied**: "Checked: slot capacity, division reservation, division practice length, one
+  practice per weekday, practices per week, coach overlap at the same weekday and time. Not checked: coach preference
+  rules (the Preferences page, Conflicts tab), daylight and sunset (the Practice daylight page; venues this import
+  creates have no coordinates, finding 18), field closures and permits, travel or turnover between fields. Coach overlap
+  was judged only for the N teams that have a coach assigned."
+
+**After the import, a normal save.** Imported rows are `manual`: a team absent from a later save's payload keeps them
+(`retained_manual`, `20261108020000:1306-1322`); for a team in the payload, a key the payload omits needs `unlock` and a
+reason, like any saved row. The import changes `practice_schedule_fingerprint` (it hashes every row's id, team, slot,
+range, `source` and `assigned_via`, `20260929000000:179-205`), so a plan read before the import gets 40001
+`PRACTICE_SCHEDULE_STALE` and reloads
+(`PracticeSchedulingPage.jsx:1511`). PR 10 proves "a save after an import moves nothing" (K2).
+
+#### 4.11.5 Mapping and what the import may create (decisions 22, 26, 30)
+
+The same mapping step as 4.5, for teams, divisions, locations, fields, and subunits. A label equal (normalised) to
+exactly one existing thing maps automatically; otherwise the admin picks one, **creates** it (on the confirm list
+only), or skips its rows. A team shell needs the `Division` of its rows. A division that matches none can be created by
+name through `upsert_division_for_import` with no age band, flagged. A location or field is created without
+coordinates and with unknown lighting, which reads unlit: every practice there reads sunset-unknown until the admin
+enters coordinates (finding 18); the confirm list says so. For a created subunit PR 10 copies what
+`finalize_field_import_job` does for a subunit row (the `Supports Halves` flag), and reads it first.
+
+**Proposals, in this order, none applied without the admin (F17):** (1) the exact normalised label; (2) an optional
+**alias file** (columns `Alias`, `Location`, `Field`, `Subunit` (the last optional); read in the browser and never
+uploaded or stored); (3) the mapping stored on the **previous completed import of this kind** (it is on the job, so no
+new table). Where two proposals disagree both are shown and none is chosen. A stored mapping entry carries `source`
+(`exact`, `alias`, `previous`, `admin`) so the audit can say how each label was resolved. The alias module is pure core
+(PR 9) and the games import (PR 6) can call it; it is a different thing from the Edge function's `HEADER_ALIASES`,
+which aliases column headers. The owner's own alias tab could not be tied to the grid (finding 17); the file format
+above is a proposal until the owner says what its columns mean.
+
+**Division practice settings from the file (decision 26).** For each division in the file the mapping step proposes
+`practices_per_week` (the most common count of rows per team; a tie proposes nothing) and `practice_minutes` (the slot
+length when every placement of the division has one length, else "any"), beside the stored values. A proposal is applied
+only for a ticked division, through the existing audited `admin_upsert_division_settings` (the 13-argument form,
+`20261105010000:1459`), never silently. A division at one a week with no length is the column default and cannot be told
+from "unset" (`20261105010000`, section 2), so the screen shows the stored value and asks. If the settings are left
+alone, a team holding more rows than its division's count is reported `overTarget` and kept (finding 15).
+
+#### 4.11.6 Locked on arrival, a re-import, rollback, dates and time (decisions 23 to 25)
+
+- **Locked.** Every saved practice is locked by default (finding 2, 2.1), so "arrive locked" is not a switch and needs no
+  new concept; a practice moves only through the writer's `unlock` prompt, with a reason and an audit row. The real
+  choice is provenance: `manual` (recommended: the admin's own schedule; kept for a team absent from a save) or `auto`
+  (a later save could prune it for an absent team, with an unlock).
+- **A re-import** is additive: the unique key makes an unchanged row a no-op (`unchanged` counted, no new run, nothing
+  audited beyond `import.completed` with zero inserts). A team the new file puts in another cell gets a new row; the old
+  one is listed "in the schedule, not in this file" and **never deleted by an import**: it is removed on the Practices
+  page with the unlock prompt, as today (decision 24). Existing saved rows, whoever wrote them, are never changed.
+- **Rollback**, `rollback_practice_import_job(job)`: reverses the application records; refuses, naming up to 50 rows, if
+  any imported assignment was changed since (its slot, range, source or `assigned_via` differs from the applied image), has an
+  exception row (`practice_exceptions` restricts the delete), or the season has completed; removes the slots,
+  fields, subunits, locations and shells it created only when nothing else references them; audited `import.rolled_back`
+  (existing); refreshes the TIME TBD list. It is a writer, so it joins the census (4.11.8).
+- **Dates.** A row's `Valid From`/`Valid Until` else the confirm step's two dates, defaulting to the season's
+  (`season_settings.season_start` and `season_end`, both nullable); when neither exists the dates are required
+  (`missing-dates`). A date outside the season is `outside-season-window`. The range is stored as the writer stores it:
+  PR 10's first test writes one row through the writer and one through the import for the same dates and requires the
+  same canonical `daterange` text, so no inclusive-or-exclusive guess is made here.
+- **Time and weekday.** A practice row holds a weekday and `time` columns (no zone) and a date range; the import converts
+  no instant, so there is no season-clock conversion, no daylight-saving case, and nothing SQL recomputes (lesson 77).
+  PR 11's parse test runs under two other host zones (`TZ`) to prove the host zone is not read. Sunset is judged
+  afterwards, on the season's clock, by the existing daylight code, and is a coverage line above, not a check here.
+
+#### 4.11.7 The placeholder fixture (PR 9)
+
+`fixtures/practice-schedule-2026/` (the family of `fixtures/demo-2026/`), generated by
+`scripts/build-practice-fixture.mjs` (pure; a seeded PRNG written in the script; `--check` exits 1 when a checked-in
+file differs; like `scripts/build-demo-seed.mjs`). It builds a **grid-shaped** file, not a solver output (the product's
+solver has no pairing yet, 5.7, so it could not produce the example's same-slot pattern): `README.md` (the shape table,
+how to regenerate, that the only inputs taken from the owner's workbook are **counts**), `practice-schedule.csv` (the
+format of 4.11.2), `aliases.csv` and `practice-invalid.csv` (about twenty rows, one per refusal reason).
+
+Shape targets (counts only, from 4.11.1; every value invented): about 235 placements (about 37 at 45 minutes and 198 at
+60), about 726 timed rows including the open ones, 132 teams (103 with two practices a week and 29 with one), about 58
+field rows of which about 49 used, over 8 venues, about 20 whole-field placements, day patterns Tue+Thu about 49,
+Mon+Wed about 38, Wed+Fri about 8, Mon+Thu about 3, and about 83 teams on one field and start both days. Names are
+placeholders in the demo fixture's conventions: venues `Venue A` to `Venue H`, fields `Field 1`..., subunits `A` and
+`B`, team labels like `U10B-01`, coaches `CoachFirstN CoachLastN`, any email at `example.com`.
+
+**Named plants**, each a small function with a count, applied to a copy: double-placed teams (5, the example's count), a
+division set to two a week holding one-practice teams (29 by shape), a coach on two teams at one start (1), team labels
+with trailing whitespace (2), a team on two halves at one time (1), two teams in a capacity-1 cell (1), a slot that
+overlaps another (1), a non-team `hold` row (1). The exact numbers are whatever the script produces; the README and the
+test pin the **produced** ones and hold them near the targets. `tests/practiceScheduleFixture.test.js` counts every
+plant **independently from the CSV** (a group-by in the test, not the product), requires the pre-plant copy to count
+none (the check can fail), requires `--check` clean, and requires `practice-invalid.csv` to reach every reason. PR 10's
+pgTAP then requires the product's flags for the same file to equal those counts. The real-name guard scans the files.
+
+#### 4.11.8 The lists to walk (lesson 73), for `practice_schedule`
+
+4.10's list, with the practice type: the `import_jobs.job_type` and `staging_import_rows.import_type` CHECKs;
+`import_application_records.import_type` (gains `practice_schedule`) and `target_table` (gains `practice_assignments`,
+and `teams` and `divisions` if PR 5 has not added them); `create_import_job`'s type list; the deferred-apply status
+pair; the allowlist's copies; the Edge `import_type` enum (`import-validation/index.ts:524-531`), `REQUIRED_FIELDS`
+(`:56`) and the sensitive-type list; the demo fence's census of writers; `fail_stale_import_jobs`; the Import panel's tab
+list and telemetry; the mock finalizer; the harness plants. And the practice side's own: **`tests/practiceReaderCensus.test.js`**
+(it enumerates every SQL function whose latest body names `practice_assignments`, so the apply and the rollback fail it
+until classified `writer`); the completed-season case (a pgTAP case: a completed season refuses the import and its
+rollback); the fingerprint case (above). PR 10's first test enumerates these from the catalogue and the code.
 
 ## 5. Design C: the smaller findings
 
@@ -511,6 +894,18 @@ TIME TBD games listed apart; CSV. **Coach schedule**: one coach's games across a
 `evaluateGameSchedule`'s per-coach warnings; the coach's name, never an email or phone (data minimisation; the master
 export's `Coach Emails` column stays where it is). Tests: counts equal the master export's rows for the same filter;
 a coach who coaches two teams in overlapping games is flagged; a game with a TIME TBD slot appears with its reason.
+
+**Added 2026-11-06 (F17; task G2b, decision 31).** The coach schedule also lists the coach's **practices**: the rows of
+`practice_assignments` for the coach's teams (through `team_coach_assignments`), day, time, field and date range. They
+exist today for any league, whether or not it imports. A coach on **two or more teams is marked from the team list**,
+not from the stored `can_coach_multiple_teams` flag that the Coaches page shows as `multi` (`CoachesPage.jsx:131, 570`);
+in the second workbook 19 of 219 named coaches are on two or more teams and one of them is in two places at one start
+(_executed_, R12). The clash column covers practices by the same rule as the import's `coach-conflict` flag (4.11.4):
+two of one coach's practices on one weekday at overlapping times on shared dates. A practice is never compared with a
+game (a weekly series against a dated event: stated, not checked). Admin only; names, never contacts. Tests: a coach on
+two teams lists both teams' practices; the marker follows the number of distinct teams, not the stored flag (a coach
+flagged `multi` with one team is not marked; an unflagged coach with two is); a same-weekday, same-time pair is flagged
+and a different-weekday pair is not.
 
 ### 5.2 F1 Duty roster (build later)
 
@@ -569,6 +964,127 @@ Rows are enumerated from baseline rows **and** saved rows together, never from t
 itself as baseline "as imported" so "since import" works from day one (decision 15). `buildChangeNotices` stays
 unwired: it writes to families, whom this product never contacts.
 
+### 5.7 F14 Paired days, same slot (PR 12; the practice solver, rule 14; added 2026-11-06)
+
+**The need, and what exists.** In the second workbook 98 teams practise on two different weekdays (Tue+Thu 49, Mon+Wed
+38, Wed+Fri 8, Mon+Thu 3), and 83 of those 98 use the same field and the same start on both days (_executed_, R12).
+SquadLogic enforces the floor under that: each of a team's practices on a different weekday, a hard rule beside
+capacity and coaches (`supabase/functions/_shared/engines/practice-coaches.ts:277-345`, rule 4 of its list; the writer's
+`weekday` rule, `20261105010000:192`). It has no convention for **which** weekdays or for repeating the slot (R20: no
+match for pairing or same-slot in the solver, its engines or `practice/`; control: the weekday rule matches in the same
+roots). A coach rule can ask for a weekday, a start or a venue, one team at a time (`coachPreferences.js`, `keepVenue` at
+`:130`): a request, not a division's convention.
+
+**The setting (optional, per division, off by default).** `divisions.practice_pairs text[] NOT NULL DEFAULT '{}'`,
+elements from `mon-wed`, `tue-thu`, `wed-fri` (a CHECK), and
+`CHECK (cardinality(practice_pairs) = 0 OR practices_per_week = 2)`. Empty is today's behaviour exactly.
+`admin_upsert_division_settings` gains `p_practice_pairs` (NULL keeps, `'{}'` clears) by dropping the 13-argument
+signature by its exact name and arguments and creating the 14-argument one, as `20261105010000:1457-1459` did (a
+trailing defaulted argument, so a cached browser still resolves); changing `practices_per_week` away from 2 while pairs
+are set is 23514 and names the setting. The control sits beside the practice settings on the Teams page. Mon+Thu (3 of
+the example's 98) is not offered: it stays hand-placed or imported. A variant, "the same slot on any two weekdays", is
+one boolean and covers it; not recommended, because it allows back-to-back days.
+
+**What the solver does.** For a division with pairs set, a team's two practices are placed as one **twin pair**: a slot
+S1 on weekday d1 and S2 on its partner d2 with identical location, field, subunit, start and end, both live over a
+shared span and both admissible under every existing hard rule (reservation, length, capacity, coach overlap, a coach
+`must`). Both rows are placed or neither. With no pair, both units are unplaced with the existing reason
+`no-slot-available` and a run finding that says "no paired slot": no new reason, so no change to the TIME TBD reason
+CHECK (`20261108020000:123-125`). A team that already holds one row (an import, an earlier run) has its second unit
+restricted to that row's twin on a partner weekday, and is unplaced the same way if there is none; the held row is never
+moved (maximum freeze), and a held row outside every allowed pair is reported, not changed.
+
+**Interactions (each a test).**
+
+| With                             | Behaviour                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `practices_per_week`             | Pairing needs exactly 2; the settings RPC and a CHECK refuse otherwise                                                                                                                                                                                                                                                                  |
+| `practice_minutes`               | A twin has the same start and end, so the same length; the length rule still applies to the first slot                                                                                                                                                                                                                                  |
+| Slot reservations (D2)           | Both slots must be open to the division: a division with reserved slots uses only those, so the twin of a reserved slot must be reserved to it too                                                                                                                                                                                      |
+| Coach preference rules           | Each practice of the pair is judged by the existing judge; a `must` set of weekdays that no allowed pair satisfies leaves no candidate (`coach-preference`); the clash with pairing is a run finding beside `PRACTICE_COACH_PREFERENCE_CONFLICT`                                                                                        |
+| Daylight and sunset              | Each occurrence is judged as today, flagged and never blocked (lesson 47); the same start on two weekdays needs no special case                                                                                                                                                                                                         |
+| Repair (`practice/repair.js`)    | Re-homes one series at a time, unchanged; a re-home that breaks a pair is flagged `pairing-broken` on its row (a compromise finding, never a refusal)                                                                                                                                                                                   |
+| The writer gate                  | A new rule `pairing` in `practice_new_auto_row_refusals`: a new auto row whose team holds another live row on shared dates must sit at the identical surface, start and end on a partner weekday; the first row of a pair is never refused. The function is replaced whole (lesson 70); manual, repair and override rows are not judged |
+| The browser run check (`verify`) | Gains the rule `pairing`; `tests/practiceUnplacedReasons.test.js` (the three spellings) is extended in both directions                                                                                                                                                                                                                  |
+| Imports                          | Accepted and flagged `pairing-differs` once this exists (4.11.4); never refused                                                                                                                                                                                                                                                         |
+| TIME TBD                         | Unchanged: a team short of its count is listed as today                                                                                                                                                                                                                                                                                 |
+
+**Rule 14, and the proof of "nothing changes".** The solver exists twice (core `schedulePractices` and the Edge solver),
+and a test holds them equal (the shape of `tests/coachPreferenceDrift.test.js`); a pairing product extends it. With
+`practice_pairs` empty, both solvers' output over the season fixture and the demo league is byte-identical to the base's:
+a `sha256` taken before any change, as lesson 46 did for one a week. A new golden covers a paired division on PR 9's
+fixture, which also shows the solver can reproduce the owner's pattern. Effort **L** (a migration, two solver twins, a
+gate rule, a settings RPC, a Teams control, a drift test, goldens). Recommendation: **later** (decision 27): the import
+with gap-fill already brings the owner's real pattern in, and pairing only improves what a new season generates, at the
+cost of a migration, two twins and a golden re-tune; waiting hurts no league.
+
+### 5.8 F15 A labelled, recurring hold for a non-team activity (PR 14 only if wanted; added 2026-11-06)
+
+The workbook has one cell holding a non-team activity (a clinic) in a weekly slot. **What exists, verified:**
+
+| Candidate               | What it is                                                                                                                                         | Why it is not the answer                                                                                                                                                                                                                                                                              |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `field_blackouts`       | Admin closures by date range, for a location or one field, optional minutes past midnight, a reason that includes `event` (`20260906000100:48-90`) | No weekday: a weekly hold is one row per date. The practice solver never reads blackouts (R21; the Practices page only warns, `PracticeSchedulingPage.jsx:568`), so a team could still be placed there, and closing ground can start the repair flow (the enact RPC's blackout arm, `20261007000000`) |
+| A division reservation  | `practice_slots.division_id`: a slot only one division's teams may use                                                                             | Needs a division to give it to. A zero-practice "Clinics" division with no teams would work and would then appear in teaming, the Teams page and the exports. Not recommended                                                                                                                         |
+| `practice_slots.label`  | An optional text on a slot                                                                                                                         | Read by no solver path (no match in the solver files), and free text. A label alone holds nothing                                                                                                                                                                                                     |
+| The `Clinic` field size | An `<option>` of the Size select (`FieldManagementPage.jsx:1009`)                                                                                  | A size of ground, not an activity                                                                                                                                                                                                                                                                     |
+| Capacity 0              | A slot nothing may fit                                                                                                                             | Refuted (finding 16): the page raises it to 1 and the loader throws                                                                                                                                                                                                                                   |
+
+**The smallest correct form.** _Now, with no schema (S, inside PR 10 and 11):_ a cell marked `Use = hold` makes no slot,
+so nothing can be placed there (correct by construction for both solvers, the writer gate and the capacity panel); the
+import counts and lists it, and flags `hold-over-open-slot` when an open slot already exists at that cell (4.11.3). Its
+weakness: nothing records the hold, so a later fields CSV can add the slot back. _Later, if the owner wants it stored
+(PR 14, M, rule 14):_ `practice_slots.hold_kind text NULL CHECK (hold_kind IN ('clinic', 'event', 'other'))`, a closed
+list so no free text is stored. A slot with a hold kind is never offered by either solver twin, is refused by a new gate
+rule `hold` for new auto rows (the gate is replaced whole, lesson 70), is left out of the capacity panel's supply and
+shown as "held", and is labelled on the Field Management slot list; a manual row may still be placed there, as an
+admin's locked and audited choice. The same proof as 5.7: with no holds set the output is byte-identical. PR 14's first
+task is to re-read this section against the code of the day. Decision 28.
+
+### 5.9 F16 Capacity versus demand, before a run (PR 13; no schema; added 2026-11-06)
+
+**What exists.** After a run only: the readiness panel shows the teams needing manual assignment and the reasons
+(`PracticeReadinessPanel.jsx:134-139`); the run's `practices` block lists, per team that wants several, how many it
+holds, was given and still lacks (`docs/architecture/practice-scheduling.md`, "What is missing, and why"); and
+`get_schedule_tbd` lists the practices a team is short of after a save (`20261108020000:445`). `evaluatePracticeSchedule`
+computes `slotUtilization` (`practiceMetrics.js:748`) and no component renders it (R24). Nothing shows, **before** a run,
+whether the slots a division may use can hold what it needs; the workbook's summary tab does this by hand.
+
+**The panel (read-only).** A section at the top of the Practices page, "Before you run: slots against what each
+division needs", one row per division of the season:
+
+| Column           | Counts                                                                                                                                                     | From                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Teams            | The roster's teams in the division                                                                                                                         | `teams` (the subject set is the roster, lessons 46 and 92) |
+| Practices wanted | teams times `practices_per_week`                                                                                                                           | `divisions`                                                |
+| Held             | Saved practice rows of those teams, counted as `planTeamsForRun` counts them                                                                               | `practice_assignments`                                     |
+| Still needed     | The sum over teams of `max(target - held, 0)`                                                                                                              | The solver's own arithmetic                                |
+| Length           | `practice_minutes`, or "any"                                                                                                                               | `divisions`                                                |
+| Slots it may use | Distinct practice slots open to the division, live from today, of its length, with their capacity and the weekdays they cover                              | `practice_slots`, reservations                             |
+| Verdict          | "short by N" when still needed exceeds capacity; "N to spare" otherwise; "fewer weekdays than practices a week" when it applies; "none wanted" at 0 a week | Derived                                                    |
+
+A total row counts a slot once though it counts in every division that may use it, and says so (lesson 92: a count is a
+number of a population; the rows can sum to more than the total). **Declared, not enforced** (AGENTS.md section 3): the
+panel ignores coach overlap, coach `must` rules, daylight, closures, permits and travel, so "short by N" is exact (a run
+cannot place more than the capacity) and "N to spare" is an upper bound, and the panel says so on its face. Reads are
+all-or-nothing, each failed read names its table and draws no row, and a view that renders before its inputs arrive
+says "not checked yet" (lessons 90 and 93). The calculation is pure core, `packages/core/src/practice/capacityDemand.js`,
+with a Zod schema. Tests: `still needed` equals the sum of `planTeamsForRun`'s `unitsNeeded` over one shared fixture (the
+Deno solver is pinned to core the repository's usual way); a division wanting 60 minutes over 45-minute slots has none
+open (`practice-length`); a reservation case; a fewer-weekdays case (`not-enough-days`); a held case; a 0-a-week
+division is not "short"; axe in both themes. Effort **M**; no schema. Recommendation: **build** (PR 13), after decision 29. It makes an import's result actionable and is useful with no import at all.
+
+### 5.10 Recorded and not built (added 2026-11-06)
+
+- **Coach shirt and bag tracking** (a tab of the second workbook). Handing out equipment is outside the product: AGENTS.md
+  section 2 excludes merchandise and stores, and nothing here tracks per-person items. Recorded so it is not
+  rediscovered as a gap.
+- **The holiday-week makeups copy** (a hidden tab holding a second copy of the grid for one week). The need, moving one
+  week's practices around closed ground, looks covered by a blackout plus the practice repair (`practice/repair.js`; the
+  enact RPC's blackout arm, `20261007000000`). _Statically reviewed_ in `docs/architecture/practice-scheduling.md` and
+  the migration's header; **not tested**, and whether it reproduces the owner's makeup grid is unknown. What resolves it:
+  the owner walks one holiday week through the repair panel with a saved blackout.
+
 ## 6. Behaviour
 
 - **Now.** Any game can be moved, cancelled, or silently dropped from view by a regeneration, with no flag, no refusal
@@ -595,21 +1111,59 @@ unwired: it writes to families, whom this product never contacts.
 | Exports and baselines carry no Published column                                           | `tests/outputGeneration.test.js` header pin unchanged                                                                                                               |
 | No coach, family or public surface                                                        | a consumer census for the new pages and exports (admin routes only), as `unwiredLayerImporters` pins importers                                                      |
 
+### 6.1 Behaviour, the practice side (added 2026-11-06)
+
+- **Now.** A league that arrives with a practice schedule has no way to bring it in: it re-enters every practice by
+  hand or lets the solver make a different one. A division cannot ask for paired days. A non-team activity can be kept
+  free only by never creating the slot. Nothing shows slots against need before a run, and the coach view lists no
+  practices.
+- **After.** The admin uploads a flat CSV of practices; maps teams, venues and fields (an alias file and the last
+  mapping propose, never decide); confirms the list of everything that will be created; and previews what the file will
+  do, including every rule it breaks and each team short of its count. The practices arrive locked, as the admin's own
+  (`manual`), nothing already saved is changed, and a run then fills only the gaps. The import rolls back while nothing
+  it wrote has changed. Optionally, a division's two practices share a slot on a paired weekday; a panel shows slots
+  against need before a run; the coach schedule lists practices and marks coaches on several teams.
+- **Unchanged (each is a test).**
+
+| Unchanged                                          | Test                                                                                                                                                                                                             |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persist_practice_schedule`, its gate and `unlock` | `supabase/tests/practice_writer_v3.sql`, `practices_per_division.sql`, `practice_persistence_rpc.sql` and `tests/gridLockedOverrideMessage.test.jsx` pass unchanged in PR 9 to 11, 13 and 14; PR 12 extends them |
+| A one-a-week league, and a league with pairing off | The `sha256` of both solvers' output over the season fixture and the demo league equals the base's, taken first (PR 12; PR 14 repeats it)                                                                        |
+| The fields CSV import and its rollback             | `supabase/tests/field_import_apply_rollback.sql` and `field_import_rollback_booking_guard.sql` unchanged                                                                                                         |
+| Saved practices are never changed by an import     | pgTAP: every row that existed before is byte-equal after an apply, a re-import and a rollback                                                                                                                    |
+| A save after an import moves no imported row       | pgTAP, and a vitest case over the real classification (`planTeamsForRun`, through the Deno mirror tests)                                                                                                         |
+| Practice readers                                   | `tests/practiceReaderCensus.test.js` classifies the apply and the rollback `writer`; no reader changes                                                                                                           |
+| Completed seasons                                  | The import and its rollback are refused (pgTAP, beside `season_schedule_readonly.sql`)                                                                                                                           |
+| Coach preference rules, daylight, repair           | `tests/coachPreferenceRules.test.js` and the daylight suites unchanged                                                                                                                                           |
+| No coach, family or public surface                 | A consumer census for the new pages and exports (admin routes only)                                                                                                                                              |
+
 ## 7. Tasks, pull requests, plants, stop conditions, risks, rollback
 
-Sizes are S under 150 lines, M 150 to 500, L over 500, tests included (estimates). **Eight pull requests, at most two in
-flight (AGENTS.md section 11), in waves:** PR 1; then PR 2 and PR 4; then PR 3 and PR 5; then PR 6; then PR 7 and PR 8.
-Open pull requests were not checked for this plan; each PR opens only when fewer than two are in flight (check with
-`gh pr list` then). Two migrations (PR 1, PR 5), within `MAX_PENDING_MIGRATIONS` (default 5,
-`docs/operations/ci-cd.md`), each merged before the next. Version numbers: the next free after `20261118010000` at the
-base `c3d190d`; take the next free when the PR starts. Rule 14 applies to PR 1, 2, 5, 6 and 8 (persistence or the
-solver); **this plan is the stop**, and no PR starts before the owner agrees it. PR 3, PR 4 and PR 7 add no persistence.
+Sizes are S under 150 lines, M 150 to 500, L over 500, tests included (estimates). **Fourteen pull requests, at most two
+in flight (AGENTS.md section 11), in waves:** PR 1; then PR 2 and PR 4; then PR 3 and PR 5; then PR 6 and PR 9; then
+PR 7 and PR 10; then PR 8 and PR 11; then PR 12 and PR 13; then PR 14 only if decision 28 chooses a stored hold. PR 13
+reads tables that exist and needs only decision 29, so it can take any free slot after that. Open pull requests were
+not checked for this plan; each PR opens only when fewer than two are in flight (check with `gh pr list` then) **and
+the owner has given an explicit go for that PR** (the hold). Four migrations (PR 1, PR 5, PR 10, PR 12) and a fifth only
+for PR 14: that is exactly `MAX_PENDING_MIGRATIONS` (default 5, `docs/operations/ci-cd.md:207`), so each is deployed
+before the next merges, never batched. Version numbers: the next free after `20261118010000` at the base `c3d190d`;
+take the next free when the PR starts. Rule 14 applies to PR 1, 2, 5, 6, 8, 10, 11, 12 and 14 (persistence or the
+solver); **this plan is the stop**, and no PR starts before the owner agrees it. PR 3, 4, 7, 9 and 13 add no
+persistence.
 
 ```
 PR1 Published (db, Edge) ──► PR2 pinned (solver) ──► PR3 Published (page)
    │                                                      │
    └──► PR5 import II (db) ◄── PR4 import I (fixture, core)    ├──► PR8 add a game (needs PR3, PR5)
               └──► PR6 import III (Edge, panel, E2E) ──► PR7 reports (needs PR1, PR6)
+
+The practice side (added 2026-11-06):
+PR4 ──► PR9  practice import I (fixture, core, aliases)
+PR5 ──► PR10 practice import II (db)       (needs PR5's migration merged and deployed; PR9 for the fixture)
+PR6 + PR10 ──► PR11 practice import III (Edge, Practices tab, E2E)
+PR9 + PR10 ──► PR12 pairing (db, solver)   (PR9's fixture for its golden; PR10's flag list gains pairing-differs)
+(nothing)  ──► PR13 capacity panel         (after decision 29)
+PR10 + PR11 ──► PR14 stored hold           (only if decision 28 says so)
 ```
 
 **Cost note for every PR (the owner's budget rules, 2026-11-03).** Run only the touched test files while iterating; one
@@ -618,7 +1172,8 @@ plants run in CI (they need the local Supabase stack); **no `/code-review` round
 AGENTS.md section 3 and needs the owner's confirmation, decision 16); docs stay short: one dated paragraph per doc in
 each PR's "Docs" line, plus the fixture README. Each PR's description lists what it did **not** run. No PR adds a
 dependency, and `check:unused`, `check:advisors` and `check:bundle` are part of CI as always; the new pages are built
-lazy-loaded like the others, so the bundle budget is not expected to be the constraint.
+lazy-loaded like the others, so the bundle budget is not expected to be the constraint. The same rules cover PR 9 to 14
+(none adds a dependency; the owner-cost line of each says what the owner is asked for).
 
 ### PR 1: Published, database and Edge (L; migration; rule 14)
 
@@ -746,6 +1301,9 @@ computed apart from the dry run.
       exports the fixture's imported schedule and re-imports it as a dry run: **zero changes**. [ ] G4 (M) "Changes since
       publication" (5.6). [ ] G5 (S) Optional "record as baseline" at import (decision 15). Tests: as 5.1 and 5.6, each
       with a case for a cancelled game and a TIME TBD game.
+- [ ] G2b (S, added 2026-11-06) Practices, and a multi-team marker derived from the team list, in the coach schedule
+      (5.1, F17, decision 31). It reads `practice_assignments`, so it needs no import and no migration. Tests: as the
+      last paragraph of 5.1.
 
 Plants: the Day Sheet filters by a venue's display name, not its id; the coach schedule omits assistant coaches; the
 Changes view enumerates from the changed rows only (a cancelled game vanishes).
@@ -755,6 +1313,145 @@ Changes view enumerates from the changed rows only (a cancelled game vanishes).
 - [ ] H1 (M) The dialog and the staged manual game (5.5). Test `tests/gameAddByHand.test.jsx`.
 
 Plants: a game addable over a Published slot; a double booking blocked instead of flagged; a new game arriving Published.
+
+### PR 9: Practice import I, the fixture and the pure core (L; no migration; added 2026-11-06)
+
+Depends on: PR 4 merged (it shares `scheduleImport/`'s helpers and the fixture conventions); decisions 19, 21 and 30.
+Rule 14: no (pure code and fixtures; nothing is persisted). Owner cost: three answers; no file from the owner (the
+fixture is invented).
+
+- [ ] J1 (M) `scripts/build-practice-fixture.mjs`, `fixtures/practice-schedule-2026/` and
+      `tests/practiceScheduleFixture.test.js`, as 4.11.7: the shape counts; every name placeholder-shaped; every plant
+      counted independently from the CSV; the pre-plant copy counts none; `--check` clean; `practice-invalid.csv`
+      reaches every refusal reason.
+- [ ] J2 (L) `packages/core/src/practiceImport/` (`parseRows`, `slotKey`, `mapping`, `aliases`, `reasonCodes`, `index`),
+      registered in the core index: days, times (both forms, `12:00 AM`, `12:30 PM`), `End` versus `Length`, a blank
+      `Team` as an open slot, `Use = hold`, the closed refusal reasons of 4.11.4, label normalisation through
+      `normaliseExternalLabel` (shared with PR 4), mapping and alias proposals (4.11.5), the division-settings proposal.
+      Tests: `tests/practiceImportParse.test.js` (every refusal reason; trailing whitespace folds to one team; a label
+      that differs only by a word stays two; run under two other `TZ` values), `tests/practiceImportMapping.test.js` (an
+      ambiguous label is never auto-mapped; an alias that disagrees with an exact match shows both and chooses neither;
+      the previous job's mapping is a proposal only), `tests/practiceImportSettings.test.js` (the most common count per
+      team; a tie proposes nothing; mixed lengths propose "any").
+- [ ] J3 (S) Docs: the fixture README, and one dated paragraph in `docs/operations/ingestion-pipeline.md` (the practice
+      file's columns).
+
+Plants: the parser reads a stray-space label as a second team; an alias proposal applied over an exact match; a team on
+two halves silently merged into a whole-field row. Stop and report if: the real-name guard or the source-hygiene test
+fails on a fixture file; the produced shape falls outside the targets of 4.11.7 and the script cannot bring it inside
+(report the produced numbers); `normaliseExternalLabel` cannot be shared with PR 4's module without a cycle.
+
+### PR 10: Practice import II, the database (L; migration; rule 14; added 2026-11-06)
+
+Depends on: PR 5 merged and deployed (the shared lists and the team-shell step) and PR 9 (the fixture); decisions 20, 22,
+23, 24, 25 and 26. Owner cost: those answers; one migration to deploy before PR 11 opens; CI minutes for pgTAP and the
+harness plants (no local stack is asked of the owner).
+
+- [ ] K1 (L) Migration: `practice_schedule` through the lists of 4.11.8; `map_practice_import_job` (a sibling of PR 5's,
+      not a generalisation: rule 2); `ensure_practice_slot` (internal); `apply_practice_import_job(job, dry_run)`;
+      `rollback_practice_import_job(job)`. **No change to `persist_practice_schedule`, its gate, or any column of
+      `practice_assignments`.** `docs/sql/<v>_revert.sql` (drops the functions and the CHECK entries; imported practices
+      stay, losing their records, so roll an import back first) and `_smoke.sql`; `supabase/catalog-snapshot.json`
+      regenerated; the harness plants re-aimed (lesson 70).
+- [ ] K2 (L) **First** `supabase/tests/practice_import_apply_rollback.sql` and the census updates (4.11.8), red against
+      today's code; then the migration. Cases: a dry run changes nothing (every table read back byte-equal); apply counts
+      equal dry-run counts over one file that reaches every outcome (each non-zero first); the five gate rules reported
+      for `manual` rows and equal to the fixture's independent counts; the writer's own gap (finding 13) shown as a fact;
+      `coach-conflict`; a re-import inserts nothing; every row that existed before is byte-equal after an apply, a
+      re-import and a rollback; a save after an import prunes and moves nothing, and a team short of its count is on the
+      TIME TBD list and gets units from `planTeamsForRun` while the others stay `locked`; the same canonical `daterange`
+      text as the writer's; rollback refuses after a change, an exception or a completed season and succeeds before; a
+      no-user job, a cross-organization job and a completed season are refused; shells land in a team run (PR 5's two
+      checks of 4.5); `practice_slot_conflicts` refusals are listed.
+- [ ] K3 (S) The mock finalizer mirrors apply, dry run and rollback. Test `tests/mockPracticeImport.test.js`: the fixture
+      through the mock equals the pgTAP's expected counts.
+- [ ] K4 (S) Docs: `docs/operations/ingestion-pipeline.md` (a practice schedule section; section 2.3's "15 minutes"
+      corrected to the turnover of 0), `docs/architecture/practice-scheduling.md` (a dated paragraph),
+      `docs/architecture/gotsport-import-contract.md` ("Practice schedule import: kept fields").
+
+Plants: the dry run's sentinel removed (it writes); `ON CONFLICT ... DO NOTHING` removed (a re-import fails or
+duplicates); the flag step calls the gate for `auto` rows only (the fixture's `manual` rows go unflagged). Stop and
+report if: `practice_new_auto_row_refusals` cannot judge a `manual` row (smallest input: one team, one slot of capacity
+1, two `manual` rows); `refresh_schedule_tbd_practices` cannot be called from the apply (smallest input: one season,
+one team short); the sentinel dry run cannot return the flag list; any existing practice pgTAP file moves; a second
+migration is needed.
+
+### PR 11: Practice import III, validation, the Practices tab, E2E (L; Edge and UI; rule 14; added 2026-11-06)
+
+Depends on: PR 6 (the shared Import panel) and PR 10 merged and deployed. Owner cost: one E2E feature in CI; after
+merge the owner may try a real file in their own session (a dry run, then roll back); the plan never asks for the file.
+
+- [ ] L1 (M) `import-validation` accepts `practice_schedule`: the allowlist, Zod rows, the 2,400 cap, the header aliases
+      of 4.11.2, no instant conversion. Tests: a Deno test and a vitest twin (days in every accepted form; `TZ` set to two
+      other zones to prove the host zone is not read); a 500-row chunk timed with coverage on (lesson 59).
+- [ ] L2 (L) The Practices tab of the Import panel (a `kind` of PR 6's panel, not a copy): upload; mapping with its
+      proposals and their sources; the division-settings proposals, one tick each; the confirm list (everything to be
+      created, with counts, and "venues created here have no coordinates"); the preview from the dry run (flags by rule,
+      the coverage sentence, teams short of their count); the result; rollback. Accessible, both themes, no colour-only
+      state. Tests: `tests/practiceImportPanel.test.jsx` (nothing is created without the confirm; each unmapped row is
+      listed with its reason; only a ticked division setting is sent).
+- [ ] L3 (S) `tests/practiceImportPreviewResult.test.js`: the preview's counts and flags equal the apply's over one file
+      that reaches every outcome (each non-zero first).
+- [ ] L4 (M) E2E `tests/e2e/features/practice_import.feature`: import the fixture, map with an alias file, see the flags
+      and the short teams, confirm, see the practices locked, roll back; axe in both themes. After `bddgen`; only this
+      feature locally. Whether the mock client can run the practice solver in E2E was not checked; if it cannot, the "a
+      run fills the gaps" case stays in K2.
+
+Plants: a label created without the confirm list; the preview's counts computed apart from the dry run; a division
+setting sent without its tick. Stop and report if: PR 6's panel cannot take a second kind without a rewrite (flag the
+refactor first: rule 2); the mock cannot answer the dry run.
+
+### PR 12: Paired days, same slot (L; migration; the practice solver; rule 14; added 2026-11-06)
+
+Depends on: PR 9 (the fixture, for the golden) and PR 10 (the import's flag list); decision 27 = build. Owner cost:
+decision 27; one migration to deploy; a golden re-tune the owner reviews (the season fixture and the demo league must
+not move with the setting off).
+
+- [ ] M1 (L) Migration: `divisions.practice_pairs` and its CHECKs; `admin_upsert_division_settings` (14 arguments, by
+      exact drop and create); the gate rule `pairing` in `practice_new_auto_row_refusals`. Revert and smoke; catalogue
+      snapshot; plants re-aimed. **First** `supabase/tests/practice_pairing.sql` red: each CHECK, the settings refusal,
+      the rule with its control (an unpaired second row refused; the first row of a pair, and the same shape with pairs
+      off, accepted), and `practices_per_division.sql` and `practice_writer_v3.sql` unchanged.
+- [ ] M2 (L) Both solver twins place a twin pair or neither (5.7). **First** the base's `sha256` over the season fixture
+      and the demo league with pairs empty; then `tests/practicePairing.test.js` (core), a Deno test (Edge),
+      `tests/practicePairingDrift.test.js` (the twins equal over a product of cases) and each interaction of 5.7 as a
+      case. `tests/practiceUnplacedReasons.test.js` extended in both directions for `pairing`.
+- [ ] M3 (M) The Teams page control, the import's `pairing-differs` flag, the repair row's `pairing-broken` flag. Tests:
+      component tests; the import case in PR 10's pgTAP extended.
+
+Plants: the pair placed non-atomically (one row placed, its partner left unplaced); the gate omits the partner-weekday
+check; the settings RPC accepts `practices_per_week` 3 with pairs set. Stop and report if: output with pairs empty
+differs by a byte from the base's; the drift test shows the twins disagree and the cause is not in this change; the TIME
+TBD reason CHECK would need a new value (it should not: 5.7).
+
+### PR 13: Capacity versus demand panel (M; no migration; read-only; added 2026-11-06)
+
+Depends on: nothing; decision 29. Owner cost: decision 29 and a look at the panel's wording.
+
+- [ ] N1 (M) `packages/core/src/practice/capacityDemand.js` and its Zod schema; the hook; the section on the Practices
+      page (5.9). Tests: `tests/practiceCapacityDemand.test.js` (the cases of 5.9, including `still needed` equal to
+      `planTeamsForRun`'s units), `tests/practiceCapacityDemandPanel.test.jsx` (every read failed in turn; "not checked
+      yet" before the inputs arrive; a 0-a-week division is not "short"; axe in both themes).
+
+Plants: the panel counts teams from the solver's output rather than the roster (a team the run lost goes missing); a slot
+open to two divisions counted twice in the total; the length rule dropped. Stop and report if: `planTeamsForRun`'s
+arithmetic cannot be mirrored in core without copying it (flag the duplication before doing it: rule 2).
+
+### PR 14: A stored slot hold (M; migration; the solver; rule 14; only if decision 28 chooses it; added 2026-11-06)
+
+Depends on: PR 10 and PR 11; decision 28 = stored. Owner cost: decision 28; the fifth migration, so the previous four
+are deployed first.
+
+- [ ] P1 (M) Migration: `practice_slots.hold_kind` and its CHECK; the gate rule `hold`; the Field Management control;
+      the import's `Use` accepts the kinds (`clinic`, `event`, `other`) and stores the hold instead of only listing it.
+      Revert, smoke, snapshot, plants re-aimed. **First** pgTAP red: a held slot refuses a new auto row, accepts a manual
+      one, and the same shape without a hold is accepted.
+- [ ] P2 (M) Both solver twins skip held slots; the capacity panel leaves them out and says "held". Byte-identical with
+      no hold (the `sha256` taken first); a case in the drift test.
+
+Plants: a solver twin that ignores the hold; the gate rule omitted; the panel counting held slots as supply. Stop and
+report if: either solver twin reads slots through a path that bypasses the filter; the gate cannot be replaced without
+moving more than three plants.
 
 ### Risks (watch / if it happens)
 
@@ -783,6 +1480,25 @@ Plants: a game addable over a Published slot; a double booking blocked instead o
   the UI says "Published baseline v3" for the record and "Published" for the switch, and the dialog explains once.
 - **Performance.** One import of 574 games is one SQL call plus two chunks of validation; lesson 59: time the page and
   Edge tests with `--coverage` on the base and the branch before merging.
+- **A second writer of `practice_assignments` (PR 10; added 2026-11-06).** The practice lock lives in the writer's body,
+  not in a trigger, so any other writer is a place it does not reach. The import only inserts, and its rollback only
+  deletes rows it wrote and nobody changed. Watch: the practice reader census and the case "every row that existed
+  before is byte-equal after an apply, a re-import and a rollback". If a path that updates a saved row is found, stop:
+  it is a defect in this plan, not a tuning question.
+- **The import's flags are SQL, so a wrong flag is wrong everywhere (PR 10).** Watch: pgTAP requires the product's flags
+  to equal the fixture's independently counted plants. If a rule is missed it is a one-function fix, because nothing
+  else computes it.
+- **The dry run takes the season lock and does the writes (PR 10).** Watch: its time with coverage on (lesson 59) and a
+  save waiting behind it. If slow, the preview says how long it took; the lock is never dropped to make it faster.
+- **Defaults hide intent (PR 11).** A division at one a week with no length is the column default and cannot be told
+  from a choice (4.11.5). If a two-a-week file is imported without ticking the division settings, the page reports the
+  teams over target and a run fills nothing; harmless, and the result screen says so.
+- **The flat file is the owner's conversion step.** Watch: whether the owner can produce it in one step from the grid.
+  If not, a grid reader becomes the next decision (21), at the cost of `.xlsx` and a layout parser.
+- **Words.** "Locked" here means the writer's default for every saved practice; the lock toggle on the Practices page
+  shows provenance, not a lock (the component says so). The import's result says "saved practices are locked" and the
+  panel keeps "manual choice" for the toggle.
+- **Pairing could surprise a team that is short a practice (PR 12).** Watch: the held-row cases. Off by default.
 
 ### Rollback
 
@@ -790,7 +1506,12 @@ PR 1: its `_revert.sql` drops the trigger, RPCs and columns and restores the pre
 text); the flags are lost, which the revert's header says; the two `audit_actions` rows stay (harmless; audit rows keep
 pointing at them). PR 2, 3, 4, 7, 8: code only, each reverts alone. PR 5: its `_revert.sql` drops the columns, RPCs
 and CHECK entries; imported games stay but lose their provenance, so roll an import back **before** reverting. PR 6:
-code only. A revert never runs automatically (`ci-cd.md`).
+code only. PR 9, 11, 13 (added 2026-11-06): code and fixtures only, each reverts alone. PR 10: its `_revert.sql` drops
+the functions and the CHECK entries; imported practices stay but lose their records, so roll an import back **before**
+reverting. PR 12: its `_revert.sql` drops `practice_pairs` and restores the gate and settings function bodies from
+production's text (lesson 87's method); the pairing settings are lost, which the header says, and practices already
+placed stay. PR 14: its revert drops `hold_kind` and restores the gate; held slots become ordinary open slots, which the
+header says, so list them first. A revert never runs automatically (`ci-cd.md`).
 
 ## 8. What already exists, but stronger
 
@@ -813,45 +1534,79 @@ the verification found (finding numbers in brackets).
 | Multiple orgs, seasons, undo, security | Multi-tenant RLS, one active season, completed seasons read-only, rollback for coach and field imports, an audit row in the same transaction as every save                   |                                                                                                                    |
 | Played games struck through            | Not present; scores live on `games` (Scores, standings), behind a setting                                                                                                    | Same split [5]                                                                                                     |
 
+### 8.1 The practice side: what already exists, but stronger (added 2026-11-06)
+
+Only what was read in the code (_statically reviewed_); the references are the ones in 2.1, 4.11 and 5.7 to 5.9.
+
+| The spreadsheet's piece           | SquadLogic today                                                                                                                                                                        | Caveat, verified                                                                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Fields and halves or sides        | A facility model with subunits; a whole field clashes with each of its halves, two halves never with each other, effective dating (`practice_slot_conflicts`, `20261029010000:140-196`) | The import creates slots through the same rule, so a clash is refused, not flagged (4.11.3)                                      |
+| Daylight and sunset               | An unlit practice ends before sunset on the season's clock, one lit field may run past; past sunset is flagged and kept, unknown sunset is flagged (`practice-scheduling.md`, Daylight) | Flagged, never blocked (owner, 2026-10-27); a venue without coordinates reads "unknown", which a created venue does (finding 18) |
+| Lighting overrides                | Per-field lighting overrides, with their own page (`PracticeLightingPage.jsx`, `practice-lighting-overrides.ts`)                                                                        | Not read by the import                                                                                                           |
+| Practices a week and how long     | `divisions.practices_per_week` (0 to 7) and `practice_minutes` (15 to 240), read by the solver and enforced by the writer's gate for new auto rows (`20261105010000`)                   | Default 1 and any length, indistinguishable from "unset"; no pairing (F14)                                                       |
+| Different days for one team       | A hard rule in the solver and, for new auto rows, in the writer's gate                                                                                                                  | It does not choose which weekdays (F14)                                                                                          |
+| Coaches on two teams              | A coach's practices never overlap in the solver (`practice-coaches.ts:311-316`); the import flags an overlap it is handed                                                               | The import judges only teams with a coach assigned; the Coaches page's `multi` badge is a stored flag (F17)                      |
+| Coach choices                     | Coach preference rules, `prefer` or `must`, one rule per team, imported by file and judged per practice (`coachPreferences.js`); an accepted must is a hard rule                        | Priority is shown, never weighed. The workbook's 1st/2nd/3rd-choice legend has no verified equivalent; not read                  |
+| "DO NOT CHANGE - PUBLISHED"       | Every saved practice is locked by default; it moves only through `unlock` with a reason and an audit row (`practice.unlock_accepted`)                                                   | No Published switch is needed for practices; the lock toggle on the Practices page is provenance (2.1)                           |
+| Makeups after a closure           | Blackouts plus the practice repair and its enact RPC (5.10)                                                                                                                             | Not tested; whether it reproduces the owner's makeup grid is unknown                                                             |
+| Conflicts at a glance             | The writer's five-rule gate, the solver's hard rules, and the run's per-team shortfalls; `get_schedule_tbd` lists short teams                                                           | The gate judges only new `auto` rows; no grid view of assignments exists (2.1)                                                   |
+| The per-division planning summary | Not present before a run                                                                                                                                                                | F16 / PR 13                                                                                                                      |
+
 ## 9. Against the rules (checked)
 
-- **AGENTS.md rule 14:** applies to PR 1, 2, 5, 6 and 8; this document is the stop. No PR starts before the owner agrees
-  it. **Global re-optimisation** is not introduced: regeneration re-solves the unpublished games exactly as it does
-  today, and `reoptimiseWholeSeason` stays unwired.
-- **Rule 2, minimal diffs:** no refactor is proposed. Two things are flagged as costs, not done: `persist_game_schedule`
-  and `admin_delete_team` are replaced whole (a migration cannot patch a function), which moves their harness plants
-  (lesson 70); and the field import's find-or-create slot lookup is **copied into `ensure_game_slot`, not extracted**,
-  leaving the duplication as a possible later refactor.
+- **AGENTS.md rule 14:** applies to PR 1, 2, 5, 6, 8, 10, 11, 12 and 14; this document is the stop. No PR starts before
+  the owner agrees it, and the owner's hold means none starts without an explicit go for that PR (section 10).
+  **Global re-optimisation** is not introduced: regeneration re-solves the unpublished games exactly as it does today,
+  and `reoptimiseWholeSeason` stays unwired; the pairing setting (PR 12) changes how the practice solver places new
+  units for a division that opts in, and re-solves no saved practice.
+- **Rule 2, minimal diffs:** no refactor is proposed. Costs flagged, not done: `persist_game_schedule` and
+  `admin_delete_team` are replaced whole (a migration cannot patch a function), which moves their harness plants
+  (lesson 70); the field import's find-or-create slot lookup is **copied into `ensure_game_slot` and
+  `ensure_practice_slot`, not extracted**, leaving the duplication as a possible later refactor; `map_practice_import_job`
+  is a sibling of PR 5's, not a generalisation; the practice import gets an additive writer rather than a new mode in
+  `persist_practice_schedule`, which would replace that function whole (added 2026-11-06). The writer's gap in finding
+  13 is reported, not fixed.
 - **Rule 4, honest labels:** this plan labels every claim; the numbers about the owner's workbooks are _executed_ counts
-  and say where they could not be reproduced (finding 9).
+  and say where they could not be reproduced (finding 9); the second workbook's brief figures that were not re-run say so.
 - **Rule 5, trust boundaries:** every id is validated against the organization; the file is validated in the Edge
-  function and again in SQL; no time is recomputed in SQL; no error is swallowed (the guard names the game).
+  function and again in SQL; no time is recomputed in SQL; no error is swallowed (the guard names the game); the
+  practice file computes no instant at all and the alias file is read only in the browser.
 - **Rule 6 and the Verification conventions:** each task names its test; each PR has at most three plants; subject sets
   are enumerated from the saved set, the roster or the code, never from the thing a break would corrupt (scope
   resolution, the audit's teams, the Changes view); "declared is not enforced" is answered by the coverage sentence;
   nothing is parsed and left unread (the `Format` and `Notes` columns are dropped, not stored); the adopted contracts
   are the siblings' (`unlock` and `GRID_OVERRIDE_REASONS`, the completed-season exemptions, `normaliseExternalLabel`,
-  the evaluators' warning names).
+  the evaluators' warning names). For PR 9 to 14: the import's flag counts are enumerated from the CSV independently of
+  the product, and the product's flags must equal them (a check that can fail, with a pre-plant control); the capacity
+  panel enumerates from the roster and the division counts, never from a run (lessons 46 and 92); the writer's five rules
+  are reused by calling the gate, not copied; "declared is not enforced" is answered by the coverage sentence and the
+  panel's face; `Use` is a closed value, so no free text is parsed and kept.
 - **Core principles:** all persistence through RPCs; every payload validated by a Zod schema (A3, F1); every state change
   audited in its transaction; WCAG 2.2 AA with a non-drag path (section 3.6); backward compatible by default (the flag
   defaults off, `pinned` is optional, `is_external` defaults false).
 - **Section 2 scope and privacy:** nothing is excluded by section 2. Admin-only throughout: the Day Sheet, coach schedule
   and duty list are admin pages and exports, never coach-facing views. Data minimisation: a games file keeps no
   coach, email, phone or free text; a coach schedule shows names, not contacts; the audit stores actor ids and reason
-  codes. No real data in the repository: the fixture is invented and the owner's workbooks stay outside.
+  codes. The practice file keeps no coach, email, phone or free text either, and the alias file holds names of places
+  only. No real data in the repository: the fixtures are invented and the owner's workbooks stay outside. The Windows
+  desktop version is not in scope.
 - **Installs and dependencies:** none added; reading `.xlsx` would add one and is deferred past the dependency-update
-  wave (decision 8).
+  wave (decisions 8 and 21).
 - **A conflict with AGENTS.md, named:** section 3 asks for an adversarial review (`/code-review`) before every PR; the
   owner's budget rule for this work says no `/code-review` rounds. Both cannot hold. This plan follows the owner's
-  rule only if the owner confirms it (decision 16); until then each PR keeps one self-review against its plants and
-  stop conditions, labelled _statically reviewed_.
+  rule only if the owner confirms it (decision 16, which covers PR 9 to 14 too); until then each PR keeps one
+  self-review against its plants and stop conditions, labelled _statically reviewed_.
 - **No ADR folder exists**, so the decisions are recorded here and, once settled, in `docs/LESSONS_LEARNED.md`.
 
 ## 10. Owner decisions
 
-Each has options and a recommendation. **If the owner is silent, the recommendation applies, except decision 16, which
-has no default and blocks the first PR.** Decisions 1, 2, 11 and 16 block PR 1; 14 blocks PR 2; 4, 5, 6, 13 and 17 block
-PR 5; 8 blocks PR 6; the rest block nothing in this wave.
+Each has options and a recommendation. **The owner's hold stands (2026-11-06): nothing in this plan starts, for any PR,
+without an explicit go from the owner for that PR, so silence is never consent to start.** When a go is given, a decision
+the owner has not answered takes its recommendation, except decision 16 (which covers PR 9 to 14 too), which has no
+default and blocks the first PR. Decisions 1, 2, 11 and 16 block PR 1; 14 blocks PR 2; 4, 5, 6, 13 and 17 block PR 5; 8
+blocks PR 6. Added 2026-11-06: 19, 21 and 30 block PR 9 (19 blocks PR 10 and 11 as well); 20, 22, 23, 24, 25 and 26
+block PR 10 (26 also shapes PR 11's panel); 27 blocks PR 12; 28 blocks PR 14 and sets how PR 10 and 11 treat a
+`Use = hold` row; 29 blocks PR 13; 31 blocks task G2b of PR 7. The rest block nothing in this wave.
 
 1. **Who may override, and what it needs.** Recommended: any `is_org_admin` (admin, tenant admin, staff, as every
    schedule write), signed in (no service role), a reason from the closed list (`field-change`, `coach-request`,
@@ -907,7 +1662,63 @@ PR 5; 8 blocks PR 6; the rest block nothing in this wave.
 17. **Week numbers for imported games.** Recommended: the `Week` column if present, else derived from the season's start
     date (4.8), required when the season has no start date. Alternative: always require `Week`.
 18. **Confirm the build list.** Recommended: build F2, F3, F5 (own CSV), F6, F7, F8, F9, F10; build F1 later; do not build
-    F4 or F12 now; F11 separately (decision 12).
+    F4 or F12 now; F11 separately (decision 12). F13 to F17 are decisions 19 to 31.
+
+_Added 2026-11-06 (the practice side)._
+
+19. **Do the practice side in this wave, and in what order.** Recommended: yes, after the games import it shares
+    machinery with: PR 9 with PR 6, PR 10 with PR 7, PR 11 with PR 8, then PR 12 and PR 13 (section 7). Alternatives: (b)
+    the practice import before the games import (PR 4 to 6 would then be built around the practice side first; sensible
+    only if the owner's practice schedule is the more urgent of the two); (c) hold the practice side until PR 1 to 8 have
+    merged (nothing is lost; the owner waits longer).
+20. **Rows the writer's gate would refuse** (the example has 5 teams in two places at once and 29 teams below their
+    count). Recommended: **accept and flag, never reject**: the rows are written as the admin's own, every broken rule is
+    listed in the preview and the result, short teams go to the TIME TBD list, and the existing writer and gate are not
+    touched. Alternatives: (b) refuse the rows (the owner's "accept and flag" for games would then not hold for practices,
+    and a team double-placed in the file could not be imported at all); (c) write only the rows that break no rule and
+    list the rest (imports less of a real schedule than it is).
+21. **File format.** Recommended: a flat CSV, one row per timed cell (4.11.2). Alternatives: (b) read the grid itself
+    from `.xlsx` (a new dependency, decision 8, plus a layout parser; the grid's measured traps are finding 14); (c) the
+    flat CSV now and a grid reader later.
+22. **What the practice import may create from the file.** Recommended: only on the confirm step's explicit list: team
+    shells (through the existing team writer), divisions (by name, no age band, flagged), locations and fields (no
+    coordinates, unknown lighting, flagged), subunits, and practice slots including open ones (a blank `Team`).
+    Alternatives: (b) create nothing, the fields CSV first (safest; two files and two conversions of the grid); (c)
+    create slots and shells but never locations or fields.
+23. **Provenance of imported practices, and "locked on arrival".** Every saved practice is locked by default, so "arrive
+    locked" holds under any answer (2.1). Recommended: `source = 'manual'` and `assigned_via = 'manual'`. Alternatives:
+    (b) `auto` (a later save could prune an imported practice for a team it omits, with an unlock); (c) "unlocked on
+    arrival": not possible without a new concept in the writer (a migration replacing `persist_practice_schedule`);
+    not recommended.
+24. **What a re-import does to saved practices.** Recommended: additive: change nothing, delete nothing, count unchanged
+    rows, list "in the schedule, not in this file". Alternative: replace the season's imported rows (a re-import would
+    then need an unlock for every moved row; not recommended).
+25. **The dates imported practices run.** Recommended: the file's `Valid From` and `Valid Until` per row, else two dates
+    on the confirm step defaulting to the season's start and end, required when the season has none (4.11.6).
+    Alternative: always require dates in the file.
+26. **Division practice settings from the file.** Recommended: propose `practices_per_week` and `practice_minutes` per
+    division from the file and apply a proposal only when ticked, through the existing audited RPC. Alternatives: (b)
+    never touch them (the page then reports two-a-week teams as over target until the admin sets them); (c) apply them
+    automatically (not recommended: the default of 1 cannot be told from "unset", and a silent change is the decision
+    nobody made, lesson 86).
+27. **The paired-days pattern: now, later or never.** Recommended: **later** (PR 12), as an optional per-division
+    setting, off by default. Alternatives: (b) now, before the import (it also changes what the fixture's golden
+    shows); (c) never (the import and gap-fill already cover what a league has); (d) the cheaper "same slot on any two
+    weekdays" boolean (covers Mon+Thu, allows back-to-back days).
+28. **The non-team slot hold.** Recommended: **now, no stored hold**: a `Use = hold` cell makes no slot and is listed;
+    build the stored `hold_kind` (PR 14) only if the owner has holds beyond the occasional one or wants them visible.
+    Alternatives: (b) the stored hold with the import (PR 14 early); (c) a zero-practice "Clinics" division reserving the
+    slot (not recommended: it appears in teaming and the exports); (d) field blackouts (not recommended: date-based, and
+    the practice solver does not read them).
+29. **The capacity-versus-demand panel.** Recommended: build (PR 13), a read-only section at the top of the Practices
+    page, labelled an upper bound. Alternatives: skip it; or show it on the import result only (smaller, but of no use
+    without an import).
+30. **Alias file and reuse of the last mapping (F17).** Recommended: yes: the mapping step takes an optional alias CSV,
+    read in the browser, and the previous import's stored mapping as proposals, never applied without the admin; no
+    table. Alternative: a stored per-organization alias list (more convenient; a table, RLS and a migration, and one
+    more place for a label to go stale).
+31. **Practices, and a multi-team marker derived from the team list, in the coach schedule (F3 and F17).** Recommended:
+    yes (task G2b of PR 7). Alternative: games only for now.
 
 ## 11. Receipts: searches, runs, and what was not run
 
@@ -963,6 +1774,63 @@ own earlier plan); that `persist_team_schedule` accepts a payload with teams and
 does; the RPC body was not exercised); that incremental teaming fills empty shells; what the workbook's formulas do
 for duties and Early/Late (labels and headers read, formulas not); the TeamSnap and GotSport template files.
 
+### 11.1 Receipts added 2026-11-06 (the practice side)
+
+Base unchanged: `origin/main` `c3d190d`, checked on 2026-11-06 (`git fetch`: still `c3d190d`, so no merge was needed
+before editing). The upload and the three scratch scripts of the coordinator's read were present, so every figure
+below was re-run rather than copied; scratch scripts (`openpyxl`, run with `python3 -I`, printing no name, venue, team,
+coach or value) are kept in the session's scratchpad, outside the repository. Each absence has its positive control.
+
+| Id  | Claim                                                                 | Command or source                                                                                                                                                                                                                                                                                                    | Result and control                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R12 | The grid's counts reproduce the coordinator's figures                 | `python3 -I grid_stats.py <upload>`                                                                                                                                                                                                                                                                                  | 235 placements (37 and 198), 1 non-team cell, 0 cells without a time header; 726 timed cells (96 and 630); 132 teams (103 with two, 29 with one); day patterns as in 4.11.1; 83 same-slot; 0 cells used twice; 5 teams in two places; 49 field rows used; 217 on a half or side; 31 merged ranges; 219 coaches, 19 on two or more, 1 same-start clash; 132 of 132 grid teams on the coach list. Control: each figure equals the coordinator's |
+| R13 | The alias tab cannot be tied to the grid                              | `alias_stats2.py` and `alias_where.py`                                                                                                                                                                                                                                                                               | 21 rows, 20 distinct targets; 0 of the 21 names occur on any other tab (exact, or whitespace- and case-normalised); 4 of the 20 targets occur as row labels on the main grid. Control: the script reads the grid's 58 labelled rows                                                                                                                                                                                                           |
+| R14 | 20 team cells are merged over two field rows                          | `merged_stats.py`                                                                                                                                                                                                                                                                                                    | 21 merged ranges span two or more rows in the data: 20 hold a team (2 rows by 1 column, the row labels sharing a stem) and 1 is a 6 by 3 block; 0 adjacent unmerged duplicates. Control: R12's 31 merged ranges include them                                                                                                                                                                                                                  |
+| R15 | Two blocks, partial time headers, marker rows, stray whitespace       | `blocks_stats.py` and `alias_stats.py`                                                                                                                                                                                                                                                                               | Block 1: 16 labelled rows, times on 2 of 5 weekdays (6 time cells); block 2: 42 rows, 15 time cells; no label in both; 2 rows labelled `.`; 236 team-shaped cells, 2 with stray whitespace. Control: 16 + 42 = 58 labelled rows                                                                                                                                                                                                               |
+| R16 | The tabs' shapes                                                      | `inspect.py`                                                                                                                                                                                                                                                                                                         | 14 tabs, 3 visible and 11 hidden; the by-team tab has 322 rows; no title or value is copied here                                                                                                                                                                                                                                                                                                                                              |
+| R17 | The import types and required fields                                  | `rg -n "practice_preferences" supabase/functions/import-validation/*.ts`, then read `index.ts:524-531` and `:56`                                                                                                                                                                                                     | The enum has six values (`players`, `coaches`, `fields`, `field_availability`, `practice_preferences`, `evaluations`); `REQUIRED_FIELDS` has no entry for a practice schedule. Control: the same read shows the `fields` branch at `:403`                                                                                                                                                                                                     |
+| R18 | No practice-schedule importer exists                                  | `rg -n -i "practice_schedule\|practice_assignments_import\|import_practice_\|apply_practice_import\|practice.?schedule.?import" supabase/functions supabase/migrations frontend/src packages/core/src --glob '!**/*.test.*'`                                                                                         | 8 hits, all unrelated (a resource name, an error code, the fingerprint RPC's name, comments). Control: `finalize_field_import_job` matches 10 times in one migration                                                                                                                                                                                                                                                                          |
+| R19 | The latest bodies of the functions this plan copies                   | `rg -n "FUNCTION public\.(persist_game_schedule\|admin_delete_team\|admin_cancel_game_assignment\|persist_practice_schedule)" supabase/migrations`                                                                                                                                                                   | `persist_game_schedule` `20261108020000:1763`; `persist_practice_schedule` `20261108020000:515`; `admin_cancel_game_assignment` `20260613000003:68`; **`admin_delete_team` `20261112010000:1413`** (the plan had `20261108020000`: corrected). Control: the older definitions are listed too                                                                                                                                                  |
+| R20 | No pairing or same-slot rule in the practice solver                   | `rg -n -i -e "pairing" -e "paired (day\|weekday\|slot\|practice)" -e "same[- ]slot" -e "twin slot"` over `practiceScheduling.js`, `practice/`, `practiceMetrics.js`, `supabase/functions/auto-scheduler`, `_shared/engines`, the Practices page                                                                      | 0 files. Control: `WEEKDAY` matches 2 lines in `practice-coaches.ts` (the different-weekday rule)                                                                                                                                                                                                                                                                                                                                             |
+| R21 | The practice solver never reads blackouts or closures                 | `rg -l -i -e blackout -e closure supabase/functions/auto-scheduler supabase/functions/_shared/engines packages/core/src/practiceScheduling.js`                                                                                                                                                                       | 0 files. Control: `PracticeSchedulingPage.jsx:13, :568` import and use `useFieldClosures` (the page warns)                                                                                                                                                                                                                                                                                                                                    |
+| R22 | `Clinic` is only a field size                                         | `rg -n -i "clinic" frontend/src packages/core/src supabase/functions supabase/migrations --glob '!**/*.test.*'`                                                                                                                                                                                                      | 1 hit, `FieldManagementPage.jsx:1009`. Control: the adjacent lines are the other size options (`11v11`, `9v9`, `7v7`, `5v5`)                                                                                                                                                                                                                                                                                                                  |
+| R23 | Capacity 0 is not a hold                                              | Read `PracticeSchedulingPage.jsx:209`, `practiceSupabase.js:98-102`, `import-validation/index.ts:436-446`; no search                                                                                                                                                                                                 | The page raises 0 to 1; the loader throws; the fields CSV refuses `Capacity` below 1. Statically reviewed only                                                                                                                                                                                                                                                                                                                                |
+| R24 | No before-a-run supply-and-demand view; `slotUtilization` unshown     | `rg -n -i -e "slots needed" -e "slots available" -e "capacity.*demand" -e "demand.*capacity" frontend/src/pages frontend/src/components packages/core/src/practice*`; `rg -l "slotUtilization" frontend/src`                                                                                                         | 2 unrelated hits (an unplaced-reason string, a Games grid empty message); `slotUtilization` has one frontend file, `PracticeReadinessPanel.jsx`, where it is named in a docblock. Control: `unassignedTeams` matches 14 lines in the panel                                                                                                                                                                                                    |
+| R25 | No alias store in the mapping module                                  | `rg -n -i alias packages/core/src/externalImport/*.js`                                                                                                                                                                                                                                                               | 0 hits. Control: `normaliseExternalLabel` at `mapping.js:160`                                                                                                                                                                                                                                                                                                                                                                                 |
+| R26 | The Practices page lists assignments as a table; no field-by-day grid | `rg -n "PracticeAssignmentList\|PracticeReadinessPanel\|GameScheduleGrid\|DataGrid" frontend/src/pages/PracticeSchedulingPage.jsx`; `rg -ln "DataGrid\|GameScheduleGrid" frontend/src`                                                                                                                               | The page uses the list and the panel only; `DataGrid` serves Players, Coaches, Blackouts and Scores; `GameScheduleGrid` (with `FieldColumn`) is used by the Games page. Control: the list component is read in full                                                                                                                                                                                                                           |
+| R27 | The writers of `practice_assignments`                                 | `rg -n -i "(insert into\|update\|delete from)\s+(public\.)?practice_assignments" supabase/migrations`, by file, then the latest bodies                                                                                                                                                                               | 17 files; the latest writing bodies are in 2.1. Control: the pattern finds the writer's insert (`20261108020000:1425`)                                                                                                                                                                                                                                                                                                                        |
+| R28 | The TIME TBD sync refuses any caller but the writer and the refresh   | Read `20261108020000:221-262` and `:347-440`                                                                                                                                                                                                                                                                         | A `PG_CONTEXT` check at `:236-240`; the refresh takes the writer's season lock and audits a change. Statically reviewed only                                                                                                                                                                                                                                                                                                                  |
+| R29 | The real-name guard and the source-hygiene test still pass            | `npm ci --ignore-scripts --no-audit --no-fund` in the worktree (`node_modules` removed afterwards), then `./node_modules/.bin/vitest run tests/realNameDenylist.test.js tests/sourceHygiene.test.js`                                                                                                                 | 2 files, 34 tests passed (the guard scans `docs/`, so this file). The install warned that the repository wants Node `^24.15.0` and this machine has 22.23.4; no file was changed by it. The guard's planted-name control is in its own file (read, not re-run)                                                                                                                                                                                |
+| R30 | Formatting and hygiene                                                | `prettier --write` on this file only (3.7.4, the repository's `.prettierrc`); the placeholder grep of `prompts/plan-change.md`; `git diff --check`; searches of the file for every string read from the owner's workbook (venue and team-family names, the club's initials, tab titles, any `@`) and for model names | Formatted; the placeholder grep printed nothing; `git diff --check` clean; 0 hits for each string searched. Prettier left the original tables alone: the only original lines the diff removes are the 59 edited on purpose (listed in the Amendments)                                                                                                                                                                                         |
+
+**The second workbook, counts only** (_executed_ 2026-11-06, R12 to R16). The brief's figures all matched; the ones that
+were new are marked.
+
+| Figure                                                                       | Recomputed                                                                                                 | Brief                       | Same?                                |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------ |
+| Placements; by block                                                         | 235; 37 (45-minute block) and 198 (60-minute block)                                                        | 235; 37 and 198             | yes                                  |
+| Distinct teams; with two practices; with one                                 | 132; 103; 29                                                                                               | same                        | yes                                  |
+| Two-weekday teams by pattern                                                 | Tue+Thu 49, Mon+Wed 38, Wed+Fri 8, Mon+Thu 3 (98); both placements at one weekday and start 5 (103 in all) | same pattern counts         | yes; the 5 and the 98 are new splits |
+| Teams holding one field and start on both days                               | 83 (of the 98)                                                                                             | 83                          | yes                                  |
+| Cells used twice; teams in two places at once                                | 0; 5                                                                                                       | 0; 5                        | yes                                  |
+| Field rows used; labelled rows; placements on a half or side                 | 49; 58; 217                                                                                                | 49; n/a; 217                | yes; 58 is new                       |
+| Venues (a prefix reading of free-text labels)                                | about 8                                                                                                    | 8                           | an estimate, as the brief            |
+| Timed cells; non-empty cells                                                 | 726 (96 and 630); 236                                                                                      | 726                         | yes; the split and 236 are new       |
+| Team cells merged over two field rows                                        | 20                                                                                                         | not in the brief            | **new** (finding 14)                 |
+| Marker rows; names with stray whitespace                                     | 2; 2                                                                                                       | not in the brief            | **new**                              |
+| Coaches named; on two or more teams; same-start clash                        | 219; 19; 1                                                                                                 | 219; 19; 1                  | yes                                  |
+| Tabs; alias rows; distinct alias targets                                     | 14 (3 visible, 11 hidden); 21; 20                                                                          | alias table only            | the rest new                         |
+| A coach-choice legend, a "do not change, published" note, equipment tracking | not looked for                                                                                             | reported by the coordinator | **not re-run**                       |
+
+**Not run, added 2026-11-06.** Everything in "Not run" above, for the new PRs too: no migration, test, pgTAP case,
+harness plant, build, `/code-review` or `gh pr list`. Also not run: any dry run of the practice import (it does not
+exist); the sentinel-rollback dry run of 4.11.4 (a design, not a measurement: PR 10's first task proves it);
+`practice_new_auto_row_refusals` over a `manual` row (read, not executed; PR 10's stop condition names it); the writer's
+gap of finding 13 (read, not executed); whether the owner's spreadsheet can emit the flat file in one step; whether the
+mock client can run the practice solver in E2E; the field import's subunit handling beyond reading the lines cited
+(PR 10 re-reads it); whether a cached browser still resolves the 13-argument settings RPC after PR 12 (the
+trailing-default argument is the method `20261105010000` used; not re-tested).
+
 ## 12. What the planning taught (for `docs/LESSONS_LEARNED.md`, written in PR 1)
 
 - **A "present and stronger" table is one claim per row, and each row has a reader.** The per-team export and feed looked
@@ -976,24 +1844,46 @@ for duties and Early/Late (labels and headers read, formulas not); the TeamSnap 
   run's payload, not the table).
 - **"Same as teaming" meant "preserve what a run recorded", not "accept what arrives".** Teaming never built the arrival
   half (the unread `team name` columns); say so when a new feature is promised to match it.
+- **Copy a function from the migration that defines it last, found by search, not from the last one you read** (added
+  2026-11-06). The plan named `20261108020000` for `admin_delete_team`; a later migration (`20261112010000`) replaced it.
+  Before any "replace whole", `rg` the function name over `supabase/migrations` and take the highest version (R19). A
+  second pass over a plan's own file references is part of the review (lessons 70 and 87).
+- **A writer built for one job is the wrong door for another.** The practice writer replaces a season and gates only the
+  rows it is told are the solver's; an import that must accept what the gate refuses is an additive writer of its own,
+  not a mode bolted on, and it reuses the gate **read-only** to say what it accepted (the gate takes any ids).
+- **Measure the trap before choosing the format.** The grid looked readable; counting its merged cells showed that a
+  plain reader loses 20 of 235 placements without a word. The format decision rests on that count, not on taste.
+- **Read the guard before promising to call a helper.** `sync_schedule_tbd_practices` allows two callers by its stack;
+  the public refresh is the import's door. A promise to "reuse the writer's step" is a claim about who may call it.
+- **Refute the cheap trick on the page, not in the table.** Capacity 0 looked like a hold in the SQL; the Practices page
+  turns it into 1 and the loader throws. A shortcut through a column is checked at every reader of the column.
+- **A default hides intent.** A division at one practice a week is the column default and a choice at once; an import
+  that reads a file must propose the setting and ask, never infer it.
 
 ## 13. Output of the planning (prompts/plan-change.md)
 
 1. Size verdict: planned, not small (above). No test is named for a small change because none is small.
-2. Departures from AGENTS.md: one, named in section 9 (the adversarial review versus the owner's budget rule), decision 16. No ADR is drafted (the repository has no ADR folder). Open questions: eighteen, each with a recommendation;
-   decisions 1, 2, 11 and 16 block the first PR.
+2. Departures from AGENTS.md: one, named in section 9 (the adversarial review versus the owner's budget rule), decision 16. No ADR is drafted (the repository has no ADR folder). Open questions: thirty-one, each with a recommendation
+   (1 to 18, and 19 to 31 added 2026-11-06); decisions 1, 2, 11 and 16 block the first PR. The owner's hold stands:
+   nothing starts without an explicit go.
 3. The first task: PR 1's A1, starting with `supabase/tests/game_published.sql`, red against today's code.
 4. What the planning taught: section 12.
 
 ## 14. Resume here (for an agent with no memory of this conversation)
 
-**Read, in this order.** (1) This plan: sections 2, 3, 4, 7, 10. (2) `AGENTS.md` sections 2 and 3 (operating rules 1 to 16,
-the Verification conventions, the Definition of Done) and `docs/LESSONS_LEARNED.md` 5, 37, 42, 47, 56, 59, 64, 65, 66, 70,
-73, 74, 77, 86, 87, 94. (3) The precedents to copy: `supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql`
+**Read, in this order.** (1) This plan: the Amendments, sections 2 and 2.1, 3, 4 (with 4.11), 5.7 to 5.9, 7, 10. (2) `AGENTS.md` sections 2 and 3 (operating rules 1 to 16,
+the Verification conventions, the Definition of Done) and `docs/LESSONS_LEARNED.md` 5, 37, 42, 46, 47, 56, 59, 64, 65, 66, 70,
+72, 73, 74, 77, 86, 87, 90, 92, 93, 94. (3) The precedents to copy: `supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql`
 (header and `unlock`), `20261111010000_season_rollover.sql:520-655` (the read-only triggers and their exemptions),
 `20261108020000_schedule_tbd.sql:1763-2440` (`persist_game_schedule` as it stands), `20260613000003:68`
 (`admin_cancel_game_assignment`), `20261029010000:1008-1100` (find-or-create game slot), `20260503060000` (staging and
-application records). (4) The pgTAP shapes: `supabase/tests/season_schedule_readonly.sql` and `practice_writer_v3.sql`
+application records). For the practice side (PR 9 onward): `20261108020000_schedule_tbd.sql:515-1752`
+(`persist_practice_schedule`), `:221-440` (the TIME TBD sync and refresh), `20261105010000_practices_per_division.sql:115-215`
+(the gate), `20261029010000:140-196` and `:892-1009` (`practice_slot_conflicts`; the practice slot find-or-create),
+`supabase/functions/_shared/engines/practice-lock.ts:232` (`planTeamsForRun`), `practice-coaches.ts:277-345` (the hard
+rules), `fixtures/demo-2026/fields.csv` with `scripts/build-demo-seed.mjs` (the fixture's shape),
+`tests/practiceReaderCensus.test.js` and `tests/practiceUnplacedReasons.test.js` (two lists a new writer and a new rule
+must join). (4) The pgTAP shapes: `supabase/tests/season_schedule_readonly.sql` and `practice_writer_v3.sql`
 (clear the JWT claims before seeding, lesson 56), and `scripts/dbharness/prove.sh` (the plant entries, e.g. `M15`).
 (5) The page: `frontend/src/pages/GameSchedulingPage.jsx` (`handleAutoGenerate:918`, `handleApplySchedule:1099`,
 `moveGameTo:1203`, `handleCancelGameAssignment:1374`), `GameCard.jsx`, `GridOverrideDialog.jsx`, `gridOverridePrompt.js`.
@@ -1003,22 +1893,29 @@ application records). (4) The pgTAP shapes: `supabase/tests/season_schedule_read
 **Re-verify before relying on anything here (main moves).** `git log -1` and the highest file in `supabase/migrations`
 (it was `20261118010000` at `c3d190d`); then re-run the searches of section 11 (R1 to R5 and the absence counts) and read
 the numbers against it; confirm `scheduleGames` still has no `pinned` and still refuses `freeze`; confirm no other
-writer of `game_assignments` has appeared (R5). The owner's two workbooks are **outside the repository**; if a
-figure from them is needed again, ask the owner for the files and recompute counts only. Never copy a name or value.
+writer of `game_assignments` has appeared (R5). For the practice side re-run R17 to R28 and confirm that
+`persist_practice_schedule`, `practice_new_auto_row_refusals` and `refresh_schedule_tbd_practices` are still the bodies
+read here, and that `admin_delete_team`'s latest body is still `20261112010000:1413` (R19). The owner's two workbooks
+are **outside the repository** (the second, a practice grid, was recomputed on 2026-11-06); if a figure from them is
+needed again, ask the owner for the files and recompute counts only. Never copy a name or value.
 
-**Order of work.** PR 1; then PR 2 and PR 4; then PR 3 and PR 5; then PR 6; then PR 7 and PR 8 (section 7). Two in flight at
-most. Nothing starts before the owner agrees this plan (rule 14) and answers decisions 1, 2, 11 and 16; record the answers
-in the "Status" line at the top, as the earlier plans do.
+**Order of work.** PR 1; then PR 2 and PR 4; then PR 3 and PR 5; then PR 6 and PR 9; then PR 7 and PR 10; then PR 8 and
+PR 11; then PR 12 and PR 13; then PR 14 only if decision 28 chooses it (section 7; PR 13 may take any free slot). Two in
+flight at most. **The owner's hold stands: nothing starts, for any PR, without an explicit go for that PR.** Nothing
+starts before the owner agrees this plan (rule 14) and answers decisions 1, 2, 11 and 16; record the answers in the
+"Status" line at the top, as the earlier plans do.
 
-**Open decisions.** Section 10. The ones with no safe default: 16. The ones that change the migration: 1, 2, 4, 5, 6, 11, 13, 17.
+**Open decisions.** Section 10. The ones with no safe default: 16. The ones that change a migration: 1, 2, 4, 5, 6, 11, 13,
+17, and (practice side) 20, 22, 23, 24, 25, 26, 27, 28. The ones that change only code or a file: 19, 21, 29, 30, 31.
 
 **How to start PR 1 without re-deriving anything.**
 
 1. `git fetch origin main`; branch `feat/game-published-db`; check that fewer than two pull requests are open.
 2. Write `supabase/tests/game_published.sql` first, from `season_schedule_readonly.sql`'s skeleton: one assertion per row
    of 3.3 and per gate of 3.4, each refusal beside an unpublished control. Run it (CI, or the local stack) and get it red.
-3. Write the migration: copy `persist_game_schedule` and `admin_delete_team` whole from `20261108020000`, and
-   `admin_cancel_game_assignment` from `20260613000003`; add the columns, the two `audit_actions` rows, the guard
+3. Write the migration: copy `persist_game_schedule` whole from `20261108020000:1763`, `admin_delete_team` whole from
+   `20261112010000:1413` (its latest body: **not** `20261108020000`), and `admin_cancel_game_assignment` from
+   `20260613000003`; add the columns, the two `audit_actions` rows, the guard
    trigger (exemptions copied from `20261111010000`), `admin_set_games_published` and `get_schedule_audit_log`; pin each
    new function `SET timezone = 'UTC'` and `SET search_path = public`; `REVOKE` from `PUBLIC` and `anon`, `GRANT` to
    `authenticated`. Then `docs/sql/<v>_revert.sql` and `_smoke.sql`, the plants in `prove.sh`, and the regenerated
@@ -1027,3 +1924,15 @@ in the "Status" line at the top, as the earlier plans do.
 5. Do **not**: wire `freeze/` or `resolve/`; read or write `games`; add an `.xlsx` dependency; change
    `assignment_source` or its `locked` mapping; edit `prompts/` or the template skills; copy any value from the owner's
    workbooks; use the word "override" for anything but "allow changes" (finding on the Edge `overrides` field).
+
+**How to start PR 9** (only after PR 4 has merged, decisions 19, 21 and 30 are answered, and the owner has given a go).
+
+1. `git fetch origin main`; branch `feat/practice-import-core`; check that fewer than two pull requests are open.
+2. Write `tests/practiceScheduleFixture.test.js` first, counting the plants **from the CSV** (not from the product) and
+   asserting the pre-plant copy counts none; get it red; then `scripts/build-practice-fixture.mjs` and the files
+   (4.11.7). Never take a name, venue or value from the owner's workbook; the only inputs are the counts of 4.11.1.
+3. Then J2's tests before the code (`practiceImportParse`, `practiceImportMapping`, `practiceImportSettings`), sharing
+   `normaliseExternalLabel` with PR 4's module.
+4. Do **not** touch `persist_practice_schedule`, `practice_new_auto_row_refusals` or any column of
+   `practice_assignments` in any practice-import PR; do not give an import a `scheduler_runs` row (4.11.4); do not call
+   `sync_schedule_tbd_practices` from anywhere but the writer and the refresh (R28).

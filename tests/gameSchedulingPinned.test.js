@@ -108,6 +108,7 @@ function seasonLeague({ blocks }) {
       for (const m of w.matchups)
         swapped.push({ homeTeamId: m.awayTeamId, awayTeamId: m.homeTeamId });
   const second = buildDivisionRoundRobins(teams, { keepSides: swapped }).roundRobinByDivision;
+  /** @type {Record<string, any[]>} */
   const roundRobinByDivision = {};
   for (const division of Object.keys(first)) {
     const one = first[division];
@@ -490,9 +491,9 @@ describe('scheduleGames({ pinned }) holds a saved game where it is', () => {
       const out = scheduleGames({ teams, slots, roundRobinByDivision, pinned });
       expect(
         out.unscheduled.map((u) => `${u.weekIndex}:${pairOf(u.matchup)}:${u.reason}`).sort()
-      ).toEqual(['1:a-c:duplicate-matchup', '1:b-d:duplicate-matchup', '2:c-d:no-slot-available']);
-      // The pinned game took (a, b)'s only meeting (week 2) and the one slot of week 2 goes to (c, d)... or
-      // nowhere: week 2 has one slot and (a, b) was consumed, so (c, d) is the game left to place.
+      ).toEqual(['1:a-c:duplicate-matchup', '1:b-d:duplicate-matchup']);
+      // The pinned game took (a, b)'s only meeting (week 2), so week 2 has just (c, d) left to place,
+      // and its one slot is free.
       expect(out.assignments.map((a) => `${a.weekIndex}:${pairOf(a)}`)).toEqual(['2:c-d']);
     });
 

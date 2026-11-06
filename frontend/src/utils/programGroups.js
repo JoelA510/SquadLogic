@@ -10,6 +10,26 @@
  */
 
 export const NO_PROGRAM_LABEL = 'No program';
+/** The `key` of the heading for the divisions in no program of their own. */
+export const NO_PROGRAM_KEY = 'none';
+
+/**
+ * The program of the league's own a division is in, or null when it is in none: a program that is
+ * not listed, and the season's default ("No program"), are both "in none". One rule for the headings
+ * (`groupByProgram`) and for the counts under them (`summarizeSeats` is given this id), so a heading
+ * and its counts are about the same divisions.
+ *
+ * @param {string | null | undefined} programId - a division's stored `program_id`
+ * @param {Array<{ id: string, is_default?: boolean }> | null | undefined} programs
+ * @returns {string | null}
+ */
+export function ownProgramIdOf(programId, programs) {
+  if (!programId) return null;
+  const own = (programs ?? []).some(
+    (program) => !program.is_default && String(program.id) === String(programId)
+  );
+  return own ? String(programId) : null;
+}
 
 /**
  * @param {{
@@ -29,11 +49,11 @@ export function groupByProgram({ items, programIdOf, programs }) {
   /** @type {string[]} */
   const inNone = [];
   for (const item of items ?? []) {
-    const programId = programIdOf(item);
-    if (programId && own.has(String(programId))) {
-      const ids = byProgram.get(String(programId)) ?? [];
+    const programId = ownProgramIdOf(programIdOf(item), list);
+    if (programId !== null) {
+      const ids = byProgram.get(programId) ?? [];
       ids.push(item.id);
-      byProgram.set(String(programId), ids);
+      byProgram.set(programId, ids);
     } else {
       inNone.push(item.id);
     }
@@ -42,6 +62,6 @@ export function groupByProgram({ items, programIdOf, programs }) {
   const groups = [...byProgram.entries()]
     .map(([programId, ids]) => ({ key: programId, label: own.get(programId).name, ids }))
     .sort((a, b) => a.label.localeCompare(b.label));
-  if (inNone.length > 0) groups.push({ key: 'none', label: NO_PROGRAM_LABEL, ids: inNone });
+  if (inNone.length > 0) groups.push({ key: NO_PROGRAM_KEY, label: NO_PROGRAM_LABEL, ids: inNone });
   return groups;
 }

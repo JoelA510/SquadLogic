@@ -100,8 +100,35 @@ the Edge counterpart of core `practice/daylight.js`:
   first dark date, and the admin decides.
 - **The repair agrees.** `practice/repair.js` keeps a re-home candidate past sunset and flags it
   (`daylightPastSunset` on the re-home and its recommendation, `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET`
-  a compromise finding); a candidate whose sunset is **unknown** is still refused (`sunset-unknown`,
-  D4: unknown says nothing about being past it, and is never read as legal).
+  a compromise finding); a candidate whose sunset is **unknown** is kept and flagged too (owner, 2026-11-02:
+  `daylightSunsetUnknown` on the re-home and its recommendation, the Edge pass's own `SUNSET_UNKNOWN` and cause,
+  and `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`, a compromise finding). D4: unknown says nothing about being past
+  sunset and is never read as legal, and "refusal would break configs that users may otherwise stick with". The
+  repair no longer makes a series TIME TBD for daylight (`past-sunset` and `sunset-unknown` stay for rows saved
+  before); a flag does not change the price (D11). The panel shows each flag on its row and in the enact dialog.
+- **Past sunset is a compromise, by label too (owner, 2026-11-02).** "Relabel the past-sunset constraint as a
+  compromise for both practice and game." In core, `PRACTICE_PAST_SUNSET` is a `compromise` finding (it was
+  `blocking`), `evaluatePracticeDaylight()` reports a past-sunset practice as `compromised` (not `rejected`), and the
+  `practice-daylight` claim is `soft` with a placeholder weight of 1 and a `history` entry for the retype. That is the
+  label for what the Edge pass and the repair already did; the rule and every number are unchanged. The game claim
+  `sunset-margin` was relabelled the same way in the following change (`docs/changes/2026-11-02-sunset-compromise.md`).
+- **The season's outlook (the Practice daylight page; read-only).** `practice/durationPhases.js` proposes how the season adapts as
+  sunset moves (shorten a practice in 10-minute steps to 40, else start earlier, never before `school_day_end`), and reports which
+  slots survive and what would fix the ones that do not. It applies nothing, and it follows the same principle as the pass above
+  (owner, 2026-11-02, "Wire the durationPhases as recommended"): a date no retiming saves is **flagged, not held out** (it is not
+  made TIME TBD, and nothing is truncated); it stays at the timing the slot has that night, still on the surface, and the
+  survival report names its first flagged date. Its rows come through `practice/durationPhaseAdapter.js`, which dates a slot with
+  no dates by the season. The page, `/schedule/practice-daylight` under Scheduling (`PracticeDaylightPage`, the Practices
+  permission, no feature flag), reads seven tables as the signed-in user (`usePracticeDaylightOutlook`: locations, fields,
+  sub-units, practice slots, approved-or-not lighting windows, teams for names, and the season's assignments), **all or
+  nothing** (a failed read names its table and draws no row), runs G3 and G5 in the browser (`utils/daylightOutlook.js`; about
+  0.1 s on the demo league's 304 slots, so no worker), and lists each practice slot on unlit ground, worst first: the changes
+  proposed by date, the dates kept as scheduled and flagged (an overlap with another practice is worded as an overlap, not as past
+  sunset), an unknown sunset (never read as fine; it points at the coordinates form), the dates under an approved lighting window,
+  and the fixes G5 names (a lit field, an earlier start, another night, a lighting window, each unchecked for permits, size and
+  room). It says on its face that it is **proposed, not applied**. G4's cascade is not called: its proposals leave only as an 8.8
+  change-log that no screen renders. The per-slot strategy and duration pins have no storage, so every slot uses the default, and
+  applying a retimed length would need a stored representation that does not exist (the plan's Reading B, not built).
 
 ## Practices per division (Phase D PR B)
 
@@ -152,6 +179,15 @@ Practice preferences page (Phase D C2, below).
   audits the rule it wrote, with its before and after where it had one (`practice_preference.*`), and a completed season takes no change (the RPCs refuse it, and the table carries E3b's completed-season read-only trigger, so any other write is refused too). An
   imported `must` is a request: in force as a prefer until an admin accepts it. The table has no write policy
   or client write grant.
+- **An edit decides a requested must only by changing its level** (`20261116010000`).
+  `admin_edit_practice_preference` replaces a rule's conditions, priority and window. A requested must that is
+  still `pending` and is saved at `prefer` (the level it is in force at) **stays pending**: `must_decision`,
+  `decided_by` and `decided_at` are untouched, and the audit row says pending before and after. Saved at `must`
+  it is accepted, stamped by the admin who saved it. A requested must that was already decided, and a rule
+  nobody asked a must of, behave as they did (an accepted must saved at `prefer` is kept as prefer, one kept as
+  prefer and saved at `prefer` stays kept). The decisions themselves are `admin_decide_must_preference`
+  (Accept as must, Keep as prefer) and `admin_accept_all_musts`. Nothing in the scheduler reads
+  `must_decision`: a pending must and a must kept as prefer are both `level = 'prefer'`.
 - **Judged per practice.** A rule applies to a team's practice when the coach is one of the team's current
   coaches, the rule is in its window on the judged day, and for every condition: a **must** removes the
   candidates that miss any of its conditions (all-of across conditions and across rules); a **prefer** costs
@@ -194,7 +230,12 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
   and the coach's priority, 200 rules to a page with **Show more** (so a crowd no filter can separate is still
   reachable); Edit (several days, start times and venues per condition, keep-current, the
   window, a sentence that reads the rule back, and the must re-judge) and Remove (asks first, and says that a
-  later file with the same preference can bring the rule back). The priority
+  later file with the same preference can bring the rule back). **Editing a pending must leaves it pending**
+  (`20261116010000`): the editor shows **Still pending** with the level as text, Save sends the level in force
+  and says "Rule saved. It is still waiting for your decision." (or, against a database that has not applied the
+  migration, what the database did instead), and **Accept as must…** (which hands over to the Accept dialog and
+  its impact preview) and **Keep as prefer** are buttons of their own, off while the form holds unsaved changes
+  because they act on the rule as saved. A must that was already decided keeps its Level control. The priority
   is shown and filterable and **not weighed** (the page says so). A rule whose coach does not coach the team
   today, or whose window is not open today, does nothing in the scheduler, and its row says "Not applied
   today" and why (`ruleNotApplied`: the same two tests as `resolveCoachPreferences`).
@@ -216,6 +257,12 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
   context) and reports the database's counts, saying so where they differ from the preview.
 - **A completed season is read-only**: the note says why and every control that writes is off (Accept, Keep,
   Accept all, Add, Edit, Remove, the file chooser); the database refuses the writes as well.
+- **Where it is linked from.** Data Import (`/import`) is not given a fifth type: a card under its panel,
+  `PracticePreferencesPointer`, says that a coach preference file is imported on this page, in the Import a file
+  tab, and links to `/coaches/practice-preferences?tab=import`. The page reads `?tab=` once on arrival
+  (`import`, `pending`, `rules` or `conflicts`; anything else opens it as usual). The card takes its visibility
+  from this page's own `NAV` entry (its `permission`, and its `feature` flag if it is ever given one), so it is
+  shown only where the page is reachable.
 
 ## Manual Adjustment Workflow
 
@@ -230,7 +277,7 @@ season shown. It never sends a coach anywhere: nobody but an admin signs in.
 - **Metrics**: Emit counts of teams assigned on first pass vs. manual follow-up, distribution of start times per division, and slot utilization percentages. The `evaluatePracticeSchedule` helper in `src/practiceMetrics.js` now implements these summaries and flags data quality issues so the admin UI can surface early warnings.
 - **Alerts**: If more than 5% of teams require manual assignment, raise an admin warning suggesting more slot capacity.
 - **Audit Trail**: Persist a JSON diff of assignments compared to the prior run for transparency.
-- **Daylight (8.9)**: an unlit or undeclared practice ends at or before `floor(sunset)` (margin 0). Core evaluation enforces it through `practice/daylight.js`. The mid-season repair (`practice/repair.js`, 8.9 PR 7) refuses every re-home candidate, tier 1 and tier 2, that runs past sunset on any date of its series-window (`past-sunset`), or whose sunset is unknown (`sunset-unknown`, never allowed). When no legal candidate is left, the series is TIME TBD with that reason. A partly legal candidate is refused, not truncated: D8's truncation belongs to the Edge post-pass. The gate is enforced in the module but is **not live** until 8.6 3b PRs 9-11 wire the repair.
+- **Daylight (8.9)**: an unlit or undeclared practice ends at or before `floor(sunset)` (margin 0). Core evaluation enforces it through `practice/daylight.js`. The mid-season repair (`practice/repair.js`, 8.9 PR 7) judges every re-home candidate, tier 1 and tier 2, over its series-window and refuses none for daylight: a candidate that runs past sunset on some date is kept and flagged (`daylightPastSunset`, owner 2026-10-27), and one whose sunset is unknown is kept and flagged (`daylightSunsetUnknown`, owner 2026-11-02; never read as legal). A partly legal candidate is kept whole, not truncated: D8's truncation belonged to the Edge post-pass, which flags too. The repair is wired into the recommendation panel (8.6 3b PRs 9-11).
 
 ## Future Enhancements
 

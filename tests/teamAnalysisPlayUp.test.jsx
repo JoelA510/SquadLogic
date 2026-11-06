@@ -247,7 +247,16 @@ describe('the Play-up section of the U12 program', () => {
     expect(byName('Kid2 Placeholder2')).toHaveTextContent('Not requested');
     expect(byName('Kid3 Placeholder3')).toHaveTextContent('Registered in U10 but plays in U12.');
     expect(byName('Kid3 Placeholder3')).toHaveTextContent('Not applicable');
-    expect(section()).toHaveTextContent('2 play-ups (1 requested, 1 not), 1 play-down');
+    // Counted by the division each plays in (play-down plan, PR 2). Kid1 asked and plays in U12, a band
+    // of 12 against their age of 10: playing up. Kid2 (unrequested) and Kid3 (registered younger than
+    // their age) both play in their own age division, in band: moved, neither playing up nor down. The
+    // old sentence counted by the kind each was listed as: "2 play-ups (1 requested, 1 not), 1 play-down".
+    const sentence =
+      '1 playing up (1 requested), 0 playing down, 2 moved to their own age division';
+    expect(section()).toHaveTextContent(sentence);
+    expect(section()).not.toHaveTextContent('2 play-ups');
+    // The page announces the same sentence once, for a screen reader.
+    expect(screen.getByText(`Play-up section: ${sentence}.`)).toBeInTheDocument();
   });
 
   it('keeps the section out of a run that has nobody to list', async () => {
@@ -312,6 +321,31 @@ describe('the U10 program takes the players who play in it', () => {
       .map((tr) => tr.textContent);
     expect(names.some((text) => text.includes('Kid1 Placeholder1'))).toBe(true);
     expect(names.some((text) => text.includes('Registered in U12 but plays in U10'))).toBe(true);
+    // The run is for U10: its listing holds the one player who plays there from U12 (Kid1, unrequested,
+    // moved). Kid2 registered in U12 and asked to play up, and plays in U12: not this run's.
+    expect(section()).toHaveTextContent(
+      '0 playing up, 0 playing down, 1 moved to their own age division'
+    );
+  });
+});
+
+describe('the Play-up sentence says what could not be compared, and who asked with nothing to honour', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('counts a request in the player’s own division on its own line, and never as a play-up', async () => {
+    // Kid1 is 10, registered U10 (a band of 10) and asked to play up: nothing to honour. Kid2 has no
+    // birth date and no age on file, registered U10 and asked: nothing can be compared.
+    seed([
+      row(1, 'U10', BORN_10, { play_up: 'Yes' }),
+      { ...row(2, 'U10', BORN_10, { play_up: 'Yes' }), date_of_birth: undefined },
+      ...fill('U10', BORN_10, 30, 8),
+      ...fill('U12', BORN_12, 10, 8),
+    ]);
+    await generate();
+    expect(section()).toHaveTextContent(
+      '0 playing up, 0 playing down, 2 asked to play up from their own division, 1 not checked (no age, or no age band)'
+    );
   });
 });
 

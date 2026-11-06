@@ -980,6 +980,22 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving a completed season takes no preference import"; STATUS=1
       fi
     fi
+    # **Editing a pending must leaves it pending (20261116010000; plan docs/changes/2026-11-02-preference-followups.md,
+    # item 1).** Two claims, each with a plant in prove.sh. The smoke RAISES on each; these fail if its evidence stops
+    # printing. (The refusals of the replaced body, 3 of 3, RAISE in the same smoke and print as a NOTICE above; the
+    # earlier smoke of the rules covers the same refusals at head, so they carry no plant of their own here.)
+    if [ "$id" = "20261116010000" ]; then
+      if grep -qF "pending stays pending: a requested must saved at prefer, and again with the level left out, kept must_decision pending, level prefer, requested_level must and no decided_by or decided_at while its days, priority and window were replaced; 2 of 2 edit audit rows say pending before and after; Keep as prefer then decided it" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a requested must that is still pending stays pending when it is saved at prefer: it is not decided, nobody is stamped as deciding it, and the audit says pending before and after"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an edit leaves a pending must pending"; STATUS=1
+      fi
+      if grep -qF "explicit decisions: a pending must saved at must was accepted and stamped by the admin; an accepted must saved at prefer was kept as prefer and re-stamped; a rule kept as prefer saved at prefer stayed kept; a rule nobody asked a must of has no decision at prefer and is accepted at must" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an edit still decides where the admin changed the level: a pending must saved at must is accepted, an accepted must saved at prefer is kept as prefer, and a rule kept as prefer or never asked as a must is given no new decision"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an edit that changes the level still decides"; STATUS=1
+      fi
+    fi
     # **8.6 3b PR 11d-2: enacting a blackout recommendation (plan §5, B8-B11,
     # and the Q10 retirement lock).** One claim per plant in prove.sh. The
     # smoke RAISEs on each; these fail if its evidence stops. (The FOR SHARE
@@ -1338,7 +1354,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2163,6 +2179,39 @@ for id in "${REVERT_CHECKS[@]}"; do
     fi
   fi
 
+  # **20261116010000's revert gives an edit its old meaning back**, so the check is a rule it must decide again: a
+  # requested must that is pending, in an organization with an admin, is planted, and after the revert an edit of
+  # it at prefer (as that admin) must keep it as prefer (decided) where the migration left it pending. A revert
+  # that restored nothing, or the wrong body, leaves it pending. Inserted as the table owner; every name is
+  # synthetic.
+  if [ "$id" = "20261116010000" ]; then
+    if ! psql_cmd "INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+                ('ef000000-0000-4000-8000-0000000000a0','pending-revert-admin@example.test', jsonb_build_object('password_length', 16));
+              INSERT INTO public.profiles (id, email) VALUES
+                ('ef000000-0000-4000-8000-0000000000a0','pending-revert-admin@example.test') ON CONFLICT DO NOTHING;
+              INSERT INTO public.organizations (id, name, slug) VALUES
+                ('ef000000-0000-4000-8000-00000000000a','Pending Revert Org','pending-revert');
+              INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES
+                ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a0','admin');
+              INSERT INTO public.season_settings (id, organization_id, name, status) VALUES
+                ('ef000000-0000-4000-8000-0000000000a1','ef000000-0000-4000-8000-00000000000a','Pending Revert Season','active');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('ef000000-0000-4000-8000-0000000000a2','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Pending Revert Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a2','Pending Revert Team');
+              INSERT INTO public.coaches (id, organization_id, season_settings_id, full_name, email, status) VALUES
+                ('ef000000-0000-4000-8000-0000000000c1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000a1','Pending Revert Coach','pending-revert-c@example.test','active');
+              INSERT INTO public.team_coach_assignments (organization_id, team_id, coach_id, role, effective_from, started_via) VALUES
+                ('ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000b1','ef000000-0000-4000-8000-0000000000c1','lead', current_date - 30, 'harness');
+              INSERT INTO public.coach_practice_preferences
+                (id, organization_id, coach_id, team_id, weekdays, level, requested_level, must_decision, status, source) VALUES
+                ('ef000000-0000-4000-8000-0000000000d1','ef000000-0000-4000-8000-00000000000a','ef000000-0000-4000-8000-0000000000c1','ef000000-0000-4000-8000-0000000000b1', ARRAY['WED'], 'prefer','must','pending','in_force','import');" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the organization, admin and pending must the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   # **20261112010000's revert writes the rules back as scalar rows**, so it REFUSES (55000) while it would
   # have to guess: a rule holding more than one value in a condition, and two rules of one coach that disagree
   # on a dimension. Seeded: six rules in force (two of them pending musts, one accepted must) for two coaches
@@ -2440,6 +2489,75 @@ NEEDLES
     else
       echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
       dump 15 $SCRATCH/harness_reapply; STATUS=1
+    fi
+  fi
+
+  # **20261117010000 codifies an index production already has**, so the case that matters is not the
+  # build from scratch (the smoke) but the migration applied onto a database that holds the index, which
+  # is production. This database is built up to the migration, so the index is there. Three things are
+  # measured, each of which a smoke run afterwards cannot reach (it cannot run the migration again):
+  # applying it again succeeds and does not rebuild the index (an unchanged relfilenode: a rebuild would
+  # lock `players` for writes in production); an index of the same name that is not the GIN index (a btree
+  # here) is refused, because IF NOT EXISTS compares the name alone; and the GIN index put back afterwards
+  # is what the revert check below finds.
+  if [ "$id" = "20261117010000" ]; then
+    v_gin_mig="$REPO/supabase/migrations/20261117010000_players_custom_attributes_gin_index.sql"
+    v_gin_q="SELECT relfilenode FROM pg_class WHERE oid = 'public.players_custom_attributes_gin_idx'::regclass;"
+    v_gin_node="$(psql_cmd "$v_gin_q" 2>$SCRATCH/harness_gin_node)"
+    if [ -z "$v_gin_node" ]; then
+      echo "FAIL ${id}: the index the migration creates is not there on a database built up to it"
+      dump 5 $SCRATCH/harness_gin_node; STATUS=1; continue
+    fi
+    if ! psql_file "$v_gin_mig" >$SCRATCH/harness_gin_reapply 2>&1; then
+      echo "FAIL ${id}: re-applied onto a database that already holds the index, the migration failed"
+      dump 10 $SCRATCH/harness_gin_reapply; STATUS=1
+    else
+      v_gin_after="$(psql_cmd "$v_gin_q" 2>/dev/null)"
+      if [ "$v_gin_after" != "$v_gin_node" ]; then
+        echo "FAIL ${id}: re-applied onto a database that already holds the index, the migration rebuilt it (relfilenode ${v_gin_node} became ${v_gin_after})"
+        STATUS=1
+      else
+        echo "  migration ${id}: applied again onto a database that already holds the index it leaves it as it was (not rebuilt)"
+      fi
+    fi
+    if ! psql_cmd "DROP INDEX public.players_custom_attributes_gin_idx; CREATE INDEX players_custom_attributes_gin_idx ON public.players USING btree (custom_attributes);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the btree index of the same name the refusal check requires was never created"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$v_gin_mig" >$SCRATCH/harness_gin_refuse 2>&1; then
+      echo "FAIL ${id}: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration accepted it"
+      STATUS=1
+    elif ! grep -qF 'players_custom_attributes_gin_idx is not the GIN index on public.players (custom_attributes) that production holds: it is a btree index' $SCRATCH/harness_gin_refuse; then
+      echo "FAIL ${id}: re-applied onto a database whose players_custom_attributes_gin_idx is a btree index, the migration failed without naming the index and the access method"
+      dump 10 $SCRATCH/harness_gin_refuse; STATUS=1
+    else
+      echo "  migration ${id}: applied onto a btree index of the same name it refuses, naming the index and the access method"
+    fi
+    if ! psql_cmd "DROP INDEX public.players_custom_attributes_gin_idx; CREATE INDEX players_custom_attributes_gin_idx ON public.players USING gin (custom_attributes);" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the GIN index could not be put back after the refusal check"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    v_gin_node="$(psql_cmd "$v_gin_q" 2>/dev/null)"
+  fi
+
+  # **20261118010000's revert gives a dropped column back to rows that exist**, so the revert is applied onto a
+  # database that holds two players (none held the column, which is gone here) and must say that two come back
+  # true and leave them true. Every name is synthetic.
+  if [ "$id" = "20261118010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('dc000000-0000-4000-8000-00000000000a','Drop Revert Org','drop-revert');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('dc000000-0000-4000-8000-0000000000a1','dc000000-0000-4000-8000-00000000000a','Drop Revert Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('dc000000-0000-4000-8000-0000000000a2','dc000000-0000-4000-8000-00000000000a','dc000000-0000-4000-8000-0000000000a1','Drop Revert Division');
+              INSERT INTO public.players (id, organization_id, season_settings_id, division_id, first_name, last_name) VALUES
+                ('dc000000-0000-4000-8000-0000000000b1','dc000000-0000-4000-8000-00000000000a','dc000000-0000-4000-8000-0000000000a1','dc000000-0000-4000-8000-0000000000a2','Revert','One'),
+                ('dc000000-0000-4000-8000-0000000000b2','dc000000-0000-4000-8000-00000000000a','dc000000-0000-4000-8000-0000000000a1','dc000000-0000-4000-8000-0000000000a2','Revert','Two');" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the two players the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -3800,6 +3918,82 @@ PROBE
         dump 10 $SCRATCH/harness_demofall; STATUS=1
       fi
     fi
+    if [ "$id" = "20261116010000" ]; then
+      # What the revert must leave: the edit function as 20261112010000 created it (md5 of its body without
+      # carriage returns, its only signature, a definer with its search path and time zone pinned, executable by
+      # authenticated and not anon, the old comment), and its OLD MEANING, run as the planted admin: an edit of the
+      # planted pending must at prefer keeps it as prefer, where the migration left it pending.
+      if psql_cmd "SELECT set_config('request.jwt.claim.sub', 'ef000000-0000-4000-8000-0000000000a0', false);
+             SELECT 'EDITPENDING-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.coach_practice_preferences
+                      WHERE id = 'ef000000-0000-4000-8000-0000000000d1' AND must_decision = 'pending') <> 1 THEN 'seed-lost'
+               WHEN (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                                                    AND proname = 'admin_edit_practice_preference') <> 1 THEN 'signatures-wrong'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) || ':' || p.prosecdef || ':' || array_to_string(p.proconfig, ',')
+                       FROM pg_proc p WHERE p.oid = to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'))
+                    <> '4d909e3ea286460367c2ca7c8671f89d:true:search_path=public,TimeZone=UTC' THEN 'body-wrong'
+               WHEN NOT has_function_privilege('authenticated', to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'), 'EXECUTE')
+                 OR has_function_privilege('anon', to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'), 'EXECUTE') THEN 'grants-wrong'
+               WHEN (SELECT obj_description(to_regprocedure('public.admin_edit_practice_preference(uuid, text, text[], integer[], uuid[], boolean, boolean, boolean, text, date, date)'), 'pg_proc'))
+                    <> 'Admin-only: replace an in-force rule''s conditions, level, priority and window (the coach and team stay). Audited as practice_preference.edited with before and after. 20261112010000.' THEN 'comment-wrong'
+               WHEN public.admin_edit_practice_preference('ef000000-0000-4000-8000-0000000000d1'::uuid, 'prefer', ARRAY['THU']) ->> 'must_decision'
+                    IS DISTINCT FROM 'kept_prefer' THEN 'meaning-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_editpending 2>&1 && grep -q 'EDITPENDING-VERDICT:restored' $SCRATCH/harness_editpending; then
+        echo "  revert ${id}: the pending-edit revert restores the edit function as at 20261112010000 (its body, comment and grants) and an edit of a pending must at prefer decides it again"
+      else
+        echo "FAIL revert ${id}: the pending-edit revert did not restore the edit function or its old meaning"
+        dump 10 $SCRATCH/harness_editpending; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261117010000" ]; then
+      # A revert that changes nothing, because the index exists in production independently of the
+      # migration: it must say so, and leave the index there, the same GIN index, valid and not rebuilt
+      # (the relfilenode read after the check above put the GIN index back).
+      if ! grep -q 'this revert changes nothing: players_custom_attributes_gin_idx is present' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: the revert did not say it changes nothing and that the index is present"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'GININDEX-VERDICT:' || CASE
+               WHEN to_regclass('public.players_custom_attributes_gin_idx') IS NULL THEN 'index-dropped'
+               WHEN (SELECT relfilenode FROM pg_class WHERE oid = 'public.players_custom_attributes_gin_idx'::regclass) <> ${v_gin_node}::oid THEN 'index-rebuilt'
+               WHEN pg_get_indexdef('public.players_custom_attributes_gin_idx'::regclass)
+                    <> 'CREATE INDEX players_custom_attributes_gin_idx ON public.players USING gin (custom_attributes)' THEN 'definition-changed'
+               WHEN NOT (SELECT indisvalid AND indisready FROM pg_index WHERE indexrelid = 'public.players_custom_attributes_gin_idx'::regclass) THEN 'not-valid'
+               ELSE 'left-alone' END;" \
+         >$SCRATCH/harness_gin_verdict 2>&1 && grep -q 'GININDEX-VERDICT:left-alone' $SCRATCH/harness_gin_verdict; then
+        echo "  revert ${id}: the revert changes nothing: the GIN index on players (custom_attributes) is still there, valid, not rebuilt and as production defines it"
+      else
+        echo "FAIL revert ${id}: the revert did not leave players_custom_attributes_gin_idx as it was"
+        dump 10 $SCRATCH/harness_gin_verdict; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261118010000" ]; then
+      # What the revert must leave: the column back as `boolean NOT NULL DEFAULT true`, both planted players
+      # holding true, and the fence as 20261030010000 created it (md5 of its body without carriage returns,
+      # naming the column again). Read from the catalogue, not from the revert's own NOTICE.
+      if ! grep -qF 'this revert re-adds players.placement_eligible at its default: 2 player row(s) come back true' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 2 players and the revert did not say that 2 player row(s) come back true"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'DROPREVERT-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.players WHERE organization_id = 'dc000000-0000-4000-8000-00000000000a') <> 2 THEN 'seed-lost'
+               WHEN NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.players'::regclass AND a.attname = 'placement_eligible'
+                                  AND NOT a.attisdropped AND format_type(a.atttypid, a.atttypmod) = 'boolean' AND a.attnotnull) THEN 'column-wrong'
+               WHEN (SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+                      WHERE a.attrelid = 'public.players'::regclass AND a.attname = 'placement_eligible') IS DISTINCT FROM 'true' THEN 'default-wrong'
+               WHEN (SELECT count(*) FROM public.players WHERE organization_id = 'dc000000-0000-4000-8000-00000000000a' AND placement_eligible) <> 2 THEN 'rows-not-true'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public.demo_fence_player_write()'))
+                    IS DISTINCT FROM 'fb4c627e18ebaf5309750e6a177eac6c' THEN 'body-wrong'
+               WHEN (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.demo_fence_player_write()')) !~ 'placement_eligible' THEN 'name-missing'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_droprevert 2>&1 && grep -q 'DROPREVERT-VERDICT:restored' $SCRATCH/harness_droprevert; then
+        echo "  revert ${id}: the revert gives the two planted players the column back at true (boolean NOT NULL DEFAULT true) and restores the demo fence as at 20261030010000 (its body, naming the column)"
+      else
+        echo "FAIL revert ${id}: the revert did not restore the column and the demo fence as they were before the migration"
+        dump 10 $SCRATCH/harness_droprevert; STATUS=1
+      fi
+    fi
     if [ "$id" = "20261112010000" ]; then
       # The seed planted 8 rules in force (2 pending musts, 2 musts kept as a prefer), 3 history rows, 4 teams, 1 window, 3 priorities.
       if ! grep -qF 'this revert writes 8 in-force rule(s) back as scalar rows (2 pending must(s) as requested rows); it drops 3 removed/replaced history row(s) and loses the team of the rules (4 team(s)), 1 date window(s) and 3 priority(ies)' $SCRATCH/harness_rev; then
@@ -4647,6 +4841,95 @@ else
   else
     echo "FAIL backfill ${BF_ID}: the rules the backfill made from the planted rows are not the ones the model says"
     dump 5 $SCRATCH/harness_backfill_v; STATUS=1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Dropping players.placement_eligible: refused while a player holds false, then applied onto planted players
+# ---------------------------------------------------------------------------
+#
+# 20261118010000 drops a column production holds no rows of, behind a refusal for a player that holds `false`.
+# A build from scratch (and every smoke) runs it over an empty table, which proves only that it parses and that
+# an empty table loses nothing, and a smoke runs after the migration and cannot run it again. So the harness
+# builds to the migration before it, plants three players (two true, one false, in an organization that is not a
+# demo) and applies the migration onto them twice: first it must REFUSE, naming the one player, and leave the
+# column, the fence body and every row exactly as they were (the migration rolls back whole); then, with that row
+# set to true, it must apply and leave every other column of all three players as it was. The stage prints PASS
+# and FAIL lines and no `(checked)` claim; prove.sh holds the plants (the guard counting the wrong set, the fence
+# keeping the name).
+echo "=== dropping players.placement_eligible: refused while a player holds false, then applied onto planted players (20261118010000) ==="
+DP_ID=20261118010000
+DP_FILE="$(ls "$REPO"/supabase/migrations/${DP_ID}_*.sql 2>/dev/null | head -n 1)"
+DP_PREV="$(ls "$REPO"/supabase/migrations/*.sql | sort | grep -B1 "/${DP_ID}_" | head -n 1 | xargs -r basename | cut -c1-14)"
+# Every column of every planted player but the dropped one: the same figure before the refusal, after it, and
+# (taken again once the false row has been set to true) after the drop, so "everything else was left as it was"
+# is a comparison and not a sentence.
+DP_FP="SELECT md5(string_agg((to_jsonb(p) - 'placement_eligible')::text, ',' ORDER BY p.id)) || ':' || count(*) FROM public.players p WHERE p.organization_id = 'dd000000-0000-4000-8000-00000000000a'"
+if [ -z "$DP_FILE" ] || [ -z "$DP_PREV" ] || [ "$DP_PREV" = "$DP_ID" ]; then
+  echo "FAIL drop ${DP_ID}: could not find the migration or the one before it (${DP_FILE:-none} / ${DP_PREV:-none})"; STATUS=1
+elif ! fresh_db; then
+  echo "FAIL drop ${DP_ID}: could not build a fresh database"; STATUS=1
+elif ! apply_all "$DP_PREV"; then
+  echo "FAIL drop ${DP_ID}: could not build up to ${DP_PREV}"; STATUS=1
+elif ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+            ('dd000000-0000-4000-8000-00000000000a','Drop Column Org','drop-column');
+          INSERT INTO public.season_settings (id, organization_id, name) VALUES
+            ('dd000000-0000-4000-8000-0000000000a1','dd000000-0000-4000-8000-00000000000a','Drop Column Season');
+          INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+            ('dd000000-0000-4000-8000-0000000000a2','dd000000-0000-4000-8000-00000000000a','dd000000-0000-4000-8000-0000000000a1','Drop Column Division');
+          INSERT INTO public.players (id, organization_id, season_settings_id, division_id, first_name, last_name, placement_eligible) VALUES
+            ('dd000000-0000-4000-8000-0000000000b1','dd000000-0000-4000-8000-00000000000a','dd000000-0000-4000-8000-0000000000a1','dd000000-0000-4000-8000-0000000000a2','Drop','One', true),
+            ('dd000000-0000-4000-8000-0000000000b2','dd000000-0000-4000-8000-00000000000a','dd000000-0000-4000-8000-0000000000a1','dd000000-0000-4000-8000-0000000000a2','Drop','Two', false),
+            ('dd000000-0000-4000-8000-0000000000b3','dd000000-0000-4000-8000-00000000000a','dd000000-0000-4000-8000-0000000000a1','dd000000-0000-4000-8000-0000000000a2','Drop','Three', true);" \
+       >$SCRATCH/harness_seed 2>&1; then
+  echo "FAIL drop ${DP_ID}: the three players the check requires were never inserted"
+  dump 10 $SCRATCH/harness_seed; STATUS=1
+else
+  v_dp_cols="$(psql_cmd "SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.players'::regclass AND attnum > 0 AND NOT attisdropped" 2>/dev/null)"
+  v_dp_f0="$(psql_cmd "$DP_FP" 2>/dev/null)"
+  if [ -z "$v_dp_cols" ] || [ -z "$v_dp_f0" ] || [ "${v_dp_f0##*:}" != "3" ]; then
+    echo "FAIL drop ${DP_ID}: could not read the planted players back (columns '${v_dp_cols}', figure '${v_dp_f0}')"; STATUS=1
+  elif psql_file "$DP_FILE" >$SCRATCH/harness_drop_refused 2>&1; then
+    echo "FAIL drop ${DP_ID}: the migration accepted a player holding false: it dropped the column over a value somebody chose"
+    STATUS=1
+  elif ! grep -qF 'refusing to drop players.placement_eligible: 1 player(s) hold false' $SCRATCH/harness_drop_refused; then
+    echo "FAIL drop ${DP_ID}: refused, but without naming the 1 player that holds false (planted two true and one false)"
+    dump 10 $SCRATCH/harness_drop_refused; STATUS=1
+  elif ! psql_cmd "SELECT 'DROPREFUSED-VERDICT:' || CASE
+           WHEN NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.players'::regclass AND a.attname = 'placement_eligible' AND NOT a.attisdropped) THEN 'column-dropped'
+           WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public.demo_fence_player_write()'))
+                IS DISTINCT FROM 'fb4c627e18ebaf5309750e6a177eac6c' THEN 'fence-replaced'
+           WHEN (SELECT count(*) FROM public.players WHERE organization_id = 'dd000000-0000-4000-8000-00000000000a' AND NOT placement_eligible) <> 1 THEN 'value-changed'
+           WHEN ($DP_FP) IS DISTINCT FROM '${v_dp_f0}' THEN 'rows-changed'
+           ELSE 'untouched' END;" \
+         >$SCRATCH/harness_drop_v1 2>&1 || ! grep -q 'DROPREFUSED-VERDICT:untouched' $SCRATCH/harness_drop_v1; then
+    echo "FAIL drop ${DP_ID}: the refused migration left something changed (it must roll back whole)"
+    dump 10 $SCRATCH/harness_drop_v1; STATUS=1
+  elif ! psql_cmd "UPDATE public.players SET placement_eligible = true WHERE id = 'dd000000-0000-4000-8000-0000000000b2';" >$SCRATCH/harness_seed 2>&1; then
+    echo "FAIL drop ${DP_ID}: the false row could not be set to true"
+    dump 10 $SCRATCH/harness_seed; STATUS=1
+  else
+    echo "  migration ${DP_ID}: onto three planted players, one holding false, it refused, naming that one, and changed nothing"
+    v_dp_f1="$(psql_cmd "$DP_FP" 2>/dev/null)"
+    if ! psql_file "$DP_FILE" >$SCRATCH/harness_drop 2>&1; then
+      echo "FAIL drop ${DP_ID}: the migration did not apply onto the planted players once none held false"
+      dump 15 $SCRATCH/harness_drop; STATUS=1
+    elif psql_cmd "SELECT 'DROP-VERDICT:' || CASE
+             WHEN EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.players'::regclass AND a.attname = 'placement_eligible' AND NOT a.attisdropped) THEN 'column-left'
+             WHEN (SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.players'::regclass AND attnum > 0 AND NOT attisdropped) <> ${v_dp_cols} - 1 THEN 'not-one-column'
+             WHEN ($DP_FP) IS DISTINCT FROM '${v_dp_f1}' THEN 'players-changed'
+             WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public.demo_fence_player_write()'))
+                  = 'fb4c627e18ebaf5309750e6a177eac6c' THEN 'fence-not-replaced'
+             WHEN (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.demo_fence_player_write()')) ~ 'placement_eligible' THEN 'fence-names-it'
+             WHEN (SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('public.demo_fence_player_write()')) !~ 'willing_to_coach' THEN 'fence-list-lost'
+             ELSE 'dropped' END;" \
+           >$SCRATCH/harness_drop_v2 2>&1 && grep -q 'DROP-VERDICT:dropped' $SCRATCH/harness_drop_v2; then
+      echo "PASS drop ${DP_ID}"
+      echo "  migration ${DP_ID}: with none holding false it dropped the one column (${v_dp_cols} became $((v_dp_cols - 1))), left every other column of the 3 planted players as it was, and replaced the demo fence with a body that no longer names it"
+    else
+      echo "FAIL drop ${DP_ID}: after the migration the column, the planted players or the demo fence are not as the model says"
+      dump 10 $SCRATCH/harness_drop_v2; STATUS=1
+    fi
   fi
 fi
 

@@ -397,6 +397,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/slots.js',
     functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
     importers: Object.freeze([
+      // The duration-phase adapter builds its slot set through the one
+      // validating builder, as the repair does.
+      'packages/core/src/practice/durationPhaseAdapter.js',
       // 8.9 PR 5: the duration-phase reports enumerate slot x dates on the
       // same weekday walk.
       'packages/core/src/practice/durationPhases.js',
@@ -409,16 +412,21 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
+      // The Practice daylight page's wording test builds a rig's slot set for the one flag the
+      // stored rows cannot reach.
+      'tests/daylightOutlookText.test.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
@@ -498,6 +506,8 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
+      // Owner, 2026-11-02: the repair and the Edge pass agree on an unknown sunset (it calls both).
+      'tests/sunsetAgreement.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
@@ -527,6 +537,8 @@ const LAYERS = Object.freeze([
       'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
       'packages/core/src/practice/enact.js',
+      // The duration-phase adapter's parity test holds its builders to this one's.
+      'tests/practiceDurationPhaseAdapter.test.js',
       'tests/practiceEnact.test.js',
       'tests/practiceRepairAdapter.test.js',
       // 8.6 3b PR 11d-1: the live-exception and blackout-enact witnesses.
@@ -658,6 +670,9 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
       'tests/autoSchedulerDaylight.test.js',
+      // The Practice daylight page's wording test re-derives every limit a sentence quotes from
+      // core's sunset (it imports core's only).
+      'tests/daylightOutlookText.test.js',
       // The demo's seasons: calls both arms (it imports each).
       'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test calls the Edge arm (it imports it), by name.
@@ -667,6 +682,9 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
+      // Owner, 2026-11-02: calls core's `sunsetOnDate()` for the oracle and the Edge arm through
+      // the pass (it imports each), by name.
+      'tests/sunsetAgreement.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
       // imports, which the name match cannot see. `importers` lists them.
     ]),
@@ -720,6 +738,8 @@ const LAYERS = Object.freeze([
       // 8.9 PR 6: by name only -- it calls core's `sunsetOnDate()` for the
       // independent derivation, and the Edge arm through the solver.
       'tests/autoSchedulerDaylight.test.js',
+      // By name only: it calls core's `sunsetOnDate()` for the independent derivation.
+      'tests/daylightOutlookText.test.js',
       // The demo's seasons: calls both arms (it imports each).
       'tests/demoSeasons.test.js',
       // Phase D, F: the demo seed test calls the Edge arm (it imports it), by name.
@@ -729,6 +749,9 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
+      // Owner, 2026-11-02: calls core's `sunsetOnDate()` for the oracle and the Edge arm through
+      // the pass (it imports each), by name.
+      'tests/sunsetAgreement.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
       // imports, which the name match cannot see. `importers` lists them.
     ]),
@@ -803,8 +826,15 @@ const LAYERS = Object.freeze([
   }),
   // 8.9 PR 5: duration phases, compression and the DST survival report.
   // Reports and proposals only -- cascade proposals leave as change-log
-  // entries and nothing applies them. Nothing in the app or the Edge calls
-  // it; the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller.
+  // entries and nothing applies them. The Edge post-pass (8.9 PR 6) is a Deno
+  // twin, not a caller. Its first production caller is the read-only "Practice
+  // daylight" page's model (`frontend/src/utils/daylightOutlook.js`, PR B of
+  // `docs/changes/2026-11-02-duration-phases-wiring.md`), which runs G3 and G5 over
+  // the adapter's output. G4 (`buildPracticeCompressionReport`) is still called by
+  // nothing outside the tests: its cascade proposals leave only as an 8.8
+  // change-log that no screen renders (plan section 6). The module was unwired
+  // for two months and described a rule the app had dropped (lesson 89); the
+  // day it gained a caller this list changed.
   Object.freeze({
     layer: 'practice/durationPhases.js',
     modulePath: 'packages/core/src/practice/durationPhases.js',
@@ -816,10 +846,43 @@ const LAYERS = Object.freeze([
       'ladderDuration',
       'shiftedStart',
     ]),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
-    consumers: Object.freeze(['tests/practiceDurationPhases.test.js']),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    importers: Object.freeze([
+      // PR B: the Practice daylight page's model imports it directly, not through the barrel.
+      'frontend/src/utils/daylightOutlook.js',
+      'packages/core/src/practice/index.js',
+    ]),
+    consumers: Object.freeze([
+      // PR B: runs G3 and G5 over the stored rows' input.
+      'frontend/src/utils/daylightOutlook.js',
+      // Wraps G3 and G5 to alter what they return, to show the page's checks can fail.
+      'tests/daylightOutlookGuards.test.js',
+      // Builds a rig the stored rows cannot reach (an operator pin) and runs G3 on it.
+      'tests/daylightOutlookText.test.js',
+      // Runs the three reports over the adapter's output, end to end.
+      'tests/practiceDurationPhaseAdapter.test.js',
+      'tests/practiceDurationPhases.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
+    expectedExternalProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
+  }),
+  // The duration-phase input adapter: database rows -> the three reports'
+  // input. Its first caller is the Practice daylight page's model (PR B); its
+  // other consumer is its own test, which also holds its graph, calendar and
+  // slots to `repairAdapter.js`'s.
+  Object.freeze({
+    layer: 'practice/durationPhaseAdapter.js',
+    modulePath: 'packages/core/src/practice/durationPhaseAdapter.js',
+    functions: Object.freeze(['buildDurationPhaseInput']),
+    importers: Object.freeze([
+      'frontend/src/utils/daylightOutlook.js',
+      'packages/core/src/practice/index.js',
+    ]),
+    consumers: Object.freeze([
+      'frontend/src/utils/daylightOutlook.js',
+      'tests/practiceDurationPhaseAdapter.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
+    expectedExternalProductionConsumers: Object.freeze(['frontend/src/utils/daylightOutlook.js']),
   }),
   // 8.9 D14 PR B: stored lighting-override rows -> PR A's input. PR C: the
   // Edge read is a Deno twin, not a caller -- it DEFINES a same-named
@@ -836,9 +899,12 @@ const LAYERS = Object.freeze([
     ]),
     importers: Object.freeze([
       'frontend/src/utils/lightingOverrides.js',
+      // The duration-phase adapter reads the approved windows through it.
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/index.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
       'supabase/functions/_shared/tests/lighting-overrides_test.ts',
       'tests/practiceLightingOverrides.test.js',
@@ -846,6 +912,7 @@ const LAYERS = Object.freeze([
       'tests/practiceLightingOverridesMock.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
       'supabase/functions/_shared/tests/lighting-overrides_test.ts',
     ]),
@@ -885,6 +952,8 @@ const LAYERS = Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
       // Phase D C2: the conflicts view and Accept all's confirmation judge with core.
       'frontend/src/utils/practiceMustConflicts.js',
+      // Reuses the repair adapter's location-id contract, consults nothing.
+      'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/index.js',
       'packages/core/src/practice/repair.js',
       // 8.6 3b PR 9: reuses the location-id contract, consults nothing.

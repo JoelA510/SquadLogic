@@ -138,7 +138,7 @@ would emit their codes are Phase 3 and later.
 | Home/away balance (4–5 of 9) | hard | global | declared-only | corpus invariants |
 | Kickoff variety (≤ 4 of 9) | preference | global | declared-only | build plan Prompt 2.1 |
 | Conflict fairness (spread ≤ 1) | hard | global | declared-only | corpus invariants |
-| Sunset margin (15) | hard | global | reason-codes | corpus invariants + `sunsets.csv` |
+| Sunset margin (15) | soft (hard until 2026-11-02; weight 1 is a placeholder) | global | reason-codes | corpus invariants + `sunsets.csv` |
 | Permit windows | hard | global | reason-codes | `facility_permits.csv` |
 
 **Seeding changes no Phase 1 severity.** Every override the seeded registry

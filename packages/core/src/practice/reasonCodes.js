@@ -237,10 +237,11 @@ export const PRACTICE_REASON = Object.freeze({
    */
   REPAIR_CANDIDATES_PAST_SUNSET: 'PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET',
   /**
-   * Re-home candidates for one displaced series were refused because the
-   * sunset on some date of the series-window is unknown (no table record, no
-   * coordinates) on unlit or undeclared ground: never read as allowed (D4).
-   * One per series with any.
+   * Re-home candidates for one displaced series are kept and flagged because
+   * the sunset on some date of the series-window is unknown (no table record,
+   * no coordinates) on unlit or undeclared ground: never read as allowed (D4),
+   * and never refused (an unknown sunset is flagged, never blocked: owner,
+   * 2026-11-02; they were refused before). One per series with any.
    */
   REPAIR_CANDIDATES_SUNSET_UNKNOWN: 'PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN',
   /**
@@ -304,8 +305,8 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL]: PRACTICE_SEVERITY.COMPROMISE,
   // A candidate past sunset is kept, not refused (2026-10-27): the admin must see the flag.
   [PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET]: PRACTICE_SEVERITY.COMPROMISE,
-  // A candidate that may have been legal could not be judged: the result may
-  // be worse than one with coordinates, so an admin must see it (D4).
+  // A candidate kept without a sunset to judge it against (2026-11-02): it may run past
+  // one, so an admin must see the flag (D4).
   [PRACTICE_REASON.REPAIR_CANDIDATES_SUNSET_UNKNOWN]: PRACTICE_SEVERITY.COMPROMISE,
   // Info while the repair was unwired; raised by 8.6 3b PR 10, which wires it
   // into the recommendation panel (the note carried forward from 8.9 PR 7): a

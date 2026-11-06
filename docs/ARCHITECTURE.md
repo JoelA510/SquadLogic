@@ -1075,10 +1075,12 @@ const conflictSet = useMemo(() => {
 
 ### 3.5 Roster (non-schedule) validation
 
-`frontend/src/hooks/useConflicts.js:13-134` detects buddy separation, invalid buddy requests,
-gender mismatch, and unsanctioned play-up/play-down against team age bounds. It is roster
-validation, not schedule validation, and reads buddies through the canonical helper
-(`:36`, `getCanonicalBuddyId`).
+`frontend/src/hooks/useConflicts.js` detects buddy separation, invalid buddy requests and gender
+mismatch. It is roster validation, not schedule validation, and reads buddies through the canonical
+helper (`getCanonicalBuddyId`). Who is playing up or down on the rosters is not a conflict: it is a
+flag, listed by `RosterAgeFlags` from the seats on the rosters (`utils/rosterAgeFlags.js`, by the
+division's saved age band and the player's stored natural age), because a team row carries no age
+band for a check in this hook to read.
 
 ### 3.6 Server-side validation
 

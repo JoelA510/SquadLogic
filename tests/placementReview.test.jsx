@@ -60,7 +60,7 @@ describe('placement review :: not placed', () => {
           reason: 'eligibility-blocked',
           metadata: {
             placement: 'no_division',
-            reviewReason: 'play-down is not permitted',
+            reviewReason: 'no suitable division holds natural age 13',
             naturalAge: 13,
             coachId: null,
           },

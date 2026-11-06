@@ -319,9 +319,13 @@ describe('a window on a division the file has no registrants in', () => {
     );
     // The file has only U3 registrants; U4 is a program because a window takes one of them.
     const u4 = await screen.findByRole('button', { name: /^U4/ });
-    expect(u4.closest('tr')).toHaveTextContent(/U4\s*1/);
+    expect(u4.closest('tr')).toHaveTextContent(/U4\s*1\s*1 moved here from another division/);
+    // Nine registered in U3, one of them plays in U4: the advice counts U3's eight where they play
+    // (it counted all nine until the advice counted by the division played, play-down plan PR 1).
     const u3 = screen.getByRole('button', { name: /^U3/ });
-    expect(u3.closest('tr')).toHaveTextContent(/U3\s*9/);
+    expect(u3.closest('tr')).toHaveTextContent(
+      /U3\s*8\s*1 registered here, placed in their own age division/
+    );
     fireEvent.click(u4);
     const button = await screen.findByRole('button', { name: /Generate Teams/ });
     await waitFor(() => expect(button).toBeEnabled());

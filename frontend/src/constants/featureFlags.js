@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ArrowDownToLine,
   Clock,
   Flag,
   Gauge,
@@ -60,6 +61,15 @@ export const FEATURE_FLAGS = {
   // squadlogic-feature-guardians, "Retiring").
   MEDICAL_FORMS: 'medical_forms',
   WAITLIST: 'waitlist',
+
+  // Play-down: a player registered in a younger division than their age plays in their own age
+  // division, unless an admin turns this on, and then plays in the division they registered for,
+  // listed on the Teams page. Off unless turned on (an absent key is off, so `FEATURE_DEFAULTS`
+  // has no entry). The Teams page reads it and hands the placement a boolean; a roster that
+  // already exists is not changed by turning it on or off (owner, 2026-11-03,
+  // docs/changes/2026-11-03-play-down-default-and-flags.md). The same key as `PLAY_DOWN_FLAG` in
+  // packages/core/src/playUp.js.
+  PLAY_DOWN: 'play_down',
 
   // Field heat-stress (WBGT) forecast; off unless an admin turns it on.
   HEAT_FORECAST: 'heat_forecast',
@@ -193,6 +203,14 @@ export const FEATURE_CATALOG = [
     label: 'Waitlist',
     description: 'Flag and manage waitlisted registrants separately from active players.',
     icon: Clock,
+    column: false,
+  },
+  {
+    key: FEATURE_FLAGS.PLAY_DOWN,
+    label: 'Play-down',
+    description:
+      'A player registered in a younger division than their age is placed in their own age division unless this is on. Turn it on to let them play in the division they registered for; each is listed on the Teams page as a play-down. Teams already reviewed, published or locked are not changed either way. Off unless turned on.',
+    icon: ArrowDownToLine,
     column: false,
   },
   {

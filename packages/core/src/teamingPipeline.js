@@ -10,8 +10,10 @@
  *      a team per coaching family — separate coach exports now drive teaming), then
  *      break any mutual pair whose two players anchor different head coaches;
  *   4. place each player in the division they play in: their own age division, unless they
- *      requested a play-up, and list every play-up and play-down for the admin (`playUp.js`);
- *      a buddy pair that now plays in two divisions is told apart;
+ *      requested a play-up (or, with the play-down setting on, registered in a younger
+ *      division), and list every play-up and play-down for the admin (`playUp.js`); a player
+ *      already on a roster that exists keeps that seat; a buddy pair that now plays in two
+ *      divisions is told apart;
  *   5. take off the waitlist a waitlisted player a coach asked for: the buddy of a coach's
  *      linked child (`waitlistException.js`).
  *
@@ -143,6 +145,10 @@ function breakPlayedApartPairs(players) {
  *   external registration id), so a buddy request naming someone outside the program is
  *   told apart from one naming nobody. Defaults to `players`.
  * @param {string} [params.buddyRule='mutual'] - the league's `buddy_rule` (`BUDDY_RULES`).
+ * @param {boolean} [params.allowPlayDown=false] - the league's play-down setting
+ *   (`PLAY_DOWN_FLAG` in `playUp.js`); see `applyPlayUpEligibility`.
+ * @param {Map<string, string>} [params.heldSeats] - player id to the division of a roster that
+ *   already exists and the player is on; see `applyPlayUpEligibility`.
  * @returns {{ players: Array<Object>, diagnostics: { buddyLinking: Array<Object>, buddyRequests: Array<Object>, coachLinking: Object, playUp: Object, waitlistExceptions: Array<Object> } }}
  */
 export function prepareTeamingInput({
@@ -155,6 +161,8 @@ export function prepareTeamingInput({
   cutoffMonth,
   cutoffDay,
   buddyRule = BUDDY_RULES.MUTUAL,
+  allowPlayDown = false,
+  heldSeats,
 }) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
 
@@ -195,6 +203,8 @@ export function prepareTeamingInput({
     cutoffMode,
     cutoffMonth,
     cutoffDay,
+    allowPlayDown,
+    heldSeats,
   });
   const apart = breakPlayedApartPairs(playUp.players);
   const requestsAfterPlay = buddyRequests.map((outcome) =>

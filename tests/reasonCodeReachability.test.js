@@ -405,7 +405,7 @@ const TABLES = Object.freeze({
  */
 const NOT_A_FINDING_TABLE = Object.freeze({
   PRACTICE_TBD_REASON:
-    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above. DECLINED (8.6 PR 5) is carried on a recommendation entry after a decline and named in PRACTICE_REPAIR_RECOMMENDATION_LOCAL, which is audited above; tests/practiceRecommendations.test.js produces it. SUNSET_UNKNOWN (8.9 PR 7) is the daylight gate emptying a venue of candidates whose sunset is unknown; PAST_SUNSET is no longer a reason a series goes TIME TBD in the repair (past sunset is flagged, never blocked: owner, 2026-10-27, Phase D PR B) and stays in the table for rows saved before. The findings that name the flags and the refusals, PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET and PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN, are audited above and tests/practiceRepairDaylight.test.js produces both.',
+    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above. DECLINED (8.6 PR 5) is carried on a recommendation entry after a decline and named in PRACTICE_REPAIR_RECOMMENDATION_LOCAL, which is audited above; tests/practiceRecommendations.test.js produces it. SUNSET_UNKNOWN (8.9 PR 7) and PAST_SUNSET are no longer reasons a series goes TIME TBD in the repair (past sunset is flagged, never blocked: owner, 2026-10-27, Phase D PR B; an unknown sunset likewise: owner, 2026-11-02) and stay in the table for rows saved before. The findings that name the flags, PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET and PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN, are audited above and tests/practiceRepairDaylight.test.js produces both.',
   PRACTICE_UNPLACED_REASON:
     "why the auto-scheduler left a practice unplaced in a run (no slot, no live date, a coach preference, the division's practice length, too few weekdays for its practices a week). It rides on an unassigned entry of the Edge response and is shown to the admin in words by describeUnplacedReason(); it is a classification, not a finding code, and has no severity table. tests/practiceUnplacedReasons.test.js pins it to the Edge constants in both directions and tests/autoSchedulerPracticeUnits.test.js produces the two new reasons from a run.",
   DORMANCY_REASON:
@@ -3203,6 +3203,19 @@ harvest(
     requirement: {
       ...capacityInput.requirement,
       slots: /** @type {number} */ (capacityReport.maxSlots) + 1,
+    },
+  })
+);
+harvest(
+  // Owner, 2026-11-02: sunset only warns, so no date of the published season is at the bare
+  // minimum any more (the two November dates used to be). The finding is driven from a requirement
+  // equal to what the leanest date holds.
+  'buildReserveCapacityReport(a requirement exactly what the leanest date holds)',
+  buildReserveCapacityReport(capacityEngines, {
+    ...capacityInput,
+    requirement: {
+      ...capacityInput.requirement,
+      slots: /** @type {number} */ (capacityReport.minSlots),
     },
   })
 );

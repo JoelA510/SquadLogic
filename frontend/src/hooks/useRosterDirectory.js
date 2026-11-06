@@ -6,10 +6,16 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 
 const IDLE = { status: 'idle', key: null, players: null, coaches: null, error: null };
 
+/** The columns of `players` the directory reads: a second copy of the schema (lesson 60). */
+const PLAYER_COLUMNS =
+  'id, first_name, last_name, rating, skill_tier, natural_age, play_up_requested';
+
 /**
- * The people a roster names: every durable player (id to name, rating and skill tier) and every coach (id
- * to name) of the season the header shows (20261108010000: both belong to one season), for the
- * manual roster editor.
+ * The people a roster names: every durable player (id to name, rating, skill tier, natural age and play-up
+ * request) and every coach (id to name) of the season the header shows (20261108010000: both belong to
+ * one season), for the manual roster editor. The natural age and the request are what the editor's
+ * play-up and play-down list judges a seat by (play-down plan, 2026-11-03, PR 2): a roster holds ids
+ * only, and the team row has no age band.
  *
  * ## Why this exists
  *
@@ -33,7 +39,8 @@ const IDLE = { status: 'idle', key: null, players: null, coaches: null, error: n
  * @param {{ enabled: boolean }} options
  * @returns {{
  *   status: 'idle' | 'loading' | 'ready' | 'error',
- *   players: Map<string, { name: string, rating: number | null, skillTier: string | null }>,
+ *   players: Map<string, { name: string, rating: number | null, skillTier: string | null,
+ *     naturalAge: number | null, playUpRequested: boolean }>,
  *   coaches: Map<string, string>,
  *   error: string | null,
  *   retry: () => void,
@@ -56,7 +63,7 @@ export function useRosterDirectory({ enabled }) {
           fetchAllPages(() =>
             supabase
               .from('players')
-              .select('id, first_name, last_name, rating, skill_tier')
+              .select(PLAYER_COLUMNS)
               .eq('organization_id', orgId)
               .eq('season_settings_id', seasonId)
           ),
@@ -79,6 +86,9 @@ export function useRosterDirectory({ enabled }) {
             name,
             rating: Number.isFinite(row.rating) ? row.rating : null,
             skillTier: typeof row.skill_tier === 'string' ? row.skill_tier : null,
+            // Blank is not zero: an age the record does not have is unknown, never 0.
+            naturalAge: Number.isFinite(row.natural_age) ? row.natural_age : null,
+            playUpRequested: row.play_up_requested === true,
           });
         }
         const coaches = new Map();

@@ -1,6 +1,42 @@
 import React from 'react';
 import { assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import Button from '../ui/Button.jsx';
+import { movedHereNote } from '../../utils/seatNotes.js';
+
+/**
+ * The recommendation's note on who is registered but not counted, because no team seats them: those on
+ * the waitlist and those no division can hold. Empty when there are none.
+ * @param {{ waitlistedCount?: number, notEligibleCount?: number }} program
+ */
+function leftOutNote(program) {
+  const waitlisted = Number(program.waitlistedCount) || 0;
+  const notEligible = Number(program.notEligibleCount) || 0;
+  if (waitlisted === 0 && notEligible === 0) return '';
+  const parts = [];
+  if (waitlisted > 0) parts.push(`${waitlisted} on the waitlist`);
+  if (notEligible > 0) parts.push(`${notEligible} not eligible for the division`);
+  const verb = waitlisted + notEligible === 1 ? 'is' : 'are';
+  return ` (${parts.join(' and ')} ${verb} not counted)`;
+}
+
+/**
+ * The recommendation's note on who moved: the advice counts a player where they play, so players
+ * registered elsewhere who play here are in the count, and players registered here who play in their
+ * own age division elsewhere are not, and the sentence says so. Empty when nobody moved.
+ * @param {{ movedInCount?: number, movedOutCount?: number }} program
+ */
+function movedNote(program) {
+  const movedIn = Number(program.movedInCount) || 0;
+  const movedOut = Number(program.movedOutCount) || 0;
+  const parts = [];
+  if (movedIn > 0) parts.push(movedHereNote(movedIn));
+  if (movedOut > 0) {
+    parts.push(
+      `${movedOut} registered here ${movedOut === 1 ? 'is' : 'are'} placed in their own age division and not counted`
+    );
+  }
+  return parts.length > 0 ? ` (${parts.join('; ')})` : '';
+}
 
 export default function TeamingConfiguration({
   program,
@@ -193,9 +229,8 @@ export default function TeamingConfiguration({
               <p className="text-sm text-text-secondary" data-testid="team-count-recommendation">
                 Recommended: {recommendedTeamCount} {recommendedTeamCount === 1 ? 'team' : 'teams'}{' '}
                 for {program.playerCount} players
-                {program.waitlistedCount > 0
-                  ? ` (${program.waitlistedCount} on the waitlist ${program.waitlistedCount === 1 ? 'is' : 'are'} not counted)`
-                  : ''}
+                {leftOutNote(program)}
+                {movedNote(program)}
                 {coachCount > 0
                   ? ` and ${coachCount} head ${coachCount === 1 ? 'coach' : 'coaches'}`
                   : ''}

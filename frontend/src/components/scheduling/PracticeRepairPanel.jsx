@@ -8,6 +8,7 @@ import {
   WEEKDAY_TEXT,
   clock,
   pastSunsetText,
+  sunsetUnknownText,
   declineIn,
   describeShape,
   namesOf,
@@ -444,6 +445,15 @@ function Recommendations({
                             <span className="badge warning">Past sunset</span> {row.pastSunset}
                           </span>
                         )}
+                        {row.sunsetUnknown && (
+                          <span
+                            className="text-sm block"
+                            data-testid="practice-repair-sunset-unknown"
+                          >
+                            <span className="badge warning">Sunset unknown</span>{' '}
+                            {row.sunsetUnknown}
+                          </span>
+                        )}
                       </span>
                     ) : (
                       <span data-testid="practice-repair-time-tbd" data-tbd-reason={row.reason}>
@@ -604,6 +614,7 @@ function Recommendations({
           rows={dialog.rows}
           replacement={dialog.replacement}
           pastSunset={dialog.pastSunset}
+          sunsetUnknown={dialog.sunsetUnknown}
           moves={dialog.moves}
           affected={dialog.affected}
           busy={busy}
@@ -707,6 +718,7 @@ function dialogFor(shown, adapted, rows, names, loss, subject) {
       ? `${describeShape(shown.to, names)}, from ${prompt.lossDate} to ${shown.effectiveUntil}`
       : `TIME TBD from ${prompt.lossDate}, because ${TBD_REASON_TEXT[shown.reason] ?? shown.reason}`,
     pastSunset: pastSunsetText(shown),
+    sunsetUnknown: sunsetUnknownText(shown),
     affected: prompt.record.published_practices_affected,
     blocked: null,
   };
@@ -772,6 +784,7 @@ function blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team
       ? `${describeShape(shown.to, names)}, from ${w.from} to ${w.until} only`
       : `TIME TBD from ${w.from} to ${w.until} only, because ${because}`,
     pastSunset: pastSunsetText(shown),
+    sunsetUnknown: sunsetUnknownText(shown),
     moves: moved
       ? `${moved.from.count} practice${moved.from.count === 1 ? '' : 's'} on ${dayText(moved.from.weekday)} move to ${moved.to.count} on ${dayText(moved.to.weekday)}.`
       : null,

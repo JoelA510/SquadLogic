@@ -30,7 +30,7 @@
 - [GotSport Import Contract](architecture/gotsport-import-contract.md) — Whitelisted player/coach fields kept vs. dropped, age-cutoff modes, play-up rules, division auto-create, and coach→team linkage.
 - [Team Generation](architecture/team-generation.md) — Algorithm design for converting registrations into balanced teams.
 - [Incremental Teaming Hardening](architecture/incremental-teaming-hardening.md) — Snapshot-aware / incremental team generation: re-run policies, the `changePolicy` reference, change diagnostics, persistence invariants.
-- [Practice Scheduling](architecture/practice-scheduling.md) — Practice slot allocation and conflict resolution.
+- [Practice Scheduling](architecture/practice-scheduling.md) — Practice slot allocation and conflict resolution, the daylight rule, and the read-only Practice daylight outlook (`/schedule/practice-daylight`; its plan is [`changes/2026-11-02-duration-phases-wiring.md`](changes/2026-11-02-duration-phases-wiring.md)).
 - [Game Scheduling](architecture/game-scheduling.md) — Game slot allocation and matchup fairness.
 - [Game Schedule Grid (ADR)](architecture/game-schedule-grid.md) — Component architecture for the drag-and-drop game-schedule grid (Fields × Time Slots layout, droppable-key design, optimistic UI).
 - [Evaluation Pipeline](architecture/evaluation-pipeline.md) — Scoring engine, metrics, findings, and `evaluation_runs` persistence.

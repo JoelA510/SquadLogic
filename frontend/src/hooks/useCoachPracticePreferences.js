@@ -90,9 +90,11 @@ export async function addPracticePreference(input) {
 
 /**
  * An admin replaces an in-force rule's conditions, level, priority and window (the coach and the team
- * stay). The RPC takes the whole rule, so every field is sent. Saving a rule that was requested as a
- * must at `prefer` keeps it as prefer, and saving it at `must` accepts it: the RPC decides the
- * request by the level it is given (migration 20261112010000).
+ * stay). The RPC takes the whole rule, so every field is sent. A requested must that is still pending
+ * stays pending when it is saved at `prefer` (the level it is in force at) and is accepted when it is
+ * saved at `must`; a requested must that was already decided is kept as prefer at `prefer` and accepted
+ * at `must` (migrations 20261112010000 and 20261116010000). The decision a pending rule needs is made
+ * with `decideMustPreference`, never by an edit that only changes its days.
  *
  * @param {any} row - the rule row being edited
  * @param {{ level: 'prefer' | 'must', weekdays?: string[] | null, startMinutes?: number[] | null,

@@ -82,7 +82,7 @@
 
 import { resolvePermitWindow } from '../availability/calendar.js';
 import { checkKickoffAvailability } from '../availability/kickoff.js';
-import { AVAILABILITY_SEVERITY } from '../availability/reasonCodes.js';
+import { AVAILABILITY_REASON, AVAILABILITY_SEVERITY } from '../availability/reasonCodes.js';
 import { getSurface } from '../facility/facilityGraph.js';
 import { registryConstraintIdsFor } from '../resolve/errors.js';
 
@@ -216,6 +216,12 @@ export function buildReserveCapacityReport(engines, rawInput) {
 
       /** @type {number[]} */
       const kickoffMinutes = [];
+      // The accepted slots that end past the daylight limit. They count, as legal slots (owner,
+      // 2026-11-02: legal with a warning, because some organisations have portable lighting or
+      // other workarounds), and the warning is kept so a caller can tell daylight capacity from
+      // capacity that needs one.
+      /** @type {number[]} */
+      const sunsetWarnedKickoffMinutes = [];
       let conditionSatisfied = 0;
       let conditionBlocked = 0;
       let conditionUndecidable = 0;
@@ -227,6 +233,8 @@ export function buildReserveCapacityReport(engines, rawInput) {
         conditional: condition !== null,
         condition,
         kickoffMinutes,
+        sunsetWarnedKickoffMinutes,
+        sunsetWarnedSlots: 0,
         slots: 0,
         conditionSatisfied: 0,
         conditionBlocked: 0,
@@ -269,6 +277,13 @@ export function buildReserveCapacityReport(engines, rawInput) {
 
         kickoffMinutes.push(kickoff);
         meta.slotsGenerated += 1;
+        if (
+          answer.findings.some(
+            (finding) => finding.code === AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED
+          )
+        ) {
+          sunsetWarnedKickoffMinutes.push(kickoff);
+        }
 
         if (condition) {
           // Does the club actually hold this candidate? A candidate whose
@@ -312,6 +327,7 @@ export function buildReserveCapacityReport(engines, rawInput) {
       }
 
       row.slots = kickoffMinutes.length;
+      row.sunsetWarnedSlots = sunsetWarnedKickoffMinutes.length;
       row.conditionSatisfied = conditionSatisfied;
       row.conditionBlocked = conditionBlocked;
       row.conditionUndecidable = conditionUndecidable;
@@ -383,6 +399,7 @@ export function buildReserveCapacityReport(engines, rawInput) {
     bestSlotsBySurface,
     minSlots: counts.length > 0 ? Math.min(...counts) : null,
     maxSlots: counts.length > 0 ? Math.max(...counts) : null,
+    sunsetWarnedSlots: dateRows.reduce((total, dateRow) => total + dateRow.sunsetWarnedSlots, 0),
     bareMinimumDates: dateRows.filter((row) => row.bareMinimum).map((row) => row.date),
     status: deriveReserveStatus(findings),
     findings,
@@ -536,6 +553,7 @@ function summariseDate(date, bySurface, counted, input) {
     assigned,
     unassigned: reserved - assigned,
     spare: slots - reserved,
+    sunsetWarnedSlots: sum(bySurface, 'sunsetWarnedSlots'),
     meetsRequirement,
     availableMeetsRequirement,
     bareMinimum,

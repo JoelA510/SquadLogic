@@ -26,10 +26,14 @@ import {
   sunsetForVenue,
 } from '@squadlogic/core/availability/index.js';
 import {
+  CONSTRAINT_REASON,
+  SEASON_2026_CONSTRAINTS,
   SEASON_2026_CONSTRAINT_ID,
+  applyRegistrySeverity,
   buildSeason2026ConstraintRegistry,
   buildSeason2026PracticeConstraintRegistry,
   constraintsForReasonCode,
+  effectiveSeverityTable,
   getConstraint,
 } from '@squadlogic/core/constraints/index.js';
 import {
@@ -596,5 +600,102 @@ describe('W11: the DST season event is derived from the zone and matches the Not
       [SEASON_CLOCK_EVENT.DST_START, '2026-03-29'],
       [SEASON_CLOCK_EVENT.DST_END, '2026-10-25'],
     ]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* K -- past sunset is a compromise, never a block (owner, 2026-11-02)         */
+/* -------------------------------------------------------------------------- */
+
+describe('K: a practice past sunset is a compromise, not a block (owner, 2026-11-02)', () => {
+  // The owner: "Relabel the past-sunset constraint as a compromise for both practice and game."
+  // What that means here is in docs/changes/2026-11-02-sunset-compromise.md: the code's severity
+  // is `compromise`, the claim is `soft` with one history entry, and the practice registry
+  // changes no severity. Every expected value below is written from that decision (as words, or
+  // counted over the input list of constraints), never read back from the severity table or the
+  // claim record under test.
+  //
+  // Plants (each red, then reverted): K-P1 `PRACTICE_PAST_SUNSET` back to `BLOCKING` in
+  // `AVAILABILITY_REASON_SEVERITY`; K-P2 the `practice-daylight` claim back to `hard` with no
+  // weight; K-P3 the claim's `history` emptied.
+  const SUNSET = 18 * 60 + 30;
+  const calendar = rigCalendar([], [{ date: RIG_DATE, sunsetMinutes: SUNSET }]);
+  // One slot ends at the sunset, one a minute after it (the boundary W15 pins).
+  const occ = rigOccurrences([
+    { surfaceId: 'dark/f', endMinutes: SUNSET },
+    { surfaceId: 'dark/f', endMinutes: SUNSET + 1 },
+  ]);
+  const registry = buildSeason2026PracticeConstraintRegistry();
+  const claim = getConstraint(registry, PRACTICE_DAYLIGHT_CONSTRAINT_ID);
+
+  it('K1: the minute past sunset is flagged, its finding is a compromise, and the check is compromised', () => {
+    // Control: a practice that ends at sunset alone has no finding, and the check is allowed.
+    const legal = evaluatePracticeDaylight({ occurrences: [occ[0]], graph: rigGraph, calendar });
+    expect(legal.findings).toEqual([]);
+    expect(legal.status).toBe('allowed');
+
+    const result = evaluatePracticeDaylight({ occurrences: occ, graph: rigGraph, calendar });
+    expect(result.allowed).toEqual([occ[0].id]);
+    expect(result.flagged.map((v) => v.occurrenceId)).toEqual([occ[1].id]);
+    const found = result.findings.filter(
+      (f) => f.code === AVAILABILITY_REASON.PRACTICE_PAST_SUNSET
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0].severity).toBe('compromise');
+    expect(result.status).toBe('compromised');
+  });
+
+  it('K2: under the practice registry the code is still a compromise, and the registry overrides no severity', () => {
+    const table = effectiveSeverityTable(registry, {});
+    expect(table.severityByCode[AVAILABILITY_REASON.PRACTICE_PAST_SUNSET]).toBe('compromise');
+    // The base severity and the claim's type agree: a one-sided change shows up here as an override.
+    expect(table.overrides.filter((override) => override.changed)).toEqual([]);
+    const result = evaluatePracticeDaylight({ occurrences: occ, graph: rigGraph, calendar });
+    const reseveritied = applyRegistrySeverity(result.findings, table);
+    expect(
+      reseveritied.findings.find((f) => f.code === AVAILABILITY_REASON.PRACTICE_PAST_SUNSET)
+        ?.severity
+    ).toBe('compromise');
+    expect(reseveritied.status).toBe('compromised');
+  });
+
+  it('K3: the claim is soft, states a weight, and is not waivable (a compromise needs no waiver)', () => {
+    expect(claim?.type).toBe('soft');
+    expect(claim?.weight).toBeGreaterThan(0);
+    expect(claim?.waivable).toBe(false);
+    expect(claim?.reasonCodes).toEqual([AVAILABILITY_REASON.PRACTICE_PAST_SUNSET]);
+  });
+
+  it('K4: the practice registry is the game registry plus one soft claim, counted over the input list', () => {
+    const countOf = (type) => SEASON_2026_CONSTRAINTS.filter((c) => c.type === type).length;
+    // Control for the count: the game registry agrees with the list it was built from.
+    const game = buildSeason2026ConstraintRegistry();
+    expect(game.stats.hardCount).toBe(countOf('hard'));
+    expect(game.stats.softCount).toBe(countOf('soft'));
+    expect(registry.stats.constraintCount).toBe(SEASON_2026_CONSTRAINTS.length + 1);
+    expect(registry.stats.hardCount).toBe(countOf('hard'));
+    expect(registry.stats.softCount).toBe(countOf('soft') + 1);
+    expect(registry.stats.preferenceCount).toBe(countOf('preference'));
+  });
+
+  it('K5: the retype is on record: hard to soft, the owner, 2026-11-02, and the registry says so', () => {
+    expect(claim?.history).toHaveLength(1);
+    expect(claim?.history[0]).toMatchObject({
+      from: 'hard',
+      to: 'soft',
+      by: 'owner',
+      at: '2026-11-02',
+    });
+    const said = registry.findings.filter(
+      (f) =>
+        f.code === CONSTRAINT_REASON.CONSTRAINT_TYPE_CHANGED &&
+        f.details.constraintId === PRACTICE_DAYLIGHT_CONSTRAINT_ID
+    );
+    expect(said).toHaveLength(1);
+    expect(said[0].details).toMatchObject({
+      firstType: 'hard',
+      lastChangeTo: 'soft',
+      lastChangeBy: 'owner',
+    });
   });
 });

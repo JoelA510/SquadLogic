@@ -4,12 +4,14 @@
  *
  * `practice/daylight.js` says which practices run past sunset. This module
  * says how the season adapts, in three reports over the same universe, and
- * **applies nothing**:
+ * **applies nothing** (it proposes; nothing here writes a start or a length
+ * back, and no stored row represents a retimed practice):
  *
  * - **G3, the DurationPhase schedule.** Per unlit slot, an ordered list of
  *   `(effectiveFrom, startMinutes, durationMinutes)` phases, each showing the
- *   date, the sunset and what bound it (`slotPhases`). The output is exactly
- *   the `seasonPhases` + per-slot `seasonOverrides` (`durationMinutes`, and
+ *   date, the sunset and what bound it (`slotPhases`), and the dates no phase
+ *   saves, flagged (`slotPhases[].flagged`). The output is exactly the
+ *   `seasonPhases` + per-slot `seasonOverrides` (`durationMinutes`, and
  *   `startTime` for a shifted slot) that `expandPracticeSlotsForSeason()`
  *   already takes -- no second mechanism.
  * - **G4, the compression report.** *Hold-starts*: every slot-date still
@@ -20,7 +22,8 @@
  *   a start time back (W13).
  * - **G5, the DST survival report.** Per unlit slot: does it survive, and if
  *   not, what would fix it -- a lit field, an earlier start, another night, a
- *   portable-lighting override.
+ *   portable-lighting override. A slot that does not survive names its first
+ *   flagged date (`firstFlaggedDate`) and every flagged date (`flaggedDates`).
  *
  * ## The one comparison (W12)
  *
@@ -50,9 +53,18 @@
  *   into an earlier slot on the same surface that night. An unknown floor
  *   refuses the shift; it is never assumed.
  *
- * A date neither can save is **held out**: TIME TBD (D8) with its date and the
- * reason, listed in `slotPhases[].tbd` -- never emitted shorter than the
- * minimum and never dropped. It leaves the slot's state as it was.
+ * A date neither can save is **flagged**, not held out (owner, 2026-11-02: a
+ * sunset condition is a warning, never a refusal, because coaches and
+ * organisations may accept conditions the app cannot see). It stays in the
+ * schedule at the timing the slot has that night, with its date, both
+ * refusals and the reason, in `slotPhases[].flagged`, carrying
+ * `AVAILABILITY_REASON.PRACTICE_PAST_SUNSET` (a compromise finding; this module
+ * stores the code, never the severity). It is never emitted shorter than the
+ * minimum, never dropped and never made TIME TBD, and it leaves the slot's
+ * state as it was. **A flagged practice still happens, so it occupies its
+ * surface at that timing**: a later slot is never proposed into minutes a
+ * running practice holds, and is itself flagged `overlap` when its shift would
+ * land there (the same rule an unknown-sunset date already follows).
  *
  * Operator duration overrides pin a slot's duration from a date. They apply
  * before the date is judged, so one that leaves a practice past sunset is
@@ -74,14 +86,15 @@
  * candidates whose permits, sizes and capacities are **not checked**. The
  * `practice-daylight` registry claim states the same.
  *
- * ## What D8 gets from here
+ * ## What the live path does instead of D8's truncation
  *
- * The scheduler only **proposes** shortening or shifting. A weekly slot that
- * is legal early and illegal late is truncated at its first illegal date and
- * the remainder goes TIME TBD; that truncation belongs to the Edge post-pass
- * (8.9 PR 6). G5 reports the date for every slot that needs it
- * (`d8.tbdFrom`), so nothing it will truncate is discovered there for the
- * first time.
+ * The scheduler only **proposes** shortening or shifting. D8 had the Edge
+ * post-pass truncate a weekly slot at its first illegal date and send the
+ * remainder to TIME TBD; since 2026-10-27 it keeps the placement whole and
+ * flags the first date past sunset (`practice-daylight.ts`), as the repair
+ * does. This module describes the same practices the same way: G5 names the
+ * first flagged date (`firstFlaggedDate`) and the flagged dates, and nothing
+ * here says a date is lost.
  *
  * ## Universes come from the input
  *
@@ -92,9 +105,14 @@
  * counted, never omitted. Dated one-off exceptions are out of scope: they are
  * judged per occurrence by `evaluatePracticeDaylight()`.
  *
- * Enforced nowhere live: the core `practiceScheduling.js`/`autoScheduler.js`
- * do not call this, and the Edge post-pass (8.9 PR 6) is a Deno twin, not a
- * caller. The D14 constants are exported for the Edge twin (PR C) to pin.
+ * Called by one thing: the read-only "Practice daylight" page's model
+ * (`frontend/src/utils/daylightOutlook.js`, PR B of
+ * `docs/changes/2026-11-02-duration-phases-wiring.md`) runs G3 and G5 over the
+ * stored rows, which come through `durationPhaseAdapter.js`, and shows them as a
+ * proposal. The core `practiceScheduling.js`/`autoScheduler.js` do not call this,
+ * the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller, and G4 is called by
+ * nothing outside the tests (its cascade has no screen). The D14 constants are
+ * exported for the Edge twin (PR C) to pin.
  *
  * @module practice/durationPhases
  */
@@ -128,7 +146,7 @@ export const PRACTICE_RETIME_KIND = Object.freeze({
   FALLBACK_SHIFT: 'fallback-shift',
 });
 
-/** Why a date could not be retimed, and so is TIME TBD (D14). */
+/** Why a date could not be retimed, and so is flagged and kept as scheduled (D14). */
 export const PRACTICE_RETIME_REFUSAL = Object.freeze({
   BELOW_MINIMUM: 'below-minimum',
   EARLIEST_START_FLOOR: 'earliest-start-floor',
@@ -175,6 +193,9 @@ export const PRACTICE_SUNSET_CASCADE_SOURCES = Object.freeze([
     matches: (/** @type {string} */ reason) => reason === PRACTICE_SUNSET_CASCADE_REASON_TEXT,
   }),
 ]);
+
+/** How a flagged date's reason ends: the practice stays as scheduled and the admin decides. */
+const KEPT_AS_SCHEDULED = 'kept as scheduled and flagged';
 
 const WEEKDAY_CODES = Object.freeze(['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']);
 const WEEKDAY_NAMES = Object.freeze({
@@ -463,12 +484,13 @@ function parseOptions(input) {
  * earlier slot on its surface that night already has its timing for the date.
  * An earlier slot occupies its derived end; on a date it is exempt, its
  * planned start plus the operator pin in force (it runs as planned); on an
- * unknown-sunset date, its current end; on a date it is held out, nothing (it
- * is TIME TBD, not on the surface). A shifted slot is re-checked against that
- * every night, and a night it would overlap is held out `overlap`.
+ * unknown-sunset date, its current end; on a date it is flagged, its current
+ * end too (a flagged practice still happens, so it holds its minutes). A
+ * shifted slot is re-checked against that every night, and a night it would
+ * overlap is flagged `overlap`.
  *
- * `retimeRefusals` counts held-out dates only, by each refusal that held one
- * out (a SHORTEN date refused by the ladder and the shift counts in both).
+ * `retimeRefusals` counts flagged dates only, by each refusal that flagged one
+ * (a SHORTEN date refused by the ladder and the shift counts in both).
  *
  * @param {ReturnType<typeof buildUnlitUniverse>} universe
  * @param {ReturnType<typeof parseOptions>} options
@@ -543,7 +565,7 @@ function deriveSlotTimelines(universe, options) {
     unlitSlotDatesExamined: 0,
     slotDatesExempt: 0,
     slotDatesSunsetUnknown: 0,
-    slotDatesHeldOut: 0,
+    slotDatesFlagged: 0,
     phaseTransitionsDerived: 0,
     shortenings: 0,
     shifts: 0,
@@ -587,7 +609,7 @@ function deriveSlotTimelines(universe, options) {
       },
     ];
     /** @type {Array<Object>} */
-    const tbd = [];
+    const flagged = [];
     let exemptDates = 0;
     const slotOverrides = overridesBySlot.get(slot.id) ?? new Map();
     const byDate = new Map(entry.dates.map((slotDate) => [slotDate.date, slotDate]));
@@ -649,14 +671,16 @@ function deriveSlotTimelines(universe, options) {
       // later on another night (its own lighting window, an operator pin), so
       // a shifted slot is re-checked every night, never assumed clear.
       if (start < slot.startMinutes && earlierEnd !== null && start < earlierEnd) {
-        counters.slotDatesHeldOut += 1;
+        // Flagged, not held out: the practice stays at the timing it has, on
+        // the surface, so it holds its minutes against the slots after it.
+        counters.slotDatesFlagged += 1;
         counters.retimeRefusals[PRACTICE_RETIME_REFUSAL.OVERLAP] += 1;
-        tbd.push({
+        flagged.push({
           date,
           code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
           shortenRefused: null,
           shiftRefused: PRACTICE_RETIME_REFUSAL.OVERLAP,
-          reason: `on ${date} slot ${slot.id}, moved to ${clockOf(start)}, would overlap an earlier slot on its surface that ends ${clockOf(earlierEnd)}`,
+          reason: `on ${date} slot ${slot.id}, moved to ${clockOf(start)}, would overlap an earlier slot on its surface that ends ${clockOf(earlierEnd)}; ${KEPT_AS_SCHEDULED}`,
           startMinutes: start,
           durationMinutes: duration,
           wouldStartMinutes: start,
@@ -664,6 +688,7 @@ function deriveSlotTimelines(universe, options) {
           earlierEndMinutes: earlierEnd,
           ...numbers,
         });
+        ends.push(start + duration);
         continue;
       }
       if (endsByDaylightLimit(start + duration, limit)) {
@@ -719,20 +744,21 @@ function deriveSlotTimelines(universe, options) {
           : `; shortening would leave ${shortenRefused.durationMinutes} min, below the ${minimum}-minute minimum`;
 
       if (next === null) {
-        // Held out: TIME TBD on this date (D8), with its reason. The state is
-        // left as it was, so one bad date does not drag the slot down. Its
-        // practice is not on this surface tonight, so it occupies nothing.
-        // Refusals are counted here only: each counts a held-out date.
+        // Flagged on this date, with its reason (owner, 2026-11-02: a sunset
+        // condition is a warning, never a hold-out). The state is left as it
+        // was, so one bad date does not drag the slot down, and the practice
+        // stays on the surface at that timing, so it occupies its minutes.
+        // Refusals are counted here only: each counts a flagged date.
         const refused = /** @type {NonNullable<typeof shift>} */ (shift);
-        counters.slotDatesHeldOut += 1;
+        counters.slotDatesFlagged += 1;
         if (shortenRefused) counters.retimeRefusals[shortenRefused.code] += 1;
         counters.retimeRefusals[/** @type {string} */ (refused.refused)] += 1;
-        tbd.push({
+        flagged.push({
           date,
           code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
           shortenRefused: shortenRefused?.code ?? null,
           shiftRefused: refused.refused,
-          reason: `${past}${shortenText}; starting at ${clockOf(refused.wouldStartMinutes)} is refused (${refused.refused}${refused.refused === PRACTICE_RETIME_REFUSAL.EARLIEST_START_FLOOR ? `, floor ${clockOf(/** @type {number} */ (floor))}` : ''}${refused.refused === PRACTICE_RETIME_REFUSAL.OVERLAP ? `, an earlier slot ends ${clockOf(/** @type {number} */ (earlierEnd))}` : ''})`,
+          reason: `${past}${shortenText}; starting at ${clockOf(refused.wouldStartMinutes)} is refused (${refused.refused}${refused.refused === PRACTICE_RETIME_REFUSAL.EARLIEST_START_FLOOR ? `, floor ${clockOf(/** @type {number} */ (floor))}` : ''}${refused.refused === PRACTICE_RETIME_REFUSAL.OVERLAP ? `, an earlier slot ends ${clockOf(/** @type {number} */ (earlierEnd))}` : ''}); ${KEPT_AS_SCHEDULED}`,
           startMinutes: start,
           durationMinutes: duration,
           wouldStartMinutes: refused.wouldStartMinutes,
@@ -740,6 +766,7 @@ function deriveSlotTimelines(universe, options) {
           earlierEndMinutes: earlierEnd,
           ...numbers,
         });
+        ends.push(start + duration);
         continue;
       }
 
@@ -795,7 +822,7 @@ function deriveSlotTimelines(universe, options) {
       plannedDurationMinutes: slot.durationMinutes,
       phases,
       pins,
-      tbd,
+      flagged,
       slotDatesExempt: exemptDates,
     });
   }
@@ -995,11 +1022,15 @@ function timingUnder(phaseSchedule, scheduledSlot, date) {
  *
  * Every slot-date is read at the schedule's timing (its start and duration,
  * {@link timingUnder}); dates under a lighting override are not judged and are
- * counted in `slotDatesExempt`. The cascade packs each night from the
- * schedule: a slot may start at the proposed end of the slot before it plus
- * their planned gap, never later than the schedule's own start. Each entry is
- * relative to the schedule: `before` is the schedule's start that date,
- * `after` the cascade's, and one is filed where that pair first changes.
+ * counted in `slotDatesExempt`. A hold-start is a date the schedule leaves
+ * ending past sunset, and G3 flags every such date, so each hold-start is a
+ * flagged date; a flagged date is not a hold-start only when it was flagged
+ * for an overlap alone and ends inside daylight. The cascade packs each night
+ * from the schedule: a slot may start at the proposed end of the slot before
+ * it plus their planned gap, never later than the schedule's own start. Each
+ * entry is relative to the schedule: `before` is the schedule's start that
+ * date, `after` the cascade's, and one is filed where that pair first
+ * changes.
  *
  * @param {Object} input
  * @param {import('./types.js').PracticeSlotSet} input.slotSet - the input plan
@@ -1218,12 +1249,13 @@ export function buildPracticeCompressionReport(input) {
  * It reads the one per-slot derivation G3 does ({@link deriveSlotTimelines}),
  * with the same options: a slot survives when G3 retimes every judged date
  * legally, by the ladder or a shift, and does not survive when any date is
- * held out as TIME TBD. A slot whose every date is under a lighting override
- * is `exempt`. The fixes are candidates, stated with what was not checked
- * (D11): a lit surface is named for its lighting only; an earlier start is not
- * checked against permits or the slots around it; another night is judged on
- * this venue's sunset at this start, shortening only; a lighting override
- * needs its request approved.
+ * flagged (kept as scheduled, past sunset or overlapping: the verdict is about
+ * the proposal, not about a date being lost). A slot whose every date is under
+ * a lighting override is `exempt`. The fixes are candidates, stated with what
+ * was not checked (D11): a lit surface is named for its lighting only; an
+ * earlier start is not checked against permits or the slots around it;
+ * another night is judged on this venue's sunset at this start, shortening
+ * only; a lighting override needs its request approved.
  *
  * @param {Object} input - as {@link derivePracticeDurationPhases}
  */
@@ -1283,7 +1315,7 @@ export function buildDstSurvivalReport(input) {
     const unknownDates = judged.filter((d) => d.limitMinutes === null).map((d) => d.date);
     meta.slotDatesSunsetUnknown += unknownDates.length;
     /** @type {Array<Object>} */
-    const failing = timeline.tbd;
+    const failing = timeline.flagged;
     const base = {
       slotId: slot.id,
       surfaceId: slot.surfaceId,
@@ -1303,8 +1335,9 @@ export function buildDstSurvivalReport(input) {
         ...base,
         verdict: PRACTICE_SURVIVAL_VERDICT.EXEMPT,
         reason: 'every date in the window is under a portable-lighting override: none is judged',
-        failingDates: [],
-        d8: null,
+        flaggedDates: [],
+        firstFlaggedDate: null,
+        refusals: [],
         fixes: [],
       };
     }
@@ -1314,8 +1347,9 @@ export function buildDstSurvivalReport(input) {
         ...base,
         verdict: PRACTICE_SURVIVAL_VERDICT.NO_DATES,
         reason: 'the slot’s weekday never falls inside its range and the window',
-        failingDates: [],
-        d8: null,
+        flaggedDates: [],
+        firstFlaggedDate: null,
+        refusals: [],
         fixes: [],
       };
     }
@@ -1333,18 +1367,15 @@ export function buildDstSurvivalReport(input) {
           verdict === PRACTICE_SURVIVAL_VERDICT.UNKNOWN
             ? `no sunset is known on ${unknownDates.length} date(s), so survival cannot be shown (never read as surviving)`
             : `ends by sunset on every judged date: as planned, shortened to no less than ${minimumDurationMinutes} min, or started earlier`,
-        failingDates: [],
-        d8: null,
+        flaggedDates: [],
+        firstFlaggedDate: null,
+        refusals: [],
         fixes: [],
       };
     }
 
     meta.slotsNotSurviving += 1;
     const first = failing[0];
-    // A date with no known sunset is never read as legal (it is listed in
-    // `unknownDates`), so `legalThrough` names the last date shown legal.
-    const lastLegal =
-      judged.filter((d) => d.date < first.date && d.limitMinutes !== null).at(-1) ?? null;
     const knownLimits = judged.filter((d) => d.limitMinutes !== null);
     const tightest = knownLimits.reduce((a, b) =>
       /** @type {number} */ (b.limitMinutes) < /** @type {number} */ (a.limitMinutes) ? b : a
@@ -1433,22 +1464,16 @@ export function buildDstSurvivalReport(input) {
       ...base,
       verdict: PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE,
       code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
-      reason: `from ${first.date} it cannot be retimed: ${first.reason}`,
-      failingDates: failing.map((d) => d.date),
+      reason: `from ${first.date} no retiming saves it: ${first.reason}`,
+      // The dates G3 flags, in date order: the practice is kept as scheduled on
+      // each, so none is lost and none is made TIME TBD.
+      flaggedDates: failing.map((d) => d.date),
+      firstFlaggedDate: first.date,
       refusals: failing.map((d) => ({
         date: d.date,
         shortenRefused: d.shortenRefused,
         shiftRefused: d.shiftRefused,
       })),
-      // D8 truncates at the first held-out date, so `tbdDates` counts every
-      // judged date from there on -- dates G3 could retime included.
-      // `heldOutDates` counts only the dates G3 itself holds out.
-      d8: {
-        legalThrough: lastLegal ? lastLegal.date : null,
-        tbdFrom: first.date,
-        tbdDates: judged.filter((d) => d.date >= first.date).length,
-        heldOutDates: failing.length,
-      },
       fixes,
     };
   });

@@ -10,10 +10,14 @@
  *     their own age division. Either way they are listed, with the facts an admin needs (the
  *     division played in, whether a parent coaches, whether a buddy is in it).
  *   - A player registered in a younger division than their natural age is a play-down. They
- *     play in their own age division and are listed.
+ *     play in their own age division and are listed. With the league's play-down setting on
+ *     (`PLAY_DOWN_FLAG`, off unless an admin turns it on) they play in the division they
+ *     registered for instead, and are listed all the same.
  *   - Only a player no division can hold (none covers their natural age) is blocked: listed,
  *     not placed, with the reason (`isEligibilityBlocked`).
  *   - A player with no natural age is placed in the registered division and flagged.
+ *   - A player already on a roster that exists (reviewed, published or locked) keeps that seat when
+ *     a setting change or a cleared request would move them, and is listed (`heldSeats`).
  *
  * Pure module: no React / Supabase imports.
  */
@@ -37,6 +41,13 @@ export const PLACEMENT = Object.freeze({
   NO_DIVISION: 'no_division',
   UNKNOWN: 'unknown',
 });
+
+/**
+ * The league setting that lets a play-down play in the division registered for, a boolean
+ * organization feature flag (frontend `FEATURE_FLAGS.PLAY_DOWN`; `tests/playDownSetting.test.jsx`
+ * holds the two equal). Off unless an admin turns it on: an absent key does not allow it.
+ */
+export const PLAY_DOWN_FLAG = 'play_down';
 
 /**
  * Is a player's placement one the generator must not seat (Phase B2)? Only a player no
@@ -226,6 +237,11 @@ function playerName(player) {
  * @property {string|null} buddyDivision - where that buddy plays
  * @property {string|null} buddyDivisionName
  * @property {boolean|null} buddyInPlayedDivision - null with no buddy
+ * @property {boolean} [heldSeat] - present (true) only when the player is on a roster that already
+ *   exists and the rule would now play them elsewhere: they stay (`heldSeats`), and
+ *   `playedDivision` is the roster's division
+ * @property {string|null} [ruleDivision] - with `heldSeat`: the division the rule would play them in
+ * @property {string|null} [ruleDivisionName] - and its name
  */
 
 /** The listing's buddy columns for a buddy who plays in `buddyPlayed`, or none. */
@@ -297,7 +313,21 @@ export function withFinalBuddyFacts(listing, players, divisions) {
  * @param {string} [params.cutoffMode]
  * @param {number|null} [params.cutoffMonth] - the season's custom cutoff month
  * @param {number|null} [params.cutoffDay] - and day
- * @returns {{ players: Array<Object>, diagnostics: { listing: PlayUpListing[], counts: Object } }}
+ * @param {boolean} [params.allowPlayDown=false] - the league's play-down setting
+ *   (`PLAY_DOWN_FLAG`). Off, a player registered in a younger division plays in their own age
+ *   division (or is blocked when none holds their age). On, they play in the division registered
+ *   for, listed as a play-down. A play-up is unaffected: it stays by request.
+ * @param {Map<string, string>} [params.heldSeats] - player id to the division of a roster that
+ *   already exists (reviewed, published or locked) and the player is on. A player whose placement
+ *   rule gives a division other than that roster's, where the roster's is one the rule itself gives
+ *   this player (the division registered for, or their own age division: a cleared request, or the
+ *   play-down setting turned on or off), stays on the roster's division and is listed with
+ *   `heldSeat`. A roster in any other division is not a rule outcome (the registration changed, or
+ *   the player was moved by hand), so the placement ignores it and a re-run moves the player as
+ *   before.
+ * @returns {{ players: Array<Object>, diagnostics: { listing: PlayUpListing[] } }} The players, each
+ *   placed, and the listing of those an admin should know about. Counts of who plays up or down,
+ *   by the division played, are `summarizeSeats` (`playUpSeats.js`), not part of this.
  */
 export function applyPlayUpEligibility({
   players,
@@ -306,8 +336,13 @@ export function applyPlayUpEligibility({
   cutoffMode,
   cutoffMonth,
   cutoffDay,
+  allowPlayDown = false,
+  heldSeats,
 }) {
   if (!Array.isArray(players)) throw new TypeError('players must be an array');
+  if (heldSeats !== undefined && heldSeats !== null && !(heldSeats instanceof Map)) {
+    throw new TypeError('heldSeats must be a Map of player id to division');
+  }
   const index = buildDivisionIndex(divisions);
   const rule = {
     cutoffMonth,
@@ -330,51 +365,56 @@ export function applyPlayUpEligibility({
     let played = player.division;
     /** @type {PlayUpKind | null} */
     let kind = null;
+    /** @type {{ ruleDivision: string } | null} the division the rule gave, when a roster holds */
+    let held = null;
     if (raw === 'in_band') {
       placement = PLACEMENT.IN_BAND;
       if (requested) kind = 'requested-own-division';
     } else if (raw === 'up' || raw === 'down') {
       placement = raw === 'up' ? PLACEMENT.PLAY_UP : PLACEMENT.PLAY_DOWN;
       kind = raw === 'up' ? 'play-up' : 'play-down';
-      // A requested play-up stays where it registered; everything else goes to the player's
-      // own age division, and a player no division can hold is blocked.
-      if (!(raw === 'up' && requested)) {
-        const own = findNaturalDivision(index, naturalAge, registered?.gender);
+      // A requested play-up stays where it registered, and so does a play-down when the league
+      // allows it; everything else goes to the player's own age division, and a player no
+      // division can hold is blocked.
+      const own = findNaturalDivision(index, naturalAge, registered?.gender);
+      let playedEntry = registered;
+      if (!(raw === 'up' ? requested : allowPlayDown)) {
         if (own) {
           played = own.id;
+          playedEntry = own;
         } else {
           placement = PLACEMENT.NO_DIVISION;
           kind = 'no-division';
         }
       }
+      // A roster that exists is not reshuffled by a rule that changed (a cleared request, the
+      // play-down setting): the player stays where they are seated, when that is a seat this rule
+      // can give them. Any other roster is a registration that changed or a move by hand.
+      const heldRef = heldSeats?.get(String(player.id));
+      const heldEntry = heldRef === undefined ? null : resolveDivisionEntry(index, heldRef);
+      if (
+        heldEntry &&
+        placement !== PLACEMENT.NO_DIVISION &&
+        heldEntry !== playedEntry &&
+        (heldEntry === registered || heldEntry === own)
+      ) {
+        held = { ruleDivision: played };
+        played = heldEntry.id ?? heldRef;
+      }
     } else if (requested) {
       kind = 'requested-age-unknown';
     }
-    decided.set(String(player.id), { naturalAge, requested, placement, played, kind });
+    decided.set(String(player.id), { naturalAge, requested, placement, played, kind, held });
   }
 
   const diagnostics = {
     listing: /** @type {PlayUpListing[]} */ ([]),
-    counts: {
-      inBand: 0,
-      playUpRequested: 0,
-      playUpUnrequested: 0,
-      playDown: 0,
-      noDivision: 0,
-      unknown: 0,
-    },
   };
   const nameOfDivision = (ref) => resolveDivisionEntry(index, ref)?.name ?? null;
 
   const resultPlayers = players.map((player) => {
     const info = decided.get(String(player.id));
-    const { naturalAge, requested, placement, played, kind } = info;
-    if (placement === PLACEMENT.IN_BAND) diagnostics.counts.inBand += 1;
-    else if (placement === PLACEMENT.PLAY_UP) {
-      diagnostics.counts[requested ? 'playUpRequested' : 'playUpUnrequested'] += 1;
-    } else if (placement === PLACEMENT.PLAY_DOWN) diagnostics.counts.playDown += 1;
-    else if (placement === PLACEMENT.NO_DIVISION) diagnostics.counts.noDivision += 1;
-    else diagnostics.counts.unknown += 1;
+    const { naturalAge, requested, placement, played, kind, held } = info;
 
     let reviewReason = null;
     if (kind !== null) {
@@ -382,15 +422,20 @@ export function applyPlayUpEligibility({
       const buddy = buddyRaw ? byId.get(String(buddyRaw)) : undefined;
       const buddyPlayed = buddy ? decided.get(String(buddy.id)).played : null;
       const playedDivision = placement === PLACEMENT.NO_DIVISION ? null : played;
-      reviewReason = {
-        'play-up': requested
-          ? 'play-up requested; plays in the division registered for'
-          : 'play-up not requested; plays in their own age division',
-        'play-down': 'registered in a younger division; plays in their own age division',
-        'requested-own-division': 'play-up requested, but registered in their own division',
-        'requested-age-unknown': 'play-up requested; natural age unknown, so nothing is checked',
-        'no-division': `no suitable division holds natural age ${naturalAge}`,
-      }[kind];
+      reviewReason = held
+        ? `already on a roster in ${nameOfDivision(played) ?? played}, which a new run does not reshuffle; the rule would now place them in ${nameOfDivision(held.ruleDivision) ?? held.ruleDivision}`
+        : {
+            'play-up': requested
+              ? 'play-up requested; plays in the division registered for'
+              : 'play-up not requested; plays in their own age division',
+            'play-down': allowPlayDown
+              ? 'registered in a younger division; plays there, as the play-down setting is on'
+              : 'registered in a younger division; plays in their own age division',
+            'requested-own-division': 'play-up requested, but registered in their own division',
+            'requested-age-unknown':
+              'play-up requested; natural age unknown, so nothing is checked',
+            'no-division': `no suitable division holds natural age ${naturalAge}`,
+          }[kind];
       diagnostics.listing.push({
         playerId: String(player.id),
         name: playerName(player),
@@ -403,6 +448,13 @@ export function applyPlayUpEligibility({
         playedDivisionName: playedDivision == null ? null : nameOfDivision(playedDivision),
         coachId: player.coachId == null || player.coachId === '' ? null : String(player.coachId),
         ...buddyFacts(buddy, buddyPlayed, playedDivision, nameOfDivision),
+        ...(held
+          ? {
+              heldSeat: true,
+              ruleDivision: String(held.ruleDivision),
+              ruleDivisionName: nameOfDivision(held.ruleDivision),
+            }
+          : {}),
       });
     }
 

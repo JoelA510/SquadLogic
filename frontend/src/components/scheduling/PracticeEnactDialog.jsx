@@ -26,7 +26,8 @@ import Button from '../ui/Button.jsx';
  *   teams: Array<{ id: string, name: string }>,
  *   rows: Array<{ assignmentId: string, now: string, range: string, assignedVia: string,
  *     effect: string, rangeAfter: string | null, detail?: string }>,
- *   replacement: string, pastSunset?: string | null, moves?: string | null, affected: number, busy: boolean,
+ *   replacement: string, pastSunset?: string | null, sunsetUnknown?: string | null,
+ *   moves?: string | null, affected: number, busy: boolean,
  *   notice: { tone: 'alert' | 'status', text: string } | null,
  *   blocked: string | null, onConfirm: () => void, onClose: () => void }} props
  */
@@ -40,6 +41,7 @@ export default function PracticeEnactDialog({
   rows,
   replacement,
   pastSunset = null,
+  sunsetUnknown = null,
   moves = null,
   affected,
   busy,
@@ -128,6 +130,11 @@ export default function PracticeEnactDialog({
           <strong>Past sunset.</strong> {pastSunset}
         </p>
       )}
+      {sunsetUnknown && (
+        <p className="text-sm" data-testid="practice-enact-sunset-unknown" role="note">
+          <strong>Sunset unknown.</strong> {sunsetUnknown}
+        </p>
+      )}
       {moves && (
         <p className="text-sm" data-testid="practice-enact-moves">
           {moves}
@@ -193,6 +200,7 @@ PracticeEnactDialog.propTypes = {
   rows: PropTypes.arrayOf(PropTypes.object).isRequired,
   replacement: PropTypes.string.isRequired,
   pastSunset: PropTypes.string,
+  sunsetUnknown: PropTypes.string,
   affected: PropTypes.number.isRequired,
   busy: PropTypes.bool.isRequired,
   notice: PropTypes.shape({ tone: PropTypes.string, text: PropTypes.string }),

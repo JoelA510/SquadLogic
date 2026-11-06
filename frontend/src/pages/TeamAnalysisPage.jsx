@@ -11,7 +11,8 @@ import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TeamOverviewPanel from '../components/TeamOverviewPanel.jsx';
 import ProgramOverview from '../components/teaming/ProgramOverview.jsx';
-import { groupByProgram } from '../utils/programGroups.js';
+import { NO_PROGRAM_KEY, groupByProgram, ownProgramIdOf } from '../utils/programGroups.js';
+import { flagCountsOf } from '../utils/seatNotes.js';
 import TeamingConfiguration from '../components/teaming/TeamingConfiguration.jsx';
 import RosterManager from '../components/teaming/RosterManager.jsx';
 import { useRosterDirectory } from '../hooks/useRosterDirectory.js';
@@ -34,6 +35,7 @@ import { TEAM_GENERATION } from '@squadlogic/core/constants.js';
 import { DEFAULT_ROSTER_LIMITS, assessTeamCount } from '@squadlogic/core/rosterSizing.js';
 import { prepareTeamingInput } from '@squadlogic/core/teamingPipeline.js';
 import { applyPlayUpEligibility } from '@squadlogic/core/playUp.js';
+import { seatsFromPlacedPlayers, summarizeSeats } from '@squadlogic/core/playUpSeats.js';
 import { summarizeBuddyRequests } from '@squadlogic/core/buddyLinking.js';
 import { isCoachingLeadAnswer } from '@squadlogic/core/coachingLeads.js';
 import { mapSchedulerRunToSummary } from '@squadlogic/core/utils/teamSummaryMapper.js';
@@ -61,6 +63,7 @@ import {
   buildTeamReviewSnapshot,
   firstString,
   getPlayerExternalId,
+  heldSeatsFromSnapshot,
   isUuid,
 } from '../utils/teamReviewPersistence.js';
 
@@ -141,36 +144,91 @@ function createDefaultConfig() {
 }
 
 /**
- * The programs of an import, with the players each holds. The head coaches are not counted here:
- * since the admin-only change (owner decision 8a, 2026-10-27) only a `coach_team_requests` link
- * anchors a team, and the links are read at generation, not with the import's rows. So the
- * overview's recommended team count is the seatable players' (`coachCount` 0); generation
- * itself makes a team for each coach whose child is eligible for the division, and one whose
- * child is not eligible, or is waitlisted, anchors no team (Phase B2).
- *
- * `playerCount` is the players generation can seat, which the advice is for: a waitlisted player
- * is seated on no team (owner, 2026-10-27), so `waitlistedRows` (the positions in `rows` that are
- * waitlisted, `waitlistedRowIndexes`) are counted apart, in `waitlistedCount`; `totalPlayers` is
- * everyone registered, as it was. The not-eligible are still counted: who they are takes each
- * player's age placed against the division rules (follow-ups F1, item 3).
+ * The divisions the file registers players in, by the division each row names, in order of first
+ * appearance. This is where a player REGISTERED; where they PLAY is `placeImportRows`, and what the
+ * advice counts is `derivePrograms`.
  */
-function derivePrograms(rows, waitlistedRows = NO_WAITLISTED_ROWS) {
+function registeredDivisionsOf(rows) {
   const grouped = new Map();
-
-  rows.forEach((row, index) => {
+  for (const row of rows) {
     const id = resolveDivisionId(row);
-    const name = String(resolveDivisionName(row)).trim() || id;
-    const current = grouped.get(id) || { id, name, playerCount: 0, waitlistedCount: 0 };
-    if (waitlistedRows.has(index)) current.waitlistedCount += 1;
-    else current.playerCount += 1;
-    grouped.set(id, current);
-  });
+    if (!grouped.has(id)) {
+      grouped.set(id, { id, name: String(resolveDivisionName(row)).trim() || id });
+    }
+  }
+  return Array.from(grouped.values());
+}
 
-  return Array.from(grouped.values()).map((program) => ({
-    ...program,
-    coachCount: 0,
-    totalPlayers: program.playerCount + program.waitlistedCount,
-  }));
+/**
+ * The programs of an import, with the players each holds, counted by the division each player PLAYS
+ * in, as generation seats them (play-down plan, 2026-11-03, PR 1): a player moved to their own age
+ * division is in the division they play in, not the one they registered in, so the advice and the
+ * teams generation builds are counts of the same players. `byDivision` is `summarizeSeats`'s count
+ * of every registrant, one seat each. The head coaches are not counted here: since the admin-only
+ * change (owner decision 8a, 2026-10-27) only a `coach_team_requests` link anchors a team, and the
+ * links are read at generation, not with the import's rows. So the overview's recommended team count
+ * is the seatable players' (`coachCount` 0); generation itself makes a team for each coach whose child
+ * is eligible for the division, and one whose child is not eligible, or is waitlisted, anchors no team
+ * (Phase B2).
+ *
+ * `playerCount` is the players generation can seat, which the advice is for: a waitlisted player is
+ * seated on no team (owner, 2026-10-27), and neither is one no division can hold
+ * (`isEligibilityBlocked`, B2). They are counted apart, in `waitlistedCount` (by the division they
+ * would play in) and `notEligibleCount` (by the division they registered in, since none holds them).
+ * A row that is both is counted once, as not eligible, as the holds list and the review totals report
+ * it (follow-ups F1, item 2; data follow-ups, item 2). `movedInCount` and `movedOutCount` are the
+ * players who play somewhere other than where they registered, so the arithmetic from the file's count
+ * to the advice is on screen.
+ *
+ * A row for each division the file registers players in, then, last, each division of the season the
+ * file has no registrants in but whose rules take players from it (a U4 whose birth-date window holds
+ * a U3 registrant; `incoming`): programs too, with the players that would play there, so they can be
+ * seen and generated, and so a player who moved is shown somewhere even when they are waitlisted
+ * (that row reads "All on the waitlist"). Their id is the division's own, which is the id the age
+ * placement gives them.
+ *
+ * `totalPlayers` is every registrant the row accounts for: the players who play here, seated or on
+ * the waitlist, and the ones registered here whom no division holds. A player who moved out is in the
+ * row they moved to, not this one. Nothing reads it (it was "everyone registered" before the advice
+ * counted by the division played).
+ *
+ * @param {Object} params
+ * @param {Array<{ id: string, name: string }>} params.registeredDivisions - `registeredDivisionsOf`
+ * @param {Map<string, import('@squadlogic/core/playUpSeats.js').SeatCounts>} params.byDivision
+ * @param {Array<Object>} [params.incomingDescriptors] - the season's divisions no program of the
+ *   file is (`buildDivisionDescriptors`' `otherDescriptors`); none until the divisions are read
+ * @param {boolean} [params.checked] - the seats were compared with the divisions' age bands, which
+ *   needs the season's divisions to have been read; until then the flag counts say they are not known
+ */
+function derivePrograms({ registeredDivisions, byDivision, incomingDescriptors = [], checked }) {
+  const toProgram = (id, name, extra = {}) => {
+    const counts = /** @type {import('@squadlogic/core/playUpSeats.js').SeatCounts} */ (
+      byDivision.get(id)
+    );
+    return {
+      id,
+      name,
+      playerCount: counts.seated,
+      waitlistedCount: counts.waitlisted,
+      notEligibleCount: counts.notEligible,
+      movedInCount: counts.movedIn,
+      movedOutCount: counts.movedOut,
+      // Who plays up or down in this division, counted by the same seats (play-down plan, PR 2).
+      flags: flagCountsOf(counts, checked === true),
+      coachCount: 0,
+      totalPlayers: counts.seated + counts.waitlisted + counts.notEligible,
+      ...extra,
+    };
+  };
+  return [
+    ...registeredDivisions.map(({ id, name }) => toProgram(id, name)),
+    ...incomingDescriptors
+      .filter((descriptor) => {
+        const counts = byDivision.get(descriptor.id);
+        return counts !== undefined && counts.seated + counts.waitlisted > 0;
+      })
+      .map((descriptor) => toProgram(descriptor.id, String(descriptor.name), { incoming: true })),
+  ];
 }
 
 /**
@@ -544,35 +602,92 @@ function matchDurablePlayer(row, byId, byExternalId) {
 
 /**
  * Does the row mark a registrant as waitlisted? The one place the page decides it: what generation
- * seats (`toGeneratorPlayer`) and what the advice counts (`waitlistedRowIndexes`) both ask here, so
- * the two cannot disagree. The row is the file's, or the file's with the stored status over it
- * (`withDurableIdentity`).
+ * seats and what the advice counts (both through `toGeneratorPlayer`, by way of `placeImportRows`)
+ * ask here, so the two cannot disagree. The row is the file's, or the file's with the stored status
+ * over it (`withDurableIdentity`).
  */
 function isWaitlistedRow(row) {
   return WAITLIST_KEYS.some((key) => parseBooleanLike(row?.[key]));
 }
 
-/**
- * The rows of the file, by position, that are waitlisted by generation's own rule: the stored
- * player's status where a durable player matches the row (the record wins), else the file's
- * waitlist column. With no durable players it is the file alone.
- * @param {any[]} rows
- * @param {any[]} [durablePlayers] - the stored players `fetchDurablePlayers` returned for the rows
- * @returns {Set<number>}
- */
-function waitlistedRowIndexes(rows, durablePlayers = []) {
-  const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
-  const indexes = new Set();
-  rows.forEach((row, index) => {
-    if (isWaitlistedRow(withDurableIdentity(row, matchDurablePlayer(row, byId, byExternalId)))) {
-      indexes.add(index);
-    }
-  });
-  return indexes;
-}
+/** No stored players are known: the read has not arrived, or it was refused. */
+const NO_DURABLE_PLAYERS = /** @type {any[]} */ ([]);
+/** No roster is saved: nobody is held on a seat. */
+const NO_HELD_SEATS = /** @type {Map<string, string>} */ (new Map());
 
-/** No row is waitlisted: the Waitlist option is off, or the file has none. */
-const NO_WAITLISTED_ROWS = /** @type {Set<number>} */ (new Set());
+/**
+ * Where each row of the file plays: THE one place the page asks core's placement
+ * (`applyPlayUpEligibility`), so the advice, the divisions that gain players and the players
+ * generation takes in from other divisions cannot drift apart (a census test fails a second call in
+ * `frontend/src`; play-down plan, 2026-11-03, PR 1).
+ *
+ * Each row becomes the generator player generation builds (`toGeneratorPlayer`, with the stored
+ * player's natural age, play-up request and waitlist status over the file's, `withDurableIdentity`,
+ * where a stored player matches), and is placed against the season's divisions: in their own age
+ * division unless they asked to play up, and in no division when none holds their age
+ * (`isEligibilityBlocked`). A player with no age is placed in the division registered (B2). Row ids
+ * are made unique (`row-<position>`), because the placement keys its players by id and two rows can
+ * share one.
+ *
+ * With `divisionDescriptors` null (the season's divisions have not been read, so nothing can be
+ * judged: a band guessed from a division's name must not decide who is left out) nobody is placed:
+ * each player is where they registered.
+ *
+ * @param {Object} params
+ * @param {Array<{ row: any, sourceIndex: number }>} params.entries - the rows, with their positions
+ *   in the import
+ * @param {any[]} [params.durablePlayers] - the stored players `fetchDurablePlayers` returned
+ * @param {boolean} [params.waitlist] - the Waitlist option: a waitlisted row carries
+ *   `status: 'waitlist'`, which generation seats nowhere
+ * @param {boolean} [params.allowPlayDown] - the Play-down setting: a player registered in a younger
+ *   division plays there, listed (off: in their own age division)
+ * @param {Map<string, string>} [params.heldSeats] - the saved rosters' seats by stored player id
+ *   (`heldSeatsFromSnapshot`): a player on a roster that exists keeps that seat when a rule changed
+ * @param {Array<Object>|null} params.divisionDescriptors - `buildDivisionDescriptors`, every
+ *   division, or null before they are read
+ * @param {any} params.seasonYear - the season's rule, as the page reads it
+ * @param {any} params.cutoffMode
+ * @param {any} params.cutoffMonth
+ * @param {any} params.cutoffDay
+ * @returns {Array<Object>} the players, in the order of `entries`
+ */
+function placeImportRows({
+  entries,
+  durablePlayers = NO_DURABLE_PLAYERS,
+  waitlist = false,
+  allowPlayDown = false,
+  heldSeats = NO_HELD_SEATS,
+  divisionDescriptors,
+  seasonYear,
+  cutoffMode,
+  cutoffMonth,
+  cutoffDay,
+}) {
+  const { byId, byExternalId } = indexDurablePlayers(durablePlayers);
+  // The placement keys its players by the row's id, the roster seats by the stored player's.
+  const heldByRow = new Map();
+  const players = entries.map(({ row, sourceIndex }) => {
+    const durable = matchDurablePlayer(row, byId, byExternalId);
+    const generationRow = durable ? withDurableIdentity(row, durable) : row;
+    const held = durable ? heldSeats.get(String(durable.id)) : undefined;
+    if (held !== undefined) heldByRow.set(`row-${sourceIndex}`, held);
+    return {
+      ...toGeneratorPlayer(generationRow, sourceIndex, resolveDivisionId(row), { waitlist }),
+      id: `row-${sourceIndex}`,
+    };
+  });
+  if (divisionDescriptors === null) return players;
+  return applyPlayUpEligibility({
+    players,
+    divisions: divisionDescriptors,
+    seasonYear,
+    cutoffMode,
+    cutoffMonth,
+    cutoffDay,
+    allowPlayDown,
+    heldSeats: heldByRow,
+  }).players;
+}
 
 /**
  * Durable players by id and by external registration id, in chunks (a long `in` list is a
@@ -901,6 +1016,13 @@ export default function TeamAnalysisPage() {
   const coachingInterestEnabled = isEnabled(FEATURE_FLAGS.COACHING_INTEREST);
   const waitlistEnabled = isEnabled(FEATURE_FLAGS.WAITLIST);
   const skillTierEnabled = isEnabled(FEATURE_FLAGS.SKILL_TIER);
+  // Off unless an admin turns it on (an absent key is off): the one reader of the Play-down setting.
+  const playDownEnabled = isEnabled(FEATURE_FLAGS.PLAY_DOWN);
+  // Who is on a roster that was already saved: a re-run keeps them there when a rule changed.
+  const heldSeats = useMemo(
+    () => heldSeatsFromSnapshot(persistenceSnapshot),
+    [persistenceSnapshot]
+  );
   const [isEditMode, setIsEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [manualTeams, setManualTeams] = useState(null);
@@ -915,6 +1037,10 @@ export default function TeamAnalysisPage() {
   const [placementAnnouncement, setPlacementAnnouncement] = useState('');
   const [stagedReview, setStagedReview] = useState(null);
   const [divisionRows, setDivisionRows] = useState(null);
+  // Whether `divisionRows` is what the season's divisions read returned. It is `[]` while nothing was
+  // read as well (no season yet, or the read failed: `divisionSettingsError` says so), so `[]` alone
+  // cannot tell a season with no divisions from a read that gave none. Only a read that worked sets this.
+  const [divisionsRead, setDivisionsRead] = useState(false);
   // The season's programs (E2), read to group the overview. Empty before the migration, when the
   // read fails, or for a league that never made one: the overview is then a flat list.
   const [seasonPrograms, setSeasonPrograms] = useState([]);
@@ -937,25 +1063,22 @@ export default function TeamAnalysisPage() {
   const canEditTeams = canManageTeams && isEditMode;
 
   const importedPlayerRows = useMemo(() => getImportedRows(importedData), [importedData]);
-  // The rows that are waitlisted, for the advice (follow-ups F1, item 3). With the Waitlist option
-  // on, the stored status of the file's players is read once per import, because the record wins
-  // over the file (a buddy taken off the waitlist is active in the record while the file still
-  // marks them), as generation reads it. Until it arrives, and if it cannot be read (logged;
-  // generation re-reads and stops on a refused read), the file's own waitlist column is used.
-  const [storedWaitlist, setStoredWaitlist] = useState(
-    /** @type {null | { rows: any[], indexes: Set<number> }} */ (null)
+  // The stored players of the file, for the advice (follow-ups F1, item 3; data follow-ups, item 2).
+  // The record wins over the file where generation lets it: the status (a buddy taken off the
+  // waitlist is active in the record while the file still marks them), and the natural age and the
+  // play-up request that decide whether a division can hold the player. So the stored players of the
+  // file are read once per import, whatever the league's options, as generation reads them. Until
+  // they arrive, and if they cannot be read (logged; generation re-reads and stops on a refused
+  // read), the file's own columns are used.
+  const [storedPlayers, setStoredPlayers] = useState(
+    /** @type {null | { rows: any[], durable: any[] }} */ (null)
   );
   // Bumped when this page changes stored statuses itself (players taken off the waitlist are made
   // active on save), so the advice reads the record again rather than the one it read on load.
   const [waitlistReadKey, setWaitlistReadKey] = useState(0);
   useEffect(() => {
-    if (
-      !waitlistEnabled ||
-      importedPlayerRows.length === 0 ||
-      !currentOrganization?.id ||
-      !currentSeasonSetting?.id
-    ) {
-      setStoredWaitlist(null);
+    if (importedPlayerRows.length === 0 || !currentOrganization?.id || !currentSeasonSetting?.id) {
+      setStoredPlayers(null);
       return undefined;
     }
     let cancelled = false;
@@ -968,103 +1091,120 @@ export default function TeamAnalysisPage() {
             importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }))
           )
         );
-        if (!cancelled) {
-          setStoredWaitlist({
-            rows: importedPlayerRows,
-            indexes: waitlistedRowIndexes(importedPlayerRows, durable),
-          });
-        }
+        if (!cancelled) setStoredPlayers({ rows: importedPlayerRows, durable });
       } catch (error) {
         logger.error(
-          `[TeamAnalysis] the stored waitlist could not be read (${error?.message ?? 'the read was refused'}); the overview counts the file's waitlist column instead:`,
+          `[TeamAnalysis] the stored players could not be read (${error?.message ?? 'the read was refused'}); the overview counts the file's waitlist column and ages instead:`,
           error
         );
-        if (!cancelled) setStoredWaitlist(null);
+        if (!cancelled) setStoredPlayers(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [
-    waitlistEnabled,
-    importedPlayerRows,
-    currentOrganization?.id,
-    currentSeasonSetting?.id,
-    waitlistReadKey,
-  ]);
-  const waitlistedRows = useMemo(() => {
-    if (!waitlistEnabled) return NO_WAITLISTED_ROWS;
-    return storedWaitlist?.rows === importedPlayerRows
-      ? storedWaitlist.indexes
-      : waitlistedRowIndexes(importedPlayerRows);
-  }, [waitlistEnabled, storedWaitlist, importedPlayerRows]);
-  const fileProgramsBase = useMemo(
-    () => derivePrograms(importedPlayerRows, waitlistedRows),
-    [importedPlayerRows, waitlistedRows]
-  );
-  // The divisions of the season the file has no registrants in but whose rules take players from it
-  // (a U4 whose birth-date window holds a U3 registrant): programs too, with the players that would
-  // play there, so they can be seen and generated. Their id is the division's own, which is the id
-  // the age placement gives them, so a player placed in one is seated by its program.
+  }, [importedPlayerRows, currentOrganization?.id, currentSeasonSetting?.id, waitlistReadKey]);
+  const durablePlayers =
+    storedPlayers?.rows === importedPlayerRows ? storedPlayers.durable : NO_DURABLE_PLAYERS;
+  // The season's rule for a player's age, as generation reads it, and the divisions the age is
+  // placed against (E3b).
   const seasonYearSetting = currentSeasonSetting?.season_year;
   const cutoffModeSetting = currentSeasonSetting?.age_cutoff_mode;
   const cutoffMonthSetting = currentSeasonSetting?.age_cutoff_month;
   const cutoffDaySetting = currentSeasonSetting?.age_cutoff_day;
-  const destinationPrograms = useMemo(() => {
-    if (!divisionRows || divisionRows.length === 0 || importedPlayerRows.length === 0) return [];
-    const { divisionDescriptors, otherDescriptors } = buildDivisionDescriptors({
-      programs: fileProgramsBase,
-      divisionRows,
-      selectedProgramKey: null,
-      savedDivision: null,
-    });
-    if (otherDescriptors.length === 0) return [];
-    const { players: placed } = applyPlayUpEligibility({
-      // A waitlisted registrant would be seated nowhere, so none is counted into a division.
-      players: importedPlayerRows.flatMap((row, sourceIndex) =>
-        waitlistedRows.has(sourceIndex)
-          ? []
-          : [
-              {
-                ...toGeneratorPlayer(row, sourceIndex, resolveDivisionId(row)),
-                id: `row-${sourceIndex}`,
-              },
-            ]
-      ),
-      divisions: divisionDescriptors,
+  const registeredDivisions = useMemo(
+    () => registeredDivisionsOf(importedPlayerRows),
+    [importedPlayerRows]
+  );
+  // The advice is for the players generation seats, so it counts every registrant in the division
+  // they PLAY in (play-down plan, PR 1): the waitlisted and the registrants no division can hold are
+  // seated on no team, so the advice leaves them out, and a player moved to their own age division
+  // counts where they play, not where they registered. One placement of every row, by generation's
+  // own function (`placeImportRows`), then one count of the seats (`summarizeSeats`). Nobody is placed
+  // until the season's divisions have been read (`divisionsRead`: not while they load, not when the
+  // read failed, not with no season): without their saved age bands a band is guessed from each
+  // division's name, and a guess must not decide who is left out or moved. A read that worked and
+  // returned no divisions is still judged by the names, as generation judges it. The advice is what it
+  // was until then: everyone where they registered, less the waitlisted.
+  // Every division a player's age is counted against, once the season's divisions have been read; the
+  // same set the Play-up section judges a run's listing by, so the two cannot be given different bands.
+  const descriptorSet = useMemo(
+    () =>
+      divisionsRead
+        ? buildDivisionDescriptors({
+            programs: registeredDivisions,
+            divisionRows,
+            selectedProgramKey: null,
+            savedDivision: null,
+          })
+        : { divisionDescriptors: null, otherDescriptors: [] },
+    [divisionsRead, registeredDivisions, divisionRows]
+  );
+  const placement = useMemo(() => {
+    const entries = importedPlayerRows.map((row, sourceIndex) => ({ row, sourceIndex }));
+    const { divisionDescriptors, otherDescriptors } =
+      importedPlayerRows.length > 0
+        ? descriptorSet
+        : { divisionDescriptors: null, otherDescriptors: [] };
+    const placed = placeImportRows({
+      entries,
+      durablePlayers,
+      waitlist: waitlistEnabled,
+      allowPlayDown: playDownEnabled,
+      heldSeats,
+      divisionDescriptors,
       seasonYear: seasonYearSetting,
       cutoffMode: cutoffModeSetting,
       cutoffMonth: cutoffMonthSetting,
       cutoffDay: cutoffDaySetting,
     });
-    const incoming = new Map();
-    for (const player of placed) {
-      incoming.set(String(player.division), (incoming.get(String(player.division)) ?? 0) + 1);
-    }
-    return otherDescriptors
-      .filter((descriptor) => incoming.get(descriptor.id) > 0)
-      .map((descriptor) => ({
-        id: descriptor.id,
-        name: String(descriptor.name),
-        playerCount: incoming.get(descriptor.id),
-        waitlistedCount: 0,
-        coachCount: 0,
-        totalPlayers: incoming.get(descriptor.id),
-        incoming: true,
-      }));
+    return { placed, divisionDescriptors, otherDescriptors };
   }, [
-    divisionRows,
+    descriptorSet,
     importedPlayerRows,
-    waitlistedRows,
-    fileProgramsBase,
+    durablePlayers,
+    waitlistEnabled,
+    playDownEnabled,
+    heldSeats,
     seasonYearSetting,
     cutoffModeSetting,
     cutoffMonthSetting,
     cutoffDaySetting,
   ]);
+  // The count of those seats, by division, by program and for the league. A division is in a program
+  // of the league's own, or in none (the same rule as the overview's headings, `ownProgramIdOf`), so a
+  // program's counts are the sum of the divisions under its heading. `checked` is false until the
+  // divisions have been read: no age band is known then, and the flags say so rather than "None".
+  const seatCount = useMemo(() => {
+    const { placed, divisionDescriptors, otherDescriptors } = placement;
+    const divisions = (divisionDescriptors ?? []).map((descriptor) => ({
+      ...descriptor,
+      program_id: ownProgramIdOf(
+        findDivisionRowForProgram(descriptor, divisionRows ?? [])?.program_id,
+        seasonPrograms
+      ),
+    }));
+    const { byDivision, byProgram, league } = summarizeSeats({
+      seats: seatsFromPlacedPlayers(placed),
+      divisions,
+    });
+    return {
+      byDivision,
+      byProgram,
+      league,
+      otherDescriptors,
+      checked: divisionDescriptors !== null,
+    };
+  }, [placement, divisionRows, seasonPrograms]);
   const basePrograms = useMemo(
-    () => [...fileProgramsBase, ...destinationPrograms],
-    [fileProgramsBase, destinationPrograms]
+    () =>
+      derivePrograms({
+        registeredDivisions,
+        byDivision: seatCount.byDivision,
+        incomingDescriptors: seatCount.otherDescriptors,
+        checked: seatCount.checked,
+      }),
+    [registeredDivisions, seatCount]
   );
 
   const reviewStorageKey = useMemo(
@@ -1122,15 +1262,27 @@ export default function TeamAnalysisPage() {
 
   // E2: the divisions under the program each is in, only when the league has a program of its
   // own with one of them in it; otherwise null and the overview is a flat list, no heading.
-  const overviewGroups = useMemo(
-    () =>
-      groupByProgram({
-        items: programs,
-        programIdOf: (program) =>
-          findDivisionRowForProgram(program, divisionRows ?? [])?.program_id,
-        programs: seasonPrograms,
-      }),
-    [programs, divisionRows, seasonPrograms]
+  const overviewGroups = useMemo(() => {
+    const groups = groupByProgram({
+      items: programs,
+      programIdOf: (program) => findDivisionRowForProgram(program, divisionRows ?? [])?.program_id,
+      programs: seasonPrograms,
+    });
+    // Each heading carries its program's play-up and play-down counts (a program with no count is not
+    // shown as zero: the heading says it is not checked).
+    return (
+      groups?.map((group) => {
+        const counts = seatCount.byProgram.get(group.key === NO_PROGRAM_KEY ? null : group.key);
+        return {
+          ...group,
+          flags: counts ? flagCountsOf(counts, seatCount.checked) : { checked: false },
+        };
+      }) ?? null
+    );
+  }, [programs, divisionRows, seasonPrograms, seatCount]);
+  const leagueFlags = useMemo(
+    () => (programs.length > 0 ? flagCountsOf(seatCount.league, seatCount.checked) : null),
+    [programs.length, seatCount]
   );
 
   const selectedProgram = useMemo(
@@ -1169,11 +1321,13 @@ export default function TeamAnalysisPage() {
     const fetchDivisionRows = async () => {
       if (!currentOrganization?.id || !currentSeasonSetting?.id) {
         setDivisionRows([]);
+        setDivisionsRead(false);
         setDivisionSettingsError(null);
         return;
       }
 
       setDivisionRows(null);
+      setDivisionsRead(false);
       setDivisionSettingsError(null);
       const readDivisions = (columns) =>
         supabase
@@ -1206,11 +1360,13 @@ export default function TeamAnalysisPage() {
       if (cancelled) return;
       if (error) {
         setDivisionRows([]);
+        setDivisionsRead(false);
         setDivisionSettingsError(error.message || 'Could not load division settings.');
         return;
       }
 
       setDivisionRows(data || []);
+      setDivisionsRead(true);
       setDivisionSettingsError(null);
     };
 
@@ -1664,26 +1820,27 @@ export default function TeamAnalysisPage() {
       });
       // Who plays in this program: everyone who registered in it except a player who plays in
       // their own age division (a play-up nobody requested, a play-down), plus those who
-      // registered elsewhere and play here. Placed first, on the file and the records alone, so
-      // the players of other programs are only read in when they land here.
+      // registered elsewhere and play here. Placed first, on the file and the records alone, by the
+      // page's one placement (`placeImportRows`, the same call the advice makes), so the players of
+      // other programs are only read in when they land here.
       const seasonYear = currentSeasonSetting?.season_year;
       const cutoffMode = currentSeasonSetting?.age_cutoff_mode;
       const cutoffMonth = currentSeasonSetting?.age_cutoff_month;
       const cutoffDay = currentSeasonSetting?.age_cutoff_day;
-      const everyone = [...generatorPlayers, ...others.map((entry) => entry.player)];
-      const playsHere = new Set(
-        applyPlayUpEligibility({
-          players: everyone,
-          divisions: divisionDescriptors,
-          seasonYear,
-          cutoffMode,
-          cutoffMonth,
-          cutoffDay,
-        })
-          .players.filter((player) => String(player.division) === selectedProgramKey)
-          .map((player) => String(player.id))
+      const placedOthers = placeImportRows({
+        entries: others,
+        durablePlayers: otherDurable,
+        allowPlayDown: playDownEnabled,
+        heldSeats,
+        divisionDescriptors,
+        seasonYear,
+        cutoffMode,
+        cutoffMonth,
+        cutoffDay,
+      });
+      const movedIn = others.filter(
+        (_entry, index) => String(placedOthers[index].division) === selectedProgramKey
       );
-      const movedIn = others.filter((entry) => playsHere.has(String(entry.player.id)));
       const unmatchedMovedIn = IS_MOCK_MODE
         ? []
         : movedIn
@@ -1704,6 +1861,8 @@ export default function TeamAnalysisPage() {
         cutoffMode,
         cutoffMonth,
         cutoffDay,
+        allowPlayDown: playDownEnabled,
+        heldSeats,
       });
       // The pipeline places each player in the division they play in; this run seats the ones
       // who play in this program. The rest of the registrants are in the listing only.
@@ -1827,7 +1986,9 @@ export default function TeamAnalysisPage() {
         [
           teamSizeAnnouncement(summarizeTeamSizeReview(snapshot.runMetadata.results)),
           placementReviewAnnouncement(summarizePlacementReview(snapshot.runMetadata.results)),
-          playUpAnnouncement(summarizePlayUpReview(snapshot.runMetadata.results)),
+          playUpAnnouncement(
+            summarizePlayUpReview(snapshot.runMetadata.results, divisionDescriptors)
+          ),
         ]
           .filter(Boolean)
           .join(' ')
@@ -1860,6 +2021,8 @@ export default function TeamAnalysisPage() {
     coachingInterestEnabled,
     waitlistEnabled,
     skillTierEnabled,
+    playDownEnabled,
+    heldSeats,
     configs,
     canManageTeams,
     features,
@@ -2138,6 +2301,8 @@ export default function TeamAnalysisPage() {
         id: teamRow.id,
         name: teamRow.name,
         division: teamRow.division || teamRow.division_id,
+        // The division row the team is in: what the roster list judges its players' ages by.
+        divisionId: teamRow.division_id,
         minAge: teamRow.min_age,
         maxAge: teamRow.max_age,
         gender: teamRow.gender,
@@ -2157,6 +2322,7 @@ export default function TeamAnalysisPage() {
 
     return activeTeamData.teams.map((t) => ({
       ...t,
+      divisionId: t.division_id,
       players: teamPlayers
         .filter((tp) => tp.team_id === t.id)
         .map((tp) => {
@@ -2346,6 +2512,8 @@ export default function TeamAnalysisPage() {
               <ProgramOverview
                 programs={programs}
                 groups={overviewGroups}
+                league={leagueFlags}
+                playDown={playDownEnabled}
                 onSelectProgram={setSelectedProgramId}
                 selectedProgramId={selectedProgramId}
               />
@@ -2433,7 +2601,11 @@ export default function TeamAnalysisPage() {
                     {`${unnamedRosterPlayers} roster ${unnamedRosterPlayers === 1 ? 'entry has' : 'entries have'} no matching player record, so ${unnamedRosterPlayers === 1 ? 'it is' : 'they are'} shown as Unknown Player.`}
                   </p>
                 )}
-                <RosterManager initialTeams={rosterTeams} onTeamsChange={handleRosterTeamsChange} />
+                <RosterManager
+                  initialTeams={rosterTeams}
+                  onTeamsChange={handleRosterTeamsChange}
+                  seasonDivisions={divisionsRead ? divisionRows : null}
+                />
               </>
             )}
           </div>
@@ -2450,7 +2622,11 @@ export default function TeamAnalysisPage() {
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}
           />
-          <PlayUpList results={displayPersistenceSnapshot?.runMetadata?.results} />
+          <PlayUpList
+            results={displayPersistenceSnapshot?.runMetadata?.results}
+            divisions={descriptorSet.divisionDescriptors}
+            playDown={playDownEnabled}
+          />
           <PlacementReviewList results={displayPersistenceSnapshot?.runMetadata?.results} />
           <BuddyRequestsList results={displayPersistenceSnapshot?.runMetadata?.results} />
           {visibleTeams.length > 0 && (

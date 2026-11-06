@@ -32,6 +32,9 @@ import RulesList from './RulesList.jsx';
 
 const PANEL_ID = 'practice-preferences-panel';
 
+/** The tab ids a link may open the page on (`?tab=`); anything else is ignored. */
+export const PREFERENCE_TABS = Object.freeze(['pending', 'rules', 'conflicts', 'import']);
+
 /**
  * What a list says when the season's coaches did not load. A rule belongs to the season through its
  * coach, so without them every list below is empty, and an empty list must not read as "none".
@@ -103,13 +106,16 @@ RemoveDialog.propTypes = {
  * A completed season is read-only: every control that writes is off and the page says why; the
  * database refuses the writes as well (22023 `season_completed`).
  */
-export default function AdminPreferenceReview({ orgId, toast }) {
+export default function AdminPreferenceReview({ orgId, toast, initialTab = null }) {
   const { currentSeasonSetting } = useOrganization();
   const seasonId = currentSeasonSetting?.id ?? null;
   const readOnly = useSeasonReadOnly();
   const context = usePreferenceContext(orgId, seasonId);
   const { rows: allRows, loaded: rowsLoaded, error, refresh } = useCoachPracticePreferences(orgId);
-  const [tabChoice, setTabChoice] = useState(/** @type {string | null} */ (null));
+  // `initialTab` (the page's `?tab=`) chooses where the page opens; a tab it does not know is ignored.
+  const [tabChoice, setTabChoice] = useState(
+    /** @type {string | null} */ (PREFERENCE_TABS.includes(initialTab) ? initialTab : null)
+  );
   const [dialog, setDialog] = useState(/** @type {any} */ (null));
   const [busyId, setBusyId] = useState(/** @type {string | null} */ (null));
   // Two days, each the one its reader uses: the Add dialog's "coaches today" is the database's day (what
@@ -482,6 +488,12 @@ export default function AdminPreferenceReview({ orgId, toast }) {
           teamName={teamName}
           onClose={() => setDialog(null)}
           onDone={refresh}
+          // A pending rule opened for editing is decided from here, as the Pending musts list decides it:
+          // Accept hands over to the Accept dialog (impact preview), Keep as prefer closes the editor once done.
+          onAccept={(row) => setDialog({ mode: 'accept', row })}
+          onKeepPrefer={async (row) => {
+            if (await keepPrefer(row)) setDialog(null);
+          }}
           toast={toast}
         />
       )}
@@ -501,4 +513,6 @@ export default function AdminPreferenceReview({ orgId, toast }) {
 AdminPreferenceReview.propTypes = {
   orgId: PropTypes.string.isRequired,
   toast: PropTypes.func.isRequired,
+  /** The tab to open on (`pending`, `rules`, `conflicts` or `import`); anything else opens as usual. */
+  initialTab: PropTypes.string,
 };

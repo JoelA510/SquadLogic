@@ -7,11 +7,22 @@
  * fields, and the right margin is sunset." Every **materialised** practice
  * occurrence on unlit ground must end at or before `floor(sunset)` less
  * {@link PRACTICE_SUNSET_MARGIN_MINUTES}, which is **0**: the civil twilight
- * after sunset is the teardown window, not practice time. Decision D1 makes it
- * hard, D2 makes the limit the `floor` of sunset, D6 makes the margin this one
- * named constant (no season column; its Deno twin arrives with the Edge
+ * after sunset is the teardown window, not practice time. Decision D1 made it a
+ * hard rule, D2 makes the limit the `floor` of sunset, D6 makes the margin this
+ * one named constant (no season column; its Deno twin arrives with the Edge
  * post-pass and is pinned equal to it by the drift test). Games keep their own
  * 15-minute margin in `availability/`; nothing here touches them.
+ *
+ * ## Severity: a compromise, never a block
+ *
+ * Since the owner's decision of 2026-11-02 ("Relabel the past-sunset constraint
+ * as a compromise for both practice and game") a violation is a `compromise`
+ * finding and this evaluator's `status` is `compromised`, not `rejected`; the
+ * `practice-daylight` claim is `soft`. That is the label for what the callers
+ * already did from 2026-10-27: the Edge pass and the repair keep a practice past
+ * sunset and flag it, because coaches and organisations may accept conditions the
+ * app cannot see (finishing at dusk on a clear day). The rule above is unchanged
+ * and so is every number; nothing here refuses, truncates or reschedules.
  *
  * - **Lit ground is exempt.** Lighting resolves through `resolveLighting()`,
  *   the field-then-ancestor-then-venue chain the game path uses. A lit field's

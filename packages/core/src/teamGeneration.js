@@ -52,8 +52,8 @@ import {
  *     (default true), `allowAssistantShellCreation` (default false — assistant-only late units
  *     backfill existing teams or place as general units instead of creating shells).
  *
- * Eligibility (Phase B2): a player whose `placement` is `play_up_blocked` or `play_down_blocked`
- * (`isEligibilityBlocked`, playUp.js) is never seated. They leave the pool before the team count
+ * Eligibility (Phase B2): a player whose `placement` is `no_division`, that is, no division holds
+ * their natural age (`isEligibilityBlocked`, playUp.js), is never seated. They leave the pool before the team count
  * and coach anchors are computed and are in `overflowByDivision` with reason
  * `eligibility-blocked`, one entry per player, metadata `{ placement, reviewReason, naturalAge,
  * coachId }`; a mutual buddy is placed alone (`buddy-not-placed`). A blocked player already on a

@@ -26,7 +26,8 @@ Spec: `docs/PHASE_8_PLAN.md` §8.9 (line 428).
   the civil twilight between sunset and dusk is the teardown window for
   equipment. So the practice margin is **0 minutes before sunset**. Games keep
   their existing margin (15, per the fixture README and `sunsetMarginRule`).
-  This answers open decision D1 (the rule is hard, not a warning) and replaces
+  This answers open decision D1 (the rule is hard, not a warning; the label became
+  a compromise on 2026-11-02, see the D1 note under the decisions table) and replaces
   D6 (no per-season margin column: one named core constant,
   `PRACTICE_SUNSET_MARGIN_MINUTES = 0`, with its Deno twin pinned equal by the
   drift test).
@@ -161,7 +162,7 @@ clustering idea is unnecessary. For scale, 50 miles of longitude at 40°N is
 | New core `practice/daylight.js` evaluator over materialised occurrences | Enforced in core evaluation; registry claim, exercise counters, attribution kind `sunset` with the numbers (for 8.10) |
 | Core `practiceScheduling.js` / `autoScheduler.js` | Unchanged; stated unenforced (the live scheduler is the Deno twin) |
 | Deno auto-scheduler | Enforced by a post-pass (`_shared/engines/practice-daylight.ts`, PR 6) on new placements, judged from the season's today; locked rows are reported with a proposed fix, never changed; an unreadable venue read refuses the run; the TIME TBD remainder is reported and audited, not persisted as a `practice_exceptions` row; optimising toward surviving slots is declared, not optimised (D11) |
-| `practice/repair.js` | Candidate gate; enforced in the module, not live until 3b wires it. *As built (PR 7):* every tier-1 and tier-2 candidate is judged by `evaluatePracticeDaylight()` over its series-window; past sunset → refused `past-sunset`, unknown sunset → refused `sunset-unknown` (D4 in core: never allowed); a venue emptied by the gate → TIME TBD with that reason, ahead of the `must_keep` filter. Partly legal candidates are **refused, not truncated**: one recommendation per series-window (3b decision 5), and D8's truncation stays the Edge post-pass's. No calendar → nothing judged, and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so |
+| `practice/repair.js` | Candidate gate; enforced in the module, not live until 3b wires it. *As built (PR 7):* every tier-1 and tier-2 candidate is judged by `evaluatePracticeDaylight()` over its series-window; past sunset → refused `past-sunset`, unknown sunset → refused `sunset-unknown` (D4 in core: never allowed); a venue emptied by the gate → TIME TBD with that reason, ahead of the `must_keep` filter. Partly legal candidates are **refused, not truncated**: one recommendation per series-window (3b decision 5), and D8's truncation stays the Edge post-pass's. No calendar → nothing judged, and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so. *Superseded: past sunset has been kept and flagged since 2026-10-27 and an unknown sunset since 2026-11-02 (D4 note below the decisions table); the gate refuses nothing.* |
 
 **Auto-scheduler post-pass (PR 6).** Slots carry `fieldId` and
 `effectiveFrom`/`effectiveUntil` (`PracticeSchedulingPage.jsx:156-184`); the
@@ -261,6 +262,39 @@ pinned. Annotate, do not rewrite, PHASE_8_PLAN's "75-minute drop … 4:44 PM"
 | D12 | The `Note` column | Read as the DST cross-check (W11) |
 | D13 | Persisting daylight TIME TBD (PR 6b; operator 2026-09-29) | (a) truncated remainder recorded as a `time_tbd` exception, `tbd_reason` `past-sunset`, new `cause_kind` `daylight`, the row kept truncated; (c) repair `past-sunset`/`sunset-unknown` tail windows only, mid-range refused until 3b PR 12; (b) row-less withdrawn team **deferred** (it stays in the writer's `teams_without_practice`) |
 | D14 | Compression strategy and step (operator 2026-09-29) | Either **shorten** or **move earlier**; default is shorten by **10 minutes** per slot; a per-slot override for portable lighting. Minimum 40 min; earliest start `school_day_end`; plan `docs/PHASE_8_9_D14_PLAN.md` APPROVED 2026-09-29 |
+
+**D4, 2026-11-02 (owner):** "Flag them, as coaches or orgs may be comfortable with extra conditions
+determined outside of the app - like going to end of dusk on a clear day, but not an overcast day. A
+warning keeps room for that, refusal would break configs that users may otherwise stick with." "Do not
+refuse yet" is now "do not refuse": `practice/repair.js` keeps an unknown-sunset candidate and flags it
+(`daylightSunsetUnknown`, the Edge pass's own `SUNSET_UNKNOWN` and cause; the finding
+`PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`), as the Edge pass has since PR 6, and never TIME TBD
+`sunset-unknown`. Unknown is still never read as legal. Plan: `docs/changes/2026-11-02-unknown-sunset-flag.md`;
+lesson 84 supersedes lesson 47 (the original row above is left as written).
+
+**D1, 2026-11-02 (owner), practice half:** "Relabel the past-sunset constraint as a compromise for both
+practice and game." "The rule is hard" (D1 above, and the 2026-09-27 ruling) is now a label that says
+`compromise`: `PRACTICE_PAST_SUNSET` is a compromise finding, the `practice-daylight` claim is `soft` (weight 1, a
+placeholder nobody has stated; `waivable: false`; the retype is in its `history`), and the evaluator's status for
+a past-sunset practice is `compromised`. Behaviour is unchanged: the Edge pass and the repair have kept and
+flagged such a practice since 2026-10-27, and no number moves. The rule itself (end by `floor(sunset)`, margin 0)
+is unchanged. **Game half, built in the following change (lesson 88): the owner approved it on 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after sunset, because some orgs have portable lighting or other workarounds.")**:
+`SUNSET_MARGIN_VIOLATED` is a compromise, the `sunset-margin` claim is `soft` (weight 1, a placeholder), a
+past-sunset kickoff is legal, placeable and counted and carries a warning, and the clean bound is the only place
+the daylight limit still stops anything. It turns `infeasible` into `feasible` and moves the season-2026 corpus
+results, which that change rewrites from the plan. Plan: `docs/changes/2026-11-02-sunset-compromise.md`; lessons 85
+and 88. The D1 row and the 2026-09-27 entry above are left as written.
+
+**D7, 2026-11-02:** "Live game path sunset: out of 8.9; stated unenforced" is unchanged: the live game scheduler
+still reads no sunset. What changed is the core's answer for a game past it: a compromise, not a block.
+
+**D8 and G3 to G5, 2026-11-02 (owner):** "Wire the durationPhases as recommended." and, of the two readings offered,
+"Go with A on durationPhases" (a read-only outlook; applying retimed lengths is not part of this). The principle of the D4 note
+above reaches the duration-phase reports: `practice/durationPhases.js` no longer "holds out" a date that neither a shorter
+practice nor an earlier start saves (TIME TBD, D8) - the date stays at its timing, is **flagged** (`slotPhases[].flagged`,
+`PRACTICE_PAST_SUNSET`, a compromise) and occupies its surface, and G5 names `firstFlaggedDate` and `flaggedDates` in place of
+D8's `tbdFrom`. The Edge dropped D8's truncation on 2026-10-27; this brings the reports into line with it. The G3 to G5 rows
+above and the D8 row are left as written. Plan: `docs/changes/2026-11-02-duration-phases-wiring.md`; lesson 89.
 
 Every PR: `/code-review` before opening; the season-2026 fixture suite when it
 touches domain types, constraints or solver stages; each new guarantee shown red

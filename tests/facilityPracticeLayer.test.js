@@ -34,9 +34,13 @@ import {
   checkKickoffAvailability,
   latestLegalKickoff,
   resolveLighting,
+  resolvePermitWindow,
 } from '@squadlogic/core/availability/index.js';
 
-import { buildFormatTimingTableFromSeason2026 } from '@squadlogic/core/timing/index.js';
+import {
+  buildFormatTimingTableFromSeason2026,
+  requireFormatTiming,
+} from '@squadlogic/core/timing/index.js';
 
 import {
   replacementSurfacesFor,
@@ -71,6 +75,8 @@ import {
   surfacesConflict,
   toSeason2026FacilityGraphInput,
 } from '@squadlogic/core/facility/index.js';
+
+import { expectedReserveKickoffs } from './helpers/reserveOracle.js';
 
 /* -------------------------------------------------------------------------- */
 /* Corpus, loaded once                                                         */
@@ -987,19 +993,35 @@ describe('practice layer :: making Pitch 2 and Pitch 3 parents takes nothing fro
     const DATE = '2026-09-19';
     const familyOf = (report) =>
       report.dates[0].bySurface.filter((row) => row.surfaceId.startsWith(sid(ALDER, 'Pitch 1')));
+    const subjectOver = (surfaceIds) =>
+      season2026CapacitySubjects({
+        graph: gameGraph,
+        table: timingTable,
+        format: '9v9',
+        dates: [DATE],
+        surfaceIds,
+        requirement: { slots: 1, label: 'round-2 control', source: 'tests' },
+        games: schedule.games,
+      })[0];
     const reportOver = (surfaceIds) =>
       buildReserveCapacityReport(
         { graph: gameGraph, table: timingTable, calendar: seasonCalendar },
-        season2026CapacitySubjects({
-          graph: gameGraph,
-          table: timingTable,
-          format: '9v9',
-          dates: [DATE],
-          surfaceIds,
-          requirement: { slots: 1, label: 'round-2 control', source: 'tests' },
-          games: schedule.games,
-        })[0]
+        subjectOver(surfaceIds)
       );
+    // What one half holds on that date, derived from the permit rows and the 9v9 timing alone
+    // (since the owner's decision of 2026-11-02 sunset only warns, so the permit is what stops
+    // the day), not read from either report.
+    const { cadenceMinutes, earliestKickoffMinutes } = subjectOver([pid(ALDER, 'Pitch 1A')]);
+    const perHalf = expectedReserveKickoffs({
+      graph: gameGraph,
+      calendar: seasonCalendar,
+      surfaceId: pid(ALDER, 'Pitch 1A'),
+      date: DATE,
+      occupancyMinutes: requireFormatTiming(timingTable, '9v9').occupancyMinutes.scheduled,
+      earliestKickoffMinutes,
+      cadenceMinutes,
+    });
+    expect(perHalf.length).toBeGreaterThan(0);
 
     const policy = season2026RelocationPolicy({
       graph: gameGraph,
@@ -1016,7 +1038,7 @@ describe('practice layer :: making Pitch 2 and Pitch 3 parents takes nothing fro
       pid(ALDER, 'Pitch 1B'),
     ]);
     const free = honest.reduce((sum, row) => sum + row.slots, 0);
-    expect(free).toBe(14);
+    expect(free).toBe(2 * perHalf.length);
 
     // The wrong implementation, written out: the round-1 rule offered the
     // sized parent too. Same report, three rows, twenty-one slots -- and the
@@ -1028,10 +1050,10 @@ describe('practice layer :: making Pitch 2 and Pitch 3 parents takes nothing fro
       pid(ALDER, 'Pitch 1A'),
       pid(ALDER, 'Pitch 1B'),
     ]);
-    expect(triple.reduce((sum, row) => sum + row.slots, 0)).toBe(21);
+    expect(triple.reduce((sum, row) => sum + row.slots, 0)).toBe(3 * perHalf.length);
     const kickoffs = triple.map((row) => JSON.stringify(row.kickoffMinutes));
     expect(new Set(kickoffs).size).toBe(1);
-    expect(JSON.parse(kickoffs[0])).toHaveLength(7);
+    expect(JSON.parse(kickoffs[0])).toEqual(perHalf);
     // ... and the parent really does exclude its halves, so the extra seven are
     // not free ground by any reading.
     expect(
@@ -1146,11 +1168,45 @@ describe('practice layer :: the sunset rule claims LIGHTING_UNDECLARED, so the e
     expect(undeclared.lit).toBeNull();
     expect(unlit.lit).toBe(false);
     const dusk = (undeclared.sunsetMinutes ?? 0) - calendar.sunsetMarginMinutes;
-    expect(undeclared.searchedToMinutes).toBe(dusk - (undeclared.occupancyMinutes ?? 0));
-    // The same ceiling declared-unlit ground gets, which is the whole claim.
-    expect(undeclared.searchedToMinutes).toBe(unlit.searchedToMinutes);
-    // Non-vacuous: the ceiling really is daylight and not the caller's own.
+    // Non-vacuous: dusk is well inside the caller's own ceiling.
     expect(dusk).toBeLessThan(22 * 60);
+    // Since the owner's decision of 2026-11-02 ("Yes to legal-with-a-warning for kickoffs after
+    // sunset, because some orgs have portable lighting or other workarounds.") the daylight limit
+    // does not bound the search: each ground's ceiling is its own permit close less the occupancy,
+    // derived from the permit rows, and dusk is not in it.
+    for (const { answer, surfaceId } of [
+      { answer: undeclared, surfaceId: cedarbrook },
+      { answer: unlit, surfaceId: sid(ALDER, 'Pitch 2') },
+    ]) {
+      // Ground with no permit row (Cedarbrook has none) is bounded by nothing but the caller.
+      const close =
+        resolvePermitWindow(calendar, {
+          venueId: graph.surfaces[surfaceId].venueId,
+          date: timed.date,
+        }).window?.closeMinutes ?? null;
+      expect(answer.searchedToMinutes).toBe(
+        close === null ? 22 * 60 : Math.min(close - (answer.occupancyMinutes ?? 0), 22 * 60)
+      );
+      expect(answer.searchedToMinutes).toBeGreaterThan(dusk - (answer.occupancyMinutes ?? 0));
+    }
+    // Undeclared ground is still treated as unlit, and that is now visible as the warning: the
+    // minute after the clean bound carries SUNSET_MARGIN_VIOLATED on undeclared and declared-unlit
+    // ground alike, the minute before it does not, and lit ground never does.
+    const cleanLatest = dusk - (undeclared.occupancyMinutes ?? 0);
+    const sunsetWarning = (surfaceId, kickoffMinutes) =>
+      checkKickoffAvailability(graph, table, calendar, {
+        surfaceId,
+        date: timed.date,
+        kickoffMinutes,
+        format: timed.format,
+      })
+        .findings.map((f) => f.code)
+        .includes(AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED);
+    for (const surfaceId of [cedarbrook, sid(ALDER, 'Pitch 2')]) {
+      expect(sunsetWarning(surfaceId, cleanLatest), surfaceId).toBe(false);
+      expect(sunsetWarning(surfaceId, cleanLatest + 1), surfaceId).toBe(true);
+    }
+    expect(sunsetWarning(sid('Summit HS', 'Stadium'), cleanLatest + 1)).toBe(false);
 
     // ... and the rule engine's counters move accordingly: one more game on
     // unknown ground is one more *undeclared*, not one more unlit.

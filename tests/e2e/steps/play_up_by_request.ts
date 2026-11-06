@@ -21,6 +21,16 @@ const BORN_12 = '2014-05-01';
 /** The rows seeded so far, by step, merged into one import. */
 const seeded: MockRow[] = [];
 
+/**
+ * What the overview, the Play-up section and the roster list each said about who plays up, read from
+ * the page by the steps below and compared at the end: the three are counts of the same seats, so the
+ * numbers must match without any of them being written into the scenario twice.
+ */
+const counted: { overview: number | null; section: number | null } = {
+  overview: null,
+  section: null,
+};
+
 async function writeImport(page: Page, rows: MockRow[]) {
   await waitForMockClient(page);
   await page.evaluate(
@@ -78,6 +88,8 @@ Given(
   'the U12 Boys import lists Pia, who asked to play up, and Quinn, who did not, both aged 10, with {int} players aged 12',
   async ({ page }, count: number) => {
     seeded.length = 0;
+    counted.overview = null;
+    counted.section = null;
     seeded.push(
       row(ASKED.id, ASKED.first, ASKED.last, 'U12 Boys', BORN_10, { 'Play Up': 'Yes' }),
       row(NOT_ASKED.id, NOT_ASKED.first, NOT_ASKED.last, 'U12 Boys', BORN_10),
@@ -153,5 +165,173 @@ Then(
     );
     // Enumerated from the table, not from the summary: exactly the two players are listed.
     await expect(section(page).getByRole('rowheader')).toHaveCount(2);
+  }
+);
+
+// ---- The overview, the Play-up section and the roster list count the same play-ups (PR 2) ----
+
+/**
+ * A program of the season's own and a division in it, saved with its age band: what Settings >
+ * Season > Programs and the division rules leave in the database. The mock reads them as the
+ * Teams page's `programs` and `divisions` reads do.
+ */
+Given(
+  'the season has the program {string} holding {string}, a division for ages {int} to {int}',
+  async ({ page }, programName: string, divisionName: string, minAge: number, maxAge: number) => {
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ programName, divisionName, minAge, maxAge, mockOrgId }) => {
+        const db = window.__MOCK_DB__ as MockDb | undefined;
+        if (!db) throw new Error('mock store not initialised');
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+        const season = (db.season_settings ?? []).find(
+          (row) => row.organization_id === orgId && row.status === 'active'
+        );
+        if (!season) throw new Error(`no active season for ${orgId}`);
+        db.programs = db.programs ?? [];
+        let program = db.programs.find(
+          (row) => row.season_settings_id === season.id && row.name === programName
+        );
+        if (!program) {
+          program = {
+            id: `e2e-program-${programName.toLowerCase()}`,
+            organization_id: orgId,
+            season_settings_id: season.id,
+            name: programName,
+            is_default: false,
+          };
+          db.programs.push(program);
+        }
+        db.divisions = db.divisions ?? [];
+        db.divisions = db.divisions.filter(
+          (row) => !(row.season_settings_id === season.id && row.name === divisionName)
+        );
+        db.divisions.push({
+          id: `e2e-division-${divisionName.toLowerCase().replace(/\s+/g, '-')}`,
+          organization_id: orgId,
+          season_settings_id: season.id,
+          program_id: program.id,
+          name: divisionName,
+          min_age: minAge,
+          max_age: maxAge,
+          max_roster_size: 14,
+          min_roster_size: 10,
+          target_team_size: 12,
+          plays_games: true,
+          practices_per_week: 1,
+          practice_minutes: null,
+        });
+        window.__saveMockDB__(db);
+      },
+      { programName, divisionName, minAge, maxAge, mockOrgId: MOCK_ORG_ID }
+    );
+  }
+);
+
+/**
+ * The players the import's rows become once it is finalized: a stored natural age (the season's year
+ * less the birth year, as the import counts it) and the play-up request, which is what the roster
+ * editor reads a rostered player's age and request from.
+ */
+Given(
+  'the import is stored as players, with the age and play-up request each row carries',
+  async ({ page }) => {
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ rows, mockOrgId }) => {
+        const db = window.__MOCK_DB__ as MockDb | undefined;
+        if (!db) throw new Error('mock store not initialised');
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+        const season = (db.season_settings ?? []).find(
+          (row) => row.organization_id === orgId && row.status === 'active'
+        );
+        if (!season) throw new Error(`no active season for ${orgId}`);
+        const stored = rows.map((row) => ({
+          id: row.id,
+          organization_id: orgId,
+          season_settings_id: season.id,
+          first_name: row['First Name'],
+          last_name: row['Last Name'],
+          natural_age: 2026 - Number(String(row.Birthdate).slice(0, 4)),
+          play_up_requested: row['Play Up'] === 'Yes',
+          gender: 'm',
+          status: 'active',
+        }));
+        const ids = new Set(stored.map((row) => row.id));
+        db.players = [...(db.players ?? []).filter((row) => !ids.has(row.id)), ...stored];
+        window.__saveMockDB__(db);
+      },
+      { rows: [...seeded], mockOrgId: MOCK_ORG_ID }
+    );
+  }
+);
+
+const overviewTable = (page: Page) => page.getByRole('table', { name: 'Division Overview' });
+
+Then(
+  'the Division Overview reads {string} for {string}',
+  async ({ page }, text: string, division: string) => {
+    const table = overviewTable(page);
+    await expect(table).toBeVisible({ timeout: 15000 });
+    const headers = await table.getByRole('columnheader').allTextContents();
+    const column = headers.indexOf('Play-up and play-down');
+    // The column exists, so a missing flag is a real absence and not a table that changed shape.
+    expect(column).toBeGreaterThan(-1);
+    const row = table
+      .getByRole('row')
+      .filter({ has: page.getByRole('button', { name: division, exact: true }) });
+    await expect(row).toHaveCount(1);
+    const cell = row.getByRole('cell').nth(column);
+    await expect(cell).toHaveText(text);
+    const up = /^(\d+) playing up$/.exec(text);
+    if (up && division === 'U12 Boys') counted.overview = Number(up[1]);
+  }
+);
+
+Then('the Division Overview heading reads {string}', async ({ page }, text: string) => {
+  await expect(overviewTable(page).getByRole('rowheader', { name: text, exact: true })).toHaveCount(
+    1
+  );
+});
+
+Then('the Division Overview league line reads {string}', async ({ page }, text: string) => {
+  await expect(page.getByTestId('play-flags-league')).toHaveText(text);
+});
+
+When('I switch to the light theme on this page', async ({ page }) => {
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Switch to light mode' }).click();
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+});
+
+Then('the Play-up section reads {string}', async ({ page }, sentence: string) => {
+  await expect(page.getByText(/Team review staged:/)).toBeVisible({ timeout: 20000 });
+  await expect(section(page)).toBeVisible({ timeout: 15000 });
+  await expect(section(page)).toContainText(sentence);
+  const up = /(\d+) playing up/.exec((await section(page).textContent()) ?? '');
+  expect(up, 'the Play-up section states how many play up').not.toBeNull();
+  counted.section = Number(up?.[1]);
+});
+
+When('I turn the Teams page to Edit Mode', async ({ page }) => {
+  // The staged review is held in the page, so this stays on the page (no navigation).
+  await page.getByRole('button', { name: 'Edit Mode' }).click();
+  await expect(page.getByTestId('roster-age-flags')).toBeVisible({ timeout: 15000 });
+});
+
+Then(
+  'the Play-up section and the roster list count as many play-ups as the overview did',
+  async ({ page }) => {
+    const list = page.getByTestId('roster-age-flags');
+    const up = /(\d+) playing up, (\d+) playing down/.exec((await list.textContent()) ?? '');
+    expect(up, 'the roster list states how many play up and down').not.toBeNull();
+    // Enumerated from the entries the list prints, not from its summary.
+    await expect(list.getByRole('listitem')).toHaveCount(Number(up?.[1]) + Number(up?.[2]));
+    expect(counted.overview, 'the overview was read first').not.toBeNull();
+    expect(counted.section, 'the Play-up section was read first').not.toBeNull();
+    expect(Number(up?.[1])).toBe(counted.overview);
+    expect(counted.section).toBe(counted.overview);
+    // Nobody plays down: play-down is not available, and a manual move was not made.
+    expect(Number(up?.[2])).toBe(0);
   }
 );

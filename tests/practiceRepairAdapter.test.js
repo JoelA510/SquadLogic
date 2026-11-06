@@ -478,16 +478,29 @@ describe('daylight', () => {
     assert.equal(adapted.declared.daylight.supplied, false);
   });
 
-  it('never geocodes: no coordinates and no table row is sunset-unknown', () => {
+  it('never geocodes: no coordinates and no table row is a sunset-unknown flag, never a refusal', () => {
     const { result, written } = run(RETIREMENT, {
       rows: { daylight: { timeZone: 'America/New_York', sunsets: [] } },
     });
-    assert.ok(result.daylight.candidatesRefusedSunsetUnknown > 0);
-    const tbd = written.plan.exceptions.find(
-      (e) => e.tbd_reason === PRACTICE_TBD_REASON.SUNSET_UNKNOWN
+    // Owner, 2026-11-02: an unknown sunset is flagged, never refused. The candidates stand with
+    // their flag, so no `sunset-unknown` TIME TBD is written for it any more.
+    assert.ok(result.daylight.candidatesFlaggedSunsetUnknown > 0);
+    assert.equal(
+      result.daylight.unknownFlagged.length,
+      result.daylight.candidatesFlaggedSunsetUnknown
     );
-    assert.ok(tbd, 'no sunset-unknown TIME TBD was written');
-    assert.equal(tbd.cause_kind, PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT);
+    assert.ok(
+      result.rehomed.some(
+        (entry) => entry.daylightSunsetUnknown?.cause === 'venue-coordinates-missing'
+      ),
+      'no re-home carries the unknown-sunset flag'
+    );
+    assert.equal(
+      written.plan.exceptions.some((e) => e.tbd_reason === PRACTICE_TBD_REASON.SUNSET_UNKNOWN),
+      false,
+      'a sunset-unknown TIME TBD was written'
+    );
+    assert.ok(written.payload, 'a tail retirement window was refused');
   });
 
   it('a past-sunset candidate is kept and flagged; a TIME TBD keeps cause_kind retirement', () => {
@@ -679,6 +692,10 @@ describe('payload contract', () => {
     const plans = [
       run(RETIREMENT).written.plan,
       run(blackout('2026-10-15', '2026-10-28')).written.plan,
+      // Daylight judged, a sunset flagged on a kept re-home (no daylight TIME TBD is written any
+      // more: past sunset and an unknown one are flagged, never blocked).
+      run(RETIREMENT, { rows: { daylight: { timeZone: 'America/New_York', sunsets: SUNSETS } } })
+        .written.plan,
       run(RETIREMENT, { rows: { daylight: { timeZone: 'America/New_York', sunsets: [] } } }).written
         .plan,
     ];

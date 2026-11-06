@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { SlidersHorizontal } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
@@ -11,11 +12,14 @@ import AdminPreferenceReview from '../components/preferences/AdminPreferenceRevi
  * the musts waiting for a decision (with Accept all for a file), every rule in force with its editor,
  * the musts that conflict, and the import of a preference file with its preview. Coaches never sign in
  * (docs/changes/2026-10-27-admin-only.md), so there is no request view. The route needs
- * `DECIDE_PRACTICE_PREFERENCE`, and the RPCs refuse a non-admin regardless of what renders.
+ * `DECIDE_PRACTICE_PREFERENCE`, and the RPCs refuse a non-admin regardless of what renders. `?tab=`
+ * (`import`, `pending`, `rules` or `conflicts`) chooses the tab the page opens on, read once on arrival:
+ * Data Import links to `?tab=import`.
  */
 export default function CoachPreferencesPage() {
   const { currentOrganization } = useOrganization();
   const toast = useToast();
+  const [searchParams] = useSearchParams();
   const orgId = currentOrganization?.id ? String(currentOrganization.id) : null;
 
   return (
@@ -35,7 +39,7 @@ export default function CoachPreferencesPage() {
       {!orgId ? (
         <p className="text-sm text-text-muted">Select an organization to continue.</p>
       ) : (
-        <AdminPreferenceReview orgId={orgId} toast={toast} />
+        <AdminPreferenceReview orgId={orgId} toast={toast} initialTab={searchParams.get('tab')} />
       )}
     </Page>
   );

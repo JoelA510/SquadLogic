@@ -90,7 +90,7 @@ already counts the not-eligible".
 
 **What is in scope.** The waitlisted. The not-eligible need each player's age placed against the
 division rules (a different computation) and are not part of this follow-up; they are listed for the
-owner.
+owner. _(Built afterwards, with the owner's go: `docs/changes/2026-11-02-data-followups.md`, item 2.)_
 
 **Design.** One predicate, `isWaitlistedRow(row)`, is the only place the page decides a row is
 waitlisted; `toGeneratorPlayer` calls it (its behaviour is unchanged) and so does the count.
@@ -164,6 +164,8 @@ clicked and removed, and a failed link clicks nothing). The helper keeps the cop
 including that an anchor whose click throws is not removed (a browser's `click()` does not throw).
 
 ## 5. "An unknown sunset is still refused" (Phase D): skipped, owner decision needed
+
+**Decided 2026-11-02 (owner): option 2.** The repair keeps the candidate and flags it, as the Edge pass does; built in `docs/changes/2026-11-02-unknown-sunset-flag.md`. The text below is the question as it was put.
 
 **What "refused" means in code.** Past sunset is flagged, never blocked (owner, 2026-10-27), in the Edge
 daylight pass and in the core repair. An **unknown** sunset (an unlit or undeclared-lighting venue with

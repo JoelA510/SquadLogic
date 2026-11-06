@@ -62,7 +62,6 @@ const DEMO_EDITABLE_PLAYER_FIELDS = Object.freeze([
   'years_played',
   'jersey_number',
   'willing_to_coach',
-  'placement_eligible',
 ]);
 
 /**

@@ -36,6 +36,7 @@ import {
   teamDecisionKey,
   venueDecisionKey,
 } from '../packages/core/src/scheduleImport/mapping.js';
+import { auditResolvedRows } from '../packages/core/src/scheduleImport/audit.js';
 import { parseScheduleRows } from '../packages/core/src/scheduleImport/parseRows.js';
 import { loadScheduleFixture, outsideDecisionsFor } from './helpers/scheduleFixtureLoad.js';
 
@@ -184,8 +185,8 @@ describe('schedule mapping: only an exact, single match is proposed', () => {
     const out = resolve([fileRow({ 'Home Team': '  lions ', 'Away Team': 'TIGERS' })]).rows[0];
     expect(out.status).toBe('ok');
     expect(out.ids).toMatchObject({ home: 't-lions-10', away: 't-tigers-10', field: 'f-a1' });
-    const entry = propose([fileRow({ 'Home Team': '  lions ' })]).teams.find((t) =>
-      t.key.endsWith('|lions')
+    const entry = propose([fileRow({ 'Home Team': '  lions ' })]).teams.find(
+      (t) => JSON.parse(t.key)[1] === 'lions'
     );
     expect(entry.status).toBe('match');
     expect(entry.proposed).toEqual({ action: 'map', id: 't-lions-10' });
@@ -355,11 +356,17 @@ describe('schedule mapping: what the admin decides', () => {
     expect(r.ids.field).toMatch(/^new:field:/);
     expect(r.ids.home).toMatch(/^new:team:/);
     expect(new Set(Object.values(r.ids)).size).toBe(4);
-    expect(out.creations.divisions).toEqual([{ key: 'u14 boys', name: 'U14 Boys' }]);
-    expect(out.creations.venues).toEqual([{ key: 'venue q', name: 'Venue Q' }]);
-    expect(out.creations.fields).toEqual([
-      { venueKey: 'venue q', key: 'field 7', name: 'Field 7' },
+    // each creation carries its placeholder id and the id of the parent it lives under
+    const divisionId = out.rows[0].ids.division;
+    const venue = out.creations.venues[0];
+    expect(out.creations.divisions).toEqual([
+      { id: divisionId, key: 'u14 boys', name: 'U14 Boys' },
     ]);
+    expect(out.creations.venues).toEqual([{ id: venue.id, key: 'venue q', name: 'Venue Q' }]);
+    expect(out.creations.fields).toEqual([
+      { id: r.ids.field, venueId: venue.id, key: 'field 7', name: 'Field 7' },
+    ]);
+    expect(out.creations.teamShells.every((t) => t.divisionId === divisionId)).toBe(true);
     expect(out.creations.teamShells.map((t) => t.name)).toEqual(['Rays', 'Sharks']);
   });
 
@@ -562,6 +569,308 @@ describe('schedule mapping: what will be created is listed, and only what a surv
   });
 });
 
+describe('schedule mapping: a composite key is a tuple, never a delimited string (Codex P2)', () => {
+  it('keeps the decision keys of colliding pairs apart', () => {
+    expect(teamDecisionKey('U10|Boys', 'Lions')).not.toBe(teamDecisionKey('U10', 'Boys|Lions'));
+    expect(fieldDecisionKey('A|B', 'C')).not.toBe(fieldDecisionKey('A', 'B|C'));
+    // and the key is still built from the normalised labels
+    expect(teamDecisionKey('  U10  BOYS ', 'lions')).toBe(teamDecisionKey('U10 Boys', 'Lions'));
+    expect(fieldDecisionKey(' Venue  A', 'FIELD 1')).toBe(fieldDecisionKey('venue a', 'Field 1'));
+  });
+
+  it('resolves division U10|Boys / team Lions and division U10 / team Boys|Lions to their own teams', () => {
+    const league = baseLeague({
+      divisions: [
+        { id: 'd-pipe', name: 'U10|Boys' },
+        { id: 'd-plain', name: 'U10' },
+      ],
+      teams: [
+        { id: 't-lions', name: 'Lions', divisionId: 'd-pipe' },
+        { id: 't-tigers-pipe', name: 'Tigers', divisionId: 'd-pipe' },
+        { id: 't-boys-lions', name: 'Boys|Lions', divisionId: 'd-plain' },
+        { id: 't-tigers-plain', name: 'Tigers', divisionId: 'd-plain' },
+      ],
+    });
+    const rows = [
+      fileRow({ Division: 'U10|Boys', 'Home Team': 'Lions', 'Away Team': 'Tigers' }),
+      fileRow({ Division: 'U10', 'Home Team': 'Boys|Lions', 'Away Team': 'Tigers' }),
+    ];
+    const out = resolve(rows, league).rows;
+    expect(out.map((r) => r.status)).toEqual(['ok', 'ok']);
+    expect(out[0].ids).toMatchObject({
+      division: 'd-pipe',
+      home: 't-lions',
+      away: 't-tigers-pipe',
+    });
+    expect(out[1].ids).toMatchObject({
+      division: 'd-plain',
+      home: 't-boys-lions',
+      away: 't-tigers-plain',
+    });
+    // two entries, not one, and each matched inside its own division
+    const entries = propose(rows, league).teams.filter((t) => t.label !== 'Tigers');
+    expect(entries.map((e) => [e.label, e.proposed?.id])).toEqual(
+      expect.arrayContaining([
+        ['Lions', 't-lions'],
+        ['Boys|Lions', 't-boys-lions'],
+      ])
+    );
+  });
+
+  it('resolves venue A|B / field C and venue A / field B|C to their own fields', () => {
+    const league = baseLeague({
+      venues: [
+        { id: 'v-ab', name: 'A|B' },
+        { id: 'v-a', name: 'A' },
+      ],
+      fields: [
+        { id: 'f-ab-c', venueId: 'v-ab', name: 'C' },
+        { id: 'f-a-bc', venueId: 'v-a', name: 'B|C' },
+      ],
+    });
+    const out = resolve(
+      [fileRow({ Venue: 'A|B', Field: 'C' }), fileRow({ Venue: 'A', Field: 'B|C' })],
+      league
+    ).rows;
+    expect(out.map((r) => r.ids?.field)).toEqual(['f-ab-c', 'f-a-bc']);
+  });
+
+  it('keeps a decision for one colliding pair from applying to the other', () => {
+    const rows = [
+      fileRow({ Division: 'U10|Boys', 'Home Team': 'Sharks' }),
+      fileRow({ Division: 'U10', 'Home Team': 'Boys|Sharks' }),
+    ];
+    const league = baseLeague({
+      divisions: [
+        { id: 'd-pipe', name: 'U10|Boys' },
+        { id: 'd-plain', name: 'U10' },
+      ],
+      teams: [
+        { id: 't-tigers-pipe', name: 'Tigers', divisionId: 'd-pipe' },
+        { id: 't-tigers-plain', name: 'Tigers', divisionId: 'd-plain' },
+      ],
+    });
+    const out = resolve(rows, league, {
+      teams: { [teamDecisionKey('U10|Boys', 'Sharks')]: { action: 'create' } },
+    }).rows;
+    expect(out[0].status).toBe('ok'); // the pair that was decided
+    expect(out[1].status).toBe('refused'); // the pair that only shares a joined string
+    expect(out[1].reason).toBe('unknown-team');
+  });
+
+  it('does not let a scope id and a name run together in the league index (sibling: the NUL join)', () => {
+    // scope "a" + name "b\u0000c" and scope "a\u0000b" + name "c" are one string if joined by NUL
+    const league = baseLeague({
+      divisions: [
+        { id: 'a', name: 'D1' },
+        { id: 'a\u0000b', name: 'D2' },
+      ],
+      teams: [
+        { id: 't-1', name: 'b\u0000c', divisionId: 'a' },
+        { id: 't-2', name: 'c', divisionId: 'a\u0000b' },
+        { id: 't-3', name: 'Tigers', divisionId: 'a\u0000b' },
+      ],
+    });
+    const p = propose(
+      [fileRow({ Division: 'D2', 'Home Team': 'c', 'Away Team': 'Tigers' })],
+      league
+    );
+    const entry = p.teams.find((t) => t.label === 'c');
+    expect(entry.status).toBe('match');
+    expect(entry.candidates.map((c) => c.id)).toEqual(['t-2']);
+  });
+
+  it('does not call two different games one because their ids run together (sibling: the duplicate key)', () => {
+    const league = baseLeague({
+      teams: [
+        { id: 'x|y', name: 'T1', divisionId: 'd10' },
+        { id: 'z', name: 'T2', divisionId: 'd10' },
+        { id: 'x', name: 'T3', divisionId: 'd10' },
+        { id: 'y|z', name: 'T4', divisionId: 'd10' },
+      ],
+    });
+    const sameSlot = { 'Start Time': '09:00', 'End Time': '10:00', Date: '2026-09-12' };
+    const out = resolve(
+      [
+        fileRow({ ...sameSlot, 'Home Team': 'T1', 'Away Team': 'T2' }),
+        fileRow({ ...sameSlot, 'Home Team': 'T3', 'Away Team': 'T4' }),
+      ],
+      league
+    ).rows;
+    expect(out.map((r) => [r.status, r.reason])).toEqual([
+      ['ok', null],
+      ['ok', null],
+    ]);
+  });
+});
+
+describe('schedule mapping: records the import creates are one record per parent and name (Codex P2)', () => {
+  // Two labels the admin maps onto the one existing division, and a team created under each.
+  const twoLabels = (over = {}) => ({
+    divisions: { [divisionDecisionKey('U10B')]: { action: 'map', id: 'd10' } },
+    teams: {
+      [teamDecisionKey('U10 Boys', 'Sharks')]: { action: 'create' },
+      [teamDecisionKey('U10B', 'Sharks')]: { action: 'create' },
+    },
+    ...over,
+  });
+  const overlapping = [
+    fileRow({
+      Division: 'U10 Boys',
+      'Home Team': 'Sharks',
+      'Away Team': 'Tigers',
+      Field: 'Field 1',
+      'Start Time': '09:00',
+      'End Time': '10:00',
+    }),
+    fileRow({
+      Division: 'U10B',
+      'Home Team': 'Sharks',
+      'Away Team': 'Lions',
+      Field: 'Field 2',
+      'Start Time': '09:00',
+      'End Time': '10:00',
+    }),
+  ];
+
+  it('gives one placeholder id and one creation to a team created under two labels of one division', () => {
+    const out = resolve(overlapping, baseLeague(), twoLabels());
+    expect(out.rows.map((r) => r.status)).toEqual(['ok', 'ok']);
+    expect(out.rows[0].ids.division).toBe('d10');
+    expect(out.rows[1].ids.division).toBe('d10');
+    expect(out.rows[0].ids.home).toBe(out.rows[1].ids.home);
+    expect(out.rows[0].ids.home).toMatch(/^new:team:/);
+    expect(out.creations.teamShells).toHaveLength(1);
+    expect(out.creations.teamShells[0]).toMatchObject({ divisionId: 'd10', name: 'Sharks' });
+  });
+
+  it('so the audit sees the one team in two places at once', () => {
+    const league = baseLeague();
+    const out = resolve(overlapping, league, twoLabels());
+    const audited = auditResolvedRows({ league, rows: out.rows });
+    expect(audited.counts['team-double-booked']).toBe(1);
+    expect(audited.checks.teamOverlap).toBe('flagged');
+    expect(audited.coverage.teams.own).toBe(3); // Sharks, Tigers, Lions: Sharks counted once
+  });
+
+  it('coalesces on the final name, not the typed label: a name given to the decision decides', () => {
+    const decisions = {
+      divisions: { [divisionDecisionKey('U10B')]: { action: 'map', id: 'd10' } },
+      teams: {
+        [teamDecisionKey('U10 Boys', 'Sharks')]: { action: 'create', name: 'Sharks FC' },
+        [teamDecisionKey('U10B', 'Shark Team')]: { action: 'create', name: ' sharks  fc ' },
+      },
+    };
+    const rows = [
+      overlapping[0],
+      { ...overlapping[1], awayLabel: 'Lions', homeLabel: 'Shark Team' },
+    ];
+    const out = resolveScheduleRows({
+      rows: parsed([
+        fileRow({ ...overlapping[0], Division: 'U10 Boys' }),
+        fileRow({ Division: 'U10B', 'Home Team': 'Shark Team', 'Away Team': 'Lions' }),
+      ]),
+      league: baseLeague(),
+      decisions,
+    });
+    void rows;
+    expect(out.rows[0].ids.home).toBe(out.rows[1].ids.home);
+    expect(out.creations.teamShells.map((t) => t.name)).toEqual(['Sharks FC']);
+  });
+
+  it('keeps a team created in another division a different team', () => {
+    const decisions = twoLabels({
+      divisions: { [divisionDecisionKey('U12 Boys')]: { action: 'map', id: 'd12' } },
+      teams: {
+        [teamDecisionKey('U10 Boys', 'Sharks')]: { action: 'create' },
+        [teamDecisionKey('U12 Boys', 'Sharks')]: { action: 'create' },
+      },
+    });
+    const out = resolve(
+      [
+        fileRow({ Division: 'U10 Boys', 'Home Team': 'Sharks', 'Away Team': 'Tigers' }),
+        fileRow({ Division: 'U12 Boys', 'Home Team': 'Sharks', 'Away Team': 'Lions' }),
+      ],
+      baseLeague(),
+      decisions
+    );
+    expect(out.rows[0].ids.home).not.toBe(out.rows[1].ids.home);
+    expect(out.creations.teamShells.map((t) => t.divisionId).sort()).toEqual(['d10', 'd12']);
+  });
+
+  it('coalesces an outside club the same way (sibling: outside creation)', () => {
+    const decisions = {
+      divisions: { [divisionDecisionKey('U10B')]: { action: 'map', id: 'd10' } },
+      teams: {
+        [teamDecisionKey('U10 Boys', 'Visiting Club A')]: { action: 'outside' },
+        [teamDecisionKey('U10B', 'visiting club a')]: { action: 'outside' },
+      },
+    };
+    const out = resolve(
+      [
+        fileRow({ Division: 'U10 Boys', 'Home Team': 'Lions', 'Away Team': 'Visiting Club A' }),
+        fileRow({ Division: 'U10B', 'Home Team': 'Tigers', 'Away Team': 'visiting club a' }),
+      ],
+      baseLeague(),
+      decisions
+    );
+    expect(out.rows[0].ids.away).toBe(out.rows[1].ids.away);
+    expect(out.creations.outsideTeams).toHaveLength(1);
+    expect(out.creations.outsideTeams[0]).toMatchObject({ divisionId: 'd10' });
+  });
+
+  it('coalesces created divisions, venues and fields by final name too (sibling)', () => {
+    const decisions = {
+      divisions: {
+        [divisionDecisionKey('U14 Boys')]: { action: 'create' },
+        [divisionDecisionKey('U14B')]: { action: 'create', name: 'U14 Boys' },
+      },
+      venues: {
+        [venueDecisionKey('Venue Q')]: { action: 'create' },
+        [venueDecisionKey('Q')]: { action: 'create', name: 'venue q' },
+      },
+      fields: {
+        [fieldDecisionKey('Venue Q', 'Field 7')]: { action: 'create' },
+        [fieldDecisionKey('Q', 'F7')]: { action: 'create', name: 'field 7' },
+      },
+      teams: {
+        [teamDecisionKey('U14 Boys', 'Sharks')]: { action: 'create' },
+        [teamDecisionKey('U14B', 'Sharks')]: { action: 'create' },
+        [teamDecisionKey('U14 Boys', 'Rays')]: { action: 'create' },
+        [teamDecisionKey('U14B', 'Eels')]: { action: 'create' },
+      },
+    };
+    const out = resolve(
+      [
+        fileRow({
+          Division: 'U14 Boys',
+          Venue: 'Venue Q',
+          Field: 'Field 7',
+          'Home Team': 'Sharks',
+          'Away Team': 'Rays',
+        }),
+        fileRow({
+          Division: 'U14B',
+          Venue: 'Q',
+          Field: 'F7',
+          'Home Team': 'Sharks',
+          'Away Team': 'Eels',
+        }),
+      ],
+      baseLeague(),
+      decisions
+    );
+    expect(out.rows.map((r) => r.status)).toEqual(['ok', 'ok']);
+    expect(out.rows[0].ids.division).toBe(out.rows[1].ids.division);
+    expect(out.rows[0].ids.field).toBe(out.rows[1].ids.field);
+    expect(out.rows[0].ids.home).toBe(out.rows[1].ids.home);
+    expect(out.creations.divisions).toHaveLength(1);
+    expect(out.creations.venues).toHaveLength(1);
+    expect(out.creations.fields).toHaveLength(1);
+    expect(out.creations.teamShells.map((t) => t.name).sort()).toEqual(['Eels', 'Rays', 'Sharks']);
+  });
+});
+
 describe('schedule mapping: the fixture', () => {
   const fixture = loadScheduleFixture();
   const result = parseScheduleRows({
@@ -582,7 +891,7 @@ describe('schedule mapping: the fixture', () => {
     // each match is the team of that name in that division, by the league's own ids
     for (const e of matched) {
       const team = fixture.league.teams.find((t) => t.id === e.proposed.id);
-      expect(scheduleLabelKey(team.name)).toBe(e.key.split('|')[1]);
+      expect(scheduleLabelKey(team.name)).toBe(JSON.parse(e.key)[1]);
     }
   });
 

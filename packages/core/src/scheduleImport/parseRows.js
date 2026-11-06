@@ -80,6 +80,7 @@ const CLOCK_TIME = /^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/;
 const WHOLE_NUMBER = /^\d+$/;
 const MAX_WEEK = 999;
 const MS_PER_DAY = 86400000;
+const MS_PER_MINUTE = 60000;
 
 const pad2 = (n) => String(n).padStart(2, '0');
 /** @param {number} total minutes past midnight */
@@ -186,6 +187,58 @@ export function scheduleWeekOf(date, seasonStart) {
     return n;
   };
   return 1 + Math.floor((mondayOf(toDay(date)) - mondayOf(toDay(seasonStart))) / 7);
+}
+
+/** One formatter per zone: building one is the expensive part of reading a long file. */
+const wallFormatters = new Map();
+
+/**
+ * The wall reading of an instant on the season's clock, and the instant spelled with that zone's
+ * offset (`2026-11-01T01:30:00-08:00`), as `resolveZonedInstant` spells one. Used for a game's end
+ * when a Length gives it as elapsed time: the end is an instant first, and its wall reading follows.
+ * The zone is always explicit, never the host's.
+ *
+ * @param {number} epochMs
+ * @param {string} timeZone
+ * @returns {{ date: string, time: string, iso: string }}
+ */
+function wallOfInstant(epochMs, timeZone) {
+  let formatter = wallFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    wallFormatters.set(timeZone, formatter);
+  }
+  /** @type {Record<string, string>} */
+  const f = {};
+  for (const part of formatter.formatToParts(new Date(epochMs))) f[part.type] = part.value;
+  const hour = f.hour === '24' ? '00' : f.hour; // some ICU builds render midnight as 24
+  const wallAsUtc = Date.UTC(
+    Number(f.year),
+    Number(f.month) - 1,
+    Number(f.day),
+    Number(hour),
+    Number(f.minute),
+    Number(f.second)
+  );
+  const offsetMinutes = Math.round((wallAsUtc - epochMs) / MS_PER_MINUTE);
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMinutes);
+  const date = `${f.year}-${f.month}-${f.day}`;
+  const time = `${hour}:${f.minute}`;
+  return {
+    date,
+    time,
+    iso: `${date}T${time}:${f.second}${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`,
+  };
 }
 
 /** A value for a message: short, and visibly the file's. @param {string} text */
@@ -452,27 +505,16 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
   if (lengthText !== '' && lengthMin === null) {
     return refuse(R.BAD_TIME, `The length ${quoted(lengthText)} is not a whole number of minutes.`);
   }
-  if (
-    startMin !== null &&
-    endGiven !== null &&
-    lengthMin !== null &&
-    startMin + lengthMin !== endGiven
-  ) {
-    return refuse(R.BAD_TIME, 'The End Time and the Length disagree about when the game ends.');
-  }
-  const endMin =
-    endGiven ?? (startMin !== null && lengthMin !== null ? startMin + lengthMin : null);
-  if (endMin !== null && endMin >= 1440) {
-    return refuse(R.BAD_TIME, 'The game would run past midnight.');
-  }
-  if (startMin !== null && endMin !== null && endMin <= startMin) {
+  // The wall reading of an End Time must be after the start's: `game_slots` holds both wall times and
+  // refuses an end that is not after its start. (A Length is added later, to the resolved start.)
+  if (startMin !== null && endGiven !== null && endGiven <= startMin) {
     return refuse(
       R.END_NOT_AFTER_START,
-      `The game ends (${hhmm(endMin)}) at or before it starts (${hhmm(startMin)}).`
+      `The game ends (${hhmm(endGiven)}) at or before it starts (${hhmm(startMin)}).`
     );
   }
   if (startMin !== null) out.startTime = hhmm(startMin);
-  if (endMin !== null) out.endTime = hhmm(endMin);
+  if (endGiven !== null) out.endTime = hhmm(endGiven);
 
   // 4. The two teams are two teams
   const homeKey = scheduleLabelKey(out.homeLabel);
@@ -517,17 +559,18 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     });
   }
 
-  // 7. The clock
-  const timed = startMin !== null && endMin !== null;
+  // 7. The clock. The start is put on the season's clock first; an End Time is put on it too, and a
+  // Length is ELAPSED minutes from the resolved start (a game does not get longer or shorter because
+  // the clocks change under it). When both are given they must agree as instants, not as wall readings.
+  const timed = startMin !== null && (endGiven !== null || lengthMin !== null);
   if (timed) {
-    const placed = [
-      ['start', 'Start Time', out.startTime],
-      ['end', 'End Time', out.endTime],
-    ].map(([which, label, time]) => ({
+    const placeAt = (which, label, time) => ({
       which,
       ...resolveZonedInstant({ date, time, timeZone, label }),
-    }));
-    const failed = placed.find((p) => p.iso === null);
+    });
+    const startAt = placeAt('start', 'Start Time', out.startTime);
+    const endAt = endGiven === null ? null : placeAt('end', 'End Time', out.endTime);
+    const failed = [startAt, endAt].find((p) => p !== null && p.iso === null);
     if (failed) {
       const finding = failed.findings[0];
       return refuse(
@@ -535,10 +578,34 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
         finding?.message ?? 'The time could not be placed on the season’s clock.'
       );
     }
-    out.start = placed[0].iso;
-    out.end = placed[1].iso;
-    const ambiguous = placed.filter((p) =>
-      p.findings.some((f) => f.code === TIMING_REASON.WALL_TIME_AMBIGUOUS)
+    const startMs = Date.parse(startAt.iso);
+    if (endAt !== null) {
+      const elapsed = (Date.parse(endAt.iso) - startMs) / MS_PER_MINUTE;
+      if (elapsed <= 0) {
+        return refuse(R.END_NOT_AFTER_START, 'The game ends at or before it starts on the clock.');
+      }
+      if (lengthMin !== null && elapsed !== lengthMin) {
+        return refuse(
+          R.BAD_TIME,
+          `The End Time and the Length disagree: from ${out.startTime} to ${out.endTime} is ${elapsed} minutes on the clock, not ${lengthMin}.`
+        );
+      }
+      out.end = endAt.iso;
+    } else {
+      const ends = wallOfInstant(startMs + lengthMin * MS_PER_MINUTE, timeZone);
+      if (ends.date !== date) return refuse(R.BAD_TIME, 'The game would run past midnight.');
+      if (ends.time <= out.startTime) {
+        return refuse(
+          R.END_NOT_AFTER_START,
+          `A game of ${lengthMin} minutes from ${out.startTime} ends at ${ends.time} by the clock, because the clocks go back during it; the import cannot store an end that is not after its start.`
+        );
+      }
+      out.endTime = ends.time;
+      out.end = ends.iso;
+    }
+    out.start = startAt.iso;
+    const ambiguous = [startAt, endAt].filter(
+      (p) => p !== null && p.findings.some((f) => f.code === TIMING_REASON.WALL_TIME_AMBIGUOUS)
     );
     if (ambiguous.length > 0) {
       out.flags.push({
@@ -572,15 +639,17 @@ function refuseRepeats(parsed) {
   const gameIds = new Set();
   for (const r of parsed) {
     if (r.status === 'refused') continue;
-    const content = [
+    // A tuple, not a delimited string: labels may contain the delimiter, and two different games
+    // must never be one key. A missing start time stays null, never a word that is also a label.
+    const content = JSON.stringify([
       scheduleLabelKey(r.divisionLabel),
       scheduleLabelKey(r.homeLabel),
       scheduleLabelKey(r.awayLabel),
       scheduleLabelKey(r.venueLabel),
       scheduleLabelKey(r.fieldLabel),
       r.date,
-      r.startTime ?? 'tbd',
-    ].join('|');
+      r.startTime,
+    ]);
     const reason = contentKeys.has(content)
       ? R.DUPLICATE_ROW
       : r.gameId !== null && gameIds.has(r.gameId)

@@ -335,6 +335,109 @@ describe('schedule import: Length instead of End Time', () => {
   });
 });
 
+describe('schedule import: a Length is elapsed time from the resolved start (Codex P2)', () => {
+  // America/Los_Angeles: 2026-11-01 clocks go back at 02:00 (01:00-01:59 happens twice);
+  // 2027-03-14 clocks go forward at 02:00 (02:00-02:59 does not exist).
+  const lengthHeaders = HEADERS.filter((h) => h !== 'End Time').concat('Length');
+  const bothHeaders = [...HEADERS, 'Length'];
+  const parseLen = (over) => {
+    const r = row({ Week: '', ...over });
+    delete r['End Time'];
+    return parseScheduleRows({ headers: lengthHeaders, rows: [r], season: SEASON }).rows[0];
+  };
+  const parseBoth = (over) =>
+    parseScheduleRows({
+      headers: bothHeaders,
+      rows: [row({ Week: '', ...over })],
+      season: SEASON,
+    }).rows[0];
+  const minutesApart = (r) => (Date.parse(r.end) - Date.parse(r.start)) / 60000;
+
+  it('00:30 + 60 on the fall-back day ends at 01:30 PDT, 60 minutes on', () => {
+    const r = parseLen({ Date: '2026-11-01', 'Start Time': '00:30', Length: '60' });
+    expect(r.status).toBe('ok');
+    expect(r.start).toBe('2026-11-01T00:30:00-07:00');
+    expect(r.end).toBe('2026-11-01T01:30:00-07:00');
+    expect(r.endTime).toBe('01:30');
+    expect(minutesApart(r)).toBe(60);
+  });
+
+  it('00:30 + 120 on the fall-back day ends at the SECOND 01:30 (PST): 120 minutes on, not 180', () => {
+    const r = parseLen({ Date: '2026-11-01', 'Start Time': '00:30', Length: '120' });
+    expect(r.status).toBe('ok');
+    expect(r.end).toBe('2026-11-01T01:30:00-08:00');
+    expect(r.endTime).toBe('01:30');
+    expect(minutesApart(r)).toBe(120);
+  });
+
+  it('01:30 + 60 on the fall-back day ends at 01:30 PST, a wall reading not after its start: refused, not stored as 120', () => {
+    // 01:30 PDT + 60 elapsed minutes is 01:30 PST (the clocks go back an hour at 02:00 PDT), so the
+    // wall reading of the end is not after the start's, which `game_slots_time_check
+    // (end_time > start_time)` cannot hold. The row is listed with a reason; it is not accepted as two
+    // hours long (the old wall arithmetic) and not accepted with an end it cannot store.
+    const r = parseLen({ Date: '2026-11-01', 'Start Time': '01:30', Length: '60' });
+    expect(r.status).toBe('refused');
+    expect(r.reason).toBe('end-not-after-start');
+    expect(r.message).toMatch(/clocks go back/);
+    reached.add('end-not-after-start');
+  });
+
+  it('01:30 + 60 on the spring-forward day ends at 03:30 PDT: 60 minutes on, not a gap', () => {
+    const r = parseLen({ Date: '2027-03-14', 'Start Time': '01:30', Length: '60' });
+    expect(r.status).toBe('ok');
+    expect(r.start).toBe('2027-03-14T01:30:00-08:00');
+    expect(r.end).toBe('2027-03-14T03:30:00-07:00');
+    expect(r.endTime).toBe('03:30');
+    expect(minutesApart(r)).toBe(60);
+  });
+
+  it('a start inside the spring-forward gap is still time-in-dst-gap', () => {
+    const r = parseLen({ Date: '2027-03-14', 'Start Time': '02:30', Length: '60' });
+    expect(r).toMatchObject({ status: 'refused', reason: 'time-in-dst-gap' });
+  });
+
+  it('a Length that would run past midnight is still refused, on a normal day and across a change', () => {
+    expect(parseLen({ 'Start Time': '23:30', Length: '60' })).toMatchObject({
+      status: 'refused',
+      reason: 'bad-time',
+    });
+    expect(parseLen({ Date: '2026-11-01', 'Start Time': '23:30', Length: '60' })).toMatchObject({
+      status: 'refused',
+      reason: 'bad-time',
+    });
+  });
+
+  it('with both an End Time and a Length, compares the resolved instants, not the wall difference', () => {
+    // 00:30 PDT to 02:30 PST is 180 minutes, though the wall clock reads two hours
+    expect(
+      parseBoth({ Date: '2026-11-01', 'Start Time': '00:30', 'End Time': '02:30', Length: '120' })
+    ).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    const agree = parseBoth({
+      Date: '2026-11-01',
+      'Start Time': '00:30',
+      'End Time': '02:30',
+      Length: '180',
+    });
+    expect(agree.status).toBe('ok');
+    expect(minutesApart(agree)).toBe(180);
+    // 01:30 PST to 03:30 PDT is 60 minutes, though the wall clock reads two hours
+    const spring = parseBoth({
+      Date: '2027-03-14',
+      'Start Time': '01:30',
+      'End Time': '03:30',
+      Length: '60',
+    });
+    expect(spring.status).toBe('ok');
+    expect(minutesApart(spring)).toBe(60);
+    expect(
+      parseBoth({ Date: '2027-03-14', 'Start Time': '01:30', 'End Time': '03:30', Length: '120' })
+    ).toMatchObject({ status: 'refused', reason: 'bad-time' });
+    // an ordinary day is unchanged
+    expect(parseBoth({ Length: '60' }).status).toBe('ok');
+    expect(parseBoth({ Length: '45' })).toMatchObject({ status: 'refused', reason: 'bad-time' });
+  });
+});
+
 describe('schedule import: a row with no time becomes TIME TBD, never a dropped row', () => {
   it('blank start and end: imported-without-time', () => {
     const r = one({ 'Start Time': '', 'End Time': '' });
@@ -822,6 +925,26 @@ describe('schedule import: same team, Game ID, repeats', () => {
     // and a refused repeat does not itself become the first
     const three = parse([row(), row({ 'Start Time': '25:00' }), row()]);
     expect(three.rows.map((r) => r.reason)).toEqual([null, 'bad-time', 'duplicate-row']);
+  });
+
+  it('does not call two different games one because their labels run together (sibling: the content key)', () => {
+    // venue "A|B" + field "C" and venue "A" + field "B|C" are one string if joined by a bar
+    const venueField = parse([
+      row({ 'Game ID': 'A', Venue: 'A|B', Field: 'C' }),
+      row({ 'Game ID': 'B', Venue: 'A', Field: 'B|C' }),
+    ]);
+    expect(venueField.rows.map((r) => r.status)).toEqual(['ok', 'ok']);
+    const teams = parse([
+      row({ 'Game ID': 'C', Division: 'X|Y', 'Home Team': 'Z' }),
+      row({ 'Game ID': 'D', Division: 'X', 'Home Team': 'Y|Z' }),
+    ]);
+    expect(teams.rows.map((r) => r.status)).toEqual(['ok', 'ok']);
+    // while a real repeat of either is still found
+    const real = parse([
+      row({ 'Game ID': 'A', Venue: 'A|B', Field: 'C' }),
+      row({ 'Game ID': 'E', Venue: 'A|B', Field: 'C' }),
+    ]);
+    expect(real.rows[1].reason).toBe('duplicate-row');
   });
 
   it('does not treat two games at different times on one field as repeats', () => {

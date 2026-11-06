@@ -39,8 +39,21 @@
  * ## Ids
  *
  * A resolved row carries `ids`. An existing record has its own id; one the import would create has
- * a stable placeholder (`new:team:u10 boys|sharks`), so the conflict audit can run on the rows before
- * anything is written and run again, over the saved rows, after.
+ * a stable placeholder, `new:<kind>:<tuple>`, so the conflict audit can run on the rows before
+ * anything is written and run again, over the saved rows, after. The tuple is the JSON array of the
+ * parent ids and the FINAL name (`new:team:["<division id>","sharks"]`): a record is identified by
+ * what it will be, not by the label of the file that reached it, so two labels mapped to one division
+ * and a team created under each are one team to create (`UNIQUE (division_id, name)`), and a created
+ * team under a created division coalesces the same way. Composite keys everywhere in this module are
+ * such tuples, never strings joined by a delimiter a label might contain.
+ *
+ * `creations` lists, per kind, one record per id: `{ id, key, name }` plus `venueId` for a field and
+ * `divisionId` for a team or an outside team (an existing parent's id, or the placeholder of one the
+ * import would create).
+ *
+ * Not checked here: a `create` whose final name is already an existing record's name under the same
+ * parent, and a team shell and an outside club created under one name in one division. Both would meet
+ * `UNIQUE (division_id, name)` in the writer (PR 5).
  */
 
 import { normaliseExternalLabel } from '../externalImport/mapping.js';
@@ -56,16 +69,27 @@ export function scheduleLabelKey(label) {
   return label === undefined || label === null ? '' : normaliseExternalLabel(String(label));
 }
 
+/**
+ * A composite key: the parts as a JSON array. Joining labels with a delimiter is ambiguous the moment
+ * a label contains the delimiter (`U10|Boys` + `Lions` and `U10` + `Boys|Lions` are one string), and
+ * a team or field would then resolve through the other's cached reference. An array of strings
+ * round-trips, so two different tuples are never one key.
+ *
+ * @param {...string} parts
+ * @returns {string}
+ */
+const tuple = (...parts) => JSON.stringify(parts);
+
 /** @param {string} divisionLabel */
 export const divisionDecisionKey = (divisionLabel) => scheduleLabelKey(divisionLabel);
 /** @param {string} venueLabel */
 export const venueDecisionKey = (venueLabel) => scheduleLabelKey(venueLabel);
 /** @param {string} venueLabel @param {string} fieldLabel */
 export const fieldDecisionKey = (venueLabel, fieldLabel) =>
-  `${scheduleLabelKey(venueLabel)}|${scheduleLabelKey(fieldLabel)}`;
+  tuple(scheduleLabelKey(venueLabel), scheduleLabelKey(fieldLabel));
 /** @param {string} divisionLabel @param {string} teamLabel */
 export const teamDecisionKey = (divisionLabel, teamLabel) =>
-  `${scheduleLabelKey(divisionLabel)}|${scheduleLabelKey(teamLabel)}`;
+  tuple(scheduleLabelKey(divisionLabel), scheduleLabelKey(teamLabel));
 
 const ACTIONS = Object.freeze({
   division: ['map', 'create', 'skip'],
@@ -108,7 +132,7 @@ function indexLeague(league) {
   const groupBy = (list, scope) => {
     const out = new Map();
     for (const item of list) {
-      const key = `${scope(item)}\u0000${scheduleLabelKey(item.name)}`;
+      const key = tuple(scope(item), scheduleLabelKey(item.name));
       out.set(key, [...(out.get(key) ?? []), item]);
     }
     return out;
@@ -238,6 +262,31 @@ function analyse({ rows, league, decisions }) {
     return null;
   }
 
+  /**
+   * The reference to a record the import would create. Its identity is its kind, its parent and its
+   * FINAL name (the decision's `name`, else the label as typed), never the label it was reached by:
+   * two labels of the file that the admin maps to one division, and a team created under each, are one
+   * team to create (`UNIQUE (division_id, name)`), and the audit must see it as one team. Decisions stay
+   * keyed by label; only what is created is coalesced.
+   *
+   * @param {'division' | 'venue' | 'field' | 'team' | 'outside'} kind
+   * @param {MappingEntry} entry
+   * @param {string[]} parents  the ids of the records it lives under, outermost first (a created
+   *   parent's id is its own placeholder, so a created team under a created division coalesces too)
+   * @param {Record<string, string>} [extra]
+   */
+  function createdRef(kind, entry, parents, extra = {}) {
+    const name = entry.effective?.name ?? entry.label;
+    const key = scheduleLabelKey(name);
+    return {
+      type: kind === 'outside' ? 'outside' : 'create',
+      id: `new:${kind}:${tuple(...parents, key)}`,
+      key,
+      name,
+      ...extra,
+    };
+  }
+
   // Divisions, then venues, then fields (a field is judged in its venue), then teams (in their division).
   for (const r of usable) {
     const key = scheduleLabelKey(r.divisionLabel);
@@ -247,7 +296,7 @@ function analyse({ rows, league, decisions }) {
       key,
       label: r.divisionLabel,
       extra: {},
-      candidates: world.divisionsByName.get(`\u0000${key}`) ?? [],
+      candidates: world.divisionsByName.get(tuple('', key)) ?? [],
     });
     if (!refs.division.has(key)) {
       refs.division.set(
@@ -256,12 +305,7 @@ function analyse({ rows, league, decisions }) {
           entry,
           (id) => world.divisionsById.has(id),
           (id) => ({ type: 'existing', id }),
-          () => ({
-            type: 'create',
-            id: `new:division:${key}`,
-            key,
-            name: entry.effective?.name ?? entry.label,
-          })
+          () => createdRef('division', entry, [])
         )
       );
     }
@@ -276,7 +320,7 @@ function analyse({ rows, league, decisions }) {
       key: venueKey,
       label: r.venueLabel,
       extra: {},
-      candidates: world.venuesByName.get(`\u0000${venueKey}`) ?? [],
+      candidates: world.venuesByName.get(tuple('', venueKey)) ?? [],
     });
     if (!refs.venue.has(venueKey)) {
       refs.venue.set(
@@ -285,12 +329,7 @@ function analyse({ rows, league, decisions }) {
           venueEntry,
           (id) => world.venuesById.has(id),
           (id) => ({ type: 'existing', id }),
-          () => ({
-            type: 'create',
-            id: `new:venue:${venueKey}`,
-            key: venueKey,
-            name: venueEntry.effective?.name ?? venueEntry.label,
-          })
+          () => createdRef('venue', venueEntry, [])
         )
       );
     }
@@ -302,10 +341,10 @@ function analyse({ rows, league, decisions }) {
     const fieldKey = scheduleLabelKey(r.fieldLabel);
     const venueRef = refs.venue.get(venueKey);
     if (venueKey === '' || fieldKey === '' || !venueRef || venueRef === SKIP) continue;
-    const key = `${venueKey}|${fieldKey}`;
+    const key = fieldDecisionKey(r.venueLabel, r.fieldLabel);
     const candidates =
       venueRef.type === 'existing'
-        ? (world.fieldsByName.get(`${venueRef.id}\u0000${fieldKey}`) ?? [])
+        ? (world.fieldsByName.get(tuple(venueRef.id, fieldKey)) ?? [])
         : [];
     const entry = entryFor(fieldEntries, {
       kind: 'field',
@@ -321,13 +360,7 @@ function analyse({ rows, league, decisions }) {
           entry,
           (id) => world.fieldsById.get(id)?.venueId === venueRef.id,
           (id) => ({ type: 'existing', id }),
-          () => ({
-            type: 'create',
-            id: `new:field:${key}`,
-            key: fieldKey,
-            venueKey,
-            name: entry.effective?.name ?? entry.label,
-          })
+          () => createdRef('field', entry, [venueRef.id], { venueId: venueRef.id })
         )
       );
     }
@@ -340,10 +373,10 @@ function analyse({ rows, league, decisions }) {
     for (const label of [r.homeLabel, r.awayLabel]) {
       const teamKey = scheduleLabelKey(label);
       if (teamKey === '') continue;
-      const key = `${divisionKey}|${teamKey}`;
+      const key = teamDecisionKey(r.divisionLabel, label);
       const candidates =
         divisionRef.type === 'existing'
-          ? (world.teamsByName.get(`${divisionRef.id}\u0000${teamKey}`) ?? [])
+          ? (world.teamsByName.get(tuple(divisionRef.id, teamKey)) ?? [])
           : [];
       const entry = entryFor(teamEntries, {
         kind: 'team',
@@ -363,13 +396,10 @@ function analyse({ rows, league, decisions }) {
         } else if (external.length === 1) {
           refs.team.set(key, { type: 'existing', id: external[0].id, outside: true });
         } else {
-          refs.team.set(key, {
-            type: 'outside',
-            id: `new:outside:${key}`,
-            key: teamKey,
-            divisionKey,
-            name: e.name ?? entry.label,
-          });
+          refs.team.set(
+            key,
+            createdRef('outside', entry, [divisionRef.id], { divisionId: divisionRef.id })
+          );
         }
         continue;
       }
@@ -383,13 +413,7 @@ function analyse({ rows, league, decisions }) {
             id,
             outside: world.teamsById.get(id)?.isExternal === true,
           }),
-          () => ({
-            type: 'create',
-            id: `new:team:${key}`,
-            key: teamKey,
-            divisionKey,
-            name: e?.name ?? entry.label,
-          })
+          () => createdRef('team', entry, [divisionRef.id], { divisionId: divisionRef.id })
         )
       );
     }
@@ -490,7 +514,7 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
           `The venue ${JSON.stringify(row.venueLabel)} is not one of yours. Map it to a venue, create it, or skip its rows.`
         );
       }
-      const fieldRef = refs.field.get(`${venueKey}|${scheduleLabelKey(row.fieldLabel)}`);
+      const fieldRef = refs.field.get(fieldDecisionKey(row.venueLabel, row.fieldLabel));
       if (fieldRef === SKIP) return skip('field', row.fieldLabel);
       if (!fieldRef) {
         return refuse(
@@ -509,7 +533,7 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
     ]) {
       const teamKey = scheduleLabelKey(label);
       if (teamKey === '') return refuse(R.UNKNOWN_TEAM, `The ${which} Team is blank.`);
-      const team = refs.team.get(`${divisionKey}|${teamKey}`);
+      const team = refs.team.get(teamDecisionKey(row.divisionLabel, label));
       if (team === SKIP) return skip('team', label);
       if (!team) {
         return refuse(
@@ -555,9 +579,8 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
   for (const item of resolved) {
     const r = item.row;
     if (!r.ids || (r.status !== 'ok' && r.status !== 'tbd')) continue;
-    const key = [r.ids.home, r.ids.away, r.ids.field ?? 'tbd', r.date, r.startTime ?? 'tbd'].join(
-      '|'
-    );
+    // null stays null in the tuple, so a game with no field or time is never an id spelled "tbd"
+    const key = JSON.stringify([r.ids.home, r.ids.away, r.ids.field, r.date, r.startTime]);
     if (seen.has(key)) {
       Object.assign(r, {
         status: 'refused',
@@ -574,6 +597,8 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
     }
   }
 
+  // What a confirmed import would create: one record per kind, parent and final name, from the rows
+  // that survive. A record reached through two labels keeps the first spelling seen.
   const creations = {
     divisions: new Map(),
     venues: new Map(),
@@ -581,53 +606,36 @@ export function resolveScheduleRows({ rows, league, decisions = {} }) {
     teamShells: new Map(),
     outsideTeams: new Map(),
   };
+  /** @param {Map<string, any>} map @param {any} ref @param {Record<string, string>} [parent] */
+  const note = (map, ref, parent = {}) => {
+    if (!map.has(ref.id)) map.set(ref.id, { id: ref.id, ...parent, key: ref.key, name: ref.name });
+  };
   for (const { row, refs: used } of resolved) {
     if (!used || (row.status !== 'ok' && row.status !== 'tbd')) continue;
-    if (used.division.type === 'create') {
-      creations.divisions.set(used.division.id, {
-        key: used.division.key,
-        name: used.division.name,
-      });
-    }
+    if (used.division.type === 'create') note(creations.divisions, used.division);
     if (used.field && used.field.type === 'create') {
-      creations.fields.set(used.field.id, {
-        venueKey: used.field.venueKey,
-        key: used.field.key,
-        name: used.field.name,
-      });
+      note(creations.fields, used.field, { venueId: used.field.venueId });
     }
     for (const side of [used.home, used.away]) {
-      if (side.type === 'create') {
-        creations.teamShells.set(side.id, {
-          divisionKey: side.divisionKey,
-          key: side.key,
-          name: side.name,
-        });
-      } else if (side.type === 'outside') {
-        creations.outsideTeams.set(side.id, {
-          divisionKey: side.divisionKey,
-          key: side.key,
-          name: side.name,
-        });
+      if (side.type === 'create') note(creations.teamShells, side, { divisionId: side.divisionId });
+      else if (side.type === 'outside') {
+        note(creations.outsideTeams, side, { divisionId: side.divisionId });
       }
     }
   }
   // A venue is created when a surviving row's field is in it (or the venue was created for its field).
   for (const { row, refs: used } of resolved) {
     if (!used || row.status !== 'ok' || !used.field) continue;
-    const venueKey = scheduleLabelKey(row.venueLabel);
-    const venue = refs.venue.get(venueKey);
-    if (venue && venue !== SKIP && venue.type === 'create') {
-      creations.venues.set(venue.id, { key: venue.key, name: venue.name });
-    }
+    const venue = refs.venue.get(venueDecisionKey(row.venueLabel));
+    if (venue && venue !== SKIP && venue.type === 'create') note(creations.venues, venue);
   }
-  const listed = (map) =>
-    [...map.values()].sort((a, b) =>
-      `${a.divisionKey ?? a.venueKey ?? ''}|${a.key}` <
-      `${b.divisionKey ?? b.venueKey ?? ''}|${b.key}`
-        ? -1
-        : 1
+  /** Sorted by parent then name, as tuples, so the order does not depend on a delimiter. */
+  const listed = (map) => {
+    const order = (x) => JSON.stringify([x.divisionId ?? x.venueId ?? '', x.key]);
+    return [...map.values()].sort((x, y) =>
+      order(x) < order(y) ? -1 : order(x) > order(y) ? 1 : 0
     );
+  };
 
   const out = resolved.map((x) => x.row);
   const counts = { rows: out.length, ok: 0, tbd: 0, refused: 0, skipped: 0, byReason: {} };

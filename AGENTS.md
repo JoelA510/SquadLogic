@@ -165,9 +165,10 @@ recurring shapes:
   cannot be checked is a falsely perfect result.
 - **No raw control characters in source** (`tests/sourceHygiene.test.js`); use `\u0000`-style
   escapes. Raw NUL bytes once made a 57 KB file merge as an unreadable binary blob.
-- **Review every PR adversarially before opening it** (the `review-change` skill; in Claude
-  Code, `/code-review`) and fix the findings in that PR; reviewing per milestone left defects in
-  `main` between phases.
+- **Review every PR except documentation and very minor ones (owner, 2026-11-06).** Codex
+  reviews first; address its findings; then run one adversarial review (the `review-change`
+  skill; in Claude Code, `/code-review`) on the result and fix its findings in that same push,
+  never a second. Reviewing per milestone left defects in `main` between phases.
 - **Search every changed export and public shape** and update every call site in the same PR.
 
 ### Core principles (apply within every PR)

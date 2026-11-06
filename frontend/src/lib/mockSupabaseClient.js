@@ -51,6 +51,11 @@ import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handleEvaluationImportRpc } from './mockEvaluations.js';
 import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
+import {
+  handleGamePublishedRpc,
+  publishedRpcRefusal,
+  publishedWriteRefusal,
+} from './mockGamePublished.js';
 import { handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
@@ -2321,6 +2326,18 @@ export const mockSupabase = {
           ),
         ]);
         if (upsertRefused) return refusedWrite(upsertRefused);
+        // The Published guard (migration 20261119010000): an upsert onto a Published row is an UPDATE of it.
+        const publishedUpsertRefused = publishedWriteRefusal(
+          table,
+          upsertRows
+            .map((r) => ({
+              before: (db[table] || []).find((item) => String(item.id) === String(r.id)),
+              after: r,
+            }))
+            .filter((pair) => pair.before)
+            .map((pair) => ({ before: pair.before, after: { ...pair.before, ...pair.after } }))
+        );
+        if (publishedUpsertRefused) return refusedWrite(publishedUpsertRefused);
         const newRecords = (Array.isArray(records) ? records : [records]).map((r) => ({
           id: r.id || mockId(),
           created_at: r.created_at || new Date().toISOString(),
@@ -2403,6 +2420,12 @@ export const mockSupabase = {
               ...matching.map((item) => ({ ...item, ...updates })),
             ]);
             if (updateRefused) return refusedWrite(updateRefused);
+            // The Published guard (migration 20261119010000), judged on the row as it stands.
+            const publishedRefused = publishedWriteRefusal(
+              table,
+              matching.map((item) => ({ before: item, after: { ...item, ...updates } }))
+            );
+            if (publishedRefused) return refusedWrite(publishedRefused);
             if (db[table]) {
               db[table] = db[table].map((item) => {
                 if (String(item[col]) === String(val)) {
@@ -2512,6 +2535,12 @@ export const mockSupabase = {
               const doomed = db[table].filter((item) => String(item[col]) === String(val));
               const deleteRefused = scheduleWriteRefusal(db, table, doomed);
               if (deleteRefused) return Promise.resolve(deleteRefused);
+              // The Published guard (migration 20261119010000): a Published row is not deleted.
+              const publishedDeleteRefused = publishedWriteRefusal(
+                table,
+                doomed.map((item) => ({ before: item, after: null }))
+              );
+              if (publishedDeleteRefused) return Promise.resolve(publishedDeleteRefused);
               // A hard delete with no tombstone resurrects: `getDB()` rebuilds
               // from `initialMockData` and `mergeSource` only adds or updates.
               // The RPCs tombstone; this generic path did not, so a direct
@@ -2664,6 +2693,15 @@ export const mockSupabase = {
       // The TIME TBD list (migration 20261108020000): the admin read, refusals included.
       const tbd = handleScheduleTbdRpc(db, name, params, { isOrgAdmin });
       if (tbd) return tbd;
+      // The Published switch and its audit log (migration 20261119010000), refusals included.
+      const publishedSwitch = handleGamePublishedRpc(db, name, params, {
+        currentUserId: storedSession ? currentUserId : null,
+        isOrgAdmin,
+      });
+      if (publishedSwitch) {
+        if (!publishedSwitch.error) saveDB(db);
+        return publishedSwitch;
+      }
       // The evaluations import's finalizer (migration 20261113010000), dry run and refusals included.
       const evaluation = handleEvaluationImportRpc(db, name, params, { isOrgAdmin, currentUserId });
       if (evaluation) {
@@ -7739,6 +7777,9 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied' } };
       }
+      // 20261119010000: a Published game is cancelled only after changes to it are allowed.
+      const gamePublishedRefused = publishedRpcRefusal(db, { kind: 'cancel', id: p_assignment_id });
+      if (gamePublishedRefused) return gamePublishedRefused;
       const gameCancelRefused = scheduleWriteRefusal(db, 'game_assignments', [assignment]);
       if (gameCancelRefused) return gameCancelRefused;
       db.game_assignments = (db.game_assignments || []).filter(
@@ -7881,6 +7922,9 @@ export const mockSupabase = {
       if (!ADMIN_ROLES.includes(String(member?.role || ''))) {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
+      // 20261119010000: a team with a Published game is deleted only after changes to its games are allowed.
+      const teamPublishedRefused = publishedRpcRefusal(db, { kind: 'team', id: p_team_id });
+      if (teamPublishedRefused) return teamPublishedRefused;
       const teamDeleteRefused = scheduleWriteRefusal(db, 'teams', [team]);
       if (teamDeleteRefused) return teamDeleteRefused;
       // As 20261108020000 (20261022030000 with the TIME TBD rows counted; that is 20261021030000

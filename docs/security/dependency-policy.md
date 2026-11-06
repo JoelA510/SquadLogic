@@ -145,7 +145,7 @@ update it tries. `npm ci` on another Node warns (`EBADENGINE`) instead.
 
 [`.github/dependabot.yml`](../../.github/dependabot.yml): npm and GitHub Actions,
 monthly, with a 3-day cooldown. Minor and patch npm bumps arrive as one grouped
-pull request, npm majors as another, and the actions as a third. Ten are
+pull request, npm majors as another, and the actions as a third. Eight are
 held back, each with its reason beside it: `@types/node` 25 (moves with
 `.nvmrc`), `eslint-plugin-react-hooks` 7.1 (new lint rules flag 63 existing
 patterns; pinned at 7.0.1 in `package.json`), `@tanstack/react-virtual`
@@ -159,10 +159,7 @@ jsx-a11y release supports ESLint 10), and `typescript` 6.1 and later
 held at `~6.0.3` in `package.json`; remove when `typescript-eslint` widens its
 range or the side-by-side setup in the resume queue is adopted), and `@sentry/react` 11.10.x only
 (its `tunnel` option fails typecheck in `tests/sentryConfig.test.js`; later releases are proposed
-again, and the entry goes once one is taken), and `tailwindcss` and `@tailwindcss/vite` 4.3.4 and 4.3.5
-(they publish `@tailwindcss/oxide-wasm32-wasi` without the `cpu: ["wasm32"]` restriction 4.3.3 has, so
-npm would install that 6.7 MB fallback everywhere; the lockfile stays at 4.3.3; remove when a
-release restores the restriction or the owner takes the fallback). Each other npm major is taken as its own
+again, and the entry goes once one is taken). Each other npm major is taken as its own
 planned upgrade (the resume queue lists them). A held-back
 package in the minor-and-patch group would otherwise fail a gate and hold the
 whole batch with it. Security updates (Settings -> Advanced

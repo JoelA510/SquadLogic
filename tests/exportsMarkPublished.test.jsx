@@ -152,7 +152,10 @@ describe('the checkbox', () => {
 
   it('says how many games the files hold, which is not how many the panel was handed', async () => {
     await generate(storageClient().client);
-    expect(checkbox()).toHaveAccessibleDescription(/3 games in these files/);
+    expect(checkbox()).toHaveAccessibleDescription(
+      /3 games in these files\. Marked Published, they are held/
+    );
+    expect(checkbox()).toHaveAccessibleDescription(/the published baseline stays the record/);
   });
 
   it('is absent when the files hold no game (nothing to mark)', async () => {

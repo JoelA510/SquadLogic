@@ -121,7 +121,8 @@ export default function AllowChangesDialog({
         These games are Published: families have been told where and when they play, so they are
         held in place. Allowing changes releases them so they can be moved or cancelled, and so that
         a new schedule can move them. Nothing else about them changes, and you can publish them
-        again at any time.
+        again at any time. The published baseline that an export records is a separate record of
+        what went out, and it is not changed.
       </p>
       <p className="text-sm mt-2" data-testid="allow-changes-moved-note">
         {movedGameNote}

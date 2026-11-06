@@ -65,6 +65,10 @@ describe('what the dialog shows', () => {
       'Synthetic Home 2 vs Synthetic Away 2 · Sat 2',
     ]);
     expect(within(dialog).queryByTestId('allow-changes-more')).not.toBeInTheDocument();
+    // Two meanings of "published" meet here (the switch and an export's baseline); the dialog says which is which.
+    expect(dialog).toHaveTextContent(
+      'The published baseline that an export records is a separate record of what went out, and it is not changed.'
+    );
   });
 
   it('says "1 Published game" in the singular', () => {

@@ -1121,7 +1121,8 @@ export default function OutputGenerationPanel({
                   Mark these games Published
                 </label>
                 <span id={markPublishedNoteId} className="text-xs text-text-muted">
-                  {`${generated.gameIds.length} ${generated.gameIds.length === 1 ? 'game' : 'games'} in these files`}
+                  {`${generated.gameIds.length} ${generated.gameIds.length === 1 ? 'game' : 'games'} in these files. ` +
+                    'Marked Published, they are held where they are; the published baseline stays the record of what went out.'}
                 </span>
               </div>
             )}

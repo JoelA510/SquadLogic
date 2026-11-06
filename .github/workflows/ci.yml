@@ -392,7 +392,7 @@ jobs:
       # Pinned (workflow env): the guard parses this version's JSON output.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
-        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        uses: supabase/setup-cli@d239d1052f6f024a8d746d7e5aeddead63b9cb53 # v3.1.0
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 
@@ -480,7 +480,7 @@ jobs:
       # API rate limit on runs 1156 and 1174.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
-        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        uses: supabase/setup-cli@d239d1052f6f024a8d746d7e5aeddead63b9cb53 # v3.1.0
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 

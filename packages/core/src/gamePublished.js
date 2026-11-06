@@ -95,6 +95,29 @@ const CAMEL = Object.freeze({
   end: 'end',
 });
 
+// The characters the database trims off a reason and a note (btrim with space, tab, CR, LF): not every Unicode space.
+const trimWs = (value) => String(value ?? '').replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+
+// An instant, read as the database reads it: a time with no zone designator is UTC (the functions pin TimeZone to
+// UTC), not the runtime's local time.
+const instant = (value) => {
+  const text = String(value).trim();
+  const m =
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(
+      text
+    );
+  if (!m) return Date.parse(text);
+  let zone = (m[3] ?? 'Z').toUpperCase();
+  if (zone !== 'Z')
+    zone =
+      zone.length === 3
+        ? `${zone}:00`
+        : zone.length === 5
+          ? `${zone.slice(0, 3)}:${zone.slice(3)}`
+          : zone;
+  return Date.parse(`${m[1]}T${m[2]}${zone}`);
+};
+
 const read = (row, field) => {
   const value = row?.[field] ?? row?.[CAMEL[field]];
   return value === undefined ? null : value;
@@ -104,8 +127,8 @@ const sameValue = (a, b, field) => {
   if (a === null && b === null) return true;
   if (a === null || b === null) return false;
   if (field === 'start' || field === 'end') {
-    const x = Date.parse(a);
-    const y = Date.parse(b);
+    const x = instant(a);
+    const y = instant(b);
     if (!Number.isNaN(x) && !Number.isNaN(y)) return x === y;
   }
   return String(a).toLowerCase() === String(b).toLowerCase();
@@ -178,8 +201,10 @@ const keyOf = (row) => {
  * gone from the page. The key is the matchup tuple (home, away, slot, week) because the save's upsert is keyed on it.
  *
  * `saved` is the set the save is about: the caller scopes it to the season (the database scopes by the home team's
- * division's season, or by the organization when the run names no season). A saved row with an incomplete key cannot
- * be carried by any save and is listed.
+ * division's season, or by the organization's seasons that are not completed when the run names no season). Only a
+ * game a save can carry is an omission, as in the database: a row with an incomplete key is not listed (no save could
+ * carry it; the guard trigger still holds it), and a game of a completed season, which is read-only, is the caller's
+ * to leave out.
  *
  * @param {Array<Record<string, any>>} saved - saved games (`published` true marks the guarded ones)
  * @param {Array<Record<string, any>>} payload - the games the save carries
@@ -191,7 +216,7 @@ export function publishedOmissions(saved, payload) {
     .filter((row) => {
       if (row?.published !== true) return false;
       const key = keyOf(row);
-      return key === null || !carried.has(key);
+      return key !== null && !carried.has(key);
     })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
@@ -231,8 +256,8 @@ export const SetGamesPublishedSchema = z
       refuse('published_required', ['published']);
       return;
     }
-    const reason = (value.reasonCode ?? '').trim();
-    const note = (value.note ?? '').trim();
+    const reason = trimWs(value.reasonCode);
+    const note = trimWs(value.note);
     if (value.published) {
       if (reason !== '' || note !== '') refuse('reason_only_when_off', ['reasonCode']);
     } else if (reason === '') {

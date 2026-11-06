@@ -192,6 +192,18 @@ const SHAPE_CASES = [
     note: 'n'.repeat(200),
   },
   { name: 'off, 200 emoji', ids: [P], published: false, reason: 'other', note: '😀'.repeat(200) },
+  // Trimmed of space, tab, CR and LF (as the SQL's btrim with those), and of nothing else.
+  { name: 'off, reason with a tab and a newline', ids: [P], published: false, reason: '\tother\n' },
+  { name: 'off, reason with a no-break space', ids: [P], published: false, reason: 'other\u00a0' },
+  { name: 'on, a newline for a note', ids: [U], published: true, note: '\n' },
+  { name: 'on, a no-break space for a note', ids: [U], published: true, note: '\u00a0' },
+  {
+    name: 'off, a 200-character note between newlines',
+    ids: [P],
+    published: false,
+    reason: 'other',
+    note: '\n' + 'n'.repeat(200) + '\r\n',
+  },
 ];
 const rpcParams = (c) => ({
   p_organization_id: MOCK_ORG_ID,
@@ -280,14 +292,12 @@ describe('the switch: what the helper cannot judge, against the SQL', () => {
       code: '23503',
       details: 'game_not_found',
     });
-    expect((await call([R])).error).toMatchObject({
-      code: '42501',
-      details: 'game_other_organization',
-    });
-    expect((await call([U, R])).error).toMatchObject({
-      code: '42501',
-      details: 'game_other_organization',
-    });
+    // Another organization's id reads exactly as one that does not exist: nothing leaks of another tenant.
+    expect((await call([R])).error).toMatchObject({ code: '23503', details: 'game_not_found' });
+    expect((await call([U, R])).error).toMatchObject({ code: '23503', details: 'game_not_found' });
+    expect((await call([R])).error.message).toBe(
+      (await call(['gp-nope'])).error.message.replace('gp-nope', R)
+    );
     expect(row(U).published).toBe(false);
   });
 
@@ -391,6 +401,25 @@ describe('the switch: what the helper cannot judge, against the SQL', () => {
     expect(
       (await rpc('get_schedule_audit_log', { p_organization_id: MOCK_ORG_ID, p_limit: 1 })).data
     ).toHaveLength(1);
+    // As LEAST(GREATEST(COALESCE(p_limit, 50), 1), 500): 0 and less are 1, a null is 50, a failed integer cast fails.
+    const limited = async (p_limit) =>
+      rpc('get_schedule_audit_log', { p_organization_id: MOCK_ORG_ID, p_limit });
+    expect((await limited(0)).data).toHaveLength(1);
+    expect((await limited(-5)).data).toHaveLength(1);
+    expect((await limited(null)).data).toHaveLength(3);
+    expect((await limited(100000)).data).toHaveLength(3);
+    expect((await limited('2')).data).toHaveLength(2);
+    expect((await limited('x')).error).toMatchObject({ code: '22P02' });
+    // The rows of one call share an instant: its call row comes first, then its per-game rows; the newest call leads.
+    const ordered = (await rpc('get_schedule_audit_log', { p_organization_id: MOCK_ORG_ID })).data;
+    const overrideAt = ordered.findIndex((r) => r.action === 'game.publish_overridden');
+    const callAt = ordered.findIndex(
+      (r) => r.action === 'game.published_set' && r.created_at === ordered[overrideAt].created_at
+    );
+    expect(overrideAt).toBeGreaterThan(-1);
+    expect(callAt).toBeGreaterThan(-1);
+    expect(callAt).toBeLessThan(overrideAt);
+    expect(ordered[0].action).toBe('game.published_set');
     asUser('gp-other-admin');
     expect(
       (await rpc('get_schedule_audit_log', { p_organization_id: MOCK_ORG_ID })).error

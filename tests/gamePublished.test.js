@@ -175,6 +175,20 @@ describe('changedPublishedFields / changesPublishedPlacement', () => {
     ).toEqual([]);
   });
 
+  it('a time with no zone designator is UTC, as the database reads it, whatever the runtime zone', () => {
+    // The database pins TimeZone to UTC; Date.parse alone would read the zone-less string in local time, so the
+    // answer would change with the machine (run once under TZ=Pacific/Auckland and TZ=America/Los_Angeles).
+    expect(changedPublishedFields(base, { ...base, start: '2026-04-04T08:00:00' })).toEqual([]);
+    expect(changedPublishedFields(base, { ...base, start: '2026-04-04 08:00:00' })).toEqual([]);
+    expect(changedPublishedFields(base, { ...base, start: '2026-04-04T08:00:00+00' })).toEqual([]);
+    expect(changedPublishedFields(base, { ...base, start: '2026-04-04T09:00:00' })).toEqual([
+      'start',
+    ]);
+    expect(changedPublishedFields(base, { ...base, end: '2026-04-04T09:00:00-07:00' })).toEqual([
+      'end',
+    ]);
+  });
+
   it('losing a value is a change', () => {
     expect(changedPublishedFields(base, { ...base, field_id: null })).toEqual(['field_id']);
     expect(changedPublishedFields({ ...base, field_id: null }, base)).toEqual(['field_id']);
@@ -251,13 +265,21 @@ describe('publishedOmissions', () => {
     expect(publishedOmissions(saved, moved).map((row) => row.id)).toEqual(['g1', 'g3']);
   });
 
-  it('a Published game whose key is incomplete can be carried by no save and is listed', () => {
+  it('a Published game whose key is incomplete is not an omission: no save can carry it, as in the database', () => {
+    // The database excludes such a game from the check (a NULL part matches nothing, so every season-less save
+    // would be refused for it for good); the guard trigger still holds it in place.
     const broken = [{ ...game('g9', 'h9', 'a9', null, 1, true) }];
+    expect(publishedOmissions(broken, [])).toEqual([]);
     expect(
       publishedOmissions(broken, [
         { home_team_id: 'h9', away_team_id: 'a9', game_slot_id: null, week_index: 1 },
-      ]).map((row) => row.id)
-    ).toEqual(['g9']);
+      ])
+    ).toEqual([]);
+    // Beside a complete one, only the complete one is listed.
+    expect(publishedOmissions([...broken, ...saved], []).map((row) => row.id)).toEqual([
+      'g1',
+      'g3',
+    ]);
   });
 
   it('nothing Published, or nothing saved, is nothing omitted', () => {
@@ -302,6 +324,17 @@ describe('setGamesPublishedRefusal', () => {
     ).toBeNull();
     expect(setGamesPublishedRefusal({ ...ok, scope: { kind: 'venue', value: 'Park' } })).toBeNull();
     expect(setGamesPublishedRefusal({ ...ok, scope: { kind: 'all', value: null } })).toBeNull();
+    // Trimmed of space, tab, CR and LF, as the database trims; not of other Unicode spaces.
+    expect(setGamesPublishedRefusal({ ...ok, reasonCode: '\tother\n' })).toBeNull();
+    expect(setGamesPublishedRefusal({ ...ok, note: '\n' + 'n'.repeat(200) + ' \r' })).toBeNull();
+    expect(
+      setGamesPublishedRefusal({
+        organizationId: 'o',
+        assignmentIds: ['a'],
+        published: true,
+        note: '\n',
+      })
+    ).toBeNull();
   });
 
   it("reports the database's code for each thing wrong, in its order", () => {
@@ -319,6 +352,15 @@ describe('setGamesPublishedRefusal', () => {
     expect(setGamesPublishedRefusal({ ...ok, reasonCode: undefined })).toBe('reason_required');
     expect(setGamesPublishedRefusal({ ...ok, reasonCode: '  ' })).toBe('reason_required');
     expect(setGamesPublishedRefusal({ ...ok, reasonCode: 'because' })).toBe('reason_unknown');
+    expect(setGamesPublishedRefusal({ ...ok, reasonCode: 'other\u00a0' })).toBe('reason_unknown');
+    expect(
+      setGamesPublishedRefusal({
+        organizationId: 'o',
+        assignmentIds: ['a'],
+        published: true,
+        note: '\u00a0',
+      })
+    ).toBe('reason_only_when_off');
     expect(setGamesPublishedRefusal({ ...ok, note: 'n'.repeat(201) })).toBe('note_too_long');
     expect(setGamesPublishedRefusal({ ...ok, published: true })).toBe('reason_only_when_off');
     expect(setGamesPublishedRefusal({ ...ok, published: true, reasonCode: undefined })).toBe(

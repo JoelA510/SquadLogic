@@ -23,8 +23,9 @@
 --     job, the demo purge, the service role) and so does the cascade of a deleted organization: the completed-season
 --     trigger's two exemptions (20261111010000), copied by contract (lesson 56).
 --   * `persist_game_schedule` (copied whole from 20261108020000, its latest body) refuses a save that OMITS a Published
---     game of its season (of the organization, when the run names no season): a row trigger cannot see an absence, and
---     the older run's rows would be orphaned and vanish from the page. 22023, DETAIL
+--     game of its season (of the organization's seasons that are not completed, when the run names no season; a game
+--     a save cannot carry, one with an incomplete key or in a completed season, is not an omission): a row trigger
+--     cannot see an absence, and the older run's rows would be orphaned and vanish from the page. 22023, DETAIL
 --     `game_published_omitted count=<n> ids=<the first 50 ids, in id order>`. Nothing is written. A payload that moves a
 --     Published row is refused by the trigger above. **Concurrency:** the save and the switch take one advisory lock per
 --     organization (`pg_advisory_xact_lock(hashtextextended('game_published:' || <organization id>, 0))`) as their first
@@ -43,8 +44,8 @@
 --     trigger stays the backstop.
 --   * `admin_set_games_published(org, ids, published, reason, note, scope)` and `get_schedule_audit_log(org, game, limit)`.
 --     The switch's gates, in order, each a test in supabase/tests/game_published.sql: a signed-in caller (42501
---     `signed_in_required`); `is_org_admin` (42501 `admin_required`); 1 to 2,400 distinct ids, all existing (23503
---     `game_not_found`) and all in the organization (42501 `game_other_organization`); the rows locked FOR UPDATE in id
+--     `signed_in_required`); `is_org_admin` (42501 `admin_required`); 1 to 2,400 distinct ids, all existing in the
+--     organization (23503 `game_not_found`, which an id of another organization reads as too); the rows locked FOR UPDATE in id
 --     order (lesson 64), where a completed season's rows are refused by the existing read-only trigger; turning OFF
 --     needs a reason from `field-change`, `coach-request`, `conflict-fix`, `published-in-error`, `other` and takes an
 --     optional note; turning ON takes neither; a game already at the value is `unchanged` and never audited. Audit, in
@@ -615,14 +616,20 @@ BEGIN
     missing AS (
         SELECT ga.id
           FROM public.game_assignments ga
+          LEFT JOIN public.teams home_team ON home_team.id = ga.home_team_id
+          LEFT JOIN public.divisions home_division ON home_division.id = home_team.division_id
+          LEFT JOIN public.season_settings home_season ON home_season.id = home_division.season_settings_id
          WHERE ga.organization_id = v_org_id
            AND ga.published
-           AND (v_season_id IS NULL
-                OR EXISTS (SELECT 1
-                             FROM public.teams home_team
-                             JOIN public.divisions home_division ON home_division.id = home_team.division_id
-                            WHERE home_team.id = ga.home_team_id
-                              AND home_division.season_settings_id = v_season_id))
+           -- Only a game a save CAN carry is an omission: a complete key (a NULL part matches nothing, so such a game
+           -- could never be carried and every season-less save would be refused for it), and a season that is not
+           -- completed (a completed season is read-only: the save could not write its games and Allow changes
+           -- cannot release them, so they would block every season-less save for good). The guard trigger still
+           -- holds both kinds in place. (Code review, #707.)
+           AND ga.home_team_id IS NOT NULL AND ga.away_team_id IS NOT NULL
+           AND ga.game_slot_id IS NOT NULL AND ga.week_index IS NOT NULL
+           AND home_season.status IS DISTINCT FROM 'completed'
+           AND (v_season_id IS NULL OR home_division.season_settings_id = v_season_id)
            AND NOT EXISTS (SELECT 1
                              FROM payload pl
                             WHERE pl.home_team_id = ga.home_team_id
@@ -1159,8 +1166,9 @@ DECLARE
     v_found integer;
     v_locked integer;
     v_bad uuid;
-    v_reason text := NULLIF(btrim(COALESCE(p_reason_code, '')), '');
-    v_note text := NULLIF(btrim(COALESCE(p_note, '')), '');
+    -- Trimmed of space, tab, CR and LF, the characters the helper and the mock trim (btrim alone takes spaces only).
+    v_reason text := NULLIF(btrim(COALESCE(p_reason_code, ''), E' \t\r\n'), '');
+    v_note text := NULLIF(btrim(COALESCE(p_note, ''), E' \t\r\n'), '');
     v_scope jsonb;
     v_changed uuid[];
     v_unchanged integer;
@@ -1198,20 +1206,17 @@ BEGIN
         RAISE EXCEPTION 'at most % games can be set in one call (% named)', c_max_ids, v_n
             USING ERRCODE = '22023', DETAIL = 'too_many_ids';
     END IF;
-    SELECT count(*) INTO v_found FROM public.game_assignments ga WHERE ga.id = ANY (v_ids);
+    -- An id of another organization reads exactly as one that does not exist: an admin learns nothing of another
+    -- tenant's games from the answer (code review, #707; persist_game_schedule, the sibling, tells them apart).
+    SELECT count(*) INTO v_found FROM public.game_assignments ga
+     WHERE ga.id = ANY (v_ids) AND ga.organization_id = p_organization_id;
     IF v_found < v_n THEN
         SELECT x.id INTO v_bad FROM unnest(v_ids) AS x(id)
-         WHERE NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.id = x.id)
+         WHERE NOT EXISTS (SELECT 1 FROM public.game_assignments ga
+                            WHERE ga.id = x.id AND ga.organization_id = p_organization_id)
          ORDER BY x.id LIMIT 1;
-        RAISE EXCEPTION 'game % does not exist', v_bad
+        RAISE EXCEPTION 'game % does not exist in this organization', v_bad
             USING ERRCODE = '23503', DETAIL = 'game_not_found';
-    END IF;
-    SELECT ga.id INTO v_bad FROM public.game_assignments ga
-     WHERE ga.id = ANY (v_ids) AND ga.organization_id <> p_organization_id
-     ORDER BY ga.id LIMIT 1;
-    IF v_bad IS NOT NULL THEN
-        RAISE EXCEPTION 'game % belongs to another organization', v_bad
-            USING ERRCODE = '42501', DETAIL = 'game_other_organization';
     END IF;
 
     -- Gate 5, said before the rows are locked (it reads nothing from them): which way, the reason, the note, the scope.
@@ -1338,7 +1343,8 @@ COMMENT ON FUNCTION public.admin_set_games_published(uuid, uuid[], boolean, text
 --
 -- Admin only, like get_settings_audit_log. The call rows come back without their `ids` (up to 2,400 of them); the
 -- per-game rows and the audit table hold them. No contact column: the contact catalogue (20261025010000) lists
--- exactly two reads that return one, and this is not a third.
+-- exactly two reads that return one, and this is not a third. Every row a call writes shares one created_at (the
+-- transaction's now()), so a call row is ordered above its per-game rows, then by id.
 
 CREATE FUNCTION public.get_schedule_audit_log(
     p_organization_id uuid,
@@ -1380,7 +1386,7 @@ BEGIN
        AND (p_assignment_id IS NULL
             OR a.resource_id = p_assignment_id
             OR (a.action = 'game.published_set' AND a.metadata -> 'ids' @> to_jsonb(p_assignment_id::text)))
-     ORDER BY a.created_at DESC, a.id DESC
+     ORDER BY a.created_at DESC, (a.action = 'game.published_set') DESC, a.id DESC
      LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 500);
 END;
 $$;

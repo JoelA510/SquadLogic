@@ -5,8 +5,8 @@
  * - `admin_set_games_published`: 42501 `signed_in_required` (no user) and `admin_required` (not an admin of the
  *   organization, said before the ids are looked at); 22023 `ids_required`, `ids_invalid`, `too_many_ids` (more than
  *   2,400 distinct ids), `published_required`, `reason_only_when_off`, `reason_required`, `reason_unknown`,
- *   `note_too_long` (over 200 characters), `scope_invalid`; 23503 `game_not_found`; 42501 `game_other_organization`;
- *   22023 `season_completed` for a game of a completed season that WOULD change (a game already at the value is
+ *   `note_too_long` (over 200 characters), `scope_invalid`; 23503 `game_not_found` (an id of another organization
+ *   reads as one that does not exist); 22023 `season_completed` for a game of a completed season that WOULD change (a game already at the value is
  *   `unchanged` and never reaches the read-only rule). Returns `{ changed, unchanged, ids }` and writes the audit
  *   rows: `game.published_set` per call, `game.publish_overridden` per game turned off with its before-image.
  * - `get_schedule_audit_log`: admin only; those two actions, a call row without its `ids`, the actor's name, newest
@@ -25,7 +25,12 @@
  *     refusal and the trigger's refusal of a moving save are held by pgTAP and by the pure helper, not here;
  *   - the exemptions of the trigger (a job with no signed-in user, the cascade of a deleted organization): the
  *     mock's direct writes are always the signed-in app's;
- *   - row locking, and the SLA01 rollback of a failed audit write.
+ *   - the mock's OWN cascades: `admin_delete_field` (confirmed), the field-import rollback and slot removal delete
+ *     or null the field of `game_assignments` without asking the guard, where the database raises 22023
+ *     `game_published` from the cascade (after its booking check refuses a booked field first). A screen built or
+ *     E2E-tested in mock mode on a Published game must not rely on those deletes succeeding (code review, #707;
+ *     not mirrored because nothing in the app shows a Published game yet: PR 3 revisits it with the screen);
+ *   - row locking and the per-organization lock, and the SLA01 rollback of a failed audit write.
  *
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()` and the write paths.
  */
@@ -59,17 +64,37 @@ const fail = (code, message, detail) => ({
 });
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+// Trimmed of space, tab, CR and LF, as the SQL trims a reason and a note.
 const text = (value) => {
-  const trimmed = String(value ?? '').trim();
+  const trimmed = String(value ?? '').replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
   return trimmed === '' ? null : trimmed;
+};
+
+// An instant as the database reads it: a time with no zone designator is UTC, not the runtime's local time.
+const instant = (value) => {
+  const text = String(value).trim();
+  const m =
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(
+      text
+    );
+  if (!m) return Date.parse(text);
+  let zone = (m[3] ?? 'Z').toUpperCase();
+  if (zone !== 'Z')
+    zone =
+      zone.length === 3
+        ? `${zone}:00`
+        : zone.length === 5
+          ? `${zone.slice(0, 3)}:${zone.slice(3)}`
+          : zone;
+  return Date.parse(`${m[1]}T${m[2]}${zone}`);
 };
 
 function sameInstantOrText(field, a, b) {
   if (a == null && b == null) return true;
   if (a == null || b == null) return false;
   if (field === 'start' || field === 'end') {
-    const x = Date.parse(a);
-    const y = Date.parse(b);
+    const x = instant(a);
+    const y = instant(b);
     if (!Number.isNaN(x) && !Number.isNaN(y)) return x === y;
   }
   return same(a, b);
@@ -169,16 +194,13 @@ function setGamesPublished(db, params, ctx) {
       'too_many_ids'
     );
   }
-  const rows = ids.map((id) => (db.game_assignments || []).find((row) => same(row.id, id)));
+  // An id of another organization reads exactly as one that does not exist (nothing is leaked of another tenant).
+  const rows = ids.map((id) =>
+    (db.game_assignments || []).find((row) => same(row.id, id) && same(row.organization_id, org))
+  );
   const missing = ids.find((id, at) => !rows[at]);
-  if (missing) return fail('23503', `game ${missing} does not exist`, 'game_not_found');
-  const foreign = ids.find((id, at) => !same(rows[at].organization_id, org));
-  if (foreign) {
-    return fail(
-      '42501',
-      `game ${foreign} belongs to another organization`,
-      'game_other_organization'
-    );
+  if (missing) {
+    return fail('23503', `game ${missing} does not exist in this organization`, 'game_not_found');
   }
 
   const published = p.p_published;
@@ -312,7 +334,12 @@ function scheduleAuditLog(db, params, ctx) {
       'admin_required'
     );
   }
-  const limit = Math.min(Math.max(Math.trunc(Number(p.p_limit ?? 50)) || 50, 1), 500);
+  // As LEAST(GREATEST(COALESCE(p_limit, 50), 1), 500): a null is 50, a 0 or less is 1, an integer cast that fails fails.
+  const asked = p.p_limit ?? 50;
+  if (!Number.isFinite(Number(asked)) || String(asked).trim() === '') {
+    return fail('22P02', `invalid input syntax for type integer: "${asked}"`, null);
+  }
+  const limit = Math.min(Math.max(Math.trunc(Number(asked)), 1), 500);
   const game = p.p_assignment_id ?? null;
   const rows = (db.audit_log || [])
     .filter(
@@ -327,6 +354,8 @@ function scheduleAuditLog(db, params, ctx) {
     .sort(
       (a, b) =>
         String(b.created_at).localeCompare(String(a.created_at)) ||
+        // a call row above its per-game rows (they share one created_at), then by id: as the SQL orders them
+        Number(b.action === 'game.published_set') - Number(a.action === 'game.published_set') ||
         String(b.id).localeCompare(String(a.id))
     )
     .slice(0, limit)

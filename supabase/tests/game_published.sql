@@ -35,7 +35,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(150);
+SELECT plan(159);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -106,6 +106,31 @@ BEGIN
     END;
 END
 $f$;
+-- probe_incomplete: Publish a game with no slot (an incomplete key: no save can carry it), then make an empty save for
+-- season A and report its answer; all undone. The omission count must not include it.
+CREATE FUNCTION pg_temp.probe_incomplete() RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE r text; sqlstate_ text; detail_ text;
+BEGIN
+    BEGIN
+        INSERT INTO public.game_assignments (id, organization_id, home_team_id, away_team_id, division, week_index, start, "end", assignment_source)
+        VALUES ('a1111111-1111-1111-1111-0000000c0e0f', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-0000000c0002',
+                'a1111111-1111-1111-1111-0000000c0003', 'Incomplete', 77, '2026-05-01T08:00:00Z', '2026-05-01T09:00:00Z', 'auto');
+        EXECUTE 'UPDATE public.game_assignments SET published = true WHERE id = ''a1111111-1111-1111-1111-0000000c0e0f''';
+        BEGIN
+            PERFORM pg_temp.save('[]'::jsonb);
+            r := 'no error';
+        EXCEPTION WHEN OTHERS THEN
+            GET STACKED DIAGNOSTICS sqlstate_ = RETURNED_SQLSTATE, detail_ = PG_EXCEPTION_DETAIL;
+            r := sqlstate_ || ':' || COALESCE(detail_, '');
+        END;
+        RAISE EXCEPTION '%', r USING ERRCODE = 'P1119';
+    EXCEPTION WHEN SQLSTATE 'P1119' THEN
+        RETURN SQLERRM;
+    WHEN OTHERS THEN
+        RETURN 'error ' || SQLSTATE;
+    END;
+END
+$f$;
 -- g: a saved game as a persist_game_schedule payload item.
 CREATE FUNCTION pg_temp.g(p_id uuid) RETURNS jsonb LANGUAGE sql AS $f$
     SELECT jsonb_build_object('home_team_id', home_team_id, 'away_team_id', away_team_id, 'game_slot_id', game_slot_id,
@@ -141,7 +166,7 @@ BEGIN
 END
 $f$;
 GRANT EXECUTE ON FUNCTION pg_temp.err(text), pg_temp.errx(text), pg_temp.msg(text), pg_temp.val(text),
-    pg_temp.g(uuid), pg_temp.save(jsonb, text), pg_temp.probe_move(), pg_temp.lock_probe(text) TO PUBLIC;
+    pg_temp.g(uuid), pg_temp.save(jsonb, text), pg_temp.probe_move(), pg_temp.lock_probe(text), pg_temp.probe_incomplete() TO PUBLIC;
 
 -- ── Seed (no signed-in user) ───────────────────────────────────────────────
 SET LOCAL "request.jwt.claims" TO '{}';
@@ -411,6 +436,9 @@ SELECT is(pg_temp.errx($$SELECT pg_temp.save(jsonb_build_array(pg_temp.g('a11111
 SELECT is(pg_temp.errx($$SELECT pg_temp.save('[]'::jsonb)$$),
     '22023:game_published_omitted count=1 ids=a1111111-1111-1111-1111-0000000c0e01',
     'an empty save is refused while a Published game of the season exists');
+SELECT is(pg_temp.probe_incomplete(),
+    '22023:game_published_omitted count=1 ids=a1111111-1111-1111-1111-0000000c0e01',
+    'a Published game with an incomplete key (no slot) is not an omission: no save can carry it, so it must not block every save (the guard still holds it)');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(jsonb_build_array(pg_temp.g('a1111111-1111-1111-1111-0000000c0e01'), pg_temp.g('a1111111-1111-1111-1111-0000000c0e02')), NULL)$$),
     '22023:game_published_omitted count=2 ids=a1111111-1111-1111-1111-0000000c0e03,a1111111-1111-1111-1111-0000000c0e04',
     'a run that names no season is judged against every season of the organization (Q, in season B, and C1, in season C, are missing)');
@@ -465,7 +493,7 @@ SELECT ok(COALESCE((SELECT position('pg_advisory_xact_lock(hashtextextended(''ga
     'the save takes the lock after its admin check and before it writes a run or reads the Published games');
 SELECT ok(COALESCE((SELECT position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) > position('admin_required' IN p.prosrc)
                        AND position('admin_required' IN p.prosrc) > 0
-                       AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) < position('FROM public.game_assignments ga WHERE ga.id = ANY' IN p.prosrc)
+                       AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) < position('SELECT count(*) INTO v_found' IN p.prosrc)
                        AND position('pg_advisory_xact_lock(hashtextextended(''game_published:'' || p_organization_id::text, 0))' IN p.prosrc) < position('FOR UPDATE' IN p.prosrc)
                       FROM pg_proc p WHERE p.oid = to_regprocedure('public.admin_set_games_published(uuid,uuid[],boolean,text,text,jsonb)')), false),
     'the switch takes it after its admin gate and before it reads or locks a game');
@@ -502,9 +530,13 @@ SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-
 SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['00000000-0000-0000-0000-00000000dead']::uuid[], true)$$),
     '23503:game_not_found', 'an id that does not exist is refused');
 SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['b2222222-2222-2222-2222-0000000c0e01']::uuid[], true)$$),
-    '42501:game_other_organization', 'an id of another organization is refused');
+    '23503:game_not_found', 'an id of another organization reads exactly as one that does not exist: nothing leaks of another tenant');
 SELECT is(pg_temp.err($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e02', 'b2222222-2222-2222-2222-0000000c0e01']::uuid[], true)$$),
-    '42501:game_other_organization', 'one foreign id refuses the whole call');
+    '23503:game_not_found', 'one foreign id refuses the whole call');
+SELECT is(pg_temp.msg($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['b2222222-2222-2222-2222-0000000c0e01']::uuid[], true)$$),
+    replace(pg_temp.msg($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['00000000-0000-0000-0000-00000000dead']::uuid[], true)$$),
+            '00000000-0000-0000-0000-00000000dead', 'b2222222-2222-2222-2222-0000000c0e01'),
+    'and the message is the same words, so the two cannot be told apart');
 SELECT is(pg_temp.val($$SELECT published::text FROM public.game_assignments WHERE id = 'a1111111-1111-1111-1111-0000000c0e02'$$), 'false',
     'and the valid id beside it was not published: nothing is partly done');
 -- Gate 4: a completed season refuses through the existing trigger; the read-only rule wins over the flag.
@@ -540,6 +572,14 @@ SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-
     '22023:reason_only_when_off', 'turning on takes no reason (a reason is for allowing changes)');
 SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e02']::uuid[], true, '', '  ')$$),
     'no error', 'blank strings for the reason and the note are no reason and no note: turning on needs none');
+SELECT is(pg_temp.errx(format($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e01']::uuid[], false, %L)$$, E'\tother\n')),
+    'no error', 'a reason is trimmed of space, tab, CR and LF, as the helper and the mock trim it');
+SELECT is(pg_temp.errx(format($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e01']::uuid[], false, %L)$$, 'other' || chr(160))),
+    '22023:reason_unknown', 'and of nothing else: a no-break space stays, as in the helper and the mock');
+SELECT is(pg_temp.errx(format($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e02']::uuid[], true, NULL, %L)$$, E'\n')),
+    'no error', 'a note of a newline is no note: turning on needs none');
+SELECT is(pg_temp.errx(format($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e02']::uuid[], true, NULL, %L)$$, chr(160))),
+    '22023:reason_only_when_off', 'but a no-break space is a note');
 SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e02']::uuid[], NULL)$$),
     '22023:published_required', 'the switch must say which way');
 SELECT is(pg_temp.errx($$SELECT public.admin_set_games_published('a1111111-1111-1111-1111-111111111111', ARRAY['a1111111-1111-1111-1111-0000000c0e02']::uuid[], true, NULL, NULL, '{"kind": "nowhere"}')$$),
@@ -632,6 +672,12 @@ SELECT is(pg_temp.errx($$SELECT pg_temp.save('[]'::jsonb)$$),
         SELECT id FROM public.game_assignments WHERE published AND (division = 'Big' OR id IN ('a1111111-1111-1111-1111-0000000c0e01', 'a1111111-1111-1111-1111-0000000c0e02'))
          ORDER BY id LIMIT 50) f$$), ''),
     'an empty save counts every Published game of the season and lists the first 50 ids, in id order');
+-- C1 is Published in the completed season C: read-only, so a save cannot carry it and Allow changes cannot release it.
+SELECT is(pg_temp.errx($$SELECT pg_temp.save('[]'::jsonb, NULL)$$),
+    '22023:game_published_omitted count=2403 ids=' || COALESCE(pg_temp.val($$SELECT string_agg(id::text, ',' ORDER BY id) FROM (
+        SELECT id FROM public.game_assignments WHERE published AND (division = 'Big' OR id IN ('a1111111-1111-1111-1111-0000000c0e01',
+            'a1111111-1111-1111-1111-0000000c0e02', 'a1111111-1111-1111-1111-0000000c0e03')) ORDER BY id LIMIT 50) f$$), ''),
+    'a save that names no season is judged against the organization''s seasons that are not completed: C1, in the completed season C, is not an omission');
 SELECT is(pg_temp.val($$SELECT (pg_temp.set_big(false, 'conflict-fix')::jsonb)->>'changed'$$), '2400', 'all 2,400 can be allowed to change in one call');
 SELECT is((SELECT count(*)::int FROM public.audit_log WHERE action = 'game.publish_overridden'), 2402,
     'and each of them has its own override row (the two earlier ones, and 2,400)');
@@ -654,6 +700,12 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.get_schedule_audit_log('a111
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.get_schedule_audit_log('a1111111-1111-1111-1111-111111111111', NULL, 1)$$), '1', 'the limit caps the rows');
 SELECT ok(COALESCE((SELECT p.prosrc ~ 'ORDER BY a\.created_at DESC' FROM pg_proc p WHERE p.oid = to_regprocedure('public.get_schedule_audit_log(uuid,uuid,integer)')), false),
     'newest first (every row of this transaction shares one now(), so the order is read from the source)');
+SELECT is(pg_temp.val($$SELECT action FROM public.get_schedule_audit_log('a1111111-1111-1111-1111-111111111111', NULL, 1)$$), 'game.published_set',
+    'rows written in one transaction share a created_at, so a call row is ordered above its per-game rows');
+SELECT is(pg_temp.val(format($$SELECT count(*) FILTER (WHERE action = 'game.published_set') FROM public.get_schedule_audit_log('a1111111-1111-1111-1111-111111111111', NULL, %s)$$,
+        (SELECT count(*) FROM public.audit_log WHERE action = 'game.published_set' AND organization_id = 'a1111111-1111-1111-1111-111111111111'))),
+    (SELECT count(*)::text FROM public.audit_log WHERE action = 'game.published_set' AND organization_id = 'a1111111-1111-1111-1111-111111111111'),
+    'and every call row leads the per-game rows, so a limit cannot cut a call away from the games it set');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.get_schedule_audit_log('a1111111-1111-1111-1111-111111111111', NULL, 500) WHERE action = 'game.published_set' AND metadata ? 'ids'$$), '0',
     'a call row comes back without its ids (up to 2,400 of them): the per-game rows and the audit table hold them');
 SELECT is(pg_temp.val($$SELECT actor_name FROM public.get_schedule_audit_log('a1111111-1111-1111-1111-111111111111', NULL, 1)$$), 'Alice Admin-A', 'it names the actor');

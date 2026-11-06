@@ -630,7 +630,10 @@ SELECT is(
         'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices',
         -- 20261112010000: practice preference rules and their import, admin RPCs.
         'admin_accept_all_musts', 'admin_add_practice_preference', 'admin_decide_must_preference',
-        'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job'
+        'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job',
+        -- 20261119010000: the Published switch (the writer, like admin_cancel_game_assignment and persist_game_schedule)
+        -- and its audit read (like get_settings_audit_log): admin RPCs gated by is_org_admin, so allowed.
+        'admin_set_games_published', 'get_schedule_audit_log'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -671,7 +674,10 @@ SELECT is(
         'get_schedule_tbd', 'refresh_schedule_tbd_practices', 'sync_schedule_tbd_practices',
         -- 20261112010000: practice preference rules and their import, admin RPCs.
         'admin_accept_all_musts', 'admin_add_practice_preference', 'admin_decide_must_preference',
-        'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job'
+        'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job',
+        -- 20261119010000: the Published switch (the writer, like admin_cancel_game_assignment and persist_game_schedule)
+        -- and its audit read (like get_settings_audit_log): admin RPCs gated by is_org_admin, so allowed.
+        'admin_set_games_published', 'get_schedule_audit_log'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

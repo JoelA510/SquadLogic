@@ -19,6 +19,7 @@ import {
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
+import { gamePublishedErrorResponse } from '../_shared/game-persistence-errors.ts';
 
 // ── Inlined constants & config ──────────────────────────────────────────────
 const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role', 'admin', 'scheduler'];
@@ -413,6 +414,10 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       if (isAuditWriteFailure(error)) {
         return await auditWriteFailedResponse(logCtx, 'Game save', error);
       }
+      // A Published game the save would move or leave out (20261119010000): the save is refused, not failed, so
+      // it is a 409 with the games named and is not logged as a failure. Every other error falls through, as before.
+      const published = gamePublishedErrorResponse(error);
+      if (published) return jsonResponse(published.body, published.status);
       await logFailure(logCtx, 'Game persistence failed', error);
       return jsonResponse(
         {

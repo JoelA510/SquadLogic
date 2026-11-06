@@ -74,6 +74,19 @@ updates:
       # and running `npm run typecheck`.
       - dependency-name: '@sentry/react'
         versions: ['11.10.x']
+      # 2026-11-06 (held on the owner's supervisor's decision): tailwindcss and
+      # @tailwindcss/vite 4.3.4 and 4.3.5 pull in @tailwindcss/oxide-wasm32-wasi without
+      # the `cpu: ["wasm32"]` restriction that 4.3.3 has (`npm view
+      # @tailwindcss/oxide-wasm32-wasi@<version> cpu`), so npm installs that 6.7 MB WASI
+      # fallback and its six bundled packages on every platform, CI and Vercel included.
+      # Only these two releases are held, so a later one is proposed again. This works
+      # around an upstream packaging change that has not been reported yet (AGENTS.md,
+      # operating rule 16). Remove both entries when a release restores the cpu
+      # restriction, or when the owner decides to take the fallback.
+      - dependency-name: tailwindcss
+        versions: ['4.3.4', '4.3.5']
+      - dependency-name: '@tailwindcss/vite'
+        versions: ['4.3.4', '4.3.5']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       minor-and-patch:

@@ -1,0 +1,35 @@
+Team,Division,Day,Start,End,Length,Location,Field,Subunit,Valid From,Valid Until,Capacity,Use,Notes
+U05B-01,U05 Boys,Mon,16:00,17:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: ok
+U05B-02,U05 Boys,Tuesday,4:00 PM,5:00 PM,,Venue A,Field 1,A,9/14/2026,11/20/2026,,,expect: ok
+U05B-03,U05 Boys,WED,12:30 PM,1:30 PM,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: ok
+U05B-04,U05 Boys,tue,18:00,,60,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: ok
+,,Fri,16:00,17:00,,Venue A,Field 1,A,,2026-11-20,,,expect: open
+,,Fri,17:00,18:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,hold,expect: hold
+,,Fri,18:00,19:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,clinic,expect: bad-use
+U05B-01,U05 Boys,Funday,19:00,20:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: bad-day
+U05B-01,U05 Boys,Mon,25:00,26:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: bad-time
+U05B-01,U05 Boys,Tue,noon,13:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: bad-time
+U05B-01,U05 Boys,Wed,19:00,,abc,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: bad-length
+U05B-01,U05 Boys,Thu,17:00,16:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: end-not-after-start
+U05B-01,U05 Boys,Fri,19:00,20:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,two,,expect: bad-capacity
+U05B-01,U05 Boys,Fri,20:00,21:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,0,,expect: capacity-not-positive
+U05B-01,U05 Boys,Thu,20:00,21:00,,Venue A,Field 1,A,13/04/2026,2026-11-20,,,expect: bad-date
+U05B-01,U05 Boys,Thu,19:00,20:00,,Venue A,Field 1,A,2026-09-14,2026-02-30,,,expect: bad-date
+U05B-01,U05 Boys,Wed,20:00,21:00,,Venue A,Field 1,A,2026-11-20,2026-09-14,,,expect: valid-until-before-from
+U05B-01,U05 Boys,Tue,20:00,21:00,,Venue A,Field 1,A,2026-08-01,2026-11-20,,,expect: outside-season-window
+U05B-01,U05 Boys,Tue,19:00,20:00,,Venue A,Field 1,A,2026-09-14,,,,expect: missing-dates
+U99B-01,U99 Boys,Mon,20:00,21:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: unknown-division
+Unlisted-01,U05 Boys,Mon,19:00,20:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: unknown-team
+U05B-01,U05 Boys,Mon,21:00,22:00,,Venue Z,Field 1,A,2026-09-14,2026-11-20,,,expect: unknown-location
+U05B-01,U05 Boys,Mon,22:00,23:00,,Venue A,Field 9,A,2026-09-14,2026-11-20,,,expect: unknown-field
+U05B-01,U05 Boys,Tue,21:00,22:00,,Venue A,Field 1,C,2026-09-14,2026-11-20,,,expect: unknown-subunit
+U06B-01,U06 Boys,Mon,16:00,17:00,,Venue B,Field 3,A,2026-09-14,2026-11-20,,,expect: team-in-two-divisions
+U06B-01,U06 Girls,Wed,16:00,17:00,,Venue B,Field 3,A,2026-09-14,2026-11-20,,,expect: team-in-two-divisions
+U07B-01,U07 Boys,Mon,16:00,17:00,,Venue B,Field 1,A,2026-09-14,2026-11-20,,,expect: ok
+U07B-02,U07 Boys,Mon,16:30,17:30,,Venue B,Field 1,,2026-09-14,2026-11-20,,,expect: slot-overlaps-another
+U05B-01,U05 Boys,Mon,16:00,17:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: duplicate-row
+U08B-01,U08 Boys,Tue,16:00,17:00,,Venue B,Field 2,A,2026-09-14,2026-11-20,,,expect: team-on-both-halves
+U08B-01,U08 Boys,Tue,16:00,17:00,,Venue B,Field 2,B,2026-09-14,2026-11-20,,,expect: team-on-both-halves
+,U05 Boys,Wed,17:00,18:00,,Venue A,Field 1,A,2026-09-14,2026-11-20,,,expect: division-not-reserved
+,,Wed,16:00,17:00,,Venue C,Field 1,A,2026-09-14,2026-11-20,,,expect: open
+,,Wed,16:00,17:00,,Venue C,Field 1,A,2026-09-14,2026-11-20,,hold,expect: hold-over-open-slot

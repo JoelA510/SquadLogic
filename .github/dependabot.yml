@@ -66,12 +66,14 @@ updates:
       # dependency PR #688 took the rest of its group and left it out. This is a
       # workaround for an upstream typing problem that has not been filed yet
       # (AGENTS.md, operating rule 16: report it upstream with the reproduction).
-      # Remove this entry once a release types it compatibly; check by bumping
-      # @sentry/react by hand in a scratch branch and running `npm run typecheck`.
-      # `>=11.10.0` also hides any later release, a fixed one included, so someone has
-      # to re-check it; the narrower alternative is `11.10.x`.
+      # Narrowed 2026-11-03 (owner decision) from `>=11.10.0` to the 11.10.x line, which
+      # is the only release shown to fail, so later releases (11.11 and up) are proposed
+      # again; each such PR's own typecheck says whether the typing is fixed.
+      # Remove this entry once a release outside 11.10.x is taken, or when the upstream
+      # fix ships; check a release by bumping @sentry/react by hand in a scratch branch
+      # and running `npm run typecheck`.
       - dependency-name: '@sentry/react'
-        versions: ['>=11.10.0']
+        versions: ['11.10.x']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       minor-and-patch:

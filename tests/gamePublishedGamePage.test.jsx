@@ -14,7 +14,7 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { ORG, SEASON, TZ, seedWorld } from './helpers/publishedGamesWorld.js';
 
 const ROLE = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
@@ -232,9 +232,15 @@ describe('turning one game off is "Allow changes"', () => {
     await waitFor(() =>
       expect(summary()).toHaveTextContent('1 of 6 saved games Published, 2 with changes allowed')
     );
-    expect(switchOf('Comets', 'Rockets')).toHaveAttribute('aria-checked', 'false');
-    expect(within(rowOf('Comets', 'Rockets')).getByTestId('published-state')).toHaveTextContent(
-      'Changes allowed'
+    // The summary renders from the saved rows; the list from a copy of them set one effect later, so the summary is
+    // not a sync point for the switch and the badge (the file passed alone and failed in the suite): wait for them.
+    await waitFor(() =>
+      expect(switchOf('Comets', 'Rockets')).toHaveAttribute('aria-checked', 'false')
+    );
+    await waitFor(() =>
+      expect(within(rowOf('Comets', 'Rockets')).getByTestId('published-state')).toHaveTextContent(
+        'Changes allowed'
+      )
     );
   });
 
@@ -284,6 +290,271 @@ describe('turning one game off is "Allow changes"', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await waitFor(() => expect(summary()).toHaveTextContent('1 of 6 saved games Published'));
     await waitFor(() => expect(summary()).toHaveFocus());
+  });
+});
+
+/**
+ * An RPC that COMMITS the change and then loses its answer: the shape supabase-js gives a failed fetch (`code` is the
+ * empty string). The database has the new flag; the page was told nothing.
+ */
+function commitThenLoseTheAnswer() {
+  const real = mockSupabase.rpc.bind(mockSupabase);
+  return vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+    const answer = await real(name, params);
+    if (name !== 'admin_set_games_published') return answer;
+    return {
+      data: null,
+      error: { message: 'TypeError: Failed to fetch', details: 'stack', hint: '', code: '' },
+    };
+  });
+}
+
+describe('a lost answer is not a refusal: the page reads the saved flags again (finding of the Codex review)', () => {
+  it('turning one game on: the change was committed, the answer was lost, and the switch and the line still follow the database', async () => {
+    await mount();
+    commitThenLoseTheAnswer();
+    fireEvent.click(switchOf('Comets', 'Meteors'));
+    // It says it does not know, in words, and does not say nothing was saved.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Synthetic Comets vs Synthetic Meteors:');
+    expect(alert).toHaveTextContent('not known whether the change was saved');
+    expect(alert).toHaveTextContent('The saved schedule is read again to show what was saved.');
+    expect(alert).not.toHaveTextContent(/were not changed/);
+    // The database has it Published, and so does the screen once the saved schedule has been read again.
+    expect(getMockData('game_assignments').find((g) => g.id === 'ga-2').published).toBe(true);
+    await waitFor(() =>
+      expect(summary()).toHaveTextContent('3 of 6 saved games Published, 1 with changes allowed')
+    );
+    await waitFor(() =>
+      expect(switchOf('Comets', 'Meteors')).toHaveAttribute('aria-checked', 'true')
+    );
+  });
+
+  it('control: a refusal that carries the database’s code changes nothing, and no read follows it (only the check before the call)', async () => {
+    await mount();
+    const reads = vi.spyOn(mockSupabase, 'from');
+    const before = reads.mock.calls.filter(([table]) => table === 'game_assignments').length;
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) =>
+      name === 'admin_set_games_published'
+        ? {
+            data: null,
+            error: { code: '42501', message: 'Access denied', details: 'admin_required' },
+          }
+        : real(name, params)
+    );
+    fireEvent.click(switchOf('Comets', 'Meteors'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Access denied');
+    await waitFor(() => expect(screen.queryByTestId('published-reason')).not.toBeInTheDocument());
+    // One read of the games, before the call (the check that they are in the saved schedule): none after the refusal.
+    expect(reads.mock.calls.filter(([table]) => table === 'game_assignments').length).toBe(
+      before + 1
+    );
+    expect(switchOf('Comets', 'Meteors')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('allowing changes: the dialog stays open with the alert, and the saved flags are read again', async () => {
+    await mount();
+    commitThenLoseTheAnswer();
+    fireEvent.click(switchOf('Comets', 'Rockets'));
+    const dialog = await screen.findByRole('dialog', { name: 'Allow changes to Published games' });
+    fireEvent.change(within(dialog).getByLabelText('Reason for allowing changes'), {
+      target: { value: 'other' },
+    });
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and allow changes' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'not known whether the change was saved'
+    );
+    expect(getMockData('game_assignments').find((g) => g.id === 'ga-1').published).toBe(false);
+    await waitFor(() =>
+      expect(summary()).toHaveTextContent('1 of 6 saved games Published, 2 with changes allowed')
+    );
+  });
+
+  it('the bulk Publish too: the line follows the database after a lost answer', async () => {
+    await mount();
+    commitThenLoseTheAnswer();
+    fireEvent.click(screen.getByRole('button', { name: 'Publish 4 games' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('not known whether');
+    await waitFor(() =>
+      expect(summary()).toHaveTextContent('6 of 6 saved games Published, 0 with changes allowed')
+    );
+  });
+});
+
+describe('focus is never left on nothing when a publish removes the row it was on (finding of the Codex review)', () => {
+  const filter = (value) =>
+    fireEvent.change(screen.getByLabelText('Show in the list'), { target: { value } });
+
+  it('under "Not published", turning a game on removes its row and focus lands on the count', async () => {
+    await mount();
+    filter('not-published');
+    await waitFor(() => expect(screen.getAllByRole('switch')).toHaveLength(3));
+    const toggle = switchOf('Comets', 'Meteors');
+    toggle.focus();
+    expect(toggle).toHaveFocus();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getAllByRole('switch')).toHaveLength(2));
+    await waitFor(() => expect(summary()).toHaveFocus());
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it('under "Changes allowed", publishing a released game removes its row and focus lands on the count', async () => {
+    await mount();
+    filter('changes-allowed');
+    await waitFor(() => expect(screen.getAllByRole('switch')).toHaveLength(1));
+    const toggle = switchOf('Rockets', 'Meteors');
+    toggle.focus();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.queryAllByRole('switch')).toHaveLength(0));
+    await waitFor(() => expect(summary()).toHaveFocus());
+  });
+
+  it('control: with every game listed the switch is still there, and it has focus again once the line has been read', async () => {
+    await mount();
+    const toggle = switchOf('Comets', 'Meteors');
+    toggle.focus();
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(summary()).toHaveTextContent('3 of 6 saved games Published, 1 with changes allowed')
+    );
+    await waitFor(() => expect(switchOf('Comets', 'Meteors')).toHaveFocus());
+  });
+
+  it('a bulk Publish leaves its button with nothing to do, and focus lands on the count', async () => {
+    await mount();
+    const opener = screen.getByRole('button', { name: 'Publish 4 games' });
+    opener.focus();
+    fireEvent.click(opener);
+    await waitFor(() =>
+      expect(summary()).toHaveTextContent('6 of 6 saved games Published, 0 with changes allowed')
+    );
+    await waitFor(() => expect(summary()).toHaveFocus());
+  });
+
+  it('a person who has moved on while it was saving keeps the focus they moved to', async () => {
+    await mount();
+    const toggle = switchOf('Comets', 'Meteors');
+    toggle.focus();
+    fireEvent.click(toggle);
+    const elsewhere = screen.getByLabelText('Show in the list');
+    elsewhere.focus();
+    await waitFor(() =>
+      expect(summary()).toHaveTextContent('3 of 6 saved games Published, 1 with changes allowed')
+    );
+    await waitFor(() => expect(screen.queryByTestId('published-reason')).not.toBeInTheDocument());
+    expect(elsewhere).toHaveFocus();
+  });
+});
+
+describe('the loaded schedule can be older than the database: publishing never names a row of an older run (sibling of the Codex finding on Exports)', () => {
+  /** Another tab moved a game (ga-2 unless told) and applied: a newer run holds the games that stayed (same rows) and a NEW row for it. */
+  function applyElsewhere(movedId = 'ga-2') {
+    const rows = getMockData('game_assignments');
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      scheduler_runs: [
+        ...getMockData('scheduler_runs'),
+        {
+          id: 'run-newer',
+          organization_id: ORG,
+          run_type: 'game',
+          status: 'completed',
+          season_settings_id: SEASON,
+          completed_at: '2026-10-20T12:00:00Z',
+          results: {},
+        },
+      ],
+      game_assignments: [
+        ...rows.map((g) => (g.id === movedId ? g : { ...g, run_id: 'run-newer' })),
+        {
+          ...rows.find((g) => g.id === movedId),
+          id: `${movedId}-moved`,
+          run_id: 'run-newer',
+          slot_id: 'gs-8',
+          game_slot_id: 'gs-8',
+        },
+      ],
+    });
+  }
+
+  it('turning on a game that another tab has moved is refused before any call, says why, and reads the saved schedule again', async () => {
+    await mount();
+    applyElsewhere();
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    fireEvent.click(switchOf('Comets', 'Meteors'));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Synthetic Comets vs Synthetic Meteors:');
+    expect(alert).toHaveTextContent('no longer in the saved schedule');
+    expect(alert).toHaveTextContent('Nothing was published');
+    expect(rpcCalls(rpc)).toEqual([]);
+    // The old row stays unpublished: it is the one the Games page could not release.
+    expect(getMockData('game_assignments').find((g) => g.id === 'ga-2').published).toBe(false);
+    // And the page now shows the schedule the database holds: the moved game is a new row, not Published.
+    await waitFor(() => expect(screen.getAllByRole('switch')).toHaveLength(6));
+    await waitFor(() =>
+      expect(switchOf('Comets', 'Meteors')).toHaveAttribute('aria-checked', 'false')
+    );
+    expect(
+      getMockData('game_assignments')
+        .filter((g) => g.published)
+        .map((g) => g.id)
+        .sort()
+    ).toEqual(['ga-1', 'ga-5']);
+  });
+
+  it('the bulk Publish is refused whole when any of its games is no longer in the saved schedule', async () => {
+    await mount();
+    applyElsewhere();
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    fireEvent.click(screen.getByRole('button', { name: 'Publish 4 games' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 of the 4 games');
+    expect(rpcCalls(rpc)).toEqual([]);
+    expect(
+      getMockData('game_assignments')
+        .filter((g) => g.published)
+        .map((g) => g.id)
+        .sort()
+    ).toEqual(['ga-1', 'ga-5']);
+  });
+
+  it('a read that is refused is not an answer: nothing is published, and it says so', async () => {
+    await mount();
+    const real = mockSupabase.from.bind(mockSupabase);
+    const refusing = new Proxy(
+      {},
+      {
+        get: (_t, method) => () =>
+          method === 'maybeSingle'
+            ? Promise.resolve({ data: null, error: { code: '42501', message: 'read refused' } })
+            : refusing,
+      }
+    );
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) =>
+      table === 'scheduler_runs' ? refusing : real(table)
+    );
+    fireEvent.click(switchOf('Comets', 'Meteors'));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('could not be read to check');
+    expect(alert).toHaveTextContent('read refused');
+    expect(rpcCalls(rpc)).toEqual([]);
+  });
+
+  it('control: turning OFF (Allow changes) is not held back by it: releasing an old row hides nothing from the page', async () => {
+    await mount();
+    applyElsewhere('ga-1');
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    fireEvent.click(switchOf('Comets', 'Rockets'));
+    const dialog = await screen.findByRole('dialog', { name: 'Allow changes to Published games' });
+    fireEvent.change(within(dialog).getByLabelText('Reason for allowing changes'), {
+      target: { value: 'other' },
+    });
+    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm and allow changes' }));
+    await waitFor(() => expect(rpcCalls(rpc)).toHaveLength(1));
+    expect(rpcCalls(rpc)[0]).toMatchObject({ p_assignment_ids: ['ga-1'], p_published: false });
   });
 });
 

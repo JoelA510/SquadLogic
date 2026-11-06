@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import OutputGenerationPanel from '../frontend/src/components/OutputGenerationPanel.jsx';
 import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
-import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/config.js', async (importOriginal) => ({
   .../** @type {object} */ (await importOriginal()),
@@ -65,8 +65,22 @@ const GAMES = [
 ];
 const EXPORTED = ['ga-1', 'ga-2', 'ga-3'];
 
+/** The saved game run the panel's games belong to: completed far in the future, so it is the latest of the club. */
+const RUN = 'run-exports-saved';
+const NEWER = 'run-exports-newer';
+const savedRun = (id, completedAt, extra = {}) => ({
+  id,
+  organization_id: ORG,
+  run_type: 'game',
+  status: 'completed',
+  completed_at: completedAt,
+  results: {},
+  ...extra,
+});
+
 const dbGame = (id, extra = {}) => ({
   id,
+  run_id: RUN,
   organization_id: ORG,
   home_team_id: 't-1',
   away_team_id: 't-2',
@@ -105,6 +119,7 @@ beforeEach(() => {
   delete window.__MOCK_DB__;
   window.__saveMockDB__({
     ...window.__MOCK_DB__,
+    scheduler_runs: [savedRun(RUN, '2999-01-01T00:00:00Z')],
     game_assignments: [
       ...GAMES.map((g) => dbGame(g.id)),
       dbGame('ga-already', { published: true, published_at: '2026-03-01T00:00:00Z' }),
@@ -252,6 +267,212 @@ describe('uploading with the box unticked', () => {
     expect(rpcCalls(rpc)).toEqual([]);
     expect(published()).toEqual(['ga-already']);
     expect(screen.queryByText(/Published \d+ games?\./)).not.toBeInTheDocument();
+  });
+});
+
+/** Another tab moved ga-1 and applied: a newer run holds the games that stayed (the same rows) and a NEW row for the moved game. */
+function applyElsewhere() {
+  window.__saveMockDB__({
+    ...window.__MOCK_DB__,
+    scheduler_runs: [...getMockData('scheduler_runs'), savedRun(NEWER, '2999-06-01T00:00:00Z')],
+    game_assignments: [
+      ...getMockData('game_assignments').map((g) =>
+        ['ga-2', 'ga-3', 'ga-untimed', 'ga-stranger'].includes(g.id) ? { ...g, run_id: NEWER } : g
+      ),
+      dbGame('ga-1-moved', { run_id: NEWER, game_slot_id: 's-new', slot_id: 's-new' }),
+    ],
+  });
+}
+
+describe('files made before the saved schedule changed are refused (finding of the Codex review)', () => {
+  it('nothing is uploaded, recorded or marked, and it says plainly to generate the files again', async () => {
+    const { client, calls } = storageClient();
+    await generate(client);
+    applyElsewhere();
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    upload();
+    const message = await screen.findByText(/out of date/);
+    expect(message.textContent).toMatch(/Nothing was uploaded/);
+    expect(message.textContent).toMatch(/Generate the CSVs again/);
+    expect(calls).toEqual([]);
+    expect(rpcCalls(rpc)).toEqual([]);
+    expect(getMockData('publication_baselines')).toHaveLength(0);
+    // The old row is a real row of the club: it must never be marked, or the Games page could not release it.
+    expect(published()).toEqual(['ga-already']);
+    expect(screen.getByRole('button', { name: 'Upload to Storage' })).toBeEnabled();
+  });
+
+  it('after generating again from the current schedule the same upload goes through, with the current games', async () => {
+    const { client, calls } = storageClient();
+    const view = await generate(client);
+    applyElsewhere();
+    view.rerender(
+      <OutputGenerationPanel
+        teams={TEAMS}
+        gameAssignments={[game('ga-1-moved', 't-1', 't-2'), GAMES[1], GAMES[2]]}
+        supabaseClient={client}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Generate CSVs' }));
+    await screen.findByText('Generated Files');
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    upload();
+    await waitFor(() => expect(rpcCalls(rpc)).toHaveLength(1));
+    expect([...rpcCalls(rpc)[0].p_assignment_ids].sort()).toEqual(['ga-1-moved', 'ga-2', 'ga-3']);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(published()).toEqual(['ga-1-moved', 'ga-2', 'ga-3', 'ga-already']);
+  });
+
+  it('a read that is refused is not an answer: nothing is uploaded or marked, and it says so', async () => {
+    const { client, calls } = storageClient();
+    await generate(client);
+    const real = mockSupabase.from.bind(mockSupabase);
+    const refusing = new Proxy(
+      {},
+      {
+        get: (_t, method) => () =>
+          method === 'maybeSingle'
+            ? Promise.resolve({ data: null, error: { code: '42501', message: 'read refused' } })
+            : refusing,
+      }
+    );
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) =>
+      table === 'scheduler_runs' ? refusing : real(table)
+    );
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    upload();
+    const message = await screen.findByText(/could not be read to check/);
+    expect(message.textContent).toMatch(/Nothing was uploaded/);
+    expect(message.textContent).toMatch(/read refused/);
+    expect(message.textContent).toMatch(/untick/i);
+    expect(calls).toEqual([]);
+    expect(rpcCalls(rpc)).toEqual([]);
+  });
+
+  it('control: with the box unticked there is nothing to mark, so nothing is checked and the upload goes as before', async () => {
+    const { client, calls } = storageClient();
+    await generate(client);
+    applyElsewhere();
+    fireEvent.click(checkbox());
+    const from = vi.spyOn(mockSupabase, 'from');
+    upload();
+    expect(await screen.findByText(/Recorded as published baseline v1\./)).toBeInTheDocument();
+    expect(calls).toHaveLength(4);
+    expect(from.mock.calls.some(([table]) => table === 'scheduler_runs')).toBe(false);
+  });
+
+  it('the check is of this season’s schedule: a later run of another season does not make the files stale', async () => {
+    vi.mocked(useOrganization).mockReturnValue(
+      // @ts-expect-error [MOCK] - a partial organization context is enough here.
+      {
+        currentOrganization: { id: ORG },
+        currentSeasonSetting: { id: MOCK_SEASON_ID, status: 'active' },
+      }
+    );
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      scheduler_runs: [
+        ...getMockData('scheduler_runs').filter((r) => r.id !== RUN),
+        savedRun(RUN, '2998-01-01T00:00:00Z', { season_settings_id: MOCK_SEASON_ID }),
+        savedRun('run-exports-other-season', '2999-12-01T00:00:00Z', {
+          season_settings_id: 'season-y',
+        }),
+      ],
+    });
+    const { client } = storageClient();
+    const wired = {
+      ...client,
+      from: (t) => mockSupabase.from(t),
+      rpc: (...a) => mockSupabase.rpc(...a),
+    };
+    await generate(wired);
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    upload();
+    await waitFor(() => expect(rpcCalls(rpc)).toHaveLength(1));
+    expect([...rpcCalls(rpc)[0].p_assignment_ids].sort()).toEqual(EXPORTED);
+  });
+});
+
+describe('a lost answer to the marking is not "not marked" (finding of the Codex review)', () => {
+  it('the games were marked and the answer was lost: it says it is not known, and points to the Games page', async () => {
+    const { client } = storageClient();
+    await generate(client);
+    const real = mockSupabase.rpc.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'rpc').mockImplementation(async (name, params) => {
+      const answer = await real(name, params);
+      return name === 'admin_set_games_published'
+        ? {
+            data: null,
+            error: { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' },
+          }
+        : answer;
+    });
+    upload();
+    const message = await screen.findByText(
+      /It is not known whether the 3 games were marked Published/
+    );
+    expect(message.textContent).toMatch(/Open the Game Scheduling page to see which are Published/);
+    expect(message.textContent).not.toMatch(/NOT marked/);
+    // This panel cannot read the saved flags again, so it does not say it does.
+    expect(message.textContent).not.toMatch(/read again/);
+    expect(published()).toEqual(['ga-1', 'ga-2', 'ga-3', 'ga-already']);
+  });
+});
+
+describe('a completed season is history: its games are not marked (finding of the Codex review)', () => {
+  const completed = () =>
+    vi.mocked(useOrganization).mockReturnValue(
+      // @ts-expect-error [MOCK] - a partial organization context is enough here.
+      {
+        currentOrganization: { id: ORG },
+        currentSeasonSetting: { id: MOCK_SEASON_ID, status: 'completed' },
+      }
+    );
+  const wire = (client) => ({
+    ...client,
+    from: (t) => mockSupabase.from(t),
+    rpc: (...a) => mockSupabase.rpc(...a),
+  });
+
+  it('the option is there, off and disabled, and says why', async () => {
+    completed();
+    await generate(wire(storageClient().client));
+    expect(checkbox()).not.toBeChecked();
+    expect(checkbox()).toBeDisabled();
+    expect(checkbox()).toHaveAccessibleDescription(/This season is completed/);
+    expect(checkbox()).toHaveAccessibleDescription(/cannot be marked Published/);
+  });
+
+  it('the historical export finishes: the files go out, the baseline is recorded, and no Published call is made', async () => {
+    completed();
+    const { client, calls } = storageClient();
+    await generate(wire(client));
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    upload();
+    const message = await screen.findByText(/Uploaded 4 files to 'exports' bucket\./);
+    expect(message.textContent).toMatch(/Recorded as published baseline v1\./);
+    expect(message.textContent).not.toMatch(/NOT marked|Game Scheduling page/);
+    expect(calls).toHaveLength(4);
+    expect(rpcCalls(rpc)).toEqual([]);
+    expect(published()).toEqual(['ga-already']);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // Said as a success, not as an error.
+    expect(
+      message.closest('[role="status"], [role="alert"]')?.getAttribute('role') ?? 'status'
+    ).not.toBe('alert');
+  });
+
+  it('control: an active season still has the option on and enabled', async () => {
+    vi.mocked(useOrganization).mockReturnValue(
+      // @ts-expect-error [MOCK] - a partial organization context is enough here.
+      {
+        currentOrganization: { id: ORG },
+        currentSeasonSetting: { id: MOCK_SEASON_ID, status: 'active' },
+      }
+    );
+    await generate(wire(storageClient().client));
+    expect(checkbox()).toBeChecked();
+    expect(checkbox()).toBeEnabled();
   });
 });
 

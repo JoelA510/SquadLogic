@@ -19,6 +19,19 @@ import { describeScope } from './gamePublishedScope.js';
 const plural = (count, one, many) => (count === 1 ? one : many);
 const games = (count) => `${count} ${plural(count, 'game', 'games')}`;
 
+/**
+ * `code` of the error `setGamesPublished` throws when it is not known whether a change was saved (its answer was lost
+ * or could not be read). Here, in the module with no imports of the client, so the sentences can name it.
+ */
+export const PUBLISHED_OUTCOME_UNKNOWN = 'PUBLISHED_OUTCOME_UNKNOWN';
+
+/** Whether a failed call may still have been committed: its answer was lost or could not be read. */
+export function isUnknownPublishedOutcome(err) {
+  return (
+    /** @type {{ code?: unknown } | null | undefined} */ (err)?.code === PUBLISHED_OUTCOME_UNKNOWN
+  );
+}
+
 /** The helper text under the optional note (owner decision 1). Verbatim. */
 export const NOTE_HELPER_TEXT =
   'Optional. Do not enter player names or other personal information.';
@@ -89,13 +102,19 @@ export function describeSetResult({ changed, unchanged }, published) {
 
 /**
  * The refusal, in the database's words, with how far a split call got. A bulk of more than 2,400 games is several
- * calls, and an earlier one has already changed its games.
+ * calls, and an earlier one has already changed its games. A call whose answer was lost is not a refusal: it is not
+ * known whether it changed anything, so this never says "the rest were not changed" of it.
  *
  * @param {Error & { done?: { calls: number, of: number, changed: number } }} err
  */
 export function describeSetFailure(err) {
   const words = err?.message || 'The change was not saved.';
   const done = err?.done;
+  if (isUnknownPublishedOutcome(err)) {
+    return done && done.calls > 0
+      ? `${words} ${done.calls} of ${done.of} calls were saved before it, changing ${games(done.changed)}.`
+      : words;
+  }
   if (done && done.calls > 0) {
     return (
       `${words} ${done.calls} of ${done.of} calls were saved before it stopped, ` +
@@ -103,6 +122,51 @@ export function describeSetFailure(err) {
     );
   }
   return words;
+}
+
+/**
+ * What the Exports panel says when marking the exported games Published failed after the files went out. A refusal
+ * is said as "NOT marked"; a lost answer is not known, and the panel (which cannot read the saved flags itself) points
+ * to the Games page, where they are.
+ *
+ * @param {Error & { done?: { calls: number, of: number, changed: number } }} err
+ * @param {number} count - the games the files hold
+ */
+export function describeMarkFailure(err, count) {
+  const noun = count === 1 ? 'game' : 'games';
+  if (isUnknownPublishedOutcome(err)) {
+    return (
+      `It is not known whether the ${count} ${noun} ${count === 1 ? 'was' : 'were'} marked Published: ` +
+      `${describeSetFailure(err)} Open the Game Scheduling page to see which are Published.`
+    );
+  }
+  return (
+    `The ${count} ${noun} ${count === 1 ? 'was' : 'were'} NOT marked Published: ${describeSetFailure(err)} ` +
+    `Mark ${count === 1 ? 'it' : 'them'} from the Game Scheduling page.`
+  );
+}
+
+/**
+ * Said when games about to be published are no longer in the saved schedule: it was changed after this page read it (in
+ * another tab, or by another admin), and a row of an older run would be published where the page could neither show
+ * nor release it. Nothing was sent.
+ *
+ * @param {number} stale - how many of the games are not in the saved schedule now
+ * @param {number} total - how many games the call named
+ */
+export function describeStaleSchedule(stale, total) {
+  return (
+    `${stale} of the ${total} ${plural(total, 'game', 'games')} ${plural(stale, 'is', 'are')} no longer in the saved ` +
+    'schedule: it was changed after this page read it. Nothing was published. The saved schedule is read again.'
+  );
+}
+
+/** Said when the saved schedule could not be read to check games before they were published. */
+export function describeStaleCheckFailure(err) {
+  return (
+    `The saved schedule could not be read to check these games (${err?.message || 'the read failed'}), ` +
+    'so nothing was published. Try again.'
+  );
 }
 
 /** The sentence under a bulk button: what it will do, counted over the saved set. */

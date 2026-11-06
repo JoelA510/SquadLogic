@@ -8,10 +8,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   NOTE_HELPER_TEXT,
+  PUBLISHED_OUTCOME_UNKNOWN,
   cancelRefusal,
   describeBulkCount,
   describeHistoryRow,
+  describeMarkFailure,
   describeSetFailure,
+  describeStaleCheckFailure,
+  describeStaleSchedule,
   describeSetResult,
   matchupOf,
   moveRefusal,
@@ -207,6 +211,64 @@ describe('the answer to a call', () => {
       )
     ).toBe('Access denied');
     expect(describeSetFailure(/** @type {any} */ ({}))).toBe('The change was not saved.');
+  });
+
+  it('a lost answer is never described as "the rest were not changed": it is not known', () => {
+    const lost = Object.assign(
+      new Error('TypeError: Failed to fetch, so it is not known whether the change was saved.'),
+      {
+        code: PUBLISHED_OUTCOME_UNKNOWN,
+        done: { calls: 0, of: 1, changed: 0 },
+      }
+    );
+    expect(describeSetFailure(lost)).toBe(lost.message);
+    const lostLater = Object.assign(
+      new Error('The request failed, so it is not known whether the change was saved.'),
+      {
+        code: PUBLISHED_OUTCOME_UNKNOWN,
+        done: { calls: 1, of: 2, changed: 2400 },
+      }
+    );
+    expect(describeSetFailure(lostLater)).toBe(
+      'The request failed, so it is not known whether the change was saved. 1 of 2 calls were saved before it, changing 2400 games.'
+    );
+    expect(describeSetFailure(lostLater)).not.toMatch(/were not changed/);
+  });
+
+  it('the Exports panel says a refused marking was NOT done, and a lost answer is not known', () => {
+    const refused = Object.assign(new Error('Access denied'), {
+      done: { calls: 0, of: 1, changed: 0 },
+    });
+    expect(describeMarkFailure(refused, 3)).toBe(
+      'The 3 games were NOT marked Published: Access denied Mark them from the Game Scheduling page.'
+    );
+    expect(describeMarkFailure(refused, 1)).toBe(
+      'The 1 game was NOT marked Published: Access denied Mark it from the Game Scheduling page.'
+    );
+    const lost = Object.assign(
+      new Error('TypeError: Failed to fetch, so it is not known whether the change was saved.'),
+      {
+        code: PUBLISHED_OUTCOME_UNKNOWN,
+        done: { calls: 0, of: 1, changed: 0 },
+      }
+    );
+    const said = describeMarkFailure(lost, 3);
+    expect(said).toMatch(/^It is not known whether the 3 games were marked Published/);
+    expect(said).toMatch(/Game Scheduling page to see which are Published/);
+    expect(said).not.toMatch(/NOT marked/);
+  });
+
+  it('a game that is no longer in the saved schedule is said plainly, with nothing published', () => {
+    expect(describeStaleSchedule(1, 1)).toBe(
+      '1 of the 1 game is no longer in the saved schedule: it was changed after this page read it. Nothing was published. The saved schedule is read again.'
+    );
+    expect(describeStaleSchedule(2, 40)).toMatch(
+      /^2 of the 40 games are no longer in the saved schedule/
+    );
+    expect(describeStaleCheckFailure(new Error('read refused'))).toBe(
+      'The saved schedule could not be read to check these games (read refused), so nothing was published. Try again.'
+    );
+    expect(describeStaleCheckFailure({})).toMatch(/the read failed/);
   });
 
   it('counts a bulk call before it is sent, and says when it goes in several', () => {

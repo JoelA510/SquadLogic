@@ -13,6 +13,34 @@
 
 import { setGamesPublishedRefusal, splitGameIds } from '@squadlogic/core/gamePublished.js';
 import { supabase } from '../lib/supabaseClient.js';
+import { fetchAllPages } from '../lib/pagedFetch.js';
+import { scopeSchedulerRunsToActiveSeason } from './schedulerRunFilters.js';
+import { PUBLISHED_OUTCOME_UNKNOWN, isUnknownPublishedOutcome } from './gamePublishedText.js';
+
+export { PUBLISHED_OUTCOME_UNKNOWN, isUnknownPublishedOutcome };
+
+// What the database (and PostgREST) put in `code` when they REFUSE a call: a SQLSTATE (22023, 42501, P0002, SLA01) or
+// a PostgREST code (PGRST202). A refusal rolled the call back. An error with any other `code` (supabase-js gives a
+// failed fetch the empty string, or a system error code such as ECONNRESET or EPIPE, which has no digit: every
+// SQLSTATE has one) or none (a gateway's 502 or 504 with a
+// body that is not JSON) never reached an answer, and the change may have been committed before the answer was lost.
+const DATABASE_REFUSAL_CODE = /^(?:(?=[0-9A-Z]*\d)[0-9A-Z]{5}|PGRST\d+)$/;
+const isDatabaseRefusal = (error) => DATABASE_REFUSAL_CODE.test(String(error?.code ?? ''));
+
+// The RPC's answer when it worked: `{ changed, unchanged, ids }`, the counts numbers. Anything else that came back
+// without an error is an answer nobody can read, and a call that may have been committed.
+const isCount = (value) => typeof value === 'number' && Number.isFinite(value);
+const isReadableAnswer = (data) =>
+  data !== null && typeof data === 'object' && isCount(data.changed) && isCount(data.unchanged);
+
+/** The error for a call whose outcome is not known: the message says so (what the caller does about it is the caller's to say), and `done` says what was saved before it. */
+function unknownOutcome(words, done, cause) {
+  return Object.assign(new Error(`${words}, so it is not known whether the change was saved.`), {
+    code: PUBLISHED_OUTCOME_UNKNOWN,
+    cause: cause ?? undefined,
+    done,
+  });
+}
 
 /**
  * Set the Published flag of the named games. A list of more than 2,400 games is sent as several calls in order; the
@@ -30,6 +58,11 @@ import { supabase } from '../lib/supabaseClient.js';
  * @param {string | null} [input.note]
  * @param {{ kind: string, value?: string } | null} [input.scope] - how the games were chosen, for the audit row
  * @param {any} [input.client] - the Supabase client (the app's, unless a test passes its own)
+ * A call whose answer was lost or could not be read (a failed fetch, a gateway's 502, a body that is not the answer)
+ * may have been committed: it throws an error with `code` {@link PUBLISHED_OUTCOME_UNKNOWN}
+ * ({@link isUnknownPublishedOutcome}), and the caller reads the saved flags again. A refusal that carries the
+ * database's own code rolled back and changed nothing.
+ *
  * @returns {Promise<{ changed: number, unchanged: number, ids: string[], calls: number }>}
  * @throws {Error & { code?: string, details?: string, done?: { calls: number, of: number, changed: number } }}
  */
@@ -65,20 +98,35 @@ export async function setGamesPublished({
         done: { calls: result.calls, of: chunks.length, changed: result.changed },
       });
     }
-    const { data, error } = await client.rpc('admin_set_games_published', {
-      p_organization_id: organizationId,
-      p_assignment_ids: chunk,
-      p_published: published,
-      p_reason_code: payload.reasonCode,
-      p_note: payload.note,
-      p_scope: scope,
-    });
+    const done = { calls: result.calls, of: chunks.length, changed: result.changed };
+    /** @type {{ data?: any, error?: any }} */
+    let answer;
+    try {
+      answer = await client.rpc('admin_set_games_published', {
+        p_organization_id: organizationId,
+        p_assignment_ids: chunk,
+        p_published: published,
+        p_reason_code: payload.reasonCode,
+        p_note: payload.note,
+        p_scope: scope,
+      });
+    } catch (thrown) {
+      // A request that threw never reached an answer (the network, an abort): the database may have committed it.
+      throw unknownOutcome(thrown?.message || 'The request failed', done, thrown);
+    }
+    const { data, error } = answer ?? {};
     if (error) {
+      if (!isDatabaseRefusal(error)) {
+        throw unknownOutcome(error.message || 'The request failed', done, error);
+      }
       throw Object.assign(new Error(error.message || 'The change was not saved.'), {
         code: error.code,
         details: error.details,
-        done: { calls: result.calls, of: chunks.length, changed: result.changed },
+        done,
       });
+    }
+    if (!isReadableAnswer(data)) {
+      throw unknownOutcome('The answer could not be read', done, null);
     }
     result.calls += 1;
     result.changed += Number(data?.changed ?? 0);
@@ -114,4 +162,41 @@ export async function readGameHistory({ organizationId, gameId, limit = 50, clie
     });
   }
   return Array.isArray(data) ? data : [];
+}
+
+/**
+ * The ids of the games of the CURRENT saved schedule, read fresh from the database: the club's latest completed game
+ * run (scoped to the season as `useSchedulerRun` scopes it, so it is the run the Games page shows) and its rows.
+ *
+ * The Exports panel checks the files it is about to mark Published against this: its own list of games was read when
+ * the page opened, and another tab may have moved a game and applied since. A game of an OLDER run is a real row that
+ * `admin_set_games_published` would accept, and the Games page could not show or release it. A refused read throws
+ * (it is never an empty schedule); no saved run is an empty set.
+ *
+ * @param {Object} input
+ * @param {string} input.organizationId
+ * @param {string | null} [input.seasonSettingsId]
+ * @param {any} [input.client]
+ * @returns {Promise<{ runId: string | null, ids: Set<string> }>}
+ */
+export async function readCurrentSavedGameIds({
+  organizationId,
+  seasonSettingsId = null,
+  client = supabase,
+}) {
+  let runQuery = client
+    .from('scheduler_runs')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .eq('run_type', 'game')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false });
+  runQuery = scopeSchedulerRunsToActiveSeason(runQuery, seasonSettingsId);
+  const { data: run, error } = await runQuery.limit(1).maybeSingle();
+  if (error) throw error;
+  if (!run?.id) return { runId: null, ids: new Set() };
+  const rows = await fetchAllPages(() =>
+    client.from('game_assignments').select('id').eq('run_id', run.id)
+  );
+  return { runId: String(run.id), ids: new Set(rows.map((row) => String(row.id))) };
 }

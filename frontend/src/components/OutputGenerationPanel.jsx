@@ -34,8 +34,8 @@ import {
   naivePublicationStamp,
   usePublicationBaselines,
 } from '../hooks/usePublicationBaselines.js';
-import { setGamesPublished } from '../utils/gamePublishedClient.js';
-import { describeSetFailure, describeSetResult } from '../utils/gamePublishedText.js';
+import { readCurrentSavedGameIds, setGamesPublished } from '../utils/gamePublishedClient.js';
+import { describeMarkFailure, describeSetResult } from '../utils/gamePublishedText.js';
 
 /**
  * The publish path, and the question it makes answerable (GAP-29).
@@ -873,6 +873,44 @@ export default function OutputGenerationPanel({
       return;
     }
 
+    // **Marking is judged before anything leaves the machine.** The games the files hold were read when this page
+    // opened, and another tab may have moved a game and applied since: marking the old row would publish a game of an
+    // older run, which the Games page can neither show nor release, and every later save would be refused for it. So
+    // the files are checked against the saved schedule read now, and out-of-date files are never uploaded. A completed
+    // season is history: nothing there is marked (the database refuses it, `season_completed`), and the export of it
+    // still finishes.
+    const gameIds = generated.gameIds ?? [];
+    const marking =
+      markPublished && !seasonCompleted && gameIds.length > 0 && Boolean(currentOrganization?.id);
+    if (marking) {
+      setStatus('uploading');
+      setMessage('Checking the games in these files against the saved schedule...');
+      try {
+        const current = await readCurrentSavedGameIds({
+          organizationId: currentOrganization.id,
+          seasonSettingsId,
+        });
+        const stale = gameIds.filter((id) => !current.ids.has(String(id)));
+        if (stale.length > 0) {
+          setStatus('error');
+          setMessage(
+            `Nothing was uploaded: ${stale.length} of the ${gameIds.length} games in these files ` +
+              `${stale.length === 1 ? 'is' : 'are'} no longer in the saved game schedule, which was changed ` +
+              'after these files were generated, so the files are out of date. Generate the CSVs again, then upload.'
+          );
+          return;
+        }
+      } catch (checkErr) {
+        logger.error('Saved schedule check error:', checkErr);
+        setStatus('error');
+        setMessage(
+          'Nothing was uploaded: the saved game schedule could not be read to check these files ' +
+            `(${checkErr.message}). Try again, or untick "Mark these games Published" to upload without marking.`
+        );
+        return;
+      }
+    }
+
     setStatus('uploading');
     setMessage('Uploading to Storage...');
 
@@ -945,8 +983,7 @@ export default function OutputGenerationPanel({
       // and a refusal is said in the database's words, never as if it had worked.
       let publishedNote = '';
       let publishedFailed = false;
-      const gameIds = generated.gameIds ?? [];
-      if (markPublished && gameIds.length > 0 && currentOrganization?.id) {
+      if (marking) {
         try {
           const marked = await setGamesPublished({
             organizationId: currentOrganization.id,
@@ -958,10 +995,8 @@ export default function OutputGenerationPanel({
         } catch (publishErr) {
           logger.error('Mark published error:', publishErr);
           publishedFailed = true;
-          publishedNote =
-            ` The ${gameIds.length} ${gameIds.length === 1 ? 'game was' : 'games were'} NOT marked ` +
-            `Published: ${describeSetFailure(publishErr)} Mark ${gameIds.length === 1 ? 'it' : 'them'} ` +
-            'from the Game Scheduling page.';
+          // A refusal is "NOT marked"; a lost answer is not known, and is never said as if it were nothing.
+          publishedNote = ` ${describeMarkFailure(publishErr, gameIds.length)}`;
         }
       }
 
@@ -1113,16 +1148,18 @@ export default function OutputGenerationPanel({
                   <input
                     type="checkbox"
                     className="cbx"
-                    checked={markPublished}
+                    checked={markPublished && !seasonCompleted}
                     onChange={(event) => setMarkPublished(event.target.checked)}
-                    disabled={status === 'uploading'}
+                    disabled={status === 'uploading' || seasonCompleted}
                     aria-describedby={markPublishedNoteId}
                   />
                   Mark these games Published
                 </label>
                 <span id={markPublishedNoteId} className="text-xs text-text-muted">
                   {`${generated.gameIds.length} ${generated.gameIds.length === 1 ? 'game' : 'games'} in these files. ` +
-                    'Marked Published, they are held where they are; the published baseline stays the record of what went out.'}
+                    (seasonCompleted
+                      ? 'This season is completed, so its games cannot be marked Published; the published baseline is still recorded.'
+                      : 'Marked Published, they are held where they are; the published baseline stays the record of what went out.')}
                 </span>
               </div>
             )}

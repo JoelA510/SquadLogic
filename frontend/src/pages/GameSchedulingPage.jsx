@@ -65,7 +65,11 @@ import { todayIso } from '../utils/today.js';
 import { isFieldOfferableOn, venueOf, venueRegistry } from '../utils/fieldLifecycle.js';
 import { isSlotOnField, parseCellId } from '../utils/gameGridCells.js';
 import { logger } from '../lib/logger.js';
-import { setGamesPublished } from '../utils/gamePublishedClient.js';
+import {
+  isUnknownPublishedOutcome,
+  readCurrentSavedGameIds,
+  setGamesPublished,
+} from '../utils/gamePublishedClient.js';
 import {
   PUBLISHED_FILTERS,
   describeScope,
@@ -75,6 +79,8 @@ import {
 import {
   cancelRefusal,
   describeSetFailure,
+  describeStaleCheckFailure,
+  describeStaleSchedule,
   describeSetResult,
   matchupOf,
   moveRefusal,
@@ -1047,6 +1053,29 @@ export default function GameSchedulingPage() {
       publishBusyRef.current = true;
       setPublishBusy(true);
       try {
+        // **Turning Published on names only games of the schedule that is saved now.** This page read its games when
+        // it opened, and another tab may have moved a game and applied since: that game's old row is still in the
+        // database (in an older run), and publishing it would hold a game the Games page can neither show nor
+        // release, with every later save refused for it. Turning it off cannot hide a game, so it is not checked.
+        if (input.published === true) {
+          const wanted = [...input.ids];
+          let stale;
+          try {
+            const current = await readCurrentSavedGameIds({
+              organizationId: currentOrganization.id,
+              seasonSettingsId: currentSeasonSetting?.id ?? null,
+            });
+            stale = wanted.filter((id) => !current.ids.has(String(id)));
+          } catch (checkErr) {
+            logger.error('Saved schedule check error:', checkErr);
+            return { ok: false, error: describeStaleCheckFailure(checkErr) };
+          }
+          if (stale.length > 0) {
+            markSavedStale();
+            refetchSaved?.();
+            return { ok: false, error: describeStaleSchedule(stale.length, wanted.length) };
+          }
+        }
         const result = await setGamesPublished({
           organizationId: currentOrganization.id,
           ...input,
@@ -1056,23 +1085,35 @@ export default function GameSchedulingPage() {
         refetchSaved?.();
         return { ok: true, result };
       } catch (err) {
-        // A long list is several calls; the ones before a refusal were saved.
-        if (err?.done?.calls > 0) {
+        // A long list is several calls, and the ones before a refusal were saved. A call whose answer was lost (a
+        // failed fetch, a gateway's 502, a body nobody can read) may have been committed too, so the saved flags
+        // are read again then as well, as after a save whose outcome is unknown (`rereadAfterUnknownOutcome`).
+        if (err?.done?.calls > 0 || isUnknownPublishedOutcome(err)) {
           markSavedStale();
           refetchSaved?.();
         }
-        return { ok: false, error: describeSetFailure(err) };
+        return {
+          ok: false,
+          error:
+            describeSetFailure(err) +
+            (isUnknownPublishedOutcome(err)
+              ? ' The saved schedule is read again to show what was saved.'
+              : ''),
+        };
       } finally {
         publishBusyRef.current = false;
         setPublishBusy(false);
       }
     },
-    [currentOrganization?.id, markSavedStale, refetchSaved]
+    [currentOrganization?.id, currentSeasonSetting?.id, markSavedStale, refetchSaved]
   );
 
   const publishGames = useCallback(
     async ({ ids, scope }, label = null) => {
       setPublishNotice(null);
+      // Where focus is when it is pressed. Publishing can remove that control (the row leaves a filtered list) or
+      // leave it nothing to do (a bulk button with no game left), so focus is put back once the list has settled.
+      restoreFocusRef.current = document.activeElement;
       const outcome = await runSetPublished({ ids, published: true, scope });
       setPublishNotice(
         outcome.ok
@@ -1122,16 +1163,23 @@ export default function GameSchedulingPage() {
     [allowDialog, runSetPublished]
   );
 
-  // Once the saved schedule has been read again, focus goes back to what opened the dialog (the switch), or to the
-  // count when that control has nothing left to do: a person is never left on a control that went away.
+  // Once the saved schedule has been read again, focus goes back to what opened the dialog or pressed the switch (or
+  // the bulk button), or to the count when that control has nothing left to do or has left the list: a person is
+  // never left on nothing. The list is a copy of the saved rows set one effect after them, so this waits until it has
+  // caught up: the row that held focus can be on screen for one render and gone in the next. A person who has moved
+  // focus on while it was saving keeps where they went.
   useEffect(() => {
     if (publishedReason !== null || !restoreFocusRef.current) return;
+    if (localAssignments !== savedAssignments) return;
     const opener = /** @type {HTMLElement} */ (restoreFocusRef.current);
     restoreFocusRef.current = null;
+    const active = document.activeElement;
+    const lost = !active || active === document.body || active === opener || !active.isConnected;
+    if (!lost) return;
     const target =
       opener.isConnected && !opener.hasAttribute('disabled') ? opener : summaryRef.current;
     target?.focus();
-  }, [publishedReason]);
+  }, [publishedReason, localAssignments, savedAssignments]);
 
   const publishedContext = useMemo(
     () => ({

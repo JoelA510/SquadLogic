@@ -9,7 +9,13 @@
  * (tests/mockGamePublished.test.js holds that arm to the SQL) for the round trip.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readGameHistory, setGamesPublished } from '../frontend/src/utils/gamePublishedClient.js';
+import {
+  PUBLISHED_OUTCOME_UNKNOWN,
+  isUnknownPublishedOutcome,
+  readCurrentSavedGameIds,
+  readGameHistory,
+  setGamesPublished,
+} from '../frontend/src/utils/gamePublishedClient.js';
 import { GAME_PUBLISH_MAX_IDS } from '../packages/core/src/gamePublished.js';
 import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
 import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
@@ -197,6 +203,223 @@ describe('a long list is several calls', () => {
       published: true,
     }).catch((err) => err);
     expect(error.done).toEqual({ calls: 0, of: 1, changed: 0 });
+  });
+});
+
+describe('an outcome that is not known (a lost answer is not a refusal)', () => {
+  // supabase-js reports a failed fetch as an error with no SQLSTATE: `code` is '' (or a Node error code), and a
+  // gateway's non-JSON 502 or 504 has no `code` at all. The database may have committed the change before the answer
+  // was lost, so the screen must read the saved flags again (the page's `rereadAfterUnknownOutcome` contract).
+  const transport = { message: 'TypeError: Failed to fetch', details: 'stack', hint: '', code: '' };
+  const attempt = (answer) =>
+    setGamesPublished({
+      client: client([answer]),
+      organizationId: ORG,
+      ids: [uuid(1)],
+      published: true,
+    }).catch((err) => err);
+
+  it.each([
+    ['a failed fetch (code is the empty string)', { data: null, error: transport }],
+    ['a system error code', { data: null, error: { ...transport, code: 'ECONNRESET' } }],
+    [
+      'a five-letter system error code (it has no digit, as every SQLSTATE does)',
+      { data: null, error: { ...transport, code: 'EPIPE' } },
+    ],
+    [
+      'a gateway answer with no code at all',
+      { data: null, error: { message: '<html>504</html>' } },
+    ],
+    ['a 2xx whose body is not the answer', { data: '<html>ok</html>', error: null }],
+    ['a 2xx with no body', { data: null, error: null }],
+    ['a 2xx whose counts are not numbers', { data: { changed: 'x', unchanged: 0 }, error: null }],
+  ])(
+    '%s is an unknown outcome, with the call counted as not acknowledged',
+    async (_name, answer) => {
+      const err = await attempt(answer);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.code).toBe(PUBLISHED_OUTCOME_UNKNOWN);
+      expect(isUnknownPublishedOutcome(err)).toBe(true);
+      expect(err.message).toMatch(/not known whether/);
+      expect(err.done).toEqual({ calls: 0, of: 1, changed: 0 });
+    }
+  );
+
+  it('a request that throws (the network, an abort) is an unknown outcome too', async () => {
+    const c = {
+      rpc: vi.fn(async () => {
+        throw new TypeError('network down');
+      }),
+    };
+    const err = await setGamesPublished({
+      client: c,
+      organizationId: ORG,
+      ids: [uuid(1)],
+      published: true,
+    }).catch((e) => e);
+    expect(isUnknownPublishedOutcome(err)).toBe(true);
+    expect(err.message).toMatch(/network down/);
+  });
+
+  it.each([
+    ['22023', 'game_not_found'],
+    ['42501', 'admin_required'],
+    ['23503', 'game_not_found'],
+    ['SLA01', '22023'],
+    ['40001', null],
+    ['P0002', null],
+    ['PGRST202', null],
+  ])(
+    'control: a refusal with the database’s code %s is a known outcome (nothing changed)',
+    async (code, details) => {
+      const err = await attempt({ data: null, error: { code, message: 'refused', details } });
+      expect(err.code).toBe(code);
+      expect(isUnknownPublishedOutcome(err)).toBe(false);
+      expect(err.message).toBe('refused');
+    }
+  );
+
+  it('in a split list, a lost answer on the second call says the first was saved and the second is not known', async () => {
+    const c = client([ok(GAME_PUBLISH_MAX_IDS), { data: null, error: transport }]);
+    const err = await setGamesPublished({
+      client: c,
+      organizationId: ORG,
+      ids: Array.from({ length: GAME_PUBLISH_MAX_IDS + 5 }, (_, i) => uuid(i + 1)),
+      published: true,
+    }).catch((e) => e);
+    expect(isUnknownPublishedOutcome(err)).toBe(true);
+    expect(err.done).toEqual({ calls: 1, of: 2, changed: GAME_PUBLISH_MAX_IDS });
+  });
+});
+
+describe('the current saved schedule, read fresh (what the Exports panel checks its files against)', () => {
+  const SEASON = 'season-a';
+  const run = (id, extra = {}) => ({
+    id,
+    organization_id: MOCK_ORG_ID,
+    run_type: 'game',
+    status: 'completed',
+    season_settings_id: SEASON,
+    completed_at: '2026-10-01T00:00:00Z',
+    results: {},
+    ...extra,
+  });
+  const row = (id, runId) => ({
+    id,
+    run_id: runId,
+    organization_id: MOCK_ORG_ID,
+    home_team_id: uuid(101),
+    away_team_id: uuid(102),
+    game_slot_id: `slot-${id}`,
+    week_index: 1,
+    start: '2026-10-03T16:00:00Z',
+    end: '2026-10-03T17:00:00Z',
+    published: false,
+  });
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    window.__saveMockDB__({
+      ...window.__MOCK_DB__,
+      scheduler_runs: [
+        run('run-old', { completed_at: '2026-10-01T00:00:00Z' }),
+        run('run-new', { completed_at: '2026-10-05T00:00:00Z' }),
+        // Not the schedule on screen: a failed run, a team run, another club's run, another season's run.
+        run('run-failed', { status: 'failed', completed_at: '2026-10-09T00:00:00Z' }),
+        run('run-team', { run_type: 'team', completed_at: '2026-10-09T00:00:00Z' }),
+        run('run-other-org', {
+          organization_id: '00000000-0000-4000-8000-0000000000ff',
+          completed_at: '2026-10-09T00:00:00Z',
+        }),
+        run('run-other-season', {
+          season_settings_id: 'season-b',
+          completed_at: '2026-10-09T00:00:00Z',
+        }),
+      ],
+      game_assignments: [
+        row('old-1', 'run-old'),
+        row('old-2', 'run-old'),
+        row('new-1', 'run-new'),
+        row('new-2', 'run-new'),
+        row('failed-1', 'run-failed'),
+        row('other-season-1', 'run-other-season'),
+      ],
+    });
+  });
+
+  it('is the games of the latest completed game run of the club and the season, and no older run’s', async () => {
+    const current = await readCurrentSavedGameIds({
+      client: mockSupabase,
+      organizationId: MOCK_ORG_ID,
+      seasonSettingsId: SEASON,
+    });
+    expect(current.runId).toBe('run-new');
+    expect([...current.ids].sort()).toEqual(['new-1', 'new-2']);
+    // The older run's rows are real rows of this club: the point is that they are not on the list.
+    expect(current.ids.has('old-1')).toBe(false);
+  });
+
+  it('asks the database the way the dashboard’s run read does: the club, game runs, completed, newest first, in the season', async () => {
+    const asked = [];
+    const builder = new Proxy(
+      {},
+      {
+        get:
+          (_target, method) =>
+          (...args) => {
+            asked.push([String(method), ...args]);
+            return method === 'maybeSingle'
+              ? Promise.resolve({ data: null, error: null })
+              : builder;
+          },
+      }
+    );
+    const recorder = { from: (table) => (asked.push(['from', table]), builder) };
+    await readCurrentSavedGameIds({
+      client: recorder,
+      organizationId: 'org-x',
+      seasonSettingsId: 'season-x',
+    });
+    expect(asked).toEqual([
+      ['from', 'scheduler_runs'],
+      ['select', 'id'],
+      ['eq', 'organization_id', 'org-x'],
+      ['eq', 'run_type', 'game'],
+      ['eq', 'status', 'completed'],
+      ['order', 'completed_at', { ascending: false }],
+      ['or', 'season_settings_id.eq.season-x,season_id.eq.season-x'],
+      ['limit', 1],
+      ['maybeSingle'],
+    ]);
+    // With no season given, the season filter is not added (as `scopeSchedulerRunsToActiveSeason` does).
+    asked.length = 0;
+    await readCurrentSavedGameIds({ client: recorder, organizationId: 'org-x' });
+    expect(asked.some(([method]) => method === 'or')).toBe(false);
+  });
+
+  it('no run: an empty set, not a failure (nothing is saved yet)', async () => {
+    window.__saveMockDB__({ ...window.__MOCK_DB__, scheduler_runs: [], game_assignments: [] });
+    const current = await readCurrentSavedGameIds({
+      client: mockSupabase,
+      organizationId: MOCK_ORG_ID,
+      seasonSettingsId: SEASON,
+    });
+    expect(current).toEqual({ runId: null, ids: new Set() });
+  });
+
+  it('a refused read throws (it is never an empty schedule)', async () => {
+    const failing = {
+      from: () => {
+        throw new Error('read refused');
+      },
+    };
+    await expect(
+      readCurrentSavedGameIds({
+        client: failing,
+        organizationId: MOCK_ORG_ID,
+        seasonSettingsId: SEASON,
+      })
+    ).rejects.toThrow('read refused');
   });
 });
 

@@ -79,6 +79,7 @@ const dbGame = (id, extra = {}) => ({
   ...extra,
 });
 
+/** @param {(path: string) => string | null} [refuse] */
 function storageClient(refuse = () => null) {
   const calls = [];
   const client = {

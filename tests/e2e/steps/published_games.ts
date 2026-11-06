@@ -338,6 +338,20 @@ When(
   }
 );
 
+When(
+  'I turn on the Published switch of the game {string} vs {string} in the list',
+  async ({ page }, home: string, away: string) => {
+    await listRow(page, home, away)
+      .getByRole('switch', { name: `Published: ${home} versus ${away}` })
+      .click();
+    await expect(page.getByTestId('published-bar-notice')).toContainText(
+      /^Published \d+ games?\./,
+      { timeout: 20_000 }
+    );
+    await settled(page);
+  }
+);
+
 When('I enter manual override on the Game Scheduling page', async ({ page }) => {
   await page.getByRole('button', { name: 'Enter Manual Override' }).click();
   await expect(page.getByTestId('game-schedule-grid')).toBeVisible({ timeout: 20_000 });

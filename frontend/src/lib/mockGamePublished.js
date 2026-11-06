@@ -29,7 +29,9 @@
  *     or null the field of `game_assignments` without asking the guard, where the database raises 22023
  *     `game_published` from the cascade (after its booking check refuses a booked field first). A screen built or
  *     E2E-tested in mock mode on a Published game must not rely on those deletes succeeding (code review, #707;
- *     not mirrored because nothing in the app shows a Published game yet: PR 3 revisits it with the screen);
+ *     not mirrored: the Games page (PR 3) shows Published games but offers no way to delete a field, venue or
+ *     slot, and its E2E feature deletes none, so it does not depend on them; the cascades stay unmirrored, statically
+ *     reviewed);
  *   - row locking and the per-organization lock, and the SLA01 rollback of a failed audit write.
  *
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()` and the write paths.

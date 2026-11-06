@@ -43,6 +43,16 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     Then the history shows "Changes allowed" with the reason "Coach request" and the note "The coach asked for a later start"
     And the history says a moved game is a new record
 
+  Scenario: Publishing a game again holds it again
+    Given the "U10 Boys" division is Published
+    And changes are allowed to the game "Lions" vs "Wolves"
+    When I turn on the Published switch of the game "Lions" vs "Wolves" in the list
+    Then the notice says "Published 1 game."
+    And the Published line reads "4 of 5 saved games Published, 0 with changes allowed"
+    And the game "Lions" vs "Wolves" is shown as "Published" in the list
+    When I enter manual override on the Game Scheduling page
+    Then the card of "Lions" vs "Wolves" is Published and cannot be dragged or moved
+
   Scenario: A game moved to another slot is saved as a new game that starts not Published
     Given the "U10 Boys" division is Published
     When I allow changes to the game "Lions" vs "Wolves" for "Field change" with the note ""

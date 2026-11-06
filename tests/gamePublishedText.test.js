@@ -206,7 +206,7 @@ describe('the answer to a call', () => {
         Object.assign(new Error('Access denied'), { done: { calls: 0, of: 2, changed: 0 } })
       )
     ).toBe('Access denied');
-    expect(describeSetFailure({})).toBe('The change was not saved.');
+    expect(describeSetFailure(/** @type {any} */ ({}))).toBe('The change was not saved.');
   });
 
   it('counts a bulk call before it is sent, and says when it goes in several', () => {

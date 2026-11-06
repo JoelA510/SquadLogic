@@ -3809,34 +3809,51 @@ describe('acceptance 16 — the fifth review round', () => {
 });
 
 describe('externalImport — the shipping app is untouched', () => {
-  it('nothing outside externalImport/ imports it', async () => {
+  /**
+   * **Wired for the first time (schedule import, PR 4).** Until then nothing outside
+   * `externalImport/` imported it (plan `docs/changes/2026-11-03-schedule-expansion.md`, R3). The
+   * schedule import's mapping takes the one label normaliser from it, so `scheduleImport/mapping.js`
+   * is now its single importer. The list is exact: a second importer, or the first one going away,
+   * has to be a reviewed edit of this file. What stays true is the claim R3 was about: no
+   * `frontend/`, `supabase/` or `scripts/` file imports it, and the layer still persists nothing.
+   */
+  const EXPECTED_IMPORTERS = ['packages/core/src/scheduleImport/mapping.js'];
+
+  it('is imported only by scheduleImport/mapping.js, and by nothing in the shipping app', async () => {
     const { readdirSync, readFileSync, statSync } = await import('node:fs');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
-    const root = path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '..',
-      'packages',
-      'core',
-      'src'
-    );
+    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const coreRoot = path.join(repo, 'packages', 'core', 'src');
     /** @type {string[]} */
     const files = [];
-    const walk = (dir) => {
+    const walk = (dir, extensions) => {
       for (const entry of readdirSync(dir)) {
+        if (entry === 'node_modules' || entry === 'dist') continue;
         const full = path.join(dir, entry);
-        if (statSync(full).isDirectory()) walk(full);
-        else if (full.endsWith('.js')) files.push(full);
+        if (statSync(full).isDirectory()) walk(full, extensions);
+        else if (extensions.some((e) => full.endsWith(e))) files.push(full);
       }
     };
-    walk(root);
+    walk(coreRoot, ['.js']);
     expect(files.length).toBeGreaterThan(0);
+    const coreFiles = [...files];
+    for (const shipping of ['frontend/src', 'supabase', 'scripts']) {
+      walk(path.join(repo, shipping), ['.js', '.jsx', '.ts', '.tsx', '.mjs']);
+    }
+    expect(files.length).toBeGreaterThan(coreFiles.length); // the shipping roots were walked too
 
-    const importers = files.filter((file) => {
-      if (file.includes(`${path.sep}externalImport${path.sep}`)) return false;
-      return /from\s+'[^']*externalImport\//.test(readFileSync(file, 'utf8'));
-    });
-    expect(importers).toEqual([]);
+    const importers = files
+      .filter((file) => {
+        if (file.includes(`${path.sep}externalImport${path.sep}`)) return false;
+        return /from\s+'[^']*externalImport\//.test(readFileSync(file, 'utf8'));
+      })
+      .map((file) => path.relative(repo, file).split(path.sep).join('/'));
+    expect(importers).toEqual(EXPECTED_IMPORTERS);
+    // the scan can see an importer: the one it lists is found by the same pattern
+    expect(
+      /from\s+'[^']*externalImport\//.test("import { x } from '../externalImport/mapping.js';")
+    ).toBe(true);
   });
 });
 

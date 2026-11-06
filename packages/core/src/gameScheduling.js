@@ -375,10 +375,12 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze, pinn
   const teamWeekAssignments = new Set();
 
   // Saved games to hold still (`pinned`) are placed first, as games already on the grid; the matchups
-  // they consume are skipped below. With none, `consumed` is empty and nothing here runs.
+  // they consume are skipped below, found by position (division, week, matchup) and not by object, so
+  // a round robin that shares one matchup object between two weeks loses one, not both. With none,
+  // `consumed` is empty and nothing here runs.
   /** @type {Array<Record<string, any>> | undefined} */
   let carried;
-  /** @type {Set<object>} */
+  /** @type {Set<string>} */
   let consumed = new Set();
   if (pinned !== undefined) {
     ({ carried, consumed } = holdPinnedGames({
@@ -400,12 +402,21 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze, pinn
       throw new TypeError(`roundRobinByDivision for division ${division} must be an array`);
     }
 
+    let weekPosition = -1;
     for (const week of weeks) {
+      weekPosition += 1;
       validateWeek({ week, division });
       collectWeekByes({ week, division, teamsById, byes });
 
+      let matchupPosition = -1;
       for (const matchup of week.matchups ?? []) {
-        if (consumed.has(matchup)) continue;
+        matchupPosition += 1;
+        if (
+          consumed.size > 0 &&
+          consumed.has(matchupKey(division, weekPosition, matchupPosition))
+        ) {
+          continue;
+        }
         scheduleMatchup({
           division,
           weekIndex: week.weekIndex,
@@ -578,8 +589,9 @@ function indexSlots(slots) {
 /**
  * Take saved games as already placed (`pinned`, see {@link scheduleGames}), before any matchup is.
  *
- * @returns {{ carried: Array<Record<string, any>>, consumed: Set<object> }} the games to hand back
- *   (shallow copies of the entries, in a fixed order) and the round-robin matchups they consumed
+ * @returns {{ carried: Array<Record<string, any>>, consumed: Set<string> }} the games to hand back
+ *   (shallow copies of the entries, in a fixed order) and the round-robin matchups they consumed,
+ *   each as a {@link matchupKey}
  */
 function holdPinnedGames({
   pinned,
@@ -708,44 +720,52 @@ function readPinnedGame(entry, index, teamsById, slotRecords) {
  * has no matchup in its own week cannot take the one another pinned game was saved in. A pair in no
  * round robin (a team of another division, an outside side) has nothing to consume.
  *
- * @returns {Set<object>} the matchup objects of `roundRobinByDivision` that are consumed
+ * @returns {Set<string>} the {@link matchupKey} of each matchup of `roundRobinByDivision` consumed
  */
 function consumeMatchups(games, roundRobinByDivision) {
-  /** @type {Map<string, Array<{ weekIndex: number, matchup: object }>>} */
+  /** @type {Map<string, Array<{ weekIndex: number, key: string }>>} */
   const meetings = new Map();
-  for (const weeks of Object.values(roundRobinByDivision)) {
+  for (const [division, weeks] of Object.entries(roundRobinByDivision)) {
     // A malformed round robin is reported by the placement loop, with the message it always had.
     if (!Array.isArray(weeks)) continue;
-    for (const week of weeks) {
-      if (!week || !Array.isArray(week.matchups)) continue;
-      for (const matchup of week.matchups) {
+    weeks.forEach((week, weekPosition) => {
+      if (!week || !Array.isArray(week.matchups)) return;
+      week.matchups.forEach((matchup, matchupPosition) => {
         if (typeof matchup?.homeTeamId !== 'string' || typeof matchup?.awayTeamId !== 'string') {
-          continue;
+          return;
         }
-        const key = pairKey(matchup.homeTeamId, matchup.awayTeamId);
-        const list = meetings.get(key) ?? [];
-        list.push({ weekIndex: week.weekIndex, matchup });
-        meetings.set(key, list);
-      }
-    }
+        const pair = pairKey(matchup.homeTeamId, matchup.awayTeamId);
+        const list = meetings.get(pair) ?? [];
+        list.push({
+          weekIndex: week.weekIndex,
+          key: matchupKey(division, weekPosition, matchupPosition),
+        });
+        meetings.set(pair, list);
+      });
+    });
   }
   for (const list of meetings.values()) list.sort((a, b) => a.weekIndex - b.weekIndex);
 
-  /** @type {Set<object>} */
+  /** @type {Set<string>} */
   const consumed = new Set();
   const unmatched = [];
   for (const game of games) {
     const list = meetings.get(pairKey(game.homeTeamId, game.awayTeamId)) ?? [];
-    const sameWeek = list.find((m) => m.weekIndex === game.weekIndex && !consumed.has(m.matchup));
-    if (sameWeek) consumed.add(sameWeek.matchup);
+    const sameWeek = list.find((m) => m.weekIndex === game.weekIndex && !consumed.has(m.key));
+    if (sameWeek) consumed.add(sameWeek.key);
     else unmatched.push(game);
   }
   for (const game of unmatched) {
     const list = meetings.get(pairKey(game.homeTeamId, game.awayTeamId)) ?? [];
-    const next = list.find((m) => !consumed.has(m.matchup));
-    if (next) consumed.add(next.matchup);
+    const next = list.find((m) => !consumed.has(m.key));
+    if (next) consumed.add(next.key);
   }
   return consumed;
+}
+
+/** One matchup of a round robin, by where it sits: division, week position, matchup position. */
+function matchupKey(division, weekPosition, matchupPosition) {
+  return `${division}\u0000${weekPosition}\u0000${matchupPosition}`;
 }
 
 function validateWeek({ week, division }) {

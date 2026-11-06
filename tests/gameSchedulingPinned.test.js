@@ -445,6 +445,30 @@ describe('scheduleGames({ pinned }) holds a saved game where it is', () => {
     });
   });
 
+  it('a round robin that shares one matchup object between two weeks loses one meeting, not both', () => {
+    // The fixture builder's wrap-around can hand the same week's matchups to two weeks. A pinned game
+    // stands in for ONE meeting, so the other must still be generated.
+    const teams = [team('a'), team('b')];
+    const slots = [slotAt('s1', 1, 9), slotAt('s3', 3, 9)];
+    const shared = { homeTeamId: 'a', awayTeamId: 'b' };
+    const roundRobinByDivision = {
+      U10: [
+        { weekIndex: 1, matchups: [shared], byes: [] },
+        { weekIndex: 3, matchups: [shared], byes: [] },
+      ],
+    };
+    const plain = scheduleGames({ teams, slots, roundRobinByDivision });
+    expect(placed(plain)).toEqual(['1:a-b@s1', '3:a-b@s3']);
+    const out = scheduleGames({
+      teams,
+      slots,
+      roundRobinByDivision,
+      pinned: [savedOn(slots[1], 'a', 'b', 'ga-1')],
+    });
+    expect(placed(out)).toEqual(['1:a-b@s1']);
+    expect(out.unscheduled).toEqual([]);
+  });
+
   it('a pair outside the round robin occupies its slot and consumes no matchup', () => {
     const teams = [team('a'), team('b'), team('x', 'U12')];
     const slots = [slotAt('s1', 1, 9), slotAt('s2', 1, 11)];

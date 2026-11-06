@@ -1316,7 +1316,7 @@ Depends on: nothing. Review (c) because it holds a migration, the guard trigger 
 path. **Its first commits cherry-pick the plan commits `0cafa0e`, `0869b07` and the 2026-11-06 amendment commit (see
 `git log`), so the plan is recorded in the same PR as the change it justifies (AGENTS.md operating rule 7).**
 
-- [ ] A1 (L) Migration: the three columns and partial index; the two `audit_actions`; the guard trigger;
+- [x] A1 (L) Migration: the three columns and partial index; the two `audit_actions`; the guard trigger;
       `admin_set_games_published`; `get_schedule_audit_log`; `persist_game_schedule` with the omission refusal;
       `admin_cancel_game_assignment` and `admin_delete_team` refusals. `docs/sql/<v>_revert.sql` (the previous bodies
       from production's text, lesson 87's method) and `_smoke.sql`; `supabase/catalog-snapshot.json` regenerated.
@@ -1324,18 +1324,18 @@ path. **Its first commits cherry-pick the plan commits `0cafa0e`, `0869b07` and 
       per gate of 3.4; each refusal paired with a control that the **unpublished** twin passes (a trigger that refuses
       everything fails the control); a signed-in caller and a no-user caller; cross-organization ids; a completed
       season; the audit rows' count and content, and the 2,400-id row's size measured; an unchanged value is a no-op.
-- [ ] A2 (S) Edge: `_shared/game-persistence-errors.ts` maps `game_published` and `game_published_omitted` to 409
+- [x] A2 (S) Edge: `_shared/game-persistence-errors.ts` maps `game_published` and `game_published_omitted` to 409
       `GAME_PUBLISHED` with the ids, and **leaves every other error as it is**. Test `tests/gamePersistenceErrors.test.js`
       (the shape of `tests/practiceEnactEdge.test.js`): both codes map; an unrelated 22023 and a 500 are unchanged.
-- [ ] A3 (S) Core `packages/core/src/gamePublished.js` (pure, registered in the index): the closed reason list, a
+- [x] A3 (S) Core `packages/core/src/gamePublished.js` (pure, registered in the index): the closed reason list, a
       splitter, `publishedOmissions(saved, payload)`, the Zod schema of the set payload. Test `tests/gamePublished.test.js`,
       including that the four shared reason codes equal `GRID_OVERRIDE_REASONS`.
-- [ ] A4 (M) Mock client mirrors the RPCs and the guard. Test `tests/mockGamePublished.test.js`: **one input that reaches
+- [x] A4 (M) Mock client mirrors the RPCs and the guard. Test `tests/mockGamePublished.test.js`: **one input that reaches
       every outcome** goes through the mock and the pure helper and their answers must agree (lesson 77's twin).
-- [ ] A5 (S) Docs: `docs/architecture/game-scheduling.md` (the Locking paragraph and the "COMPLETE" note corrected),
+- [x] A5 (S) Docs: `docs/architecture/game-scheduling.md` (the Locking paragraph and the "COMPLETE" note corrected),
       `docs/MODEL_GAPS.md` GAP-29 and GAP-35 (a dated note: the stored flag is Published), `docs/PUBLICATION_PARITY.md`
       (the relation in 3.1), `docs/LESSONS_LEARNED.md` (section 12).
-- [ ] A6 (S) **A separate commit.** AGENTS.md section 3's "Review every PR adversarially before opening it" bullet
+- [x] A6 (S) **A separate commit.** AGENTS.md section 3's "Review every PR adversarially before opening it" bullet
       (Verification conventions) and CLAUDE.md's Review bullet get the exception wording: documentation and very minor
       PRs need no review; every other PR is reviewed by Codex first, then gets one `/code-review` after the Codex
       findings are addressed. The owner approved this edit in principle (message 1, section 10) and the hold on it is

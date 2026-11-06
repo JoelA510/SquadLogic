@@ -177,6 +177,10 @@ compared at all. The operator surface is the Exports panel: publish, pick a
 version, and see matched / differing / removed / added with the differing rows
 **named**.
 
+### Published (the per-game switch) is not the baseline (2026-11-06)
+
+"Published" now also names a flag on each saved game (`game_assignments.published`, migration `20261119010000`): these games were told to families, so a trigger and the save keep them where they are until an admin allows changes. The two are linked by one optional act, not by code: the Exports panel's "Publish" will offer to mark the games it exported (plan decision 3, PR 3). **The baseline stays the evidence** (immutable, versioned, never edited); **the flag is the working-state guard** (turned off and on, audited). Parity compares a baseline with the working schedule and does not read the flag. On screen the record is "Published baseline v3" and the switch is "Published"; the dialog says so once.
+
 ### The defect this stage found: `Start` has two spellings
 
 Running the comparison rather than reading it turned up a pre-existing

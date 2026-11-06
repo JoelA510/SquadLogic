@@ -4,7 +4,7 @@
 > [!NOTE]
 > **Implementation Status: COMPLETE**
 >
-> Game scheduling is implemented in `packages/core/src/gameScheduling.js` (778 lines) and `packages/core/src/gameMetrics.js` (444 lines). The interactive Game Schedule Grid with drag-and-drop is in `frontend/src/components/scheduling/`. Key difference from original design: the `scheduling_exceptions` table referenced below was not created — exception handling is managed through the manual override system (`assignment_source: 'manual'`) and the `GameConflictBanner` UI.
+> Game scheduling is implemented in `packages/core/src/gameScheduling.js` (778 lines) and `packages/core/src/gameMetrics.js` (444 lines). The interactive Game Schedule Grid with drag-and-drop is in `frontend/src/components/scheduling/`. Key difference from original design: the `scheduling_exceptions` table referenced below was not created — exception handling is managed through the manual override system (`assignment_source: 'manual'`) and the `GameConflictBanner` UI. **The locking mechanism below was never built as written** (corrected 2026-11-06): `locked` is rewritten to `manual` in the save and only draws a badge, and nothing refused a change to any game until the Published switch (migration `20261119010000`, plan `docs/changes/2026-11-03-schedule-expansion.md`).
 
 # Game Scheduling Plan
 
@@ -53,7 +53,7 @@
 
 1. **Preview & Adjustments**: Front end surfaces a calendar/table view for each Saturday with conflict indicators. Admin can drag-and-drop fixtures to alternative slots, which triggers an update to Supabase via serverless functions.
 2. **Byes & Double-Headers**: UI clearly labels teams on bye weeks and allows optional double-header approvals before committing them.
-3. **Locking Mechanism**: After league approval, mark specific games as locked to prevent automated reshuffling during later reruns unless explicitly unlocked.
+3. **Locking Mechanism**: After league approval, mark specific games as locked to prevent automated reshuffling during later reruns unless explicitly unlocked. *(Built as **Published**, 2026-11-06, database side: a per-game flag on `game_assignments` that a trigger on every writer holds in place for a signed-in caller (a Published game cannot be moved, re-fielded, re-timed, re-teamed or deleted, and a team or slot delete that would cascade onto one is refused); `persist_game_schedule` refuses a save that leaves a Published game out (`game_published_omitted`, 409 `GAME_PUBLISHED` from the Edge function); turning it off is the audited "Allow changes" act (`admin_set_games_published`: any organization admin, a reason from `field-change`, `coach-request`, `conflict-fix`, `published-in-error`, `other`, an optional note of at most 200 characters, up to 2,400 games a call; `game.published_set` per call, `game.publish_overridden` per game; read with `get_schedule_audit_log`); turning it on needs nothing. The save keys games by the matchup tuple (home, away, slot, week) and writes no id, so a game moved to another slot or week is a new row and the Published original counts as omitted. The generator keeping Published games (`pinned`) and the Games page switch are the plan's PR 2 and PR 3.)*
 
 ## Testing Strategy
 

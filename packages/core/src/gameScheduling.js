@@ -1,5 +1,5 @@
 import { listTeamCoachIds } from './practiceScheduling.js';
-import { SlotSchema, TeamSchema } from './schemas/index.js';
+import { AssignmentSchema, SlotSchema, TeamSchema } from './schemas/index.js';
 
 /** @typedef {import('./types.js').Team} Team */
 /** @typedef {import('./types.js').GameSlot} GameSlot */
@@ -297,14 +297,35 @@ function indexKeepSides(keepSides, teamSet) {
  * @param {unknown} [params.freeze]
  *   - **Refused.** See {@link scheduleGames} for why this parameter exists only
  *     to throw.
+ * @param {ReadonlyArray<Record<string, any>>} [params.pinned]
+ *   - Saved games to hold exactly where they are (the Published games of a
+ *     saved schedule; plan `docs/changes/2026-11-03-schedule-expansion.md`, 3.5).
+ *     Each is read as `{ homeTeamId, awayTeamId, slotId (or gameSlotId),
+ *     weekIndex, start, end, division }` and handled as a game the solver has
+ *     already placed, before any matchup is: it takes one unit of its slot's
+ *     capacity, consumes one matchup of its unordered pair (the same
+ *     `weekIndex` when the round robin has one, else the pair's earliest other
+ *     week; a pair in no round robin, an outside side or an extra game,
+ *     consumes none), puts both teams in its week, puts their coaches at its
+ *     time, counts toward the shared-slot usage and sets each team's usual start
+ *     time. An entry that cannot be held (malformed) throws: a Published game is
+ *     never skipped. Absent, the function is today's, byte for byte, and the
+ *     result has no `carried` key.
  * @returns {{
  *   assignments: Array<{ weekIndex: number, division: string, slotId: string, start: string, end: string, homeTeamId: string, awayTeamId: string, fieldId: string | null }>,
  *   byes: Array<{ weekIndex: number, division: string, teamId: string }>,
  *   unscheduled: Array<{ weekIndex: number, division: string, matchup: { homeTeamId: string, awayTeamId: string }, reason: string }>,
  *   sharedSlotUsage: Array<Object>,
+ *   carried?: Array<Record<string, any>>,
  * }}
+ *   `carried` (only when `pinned` was given, even empty) is the pinned games,
+ *   each a shallow copy of the entry it came from (its `id` and every other
+ *   field intact), ordered by week, division, start, slot and teams, whatever
+ *   order they arrived in. They are the saved games themselves: the save that
+ *   follows keys its upsert on (home, away, slot, week), so one that comes back
+ *   with the same tuple updates the same row and keeps its id.
  */
-export function scheduleGames({ teams, slots, roundRobinByDivision, freeze }) {
+export function scheduleGames({ teams, slots, roundRobinByDivision, freeze, pinned }) {
   // Freeze scopes are Phase 4.1 and they do not live here. This engine is
   // week-indexed and *generates* matchups from a round robin; it has no game
   // ids (assignments are keyed by division, week and the alphabetised pair) and
@@ -318,9 +339,12 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze }) {
   // `resolve/reoptimiseWholeSeason()` for the deliberate, named global
   // re-solve. GAP-32 (week index vs calendar date) and GAP-35 (no persisted
   // freeze scope) are why the bridge does not exist yet.
+  //
+  // What this engine CAN do is hold saved games still: `pinned` (below) takes
+  // them as games already placed, which needs no game id and no date model.
   if (freeze !== undefined) {
     throw new TypeError(
-      'gameScheduling: scheduleGames() cannot honour a freeze and will not pretend to. It is week-indexed, it generates matchups rather than re-placing existing games, and its assignments carry no game id to freeze. Use resolve/applyChangeRequest() to apply a scoped change to an existing schedule, or resolve/reoptimiseWholeSeason() to re-solve one on purpose. See GAP-35 and GAP-32.'
+      'gameScheduling: scheduleGames() cannot honour a freeze and will not pretend to. It is week-indexed, it generates matchups rather than re-placing existing games, and its assignments carry no game id to freeze. Use resolve/applyChangeRequest() to apply a scoped change to an existing schedule, or resolve/reoptimiseWholeSeason() to re-solve one on purpose. See GAP-35 and GAP-32. To keep saved games where they are while the others are generated again, pass them as `pinned`.'
     );
   }
 
@@ -334,9 +358,12 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze }) {
   if (!Array.isArray(slots)) {
     throw new TypeError('slots must be an array');
   }
+  if (pinned !== undefined && !Array.isArray(pinned)) {
+    throw new TypeError('pinned must be an array');
+  }
 
   const teamsById = indexTeams(teams);
-  const { divisionSlots, sharedSlots, slotCapacityMap } = indexSlots(slots);
+  const { divisionSlots, sharedSlots, slotCapacityMap, slotRecords } = indexSlots(slots);
   const sharedSlotUsage = new Map();
   const sharedFieldUsage = new Map();
   const teamStartPreferences = new Map();
@@ -347,16 +374,49 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze }) {
   const coachAssignments = new Map();
   const teamWeekAssignments = new Set();
 
+  // Saved games to hold still (`pinned`) are placed first, as games already on the grid; the matchups
+  // they consume are skipped below, found by position (division, week, matchup) and not by object, so
+  // a round robin that shares one matchup object between two weeks loses one, not both. With none,
+  // `consumed` is empty and nothing here runs.
+  /** @type {Array<Record<string, any>> | undefined} */
+  let carried;
+  /** @type {Set<string>} */
+  let consumed = new Set();
+  if (pinned !== undefined) {
+    ({ carried, consumed } = holdPinnedGames({
+      pinned,
+      roundRobinByDivision,
+      teamsById,
+      slotRecords,
+      slotCapacityMap,
+      sharedSlotUsage,
+      sharedFieldUsage,
+      coachAssignments,
+      teamWeekAssignments,
+      teamStartPreferences,
+    }));
+  }
+
   for (const [division, weeks] of Object.entries(roundRobinByDivision)) {
     if (!Array.isArray(weeks)) {
       throw new TypeError(`roundRobinByDivision for division ${division} must be an array`);
     }
 
+    let weekPosition = -1;
     for (const week of weeks) {
+      weekPosition += 1;
       validateWeek({ week, division });
       collectWeekByes({ week, division, teamsById, byes });
 
+      let matchupPosition = -1;
       for (const matchup of week.matchups ?? []) {
+        matchupPosition += 1;
+        if (
+          consumed.size > 0 &&
+          consumed.has(matchupKey(division, weekPosition, matchupPosition))
+        ) {
+          continue;
+        }
         scheduleMatchup({
           division,
           weekIndex: week.weekIndex,
@@ -420,7 +480,11 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze }) {
 
   const sharedSlotUsageSummary = formatSharedSlotUsage(sharedSlotUsage);
 
-  return { assignments, byes, unscheduled, sharedSlotUsage: sharedSlotUsageSummary };
+  // No `carried` key at all without `pinned`: the result is the base's, byte for byte.
+  if (carried === undefined) {
+    return { assignments, byes, unscheduled, sharedSlotUsage: sharedSlotUsageSummary };
+  }
+  return { assignments, byes, unscheduled, sharedSlotUsage: sharedSlotUsageSummary, carried };
 }
 
 function indexTeams(teams) {
@@ -519,7 +583,189 @@ function indexSlots(slots) {
     }
   }
 
-  return { divisionSlots, sharedSlots, slotCapacityMap };
+  return { divisionSlots, sharedSlots, slotCapacityMap, slotRecords };
+}
+
+/**
+ * Take saved games as already placed (`pinned`, see {@link scheduleGames}), before any matchup is.
+ *
+ * @returns {{ carried: Array<Record<string, any>>, consumed: Set<string> }} the games to hand back
+ *   (shallow copies of the entries, in a fixed order) and the round-robin matchups they consumed,
+ *   each as a {@link matchupKey}
+ */
+function holdPinnedGames({
+  pinned,
+  roundRobinByDivision,
+  teamsById,
+  slotRecords,
+  slotCapacityMap,
+  sharedSlotUsage,
+  sharedFieldUsage,
+  coachAssignments,
+  teamWeekAssignments,
+  teamStartPreferences,
+}) {
+  const games = pinned.map((entry, index) => readPinnedGame(entry, index, teamsById, slotRecords));
+  // A fixed order, so the answer does not depend on how the saved rows arrived: the start-time
+  // preference below is the one thing that reads the order.
+  games.sort(
+    (a, b) =>
+      a.weekIndex - b.weekIndex ||
+      a.division.localeCompare(b.division) ||
+      a.start - b.start ||
+      a.slotId.localeCompare(b.slotId) ||
+      a.homeTeamId.localeCompare(b.homeTeamId) ||
+      a.awayTeamId.localeCompare(b.awayTeamId) ||
+      String(a.entry.id ?? '').localeCompare(String(b.entry.id ?? ''))
+  );
+
+  const consumed = consumeMatchups(games, roundRobinByDivision);
+
+  for (const game of games) {
+    const { homeTeamId, awayTeamId, weekIndex, slotId, division, start, end } = game;
+    const slot = slotRecords.get(slotId);
+    // A slot the solver was not given (its field retired, say) has nothing to take capacity from;
+    // the game is still carried and still keeps its teams and coaches busy.
+    if (slot) {
+      slotCapacityMap.set(slotId, slotCapacityMap.get(slotId) - 1);
+      if (!slot.division) {
+        recordSharedSlotUsage({ sharedSlotUsage, sharedFieldUsage, slot, division });
+      }
+    }
+    for (const teamId of [homeTeamId, awayTeamId]) {
+      teamWeekAssignments.add(`${teamId}::${weekIndex}`);
+      updateTeamStartPreference({ teamStartPreferences, teamId, start });
+      for (const coachId of teamsById.get(teamId)?.coachIds ?? []) {
+        recordCoachAssignment({
+          coachAssignments,
+          coachId,
+          assignment: { slotId, start, end, weekIndex, teamId },
+        });
+      }
+    }
+  }
+
+  return { carried: games.map((game) => ({ ...game.entry })), consumed };
+}
+
+/**
+ * One pinned entry, checked and read. A game that cannot be held is refused, never skipped: the save
+ * refuses a schedule that leaves out a Published game, and skipping one here would only move the
+ * failure to the end of the page's work.
+ */
+function readPinnedGame(entry, index, teamsById, slotRecords) {
+  const label = `pinned[${index}]`;
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new TypeError(`${label} must be a saved game object`);
+  }
+  const { homeTeamId, awayTeamId } = entry;
+  if (typeof homeTeamId !== 'string' || homeTeamId === '') {
+    throw new TypeError(`${label} requires a homeTeamId`);
+  }
+  if (typeof awayTeamId !== 'string' || awayTeamId === '') {
+    throw new TypeError(`${label} requires an awayTeamId`);
+  }
+  if (homeTeamId === awayTeamId) {
+    throw new TypeError(`${label} names team ${homeTeamId} on both sides`);
+  }
+  const slotId = entry.slotId ?? entry.gameSlotId;
+  if (typeof slotId !== 'string' || slotId === '') {
+    throw new TypeError(`${label} (${homeTeamId} vs ${awayTeamId}) requires a slotId`);
+  }
+  const slot = slotRecords.get(slotId);
+  const weekIndex = entry.weekIndex ?? slot?.weekIndex;
+  if (!Number.isInteger(weekIndex) || weekIndex <= 0) {
+    throw new TypeError(
+      `${label} (${homeTeamId} vs ${awayTeamId}) requires a positive integer weekIndex`
+    );
+  }
+  // The assignment schema judges the rest (a division, an end after the start, and a time that
+  // carries its zone), as `evaluateGameSchedule` does for the same game. A game with no time of its
+  // own takes its slot's.
+  const division =
+    entry.division ??
+    teamsById.get(homeTeamId)?.division ??
+    teamsById.get(awayTeamId)?.division ??
+    slot?.division;
+  const parsed = AssignmentSchema.safeParse({
+    weekIndex,
+    division,
+    slotId,
+    homeTeamId,
+    awayTeamId,
+    start: entry.start ?? entry.kickoff ?? slot?.start,
+    end: entry.end ?? slot?.end,
+  });
+  if (!parsed.success) {
+    throw new TypeError(
+      `${label} (${homeTeamId} vs ${awayTeamId}) cannot be held: ${parsed.error.issues[0]?.message}`
+    );
+  }
+  return {
+    entry,
+    weekIndex,
+    division: String(division),
+    slotId,
+    homeTeamId,
+    awayTeamId,
+    start: parsed.data.start,
+    end: parsed.data.end,
+  };
+}
+
+/**
+ * Which round-robin matchups the pinned games stand in for. A pinned game consumes one matchup of
+ * its unordered pair: the one in its own week when there is one, else the pair's earliest week
+ * left. The first choice is made for every game before the second is made for any, so a game that
+ * has no matchup in its own week cannot take the one another pinned game was saved in. A pair in no
+ * round robin (a team of another division, an outside side) has nothing to consume.
+ *
+ * @returns {Set<string>} the {@link matchupKey} of each matchup of `roundRobinByDivision` consumed
+ */
+function consumeMatchups(games, roundRobinByDivision) {
+  /** @type {Map<string, Array<{ weekIndex: number, key: string }>>} */
+  const meetings = new Map();
+  for (const [division, weeks] of Object.entries(roundRobinByDivision)) {
+    // A malformed round robin is reported by the placement loop, with the message it always had.
+    if (!Array.isArray(weeks)) continue;
+    weeks.forEach((week, weekPosition) => {
+      if (!week || !Array.isArray(week.matchups)) return;
+      week.matchups.forEach((matchup, matchupPosition) => {
+        if (typeof matchup?.homeTeamId !== 'string' || typeof matchup?.awayTeamId !== 'string') {
+          return;
+        }
+        const pair = pairKey(matchup.homeTeamId, matchup.awayTeamId);
+        const list = meetings.get(pair) ?? [];
+        list.push({
+          weekIndex: week.weekIndex,
+          key: matchupKey(division, weekPosition, matchupPosition),
+        });
+        meetings.set(pair, list);
+      });
+    });
+  }
+  for (const list of meetings.values()) list.sort((a, b) => a.weekIndex - b.weekIndex);
+
+  /** @type {Set<string>} */
+  const consumed = new Set();
+  const unmatched = [];
+  for (const game of games) {
+    const list = meetings.get(pairKey(game.homeTeamId, game.awayTeamId)) ?? [];
+    const sameWeek = list.find((m) => m.weekIndex === game.weekIndex && !consumed.has(m.key));
+    if (sameWeek) consumed.add(sameWeek.key);
+    else unmatched.push(game);
+  }
+  for (const game of unmatched) {
+    const list = meetings.get(pairKey(game.homeTeamId, game.awayTeamId)) ?? [];
+    const next = list.find((m) => !consumed.has(m.key));
+    if (next) consumed.add(next.key);
+  }
+  return consumed;
+}
+
+/** One matchup of a round robin, by where it sits: division, week position, matchup position. */
+function matchupKey(division, weekPosition, matchupPosition) {
+  return `${division}\u0000${weekPosition}\u0000${matchupPosition}`;
 }
 
 function validateWeek({ week, division }) {

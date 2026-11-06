@@ -280,7 +280,9 @@ visible with a reason (incident 10), nothing raised.
   and names `resolve/applyChangeRequest()` and `resolve/reoptimiseWholeSeason()`
   in the message: accepting a freeze it could not honour would be incident 1's
   shape exactly, a caller believing a schedule is protected while every game is
-  free to move.
+  free to move. Holding saved games still while the others are generated again is a
+  smaller thing than a freeze, and `scheduleGames({ pinned })` does it (Published
+  games, `docs/architecture/game-scheduling.md`).
 - **Repair anything but facility legality.** Occupancy, permits, lighting,
   daylight, size and lining are Phase 1.3's and are repaired. Turnover floors,
   round-robin completeness, home/away balance and coach travel are the rule

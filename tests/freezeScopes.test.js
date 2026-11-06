@@ -2375,6 +2375,8 @@ describe('scheduleGames() refuses a freeze rather than ignoring one', () => {
     expect(raised.message).toContain('resolve/reoptimiseWholeSeason()');
     expect(raised.message).toContain('GAP-35');
     expect(raised.message).toContain('GAP-32');
+    // And it names the supported way to hold saved games still (PR 2 of the schedule expansion).
+    expect(raised.message).toContain('pinned');
     // It refuses `null` too: "no freeze" is not something a caller says by
     // passing a falsy value.
     expect(() => scheduleGames({ teams, slots, roundRobinByDivision, freeze: null })).toThrow(

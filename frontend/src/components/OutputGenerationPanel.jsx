@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   practiceChangesNoteOf,
   readUnshownPracticeChanges,
@@ -34,6 +34,8 @@ import {
   naivePublicationStamp,
   usePublicationBaselines,
 } from '../hooks/usePublicationBaselines.js';
+import { setGamesPublished } from '../utils/gamePublishedClient.js';
+import { describeSetFailure, describeSetResult } from '../utils/gamePublishedText.js';
 
 /**
  * The publish path, and the question it makes answerable (GAP-29).
@@ -228,19 +230,26 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
   const exportPractices = practiceRows
     .map(normalizePracticeForExport)
     .filter((assignment) => assignment && exportTeamIds.has(String(assignment.teamId)));
-  const exportGames = gameRows
-    .map(normalizeGameForExport)
+  // The ids go with the games through the same filters, so the games a file holds and the games "Mark these games
+  // Published" names cannot differ: a game with no time, or of a team the files do not hold, is in neither.
+  const exportedGames = gameRows
+    .map((assignment) => ({ id: assignment?.id, game: normalizeGameForExport(assignment) }))
     .filter(
-      (assignment) =>
-        assignment &&
-        exportTeamIds.has(String(assignment.homeTeamId)) &&
-        exportTeamIds.has(String(assignment.awayTeamId))
+      ({ game }) =>
+        game &&
+        exportTeamIds.has(String(game.homeTeamId)) &&
+        exportTeamIds.has(String(game.awayTeamId))
     );
+  const exportGames = exportedGames.map(({ game }) => game);
+  const gameIds = exportedGames
+    .map(({ id }) => id)
+    .filter((id) => typeof id === 'string' && id !== '');
 
   return {
     teams: exportTeams,
     practiceAssignments: exportPractices,
     gameAssignments: exportGames,
+    gameIds,
     untimed,
   };
 }
@@ -584,6 +593,9 @@ export default function OutputGenerationPanel({
   const [parityBusy, setParityBusy] = useState(false);
   // The master XLSX download's failure, said beside the files (admin focus R7).
   const [xlsxError, setXlsxError] = useState(/** @type {string | null} */ (null));
+  // "Mark these games Published" (owner decision 3): on by default; the games are the ones in the files made.
+  const [markPublished, setMarkPublished] = useState(true);
+  const markPublishedNoteId = useId();
 
   // The CSV export flattens teams, practices and games into one file; the
   // email drafts read teams and practices only.
@@ -756,7 +768,8 @@ export default function OutputGenerationPanel({
           gameAssignments: exportPayload.gameAssignments,
           tbdItems: tbd.items,
         });
-        setGenerated(exports);
+        // The ids of the games the files hold travel with them: Upload marks those, as they were made.
+        setGenerated({ ...exports, gameIds: exportPayload.gameIds });
         setTbdRows(tbd.rows);
         // Counted over the rows the CSV holds, filtered exactly as
         // `buildExportPayload` filters them, never over rows it dropped.
@@ -926,8 +939,36 @@ export default function OutputGenerationPanel({
           `${baselineErr.message}. Nothing can later be checked against this publication.`;
       }
 
-      setStatus(baselineFailed ? 'error' : 'success');
-      setMessage(`Uploaded ${files.length} files to 'exports' bucket. ${baselineNote}`);
+      // **The games the files hold are told to families now**, so they are held where they are: marked Published by
+      // the bulk call, with exactly the ids in the files. The baseline above stays the record of what went out;
+      // this is the working-state guard. It is attempted whether or not the baseline landed (the files did go out),
+      // and a refusal is said in the database's words, never as if it had worked.
+      let publishedNote = '';
+      let publishedFailed = false;
+      const gameIds = generated.gameIds ?? [];
+      if (markPublished && gameIds.length > 0 && currentOrganization?.id) {
+        try {
+          const marked = await setGamesPublished({
+            organizationId: currentOrganization.id,
+            ids: gameIds,
+            published: true,
+            scope: { kind: 'selection', value: 'Exports panel' },
+          });
+          publishedNote = ` ${describeSetResult(marked, true)}`;
+        } catch (publishErr) {
+          logger.error('Mark published error:', publishErr);
+          publishedFailed = true;
+          publishedNote =
+            ` The ${gameIds.length} ${gameIds.length === 1 ? 'game was' : 'games were'} NOT marked ` +
+            `Published: ${describeSetFailure(publishErr)} Mark ${gameIds.length === 1 ? 'it' : 'them'} ` +
+            'from the Game Scheduling page.';
+        }
+      }
+
+      setStatus(baselineFailed || publishedFailed ? 'error' : 'success');
+      setMessage(
+        `Uploaded ${files.length} files to 'exports' bucket. ${baselineNote}${publishedNote}`
+      );
     } catch (err) {
       logger.error('Upload error:', err);
       setStatus('error');
@@ -1062,6 +1103,27 @@ export default function OutputGenerationPanel({
               >
                 {status === 'uploading' ? 'Uploading...' : 'Upload to Storage'}
               </button>
+            )}
+
+            {/* The files are the record of what goes out; this makes the games in them Published (held in place)
+                in the same act. On by default, and one tick to leave them as they are. */}
+            {generated && !csvBlocked && !inDemo && (generated.gameIds?.length ?? 0) > 0 && (
+              <div className="flex flex-col relative z-20">
+                <label className="flex items-center gap-2 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    className="cbx"
+                    checked={markPublished}
+                    onChange={(event) => setMarkPublished(event.target.checked)}
+                    disabled={status === 'uploading'}
+                    aria-describedby={markPublishedNoteId}
+                  />
+                  Mark these games Published
+                </label>
+                <span id={markPublishedNoteId} className="text-xs text-text-muted">
+                  {`${generated.gameIds.length} ${generated.gameIds.length === 1 ? 'game' : 'games'} in these files`}
+                </span>
+              </div>
             )}
           </div>
 

@@ -24,6 +24,12 @@ import TeamScheduleView from '../components/TeamScheduleView.jsx';
 import AutoSchedulerPanel from '../components/scheduling/AutoSchedulerPanel.jsx';
 import GameScheduleGrid from '../components/scheduling/GameScheduleGrid.jsx';
 import { GameCardPreview, GameMoveContext } from '../components/scheduling/GameCard.jsx';
+import PublishedControls, {
+  GamePublishedContext,
+} from '../components/scheduling/PublishedSwitch.jsx';
+import GamePublishedBar from '../components/scheduling/GamePublishedBar.jsx';
+import AllowChangesDialog from '../components/scheduling/AllowChangesDialog.jsx';
+import GameHistoryDialog from '../components/scheduling/GameHistoryDialog.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import Tabs from '../components/ui/Tabs.jsx';
@@ -59,6 +65,22 @@ import { todayIso } from '../utils/today.js';
 import { isFieldOfferableOn, venueOf, venueRegistry } from '../utils/fieldLifecycle.js';
 import { isSlotOnField, parseCellId } from '../utils/gameGridCells.js';
 import { logger } from '../lib/logger.js';
+import { setGamesPublished } from '../utils/gamePublishedClient.js';
+import {
+  PUBLISHED_FILTERS,
+  describeScope,
+  filterByPublishedState,
+  movedHistoryGames,
+} from '../utils/gamePublishedScope.js';
+import {
+  cancelRefusal,
+  describeSetFailure,
+  describeSetResult,
+  matchupOf,
+  moveRefusal,
+  movedGamesNote,
+  stagedMoveNote,
+} from '../utils/gamePublishedText.js';
 
 function normalizeAssignmentSource(source) {
   return source === 'manual' || source === 'locked' ? 'manual' : 'auto';
@@ -527,6 +549,50 @@ function toPersistenceAssignment(assignment) {
   };
 }
 
+/**
+ * Cancel one saved game, after a Published game has been refused.
+ *
+ * A Published game is not cancelled from here: the sentence says to allow changes first, and nothing is asked or sent
+ * (the database refuses it too, `game_published`). Anything else is confirmed, cancelled by `admin_cancel_game_assignment`
+ * and removed from the list; a refusal from the database is shown in its words and nothing is removed.
+ *
+ * A function of its own, with its effects passed in, because the list's cancel button is reachable by no role today
+ * (the list shows only when the grid does not, and the button only in edit mode, which opens the grid), and its logic
+ * is still worth holding: `tests/gameGridPublishedGuards.test.jsx`.
+ *
+ * @param {Record<string, any>} assignment
+ * @param {{ rpc: (name: string, params: Record<string, any>) => Promise<{ error: any }>,
+ *   say: (text: string) => void, onCancelled: (id: string) => void,
+ *   confirm?: (text: string) => boolean, fail?: (text: string) => void }} deps
+ */
+export async function cancelGameAssignment(
+  assignment,
+  {
+    rpc,
+    say,
+    onCancelled,
+    confirm = (text) => window.confirm(text),
+    fail = (text) => window.alert(text),
+  }
+) {
+  if (assignment.published === true) {
+    say(cancelRefusal(assignment));
+    return;
+  }
+  if (
+    !confirm(
+      `Cancel the game between ${assignment.homeTeamName ?? 'Home'} and ${assignment.awayTeamName ?? 'Away'}? This cannot be undone.`
+    )
+  )
+    return;
+  const { error } = await rpc('admin_cancel_game_assignment', { p_assignment_id: assignment.id });
+  if (error) {
+    fail(error.message || 'Cancel failed');
+  } else {
+    onCancelled(assignment.id);
+  }
+}
+
 export default function GameSchedulingPage() {
   // `error` too. `game` is an object literal the hook rebuilds every render,
   // so it is never null and the empty grid below is indistinguishable from a
@@ -577,6 +643,8 @@ export default function GameSchedulingPage() {
   const [divisionRows, setDivisionRows] = useState([]);
   const [referenceError, setReferenceError] = useState(null);
   const [activeGame, setActiveGame] = useState(null);
+  // The venues' names by id, for the bulk bar's "one venue" scope (the fields carry only their venue's id).
+  const [venueNames, setVenueNames] = useState(/** @type {Record<string, string>} */ ({}));
 
   const timezone = currentSeasonSetting?.timezone;
   // **"No clock yet" and "no clock at all" are different facts**, and the slot
@@ -623,6 +691,7 @@ export default function GameSchedulingPage() {
         setAllFields([]);
         setGameSlotRows([]);
         setDivisionRows([]);
+        setVenueNames({});
         setReferenceError(null);
         return;
       }
@@ -664,7 +733,7 @@ export default function GameSchedulingPage() {
           // the third argument throws on `undefined`.
           supabase
             .from('locations')
-            .select('id, effective_to')
+            .select('id, name, effective_to')
             .eq('organization_id', currentOrganization.id),
           // **Which divisions play games (D2).** A failed read is an error like
           // the others: guessing "every division plays" would build fixtures
@@ -688,7 +757,7 @@ export default function GameSchedulingPage() {
         // every site reads as unbounded. Every OTHER venue error stays fatal:
         // swallowing them would hide every pitch instead, which looks
         // different and is the same defect.
-        /** @type {Array<{ id: any, effective_to?: any }>|null} */
+        /** @type {Array<{ id: any, name?: any, effective_to?: any }>|null} */
         let venues = venueRows;
         let venueFault = venueError;
         if (venueFault?.code === '42703') {
@@ -697,7 +766,7 @@ export default function GameSchedulingPage() {
           );
           const retry = await supabase
             .from('locations')
-            .select('id')
+            .select('id, name')
             .eq('organization_id', currentOrganization.id);
           if (!isMounted) return;
           venues = retry.data;
@@ -726,6 +795,13 @@ export default function GameSchedulingPage() {
         if (divisionFault) throw divisionFault;
 
         setAllFields(fieldRows ?? []);
+        setVenueNames(
+          Object.fromEntries(
+            (venues ?? [])
+              .filter((row) => row?.id && row?.name)
+              .map((row) => [String(row.id), String(row.name)])
+          )
+        );
         // The two halves of "may the scheduler still offer this" live in one
         // testable producer, because the reading is the point of the change and
         // an inline predicate on a 1000-line page is a reading nothing can pin.
@@ -742,6 +818,7 @@ export default function GameSchedulingPage() {
         setAllFields([]);
         setGameSlotRows([]);
         setDivisionRows([]);
+        setVenueNames({});
         setReferenceError(err.message || 'Game schedule reference data could not be loaded.');
       }
     }
@@ -846,19 +923,27 @@ export default function GameSchedulingPage() {
     [seasonClockLoading, unplaceableSlots]
   );
 
+  // The saved schedule as the page shows it: one entry per row the database returned for the latest run, with
+  // the Published state it carries. This is the SAVED SET the Published controls act on (the bulk scopes, the
+  // counts, the ids of a call), never the staged review and never a filtered list.
+  const savedAssignments = useMemo(
+    () =>
+      (game?.assignments ?? []).map((assignment, index) =>
+        buildDisplayAssignment({
+          assignment,
+          index,
+          runId: game?.runId,
+          teamById,
+          slotById,
+          fieldById,
+        })
+      ),
+    [fieldById, game?.assignments, game?.runId, slotById, teamById]
+  );
+
   useEffect(() => {
-    const nextAssignments = (game?.assignments ?? []).map((assignment, index) =>
-      buildDisplayAssignment({
-        assignment,
-        index,
-        runId: game?.runId,
-        teamById,
-        slotById,
-        fieldById,
-      })
-    );
-    setLocalAssignments(nextAssignments);
-  }, [fieldById, game?.assignments, game?.generatedAt, game?.runId, slotById, teamById]);
+    setLocalAssignments(savedAssignments);
+  }, [savedAssignments, game?.generatedAt]);
 
   const displayedAssignments = reviewAssignments ?? localAssignments;
   const isReviewing = Boolean(reviewAssignments);
@@ -867,6 +952,223 @@ export default function GameSchedulingPage() {
   useEffect(() => {
     displayedAssignmentsRef.current = displayedAssignments;
   }, [displayedAssignments]);
+
+  // ---------------------------------------------------------------------------
+  // Published (plan docs/changes/2026-11-03-schedule-expansion.md, 3.6, PR 3)
+  //
+  // A Published game is held where it is: the database refuses to move or delete it (a trigger), and this page
+  // is the friendly half of that. Turning the flag ON needs nothing; turning it OFF is "Allow changes", a
+  // deliberate, audited act with its own dialog, so no save, move or cancel ever releases a game by the way.
+  //
+  // Every control here acts on the SAVED SET (`savedAssignments`, the rows of the latest run as the database
+  // returned them): the counts, the bulk scopes and the ids of a call are enumerated from it, never from the
+  // staged review and never from the list's filter. The games on screen after an Apply are the staged ones (a
+  // moved game keeps its old id there, a new one has none), so the controls wait for the saved schedule to be read
+  // again; and a game moved to another slot or week is a NEW row that starts not Published (lesson 95), which the
+  // page says rather than hide.
+  // ---------------------------------------------------------------------------
+  const publishedReasonId = useId();
+  const summaryRef = useRef(/** @type {HTMLParagraphElement | null} */ (null));
+  const refetchSaved = game?.refetchSaved ?? game?.refetch;
+  const savedGamesRef = useRef(game?.assignments);
+  useEffect(() => {
+    savedGamesRef.current = game?.assignments;
+  }, [game?.assignments]);
+  // The saved rows the screen last held when a change was made. While `game.assignments` is still that array
+  // the read that follows has not landed, and the ids and flags on screen are not known to be the database's.
+  const [staleAgainst, setStaleAgainst] = useState(/** @type {unknown} */ (null));
+  const savedIsStale = staleAgainst !== null && staleAgainst === game?.assignments;
+  const markSavedStale = useCallback(() => setStaleAgainst(savedGamesRef.current ?? null), []);
+  const [listFilter, setListFilter] = useState('all');
+  const [publishBusy, setPublishBusy] = useState(false);
+  const publishBusyRef = useRef(false);
+  const [publishNotice, setPublishNotice] = useState(
+    /** @type {null | { tone: 'alert' | 'status', text: string }} */ (null)
+  );
+  const [allowDialog, setAllowDialog] = useState(
+    /** @type {null | { games: Array<Record<string, any>>, scope: { kind: string, value?: string }, key: number }} */ (
+      null
+    )
+  );
+  const [dialogNotice, setDialogNotice] = useState(
+    /** @type {null | { tone: 'alert' | 'status', text: string }} */ (null)
+  );
+  const [historyGame, setHistoryGame] = useState(/** @type {null | Record<string, any>} */ (null));
+  const dialogKeyRef = useRef(0);
+  const openerRef = useRef(/** @type {Element | null} */ (null));
+  const restoreFocusRef = useRef(/** @type {Element | null} */ (null));
+
+  // Only an organization admin may change it (the database's `is_org_admin`), and never in a completed season.
+  const canChangePublished = canApplySchedule;
+  const canReadHistory = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
+  const savedReadState = errors.game
+    ? 'unreadable'
+    : loading.game || savedIsStale
+      ? 'reading'
+      : 'ready';
+  /** Why the Published controls are off right now, or null. Said once, in the bar, and pointed at by each switch. */
+  let publishedReason = null;
+  if (!canChangePublished) {
+    publishedReason = seasonReadOnly
+      ? 'This season is completed, so whether its games are Published cannot be changed.'
+      : 'Only an organization admin can change whether games are Published.';
+  } else if (savedReadState === 'unreadable') {
+    publishedReason =
+      'The saved schedule could not be read, so what is Published cannot be changed.';
+  } else if (savedReadState === 'reading') {
+    publishedReason = 'Reading the saved schedule…';
+  } else if (savedAssignments.length === 0) {
+    publishedReason = 'There is no saved schedule yet, so there is nothing to publish.';
+  } else if (isReviewing) {
+    publishedReason =
+      'A staged schedule is waiting. Apply or discard it before changing what is Published.';
+  } else if (publishBusy) {
+    publishedReason = 'Saving…';
+  }
+
+  const allFieldById = useMemo(
+    () => new Map(allFields.map((field) => [String(field.id), field])),
+    [allFields]
+  );
+  /** The venue a saved game is at, by name, from every field the organization holds (retired ones too). */
+  const gameVenueName = useCallback(
+    (savedGame) => {
+      const field = allFieldById.get(String(savedGame?.fieldId ?? ''));
+      return field?.location_id ? (venueNames[String(field.location_id)] ?? null) : null;
+    },
+    [allFieldById, venueNames]
+  );
+
+  const runSetPublished = useCallback(
+    async (input) => {
+      if (publishBusyRef.current)
+        return { ok: false, error: 'Another change is still being saved.' };
+      if (!currentOrganization?.id) return { ok: false, error: 'No organization is selected.' };
+      publishBusyRef.current = true;
+      setPublishBusy(true);
+      try {
+        const result = await setGamesPublished({
+          organizationId: currentOrganization.id,
+          ...input,
+        });
+        // The flag is the database's, not a guess of ours: read the saved schedule again.
+        markSavedStale();
+        refetchSaved?.();
+        return { ok: true, result };
+      } catch (err) {
+        // A long list is several calls; the ones before a refusal were saved.
+        if (err?.done?.calls > 0) {
+          markSavedStale();
+          refetchSaved?.();
+        }
+        return { ok: false, error: describeSetFailure(err) };
+      } finally {
+        publishBusyRef.current = false;
+        setPublishBusy(false);
+      }
+    },
+    [currentOrganization?.id, markSavedStale, refetchSaved]
+  );
+
+  const publishGames = useCallback(
+    async ({ ids, scope }, label = null) => {
+      setPublishNotice(null);
+      const outcome = await runSetPublished({ ids, published: true, scope });
+      setPublishNotice(
+        outcome.ok
+          ? { tone: 'status', text: describeSetResult(outcome.result, true) }
+          : { tone: 'alert', text: label ? `${label}: ${outcome.error}` : outcome.error }
+      );
+    },
+    [runSetPublished]
+  );
+
+  const openAllowChanges = useCallback(
+    (games, scope) => {
+      setDialogNotice(null);
+      openerRef.current = document.activeElement;
+      dialogKeyRef.current += 1;
+      setAllowDialog({
+        games: games.map((savedGame) => ({
+          ...savedGame,
+          whenText: formatDateTime(savedGame.start ?? savedGame.kickoff, timezone),
+        })),
+        scope,
+        key: dialogKeyRef.current,
+      });
+    },
+    [timezone]
+  );
+
+  const confirmAllowChanges = useCallback(
+    async ({ reasonCode, note }) => {
+      if (!allowDialog) return;
+      setDialogNotice(null);
+      const outcome = await runSetPublished({
+        ids: allowDialog.games.map((savedGame) => String(savedGame.id)),
+        published: false,
+        reasonCode,
+        note,
+        scope: allowDialog.scope,
+      });
+      if (outcome.ok) {
+        restoreFocusRef.current = openerRef.current;
+        setAllowDialog(null);
+        setPublishNotice({ tone: 'status', text: describeSetResult(outcome.result, false) });
+      } else {
+        setDialogNotice({ tone: 'alert', text: outcome.error });
+      }
+    },
+    [allowDialog, runSetPublished]
+  );
+
+  // Once the saved schedule has been read again, focus goes back to what opened the dialog (the switch), or to the
+  // count when that control has nothing left to do: a person is never left on a control that went away.
+  useEffect(() => {
+    if (publishedReason !== null || !restoreFocusRef.current) return;
+    const opener = /** @type {HTMLElement} */ (restoreFocusRef.current);
+    restoreFocusRef.current = null;
+    const target =
+      opener.isConnected && !opener.hasAttribute('disabled') ? opener : summaryRef.current;
+    target?.focus();
+  }, [publishedReason]);
+
+  const publishedContext = useMemo(
+    () => ({
+      canChange: canChangePublished,
+      canReadHistory,
+      disabledReason: canChangePublished ? publishedReason : null,
+      reasonId: publishedReasonId,
+      publish: (savedGame) => {
+        const { home, away } = matchupOf(savedGame);
+        publishGames(
+          { ids: [String(savedGame.id)], scope: { kind: 'selection' } },
+          `${home} vs ${away}`
+        );
+      },
+      allowChanges: (savedGame) => openAllowChanges([savedGame], { kind: 'selection' }),
+      showHistory: (savedGame) => setHistoryGame(savedGame),
+    }),
+    [
+      canChangePublished,
+      canReadHistory,
+      openAllowChanges,
+      publishGames,
+      publishedReason,
+      publishedReasonId,
+    ]
+  );
+
+  // The list can be filtered to what is Published or released; the filter shapes the LIST and nothing else (the
+  // bar above it is given the saved set, not this).
+  const showPublishedFilter = !canEditSchedule && activeTab === 'full' && !isReviewing;
+  const listAssignments = useMemo(
+    () =>
+      showPublishedFilter
+        ? filterByPublishedState(displayedAssignments, listFilter)
+        : displayedAssignments,
+    [displayedAssignments, listFilter, showPublishedFilter]
+  );
 
   /**
    * Blackout conflicts, merged into the same banner the scheduler's own
@@ -1189,7 +1491,18 @@ export default function GameSchedulingPage() {
       );
       setReviewAssignments(null);
       setApplyStatus('applied');
-      setStatusMessage('Game schedule applied through the persistence workflow.');
+      // A game that had a Published history and is not where it was is saved as a NEW game: it starts not
+      // Published, and its history stays with the old record. Said, not hidden.
+      const leftBehind = movedHistoryGames(reviewAssignments, savedAssignments);
+      setStatusMessage(
+        `Game schedule applied through the persistence workflow.${
+          leftBehind.length > 0 ? movedGamesNote(leftBehind.length) : ''
+        }`
+      );
+      // The games on screen are the staged ones; the saved schedule (its ids and flags) is read again, and the
+      // Published controls wait for it.
+      markSavedStale();
+      refetchSaved?.();
     } catch (err) {
       setApplyStatus('error');
       setApplyError(err.message || 'Game schedule changes could not be applied.');
@@ -1200,9 +1513,12 @@ export default function GameSchedulingPage() {
     canManageSchedule,
     game?.runId,
     localAssignments,
+    markSavedStale,
     persistReviewedAssignments,
+    refetchSaved,
     rereadAfterUnknownOutcome,
     reviewAssignments,
+    savedAssignments,
     schedulerResult,
   ]);
 
@@ -1235,6 +1551,8 @@ export default function GameSchedulingPage() {
       setLastRollbackAssignments(null);
       setApplyStatus('rolledBack');
       setStatusMessage('Game schedule rolled back through the persistence workflow.');
+      markSavedStale();
+      refetchSaved?.();
     } catch (err) {
       setApplyStatus('error');
       setApplyError(err.message || 'Game schedule rollback could not be applied.');
@@ -1244,7 +1562,9 @@ export default function GameSchedulingPage() {
     canApplySchedule,
     canManageSchedule,
     lastRollbackAssignments,
+    markSavedStale,
     persistReviewedAssignments,
+    refetchSaved,
     rereadAfterUnknownOutcome,
   ]);
 
@@ -1288,6 +1608,14 @@ export default function GameSchedulingPage() {
       // Put back where it was (a keyboard pick-up and drop, a drop on its own
       // cell): nothing moved, so nothing is staged or marked manual.
       if (cellOf(currentAssignment) === targetCell) return;
+      // A Published game is held where it is. The card offers no grip and no "Move to" for it; this is the same
+      // refusal for a drop or a call that reaches the handler anyway, before anything is staged. The database
+      // refuses the move too (a trigger), so this is the friendly half.
+      if (currentAssignment.published === true) {
+        setApplyError(null);
+        setStatusMessage(moveRefusal(currentAssignment));
+        return;
+      }
       // The grid draws every slot under every field, but a slot is one field's
       // booking: what "Move to" does not offer, a drop does not stage either
       // (`isSlotOnField`, the one rule for both).
@@ -1338,7 +1666,13 @@ export default function GameSchedulingPage() {
       setReviewAssignments(staged);
       setApplyStatus('review');
       setApplyError(null);
-      setStatusMessage('Manual game move staged. Apply the schedule to persist it.');
+      // A game that has been Published and is moved is saved as a new game, which starts not Published (the save
+      // keys a game on its slot and week and writes no id): said here, where the move is staged.
+      setStatusMessage(
+        (currentAssignment.publishedAt ?? currentAssignment.published_at)
+          ? stagedMoveNote(currentAssignment)
+          : 'Manual game move staged. Apply the schedule to persist it.'
+      );
     },
     [canEditSchedule, fields, slotByCellSlotId]
   );
@@ -1439,22 +1773,18 @@ export default function GameSchedulingPage() {
     };
   }, [cellLabels, slotByCellSlotId]);
 
-  const handleCancelGameAssignment = useCallback(async (assignment) => {
-    if (
-      !window.confirm(
-        `Cancel the game between ${assignment.homeTeamName ?? 'Home'} and ${assignment.awayTeamName ?? 'Away'}? This cannot be undone.`
-      )
-    )
-      return;
-    const { error } = await supabase.rpc('admin_cancel_game_assignment', {
-      p_assignment_id: assignment.id,
-    });
-    if (error) {
-      window.alert(error.message || 'Cancel failed');
-    } else {
-      setLocalAssignments((prev) => prev.filter((a) => a.id !== assignment.id));
-    }
-  }, []);
+  const handleCancelGameAssignment = useCallback(
+    (assignment) =>
+      cancelGameAssignment(assignment, {
+        rpc: async (name, params) => supabase.rpc(name, params),
+        say: (text) => {
+          setApplyError(null);
+          setStatusMessage(text);
+        },
+        onCancelled: (id) => setLocalAssignments((prev) => prev.filter((a) => a.id !== id)),
+      }),
+    []
+  );
 
   if (loading.game && !game) {
     return (
@@ -1464,7 +1794,8 @@ export default function GameSchedulingPage() {
     );
   }
 
-  return (
+  // The page, held in a constant so that the provider around it does not re-indent all of it.
+  const page = (
     <div className="animate-fadeIn space-y-8">
       <div className="flex justify-between items-start mb-8">
         <div>
@@ -1594,7 +1925,24 @@ export default function GameSchedulingPage() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6">
+          <GamePublishedBar
+            saved={savedAssignments}
+            status={savedReadState}
+            canChange={canChangePublished}
+            reason={publishedReason}
+            reasonId={publishedReasonId}
+            controlsOff={publishedReason !== null}
+            timezone={timezone}
+            venueOf={gameVenueName}
+            showFilter={showPublishedFilter}
+            filter={listFilter}
+            onFilterChange={setListFilter}
+            notice={publishNotice}
+            summaryRef={summaryRef}
+            onPublish={({ ids, scope }) => publishGames({ ids, scope })}
+            onAllowChanges={({ games, scope }) => openAllowChanges(games, scope)}
+          />
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md">
             {/* The view tabs are the shared `Tabs` primitive: the selected one carries an
                 underline and `aria-selected`, not only a colour (WCAG 1.4.1). The bar's
@@ -1657,12 +2005,25 @@ export default function GameSchedulingPage() {
                   </DndContext>
                 </div>
               ) : activeTab === 'full' ? (
-                <GameScheduleList
-                  assignments={displayedAssignments}
-                  timezone={timezone}
-                  onEditSchedule={canManageSchedule ? handleAutoGenerate : undefined}
-                  onCancelAssignment={canCancelAssignments ? handleCancelGameAssignment : undefined}
-                />
+                showPublishedFilter &&
+                listFilter !== 'all' &&
+                listAssignments.length === 0 &&
+                displayedAssignments.length > 0 ? (
+                  <p className="p-6 text-sm text-text-muted" data-testid="published-filter-empty">
+                    {`No saved games are ${
+                      PUBLISHED_FILTERS.find((item) => item.id === listFilter)?.label ?? listFilter
+                    }.`}
+                  </p>
+                ) : (
+                  <GameScheduleList
+                    assignments={listAssignments}
+                    timezone={timezone}
+                    onEditSchedule={canManageSchedule ? handleAutoGenerate : undefined}
+                    onCancelAssignment={
+                      canCancelAssignments ? handleCancelGameAssignment : undefined
+                    }
+                  />
+                )
               ) : (
                 <TeamScheduleSelector
                   assignments={displayedAssignments}
@@ -1702,7 +2063,36 @@ export default function GameSchedulingPage() {
           <PracticeOnlyDivisions divisions={divisionPlan.practiceOnlyDivisions} />
         </div>
       </div>
+
+      {allowDialog && (
+        <AllowChangesDialog
+          key={allowDialog.key}
+          open
+          games={allowDialog.games}
+          scopeText={
+            allowDialog.scope.kind === 'selection' ? null : describeScope(allowDialog.scope)
+          }
+          busy={publishBusy}
+          notice={dialogNotice}
+          onConfirm={confirmAllowChanges}
+          onClose={() => setAllowDialog(null)}
+        />
+      )}
+      {historyGame && currentOrganization?.id && (
+        <GameHistoryDialog
+          key={String(historyGame.id)}
+          open
+          game={historyGame}
+          organizationId={currentOrganization.id}
+          timezone={timezone}
+          onClose={() => setHistoryGame(null)}
+        />
+      )}
     </div>
+  );
+
+  return (
+    <GamePublishedContext.Provider value={publishedContext}>{page}</GamePublishedContext.Provider>
   );
 }
 
@@ -1782,6 +2172,9 @@ function GameScheduleList({ assignments, timezone, onEditSchedule, onCancelAssig
             <th className="p-4 text-xs font-semibold text-text-muted uppercase tracking-wider">
               Kickoff
             </th>
+            <th className="p-4 text-xs font-semibold text-text-muted uppercase tracking-wider">
+              Published
+            </th>
             {onCancelAssignment && (
               <th className="p-4 text-xs font-semibold text-text-muted uppercase tracking-wider text-right">
                 Actions
@@ -1802,6 +2195,9 @@ function GameScheduleList({ assignments, timezone, onEditSchedule, onCancelAssig
               <td className="p-4 text-text-secondary">{a.fieldName ?? a.fieldId ?? '-'}</td>
               <td className="p-4 text-text-secondary">
                 {a.kickoff ? formatDateTime(a.kickoff, timezone) : '-'}
+              </td>
+              <td className="p-4">
+                <PublishedControls assignment={a} className="" />
               </td>
               {onCancelAssignment && (
                 <td className="p-4 text-right">

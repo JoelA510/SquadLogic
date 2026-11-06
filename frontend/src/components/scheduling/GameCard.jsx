@@ -6,6 +6,7 @@ import { GripVertical, Clock, MapPin } from 'lucide-react';
 import { formatTime } from '../../utils/formatters.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import { divisionDisplayName } from '../../utils/divisions.js';
+import PublishedControls from './PublishedSwitch.jsx';
 
 /**
  * The grid's move targets and its one move handler, provided by
@@ -113,6 +114,10 @@ MoveToControl.propTypes = {
  * A pointer drags the whole card. The keyboard drags from the grip, a button
  * (the activator node), so a key pressed in the "Move to…" control never
  * starts a drag; the page's `KeyboardSensor` moves it between cells.
+ *
+ * **A Published game is held where it is** (plan `docs/changes/2026-11-03-schedule-expansion.md`, 3.6): it has no
+ * grip, is not draggable, and has no "Move to…"; its Published state is said on the card, with an "Allow changes"
+ * button in the place of "Move to…". The page's move handler and the database refuse a move of it regardless.
  */
 export default function GameCard({
   assignment,
@@ -120,11 +125,13 @@ export default function GameCard({
   isDragDisabled = false,
   timezone = undefined,
 }) {
+  const isPublishedGame = assignment.published === true;
+  const held = isDragDisabled || isPublishedGame;
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } =
     useDraggable({
       id: assignment.id,
       data: assignment,
-      disabled: isDragDisabled,
+      disabled: held,
     });
   /** @type {{ onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement> } & Record<string, any>} */
   const { onKeyDown: keyboardListener, ...pointerListeners } = listeners ?? {};
@@ -147,7 +154,7 @@ export default function GameCard({
       style={style}
       data-testid={`game-card-${assignment.id}`}
       className={`p-3 bg-bg-surface border rounded-lg shadow-sm transition-colors ${
-        isDragDisabled ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+        held ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
       } ${
         hasConflict
           ? 'border-status-error shadow-[0_0_12px_rgba(239,68,68,0.25)]'
@@ -159,7 +166,7 @@ export default function GameCard({
     >
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
-          {!isDragDisabled && (
+          {!held && (
             <button
               type="button"
               ref={setActivatorNodeRef}
@@ -199,7 +206,15 @@ export default function GameCard({
         </span>
       </div>
 
-      {move && !isDragDisabled && <MoveToControl assignment={assignment} move={move} />}
+      <PublishedControls assignment={assignment} />
+
+      {isPublishedGame && (
+        <p className="mt-1 text-xs text-text-muted" data-testid="published-hold-note">
+          Published: allow changes to move it.
+        </p>
+      )}
+
+      {move && !held && <MoveToControl assignment={assignment} move={move} />}
     </div>
   );
 }
@@ -215,6 +230,7 @@ GameCard.propTypes = {
     fieldId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
     division: PropTypes.string,
     assignmentSource: PropTypes.string,
+    published: PropTypes.bool,
   }).isRequired,
   hasConflict: PropTypes.bool,
   isDragDisabled: PropTypes.bool,

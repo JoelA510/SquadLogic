@@ -9,9 +9,11 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
 
   What this feature does NOT assert, because it is not true: that a game's Published state, its date or its history
   follows it to another slot or week. The save keys a game on (home, away, slot, week) and writes no id, so a game moved
-  to another slot or week is saved as a new game that starts not Published, and the page says so. The save is answered
-  by a stand-in here (the mock client has no arm for `persist_game_schedule`), so these scenarios read what the page
-  SENDS and what it SAYS; the database's side is held by supabase/tests/game_published.sql in CI.
+  to another slot or week is saved as a new game that starts not Published, and the page says so. The mock client has no
+  arm for `persist_game_schedule`, so a stand-in answers the save the way the database does (a new run; each game
+  upserted on its matchup tuple, a moved game a new row that starts not Published, the old row left behind in its older
+  run), and the scenarios assert only what the page RENDERS after it reads the saved schedule again. What the page sends
+  is held by tests/gameGridPublishedGuards.test.jsx; the database's side by supabase/tests/game_published.sql in CI.
 
   The league: U10 Boys (Lions, Wolves, Comets, Bulls) with four saved games, U12 Girls (Hawks, Owls) with one, on two
   fields at two venues; two slots are empty (week 3).
@@ -62,8 +64,10 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     Then the Games page says "will be saved as a new game, which starts not Published"
     When I apply the staged game schedule
     Then the Games page says "1 moved game was saved as a new game: it starts not Published, so publish it again."
-    And the save carried "Lions" vs "Wolves" in the empty slot
-    And the save carried the Published games exactly where they were
+    And the Published line reads "3 of 5 saved games Published, 0 with changes allowed"
+    And the game "Lions" vs "Wolves" is now in the empty slot on "North Field" as a new game that is "Not published"
+    And the place where "Lions" vs "Wolves" was saved is empty
+    And the other Published games are still Published in their own places
 
   Scenario: Regenerating keeps the Published games where they are
     Given the "U10 Boys" division is Published

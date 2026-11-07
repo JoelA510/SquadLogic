@@ -387,23 +387,133 @@ When(
   }
 );
 
-type SavedRows = Array<Record<string, unknown>>;
-type PersistencePage = Page & {
-  __gameSaves?: Array<{ snapshot?: { payload?: { assignmentRows?: SavedRows } } }>;
-};
+type SaveOutcome = { runId: string } | { refused: string[] };
+
+/**
+ * The stand-in for `persist_game_schedule` (the mock client has no arm for the save, which is an Edge function over SQL):
+ * it answers the way the database does, so the page's refresh after Apply reads a REAL result and the scenarios assert
+ * what is rendered, never what was sent.
+ *
+ * What the database does, and this does: the save makes a NEW completed run and upserts each game on its matchup
+ * tuple (home, away, slot, week) without writing an id. A game whose tuple is already saved keeps its row (its id, its
+ * Published flag and its history) and moves to the new run; a game at a tuple that is not saved is a NEW row that starts
+ * not Published, with no history; a row the save does not name stays behind in its older run, where the page no longer
+ * shows it. A save that leaves out a Published game is refused whole (`game_published_omitted`, 409 `GAME_PUBLISHED`).
+ * What it does not do: the guard trigger on a moved Published row (a moved tuple is an omission here, as there), the
+ * audit rows, the TIME TBD sync. Those are held by supabase/tests/game_published.sql.
+ */
+async function persistLikeTheDatabase(
+  page: Page,
+  body: {
+    snapshot?: { payload?: { assignmentRows?: Array<Record<string, unknown>> } };
+    runMetadata?: { organizationId?: string; seasonSettingsId?: string };
+  }
+): Promise<SaveOutcome> {
+  const rows = body.snapshot?.payload?.assignmentRows ?? [];
+  const org = body.runMetadata?.organizationId ?? CLUB.orgId;
+  const season = body.runMetadata?.seasonSettingsId ?? CLUB.seasonId;
+  return page.evaluate(
+    ({ rows, org, season }) => {
+      type Row = Record<string, unknown>;
+      const db = window.__MOCK_DB__ as Record<string, Row[] | undefined>;
+      const tuple = (row: Row) =>
+        [row.home_team_id, row.away_team_id, row.game_slot_id ?? row.slot_id, row.week_index]
+          .map(String)
+          .join('|');
+      const saved = (db.game_assignments ?? []).filter((game) => game.organization_id === org);
+      const named = new Set(rows.map(tuple));
+      const omitted = saved
+        .filter((game) => game.published === true && !named.has(tuple(game)))
+        .map((game) => String(game.id))
+        .sort();
+      if (omitted.length > 0) return { refused: omitted };
+
+      const gameRuns = (db.scheduler_runs ?? []).filter(
+        (run) => run.organization_id === org && run.run_type === 'game'
+      );
+      const latest = Math.max(
+        Date.now(),
+        ...gameRuns.map((run) => Date.parse(String(run.completed_at))).filter(Number.isFinite)
+      );
+      const runId = `e2e-saved-run-${gameRuns.length + 1}`;
+      const completedAt = new Date(latest + 60_000).toISOString();
+
+      const taken = new Set<string>();
+      const written = rows.map((row, index): Row => {
+        const match = saved.find(
+          (game) => !taken.has(String(game.id)) && tuple(game) === tuple(row)
+        );
+        if (match) {
+          taken.add(String(match.id));
+          // The same row: its id, its Published flag and its history stay; it joins the new run.
+          return {
+            ...match,
+            division: row.division,
+            field_id: row.field_id,
+            start: row.start,
+            end: row.end,
+            assignment_source: row.assignment_source,
+            run_id: runId,
+          };
+        }
+        return {
+          ...row,
+          id: `e2e-new-game-${runId}-${index}`,
+          organization_id: org,
+          run_id: runId,
+          published: false,
+          published_at: null,
+          published_by: null,
+        };
+      });
+      db.scheduler_runs = [
+        ...(db.scheduler_runs ?? []),
+        {
+          id: runId,
+          organization_id: org,
+          season_settings_id: season,
+          run_type: 'game',
+          status: 'completed',
+          created_at: completedAt,
+          completed_at: completedAt,
+          results: { summary: { scheduledRate: 1.0, unscheduledMatchups: 0 }, warnings: [] },
+        },
+      ];
+      db.game_assignments = [...(db.game_assignments ?? []), ...written];
+      window.__saveMockDB__(db);
+      return { runId };
+    },
+    { rows, org, season }
+  );
+}
 
 When('I apply the staged game schedule', async ({ page }) => {
-  // The save is answered by a stand-in (the mock client has no arm for `persist_game_schedule`): this scenario reads
-  // what the page SENDS.
   await page.route('**/functions/v1/game-persistence', async (route) => {
-    const saves = ((page as PersistencePage).__gameSaves ??= []);
-    saves.push(JSON.parse(route.request().postData() || '{}'));
+    const outcome = await persistLikeTheDatabase(
+      page,
+      JSON.parse(route.request().postData() || '{}')
+    );
+    if ('refused' in outcome) {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'error',
+          code: 'GAME_PUBLISHED',
+          reason: 'game_published_omitted',
+          message: `this save leaves out ${outcome.refused.length} Published game(s): a save carries every Published game of its season, unchanged`,
+          ids: outcome.refused,
+          count: outcome.refused.length,
+        }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         status: 'success',
-        runId: '00000000-0000-4000-8000-0000000000ca',
+        runId: outcome.runId,
         message: 'Persistence successful.',
       }),
     });
@@ -538,34 +648,55 @@ Then('the Games page says {string}', async ({ page }, text: string) => {
   await expect(page.getByText(text).first()).toBeVisible({ timeout: 20_000 });
 });
 
+// The empty slots of week 3 (see the table at the top): where the move goes.
+const EMPTY_SLOT: Record<string, string> = { north: 'e2e-gs-7', south: 'e2e-gs-8' };
+const cellOf = (page: Page, field: string, slot: string) =>
+  page.getByTestId(`drop-zone-e2e-${field}:${slot}`);
+
 Then(
-  'the save carried {string} vs {string} in the empty slot',
-  async ({ page }, home: string, away: string) => {
-    const rows = lastSaveRows(page);
-    const moved = rows.find(
-      (row) => row.home_team_id === teamId(home) && row.away_team_id === teamId(away)
-    );
-    expect(moved, `${home} vs ${away} is in the save`).toBeTruthy();
-    // The empty slot on North Field (week 3), not the slot the game was saved in.
-    expect(moved?.game_slot_id).toBe('e2e-gs-7');
-    expect(moved?.game_slot_id).not.toBe(gameOf(home, away).slot);
+  'the game {string} vs {string} is now in the empty slot on {string} as a new game that is {string}',
+  async ({ page }, home: string, away: string, fieldName: string, state: string) => {
+    const field = fieldName.split(' ')[0].toLowerCase();
+    const seeded = gameOf(home, away);
+    // The grid shows what the page read back from the database after the save: the saved schedule, not the staged one.
+    const card = cellOf(page, field, EMPTY_SLOT[field]).getByTestId(/^game-card-/);
+    await expect(card).toHaveCount(1, { timeout: 20_000 });
+    // A new row has a new id: the card is not the one the game had before the move.
+    await expect(card).not.toHaveAttribute('data-testid', `game-card-${seeded.id}`);
+    await expect(card.getByTestId('published-state')).toHaveText(state);
+    await expect(
+      card.getByRole('switch', { name: `Published: ${home} versus ${away}` })
+    ).toHaveAttribute('aria-checked', 'false');
+    // It starts with no history, and nothing is held: no History button, no Allow changes.
+    await expect(card.getByRole('button', { name: /^History:/ })).toHaveCount(0);
+    await expect(card.getByRole('button', { name: /^Allow changes:/ })).toHaveCount(0);
+    await expect(card.getByTestId('published-hold-note')).toHaveCount(0);
   }
 );
 
-Then('the save carried the Published games exactly where they were', async ({ page }) => {
-  const rows = lastSaveRows(page);
-  // All five games are in the save (a Published game left out is refused by the database).
-  expect(rows).toHaveLength(GAMES.length);
+Then(
+  'the place where {string} vs {string} was saved is empty',
+  async ({ page }, home: string, away: string) => {
+    const seeded = gameOf(home, away);
+    const cell = cellOf(page, seeded.field, seeded.slot);
+    await expect(cell.getByTestId(`empty-slot-e2e-${seeded.field}:${seeded.slot}`)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(cell.getByTestId(/^game-card-/)).toHaveCount(0);
+  }
+);
+
+Then('the other Published games are still Published in their own places', async ({ page }) => {
   for (const [home, away] of PUBLISHED_MATCHUPS.slice(1)) {
     const seeded = gameOf(home, away);
-    const sent = rows.filter(
-      (row) =>
-        row.home_team_id === teamId(home) &&
-        row.away_team_id === teamId(away) &&
-        row.game_slot_id === seeded.slot &&
-        row.week_index === seeded.week
-    );
-    expect(sent, `${home} vs ${away} is saved at its slot and week`).toHaveLength(1);
+    // The same card (the same row: id and flag kept), in the same cell, still Published and still held.
+    const card = cellOf(page, seeded.field, seeded.slot).getByTestId(`game-card-${seeded.id}`);
+    await expect(card, `${home} vs ${away} is where it was`).toBeVisible({ timeout: 20_000 });
+    await expect(card.getByTestId('published-state')).toHaveText('Published');
+    await expect(
+      card.getByRole('switch', { name: `Published: ${home} versus ${away}` })
+    ).toHaveAttribute('aria-checked', 'true');
+    await expect(card.getByTestId('published-hold-note')).toBeVisible();
   }
 });
 
@@ -582,9 +713,3 @@ Then('the Published games are where they were', async ({ page }) => {
     await expect(row.getByTestId('published-state')).toHaveText('Published');
   }
 });
-
-function lastSaveRows(page: Page): SavedRows {
-  const saves = (page as PersistencePage).__gameSaves ?? [];
-  expect(saves.length, 'the page sent a save').toBeGreaterThan(0);
-  return saves[saves.length - 1].snapshot?.payload?.assignmentRows ?? [];
-}

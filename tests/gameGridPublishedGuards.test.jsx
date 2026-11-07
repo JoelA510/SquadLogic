@@ -20,6 +20,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ORG, SEASON, TZ, seedWorld } from './helpers/publishedGamesWorld.js';
 import { cancelRefusal, moveRefusal } from '../frontend/src/utils/gamePublishedText.js';
+import { publishedOmissions } from '../packages/core/src/gamePublished.js';
+import { getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 
 const ROLE = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
 /** What the page handed `DndContext`, so a test can finish a drag the way the library does. */
@@ -72,8 +74,13 @@ vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
 vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), log: vi.fn(), info: vi.fn() },
 }));
+/** What the page handed the save, in order: the arguments of every `persistGameScheduleReview`. */
+const SAVES = vi.hoisted(() => ({ calls: /** @type {any[]} */ ([]) }));
 vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
-  persistGameScheduleReview: async () => ({ runId: 'run-new' }),
+  persistGameScheduleReview: async (args) => {
+    SAVES.calls.push(args);
+    return { runId: 'run-new' };
+  },
 }));
 // The page's DndContext, recorded: `onDragEnd` is what the library calls when a drop lands.
 vi.mock('@dnd-kit/core', async (importOriginal) => {
@@ -118,6 +125,7 @@ const { ROLE_PERMISSIONS, ROLES } = await import('../frontend/src/constants/perm
 beforeEach(() => {
   sessionStorage.clear();
   DND.props = null;
+  SAVES.calls.length = 0;
   ROLE.value = {
     currentOrganization: { id: ORG, name: 'Synthetic FC' },
     currentSeasonSetting: { id: SEASON, timezone: TZ, status: 'active' },
@@ -298,6 +306,48 @@ describe('applying a move of a game that has a history says it is a new game', (
     ).toHaveTextContent(
       '1 moved game was saved as a new game: it starts not Published, so publish it again.'
     );
+  });
+
+  // What the E2E feature used to read from the captured request (a payload assertion is not a DOM assertion): the page
+  // hands the save the moved game at its new slot and week, and every Published game exactly where it was, which is
+  // what the database's omission check requires (`publishedOmissions` is its twin).
+  it('the save carries the moved game at its new slot and week, and every Published game where it was', async () => {
+    await openGrid();
+    const saved = getMockData('game_assignments');
+    fireEvent.click(screen.getByText('keyboard-move ga-3'));
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+    await screen.findByText(/Game schedule applied through the persistence workflow\./);
+    expect(SAVES.calls).toHaveLength(1);
+    const sent = SAVES.calls[0].assignments;
+    // All six games are in the save: a game left out is not a deleted game, it is a refused save when Published.
+    expect(sent).toHaveLength(6);
+    const matchup = (home, away) =>
+      sent.filter((a) => a.homeTeamId === home && a.awayTeamId === away);
+    // ga-3 (team-2 v team-3, saved on f-south, slot gs-3, week 2) moved to f-north / gs-7 (week 3).
+    const [moved] = matchup('team-2', 'team-3');
+    expect(moved).toMatchObject({ fieldId: 'f-north', slotId: 'gs-7', weekIndex: 3 });
+    // A move to another slot or week is another matchup tuple: a NEW row, not an update of ga-3 (lesson 95).
+    const ga3 = saved.find((g) => g.id === 'ga-3');
+    expect([ga3.game_slot_id, ga3.week_index]).not.toEqual([moved.slotId, moved.weekIndex]);
+    // The Published games (ga-1: team-1 v team-2; ga-5: team-4 v team-6) are saved where they were.
+    expect(matchup('team-1', 'team-2')[0]).toMatchObject({
+      fieldId: 'f-north',
+      slotId: 'gs-1',
+      weekIndex: 1,
+    });
+    expect(matchup('team-4', 'team-6')[0]).toMatchObject({
+      fieldId: 'f-south',
+      slotId: 'gs-5',
+      weekIndex: 2,
+    });
+    // The oracle is the database's omission check: none left out. And it can fail: leave one Published game out.
+    expect(publishedOmissions(saved, sent)).toEqual([]);
+    const withoutGa1 = sent.filter(
+      (a) => !(a.homeTeamId === 'team-1' && a.awayTeamId === 'team-2')
+    );
+    expect(publishedOmissions(saved, withoutGa1).map((g) => g.id)).toEqual(['ga-1']);
   });
 
   it('control: a game that was never published, moved and applied, has no such sentence', async () => {

@@ -460,7 +460,7 @@ SELECT is(pg_temp.errx($$SELECT public.admin_cancel_game_assignment('a1111111-11
 SELECT is(pg_temp.errx($$SELECT public.admin_delete_team('a1111111-1111-1111-1111-0000000d0003')$$), '22023:game_published', 'delete team refuses its team');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7('{}', ARRAY['a1111111-1111-1111-1111-0000000d0e02']::uuid[]))$$),
     '22023:game_published_omitted count=1 ids=a1111111-1111-1111-1111-0000000d0e02', 'a save that leaves it out is refused as an omission');
-SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e02', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e02', 'a1111111-1111-1111-1111-0000000d00d9'))))$$),
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e02', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e02', 'a1111111-1111-1111-1111-0000000d00da'))))$$),
     '22023:game_published', 'and a save that moves it by its id is refused by the guard');
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error', 'control: a save that carries it where it is is accepted');
 

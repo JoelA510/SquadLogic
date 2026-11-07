@@ -1354,7 +1354,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2557,6 +2557,30 @@ NEEDLES
                 ('dc000000-0000-4000-8000-0000000000b2','dc000000-0000-4000-8000-00000000000a','dc000000-0000-4000-8000-0000000000a1','dc000000-0000-4000-8000-0000000000a2','Revert','Two');" \
          >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the two players the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261120010000's revert keeps a column that holds data and puts the old bodies back over rows the new save
+  # wrote**, so it is applied onto a database that holds two games with a season (one of them Published) and must say
+  # that two carry a season, leave both rows and the Published flag, bring the guard back WHEN (OLD.published) and
+  # take the predicate away. Every name is synthetic.
+  if [ "$id" = "20261120010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('1d000000-0000-4000-8000-00000000000a','Identity Revert Org','identity-revert');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('1d000000-0000-4000-8000-0000000000a1','1d000000-0000-4000-8000-00000000000a','Identity Revert Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('1d000000-0000-4000-8000-0000000000a2','1d000000-0000-4000-8000-00000000000a','1d000000-0000-4000-8000-0000000000a1','Identity Revert Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('1d000000-0000-4000-8000-0000000000b1','1d000000-0000-4000-8000-00000000000a','1d000000-0000-4000-8000-0000000000a2','Revert One'),
+                ('1d000000-0000-4000-8000-0000000000b2','1d000000-0000-4000-8000-00000000000a','1d000000-0000-4000-8000-0000000000a2','Revert Two');
+              INSERT INTO public.game_assignments (id, organization_id, home_team_id, away_team_id, division, week_index, season_settings_id) VALUES
+                ('1d000000-0000-4000-8000-0000000000c1','1d000000-0000-4000-8000-00000000000a','1d000000-0000-4000-8000-0000000000b1','1d000000-0000-4000-8000-0000000000b2','Identity Revert Division',1,'1d000000-0000-4000-8000-0000000000a1'),
+                ('1d000000-0000-4000-8000-0000000000c2','1d000000-0000-4000-8000-00000000000a','1d000000-0000-4000-8000-0000000000b2','1d000000-0000-4000-8000-0000000000b1','Identity Revert Division',2,'1d000000-0000-4000-8000-0000000000a1');
+              UPDATE public.game_assignments SET published = true WHERE id = '1d000000-0000-4000-8000-0000000000c1';" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the two games the revert check requires were never inserted"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -3992,6 +4016,32 @@ PROBE
       else
         echo "FAIL revert ${id}: the revert did not restore the column and the demo fence as they were before the migration"
         dump 10 $SCRATCH/harness_droprevert; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261120010000" ]; then
+      # What the revert must leave: both games, the Published one still Published, the season column and its values
+      # (it stays), the guard trigger WHEN (OLD.published) and no predicate function, the four bodies as 20261119010000
+      # defines them (the revert checks the md5 itself; the verdict reads the catalogue again), and a save that goes back
+      # to the tuple: a game sent WITH its id and a new place is then a new row, the old one left behind.
+      if ! grep -qF 'this revert keeps game_assignments.season_settings_id (nullable): 2 game(s) carry a season' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 2 games with a season and the revert did not say that 2 carry one"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'IDREVERT-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.game_assignments WHERE organization_id = '1d000000-0000-4000-8000-00000000000a') <> 2 THEN 'seed-lost'
+               WHEN (SELECT count(*) FROM public.game_assignments WHERE organization_id = '1d000000-0000-4000-8000-00000000000a' AND season_settings_id = '1d000000-0000-4000-8000-0000000000a1') <> 2 THEN 'season-lost'
+               WHEN NOT (SELECT published FROM public.game_assignments WHERE id = '1d000000-0000-4000-8000-0000000000c1') THEN 'published-lost'
+               WHEN to_regprocedure('public.game_is_held(uuid)') IS NOT NULL OR to_regprocedure('public.game_held_ids(uuid[])') IS NOT NULL THEN 'predicate-left'
+               WHEN NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.game_assignments'::regclass AND t.tgname = 'game_assignments_published_guard'
+                                  AND pg_get_triggerdef(t.oid) ~ 'WHEN \\(old\\.published\\)') THEN 'guard-wrong'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public.persist_game_schedule(jsonb, jsonb)'))
+                    IS DISTINCT FROM '906ee9c96d70fe3360800a07e73bc135' THEN 'save-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_idrevert 2>&1 && grep -q 'IDREVERT-VERDICT:restored' $SCRATCH/harness_idrevert; then
+        echo "  revert ${id}: the revert keeps the two planted games, their season and the Published flag, brings the guard back WHEN (OLD.published), restores the save as at 20261119010000 and removes the predicate"
+      else
+        echo "FAIL revert ${id}: the revert did not leave the planted games and the 20261119010000 bodies as they were"
+        dump 10 $SCRATCH/harness_idrevert; STATUS=1
       fi
     fi
     if [ "$id" = "20261112010000" ]; then

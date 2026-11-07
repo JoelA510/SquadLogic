@@ -253,6 +253,14 @@ R67="$REPO/docs/sql/20261118010000_revert.sql"
 # the three plants of its own, below; the pgTAP file (supabase/tests/game_published.sql) is CI's.
 M68="$REPO/supabase/migrations/20261119010000_game_published.sql"
 R68="$REPO/docs/sql/20261119010000_revert.sql"
+# A game keeps its id: the save updates a game in place when an assignment names it, the season is stored on the game, and
+# "held" is one predicate (game_is_held). Plan docs/changes/2026-11-06-games-table-source-of-truth.md, F11-1. It replaces
+# persist_game_schedule, admin_cancel_game_assignment, admin_delete_team and the guard function of $M68 whole, so the
+# plants that aimed at those bodies are re-aimed here (lesson 70): nine of PR 1's (two on the game save, seven on the team
+# delete) and two of the Published switch's own (the guard's column list, the omission check). Its smoke holds two plants
+# of its own (the third, the matcher that ignores the week, is a vitest mutation: tests/gameIdentityCarry.test.js).
+M69="$REPO/supabase/migrations/20261120010000_game_identity.sql"
+R69="$REPO/docs/sql/20261120010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3721,7 +3729,7 @@ plant "M27 P1 the team save writes no audit row" "$M27" \
             v_org_id, 'team.saved'," \
   "smoke 20261018070000"
 
-plant "M27 P2 the game save swallows a failed audit write" "$M68" \
+plant "M27 P2 the game save swallows a failed audit write" "$M69" \
   "                    ELSE jsonb_build_object('unscheduled_count', v_tbd_games) END);
     EXCEPTION WHEN OTHERS THEN
         RAISE EXCEPTION 'audit write failed, nothing was saved: %', SQLERRM
@@ -3737,7 +3745,7 @@ plant "M27 P3 the team save drops the no-actor guard" "$M27" \
   "        NULL;" \
   "smoke 20261018070000"
 
-plant "M27 P6 the game save admits any signed-in user" "$M68" \
+plant "M27 P6 the game save admits any signed-in user" "$M69" \
   "        RAISE EXCEPTION 'organization_id or season_settings_id is required'
             USING ERRCODE = '23502';
     END IF;
@@ -4014,10 +4022,11 @@ plant "R34 the revert restores a drifted rotate body" "$R34" \
 # (R2) replaces admin_delete_team without RSVPs, so the plants on the delete are
 # aimed at that copy ($M39), the live definition until 20261108020000 (Phase D, E) replaced it
 # again to count the TIME TBD rows its cascade takes, then 20261112010000 ($M61) to count the practice preference rules,
-# and 20261119010000 ($M68) to refuse a Published game, since when they are aimed at $M68; the three RSVP plants (the
+# and 20261119010000 ($M68) to refuse a Published game, then 20261120010000 ($M69) to ask the held predicate, since when they
+# are aimed at $M69; the three RSVP plants (the
 # opponent's game RSVP, a practice RSVP sharing a game id, the RSVP writer's
 # game lock) went with the RSVP function and table.
-plant "M35 the delete withdraws nothing" "$M68" \
+plant "M35 the delete withdraws nothing" "$M69" \
   "                                         WHERE pa.team_id = p_team_id))
            AND pe.withdrawn_at IS NULL
         RETURNING pe.*" \
@@ -4026,12 +4035,12 @@ plant "M35 the delete withdraws nothing" "$M68" \
         RETURNING pe.*" \
   "smoke 20261021030000"
 
-plant "M35 the delete archives nothing onto the run" "$M68" \
+plant "M35 the delete archives nothing onto the run" "$M69" \
   "     WHERE sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "     WHERE false AND sr.id IN (SELECT (e.value->>'run_id')::uuid FROM jsonb_array_elements(v_archived) e" \
   "smoke 20261021030000"
 
-plant "M35 the delete audits no series" "$M68" \
+plant "M35 the delete audits no series" "$M69" \
   "            'practice.cancelled',
             'practice_assignments',
             v_pa.id," \
@@ -4040,19 +4049,19 @@ plant "M35 the delete audits no series" "$M68" \
             v_pa.id," \
   "smoke 20261021030000"
 
-plant "M35 the delete leaves players.team_id" "$M68" \
+plant "M35 the delete leaves players.team_id" "$M69" \
   "    UPDATE public.players SET team_id = NULL WHERE id = ANY (v_player_ids);" \
   "    PERFORM 1;" \
   "smoke 20261021030000"
 
-plant "M35 team.deleted records no counts" "$M68" \
+plant "M35 team.deleted records no counts" "$M69" \
   "            || v_counts
 " \
   "            || '{}'::jsonb
 " \
   "smoke 20261021030000"
 
-plant "M35 the delete lets a coach through" "$M68" \
+plant "M35 the delete lets a coach through" "$M69" \
   "    IF NOT public.is_org_admin(v_team.organization_id) THEN
         -- Production's own text" \
   "    IF false THEN
@@ -4248,7 +4257,7 @@ plant "M39 create_team_message is left behind" "$M39" \
   "" \
   "smoke 20261022030000"
 
-plant "M39 admin_delete_team still counts the RSVP table" "$M68" \
+plant "M39 admin_delete_team still counts the RSVP table" "$M69" \
   "        'team_players_deleted',
             (SELECT count(*) FROM public.team_players WHERE team_id = p_team_id)," \
   "        'team_players_deleted',
@@ -5495,11 +5504,12 @@ plant "R67 the revert re-adds the column without its default" "$R67" \
 # The Published switch (docs/changes/2026-11-03-schedule-expansion.md, PR 1). The smoke docs/sql/20261119010000_smoke.sql
 # runs the guard, the game save, cancel, delete team and the switch for real, as a signed-in admin, and must go red for
 # each plant (the pgTAP file, supabase/tests/game_published.sql, is CI's and holds the full table; the same three
-# plants were also run against it on a database built from the migrations, with a local stand-in for pgTAP):
+# plants were also run against it on a database built from the migrations, with a local stand-in for pgTAP). The first
+# two now aim at 20261120010000 ($M69), which replaced the guard and the game save whole:
 #   - the guard's column list omits home_team_id, so a team swap on a Published game goes through;
 #   - the omission check is removed, so a save that leaves a Published game out is accepted;
 #   - the switch stops requiring a reason when it turns Published off.
-plant "M68 the guard's column list omits home_team_id" "$M68" \
+plant "M69 the guard's column list omits home_team_id" "$M69" \
   "NEW.field_id, NEW.home_team_id, NEW.away_team_id, NEW.week_index, NEW.start, NEW.\"end\")
        IS NOT DISTINCT FROM
        (OLD.game_slot_id, OLD.slot_id, OLD.field_id, OLD.home_team_id, OLD.away_team_id," \
@@ -5508,7 +5518,7 @@ plant "M68 the guard's column list omits home_team_id" "$M68" \
        (OLD.game_slot_id, OLD.slot_id, OLD.field_id, OLD.away_team_id," \
   "smoke 20261119010000"
 
-plant "M68 the game save no longer refuses an omitted Published game" "$M68" \
+plant "M69 the game save no longer refuses an omitted Published game" "$M69" \
   "    IF v_omitted_count > 0 THEN" \
   "    IF false THEN" \
   "smoke 20261119010000"
@@ -5519,6 +5529,24 @@ plant "M68 the switch no longer needs a reason to allow changes" "$M68" \
   "        IF false THEN
             RAISE EXCEPTION 'allowing changes to a Published game needs a reason'" \
   "smoke 20261119010000"
+
+# A game keeps its id (docs/changes/2026-11-06-games-table-source-of-truth.md, F11-1). The smoke
+# docs/sql/20261120010000_smoke.sql runs the in-place save and its refusals for real, as a signed-in admin, and must go
+# red for each plant (the pgTAP file, supabase/tests/game_identity.sql, is CI's and holds the full table):
+#   - the save reads no ids (the payload's id is NULL), so a moved game is a new row again, as before this migration;
+#   - the clash check is removed, so a game moved onto an older hidden row meets the unique index (23505) instead of
+#     being refused by name with both ids.
+plant "M69 the game save reads no ids, so a moved game is a new row again" "$M69" \
+  "                    assignment_items.ordinality AS assignment_ordinal,
+                    NULLIF(value->>'id', '')::uuid AS id," \
+  "                    assignment_items.ordinality AS assignment_ordinal,
+                    NULL::uuid AS id," \
+  "smoke 20261120010000"
+
+plant "M69 the clash check is removed" "$M69" \
+  "    IF v_clash_first IS NOT NULL THEN" \
+  "    IF false THEN" \
+  "smoke 20261120010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

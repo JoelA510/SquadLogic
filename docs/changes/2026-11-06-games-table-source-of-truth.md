@@ -2,7 +2,7 @@
 
 Kind: REFACTOR with a persistence change (a score store, game identity, one read of the saved schedule).
 Drawn up: 2026-11-06 against `origin/main` `c3d190d`. Owner: the repository owner.
-Status: **PROPOSED. Plan only: no code, migration, test or fixture is written by this change.** This is the F11 plan that
+Status: **APPROVED by the owner, 2026-11-07 (see "Owner answers (2026-11-07)" under "Owner decisions"); this change itself is plan only: no code, migration, test or fixture is written by it.** This is the F11 plan that
 decision 12 of the schedule-expansion plan requires the owner to approve before PR 5 starts. AGENTS.md rule 14 applies
 (persistence and the domain model), so nothing here is built until the owner agrees. The expansion plan is
 `docs/changes/2026-11-03-schedule-expansion.md` on the branch `claude/vibrant-allen-hr7y7s-schedule-expansion-plan` (it is
@@ -705,6 +705,23 @@ answered with them or one by one.
    (b) Drop in F11-2. (c) Never.
 10. **D10. The shape of a score.** (a) Both scores or none; a one-sided call is refused [recommended]. (b) Keep today's
     behaviour: accept one score and store it, ignored by standings.
+
+### Owner answers (2026-11-07)
+
+The owner's words, verbatim: "I'll just accept your recommendations on all open decisions for now". Read as: D1 to D10 are
+answered as recommended, that is **D1 (a), D2 (a), D3 (a), D4 (a), D5 (a), D6 (a), D7 (a), D8 (a), D9 (a), D10 (a)**. Two
+consequences are recorded here so no agent has to infer them:
+
+- **D8 and U3.** Expansion PR 1 merged (#707, `4750b2d`) without the identity layer, so F11-1 is **its own migration pull
+  request, merged and deployed before PR 5 starts** (the "or its own" branch of the F11-1 header). It replaces
+  `persist_game_schedule` again, defines `game_is_held`, and re-aims PR 1's guard, cancel and omission-check at it.
+  This plan file reaches `main` in F11-1's first commit (the branch it lives on has no pull request of its own).
+- **D6.** The season column (`game_assignments.season_settings_id`) is in F11-1's migration; PR 5's `external_ref` index is
+  unique on `(season_settings_id, external_ref)`.
+
+Order after this: F11-1, then PR 5 (with the amendments in "What PR 5 ... must do or avoid"), then PR 6; F11-2 and F11-3
+after PR 6, ahead of PR 10; F11-4 before PR 12; F11-5 last and only on the owner's word. U1 (the PostgREST view spike),
+U2 (do platforms repeat Game IDs across seasons: ask the owner) and U5 stay open as written.
 
 ## Unknowns, and what would resolve them
 

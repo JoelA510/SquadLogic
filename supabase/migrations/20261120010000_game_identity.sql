@@ -848,13 +848,15 @@ BEGIN
            AND ga.game_slot_id IS NOT NULL AND ga.week_index IS NOT NULL
            AND home_season.status IS DISTINCT FROM 'completed'
            AND (v_season_id IS NULL OR home_division.season_settings_id = v_season_id)
+           -- Two anti-joins and not one with an OR: an OR between the id and the tuple cannot be hashed, and a league of
+           -- 2,400 games then compares every game with every row of the payload.
+           AND NOT EXISTS (SELECT 1 FROM payload pl WHERE pl.id = ga.id)
            AND NOT EXISTS (SELECT 1
                              FROM payload pl
-                            WHERE pl.id = ga.id
-                               OR (pl.home_team_id = ga.home_team_id
-                                   AND pl.away_team_id = ga.away_team_id
-                                   AND pl.game_slot_id = ga.game_slot_id
-                                   AND pl.week_index = ga.week_index))
+                            WHERE pl.home_team_id = ga.home_team_id
+                              AND pl.away_team_id = ga.away_team_id
+                              AND pl.game_slot_id = ga.game_slot_id
+                              AND pl.week_index = ga.week_index)
     ),
     missing AS (
         SELECT h.id

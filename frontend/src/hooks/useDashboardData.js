@@ -81,6 +81,7 @@ export function useDashboardData() {
     assignments: gameAssignments,
     loading: gameAssignmentsLoading,
     error: gameAssignmentsError,
+    refetch: refetchGameAssignments,
   } = useGameAssignments(gameRunId);
 
   /**
@@ -137,6 +138,16 @@ export function useDashboardData() {
     refetchPracticeSchedule();
   }, [refetchPracticeRun, refetchPracticeSchedule]);
 
+  /**
+   * Re-read the saved game schedule: the latest run, and the games of the run on screen. A change that makes no new
+   * run (turning Published on or off) leaves the run id as it was, so the games are read again by name; a save that
+   * made one moves the run id, and its games follow it.
+   */
+  const refetchGameSaved = useCallback(() => {
+    refetchGameRun();
+    refetchGameAssignments();
+  }, [refetchGameRun, refetchGameAssignments]);
+
   const roadmapStats = useMemo(() => {
     const completed = ROADMAP_SECTIONS.filter((section) => section.status === 'complete').length;
     const pending = ROADMAP_SECTIONS.length - completed;
@@ -174,6 +185,7 @@ export function useDashboardData() {
     runId: gameRunId,
     assignments: gameAssignments,
     refetch: refetchGameRun,
+    refetchSaved: refetchGameSaved,
   };
 
   return {

@@ -1373,12 +1373,12 @@ golden moves, or if output without `pinned` differs by a byte.
 
 Depends on: PR 1 and PR 2.
 
-- [ ] C1 (M) The switch and the card text. Test `tests/gameCardPublished.test.jsx`: role, name, state in words, axe
+- [x] C1 (M) The switch and the card text. Test `tests/gameCardPublished.test.jsx`: role, name, state in words, axe
       clean, both themes' tokens only.
-- [ ] C2 (M) The bulk bar and the scope resolver. Test `tests/gamePublishedBulk.test.jsx`: a scope is enumerated from
+- [x] C2 (M) The bulk bar and the scope resolver. Test `tests/gamePublishedBulk.test.jsx`: a scope is enumerated from
       the **saved set**, not the filtered view (a filter active, the count still the saved count); the count is shown
       before the call; a refused call shows the database's words.
-- [ ] C3 (M) The "Allow changes" dialog. Its optional note field carries the helper text "Optional. Do not enter player
+- [x] C3 (M) The "Allow changes" dialog. Its optional note field carries the helper text "Optional. Do not enter player
       names or other personal information." and a character counter (200) (decision 1). Audit rows have no per-row
       delete path and are pruned only by `prune_old_audit_logs` (180 days by default, set per organization), so a note
       persists up to that window, and the helper text is a soft control; one dated sentence in
@@ -1386,10 +1386,10 @@ Depends on: PR 1 and PR 2.
       `tests/gamePublishedOverrideDialog.test.jsx`: Confirm disabled with a visible reason until a reason and the tick
       are given; focus to the heading and back; a refusal is an alert; the helper text is rendered with the note field
       (as its description), the counter shows the count of 200, and a 201st character is not accepted.
-- [ ] C4 (S) Guards in `moveGameTo`, the cancel handler and the drag handle. Test `tests/gameGridPublishedGuards.test.jsx`:
+- [x] C4 (S) Guards in `moveGameTo`, the cancel handler and the drag handle. Test `tests/gameGridPublishedGuards.test.jsx`:
       a drop and the keyboard "Move to" are both refused with the sentence; cancel asks for "Allow changes" first.
-- [ ] C5 (S) The Exports "Publish" checkbox (decision 3). Test: the bulk call carries exactly the exported ids.
-- [ ] C6 (M) One E2E feature `tests/e2e/features/published_games.feature`: publish a division; try to move one (refused);
+- [x] C5 (S) The Exports "Publish" checkbox (decision 3). Test: the bulk call carries exactly the exported ids.
+- [x] C6 (M) One E2E feature `tests/e2e/features/published_games.feature`: publish a division; try to move one (refused);
       allow changes with a reason; move it; publish again; the history shows the reason; regenerate and see the
       Published games unmoved; axe in both themes. Run after `bddgen`; only this feature locally.
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   practiceChangesNoteOf,
   readUnshownPracticeChanges,
@@ -34,6 +34,8 @@ import {
   naivePublicationStamp,
   usePublicationBaselines,
 } from '../hooks/usePublicationBaselines.js';
+import { readCurrentSavedGameIds, setGamesPublished } from '../utils/gamePublishedClient.js';
+import { describeMarkFailure, describeSetResult } from '../utils/gamePublishedText.js';
 
 /**
  * The publish path, and the question it makes answerable (GAP-29).
@@ -228,19 +230,26 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
   const exportPractices = practiceRows
     .map(normalizePracticeForExport)
     .filter((assignment) => assignment && exportTeamIds.has(String(assignment.teamId)));
-  const exportGames = gameRows
-    .map(normalizeGameForExport)
+  // The ids go with the games through the same filters, so the games a file holds and the games "Mark these games
+  // Published" names cannot differ: a game with no time, or of a team the files do not hold, is in neither.
+  const exportedGames = gameRows
+    .map((assignment) => ({ id: assignment?.id, game: normalizeGameForExport(assignment) }))
     .filter(
-      (assignment) =>
-        assignment &&
-        exportTeamIds.has(String(assignment.homeTeamId)) &&
-        exportTeamIds.has(String(assignment.awayTeamId))
+      ({ game }) =>
+        game &&
+        exportTeamIds.has(String(game.homeTeamId)) &&
+        exportTeamIds.has(String(game.awayTeamId))
     );
+  const exportGames = exportedGames.map(({ game }) => game);
+  const gameIds = exportedGames
+    .map(({ id }) => id)
+    .filter((id) => typeof id === 'string' && id !== '');
 
   return {
     teams: exportTeams,
     practiceAssignments: exportPractices,
     gameAssignments: exportGames,
+    gameIds,
     untimed,
   };
 }
@@ -584,6 +593,9 @@ export default function OutputGenerationPanel({
   const [parityBusy, setParityBusy] = useState(false);
   // The master XLSX download's failure, said beside the files (admin focus R7).
   const [xlsxError, setXlsxError] = useState(/** @type {string | null} */ (null));
+  // "Mark these games Published" (owner decision 3): on by default; the games are the ones in the files made.
+  const [markPublished, setMarkPublished] = useState(true);
+  const markPublishedNoteId = useId();
 
   // The CSV export flattens teams, practices and games into one file; the
   // email drafts read teams and practices only.
@@ -756,7 +768,8 @@ export default function OutputGenerationPanel({
           gameAssignments: exportPayload.gameAssignments,
           tbdItems: tbd.items,
         });
-        setGenerated(exports);
+        // The ids of the games the files hold travel with them: Upload marks those, as they were made.
+        setGenerated({ ...exports, gameIds: exportPayload.gameIds });
         setTbdRows(tbd.rows);
         // Counted over the rows the CSV holds, filtered exactly as
         // `buildExportPayload` filters them, never over rows it dropped.
@@ -860,6 +873,44 @@ export default function OutputGenerationPanel({
       return;
     }
 
+    // **Marking is judged before anything leaves the machine.** The games the files hold were read when this page
+    // opened, and another tab may have moved a game and applied since: marking the old row would publish a game of an
+    // older run, which the Games page can neither show nor release, and every later save would be refused for it. So
+    // the files are checked against the saved schedule read now, and out-of-date files are never uploaded. A completed
+    // season is history: nothing there is marked (the database refuses it, `season_completed`), and the export of it
+    // still finishes.
+    const gameIds = generated.gameIds ?? [];
+    const marking =
+      markPublished && !seasonCompleted && gameIds.length > 0 && Boolean(currentOrganization?.id);
+    if (marking) {
+      setStatus('uploading');
+      setMessage('Checking the games in these files against the saved schedule...');
+      try {
+        const current = await readCurrentSavedGameIds({
+          organizationId: currentOrganization.id,
+          seasonSettingsId,
+        });
+        const stale = gameIds.filter((id) => !current.ids.has(String(id)));
+        if (stale.length > 0) {
+          setStatus('error');
+          setMessage(
+            `Nothing was uploaded: ${stale.length} of the ${gameIds.length} games in these files ` +
+              `${stale.length === 1 ? 'is' : 'are'} no longer in the saved game schedule, which was changed ` +
+              'after these files were generated, so the files are out of date. Generate the CSVs again, then upload.'
+          );
+          return;
+        }
+      } catch (checkErr) {
+        logger.error('Saved schedule check error:', checkErr);
+        setStatus('error');
+        setMessage(
+          'Nothing was uploaded: the saved game schedule could not be read to check these files ' +
+            `(${checkErr.message}). Try again, or untick "Mark these games Published" to upload without marking.`
+        );
+        return;
+      }
+    }
+
     setStatus('uploading');
     setMessage('Uploading to Storage...');
 
@@ -926,8 +977,33 @@ export default function OutputGenerationPanel({
           `${baselineErr.message}. Nothing can later be checked against this publication.`;
       }
 
-      setStatus(baselineFailed ? 'error' : 'success');
-      setMessage(`Uploaded ${files.length} files to 'exports' bucket. ${baselineNote}`);
+      // **The games the files hold are told to families now**, so they are held where they are: marked Published by
+      // the bulk call, with exactly the ids in the files. The baseline above stays the record of what went out;
+      // this is the working-state guard. It is attempted whether or not the baseline landed (the files did go out),
+      // and a refusal is said in the database's words, never as if it had worked.
+      let publishedNote = '';
+      let publishedFailed = false;
+      if (marking) {
+        try {
+          const marked = await setGamesPublished({
+            organizationId: currentOrganization.id,
+            ids: gameIds,
+            published: true,
+            scope: { kind: 'selection', value: 'Exports panel' },
+          });
+          publishedNote = ` ${describeSetResult(marked, true)}`;
+        } catch (publishErr) {
+          logger.error('Mark published error:', publishErr);
+          publishedFailed = true;
+          // A refusal is "NOT marked"; a lost answer is not known, and is never said as if it were nothing.
+          publishedNote = ` ${describeMarkFailure(publishErr, gameIds.length)}`;
+        }
+      }
+
+      setStatus(baselineFailed || publishedFailed ? 'error' : 'success');
+      setMessage(
+        `Uploaded ${files.length} files to 'exports' bucket. ${baselineNote}${publishedNote}`
+      );
     } catch (err) {
       logger.error('Upload error:', err);
       setStatus('error');
@@ -1062,6 +1138,30 @@ export default function OutputGenerationPanel({
               >
                 {status === 'uploading' ? 'Uploading...' : 'Upload to Storage'}
               </button>
+            )}
+
+            {/* The files are the record of what goes out; this makes the games in them Published (held in place)
+                in the same act. On by default, and one tick to leave them as they are. */}
+            {generated && !csvBlocked && !inDemo && (generated.gameIds?.length ?? 0) > 0 && (
+              <div className="flex flex-col relative z-20">
+                <label className="flex items-center gap-2 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    className="cbx"
+                    checked={markPublished && !seasonCompleted}
+                    onChange={(event) => setMarkPublished(event.target.checked)}
+                    disabled={status === 'uploading' || seasonCompleted}
+                    aria-describedby={markPublishedNoteId}
+                  />
+                  Mark these games Published
+                </label>
+                <span id={markPublishedNoteId} className="text-xs text-text-muted">
+                  {`${generated.gameIds.length} ${generated.gameIds.length === 1 ? 'game' : 'games'} in these files. ` +
+                    (seasonCompleted
+                      ? 'This season is completed, so its games cannot be marked Published; the published baseline is still recorded.'
+                      : 'Marked Published, they are held where they are; the published baseline stays the record of what went out.')}
+                </span>
+              </div>
             )}
           </div>
 

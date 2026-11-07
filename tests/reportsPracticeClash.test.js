@@ -30,9 +30,12 @@ const practice = (id, extra = {}) => ({
   ...extra,
 });
 
+/** The verdict, read as the union it is: `sharedDates` and `why` each belong to one arm. */
+const clash = (a, b) => /** @type {any} */ (practicesClash(a, b));
+
 describe('practicesClash', () => {
   it('is a clash on one weekday, with overlapping times, on dates both are live', () => {
-    const result = practicesClash(
+    const result = clash(
       practice('a'),
       practice('b', { startTime: '18:00:00', endTime: '19:00:00' })
     );
@@ -44,7 +47,7 @@ describe('practicesClash', () => {
   });
 
   it('is not a clash on different weekdays, however the times fall', () => {
-    const result = practicesClash(practice('a'), practice('b', { dayOfWeek: 'wed' }));
+    const result = clash(practice('a'), practice('b', { dayOfWeek: 'wed' }));
     expect(result).toMatchObject({ judged: true, clash: false });
   });
 
@@ -67,7 +70,7 @@ describe('practicesClash', () => {
   it('is not a clash when the date ranges never meet', () => {
     const early = practice('a', { range: '[2026-09-08,2026-10-06)' });
     const late = practice('b', { range: '[2026-10-06,2026-11-20)' });
-    expect(practicesClash(early, late)).toMatchObject({
+    expect(clash(early, late)).toMatchObject({
       judged: true,
       clash: false,
       sharedDates: 0,
@@ -78,7 +81,7 @@ describe('practicesClash', () => {
     // [..., 2026-10-07) ends on Tue 2026-10-06; the second starts Tue 2026-10-06.
     const early = practice('a', { range: '[2026-09-08,2026-10-07)' });
     const late = practice('b', { range: '[2026-10-06,2026-11-20)' });
-    expect(practicesClash(early, late)).toMatchObject({
+    expect(clash(early, late)).toMatchObject({
       judged: true,
       clash: true,
       sharedDates: 1,
@@ -90,19 +93,19 @@ describe('practicesClash', () => {
     // Wed 2026-10-07 to Mon 2026-10-12 holds no Tuesday: the half-open bound leaves out Tue 2026-10-13.
     const a = practice('a', { range: '[2026-10-07,2026-10-13)' });
     const b = practice('b', { range: '[2026-10-07,2026-10-13)' });
-    expect(practicesClash(a, b)).toMatchObject({ judged: true, clash: false, sharedDates: 0 });
+    expect(clash(a, b)).toMatchObject({ judged: true, clash: false, sharedDates: 0 });
   });
 
   it('limits a series to its slot validity as well as its range', () => {
     const a = practice('a', { validUntil: '2026-09-20' });
     const b = practice('b', { range: '[2026-09-22,2026-11-20)' });
-    expect(practicesClash(a, b)).toMatchObject({ judged: true, clash: false });
+    expect(clash(a, b)).toMatchObject({ judged: true, clash: false });
   });
 
   it('reads a row with no range as live for its whole slot validity, and an open range likewise', () => {
     const noRange = practice('a', { range: null });
     const open = practice('b', { range: '[2026-11-03,)' });
-    const result = practicesClash(noRange, open);
+    const result = clash(noRange, open);
     expect(result).toMatchObject({ judged: true, clash: true, firstDate: '2026-11-03' });
     // Tuesdays 3, 10, 17, 24 of November: the validity ends on the 30th.
     expect(result.sharedDates).toBe(4);
@@ -116,7 +119,7 @@ describe('practicesClash', () => {
       practice('x', { endTime: 'late' }),
       practice('x', { startTime: '19:00:00', endTime: '18:00:00' }),
     ]) {
-      const result = practicesClash(practice('a'), bad);
+      const result = clash(practice('a'), bad);
       expect(result.judged).toBe(false);
       expect(result.clash).toBe(false);
       expect(typeof result.why).toBe('string');

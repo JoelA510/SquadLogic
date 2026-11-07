@@ -30,6 +30,7 @@ import {
   buildChangesSincePublication,
   changesCsv,
 } from '../packages/core/src/reports/changesSincePublication.js';
+import { generateScheduleExports } from '../packages/core/src/outputGeneration.js';
 import { gameKey, tbdGameKey } from '../packages/core/src/reports/gameKey.js';
 import { parseGameTbdNote, scheduleTbdNote } from '../packages/core/src/scheduleTbd.js';
 import {
@@ -40,6 +41,7 @@ import {
   VENUES,
   baselineRows,
   overrideRow,
+  exportGames,
   savedGames,
   tbdGames,
 } from './helpers/reportsWorld.js';
@@ -68,8 +70,6 @@ const input = (extra = {}) => ({
 });
 const view = (extra = {}) => buildChangesSincePublication(input(extra));
 const kinds = (result) => result.rows.map((row) => row.kind);
-const byTeams = (result, home, away) =>
-  result.rows.filter((row) => row.home === home && row.away === away);
 
 /** A saved game as another save would leave it: a new row (new id), the tuple of where it went. */
 const moved = (id, slotId, weekIndex, start, end, extra = {}) => ({
@@ -513,6 +513,60 @@ describe('what cannot be read is counted and named', () => {
     expect(result.counts.baselineUnreadable).toBe(2);
   });
 
+  it('pairs a game between two divisions, and tells apart two games of one name and one slot by their division', () => {
+    // A cross-division game: the Home row (U10) and the Away row (U12) carry their own division.
+    const teams = [
+      ...TEAMS,
+      { id: 't-7', name: 'Synthetic Meteors', divisionId: 'd-12', division: 'U12' },
+    ];
+    const games = [
+      ...savedGames(),
+      // Same slot, same time, same field, same two names, two divisions: Meteors (U10) v Rockets (U10) is g3's pair
+      // of names, and Meteors (U12) v Rockets (U12) is a second game with those names.
+      {
+        ...savedGames()[2],
+        id: 'g-twin',
+        homeTeamId: 't-7',
+        awayTeamId: 't-8',
+        division: 'U12',
+      },
+      {
+        ...savedGames()[0],
+        id: 'g-cross',
+        homeTeamId: 't-1',
+        awayTeamId: 't-4',
+        slotId: 's-7',
+        gameSlotId: 's-7',
+        weekIndex: 3,
+        start: '2026-10-17T17:00:00+00:00',
+        end: '2026-10-17T18:00:00+00:00',
+      },
+    ];
+    const registry = [
+      ...teams,
+      { id: 't-8', name: 'Synthetic Rockets', divisionId: 'd-12', division: 'U12' },
+    ];
+    const rows = generateScheduleExports({
+      teams: registry.map(({ id, name, division }) => ({ id, name, division })),
+      gameAssignments: exportGames(games),
+      tbdItems: [],
+    }).master.rows;
+    const result = view({
+      baseline: { rows, recordedAt: RECORDED_AT, version: 3, label: 'x' },
+      savedGames: games,
+      teams: registry,
+      slots: [...SLOTS],
+      tbdGames: [],
+    });
+    expect(result.counts).toMatchObject({
+      baselineGames: 8,
+      savedGames: 8,
+      unchanged: 8,
+      baselineUnreadable: 0,
+    });
+    expect(result.sound).toBe(true);
+  });
+
   it('reads a slot’s week from the saved games when the registry lacks it, and lists a game whose slot is gone', () => {
     const noS3 = SLOTS.filter((s) => s.id !== 's-3');
     expect(view({ slots: noS3 }).counts).toMatchObject({ unchanged: 6, removed: 0, added: 0 });
@@ -566,7 +620,9 @@ describe('the file', () => {
     expect(lines).toHaveLength(2);
     expect(lines[1]).toContain(CHANGE_LABEL[CHANGE_KIND.REMOVED]);
     expect(lines[1]).toContain('Coach request');
-    expect(lines[1]).toContain('Coach asked');
+    // The note is free text and a file leaves the app: the reason and who and when are in the file, the note is not.
+    expect(lines[1]).not.toContain('Coach asked');
+    expect(lines[1]).toContain('Synthetic Admin');
     expect(changesCsv(result)).not.toMatch(/e-?mail|phone|@/i);
   });
 });

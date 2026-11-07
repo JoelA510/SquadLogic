@@ -13,7 +13,7 @@
  *   baseline that fails its integrity check.
  */
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ScheduleReportsPanel from '../frontend/src/components/reports/ScheduleReportsPanel.jsx';
@@ -63,6 +63,16 @@ vi.mock('../frontend/src/utils/scheduleDownloads.js', () => ({
 }));
 
 const ADMIN_ID = 'mock-admin-id';
+
+/** The organization context, partial on purpose: the panel reads the organization, the season and its zone. */
+function mockOrganization(timezone) {
+  vi.mocked(useOrganization).mockReturnValue(
+    /** @type {any} */ ({
+      currentOrganization: { id: ORG_ID },
+      currentSeasonSetting: { id: SEASON_ID, timezone },
+    })
+  );
+}
 const NO_ERRORS = { team: null, practice: null, game: null };
 const NOT_LOADING = { team: false, practice: false, game: false };
 
@@ -175,16 +185,13 @@ function clientFailing(table, how = 'error') {
 const openTab = (name) => fireEvent.click(screen.getByRole('tab', { name }));
 const downloaded = () => {
   const [call] = vi.mocked(saveFile).mock.calls.slice(-1);
-  return { name: call[0], csv: call[1] };
+  // `csvBlob` is mocked as the identity, so what was saved is the CSV text.
+  return { name: call[0], csv: /** @type {string} */ (/** @type {unknown} */ (call[1])) };
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(useOrganization).mockReturnValue({
-    // @ts-expect-error [MOCK] - a partial organization context is enough here.
-    currentOrganization: { id: ORG_ID },
-    currentSeasonSetting: { id: SEASON_ID, timezone: TZ },
-  });
+  mockOrganization(TZ);
   seedWorld();
 });
 afterEach(() => cleanup());
@@ -212,11 +219,7 @@ describe('a view that renders before its inputs arrive says it has not checked',
   });
 
   it('draws nothing and says so when the season has no time zone', async () => {
-    vi.mocked(useOrganization).mockReturnValue({
-      // @ts-expect-error [MOCK] - a partial organization context is enough here.
-      currentOrganization: { id: ORG_ID },
-      currentSeasonSetting: { id: SEASON_ID, timezone: null },
-    });
+    mockOrganization(null);
     mount();
     expect(await screen.findByRole('alert')).toHaveTextContent(/time zone/i);
     expect(screen.queryByTestId('day-sheet-table')).toBeNull();
@@ -407,7 +410,7 @@ describe('Changes since publication', () => {
   it('says nothing has changed, with the counts, when the saved schedule equals the baseline', async () => {
     seedWorld({ baselines: [published()] });
     await openChanges();
-    fireEvent.change(await screen.findByLabelText('Published baseline'), {
+    fireEvent.change(await screen.findByLabelText('Compare with baseline'), {
       target: { value: 'b-1' },
     });
     expect(await screen.findByTestId('changes-summary')).toHaveTextContent(
@@ -429,7 +432,7 @@ describe('Changes since publication', () => {
       end: '2026-10-17T16:00:00+00:00',
     };
     await openChanges({ gameAssignments: [...savedGames({ g1: null, g3: null }), moved] });
-    fireEvent.change(await screen.findByLabelText('Published baseline'), {
+    fireEvent.change(await screen.findByLabelText('Compare with baseline'), {
       target: { value: 'b-1' },
     });
     const table = await screen.findByTestId('changes-table');
@@ -478,7 +481,7 @@ describe('Changes since publication', () => {
       ],
     });
     await openChanges({ gameAssignments: savedGames({ g3: null }) });
-    fireEvent.change(await screen.findByLabelText('Published baseline'), {
+    fireEvent.change(await screen.findByLabelText('Compare with baseline'), {
       target: { value: 'b-1' },
     });
     const table = await screen.findByTestId('changes-table');
@@ -501,7 +504,7 @@ describe('Changes since publication', () => {
       ],
     });
     await openChanges();
-    fireEvent.change(await screen.findByLabelText('Published baseline'), {
+    fireEvent.change(await screen.findByLabelText('Compare with baseline'), {
       target: { value: 'b-1' },
     });
     const alert = await screen.findByTestId('changes-read-error');
@@ -514,7 +517,7 @@ describe('Changes since publication', () => {
   it('downloads the changes as a CSV', async () => {
     seedWorld({ baselines: [published()] });
     await openChanges({ gameAssignments: savedGames({ g3: null }) });
-    fireEvent.change(await screen.findByLabelText('Published baseline'), {
+    fireEvent.change(await screen.findByLabelText('Compare with baseline'), {
       target: { value: 'b-1' },
     });
     fireEvent.click(await screen.findByRole('button', { name: /download changes/i }));

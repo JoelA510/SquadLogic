@@ -197,7 +197,7 @@ describe('the Day Sheet equals the master export, row for row', () => {
       .map((id) => byId.get(id))
       .map(
         (g) =>
-          `${names.get(g.homeTeamId)}|${names.get(g.awayTeamId)}|${g.start}|${g.end}|${g.fieldId}`
+          `${names.get(g.homeTeamId)}|${names.get(g.awayTeamId)}|${new Date(g.start).toISOString()}|${new Date(g.end).toISOString()}|${g.fieldId}`
       )
       .sort();
     expect(sheetKeys).toEqual(masterKeys);
@@ -250,6 +250,20 @@ describe('the Day Sheet equals the master export, row for row', () => {
     expect(none.rows).toEqual([]);
     expect(none.tbd.length).toBe(1);
     expect(none.counts.tbd).toBe(1);
+  });
+});
+
+describe('with no date chosen', () => {
+  it('has no dated game, and still lists the TIME TBD games and the games with no readable time', () => {
+    const games = [
+      ...savedGames(),
+      { ...savedGames()[0], id: 'g-untimed', start: null, end: null },
+    ];
+    const result = sheet({ games, date: null });
+    expect(result.rows).toEqual([]);
+    expect(result.counts).toMatchObject({ onDate: 0, shown: 0, tbd: 1, unreadable: 1 });
+    expect(result.tbd).toHaveLength(1);
+    expect(result.unreadable.map((u) => u.id)).toEqual(['g-untimed']);
   });
 });
 

@@ -15,18 +15,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  PRACTICE_READ_SELECT,
-  loadBaselineForChanges,
-  loadReportsReference,
-  loadScheduleAuditRows,
-  practicesFromRows,
-} from '../frontend/src/utils/scheduleReportsRead.js';
+import * as reads from '../frontend/src/utils/scheduleReportsRead.js';
+import { PUBLICATION_REASON } from '../packages/core/src/publication/reasonCodes.js';
 import {
   COACH_ASSIGNMENTS,
   ORG_ID,
   SEASON_ID,
-  baselineDbRow,
   baselineRows,
   practiceRows,
   practices,
@@ -91,6 +85,17 @@ function fakeClient({ tables = {}, failures = {}, rpcs = {}, rpcFailures = {} } 
   };
   return client;
 }
+
+const { PRACTICE_READ_SELECT, practicesFromRows } = reads;
+// The results are unions (`ok` selects an arm); the tests read both arms' fields on purpose.
+const loadReportsReference =
+  /** @type {(...args: Parameters<typeof reads.loadReportsReference>) => Promise<any>} */ (
+    reads.loadReportsReference
+  );
+const loadScheduleAuditRows =
+  /** @type {(...args: Parameters<typeof reads.loadScheduleAuditRows>) => Promise<any>} */ (
+    reads.loadScheduleAuditRows
+  );
 
 const SEASON_TABLES = () => ({
   locations: [{ id: 'v-north', name: 'North Park' }],
@@ -299,68 +304,53 @@ describe('practicesFromRows', () => {
   });
 });
 
-describe('loadBaselineForChanges: one stored baseline, checked on read', () => {
-  const documentRow = (rows, mutate = (r) => r) => baselineDbRow(rows, { mutate });
+describe('changesBaselineFrom: a stored baseline, as the store hook read it', () => {
+  const summary = {
+    baselineVersion: 3,
+    label: 'Week 1 files',
+    recordedAt: '2026-10-02T12:00:00+00:00',
+  };
+  const snapshot = () => ({ rows: baselineRows(savedGames()) });
 
-  it('returns the rows, the version, the label and when it was recorded', async () => {
-    const rows = baselineRows(savedGames());
-    const client = fakeClient({ tables: { publication_baselines: [documentRow(rows)] } });
-    const result = await loadBaselineForChanges(client, {
-      organizationId: ORG_ID,
-      baselineId: 'b-1',
-    });
+  it('gives the rows, the version, the label and when it was recorded', () => {
+    const result = /** @type {any} */ (
+      reads.changesBaselineFrom({ baseline: summary, snapshot: snapshot(), readFindings: [] })
+    );
     expect(result.ok).toBe(true);
     expect(result.baseline).toMatchObject({
       version: 3,
       label: 'Week 1 files',
       recordedAt: '2026-10-02T12:00:00+00:00',
     });
-    expect(result.baseline.rows).toHaveLength(rows.length);
-    const call = client.calls.find((c) => c.table === 'publication_baselines');
-    expect(call.filters).toContainEqual(['organization_id', ORG_ID]);
-    expect(call.filters).toContainEqual(['id', 'b-1']);
+    expect(result.baseline.rows).toHaveLength(baselineRows(savedGames()).length);
   });
 
-  it('does not compare against a baseline whose rows no longer match their digest', async () => {
-    const rows = baselineRows(savedGames());
-    const tampered = documentRow(rows, (row) => ({
-      ...row,
-      export_rows: row.export_rows.map((r, i) =>
-        i === 0 ? { ...r, Start: '2026-10-03T23:00:00.000Z' } : r
-      ),
-    }));
-    const client = fakeClient({ tables: { publication_baselines: [tampered] } });
-    const result = await loadBaselineForChanges(client, {
-      organizationId: ORG_ID,
-      baselineId: 'b-1',
-    });
-    expect(result.ok).toBe(false);
-    expect(result.table).toBe('publication_baselines');
+  it('does not compare against a baseline whose rows no longer match their digest', () => {
+    const findings = [{ code: PUBLICATION_REASON.SNAPSHOT_DIGEST_MISMATCH }];
+    const result = /** @type {any} */ (
+      reads.changesBaselineFrom({ baseline: summary, snapshot: snapshot(), readFindings: findings })
+    );
+    expect(result).toMatchObject({ ok: false, table: 'publication_baselines' });
     expect(result.message).toMatch(/integrity|digest/i);
     expect(result.baseline).toBeUndefined();
+    // A finding that is not the digest's does not stop the comparison.
+    const other = reads.changesBaselineFrom({
+      baseline: summary,
+      snapshot: snapshot(),
+      readFindings: [{ code: 'SOMETHING_ELSE' }],
+    });
+    expect(other.ok).toBe(true);
   });
 
-  it('names the table when the baseline is gone, unreadable or the request is rejected', async () => {
-    const gone = await loadBaselineForChanges(fakeClient({ tables: {} }), {
-      organizationId: ORG_ID,
-      baselineId: 'b-1',
-    });
-    expect(gone).toMatchObject({ ok: false, table: 'publication_baselines' });
-    const denied = await loadBaselineForChanges(
-      fakeClient({ failures: { publication_baselines: 'denied' } }),
-      { organizationId: ORG_ID, baselineId: 'b-1' }
+  it('does not compare against a baseline with no time it was recorded', () => {
+    const result = /** @type {any} */ (
+      reads.changesBaselineFrom({
+        baseline: { ...summary, recordedAt: null },
+        snapshot: snapshot(),
+        readFindings: [],
+      })
     );
-    expect(denied).toMatchObject({ ok: false, table: 'publication_baselines' });
-    const rejected = await loadBaselineForChanges(
-      fakeClient({ failures: { publication_baselines: 'reject' } }),
-      { organizationId: ORG_ID, baselineId: 'b-1' }
-    );
-    expect(rejected).toMatchObject({ ok: false, table: 'publication_baselines' });
-    const broken = await loadBaselineForChanges(
-      fakeClient({ tables: { publication_baselines: [{ id: 'b-1', export_rows: 'nonsense' }] } }),
-      { organizationId: ORG_ID, baselineId: 'b-1' }
-    );
-    expect(broken).toMatchObject({ ok: false, table: 'publication_baselines' });
+    expect(result).toMatchObject({ ok: false, table: 'publication_baselines' });
   });
 });
 

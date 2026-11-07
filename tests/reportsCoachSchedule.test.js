@@ -221,7 +221,7 @@ describe('one coach’s schedule', () => {
       Start: '17:00',
       End: '18:30',
       'Time Zone': TZ,
-      Location: 'Field A1',
+      Location: 'North Park - Field A1',
       Dates: '2026-09-08 to 2026-11-19',
       Status: 'Scheduled',
     });
@@ -251,7 +251,15 @@ describe('one coach’s schedule', () => {
   it('keeps a saved game with no readable time, and says why', () => {
     const games = [
       ...savedGames(),
-      { ...savedGames()[0], id: 'g-untimed', slotId: null, start: null, end: null, weekIndex: 4 },
+      {
+        ...savedGames()[0],
+        id: 'g-untimed',
+        slotId: null,
+        gameSlotId: null,
+        start: null,
+        end: null,
+        weekIndex: 4,
+      },
       { ...savedGames()[0], id: 'g-nostart', slotId: 's-9', start: null, end: null, weekIndex: 5 },
     ];
     const result = schedule('c-1', { games });

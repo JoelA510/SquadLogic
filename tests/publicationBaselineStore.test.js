@@ -283,6 +283,45 @@ describe('publication baselines :: the slice, run end to end', () => {
   });
 });
 
+describe('publication baselines :: readBaseline, the one read of a stored baseline', () => {
+  it('gives the summary, the snapshot and the findings of reading it back, clean for a baseline as stored', async () => {
+    const { result } = await mountHook();
+    await act(async () => {
+      await result.current.publishBaseline(publishInput(rowsFor(GAMES)));
+    });
+    await waitFor(() => expect(result.current.baselines).toHaveLength(1));
+    const [summary] = result.current.baselines;
+
+    const read = await result.current.readBaseline(summary.id);
+    expect(read.baseline).toMatchObject({ id: summary.id, baselineVersion: 1 });
+    expect(read.snapshot.rows).toHaveLength(rowsFor(GAMES).length);
+    expect(read.readFindings.map((finding) => finding.code)).not.toContain(
+      PUBLICATION_REASON.SNAPSHOT_DIGEST_MISMATCH
+    );
+  });
+
+  it('reports a baseline whose stored rows were edited, and says nothing is there for an id that is not', async () => {
+    const { result } = await mountHook();
+    await act(async () => {
+      await result.current.publishBaseline(publishInput(rowsFor(GAMES)));
+    });
+    await waitFor(() => expect(result.current.baselines).toHaveLength(1));
+    const [summary] = result.current.baselines;
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__'));
+    db.publication_baselines[0].export_rows[0].Field = 'somewhere-else';
+    window.__saveMockDB__(db);
+
+    const read = await result.current.readBaseline(summary.id);
+    expect(read.readFindings.map((finding) => finding.code)).toContain(
+      PUBLICATION_REASON.SNAPSHOT_DIGEST_MISMATCH
+    );
+    await expect(result.current.readBaseline('no-such-baseline')).rejects.toThrow(
+      /no longer readable/
+    );
+    await expect(result.current.readBaseline('')).rejects.toThrow(/Choose a published baseline/);
+  });
+});
+
 describe('publication baselines :: the naive stamp', () => {
   it('renders local wall-clock parts, never the UTC rendering toISOString gives', () => {
     // A publication at 20:00 on the 20th stamped from `toISOString()` in a

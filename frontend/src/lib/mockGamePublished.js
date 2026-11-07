@@ -105,6 +105,17 @@ function sameInstantOrText(field, a, b) {
 const refusal = (message) => fail('22023', message, 'game_published');
 
 /**
+ * Whether a stored game is held where it is: the mock's copy of `game_held_ids` (today: Published). Every refusal in
+ * this file asks it, and `mockGameIdentity.js` imports it, so the mock has one place to change when a score also holds a
+ * game (F11-2).
+ *
+ * @param {Record<string, any> | null | undefined} row
+ */
+export function isRowHeld(row) {
+  return row?.published === true;
+}
+
+/**
  * The guard for a direct write: `pairs` are `{ before, after }` per row, `after` null for a delete. Only a row that
  * is Published BEFORE the write is judged (so clearing the flag and moving in one write is refused).
  *
@@ -115,7 +126,7 @@ const refusal = (message) => fail('22023', message, 'game_published');
 export function publishedWriteRefusal(table, pairs) {
   if (table !== 'game_assignments') return null;
   for (const { before, after } of pairs || []) {
-    if (before?.published !== true) continue;
+    if (!isRowHeld(before)) continue;
     if (after == null) {
       return refusal(
         `Game ${before.id} is Published and cannot be deleted: allow changes to it first`
@@ -144,7 +155,7 @@ export function publishedWriteRefusal(table, pairs) {
 export function publishedRpcRefusal(db, what) {
   if (what.kind === 'cancel') {
     const game = (db.game_assignments || []).find((row) => same(row.id, what.id));
-    if (game?.published === true) {
+    if (isRowHeld(game)) {
       return refusal(
         `game ${game.id} is Published and cannot be cancelled: allow changes to it first`
       );
@@ -152,8 +163,7 @@ export function publishedRpcRefusal(db, what) {
     return null;
   }
   const count = (db.game_assignments || []).filter(
-    (row) =>
-      row.published === true && (same(row.home_team_id, what.id) || same(row.away_team_id, what.id))
+    (row) => isRowHeld(row) && (same(row.home_team_id, what.id) || same(row.away_team_id, what.id))
   ).length;
   if (count > 0) {
     return refusal(

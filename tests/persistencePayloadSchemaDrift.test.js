@@ -89,6 +89,15 @@ const CASES = {
                 gameSlotId: 'slot-1',
                 division: 'U10',
               },
+              // A game the save is told it continues (20261120010000): the row carries its saved `id`, which both
+              // schemas pass through, so the page's client check and the Edge function accept what the database reads.
+              {
+                id: '00000000-0000-4000-8000-0000000000a1',
+                home_team_id: 'team-3',
+                away_team_id: 'team-4',
+                game_slot_id: 'slot-2',
+                week_index: 2,
+              },
             ],
           },
           lastRunId: null,

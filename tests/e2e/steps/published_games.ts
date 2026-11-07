@@ -390,17 +390,18 @@ When(
 type SaveOutcome = { runId: string } | { refused: string[] };
 
 /**
- * The stand-in for `persist_game_schedule` (the mock client has no arm for the save, which is an Edge function over SQL):
- * it answers the way the database does, so the page's refresh after Apply reads a REAL result and the scenarios assert
- * what is rendered, never what was sent.
+ * The stand-in for `persist_game_schedule` (the mock client has no arm for the save over the Edge function, which is
+ * SQL): it answers the way the database does, so the page's refresh after Apply reads a REAL result and the scenarios
+ * assert what is rendered, never what was sent.
  *
- * What the database does, and this does: the save makes a NEW completed run and upserts each game on its matchup
- * tuple (home, away, slot, week) without writing an id. A game whose tuple is already saved keeps its row (its id, its
- * Published flag and its history) and moves to the new run; a game at a tuple that is not saved is a NEW row that starts
- * not Published, with no history; a row the save does not name stays behind in its older run, where the page no longer
- * shows it. A save that leaves out a Published game is refused whole (`game_published_omitted`, 409 `GAME_PUBLISHED`).
- * What it does not do: the guard trigger on a moved Published row (a moved tuple is an omission here, as there), the
- * audit rows, the TIME TBD sync. Those are held by supabase/tests/game_published.sql.
+ * What the database does (20261120010000), and this does: the save makes a NEW completed run. A game the save names by
+ * its `id` is UPDATED IN PLACE: it keeps its id, its Published flag and its history, takes the place the save gives it,
+ * and joins the new run. A game sent without an id is upserted on its matchup tuple (home, away, slot, week): the saved
+ * row at that tuple is kept, otherwise it is a NEW row that starts not Published, with no history. A row the save does
+ * not name stays behind in its older run, where the page no longer shows it. A save that leaves out a Published game
+ * (neither its id nor its tuple is in it) is refused whole (`game_published_omitted`, 409 `GAME_PUBLISHED`).
+ * What it does not do: the guard trigger on a moved Published row (the page does not offer one), the audit rows, the
+ * TIME TBD sync. Those are held by supabase/tests/game_published.sql and game_identity.sql.
  */
 async function persistLikeTheDatabase(
   page: Page,
@@ -422,8 +423,12 @@ async function persistLikeTheDatabase(
           .join('|');
       const saved = (db.game_assignments ?? []).filter((game) => game.organization_id === org);
       const named = new Set(rows.map(tuple));
+      const namedIds = new Set(rows.filter((row) => row.id).map((row) => String(row.id)));
       const omitted = saved
-        .filter((game) => game.published === true && !named.has(tuple(game)))
+        .filter(
+          (game) =>
+            game.published === true && !named.has(tuple(game)) && !namedIds.has(String(game.id))
+        )
         .map((game) => String(game.id))
         .sort();
       if (omitted.length > 0) return { refused: omitted };
@@ -440,19 +445,26 @@ async function persistLikeTheDatabase(
 
       const taken = new Set<string>();
       const written = rows.map((row, index): Row => {
-        const match = saved.find(
-          (game) => !taken.has(String(game.id)) && tuple(game) === tuple(row)
-        );
+        const byId = row.id ? saved.find((game) => String(game.id) === String(row.id)) : undefined;
+        const match =
+          byId ?? saved.find((game) => !taken.has(String(game.id)) && tuple(game) === tuple(row));
         if (match) {
           taken.add(String(match.id));
-          // The same row: its id, its Published flag and its history stay; it joins the new run.
+          // The same row: its id, its Published flag and its history stay; it takes the place it is sent at and joins
+          // the new run.
           return {
             ...match,
+            home_team_id: row.home_team_id,
+            away_team_id: row.away_team_id,
+            game_slot_id: row.game_slot_id,
+            slot_id: row.slot_id ?? row.game_slot_id,
+            week_index: row.week_index,
             division: row.division,
             field_id: row.field_id,
             start: row.start,
             end: row.end,
             assignment_source: row.assignment_source,
+            season_settings_id: season,
             run_id: runId,
           };
         }
@@ -464,6 +476,7 @@ async function persistLikeTheDatabase(
           published: false,
           published_at: null,
           published_by: null,
+          season_settings_id: season,
         };
       });
       db.scheduler_runs = [
@@ -479,7 +492,12 @@ async function persistLikeTheDatabase(
           results: { summary: { scheduledRate: 1.0, unscheduledMatchups: 0 }, warnings: [] },
         },
       ];
-      db.game_assignments = [...(db.game_assignments ?? []), ...written];
+      // The rows the save names are rewritten; the rest of the saved games stay as they are, in their older runs.
+      const rewritten = new Set(written.map((row) => String(row.id)));
+      db.game_assignments = [
+        ...(db.game_assignments ?? []).filter((game) => !rewritten.has(String(game.id))),
+        ...written,
+      ];
       window.__saveMockDB__(db);
       return { runId };
     },
@@ -638,9 +656,9 @@ Then(
   }
 );
 
-Then('the history says a moved game is a new record', async ({ page }) => {
+Then('the history says a moved game keeps its history', async ({ page }) => {
   await expect(page.getByRole('dialog', { name: /^History:/ })).toContainText(
-    'A game moved to another time slot or week is saved as a new game: it starts with no history, and the old record keeps this one.'
+    'A game keeps its history when it is moved to another time slot or week. A new game, one that continues no saved game, starts with none.'
   );
 });
 
@@ -654,21 +672,21 @@ const cellOf = (page: Page, field: string, slot: string) =>
   page.getByTestId(`drop-zone-e2e-${field}:${slot}`);
 
 Then(
-  'the game {string} vs {string} is now in the empty slot on {string} as a new game that is {string}',
+  'the game {string} vs {string} is now in the empty slot on {string} as the same game that is {string}',
   async ({ page }, home: string, away: string, fieldName: string, state: string) => {
     const field = fieldName.split(' ')[0].toLowerCase();
     const seeded = gameOf(home, away);
     // The grid shows what the page read back from the database after the save: the saved schedule, not the staged one.
     const card = cellOf(page, field, EMPTY_SLOT[field]).getByTestId(/^game-card-/);
     await expect(card).toHaveCount(1, { timeout: 20_000 });
-    // A new row has a new id: the card is not the one the game had before the move.
-    await expect(card).not.toHaveAttribute('data-testid', `game-card-${seeded.id}`);
+    // The save updated the game in place, so the card is the one the game had before the move: the same id.
+    await expect(card).toHaveAttribute('data-testid', `game-card-${seeded.id}`);
     await expect(card.getByTestId('published-state')).toHaveText(state);
     await expect(
       card.getByRole('switch', { name: `Published: ${home} versus ${away}` })
     ).toHaveAttribute('aria-checked', 'false');
-    // It starts with no history, and nothing is held: no History button, no Allow changes.
-    await expect(card.getByRole('button', { name: /^History:/ })).toHaveCount(0);
+    // It keeps its history (the History button is there) and nothing holds it: no hold note, no Allow changes.
+    await expect(card.getByRole('button', { name: /^History:/ })).toHaveCount(1);
     await expect(card.getByRole('button', { name: /^Allow changes:/ })).toHaveCount(0);
     await expect(card.getByTestId('published-hold-note')).toHaveCount(0);
   }

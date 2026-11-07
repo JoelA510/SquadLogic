@@ -172,18 +172,21 @@ describe('a Published game is not moved by "Move to" (the keyboard path)', () =>
     expect(screen.getByRole('button', { name: /apply schedule/i })).toBeInTheDocument();
   });
 
-  it('control: a game with changes allowed is staged, and the line says it will be a new game', async () => {
+  it('control: a game with changes allowed is staged, and the line says it keeps its history', async () => {
     await openGrid();
     fireEvent.click(screen.getByText('keyboard-move ga-3'));
     const line = await screen.findByText(/Manual game move staged/);
-    expect(line).toHaveTextContent('will be saved as a new game, which starts not Published');
+    expect(line).toHaveTextContent(
+      'keeps its history and stays not Published until you publish it again'
+    );
+    expect(line).not.toHaveTextContent(/new game|starts not Published/);
   });
 
   it('a game that is not Published moved plainly does not get that sentence (it has no history to leave behind)', async () => {
     await openGrid();
     fireEvent.click(screen.getByText('keyboard-move ga-2'));
     const line = await screen.findByText(/Manual game move staged/);
-    expect(line).not.toHaveTextContent(/new game/);
+    expect(line).not.toHaveTextContent(/new game|no longer in the schedule/);
   });
 });
 
@@ -294,18 +297,17 @@ describe('cancel asks for "Allow changes" first', () => {
   });
 });
 
-describe('applying a move of a game that has a history says it is a new game', () => {
-  it('a game with changes allowed, moved and applied: the status line says it starts not Published', async () => {
+describe('applying a move of a game that has a history: it is the same game', () => {
+  it('a game with changes allowed, moved and applied: the status line says nothing was left behind', async () => {
     await openGrid();
     fireEvent.click(screen.getByText('keyboard-move ga-3'));
     const apply = await screen.findByRole('button', { name: /apply schedule/i });
     await waitFor(() => expect(apply).toBeEnabled());
     fireEvent.click(apply);
-    expect(
-      await screen.findByText(/Game schedule applied through the persistence workflow\./)
-    ).toHaveTextContent(
-      '1 moved game was saved as a new game: it starts not Published, so publish it again.'
+    const line = await screen.findByText(
+      /Game schedule applied through the persistence workflow\./
     );
+    expect(line).not.toHaveTextContent(/new game|starts not Published|no longer in the schedule/);
   });
 
   // What the E2E feature used to read from the captured request (a payload assertion is not a DOM assertion): the page
@@ -328,9 +330,13 @@ describe('applying a move of a game that has a history says it is a new game', (
     // ga-3 (team-2 v team-3, saved on f-south, slot gs-3, week 2) moved to f-north / gs-7 (week 3).
     const [moved] = matchup('team-2', 'team-3');
     expect(moved).toMatchObject({ fieldId: 'f-north', slotId: 'gs-7', weekIndex: 3 });
-    // A move to another slot or week is another matchup tuple: a NEW row, not an update of ga-3 (lesson 95).
+    // A move to another slot or week is another matchup tuple, and the save is told which game it is: the moved game
+    // carries its own id (ga-3), so the save updates that row in place instead of adding one (F11-1).
     const ga3 = saved.find((g) => g.id === 'ga-3');
     expect([ga3.game_slot_id, ga3.week_index]).not.toEqual([moved.slotId, moved.weekIndex]);
+    expect(moved.id).toBe('ga-3');
+    // Every saved game goes with its own id; none is sent with a placeholder.
+    expect(sent.map((a) => a.id).sort()).toEqual(saved.map((g) => g.id).sort());
     // The Published games (ga-1: team-1 v team-2; ga-5: team-4 v team-6) are saved where they were.
     expect(matchup('team-1', 'team-2')[0]).toMatchObject({
       fieldId: 'f-north',

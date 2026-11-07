@@ -7,13 +7,15 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
   database refuses to move or delete it. Turning Published ON needs nothing. Turning it OFF is "Allow changes": a reason
   from a short list, an optional note, and a tick.
 
-  What this feature does NOT assert, because it is not true: that a game's Published state, its date or its history
-  follows it to another slot or week. The save keys a game on (home, away, slot, week) and writes no id, so a game moved
-  to another slot or week is saved as a new game that starts not Published, and the page says so. The mock client has no
-  arm for `persist_game_schedule`, so a stand-in answers the save the way the database does (a new run; each game
-  upserted on its matchup tuple, a moved game a new row that starts not Published, the old row left behind in its older
-  run), and the scenarios assert only what the page RENDERS after it reads the saved schedule again. What the page sends
-  is held by tests/gameGridPublishedGuards.test.jsx; the database's side by supabase/tests/game_published.sql in CI.
+  What a move does: since the save updates a game in place when the page names it by its id (F11-1), a game moved to
+  another slot or week is still the same game. It keeps its id, its history and its place in the Published count (not
+  Published until it is published again), and the page says so. A game that drops out of a regenerated schedule is the
+  one case that leaves its history behind, and the page says that too. The mock client has no arm for the save over the
+  Edge function, so a stand-in answers it the way the database does (a new run; a game named by its id updated in place,
+  one without an id upserted on its matchup tuple, the rows the save does not name left in their older run), and the
+  scenarios assert only what the page RENDERS after it reads the saved schedule again. What the page sends is held by
+  tests/gameGridPublishedGuards.test.jsx and tests/gameSchedulingIdentity.test.jsx; the database's side by
+  supabase/tests/game_published.sql and game_identity.sql in CI.
 
   The league: U10 Boys (Lions, Wolves, Comets, Bulls) with four saved games, U12 Girls (Hawks, Owls) with one, on two
   fields at two venues; two slots are empty (week 3).
@@ -43,7 +45,7 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     And the game "Lions" vs "Wolves" is shown as "Changes allowed" in the list
     When I open the history of the game "Lions" vs "Wolves"
     Then the history shows "Changes allowed" with the reason "Coach request" and the note "The coach asked for a later start"
-    And the history says a moved game is a new record
+    And the history says a moved game keeps its history
 
   Scenario: Publishing a game again holds it again
     Given the "U10 Boys" division is Published
@@ -55,17 +57,17 @@ Feature: Published games on the Game Scheduling page (schedule expansion, PR 3)
     When I enter manual override on the Game Scheduling page
     Then the card of "Lions" vs "Wolves" is Published and cannot be dragged or moved
 
-  Scenario: A game moved to another slot is saved as a new game that starts not Published
+  Scenario: A game moved to another slot is the same game: it keeps its history and stays not Published
     Given the "U10 Boys" division is Published
     When I allow changes to the game "Lions" vs "Wolves" for "Field change" with the note ""
     And I enter manual override on the Game Scheduling page
     Then the card of "Lions" vs "Wolves" can still be moved
     When I move the game "Lions" vs "Wolves" to the empty slot on "North Field" with its Move to list
-    Then the Games page says "will be saved as a new game, which starts not Published"
+    Then the Games page says "keeps its history and stays not Published until you publish it again"
     When I apply the staged game schedule
-    Then the Games page says "1 moved game was saved as a new game: it starts not Published, so publish it again."
-    And the Published line reads "3 of 5 saved games Published, 0 with changes allowed"
-    And the game "Lions" vs "Wolves" is now in the empty slot on "North Field" as a new game that is "Not published"
+    Then the Games page says "Game schedule applied through the persistence workflow."
+    And the Published line reads "3 of 5 saved games Published, 1 with changes allowed"
+    And the game "Lions" vs "Wolves" is now in the empty slot on "North Field" as the same game that is "Changes allowed"
     And the place where "Lions" vs "Wolves" was saved is empty
     And the other Published games are still Published in their own places
 

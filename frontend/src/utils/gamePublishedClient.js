@@ -138,8 +138,8 @@ export async function setGamesPublished({
 
 /**
  * The audit rows that name one game (`get_schedule_audit_log`): newest first, at most `limit`. Admin only; the
- * database refuses anyone else in its own words. The ids are the game's row id as the database holds it, so a game
- * moved to another slot or week has no history here (it is a new row, lesson 95).
+ * database refuses anyone else in its own words. The ids are the game's row id as the database holds it, and a game
+ * keeps its id when it is moved to another slot or week, so its history is read here under the same id.
  *
  * @param {Object} input
  * @param {string} input.organizationId

@@ -13,9 +13,11 @@
  * (`tests/mockGamePublished.test.js`, lesson 77). It is used to say "no" before a call is sent, to build the
  * bulk calls, and as the oracle for what a regeneration must carry (PR 2).
  *
- * **Identity.** The game save keys its upsert on the matchup tuple (home, away, slot, week) and writes no `id`, so
- * `publishedOmissions` works on that tuple too. A game moved to another slot or week is a new tuple, hence a new row
- * with a new id: a Published original is then an OMISSION, and anything keyed by the old id stays with the old row.
+ * **Identity.** Since 20261120010000 the game save updates a game in place when an assignment names it by `id`, and
+ * upserts on the matchup tuple (home, away, slot, week) for one without; `publishedOmissions` counts a game carried by
+ * either. A game sent without its id at another slot or week is a new tuple, hence a new row: a Published original is
+ * then an OMISSION, and anything keyed by the old id stays with the old row. The twin of the whole save is
+ * `gameIdentityRefusal` in `gameIdentity.js`.
  *
  * @module gamePublished
  */
@@ -198,7 +200,9 @@ const keyOf = (row) => {
 /**
  * The Published saved games a save would leave out: the twin of the check in `persist_game_schedule`. A save carries
  * every Published game of its season, unchanged; a game it leaves out is not deleted but orphaned in an older run and
- * gone from the page. The key is the matchup tuple (home, away, slot, week) because the save's upsert is keyed on it.
+ * gone from the page. A game is carried when its matchup tuple (home, away, slot, week) OR its `id` is in the payload
+ * (the save updates a game in place when an assignment names it by id; a payload row without one is upserted on the
+ * tuple).
  *
  * `saved` is the set the save is about: the caller scopes it to the season (the database scopes by the home team's
  * division's season, or by the organization's seasons that are not completed when the run names no season). Only a
@@ -212,9 +216,18 @@ const keyOf = (row) => {
  */
 export function publishedOmissions(saved, payload) {
   const carried = new Set((payload ?? []).map(keyOf).filter((key) => key !== null));
+  // 20261120010000: a game is carried if its id OR its tuple is in the payload (an assignment that names a saved game by
+  // id continues it wherever it is sent; the guard then judges the move).
+  const carriedIds = new Set(
+    (payload ?? [])
+      .map((row) => row?.id)
+      .filter((id) => typeof id === 'string' && id !== '')
+      .map((id) => id.toLowerCase())
+  );
   return (saved ?? [])
     .filter((row) => {
       if (row?.published !== true) return false;
+      if (typeof row.id === 'string' && carriedIds.has(row.id.toLowerCase())) return false;
       const key = keyOf(row);
       return key !== null && !carried.has(key);
     })

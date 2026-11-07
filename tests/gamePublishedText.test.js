@@ -1,9 +1,11 @@
 /**
  * PR 3 of the schedule expansion (docs/changes/2026-11-03-schedule-expansion.md, 3.3, 3.4 and 3.6): the sentences the
  * Games page says about the Published switch, held to the words the owner chose ("Published", "Allow changes") and to
- * what is TRUE of identity: the save keys a game on (home, away, slot, week) and writes no id, so a game moved to
- * another slot or week is a new record that starts not Published (lesson 95). No sentence here promises that a flag, a
- * date or a history follows a move.
+ * what is TRUE of identity. Since 20261120010000 (F11-1) the save updates a game in place when the page names it by its
+ * id, so a game moved to another slot or week keeps its id, its history and its Published state (not Published after
+ * Allow changes, until it is published again); lesson 95 said it became a new record, and was true before. What does
+ * not carry over is a game the new schedule no longer holds, which stays in the old run with its history. No sentence
+ * here says a moved game is new.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -20,11 +22,11 @@ import {
   matchupOf,
   moveRefusal,
   movedGameNote,
-  movedGamesNote,
+  leftBehindNote,
   reasonLabel,
   stagedMoveNote,
 } from '../frontend/src/utils/gamePublishedText.js';
-import { movedHistoryGames } from '../frontend/src/utils/gamePublishedScope.js';
+import { leftBehindHistoryGames } from '../frontend/src/utils/gamePublishedScope.js';
 import { GAME_PUBLISH_REASONS } from '../packages/core/src/gamePublished.js';
 
 const when = (value) => `at ${value}`;
@@ -68,38 +70,36 @@ describe('the words', () => {
   });
 });
 
-describe('a moved game is a new record, and nothing promises otherwise', () => {
-  it('says it once in the dialog: saved as a new game, starts not Published, history stays with the old record', () => {
-    expect(movedGameNote).toMatch(/saved as a new game/);
-    expect(movedGameNote).toMatch(/starts not Published/);
+describe('a moved game is the same game, and no sentence says it is new', () => {
+  it('says it once in the dialog: still the same game, keeps its history, publish it again after the move', () => {
+    expect(movedGameNote).toMatch(/still the same game/);
+    expect(movedGameNote).toMatch(/keeps its history/);
+    expect(movedGameNote).toMatch(/not Published/);
     expect(movedGameNote).toMatch(/publish it again/);
-    expect(movedGameNote).toMatch(/history stays with the old record/);
   });
 
-  it('says it when a move of a game with a history is staged, and when the schedule is applied', () => {
+  it('says it when a move of a game with a history is staged, and when the schedule leaves a game behind', () => {
     expect(stagedMoveNote({ homeTeamName: 'A', awayTeamName: 'B' })).toBe(
-      'Manual game move staged. Apply the schedule to persist it. A vs B will be saved as a new game, which starts not Published.'
+      'Manual game move staged. Apply the schedule to persist it. A vs B keeps its history and stays not Published until you publish it again.'
     );
-    expect(movedGamesNote(1)).toBe(
-      ' 1 moved game was saved as a new game: it starts not Published, so publish it again.'
+    expect(leftBehindNote(1)).toBe(
+      ' 1 game that had been Published is no longer in the schedule (its pair does not meet again, or it could not be placed): its history stays with the old record.'
     );
-    expect(movedGamesNote(3)).toBe(
-      ' 3 moved games were saved as new games: they start not Published, so publish them again.'
+    expect(leftBehindNote(3)).toBe(
+      ' 3 games that had been Published are no longer in the schedule (their pairs do not meet again, or they could not be placed): their history stays with the old records.'
     );
   });
 
-  it('no sentence says a flag, a date or a history survives, or follows, a move', () => {
+  it('no sentence says a moved game is saved as a new game, a new record, or starts not Published', () => {
     const all = [
       movedGameNote,
       stagedMoveNote({ homeTeamName: 'A', awayTeamName: 'B' }),
-      movedGamesNote(1),
-      movedGamesNote(2),
       moveRefusal({}),
       cancelRefusal({}),
     ].join(' ');
-    expect(all).not.toMatch(
-      /stays? Published|remains? Published|keeps? (its|the) (history|flag)|follows/i
-    );
+    expect(all).not.toMatch(/new (game|record)|starts? not Published|history stays with the old/i);
+    // The one sentence that does name the old record is about a game the schedule dropped, not one that was moved.
+    expect(leftBehindNote(1)).not.toMatch(/moved|new game|new record/i);
   });
 });
 
@@ -115,42 +115,53 @@ describe('which saved games a staged schedule leaves behind (their history stays
   });
   const HISTORY = { publishedAt: '2026-10-01T00:00:00Z' };
 
-  it('a game with a history whose slot is gone from the staged schedule is left behind', () => {
+  it('a game with a history that a staged game carries by id is not left behind, wherever it now is', () => {
     const before = [saved('g1', HISTORY), saved('g2', HISTORY), saved('g3')];
-    // g1 stays where it was; g2 is moved to another slot; g3 has no history to leave.
+    // g1 stays where it was; g2 is moved to another slot AND week (the same id); g3 has no history to leave.
     const staged = [
       saved('g1', HISTORY),
-      { ...saved('g2', HISTORY), slotId: 's-elsewhere' },
+      { ...saved('g2', HISTORY), slotId: 's-elsewhere', weekIndex: 4 },
       saved('g3'),
     ];
-    expect(movedHistoryGames(staged, before).map((g) => g.id)).toEqual(['g2']);
+    expect(leftBehindHistoryGames(staged, before)).toEqual([]);
   });
 
-  it('a week change is a new record too, and the other tuple parts count', () => {
+  it('a game with a history that no staged game carries, by id or by tuple, is left behind', () => {
+    const before = [saved('g1', HISTORY), saved('g2', HISTORY), saved('g3')];
+    // g2 is gone from the staged schedule: a regenerated game with a placeholder id sits somewhere else.
+    const staged = [saved('g1', HISTORY), saved('review-1', { slotId: 's-new', persisted: false })];
+    expect(leftBehindHistoryGames(staged, before).map((g) => g.id)).toEqual(['g2']);
+  });
+
+  it('a staged game with no saved id at the tuple of a saved game holds it (the save upserts on the tuple)', () => {
     const before = [saved('g1', HISTORY)];
-    expect(movedHistoryGames([{ ...saved('g1', HISTORY), weekIndex: 2 }], before)).toHaveLength(1);
-    expect(movedHistoryGames([{ ...saved('g1', HISTORY), homeTeamId: 'z' }], before)).toHaveLength(
-      1
-    );
+    const staged = [
+      { homeTeamId: 'h', awayTeamId: 'a', slotId: 's-g1', weekIndex: 1, id: 'review-0' },
+    ];
+    expect(leftBehindHistoryGames(staged, before)).toEqual([]);
   });
 
-  it('a change of field, start or end alone, with the same slot and week, keeps the row: not left behind', () => {
-    const before = [saved('g1', { ...HISTORY, fieldId: 'f1', start: '2026-10-03T13:00:00Z' })];
-    const staged = [saved('g1', { ...HISTORY, fieldId: 'f2', start: '2026-10-03T14:00:00Z' })];
-    expect(movedHistoryGames(staged, before)).toEqual([]);
+  it('another tuple, and no saved id, does not hold it: a week change or a team change leaves it', () => {
+    const before = [saved('g1', HISTORY)];
+    expect(
+      leftBehindHistoryGames([{ ...saved('review-1'), slotId: 's-g1', weekIndex: 2 }], before)
+    ).toHaveLength(1);
+    expect(
+      leftBehindHistoryGames([{ ...saved('review-1'), slotId: 's-g1', homeTeamId: 'z' }], before)
+    ).toHaveLength(1);
   });
 
   it('a Published game the staged schedule still holds is not left behind; one it lacks is', () => {
     const before = [saved('g1', { published: true }), saved('g2', { published: true })];
-    expect(movedHistoryGames([saved('g1', { published: true })], before).map((g) => g.id)).toEqual([
-      'g2',
-    ]);
+    expect(
+      leftBehindHistoryGames([saved('g1', { published: true })], before).map((g) => g.id)
+    ).toEqual(['g2']);
   });
 
   it('is judged on the saved side: a regenerated game with a fresh id does not hide the one it replaced', () => {
     const before = [saved('g1', HISTORY)];
     const staged = [{ ...saved('review-1'), slotId: 's-new', persisted: false }];
-    expect(movedHistoryGames(staged, before).map((g) => g.id)).toEqual(['g1']);
+    expect(leftBehindHistoryGames(staged, before).map((g) => g.id)).toEqual(['g1']);
   });
 
   it('reads the snake spelling of a row', () => {
@@ -165,9 +176,12 @@ describe('which saved games a staged schedule leaves behind (their history stays
       },
     ];
     expect(
-      movedHistoryGames([{ homeTeamId: 'h', awayTeamId: 'a', slotId: 's1', weekIndex: 1 }], before)
+      leftBehindHistoryGames(
+        [{ homeTeamId: 'h', awayTeamId: 'a', slotId: 's1', weekIndex: 1 }],
+        before
+      )
     ).toEqual([]);
-    expect(movedHistoryGames([], before)).toHaveLength(1);
+    expect(leftBehindHistoryGames([], before)).toHaveLength(1);
   });
 });
 

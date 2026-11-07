@@ -58,6 +58,7 @@ import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
 import { parseGameUnscheduled } from '@squadlogic/core/scheduleTbd.js';
+import { carryGameIds, isHeld } from '@squadlogic/core/gameIdentity.js';
 import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
@@ -74,7 +75,7 @@ import {
   PUBLISHED_FILTERS,
   describeScope,
   filterByPublishedState,
-  movedHistoryGames,
+  leftBehindHistoryGames,
 } from '../utils/gamePublishedScope.js';
 import {
   cancelRefusal,
@@ -83,8 +84,8 @@ import {
   describeStaleSchedule,
   describeSetResult,
   matchupOf,
+  leftBehindNote,
   moveRefusal,
-  movedGamesNote,
   stagedMoveNote,
 } from '../utils/gamePublishedText.js';
 
@@ -541,6 +542,17 @@ function buildDisplayAssignment({ assignment, index, runId, teamById, slotById, 
   };
 }
 
+/**
+ * The id of the saved game a displayed assignment IS, or undefined. A game the database returned, or one the matcher
+ * continued from a saved game, is `persisted` and its `id` is a `game_assignments.id`; a new game's id is a placeholder
+ * built for the screen (`review-...`), is never sent, and the database would refuse it.
+ */
+function savedGameIdOf(assignment) {
+  return assignment?.persisted === true && typeof assignment.id === 'string' && assignment.id !== ''
+    ? assignment.id
+    : undefined;
+}
+
 function toPersistenceAssignment(assignment) {
   return {
     division: assignment.division,
@@ -581,7 +593,7 @@ export async function cancelGameAssignment(
     fail = (text) => window.alert(text),
   }
 ) {
-  if (assignment.published === true) {
+  if (isHeld(assignment)) {
     say(cancelRefusal(assignment));
     return;
   }
@@ -870,7 +882,7 @@ export default function GameSchedulingPage() {
   const publishedGames = useMemo(
     () =>
       (game?.assignments ?? [])
-        .filter((assignment) => assignment?.published === true)
+        .filter((assignment) => isHeld(assignment))
         .map((assignment) => ({
           ...assignment,
           slotId: getAssignmentSlotId(assignment),
@@ -969,9 +981,10 @@ export default function GameSchedulingPage() {
   // Every control here acts on the SAVED SET (`savedAssignments`, the rows of the latest run as the database
   // returned them): the counts, the bulk scopes and the ids of a call are enumerated from it, never from the
   // staged review and never from the list's filter. The games on screen after an Apply are the staged ones (a
-  // moved game keeps its old id there, a new one has none), so the controls wait for the saved schedule to be read
-  // again; and a game moved to another slot or week is a NEW row that starts not Published (lesson 95), which the
-  // page says rather than hide.
+  // moved or regenerated game that continues a saved game carries that game's id, a new game has a placeholder), so
+  // the controls wait for the saved schedule to be read again. A game moved to another slot or week keeps its id, its
+  // flag and its history, because the save updates it in place (20261120010000); a game the new schedule no longer
+  // holds stays in the old run, which the page says rather than hide.
   // ---------------------------------------------------------------------------
   const publishedReasonId = useId();
   const summaryRef = useRef(/** @type {HTMLParagraphElement | null} */ (null));
@@ -1331,8 +1344,7 @@ export default function GameSchedulingPage() {
       const start = performance.now();
       // The Published games come back as `carried`, unchanged, beside the new games: the review is
       // all of them, because the save must carry every Published game of the season (it refuses one
-      // that is left out) and keeps a row, and its id, only for a game that comes back with the same
-      // slot, week and sides. Evaluated and summarised as the whole schedule they are.
+      // that is left out). Evaluated and summarised as the whole schedule they are.
       const { carried, ...result } = scheduleGames({
         teams: gameTeams,
         slots: gameSlots,
@@ -1343,6 +1355,24 @@ export default function GameSchedulingPage() {
       const scheduled = carried?.length
         ? [...carried, ...result.assignments].sort(compareGamesByTime)
         : result.assignments;
+      // Which saved game each regenerated game continues, by the same pair and the nearest week (plan
+      // `docs/changes/2026-11-06-games-table-source-of-truth.md`, I2). A carried game is the saved game itself and
+      // keeps its id; the rest take the id of the saved game of their pair, so the save updates that game in place and
+      // its Published state and history stay with it. Read from the saved run only, as `keepSides` is. A proposal: the
+      // database checks every id it is sent.
+      const savedRows = game?.assignments ?? [];
+      const savedById = new Map(savedRows.map((row) => [row.id, row]));
+      const identified = carryGameIds(savedRows, scheduled).map((assignment) => {
+        const was = savedById.get(assignment.id);
+        return was
+          ? {
+              ...assignment,
+              published: was.published,
+              publishedAt: was.publishedAt ?? was.published_at,
+              publishedBy: was.publishedBy ?? was.published_by,
+            }
+          : assignment;
+      });
       const evaluation = evaluateGameSchedule({
         assignments: scheduled,
         teams: gameTeams,
@@ -1353,7 +1383,7 @@ export default function GameSchedulingPage() {
       const elapsedMs = Math.round(performance.now() - start);
       const summary = summarizeGameResult({ ...result, assignments: scheduled });
       const generatedAt = new Date().toISOString();
-      const nextAssignments = scheduled.map((assignment, index) =>
+      const nextAssignments = identified.map((assignment, index) =>
         buildDisplayAssignment({
           assignment,
           index,
@@ -1402,6 +1432,7 @@ export default function GameSchedulingPage() {
   }, [
     divisionPlan,
     fieldById,
+    game?.assignments,
     gameSlots,
     gameTeams,
     publishedGames,
@@ -1447,6 +1478,15 @@ export default function GameSchedulingPage() {
   const persistReviewedAssignments = useCallback(
     async ({ assignments, generationMode, resultSummary, resultDetails }) => {
       const persistenceAssignments = assignments.map(toPersistenceAssignment);
+      // The save is told which saved game each assignment is, by id (a moved, flipped or regenerated game keeps its
+      // id, its Published state and its history); a new game carries none. The run's recorded `results.assignments`
+      // below is what it always was and holds no ids.
+      const rowsToSave = assignments.map((assignment, index) => {
+        const id = savedGameIdOf(assignment);
+        return id === undefined
+          ? persistenceAssignments[index]
+          : { ...persistenceAssignments[index], id };
+      });
       const missingSlot = persistenceAssignments.find(
         (assignment) => !assignment.slotId || !slotById.has(assignment.slotId)
       );
@@ -1457,7 +1497,7 @@ export default function GameSchedulingPage() {
 
       const now = new Date().toISOString();
       const result = await persistGameScheduleReview({
-        assignments: persistenceAssignments,
+        assignments: rowsToSave,
         runMetadata: {
           organizationId: currentOrganization?.id,
           seasonSettingsId: currentSeasonSetting?.id,
@@ -1539,12 +1579,13 @@ export default function GameSchedulingPage() {
       );
       setReviewAssignments(null);
       setApplyStatus('applied');
-      // A game that had a Published history and is not where it was is saved as a NEW game: it starts not
-      // Published, and its history stays with the old record. Said, not hidden.
-      const leftBehind = movedHistoryGames(reviewAssignments, savedAssignments);
+      // A game moved, flipped or regenerated keeps its id, its Published state and its history (the save updates it
+      // in place). A game that had a Published history and that the new schedule no longer holds stays in the old run
+      // with it. Said, not hidden.
+      const leftBehind = leftBehindHistoryGames(reviewAssignments, savedAssignments);
       setStatusMessage(
         `Game schedule applied through the persistence workflow.${
-          leftBehind.length > 0 ? movedGamesNote(leftBehind.length) : ''
+          leftBehind.length > 0 ? leftBehindNote(leftBehind.length) : ''
         }`
       );
       // The games on screen are the staged ones; the saved schedule (its ids and flags) is read again, and the
@@ -1659,7 +1700,7 @@ export default function GameSchedulingPage() {
       // A Published game is held where it is. The card offers no grip and no "Move to" for it; this is the same
       // refusal for a drop or a call that reaches the handler anyway, before anything is staged. The database
       // refuses the move too (a trigger), so this is the friendly half.
-      if (currentAssignment.published === true) {
+      if (isHeld(currentAssignment)) {
         setApplyError(null);
         setStatusMessage(moveRefusal(currentAssignment));
         return;
@@ -1714,8 +1755,8 @@ export default function GameSchedulingPage() {
       setReviewAssignments(staged);
       setApplyStatus('review');
       setApplyError(null);
-      // A game that has been Published and is moved is saved as a new game, which starts not Published (the save
-      // keys a game on its slot and week and writes no id): said here, where the move is staged.
+      // A game that has been Published and is moved keeps its history and stays not Published until it is published
+      // again (the save updates it in place by its id): said here, where the move is staged.
       setStatusMessage(
         (currentAssignment.publishedAt ?? currentAssignment.published_at)
           ? stagedMoveNote(currentAssignment)

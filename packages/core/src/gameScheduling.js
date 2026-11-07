@@ -322,8 +322,9 @@ function indexKeepSides(keepSides, teamSet) {
  *   each a shallow copy of the entry it came from (its `id` and every other
  *   field intact), ordered by week, division, start, slot and teams, whatever
  *   order they arrived in. They are the saved games themselves: the save that
- *   follows keys its upsert on (home, away, slot, week), so one that comes back
- *   with the same tuple updates the same row and keeps its id.
+ *   follows is sent each with its `id` and updates that row in place, so it keeps
+ *   its id (and, sent without one, a game that comes back with the same tuple
+ *   updates the same row).
  */
 export function scheduleGames({ teams, slots, roundRobinByDivision, freeze, pinned }) {
   // Freeze scopes are Phase 4.1 and they do not live here. This engine is

@@ -397,6 +397,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/slots.js',
     functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
     importers: Object.freeze([
+      // The capacity-against-demand model dates a slot on the same weekday walk as the others
+      // (schedule expansion, PR 13).
+      'packages/core/src/practice/capacityDemand.js',
       // The duration-phase adapter builds its slot set through the one
       // validating builder, as the repair does.
       'packages/core/src/practice/durationPhaseAdapter.js',
@@ -412,6 +415,7 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/capacityDemand.js',
       'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
@@ -426,6 +430,7 @@ const LAYERS = Object.freeze([
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/capacityDemand.js',
       'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',

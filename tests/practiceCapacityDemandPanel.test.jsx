@@ -20,8 +20,8 @@
  *
  * Axe is not run here: this repository has no axe in jsdom (lesson 97, point 4). The panel is
  * scanned in both themes by `tests/e2e/features/practices_per_division.feature`; what jsdom can hold
- * is held here: a captioned table with column and row headers, a focusable labelled scroll region,
- * the verdict in words (never colour alone), and no hard-coded colour.
+ * is held here: a labelled list with a heading and a definition list per division, the verdict in
+ * words (never colour alone), and no hard-coded colour.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -123,27 +123,28 @@ afterEach(() => {
 const load = async (ids = { organizationId: ORG, seasonSettingsId: SEASON_ID }) =>
   /** @type {any} */ (await loadPracticeCapacityRows(supabase, ids));
 
-/** The panel's rows, by division name, as `{ column header: cell text }`. */
+/** A card's figures as `{ label: value text }`, read from its definition list. */
+const figuresOf = (card) =>
+  Object.fromEntries(
+    [...card.querySelectorAll('dl > div')].map((pair) => [
+      pair.querySelector('dt').textContent.trim(),
+      pair.querySelector('dd').textContent.replace(/\s+/g, ' ').trim(),
+    ])
+  );
+
+/** The panel's cards, by division name, as `{ label: value text }`. */
 function figures() {
-  const headers = screen.getAllByRole('columnheader').map((th) => th.textContent.trim());
   const out = {};
-  for (const tr of screen.getAllByTestId('capacity-row')) {
-    const cells = [...tr.children].map((cell) => cell.textContent.replace(/\s+/g, ' ').trim());
-    out[cells[0]] = Object.fromEntries(headers.map((name, i) => [name, cells[i]]));
+  for (const card of screen.getAllByTestId('capacity-row')) {
+    out[card.querySelector('h3').textContent.trim()] = figuresOf(card);
   }
   return out;
 }
-const totalRow = () => {
-  const headers = screen.getAllByRole('columnheader').map((th) => th.textContent.trim());
-  const cells = [...screen.getByTestId('capacity-total').children].map((cell) =>
-    cell.textContent.replace(/\s+/g, ' ').trim()
-  );
-  return Object.fromEntries(headers.map((name, i) => [name, cells[i]]));
-};
+const totalRow = () => figuresOf(screen.getByTestId('capacity-total'));
 
 const renderReady = async (props = {}) => {
   render(<PracticeCapacityDemandPanel {...props} />);
-  await screen.findByTestId('capacity-table');
+  await screen.findByTestId('capacity-list');
 };
 
 describe('the loader reads four tables, and only reads', () => {
@@ -308,7 +309,7 @@ describe('before its inputs arrive, the panel says "not checked yet"', () => {
     render(<PracticeCapacityDemandPanel />);
     const note = screen.getByTestId('capacity-unchecked');
     expect(note).toHaveTextContent(/not checked yet/i);
-    expect(screen.queryByTestId('capacity-table')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capacity-list')).not.toBeInTheDocument();
     expect(screen.queryAllByTestId('capacity-row')).toHaveLength(0);
     expect(
       screen.getByRole('heading', {
@@ -327,12 +328,12 @@ describe('before its inputs arrive, the panel says "not checked yet"', () => {
 
   it('again, with the old rows gone, while it reads after the page saved something', async () => {
     const view = render(<PracticeCapacityDemandPanel refreshKey={0} />);
-    await screen.findByTestId('capacity-table');
+    await screen.findByTestId('capacity-list');
     view.rerender(<PracticeCapacityDemandPanel refreshKey={1} />);
     expect(screen.getByTestId('capacity-unchecked')).toHaveTextContent(/not checked yet/i);
-    expect(screen.queryByTestId('capacity-table')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capacity-list')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(VERDICT_WORDS);
-    await screen.findByTestId('capacity-table');
+    await screen.findByTestId('capacity-list');
   });
 
   it('no organization, no season and no time zone are said in words, with no figure', async () => {
@@ -347,7 +348,7 @@ describe('before its inputs arrive, the panel says "not checked yet"', () => {
     };
     render(<PracticeCapacityDemandPanel />);
     expect(screen.getByTestId('capacity-blocked')).toHaveTextContent(NO_ZONE_MESSAGE);
-    expect(screen.queryByTestId('capacity-table')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capacity-list')).not.toBeInTheDocument();
     await settle();
     expect(h.reads).toEqual([]);
   });
@@ -368,13 +369,13 @@ describe('a failed read draws no row, ever', () => {
     '%s failing as an %s: an alert naming it, and no row, no table, no verdict',
     async (table, how) => {
       h.fail = table;
-      h.failAs = how;
+      h.failAs = /** @type {'error' | 'throw'} */ (how);
       render(<PracticeCapacityDemandPanel />);
       const alert = await screen.findByRole('alert');
       expect(alert).toHaveTextContent(table);
       expect(alert).toHaveTextContent('no capacity figures are shown');
       expect(screen.queryAllByTestId('capacity-row')).toHaveLength(0);
-      expect(screen.queryByTestId('capacity-table')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('capacity-list')).not.toBeInTheDocument();
       expect(screen.queryByTestId('capacity-total')).not.toBeInTheDocument();
       expect(screen.queryByTestId('capacity-unchecked')).not.toBeInTheDocument();
       expect(document.body.textContent).not.toMatch(
@@ -435,7 +436,7 @@ describe('the figures, worked out from the league', () => {
       'Room left': '0 of 0',
     });
     expect(figures().U14['Verdict (upper bound)']).toBe(
-      'No slot open: no practice slot is exactly as long as the division’s practice. Short by 1.'
+      "No slot open. No practice slot is exactly as long as the division's practice. Short by 1."
     );
   });
 
@@ -464,7 +465,6 @@ describe('the figures, worked out from the league', () => {
       Held: '1',
       'Still needed': '4',
       'Slots it may use': '3 slots (the rows add up to 5)',
-      Length: '—',
       'Room left': '4 of 5',
       'Verdict (upper bound)': '0 to spare',
     });
@@ -503,7 +503,7 @@ describe('the figures, worked out from the league', () => {
     expect(await screen.findByTestId('capacity-no-divisions')).toHaveTextContent(
       'This season has no divisions yet, so there is nothing to compare.'
     );
-    expect(screen.queryByTestId('capacity-table')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capacity-list')).not.toBeInTheDocument();
   });
 
   it('counts a slot that cannot be read in the basis line and in no row', async () => {
@@ -526,7 +526,86 @@ describe('the figures, worked out from the league', () => {
     expect(alert).toHaveTextContent('could not be worked out');
     expect(alert).toHaveTextContent('nothing is shown');
     expect(screen.queryAllByTestId('capacity-row')).toHaveLength(0);
-    expect(screen.queryByTestId('capacity-table')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('capacity-list')).not.toBeInTheDocument();
+  });
+});
+
+describe('every kind of verdict is worded', () => {
+  /** One division, its teams, and the slots to read, over the league's own season and clock. */
+  const oneDivision = ({ perWeek = 1, minutes = null, teams = 1, slots = [] }) => {
+    const base = capacityTables();
+    h.tables.divisions = [
+      {
+        ...base.divisions[0],
+        id: 'd1',
+        name: 'U9',
+        practices_per_week: perWeek,
+        practice_minutes: minutes,
+      },
+    ];
+    h.tables.teams = Array.from({ length: teams }, (_, i) => ({
+      ...base.teams[0],
+      id: `t${i}`,
+      division_id: 'd1',
+    }));
+    h.tables.practice_slots = slots.map((slot, i) => ({
+      ...base.practice_slots[0],
+      id: `s${i}`,
+      ...slot,
+    }));
+    h.tables.practice_assignments = [];
+  };
+  const verdict = async () => {
+    render(<PracticeCapacityDemandPanel />);
+    await screen.findByTestId('capacity-list');
+    return figures().U9['Verdict (upper bound)'];
+  };
+
+  it('short by N', async () => {
+    oneDivision({ teams: 3, slots: [{ day_of_week: 'tue', capacity: 2 }] });
+    expect(await verdict()).toBe('Short by 1');
+  });
+
+  it('too few weekdays, in the words of the run’s own reason, with the shortage when there is one', async () => {
+    oneDivision({ perWeek: 2, teams: 1, slots: [{ day_of_week: 'thu', capacity: 1 }] });
+    expect(await verdict()).toBe(
+      "Too few weekdays. The division's slots fall on fewer weekdays than its practices a week " +
+        '(the division wants 2 a week; its open slots fall on 1 weekday). Short by 1.'
+    );
+  });
+
+  it('too few weekdays with room to spare has no shortage in it', async () => {
+    oneDivision({ perWeek: 2, teams: 1, slots: [{ day_of_week: 'thu', capacity: 5 }] });
+    expect(await verdict()).toBe(
+      "Too few weekdays. The division's slots fall on fewer weekdays than its practices a week " +
+        '(the division wants 2 a week; its open slots fall on 1 weekday).'
+    );
+  });
+
+  it('no slot with a date left from today', async () => {
+    oneDivision({ teams: 2, slots: [{ day_of_week: 'tue', valid_until: '2026-09-29' }] });
+    expect(await verdict()).toBe(
+      'No slot open. No practice slot has a date left from today. Short by 2.'
+    );
+  });
+
+  it('no slot because every live slot is reserved to another division', async () => {
+    oneDivision({ teams: 1, slots: [{ day_of_week: 'tue', division_id: 'someone-else' }] });
+    expect(await verdict()).toBe(
+      'No slot open. Every slot with a date left from today is reserved to another division. Short by 1.'
+    );
+  });
+
+  it('a division with no team', async () => {
+    oneDivision({ teams: 0, slots: [{ day_of_week: 'tue' }] });
+    expect(await verdict()).toBe('No teams');
+  });
+
+  it('the whole-season line of a league that wants nothing says "None wanted"', async () => {
+    oneDivision({ perWeek: 0, teams: 2 });
+    render(<PracticeCapacityDemandPanel />);
+    await screen.findByTestId('capacity-list');
+    expect(totalRow()['Verdict (upper bound)']).toBe('None wanted');
   });
 });
 
@@ -544,10 +623,11 @@ describe('the sentences on the panel’s face (decisions 28 and 29)', () => {
     expect(screen.getByTestId('capacity-held-outside')).toHaveTextContent(HELD_OUTSIDE);
   });
 
-  it('labels its verdict an upper bound, in the sentence and in the column heading', async () => {
+  it('labels its verdict an upper bound, in the sentence and on the verdict of every division', async () => {
     await renderReady();
     expect(screen.getByTestId('capacity-upper-bound')).toHaveTextContent(UPPER_BOUND);
-    expect(screen.getByRole('columnheader', { name: 'Verdict (upper bound)' })).toBeInTheDocument();
+    // Four divisions and the whole-season line: each verdict is labelled, none is bare.
+    expect(screen.getAllByText('Verdict (upper bound)')).toHaveLength(5);
   });
 
   it('declares what it does not check', async () => {
@@ -573,35 +653,37 @@ describe('the sentences on the panel’s face (decisions 28 and 29)', () => {
   });
 });
 
-describe('the table is a table', () => {
-  it('has a caption, column headers, a row header per row, and a focusable labelled scroll region', async () => {
+describe('the cards are a list', () => {
+  it('is a labelled list with a heading and a definition list per division, and one for the season', async () => {
     await renderReady();
-    const table = screen.getByTestId('capacity-table');
-    expect(table.tagName).toBe('TABLE');
-    expect(table.querySelector('caption')).toHaveTextContent(/still needed/i);
-    const columns = within(table).getAllByRole('columnheader');
-    expect(columns.length).toBe(9);
-    for (const th of columns) expect(th).toHaveAttribute('scope', 'col');
-    for (const tr of [
+    const list = screen.getByRole('list', { name: 'Capacity against demand, by division' });
+    expect(list).toBe(screen.getByTestId('capacity-list'));
+    const cards = within(list).getAllByRole('listitem');
+    expect(cards).toHaveLength(5);
+    for (const card of cards) {
+      expect(card.querySelector('h3')).not.toBeNull();
+      const pairs = [...card.querySelectorAll('dl > div')];
+      expect(pairs.length).toBeGreaterThanOrEqual(7);
+      for (const pair of pairs) {
+        expect(pair.querySelector('dt').textContent.trim().length).toBeGreaterThan(0);
+        expect(pair.querySelector('dd').textContent.trim().length).toBeGreaterThan(0);
+      }
+    }
+    // The page is one narrow column: nothing here is a table that could run off its edge.
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('puts the verdict first in every card, in words, so colour is never the only signal', async () => {
+    await renderReady();
+    for (const card of [
       ...screen.getAllByTestId('capacity-row'),
       screen.getByTestId('capacity-total'),
     ]) {
-      expect(tr.firstElementChild.tagName).toBe('TH');
-      expect(tr.firstElementChild).toHaveAttribute('scope', 'row');
-    }
-    const region = screen.getByRole('region', { name: /capacity against demand, by division/i });
-    expect(region).toHaveAttribute('tabindex', '0');
-    expect(region).toContainElement(table);
-  });
-
-  it('puts the verdict in words in every row, so colour is never the only signal', async () => {
-    await renderReady();
-    for (const tr of screen.getAllByTestId('capacity-row')) {
-      const cell = tr.lastElementChild;
-      expect(cell.textContent.trim().length).toBeGreaterThan(5);
-      expect(cell.textContent).toMatch(
-        /to spare|short by|none wanted|no teams|no slot open|fewer weekdays/i
-      );
+      const first = card.querySelector('dl > div');
+      expect(first.querySelector('dt').textContent).toBe('Verdict (upper bound)');
+      const text = first.querySelector('dd').textContent;
+      expect(text.trim().length).toBeGreaterThan(5);
+      expect(text).toMatch(/to spare|short by|none wanted|no teams|no slot open|too few weekdays/i);
     }
   });
 

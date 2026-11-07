@@ -772,7 +772,7 @@ describe('the input and the report are schemas (trust boundary)', () => {
     negative.divisions[0].stillNeeded = -1;
     expect(CapacityDemandReportSchema.safeParse(negative).success).toBe(false);
     const stranger = structuredClone(report);
-    stranger.divisions[0].verdict.kind = 'fine';
+    /** @type {any} */ (stranger.divisions[0].verdict).kind = 'fine';
     expect(CapacityDemandReportSchema.safeParse(stranger).success).toBe(false);
   });
 });

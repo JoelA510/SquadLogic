@@ -174,3 +174,12 @@ export {
 } from './coachPreferences.js';
 
 export { toSeason2026PracticePlan } from './adapters/season2026PracticeGrid.js';
+
+export {
+  CAPACITY_VERDICT,
+  CapacityDemandInputSchema,
+  CapacityDemandReportSchema,
+  buildCapacityDemand,
+  capacityDemandInputFromRows,
+  practicesStillNeeded,
+} from './capacityDemand.js';

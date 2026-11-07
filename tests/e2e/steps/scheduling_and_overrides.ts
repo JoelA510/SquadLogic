@@ -1375,8 +1375,11 @@ Given('a practice schedule has been generated', async ({ page }) => {
 
 Given('I am on the Practice Scheduling page', async ({ page }) => {
   await page.goto('/schedule/practice');
-  // Wait for the actual table to mount inside the PracticeAssignmentList component
-  await expect(page.locator('table').first()).toBeVisible({ timeout: 15000 });
+  // Wait for the actual table to mount inside the PracticeAssignmentList component: not the first
+  // table on the page, which since the capacity panel (PR 13) is the panel's.
+  await expect(
+    page.getByRole('table').filter({ has: page.getByRole('columnheader', { name: 'Field Slot' }) })
+  ).toBeVisible({ timeout: 15000 });
 });
 
 When(

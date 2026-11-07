@@ -140,6 +140,11 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 // Panels this file does not test. `EvaluationPanel` is deliberately NOT here.
 const stub = (name) => ({ default: () => <div data-testid={`stub-${name}`} /> });
 vi.mock('../frontend/src/components/PracticeReadinessPanel.jsx', () => stub('readiness'));
+// The capacity panel reads tables of its own and is not what this file tests (schedule expansion, PR 13):
+// its alert for a read these doubles do not answer would be a second alert beside the one under test.
+vi.mock('../frontend/src/components/scheduling/PracticeCapacityDemandPanel.jsx', () =>
+  stub('capacity')
+);
 vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
   default: (props) => {
     OVERRIDE_PROPS.value = props;

@@ -155,6 +155,22 @@ the Edge counterpart of core `practice/daylight.js`:
   count (`practice_new_auto_row_refusals`, P0001, naming each row). The count is per scheduling week (Monday to Sunday), a saved row with no date range holds its slot's whole validity, and `teams_without_practice` leaves out the teams of a 0-a-week division. Manual, repair, recommendation
   and override rows keep their existing checks. Coach overlap, preferences and daylight are the
   server's verify, not the writer.
+- **Before a run: slots against what each division needs** (schedule expansion, PR 13, 2026-11-07;
+  read-only, no migration). A section at the top of the Practices page, from
+  `packages/core/src/practice/capacityDemand.js`: per division of the season, the roster's teams
+  (`teams`, never a solver's output), practices wanted, saved rows held, still needed (the sum over
+  teams of `max(target - held, 0)`, the planner's own arithmetic, held equal to `planTeamsForRun` by
+  `tests/practiceCapacityDemand.test.js`), and the room in the distinct slots the division may use:
+  live from today, exactly its practice length, not reserved to another division, less the saved
+  practices that fill them (the busiest date's load, as the solver's capacity rule reads it). Its verdict
+  (short by N, N to spare, no slot open and why, too few weekdays, none wanted at 0 a week) is an
+  **upper bound**: with no stored hold (owner decision 28) nothing records a time held outside the app, so
+  the panel counts every open slot and says that such times are unknown to it. It does not read coach
+  overlap, coach `must` rules, daylight, closures, permits, travel, saved exceptions or a TIME TBD
+  team, so a run can place fewer practices than it shows. A slot open to two divisions counts in each
+  row and once in the whole-season line, which says so. All four reads are all-or-nothing, and until
+  they arrive the section says "not checked yet". When PR 5 adds `teams.is_external`, its census must
+  classify this read of `teams`: an outside club's team is not practice demand.
 
 ## Coach practice preference rules (Phase D C1, `20261112010000`)
 

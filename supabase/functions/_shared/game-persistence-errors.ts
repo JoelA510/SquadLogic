@@ -14,10 +14,13 @@
  * The first is the guard trigger refusing a save that moves a Published game in place (the message names the game);
  * the second is the save refusing to leave a Published game out. The database's message is always kept.
  *
- * **A save that names games by id** (`20261120010000_game_identity.sql`; `gameIdentityErrorResponse`). These are the
- * same kind of outcome: caused by what the admin sent or by another admin's act a moment before (one cancels game X
- * while another applies a regeneration that names X), so they are a 409 with the database's words and are not logged
- * as a failure.
+ * **A save that names games by id** (`20261120010000_game_identity.sql`; `gameIdentityErrorResponse`). All six are a
+ * 409 with the database's words. Four are caused by what the admin sent or by another admin's act a moment before (one
+ * cancels game X while another applies a regeneration that names X): `game_not_found`, `game_identity_season`,
+ * `game_identity_conflict` and `game_removed` are not logged as a failure. The other two, `game_identity_invalid` and
+ * `game_identity_repeated`, are not an admin's doing or a race: the page never sends a placeholder id (only saved games
+ * carry one) and the matcher throws on a duplicate, so they signal a page regression and `logAsFailure` asks the caller
+ * to write the failure log for them, as the generic path does.
  *
  * | SQLSTATE | DETAIL                                         | HTTP                                              |
  * |----------|------------------------------------------------|---------------------------------------------------|
@@ -103,6 +106,13 @@ export interface GameIdentityErrorResponse {
     /** The games named (the DETAIL's ids, else the message's); empty when the refusal names none. */
     ids: string[];
   };
+  /**
+   * Whether the caller also writes the failure log (NOT part of the response body). True for the two refusals the page
+   * itself must never cause: an id that is not a uuid (the page sends only saved games' ids) and a game named twice (the
+   * matcher throws on a duplicate), so either signals a page regression and stays visible. False for the other four, which
+   * an admin or another admin's act a moment before causes.
+   */
+  logAsFailure: boolean;
 }
 
 /** The message `persist_game_schedule` raises (40001) when a game it has just seen is gone by the time it locks it. */
@@ -130,6 +140,7 @@ export function gameIdentityErrorResponse(error: unknown): GameIdentityErrorResp
   ): GameIdentityErrorResponse => ({
     status: 409,
     body: { status: 'error', code: 'GAME_IDENTITY', reason, message: raw ?? fallback, ids },
+    logAsFailure: reason === 'game_identity_invalid' || reason === 'game_identity_repeated',
   });
   const idsOf = (text: string) => [
     ...new Set((text.match(UUID) ?? []).map((id) => id.toLowerCase())),

@@ -422,10 +422,15 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       const published = gamePublishedErrorResponse(error);
       if (published) return jsonResponse(published.body, published.status);
       // A save that names a game by id and is refused for it (20261120010000: an id that is not a game of this
-      // organization or season, a game named twice, two games at one place, a game another admin removed a moment
-      // ago): caused by what was sent or by another admin, so a 409 with the database's words, not a logged failure.
+      // organization or season, two games at one place, a game another admin removed a moment ago): caused by what was
+      // sent or by another admin, so a 409 with the database's words and no failure log.
+      // Two of them (an id that is not a uuid, a game named twice) are the page's own fault and are logged, as the
+      // generic path logs; the answer is the same 409 either way.
       const identity = gameIdentityErrorResponse(error);
-      if (identity) return jsonResponse(identity.body, identity.status);
+      if (identity) {
+        if (identity.logAsFailure) await logFailure(logCtx, 'Game persistence failed', error);
+        return jsonResponse(identity.body, identity.status);
+      }
       await logFailure(logCtx, 'Game persistence failed', error);
       return jsonResponse(
         {

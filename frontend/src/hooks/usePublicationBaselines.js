@@ -183,31 +183,27 @@ export function usePublicationBaselines() {
   );
 
   /**
-   * Load one stored baseline and ask whether the working schedule still
-   * matches it.
+   * Load one stored baseline: its summary, its snapshot and the findings of reading it back.
    *
    * **The read goes back through `readPublicationSnapshot()`**, which re-runs
    * every construction check and re-computes the digest against the rows that
    * actually arrived. There is no fast path that trusts a row because this
    * hook wrote it: a store with its own opinions about jsonb, or a row edited
    * out of band, comes back as `SNAPSHOT_DIGEST_MISMATCH` at blocking rather
-   * than as a clean comparison against corrupted ground truth.
+   * than as a clean read of corrupted ground truth.
    *
-   * The result carries the read's own findings alongside the parity run's, so
-   * a digest mismatch is visible to the surface rather than being swallowed by
-   * a comparison that then looks fine.
+   * Two readers use it, so the seam stays reached from this one file: the
+   * parity check below, and the "Changes since publication" report
+   * (`components/reports/ChangesView.jsx`), which compares the snapshot's rows
+   * with the saved schedule game by game.
    *
    * @param {string} baselineId - a `publication_baselines.id`
-   * @param {ReadonlyArray<Record<string, string>>} currentRows - `master.rows`
-   * @returns {Promise<{ baseline: any, snapshot: any, readFindings: any[], parity: any }>}
+   * @returns {Promise<{ baseline: any, snapshot: any, readFindings: any[] }>}
    */
-  const compareWithBaseline = useCallback(
-    async (baselineId, currentRows) => {
+  const readBaseline = useCallback(
+    async (baselineId) => {
       if (!currentOrganization?.id) throw new Error('No active organization');
       if (!baselineId) throw new Error('Choose a published baseline to compare against');
-      if (!Array.isArray(currentRows) || currentRows.length === 0) {
-        throw new Error('Generate the CSVs first: there is no current schedule to compare');
-      }
 
       const { data, error: readError } = await supabase
         .from('publication_baselines')
@@ -234,21 +230,46 @@ export function usePublicationBaselines() {
         rows: data.export_rows,
         digest: String(data.digest),
       });
-
-      return {
-        baseline: toBaselineSummary(data),
-        snapshot,
-        readFindings: findings,
-        parity: checkBaselineParity({
-          snapshot,
-          currentRows,
-          currentLabel: 'the working schedule',
-          subject: `published baseline v${data.baseline_version} against the working schedule`,
-        }),
-      };
+      return { baseline: toBaselineSummary(data), snapshot, readFindings: findings };
     },
     [currentOrganization?.id]
   );
 
-  return { baselines, loading, error, refresh, publishBaseline, compareWithBaseline };
+  /**
+   * Load one stored baseline and ask whether the working schedule still
+   * matches it.
+   *
+   * The result carries the read's own findings alongside the parity run's, so
+   * a digest mismatch is visible to the surface rather than being swallowed by
+   * a comparison that then looks fine.
+   *
+   * @param {string} baselineId - a `publication_baselines.id`
+   * @param {ReadonlyArray<Record<string, string>>} currentRows - `master.rows`
+   * @returns {Promise<{ baseline: any, snapshot: any, readFindings: any[], parity: any }>}
+   */
+  const compareWithBaseline = useCallback(
+    async (baselineId, currentRows) => {
+      if (!currentOrganization?.id) throw new Error('No active organization');
+      if (!baselineId) throw new Error('Choose a published baseline to compare against');
+      if (!Array.isArray(currentRows) || currentRows.length === 0) {
+        throw new Error('Generate the CSVs first: there is no current schedule to compare');
+      }
+
+      const { baseline, snapshot, readFindings } = await readBaseline(baselineId);
+      return {
+        baseline,
+        snapshot,
+        readFindings,
+        parity: checkBaselineParity({
+          snapshot,
+          currentRows,
+          currentLabel: 'the working schedule',
+          subject: `published baseline v${baseline.baselineVersion} against the working schedule`,
+        }),
+      };
+    },
+    [currentOrganization?.id, readBaseline]
+  );
+
+  return { baselines, loading, error, refresh, publishBaseline, readBaseline, compareWithBaseline };
 }

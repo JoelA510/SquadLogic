@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Download } from 'lucide-react';
 import Page from '../components/chrome/Page.jsx';
 import PageHeader from '../components/chrome/PageHeader.jsx';
@@ -8,6 +8,9 @@ import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { isDemoOrganization } from '../lib/demo.js';
+
+// The reports are read-only views of the saved schedule, opened less often than the files above them: their own chunk.
+const ScheduleReportsPanel = lazy(() => import('../components/reports/ScheduleReportsPanel.jsx'));
 
 /**
  * Exports — roster/schedule CSV generation and coach welcome emails,
@@ -67,6 +70,21 @@ export default function ExportsPage() {
           sourceErrors={errors}
           sourceLoading={loading}
         />
+        <Suspense
+          fallback={
+            <p className="text-sm text-text-muted mt-6" role="status">
+              Loading the schedule reports&hellip;
+            </p>
+          }
+        >
+          <ScheduleReportsPanel
+            gameAssignments={game?.assignments || []}
+            gameRunId={game?.runId ?? null}
+            sourceErrors={errors}
+            sourceLoading={loading}
+            supabaseClient={supabase}
+          />
+        </Suspense>
       </div>
     </Page>
   );

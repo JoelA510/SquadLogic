@@ -89,6 +89,24 @@ export function scheduleTbdNote(item, { ordinal = 1 } = {}) {
     : `Practice not scheduled: ${why}.`;
 }
 
+const GAME_TBD_NOTE = /^Game not scheduled \(week (\d+)\): (.+)\.$/;
+
+/**
+ * The week and the reason in words out of a game's `Notes` cell, the inverse of {@link scheduleTbdNote} for a game
+ * item. The baseline of a publication keeps only the master export's rows, and a TIME TBD game there has its week in
+ * this sentence and nowhere else; `tests/reportsChangesSincePublication.test.js` holds the two to each other.
+ *
+ * @param {unknown} note
+ * @returns {{ weekIndex: number, why: string } | null} `null` for any note this module did not write
+ */
+export function parseGameTbdNote(note) {
+  if (typeof note !== 'string') return null;
+  const match = GAME_TBD_NOTE.exec(note.trim());
+  if (match === null) return null;
+  const weekIndex = Number(match[1]);
+  return Number.isInteger(weekIndex) && weekIndex > 0 ? { weekIndex, why: match[2] } : null;
+}
+
 const practiceItem = z.object({
   kind: z.literal('practice'),
   teamId: z.string().min(1),

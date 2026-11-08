@@ -1,5 +1,6 @@
-import { createBdd } from 'playwright-bdd';
+import { createBdd, type DataTable } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
+import { AxeBuilder } from '@axe-core/playwright';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -167,5 +168,147 @@ Then(
           `${team}: ${have} of ${target} practices (no practice slot is exactly as long as the division's practice)`
         )
     ).toBeVisible();
+  }
+);
+
+// --- The capacity panel (schedule expansion, PR 13) ---
+//
+// "Before you run: slots against what each division needs" reads the saved teams (the roster), the
+// division's settings, the practice slots and the saved practices, and compares them before any run.
+// The saved teams are seeded into the mock's `teams` table here: the run's roster, which the steps
+// above seed into the latest team run, is the solver's input and not what the panel reads.
+
+const capacityRow = (page: Page, division: string) =>
+  page
+    .getByTestId('capacity-row')
+    .filter({ has: page.getByRole('heading', { name: division, exact: true }) });
+
+/**
+ * The value of one labelled figure of a division's card ("Held", "Verdict (upper bound)"). The label
+ * is matched as exact text, not as a pattern built from it: "Held" must not match a longer label,
+ * and nothing in it needs escaping.
+ */
+const capacityFigure = (row: ReturnType<typeof capacityRow>, label: string) =>
+  row
+    .locator('dl > div')
+    .filter({ has: row.page().locator('dt').getByText(label, { exact: true }) })
+    .locator('dd');
+
+Given('these saved teams in {string}:', async ({ page }, division: string, table: DataTable) => {
+  const names = table.hashes().map((row) => row.team);
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ division, names, mockOrgId }) => {
+      const db = window.__MOCK_DB__ as unknown as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const found = (db.divisions ?? []).find(
+        (row) => row.organization_id === orgId && row.name === division
+      );
+      if (!found) throw new Error(`no division named ${division}`);
+      const slug = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
+      db.teams = [
+        ...(db.teams ?? []).filter((row) => !names.some((name) => row.id === `cap-${slug(name)}`)),
+        ...names.map((name) => ({
+          id: `cap-${slug(name)}`,
+          name,
+          division_id: found.id,
+          organization_id: orgId,
+        })),
+      ];
+      window.__saveMockDB__(db);
+    },
+    { division, names, mockOrgId: MOCK_ORG_ID }
+  );
+});
+
+When('I look at the Practice Scheduling page', async ({ page }) => {
+  await page.goto('/schedule/practice');
+  await expect(
+    page.getByRole('heading', { name: 'Before you run: slots against what each division needs' })
+  ).toBeVisible({ timeout: 15000 });
+});
+
+Then(
+  'the capacity panel row for {string} says:',
+  async ({ page }, division: string, table: DataTable) => {
+    const row = capacityRow(page, division);
+    // The panel is its own chunk and reads four tables: wait for it to have drawn the division.
+    await expect(row).toBeVisible({ timeout: 20000 });
+    const [expected] = table.hashes();
+    for (const [label, text] of Object.entries(expected)) {
+      await expect(capacityFigure(row, label), `${division}: ${label}`).toHaveText(text);
+    }
+  }
+);
+
+Then(
+  'the capacity panel verdict for {string} says {string}',
+  async ({ page }, division: string, text: string) => {
+    await expect(
+      capacityFigure(capacityRow(page, division), 'Verdict (upper bound)')
+    ).toContainText(text, { timeout: 20000 });
+  }
+);
+
+Then('the capacity panel says what its figures are based on', async ({ page }) => {
+  await expect(page.getByTestId('capacity-basis')).toContainText(
+    'These figures are based on every open practice slot a division may use, live from today'
+  );
+});
+
+Then(
+  'the capacity panel says that times held outside the app are unknown to it',
+  async ({ page }) => {
+    await expect(page.getByTestId('capacity-held-outside')).toHaveText(
+      'Times held outside the app are unknown to this panel.'
+    );
+  }
+);
+
+Then('the capacity panel says that every verdict is an upper bound', async ({ page }) => {
+  await expect(page.getByTestId('capacity-upper-bound')).toContainText(
+    'Each verdict is an upper bound'
+  );
+  await expect(page.getByText('Verdict (upper bound)').first()).toBeVisible();
+});
+
+/** The WCAG 2.0, 2.1 and 2.2 A and AA rules, as tests/e2e/steps/accessibility.ts scans them. */
+const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
+
+Then(
+  'axe finds no serious or critical violations in the capacity panel in the {string} theme',
+  async ({ page }, theme: string) => {
+    if (theme === 'dark') await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    else await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+    // The scan must see the drawn cards: a panel still saying "not checked yet" would pass it.
+    await expect(page.getByTestId('capacity-list')).toBeVisible({ timeout: 20000 });
+    // Finite entrance animations settle first: axe measures colours as drawn.
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((a) => a.finished.catch(() => undefined))
+      )
+    );
+    const results = await new AxeBuilder({ page })
+      .include('[data-testid="capacity-panel"]')
+      .withTags(WCAG_TAGS)
+      .analyze();
+    // A scan that checked nothing proves nothing.
+    expect(
+      results.passes.length,
+      'axe passed no rule on the capacity panel: did it render?'
+    ).toBeGreaterThan(5);
+    const blocking = results.violations
+      .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+      .flatMap((v) =>
+        v.nodes.map((n) => `[${v.impact}] ${v.id} at ${n.target.join(' ')}\n    ${n.html}`)
+      );
+    expect(
+      blocking,
+      `serious or critical axe violations in the capacity panel (${theme}):\n${blocking.join('\n')}`
+    ).toEqual([]);
   }
 );

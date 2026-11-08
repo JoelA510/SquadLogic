@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDashboardData } from '../hooks/useDashboardData.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import PracticeAssignmentList from '../components/PracticeAssignmentList.jsx';
@@ -61,6 +61,12 @@ import {
   buildPracticeApplyStatus,
   buildTeamsWithoutPracticeWarnings,
 } from '../utils/practiceApplyStatus.js';
+
+// Lazy, as the page's other parts that only some visits need: the capacity-against-demand check and
+// its model are loaded when the page renders, in a chunk of their own (schedule expansion, PR 13).
+const PracticeCapacityDemandPanel = lazy(
+  () => import('../components/scheduling/PracticeCapacityDemandPanel.jsx')
+);
 
 const DAY_LABELS = {
   sun: 'Sunday',
@@ -613,7 +619,14 @@ export default function PracticeSchedulingPage() {
     seasonSettingsId: currentSeasonSetting?.id,
   });
   const seasonRows = seasonPractice.rows;
-  const refetchSeasonPractice = seasonPractice.refetch;
+  // The capacity panel reads the same saved practices for itself; every re-read of them here also
+  // tells it to read again, so its "Held" and "Room left" are never those of before a save.
+  const [capacityRefreshKey, setCapacityRefreshKey] = useState(0);
+  const refetchSeasonPracticeRows = seasonPractice.refetch;
+  const refetchSeasonPractice = useCallback(() => {
+    refetchSeasonPracticeRows();
+    setCapacityRefreshKey((key) => key + 1);
+  }, [refetchSeasonPracticeRows]);
   // The season's live saved exceptions (relocated, TIME TBD), which the
   // evaluation applies (the M4.7 follow-up, plan Q1).
   const seasonExceptions = useSeasonPracticeExceptions({
@@ -1849,6 +1862,16 @@ export default function PracticeSchedulingPage() {
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner warnings={blackoutWarnings} />
+
+      <Suspense
+        fallback={
+          <p className="text-sm text-text-muted" data-testid="capacity-unchecked">
+            Slots against what each division needs: not checked yet.
+          </p>
+        }
+      >
+        <PracticeCapacityDemandPanel refreshKey={capacityRefreshKey} />
+      </Suspense>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">

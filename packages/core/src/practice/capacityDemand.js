@@ -1,0 +1,706 @@
+/**
+ * Capacity versus demand, before a run (schedule expansion, PR 13, task N1; plan
+ * `docs/changes/2026-11-03-schedule-expansion.md`, 5.9 and decisions 28 and 29).
+ *
+ * One row per division of the season: how many practices its teams want a week, how many they
+ * already hold, how many they still lack, and whether the practice slots the division may use have
+ * the room for the rest. Read-only and pure: it is handed the rows a page read and a `YYYY-MM-DD`
+ * "today" (this package builds no `Date`), and it stores and sends nothing.
+ *
+ * ## What the numbers are, and are not (decisions 28 and 29)
+ *
+ * The room counts **every open slot** a division may use: live from today on, as long as the
+ * division's practice, and not closed to it by a reservation. Nothing in the app records a time
+ * that is held outside it, so the calculation cannot leave one out: its verdict is an **upper
+ * bound** (the room can only be too high), and the page that shows it says so. Excluding held times
+ * for real is a stored hold, which the owner has not asked for.
+ *
+ * **Declared, not enforced** (AGENTS.md section 3). It does not read coach overlap, coach `must`
+ * rules, daylight, closures, permits, travel, saved exceptions, or a team whose practice time is
+ * TIME TBD (the planner leaves such a team out of a run and this does not: the gap is that team's
+ * need, pinned by `tests/practiceCapacityDemand.test.js`). A run applies all of them, so it can
+ * place fewer practices than the room shown.
+ *
+ * ## One rule each, held to the run's
+ *
+ * - **The subject set is the roster** (lessons 46 and 92): every team of a division of the season,
+ *   whether or not it holds a saved practice or appears in any solver output.
+ * - **Still needed is the planner's arithmetic**: per team `max(target - held, 0)`, `held` being
+ *   every saved row of the team whatever its dates ({@link practicesStillNeeded}; the Edge twin is
+ *   `planTeamsForRun`, `supabase/functions/_shared/engines/practice-lock.ts`, and
+ *   `tests/practiceCapacityDemand.test.js` runs both over one league). It is deliberately a
+ *   mirror of one expression, not a copy of the planner.
+ * - **A slot is open to a division** when it has a live date from today
+ *   (`assignmentLiveSpan` with `notBefore`, as the solver dates it), is exactly the division's
+ *   practice length when the division sets one (`practiceLengthRefuses`), and no reservation refuses
+ *   it (`reservationRefusal`, core's twin of the solver's rule). When none is open, the reason is
+ *   what refused each live slot ({@link noSlotReason}), never a count or a setting.
+ * - **A saved practice uses its place** in its slot over the dates it covers from today on; the
+ *   room of a slot is its capacity less the busiest date's load (`peakLiveCount`), as the solver's
+ *   capacity rule reads it. A range that cannot be read is counted as filling the whole slot and
+ *   is counted in `basis.unreadableRanges`, never skipped.
+ * - **A division that wants nothing** (0 a week) is "none wanted", never short, and counts no slot.
+ * - **A slot open to two divisions counts in each division's row and once in the total**
+ *   (lesson 92: a count is a number of a population; the rows can add up to more than the total).
+ * - **A slot that cannot be read** (a weekday, time or date it lacks) is counted in the basis and
+ *   is open to nobody, as the page's own partition leaves it out of a run.
+ *
+ * @module practice/capacityDemand
+ */
+
+import { z } from 'zod';
+
+import { IdSchema, IsoDateSchema } from '../availability/schemas.js';
+import {
+  RESERVATION_REASON,
+  reservationRefusal,
+  reservedDivisionIdsOf,
+} from '../practiceScheduling.js';
+import { PRACTICE_UNPLACED_REASON } from '../practiceUnplacedReasons.js';
+import {
+  LIVE_SPAN_STATUS,
+  assignmentLiveSpan,
+  calendarDayNumber,
+  peakLiveCount,
+  wallSeconds,
+} from '../utils/practiceLiveDates.js';
+import { firstWeekdayOnOrAfter } from './slots.js';
+
+/** The kinds of verdict a row (or the total) can carry. */
+export const CAPACITY_VERDICT = Object.freeze({
+  /** The division gives its teams no practice (0 a week). Never short. */
+  NONE_WANTED: 'none-wanted',
+  /** The division has no team in the season. */
+  NO_TEAMS: 'no-teams',
+  /** Practices are still needed and no slot is open to the division; `reason` says why. */
+  NO_SLOT: 'no-slot',
+  /** The open slots fall on fewer weekdays than the practices a week the division wants. */
+  NOT_ENOUGH_DAYS: 'not-enough-days',
+  /** Still needed exceeds the room. */
+  SHORT: 'short',
+  /** The room covers what is still needed (possibly with none to spare). */
+  SPARE: 'spare',
+});
+
+/**
+ * Why no slot is open to a division, one code each (the codes of a verdict of kind
+ * {@link CAPACITY_VERDICT}.NO_SLOT). The date and length codes are the run's own words
+ * (`PRACTICE_UNPLACED_REASON`); the reservation codes are **every** reason `reservationRefusal` has
+ * (`RESERVATION_REASON`, spread here so a reason added there is a code here at once, and
+ * `tests/practiceCapacityDemandReasons.test.js` then fails until it has panel words); and
+ * `RESERVATIONS_MIXED` is for right-length live slots refused for more than one of them. Words:
+ * `capacityDemandText.js`.
+ */
+export const CAPACITY_NO_SLOT_REASON = Object.freeze({
+  /** No slot has a date left from today. */
+  NO_LIVE_DATE: PRACTICE_UNPLACED_REASON.NO_LIVE_DATE,
+  /** The division sets a length and no live slot is that long. */
+  PRACTICE_LENGTH: PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH,
+  /** `RESERVED_FOR_ANOTHER_DIVISION` and `OUTSIDE_DIVISION_RESERVATION`, from the run's own list. */
+  ...RESERVATION_REASON,
+  /** The right-length live slots are refused for more than one reservation reason. */
+  RESERVATIONS_MIXED: 'reservations-mixed',
+});
+
+/** Weekday codes as `practice_slots.day_of_week` stores them, in the order a week is shown. */
+const WEEKDAYS = Object.freeze(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+
+/**
+ * What one team still lacks: its division's practices a week less the saved rows it holds, never
+ * below zero. The mirror of `planTeamsForRun`'s `Math.max(target - held, 0)`; a team holding more
+ * than its count needs none, and its extra rows do not offset another team's need.
+ *
+ * @param {number} target - practices a week (0 to 7)
+ * @param {number} held - saved rows the team holds, whatever their dates
+ * @returns {number}
+ */
+export function practicesStillNeeded(target, held) {
+  return Math.max(target - held, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
+
+const DivisionSchema = z
+  .object({
+    id: IdSchema,
+    name: z.string(),
+    /** `divisions.practices_per_week`: its CHECK is an integer from 0 to 7. */
+    practicesPerWeek: z.number().int().min(0).max(7),
+    /** `divisions.practice_minutes`: null (any slot length) or an integer from 15 to 240. */
+    practiceMinutes: z.number().int().min(15).max(240).nullable(),
+  })
+  .strict();
+
+const TeamSchema = z.object({ id: IdSchema, divisionId: IdSchema }).strict();
+
+/**
+ * A `practice_slots` row. The weekday, times and dates are read per slot (`readSlot`), so one slot
+ * that cannot be read is counted and left out, and never fails the whole panel.
+ */
+const SlotSchema = z
+  .object({
+    id: IdSchema,
+    dayOfWeek: z.string().nullable(),
+    startTime: z.string().nullable(),
+    endTime: z.string().nullable(),
+    /** `smallint DEFAULT 1`, nullable; read as the page reads it (`Math.max(1, capacity ?? 1)`). */
+    capacity: z.number().int().nullable(),
+    validFrom: z.string().nullable(),
+    validUntil: z.string().nullable(),
+    divisionId: z.string().nullable(),
+  })
+  .strict();
+
+const AssignmentSchema = z
+  .object({
+    id: IdSchema,
+    teamId: IdSchema,
+    slotId: z.string().nullable(),
+    effectiveDateRange: z.string().nullable(),
+  })
+  .strict();
+
+/** What {@link buildCapacityDemand} reads. */
+export const CapacityDemandInputSchema = z
+  .object({
+    /** Today on the season's clock (`seasonCalendarDate`), `YYYY-MM-DD`. */
+    liveFrom: IsoDateSchema.refine((value) => calendarDayNumber(value) !== null, {
+      message: 'expected a real calendar date',
+    }),
+    /** The season's dates: a slot with none of its own takes them (the page's rule). */
+    season: z.object({ start: z.string().nullable(), end: z.string().nullable() }).strict(),
+    divisions: z.array(DivisionSchema),
+    teams: z.array(TeamSchema),
+    slots: z.array(SlotSchema),
+    assignments: z.array(AssignmentSchema),
+  })
+  .strict()
+  .superRefine((input, ctx) => {
+    for (const key of ['divisions', 'teams', 'slots', 'assignments']) {
+      const seen = new Set();
+      input[key].forEach((entry, index) => {
+        if (seen.has(entry.id)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'id'],
+            message: `${key} carry the id ${entry.id} twice`,
+          });
+        }
+        seen.add(entry.id);
+      });
+    }
+  });
+
+const Count = z.number().int().min(0);
+const VerdictSchema = z
+  .object({
+    kind: z.enum(Object.values(CAPACITY_VERDICT)),
+    /** For {@link CAPACITY_VERDICT.NO_SLOT} and {@link CAPACITY_VERDICT.NOT_ENOUGH_DAYS}. */
+    reason: z
+      .enum([...Object.values(CAPACITY_NO_SLOT_REASON), PRACTICE_UNPLACED_REASON.NOT_ENOUGH_DAYS])
+      .nullable(),
+    short: Count,
+    spare: Count,
+  })
+  .strict();
+
+const DivisionReportSchema = z
+  .object({
+    divisionId: IdSchema,
+    name: z.string(),
+    teams: Count,
+    practicesPerWeek: Count,
+    practiceMinutes: Count.nullable(),
+    /** Teams times practices a week. */
+    wanted: Count,
+    /** Saved rows of the division's teams. May exceed `wanted`. */
+    held: Count,
+    /** The sum over teams of {@link practicesStillNeeded}. */
+    stillNeeded: Count,
+    /** Teams holding more rows than the division wants. */
+    teamsOverCount: Count,
+    /** The most practices any one team of the division still needs. */
+    largestNeed: Count,
+    /** The most practices one team could hold in the open slots with none on the same date. */
+    maxApart: Count,
+    slots: z
+      .object({
+        open: Count,
+        weekdays: z.array(z.enum(WEEKDAYS)),
+        capacity: Count,
+        room: Count,
+      })
+      .strict(),
+    verdict: VerdictSchema,
+  })
+  .strict();
+
+/** What {@link buildCapacityDemand} returns. */
+export const CapacityDemandReportSchema = z
+  .object({
+    liveFrom: IsoDateSchema,
+    basis: z
+      .object({
+        slotsRead: Count,
+        slotsUnreadable: Count,
+        slotsLive: Count,
+        slotsOpenToSomeDivision: Count,
+        slotsOpenToNoDivision: Count,
+        unreadableRanges: Count,
+      })
+      .strict(),
+    divisions: z.array(DivisionReportSchema),
+    total: z
+      .object({
+        teams: Count,
+        wanted: Count,
+        held: Count,
+        stillNeeded: Count,
+        slots: z
+          .object({
+            /** Distinct slots open to some division. */
+            open: Count,
+            /** The rows' own counts added up: more than `open` when a slot serves two divisions. */
+            inRows: Count,
+            capacity: Count,
+            room: Count,
+          })
+          .strict(),
+        verdict: VerdictSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
+/** @typedef {z.infer<typeof CapacityDemandInputSchema>} CapacityDemandInput */
+/** @typedef {z.infer<typeof CapacityDemandReportSchema>} CapacityDemandReport */
+
+// ---------------------------------------------------------------------------
+// Reading a slot
+// ---------------------------------------------------------------------------
+
+/**
+ * One slot, read as the page and the solver read it: the weekday, the times, the dates (its own,
+ * else the season's), the first date it falls on, and whether any date of it is left from today.
+ * `null` when it cannot be read.
+ *
+ * @param {CapacityDemandInput['slots'][number]} raw
+ * @param {CapacityDemandInput['season']} season
+ * @param {string} liveFrom
+ */
+function readSlot(raw, season, liveFrom) {
+  const day = String(raw.dayOfWeek ?? '')
+    .trim()
+    .toLowerCase();
+  if (!WEEKDAYS.includes(/** @type {any} */ (day))) return null;
+  const startSec = wallSeconds(raw.startTime);
+  const endSec = wallSeconds(raw.endTime);
+  // A window that does not end after it starts overlaps nothing: the solver refuses it too.
+  if (startSec === null || endSec === null || endSec <= startSec) return null;
+  const validFrom = raw.validFrom ?? season.start;
+  const validUntil = raw.validUntil ?? season.end;
+  const lastDay = calendarDayNumber(validUntil);
+  if (calendarDayNumber(validFrom) === null || lastDay === null) return null;
+  const firstDay = /** @type {number} */ (
+    calendarDayNumber(firstWeekdayOnOrAfter(/** @type {string} */ (validFrom), day.toUpperCase()))
+  );
+  const span = assignmentLiveSpan({ firstDay, lastDay, notBefore: liveFrom });
+  return {
+    id: raw.id,
+    day,
+    startSec,
+    endSec,
+    capacity: Math.max(1, raw.capacity ?? 1),
+    divisionId: raw.divisionId,
+    firstDay,
+    lastDay,
+    span: span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
+  };
+}
+
+/**
+ * Whether the division's practice length refuses the slot (`practiceLengthRefuses`, the solver's
+ * rule): a division that sets a length takes only slots exactly that long.
+ *
+ * @param {number | null} practiceMinutes
+ * @param {{ startSec: number, endSec: number }} slot
+ */
+function lengthRefuses(practiceMinutes, slot) {
+  if (practiceMinutes === null) return false;
+  return slot.endSec - slot.startSec !== practiceMinutes * 60;
+}
+
+/** Why a slot is not open to a division, besides a reservation (a reservation's own code is `reservationRefusal`'s). */
+const NOT_LIVE = 'not-live';
+const WRONG_LENGTH = 'wrong-length';
+
+/**
+ * Whether a slot is open to a division, and if not what refused it, in one order per slot: no date
+ * left from today; else not the division's length; else the reservation (`reservationRefusal`'s
+ * code). `null` is open. This is the one place a slot is judged for a division: the slots it may use
+ * and the reason it has none both come from it.
+ *
+ * @param {{ id: string, practiceMinutes?: number | null }} division
+ * @param {ReturnType<typeof readSlot> & {}} slot
+ * @param {Set<string>} reservedDivisionIds
+ * @returns {string | null}
+ */
+function refusalOf(division, slot, reservedDivisionIds) {
+  if (slot.span === null) return NOT_LIVE;
+  if (lengthRefuses(division.practiceMinutes, slot)) return WRONG_LENGTH;
+  return reservationRefusal(
+    { divisionId: division.id },
+    { divisionId: slot.divisionId },
+    reservedDivisionIds
+  );
+}
+
+/**
+ * The reason a division has no open slot, from what refused each of its slots, in one stated
+ * priority: no slot has a date left from today (`no-live-date`); else no live slot is the division's
+ * length (`practice-length`); else the reservation reason of the right-length live slots (they are
+ * all refused by a reservation, or one would be open): that reason when it is one, `reservations-mixed`
+ * when they are refused for more than one. A slot judged for its length is never judged for its
+ * reservation, so a wrong-length slot never reads as a reservation.
+ *
+ * @param {Array<string | null>} refusals - {@link refusalOf} of every slot, none of them `null`
+ * @returns {string}
+ */
+function noSlotReason(refusals) {
+  const live = refusals.filter((why) => why !== NOT_LIVE);
+  if (live.length === 0) return CAPACITY_NO_SLOT_REASON.NO_LIVE_DATE;
+  const rightLength = live.filter((why) => why !== WRONG_LENGTH);
+  if (rightLength.length === 0) return CAPACITY_NO_SLOT_REASON.PRACTICE_LENGTH;
+  const reasons = new Set(rightLength);
+  return reasons.size === 1
+    ? /** @type {string} */ ([...reasons][0])
+    : CAPACITY_NO_SLOT_REASON.RESERVATIONS_MIXED;
+}
+
+/**
+ * The most practices one team could hold in these open slots with no two of them on the same date:
+ * the run's own rule (`checkHardConstraints`, `HARD_CONSTRAINT_RULE.WEEKDAY`: a new placement is
+ * refused when it shares a live date with another practice of the team), which is about dates, not
+ * weekdays. Slots on different weekdays never share a date; two slots on one weekday share one when
+ * their live ranges (from today, to the end of their validity) overlap, so a weekday contributes the
+ * most pairwise date-disjoint ranges it holds (the greedy choice by earliest end is exact for
+ * intervals). A team's own saved practices are ignored, on purpose: that can only make this larger,
+ * and a verdict built on it can only be too generous.
+ *
+ * @param {Array<{ day: string, span: { first: number, last: number } | null }>} openSlots
+ * @returns {number}
+ */
+function mostApart(openSlots) {
+  let total = 0;
+  for (const day of WEEKDAYS) {
+    const spans = openSlots
+      .filter((slot) => slot.day === day && slot.span !== null)
+      .map((slot) => /** @type {{ first: number, last: number }} */ (slot.span))
+      .sort((a, b) => a.last - b.last);
+    let lastTaken = -Infinity;
+    for (const span of spans) {
+      if (span.first > lastTaken) {
+        total += 1;
+        lastTaken = span.last;
+      }
+    }
+  }
+  return total;
+}
+
+// ---------------------------------------------------------------------------
+// The calculation
+// ---------------------------------------------------------------------------
+
+/** A readable message for a failed parse: where, and what was wrong, for the first few issues. */
+function describeIssues(error) {
+  return error.issues
+    .slice(0, 3)
+    .map((issue) => `${issue.path.join('.') || 'input'}: ${issue.message}`)
+    .join('; ');
+}
+
+/**
+ * Slots against need, per division and for the season. Throws a `TypeError` naming the first
+ * invalid field when the input does not parse (a division the table would not hold, two rows with
+ * one id): a figure over data that cannot be trusted is not drawn.
+ *
+ * @param {CapacityDemandInput} rawInput
+ * @returns {CapacityDemandReport}
+ */
+export function buildCapacityDemand(rawInput) {
+  const parsed = CapacityDemandInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    throw new TypeError(`practice capacity: ${describeIssues(parsed.error)}`);
+  }
+  const input = parsed.data;
+  const { liveFrom } = input;
+
+  // The slots the run is given: those that can be read. A reservation is read from every one of
+  // them before any filter, so a division whose reserved slots are all out of date is left with none.
+  const read = input.slots.map((slot) => readSlot(slot, input.season, liveFrom));
+  const slots = /** @type {NonNullable<(typeof read)[number]>[]} */ (read.filter(Boolean));
+  const reservedDivisionIds = reservedDivisionIdsOf(slots);
+
+  // Saved practices, by team (every row counts as held) and by slot (a place in use).
+  const heldBy = new Map();
+  const rowsBySlot = new Map();
+  for (const row of input.assignments) {
+    heldBy.set(row.teamId, (heldBy.get(row.teamId) ?? 0) + 1);
+    if (row.slotId === null) continue;
+    const list = rowsBySlot.get(row.slotId) ?? [];
+    list.push(row);
+    rowsBySlot.set(row.slotId, list);
+  }
+
+  // The room of each live slot: its capacity less the busiest date's load from today on.
+  let unreadableRanges = 0;
+  const roomOf = new Map();
+  for (const slot of slots) {
+    if (slot.span === null) continue;
+    const spans = [];
+    for (const row of rowsBySlot.get(slot.id) ?? []) {
+      const held = assignmentLiveSpan({
+        firstDay: slot.firstDay,
+        lastDay: slot.lastDay,
+        range: row.effectiveDateRange,
+        notBefore: liveFrom,
+      });
+      if (held.status === LIVE_SPAN_STATUS.LIVE) spans.push({ first: held.first, last: held.last });
+      else if (held.status === LIVE_SPAN_STATUS.UNREADABLE) {
+        unreadableRanges += 1;
+        spans.push(slot.span);
+      }
+    }
+    roomOf.set(slot.id, Math.max(slot.capacity - peakLiveCount(spans), 0));
+  }
+
+  // The subject set: the roster. Never the saved practices, never a solver's output.
+  const rosterTeams = input.teams;
+  const teamsByDivision = new Map();
+  for (const team of rosterTeams) {
+    const list = teamsByDivision.get(team.divisionId) ?? [];
+    list.push(team);
+    teamsByDivision.set(team.divisionId, list);
+  }
+
+  const openUnion = new Set();
+
+  const divisions = [...input.divisions]
+    .sort(
+      (a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }) || a.id.localeCompare(b.id)
+    )
+    .map((division) => {
+      const teams = teamsByDivision.get(division.id) ?? [];
+      const wanted = teams.length * division.practicesPerWeek;
+      let held = 0;
+      let stillNeeded = 0;
+      let teamsOverCount = 0;
+      let largestNeed = 0;
+      for (const team of teams) {
+        const rows = heldBy.get(team.id) ?? 0;
+        const needs = practicesStillNeeded(division.practicesPerWeek, rows);
+        held += rows;
+        stillNeeded += needs;
+        largestNeed = Math.max(largestNeed, needs);
+        if (rows > division.practicesPerWeek) teamsOverCount += 1;
+      }
+
+      // A division that wants nothing uses no slot, so none is counted for it. Every slot is judged
+      // once for the division: it is open, or something refused it, and that is the reason.
+      const refusals =
+        wanted > 0 ? slots.map((slot) => refusalOf(division, slot, reservedDivisionIds)) : [];
+      const open = slots.filter((_, index) => wanted > 0 && refusals[index] === null);
+      for (const slot of open) openUnion.add(slot.id);
+      const weekdays = WEEKDAYS.filter((day) => open.some((slot) => slot.day === day));
+      const capacity = open.reduce((sum, slot) => sum + slot.capacity, 0);
+      const room = open.reduce((sum, slot) => sum + (roomOf.get(slot.id) ?? 0), 0);
+      const slotFigures = { open: open.length, weekdays, capacity, room };
+      const maxApart = mostApart(open);
+      return {
+        divisionId: division.id,
+        name: division.name,
+        teams: teams.length,
+        practicesPerWeek: division.practicesPerWeek,
+        practiceMinutes: division.practiceMinutes,
+        wanted,
+        held,
+        stillNeeded,
+        teamsOverCount,
+        largestNeed,
+        maxApart,
+        slots: slotFigures,
+        verdict: divisionVerdict({
+          practicesPerWeek: division.practicesPerWeek,
+          teams: teams.length,
+          stillNeeded,
+          largestNeed,
+          maxApart,
+          slots: slotFigures,
+          noSlotReason: open.length === 0 ? noSlotReason(refusals) : null,
+        }),
+      };
+    });
+
+  const sum = (pick) => divisions.reduce((total, row) => total + pick(row), 0);
+  const openInRows = sum((row) => row.slots.open);
+  const totalOpen = openUnion.size;
+  const totalCapacity = slots
+    .filter((slot) => openUnion.has(slot.id))
+    .reduce((total, slot) => total + slot.capacity, 0);
+  const totalRoom = slots
+    .filter((slot) => openUnion.has(slot.id))
+    .reduce((total, slot) => total + (roomOf.get(slot.id) ?? 0), 0);
+  const totals = {
+    teams: sum((row) => row.teams),
+    wanted: sum((row) => row.wanted),
+    held: sum((row) => row.held),
+    stillNeeded: sum((row) => row.stillNeeded),
+  };
+  const slotsLive = slots.filter((slot) => slot.span !== null).length;
+
+  return CapacityDemandReportSchema.parse({
+    liveFrom,
+    basis: {
+      slotsRead: input.slots.length,
+      slotsUnreadable: input.slots.length - slots.length,
+      slotsLive,
+      slotsOpenToSomeDivision: totalOpen,
+      slotsOpenToNoDivision: slotsLive - totalOpen,
+      unreadableRanges,
+    },
+    divisions,
+    total: {
+      ...totals,
+      slots: { open: totalOpen, inRows: openInRows, capacity: totalCapacity, room: totalRoom },
+      verdict: totalVerdict({ ...totals, room: totalRoom }),
+    },
+  });
+}
+
+/**
+ * A division's verdict. In order: nothing wanted; no team; nothing more needed (the room is then
+ * all spare); no slot open, with the reason {@link noSlotReason} gives from what refused each of its
+ * slots; too few weekdays for the practices a team still needs; else short by what the room lacks or
+ * the room to spare.
+ *
+ * **A verdict fires on a condition that is necessary for the run to fail, never on a coarse one**
+ * (the face says each verdict is an upper bound, so it may be generous and must not be strict). The
+ * weekday verdict is the case that taught it (Codex, #711, the fourth finding): a practice held on an
+ * expired slot still counts toward a team's target, so comparing the open weekdays with the weekly
+ * target said "too few weekdays" of a team that holds one of two and has one weekday left, which the
+ * run places. It now compares the most any one team still needs (`largestNeed`, target less held,
+ * never below zero) with the most practices one team could hold in the open slots with none on the
+ * same date ({@link mostApart}: the run's rule is about dates, not weekdays, so two slots on one
+ * weekday whose live dates never meet count twice), whichever practices the team already holds. A
+ * team that needs more than that cannot be given them all. A seeded differential,
+ * `tests/practiceCapacityDemandVsOptimizer.test.js`, holds every failure the panel claims to the
+ * real optimizer; it found the date-versus-weekday case after the weekly-target one.
+ *
+ * **The reason is what refused the live slots, not a count or the division's setting** (Codex,
+ * #711, three findings of one shape: the length reason was chosen on the setting alone; then the
+ * reservation reason was one sentence for the two reasons `reservationRefusal` has). One deliberate
+ * difference from the run: the solver (`explainUnplaced`, `auto-scheduler-solver.ts`) tests the length
+ * only among the slots left after the reservation and reports `practice-length` when a right-length
+ * slot is reserved away; this judges each slot once, length before reservation, so it does not tell
+ * an admin that no slot is that long when one is. `tests/practiceCapacityDemand.test.js` pins the
+ * solver's reason for those cases.
+ *
+ * @param {{ practicesPerWeek: number, teams: number, stillNeeded: number, largestNeed: number,
+ *   maxApart: number,
+ *   slots: { open: number, weekdays: string[], capacity: number, room: number },
+ *   noSlotReason: string | null }} input - `noSlotReason` is set exactly when `slots.open` is 0
+ */
+function divisionVerdict({
+  practicesPerWeek,
+  teams,
+  stillNeeded,
+  largestNeed,
+  maxApart,
+  slots,
+  noSlotReason: why,
+}) {
+  const short = Math.max(stillNeeded - slots.room, 0);
+  const spare = Math.max(slots.room - stillNeeded, 0);
+  if (practicesPerWeek === 0) {
+    return { kind: CAPACITY_VERDICT.NONE_WANTED, reason: null, short: 0, spare: 0 };
+  }
+  if (teams === 0) return { kind: CAPACITY_VERDICT.NO_TEAMS, reason: null, short: 0, spare: 0 };
+  if (stillNeeded === 0) return { kind: CAPACITY_VERDICT.SPARE, reason: null, short: 0, spare };
+  if (slots.open === 0) {
+    return { kind: CAPACITY_VERDICT.NO_SLOT, reason: why, short, spare: 0 };
+  }
+  if (largestNeed > maxApart) {
+    return {
+      kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS,
+      reason: PRACTICE_UNPLACED_REASON.NOT_ENOUGH_DAYS,
+      short,
+      spare,
+    };
+  }
+  return short > 0
+    ? { kind: CAPACITY_VERDICT.SHORT, reason: null, short, spare: 0 }
+    : { kind: CAPACITY_VERDICT.SPARE, reason: null, short: 0, spare };
+}
+
+/** The whole season's verdict, over the distinct slots: short, to spare, or nothing wanted. */
+function totalVerdict({ wanted, stillNeeded, room }) {
+  if (wanted === 0) return { kind: CAPACITY_VERDICT.NONE_WANTED, reason: null, short: 0, spare: 0 };
+  const short = Math.max(stillNeeded - room, 0);
+  const spare = Math.max(room - stillNeeded, 0);
+  return short > 0
+    ? { kind: CAPACITY_VERDICT.SHORT, reason: null, short, spare: 0 }
+    : { kind: CAPACITY_VERDICT.SPARE, reason: null, short: 0, spare };
+}
+
+// ---------------------------------------------------------------------------
+// From the tables to the input
+// ---------------------------------------------------------------------------
+
+const orNull = (value) => (value === undefined ? null : value);
+
+/**
+ * The input, from the rows a page read: divisions, teams and `practice_slots` in the tables' own
+ * column names, the season's assignments as `loadSeasonPracticeAssignments` returns them
+ * (`practiceSupabase.js`), and the `season_settings` row. A column a row lacks is none, never
+ * undefined, so a select that forgot one fails the schema or changes a figure rather than hiding.
+ *
+ * @param {{ liveFrom: string, season: Record<string, any>, divisions: Array<Record<string, any>>,
+ *   teams: Array<Record<string, any>>, practiceSlots: Array<Record<string, any>>,
+ *   practiceAssignments: Array<Record<string, any>> }} rows
+ * @returns {CapacityDemandInput}
+ */
+export function capacityDemandInputFromRows(rows) {
+  return {
+    liveFrom: rows.liveFrom,
+    season: {
+      start: orNull(rows.season?.season_start),
+      end: orNull(rows.season?.season_end),
+    },
+    divisions: rows.divisions.map((row) => ({
+      id: String(row.id),
+      name: String(row.name ?? ''),
+      practicesPerWeek: row.practices_per_week,
+      practiceMinutes: orNull(row.practice_minutes),
+    })),
+    teams: rows.teams.map((row) => ({ id: String(row.id), divisionId: String(row.division_id) })),
+    slots: rows.practiceSlots.map((row) => ({
+      id: String(row.id),
+      dayOfWeek: orNull(row.day_of_week),
+      startTime: orNull(row.start_time),
+      endTime: orNull(row.end_time),
+      capacity: orNull(row.capacity),
+      validFrom: orNull(row.valid_from),
+      validUntil: orNull(row.valid_until),
+      divisionId: orNull(row.division_id),
+    })),
+    assignments: rows.practiceAssignments.map((row) => ({
+      id: String(row.id),
+      teamId: String(row.teamId),
+      slotId: orNull(row.slotId),
+      effectiveDateRange: orNull(row.effectiveDateRange),
+    })),
+  };
+}

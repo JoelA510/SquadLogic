@@ -517,6 +517,73 @@ describe('the weekday verdict fires on what a team still needs, not on the weekl
     expect(row(both, 'two').verdict.kind).toBe(CAPACITY_VERDICT.NOT_ENOUGH_DAYS);
   });
 
+  it('two slots on one weekday whose live dates never meet give a team two practices on different dates: no weekday verdict (the differential, seed 102)', () => {
+    // The run's rule is "never two of a team's practices on one date", not "never on one weekday": a
+    // Monday slot live only on the 5th and a Monday slot that starts on the 2nd of November share no
+    // date, so one team holds both, and the weekday count alone would say it cannot.
+    const report = run({
+      divisions: [two],
+      teams: [team('t', 'two')],
+      slots: [
+        slot('early', 'mon', { validUntil: '2026-10-06', capacity: 2 }),
+        slot('late', 'mon', { validFrom: '2026-11-02', capacity: 2 }),
+      ],
+    });
+    expect(row(report, 'two')).toMatchObject({
+      largestNeed: 2,
+      maxApart: 2,
+      slots: { open: 2, weekdays: ['mon'] },
+      verdict: { kind: CAPACITY_VERDICT.SPARE },
+    });
+  });
+
+  it('two Monday slots that share dates give a team one practice a date: it fires', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('t', 'two')],
+      slots: [slot('a', 'mon', { capacity: 2 }), slot('b', 'mon', { capacity: 2 })],
+    });
+    expect(row(report, 'two')).toMatchObject({
+      maxApart: 1,
+      verdict: { kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS },
+    });
+  });
+
+  it('slots on different weekdays are always apart, whatever their dates', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('t', 'two')],
+      slots: [slot('mon', 'mon', { capacity: 2 }), slot('tue', 'tue', { capacity: 2 })],
+    });
+    expect(row(report, 'two')).toMatchObject({ maxApart: 2 });
+    expect(row(report, 'two').verdict.kind).toBe(CAPACITY_VERDICT.SPARE);
+  });
+
+  it('three Monday slots, two of which overlap and one that comes after both, give two apart, so a need of three fires', () => {
+    const slots = [
+      slot('a', 'mon', { validUntil: '2026-10-20' }),
+      slot('b', 'mon', { validFrom: '2026-10-12', validUntil: '2026-10-27' }),
+      slot('c', 'mon', { validFrom: '2026-11-02' }),
+    ];
+    const report = run({
+      divisions: [division('three', 3)],
+      teams: [team('t', 'three')],
+      slots,
+    });
+    expect(row(report, 'three')).toMatchObject({
+      largestNeed: 3,
+      maxApart: 2,
+      verdict: { kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS },
+    });
+    const twoWanted = run({ divisions: [two], teams: [team('t', 'two')], slots });
+    expect(row(twoWanted, 'two')).toMatchObject({ maxApart: 2 });
+    expect(row(twoWanted, 'two').verdict.kind).toBe(CAPACITY_VERDICT.SPARE);
+  });
+
+  it('a division with no open slot has none apart', () => {
+    expect(row(run({ divisions: [two], teams: [team('t', 'two')] }), 'two').maxApart).toBe(0);
+  });
+
   it('three practices still needed on two open weekdays fires; the same need on three weekdays does not', () => {
     const three = division('three', 3);
     const slots2 = [slot('tue', 'tue', { capacity: 3 }), slot('thu', 'thu', { capacity: 3 })];

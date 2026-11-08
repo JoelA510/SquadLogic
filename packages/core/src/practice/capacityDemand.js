@@ -223,6 +223,8 @@ const DivisionReportSchema = z
     teamsOverCount: Count,
     /** The most practices any one team of the division still needs. */
     largestNeed: Count,
+    /** The most practices one team could hold in the open slots with none on the same date. */
+    maxApart: Count,
     slots: z
       .object({
         open: Count,
@@ -377,6 +379,37 @@ function noSlotReason(refusals) {
     : CAPACITY_NO_SLOT_REASON.RESERVATIONS_MIXED;
 }
 
+/**
+ * The most practices one team could hold in these open slots with no two of them on the same date:
+ * the run's own rule (`checkHardConstraints`, `HARD_CONSTRAINT_RULE.WEEKDAY`: a new placement is
+ * refused when it shares a live date with another practice of the team), which is about dates, not
+ * weekdays. Slots on different weekdays never share a date; two slots on one weekday share one when
+ * their live ranges (from today, to the end of their validity) overlap, so a weekday contributes the
+ * most pairwise date-disjoint ranges it holds (the greedy choice by earliest end is exact for
+ * intervals). A team's own saved practices are ignored, on purpose: that can only make this larger,
+ * and a verdict built on it can only be too generous.
+ *
+ * @param {Array<{ day: string, span: { first: number, last: number } | null }>} openSlots
+ * @returns {number}
+ */
+function mostApart(openSlots) {
+  let total = 0;
+  for (const day of WEEKDAYS) {
+    const spans = openSlots
+      .filter((slot) => slot.day === day && slot.span !== null)
+      .map((slot) => /** @type {{ first: number, last: number }} */ (slot.span))
+      .sort((a, b) => a.last - b.last);
+    let lastTaken = -Infinity;
+    for (const span of spans) {
+      if (span.first > lastTaken) {
+        total += 1;
+        lastTaken = span.last;
+      }
+    }
+  }
+  return total;
+}
+
 // ---------------------------------------------------------------------------
 // The calculation
 // ---------------------------------------------------------------------------
@@ -485,6 +518,7 @@ export function buildCapacityDemand(rawInput) {
       const capacity = open.reduce((sum, slot) => sum + slot.capacity, 0);
       const room = open.reduce((sum, slot) => sum + (roomOf.get(slot.id) ?? 0), 0);
       const slotFigures = { open: open.length, weekdays, capacity, room };
+      const maxApart = mostApart(open);
       return {
         divisionId: division.id,
         name: division.name,
@@ -496,12 +530,14 @@ export function buildCapacityDemand(rawInput) {
         stillNeeded,
         teamsOverCount,
         largestNeed,
+        maxApart,
         slots: slotFigures,
         verdict: divisionVerdict({
           practicesPerWeek: division.practicesPerWeek,
           teams: teams.length,
           stillNeeded,
           largestNeed,
+          maxApart,
           slots: slotFigures,
           noSlotReason: open.length === 0 ? noSlotReason(refusals) : null,
         }),
@@ -555,11 +591,13 @@ export function buildCapacityDemand(rawInput) {
  * weekday verdict is the case that taught it (Codex, #711, the fourth finding): a practice held on an
  * expired slot still counts toward a team's target, so comparing the open weekdays with the weekly
  * target said "too few weekdays" of a team that holds one of two and has one weekday left, which the
- * run places. It now compares them with the most any one team still needs
- * (`largestNeed`, target less held, never below zero), whichever weekdays the team already holds:
- * no team can be placed on more different weekdays than are open, so a team that needs more than
- * that cannot be given them all. `tests/practiceCapacityDemandVsOptimizer.test.js` holds every
- * failure the panel claims to the real optimizer.
+ * run places. It now compares the most any one team still needs (`largestNeed`, target less held,
+ * never below zero) with the most practices one team could hold in the open slots with none on the
+ * same date ({@link mostApart}: the run's rule is about dates, not weekdays, so two slots on one
+ * weekday whose live dates never meet count twice), whichever practices the team already holds. A
+ * team that needs more than that cannot be given them all. A seeded differential,
+ * `tests/practiceCapacityDemandVsOptimizer.test.js`, holds every failure the panel claims to the
+ * real optimizer; it found the date-versus-weekday case after the weekly-target one.
  *
  * **The reason is what refused the live slots, not a count or the division's setting** (Codex,
  * #711, three findings of one shape: the length reason was chosen on the setting alone; then the
@@ -571,6 +609,7 @@ export function buildCapacityDemand(rawInput) {
  * solver's reason for those cases.
  *
  * @param {{ practicesPerWeek: number, teams: number, stillNeeded: number, largestNeed: number,
+ *   maxApart: number,
  *   slots: { open: number, weekdays: string[], capacity: number, room: number },
  *   noSlotReason: string | null }} input - `noSlotReason` is set exactly when `slots.open` is 0
  */
@@ -579,6 +618,7 @@ function divisionVerdict({
   teams,
   stillNeeded,
   largestNeed,
+  maxApart,
   slots,
   noSlotReason: why,
 }) {
@@ -592,7 +632,7 @@ function divisionVerdict({
   if (slots.open === 0) {
     return { kind: CAPACITY_VERDICT.NO_SLOT, reason: why, short, spare: 0 };
   }
-  if (largestNeed > slots.weekdays.length) {
+  if (largestNeed > maxApart) {
     return {
       kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS,
       reason: PRACTICE_UNPLACED_REASON.NOT_ENOUGH_DAYS,

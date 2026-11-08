@@ -169,7 +169,13 @@ the Edge counterpart of core `practice/daylight.js`:
   of that length: reserved to another division, or the division's own reserved slots, none of them
   live, so it may use only those, or both), one sentence each (`capacityDemandText.js`, held by a
   census of `RESERVATION_REASON`); the run reports `practice-length` for a reserved right-length slot
-  too, because it tests the length only among the slots left after the reservation: with no stored hold (owner decision 28) nothing records a time held outside the app, so
+  too, because it tests the length only among the slots left after the reservation. "Too few weekdays"
+  fires only when the most any one team still needs (target less held: a practice held on an expired
+  slot still counts toward the target) exceeds the most practices one team could hold in the open
+  slots with none on the same date (the run's rule is about dates: two slots on one weekday whose live
+  dates never meet count twice), and `tests/practiceCapacityDemandVsOptimizer.test.js` holds every
+  failure the panel claims (short, no slot, too few weekdays) to the real optimizer over 300 seeded
+  leagues. With no stored hold (owner decision 28) nothing records a time held outside the app, so
   the panel counts every open slot and says that such times are unknown to it. It does not read coach
   overlap, coach `must` rules, daylight, closures, permits, travel, saved exceptions or a TIME TBD
   team, so a run can place fewer practices than it shows. A slot open to two divisions counts in each

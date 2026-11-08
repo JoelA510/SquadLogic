@@ -173,11 +173,13 @@ async function runBoth(league) {
     [],
     targets
   );
+  /** @type {any[]} */
   const teams = league.teams.map((team) => ({
     ...prepareTeam({ id: team.id, division: team.divisionId, coachId: `c-${team.id}` }),
     practicesPerWeek: targets.get(team.id),
     practiceMinutes: divisionOf.get(team.divisionId).practiceMinutes,
   }));
+  /** @type {any[]} */
   const slots = league.slots.map(runSlot);
   const applied = applySlotReservations(teams, slots, {
     slotDivision: new Map(league.slots.map((slot) => [slot.id, slot.divisionId])),

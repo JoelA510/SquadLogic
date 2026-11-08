@@ -741,6 +741,10 @@ describe('why no slot is open: the filter that left the live slots none [plant P
         capacity: 1,
       };
     };
+    /**
+     * @param {any[]} slots
+     * @param {string[]} reservedIds
+     */
     const solverReason = async (slots, reservedIds) => {
       const t = {
         ...prepareTeam({ id: 't', division: 'U10', coachId: 'c' }),

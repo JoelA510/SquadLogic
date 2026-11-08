@@ -416,6 +416,11 @@ export function buildCapacityDemand(rawInput) {
       const capacity = open.reduce((sum, slot) => sum + slot.capacity, 0);
       const room = open.reduce((sum, slot) => sum + (roomOf.get(slot.id) ?? 0), 0);
       const slotFigures = { open: open.length, weekdays, capacity, room };
+      // The live slots of the division's length, before any reservation: what says whether the
+      // length, or the reservation, is what left it no slot (`divisionVerdict`).
+      const liveOfLength = slots.filter(
+        (slot) => slot.span !== null && !lengthRefuses(division.practiceMinutes, slot)
+      ).length;
 
       return {
         divisionId: division.id,
@@ -430,11 +435,11 @@ export function buildCapacityDemand(rawInput) {
         slots: slotFigures,
         verdict: divisionVerdict({
           practicesPerWeek: division.practicesPerWeek,
-          practiceMinutes: division.practiceMinutes,
           teams: teams.length,
           stillNeeded,
           slots: slotFigures,
           anyLive,
+          liveOfLength,
         }),
       };
     });
@@ -477,18 +482,21 @@ export function buildCapacityDemand(rawInput) {
 
 /**
  * A division's verdict. In order: nothing wanted; no team; nothing more needed (the room is then
- * all spare); no slot open (and why, in the solver's own words: no date left from today, the
- * practice length, or every slot reserved away); too few weekdays for the practices a week; else
- * short by what the room lacks or the room to spare.
+ * all spare); no slot open; too few weekdays for the practices a week; else short by what the room
+ * lacks or the room to spare.
+ *
+ * **Why no slot is open is the filter that excluded the live slots, not the division's setting.**
+ * In the order the solver tests them (`explainUnplaced`, `auto-scheduler-solver.ts`): no slot has a
+ * date left from today (`no-live-date`); else no live slot is the division's length
+ * (`practice-length`); else a live slot of the length exists and the reservation is what keeps the
+ * division off every one (`no-slot-available`; with no length set, every live slot passes the length
+ * test, so this is the reservation too). **One deliberate difference from the run:** the solver
+ * tests the length only among the slots left after the reservation, so a right-length slot reserved
+ * to another division reads there as `practice-length`; this tests the length among all live slots,
+ * so the panel does not tell an admin that no slot is that long when one is (Codex, #711).
+ * `tests/practiceCapacityDemand.test.js` pins the solver's reason for those cases.
  */
-function divisionVerdict({
-  practicesPerWeek,
-  practiceMinutes,
-  teams,
-  stillNeeded,
-  slots,
-  anyLive,
-}) {
+function divisionVerdict({ practicesPerWeek, teams, stillNeeded, slots, anyLive, liveOfLength }) {
   const short = Math.max(stillNeeded - slots.room, 0);
   const spare = Math.max(slots.room - stillNeeded, 0);
   if (practicesPerWeek === 0) {
@@ -500,7 +508,7 @@ function divisionVerdict({
     /** @type {string} */
     let reason = PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE;
     if (!anyLive) reason = PRACTICE_UNPLACED_REASON.NO_LIVE_DATE;
-    else if (practiceMinutes !== null) reason = PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH;
+    else if (liveOfLength === 0) reason = PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH;
     return { kind: CAPACITY_VERDICT.NO_SLOT, reason, short, spare: 0 };
   }
   if (practicesPerWeek > 1 && slots.weekdays.length < practicesPerWeek) {

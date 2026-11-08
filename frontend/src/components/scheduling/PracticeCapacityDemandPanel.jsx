@@ -47,9 +47,13 @@ const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
  * (`describeUnplacedReason`); the third, a division reserved away from every slot that still has a
  * date, has none there ("no slot was free for it" does not say what is wrong before a run).
  */
-function noSlotReason(reason) {
+function noSlotReason(reason, practiceMinutes) {
   if (reason === PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE) {
-    return 'Every slot with a date left from today is reserved to another division.';
+    // With a practice length set, the slots of that length are what is reserved away: the ones of
+    // another length are not reserved, they are the wrong length, and the sentence says which.
+    return practiceMinutes === null || practiceMinutes === undefined
+      ? 'Every slot with a date left from today is reserved to another division.'
+      : "Every slot of the division's length with a date left from today is reserved to another division.";
   }
   return `${capitalise(describeUnplacedReason(reason))}.`;
 }
@@ -74,7 +78,7 @@ function describeVerdict(verdict, row = undefined) {
       return {
         tone: 'danger',
         label: 'No slot open',
-        detail: `${noSlotReason(verdict.reason)} Short by ${verdict.short}.`,
+        detail: `${noSlotReason(verdict.reason, row?.practiceMinutes)} Short by ${verdict.short}.`,
       };
     default:
       return {

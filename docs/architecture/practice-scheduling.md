@@ -164,7 +164,10 @@ the Edge counterpart of core `practice/daylight.js`:
   live from today, exactly its practice length, not reserved to another division, less the saved
   practices that fill them (the busiest date's load, as the solver's capacity rule reads it). Its verdict
   (short by N, N to spare, no slot open and why, too few weekdays, none wanted at 0 a week) is an
-  **upper bound**: with no stored hold (owner decision 28) nothing records a time held outside the app, so
+  **upper bound**; "no slot open" names the filter that left the live slots none (no date left from
+  today, else no live slot of its length, else its slots of that length reserved to another division),
+  where the run reports `practice-length` in the last case too, because it tests the length only among
+  the slots left after the reservation: with no stored hold (owner decision 28) nothing records a time held outside the app, so
   the panel counts every open slot and says that such times are unknown to it. It does not read coach
   overlap, coach `must` rules, daylight, closures, permits, travel, saved exceptions or a TIME TBD
   team, so a run can place fewer practices than it shows. A slot open to two divisions counts in each

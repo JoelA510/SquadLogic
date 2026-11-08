@@ -113,7 +113,7 @@ const REMOVED =
   'a game was removed while this save was being checked: nothing was saved, try again';
 
 describe('gameIdentityErrorResponse', () => {
-  /** @type {Array<[string, any, { reason: string, ids: string[] }]>} */
+  /** @type {Array<[string, any, { reason: string, ids: string[], logged: boolean }]>} */
   const CASES = [
     [
       'an id that is not a uuid',
@@ -122,7 +122,7 @@ describe('gameIdentityErrorResponse', () => {
         details: 'game_identity_invalid',
         message: 'assignment id "review-0" is not a game id (a uuid)',
       },
-      { reason: 'game_identity_invalid', ids: [] },
+      { reason: 'game_identity_invalid', ids: [], logged: true },
     ],
     [
       'a game named twice',
@@ -131,7 +131,7 @@ describe('gameIdentityErrorResponse', () => {
         details: 'game_identity_repeated',
         message: `game ${A} is named more than once in this save`,
       },
-      { reason: 'game_identity_repeated', ids: [A] },
+      { reason: 'game_identity_repeated', ids: [A], logged: true },
     ],
     [
       'a game that is not there (and one of another organization, in the same words)',
@@ -140,7 +140,7 @@ describe('gameIdentityErrorResponse', () => {
         details: 'game_not_found',
         message: `game ${B} does not exist in this organization`,
       },
-      { reason: 'game_not_found', ids: [B] },
+      { reason: 'game_not_found', ids: [B], logged: false },
     ],
     [
       'a game of another season',
@@ -149,7 +149,7 @@ describe('gameIdentityErrorResponse', () => {
         details: `game_identity_season ids=${C}`,
         message: `game ${C} is a game of another season: a save names only games of its own season`,
       },
-      { reason: 'game_identity_season', ids: [C] },
+      { reason: 'game_identity_season', ids: [C], logged: false },
     ],
     [
       'two games at one place',
@@ -158,7 +158,7 @@ describe('gameIdentityErrorResponse', () => {
         details: `game_identity_conflict ids=${A},${B}`,
         message: `game ${A} would end where ${B} already is: one place holds one game of a pair (the unique matchup, slot and week)`,
       },
-      { reason: 'game_identity_conflict', ids: [A, B] },
+      { reason: 'game_identity_conflict', ids: [A, B], logged: false },
     ],
     [
       'a game at the place of a new game of the same save (one id)',
@@ -167,12 +167,12 @@ describe('gameIdentityErrorResponse', () => {
         details: `game_identity_conflict ids=${A}`,
         message: `game ${A} would end where a new game of this save already is: one place holds one game of a pair (the unique matchup, slot and week)`,
       },
-      { reason: 'game_identity_conflict', ids: [A] },
+      { reason: 'game_identity_conflict', ids: [A], logged: false },
     ],
     [
       'a game removed while the save was being checked',
       { code: '40001', details: null, message: REMOVED },
-      { reason: 'game_removed', ids: [] },
+      { reason: 'game_removed', ids: [], logged: false },
     ],
   ];
 
@@ -187,7 +187,35 @@ describe('gameIdentityErrorResponse', () => {
         message: error.message,
         ids: want.ids,
       },
+      logAsFailure: want.logged,
     });
+  });
+
+  it('asks for the failure log for exactly the two refusals the page itself must never cause', () => {
+    // An id that is not a uuid and a game named twice are not an admin's doing or a race: the page never sends a
+    // placeholder id (only saved games carry one) and the matcher throws on a duplicate, so either signals a page
+    // regression and stays visible in the failure log. The other four are caused by what the admin sent or by another
+    // admin a moment before, and are not logged. The answer (409, the database's message) is the same for all six.
+    const logged = CASES.filter(
+      ([, error]) => gameIdentityErrorResponse(error)?.logAsFailure === true
+    )
+      .map(([, , want]) => want.reason)
+      .sort();
+    const quiet = CASES.filter(
+      ([, error]) => gameIdentityErrorResponse(error)?.logAsFailure === false
+    )
+      .map(([, , want]) => want.reason)
+      .sort();
+    expect(logged).toEqual(['game_identity_invalid', 'game_identity_repeated']);
+    expect(quiet).toEqual([
+      'game_identity_conflict',
+      'game_identity_conflict',
+      'game_identity_season',
+      'game_not_found',
+      'game_removed',
+    ]);
+    // Every case is in one list or the other: a mapper that forgot the flag (undefined) fills neither.
+    expect(logged.length + quiet.length).toBe(CASES.length);
   });
 
   it('answers a refusal with no message with words of its own', () => {
@@ -290,14 +318,15 @@ describe('game-persistence/index.ts', () => {
       /message: \(error as Error\)\?\.message \|\| 'Failed to persist game snapshot\.',\s*\},\s*500/
     );
   });
-  it('maps the identity refusals after the Published mapping and before the failure log', () => {
+  it('maps the identity refusals after the Published mapping and before the generic failure log, logging only when the mapper says so', () => {
     const published = INDEX.indexOf('gamePublishedErrorResponse(error)');
     const identity = INDEX.indexOf('gameIdentityErrorResponse(error)');
-    const logged = INDEX.indexOf("logFailure(logCtx, 'Game persistence failed', error)");
+    const generic = INDEX.lastIndexOf("logFailure(logCtx, 'Game persistence failed', error)");
     expect(identity).toBeGreaterThan(published);
-    expect(logged).toBeGreaterThan(identity);
+    expect(generic).toBeGreaterThan(identity);
+    // The identity branch logs, with the generic path's call, only for a refusal the mapper marks, and before it answers.
     expect(INDEX).toMatch(
-      /if \(identity\) return jsonResponse\(identity\.body, identity\.status\);/
+      /if \(identity\) \{\s*if \(identity\.logAsFailure\) await logFailure\(logCtx, 'Game persistence failed', error\);\s*return jsonResponse\(identity\.body, identity\.status\);\s*\}/
     );
     expect(INDEX).toMatch(
       /import \{[^}]*gameIdentityErrorResponse[^}]*\} from '\.\.\/_shared\/game-persistence-errors\.ts'/

@@ -33,7 +33,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(99);
+SELECT plan(100);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -385,6 +385,12 @@ SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1
         '{}', '[]'), NULL)$$),
     '22023:game_identity_conflict ids=a1111111-1111-1111-1111-0000000d0e04,a1111111-1111-1111-1111-0000000d0e08',
     'a save that names no season is judged the same way');
+-- Which clash is named when there are two: a stored game (two ids) before a new game of the same save (one id), as
+-- `ORDER BY first_id, second_id NULLS LAST` takes them.
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e04', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e04', 'a1111111-1111-1111-1111-0000000d00d8')),
+        '{}', jsonb_build_array(pg_temp.at('a1111111-1111-1111-1111-0000000d0002', 'a1111111-1111-1111-1111-0000000d0004', 'a1111111-1111-1111-1111-0000000d00d8'))))$$),
+    '22023:game_identity_conflict ids=a1111111-1111-1111-1111-0000000d0e04,a1111111-1111-1111-1111-0000000d0e08',
+    'a game moved onto an older row AND onto the place of a new game of the same save: the stored row is named, a clash with no second game comes last');
 -- Nothing above wrote a thing.
 SELECT is(pg_temp.val($$SELECT (SELECT org_a_games FROM idbase) = (SELECT count(*) FROM public.game_assignments WHERE organization_id = 'a1111111-1111-1111-1111-111111111111')$$), 'true',
     'every refusal and every probe above left Org A''s games as they were');
@@ -407,17 +413,23 @@ SELECT ok(pg_temp.msg($$SELECT pg_temp.save(pg_temp.set7())$$) ~ 'a1111111-1111-
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e07', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e07', 'a1111111-1111-1111-1111-0000000d00d9'))))$$),
     '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e07',
     'moving it in the same save does not get it past the check (it would be rewritten into this season)');
-SELECT is(pg_temp.val($$SELECT (SELECT org_a_runs FROM idbase) = (SELECT count(*) FROM public.scheduler_runs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111' AND run_type = 'game')
-                        AND (SELECT season_settings_id::text FROM public.game_assignments WHERE id = 'a1111111-1111-1111-1111-0000000d0e07') = 'a1111111-1111-1111-1111-1111111100d1'
-                        AND pg_temp.placed('a1111111-1111-1111-1111-0000000d0e07') = '0005>0006@00d4/1'$$), 'true',
-    'the refusals wrote nothing: no run, the game still in its season and at its place');
+-- The season is judged BEFORE the first row is written. (That a refused save leaves nothing behind is PostgreSQL's
+-- atomicity, not this function's, and no assertion could fail on it; the order can: the first write of a payload that
+-- also moves a Published game is refused by the guard, so a season check that ran after the writes would lose to
+-- `game_published`. The control for this payload, with no game in another season, is the Published-move assertion of
+-- section 3, which is refused `game_published`.)
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e01', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e01', 'a1111111-1111-1111-1111-0000000d00d9'))))$$),
+    '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e07',
+    'the season is judged before anything is written: a payload that also moves a Published game is refused for the season, not for the Published game');
 UPDATE public.game_assignments SET season_settings_id = 'a1111111-1111-1111-1111-1111111100d1' WHERE id = 'a1111111-1111-1111-1111-0000000d0e03';
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$),
     '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e03',
     'two games of another season: the first by id is named');
 UPDATE public.game_assignments SET season_settings_id = NULL WHERE id = 'a1111111-1111-1111-1111-0000000d0e03';
+-- Control (passes without the check too): it shows the check refuses only when the save names a season.
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(), NULL)$$), 'no error',
     'a save that names no season skips the check: the same payload is accepted');
+-- Control (passes without the check too): it pins the order, the existence of an id before its season.
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e02', pg_temp.gi('a1111111-1111-1111-1111-0000000d0e02') || '{"id": "a1111111-1111-1111-1111-0000000d0eee"}')))$$),
     '23503:game_not_found',
     'the season is checked after the id exists: an unknown id is refused as not found, ahead of a game of another season');
@@ -425,9 +437,11 @@ SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1
     '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e07',
     'and before the collisions: a game of another season is named ahead of a game moved onto an older row');
 UPDATE public.game_assignments SET season_settings_id = 'a1111111-1111-1111-1111-111111111aaa' WHERE id = 'a1111111-1111-1111-1111-0000000d0e07';
+-- Control (passes without the check too): a game stored in the save's own season must never be refused.
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error',
     'control: the same game stored in the save''s OWN season is accepted');
 UPDATE public.game_assignments SET season_settings_id = NULL WHERE id = 'a1111111-1111-1111-1111-0000000d0e07';
+-- Control (passes without the check too): a game with no stored season must never be refused.
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error',
     'control: and with no stored season (saved before the column) it is accepted');
 

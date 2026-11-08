@@ -273,6 +273,15 @@ const CASES = [
     '',
   ],
   [
+    // What it proves: the database compares uuid VALUES (the run's season is cast to uuid, the stored one is a uuid
+    // column), so the same season spelled in capitals by the caller is the same season and is accepted. The mock holds
+    // ids as text and must fold case to say the same; a comparison on the raw strings would refuse game 11 here.
+    "the save's own season spelled in capitals: the same season, so a game stored in it is accepted",
+    (db) => [...ALL.map((n) => item(db, n)), item(db, 11)],
+    '',
+    { ...RUN, season_settings_id: SEASON.toUpperCase() },
+  ],
+  [
     'a save that names no season skips the check: a game of another season is accepted',
     (db) => [...ALL.map((n) => item(db, n)), item(db, 10)],
     '',
@@ -294,6 +303,16 @@ const CASES = [
   [
     'a game moved onto an older hidden row of the same pair',
     (db) => ALL.map((n) => (n === 4 ? item(db, 4, { to: 8 }) : item(db, n))),
+    `22023 game_identity_conflict ids=${G[4]},${G[8]}`,
+  ],
+  [
+    'a game moved onto an older hidden row AND onto the place of a new game of the same save: the stored row is named, the new game is not',
+    // The clashes are (X, H) and (X, no second game). The database orders them by first id, then second id NULLS LAST, so the
+    // one that names two games comes first; a sentinel that sorted "no second game" first would answer `ids=X` alone.
+    (db) => [
+      ...ALL.map((n) => (n === 4 ? item(db, 4, { to: 8 }) : item(db, n))),
+      { ...item(db, 4, { to: 8 }), id: undefined },
+    ],
     `22023 game_identity_conflict ids=${G[4]},${G[8]}`,
   ],
   [

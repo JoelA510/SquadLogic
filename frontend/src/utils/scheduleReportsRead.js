@@ -1,3 +1,4 @@
+import { positiveWeek } from '@squadlogic/core/reports/gameKey.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { loadSeasonPracticeRows } from '@squadlogic/core/practiceSupabase.js';
 import { PUBLICATION_REASON } from '@squadlogic/core/publication/reasonCodes.js';
@@ -36,6 +37,29 @@ export const PRACTICE_READ_SELECT =
   'field:fields(id, name))';
 
 const AUDIT_LIMIT = 500;
+
+/**
+ * The tables each report needs, so a report is not blocked by a read it does not use. The league is what every report
+ * is built over (venues, fields, divisions, teams, slots, the TIME TBD list); the coaches group is the coach schedule's
+ * alone (the coaches, their assignments and the practices), read with the divisions and teams that scope them to the
+ * season.
+ */
+const TABLE_GROUPS = Object.freeze({
+  league: ['locations', 'fields', 'divisions', 'teams', 'game_slots', 'get_schedule_tbd'],
+  coaches: ['coaches', 'team_coach_assignments', 'practice_assignments', 'divisions', 'teams'],
+});
+/** The order a failure is reported in, so the same break gives the same sentence. */
+const TABLE_ORDER = [
+  'locations',
+  'fields',
+  'divisions',
+  'teams',
+  'coaches',
+  'team_coach_assignments',
+  'game_slots',
+  'practice_assignments',
+  'get_schedule_tbd',
+];
 
 /** @param {string} table @param {unknown} err */
 const failure = (table, err) => ({
@@ -94,18 +118,23 @@ export function practicesFromRows(rows) {
  *
  * @param {any} client - the supabase client
  * @param {{ organizationId?: string | null, seasonSettingsId?: string | null }} params
+ * @param {{ groups?: Array<'league' | 'coaches'> }} [options] - which tables to read; both by default
  * @returns {Promise<{ ok: true, data: {
  *   venues: Array<{ id: string, name: string }>,
  *   fields: Array<{ id: string, name: string, venueId: string | null }>,
  *   teams: Array<{ id: string, name: string, divisionId: string, division: string }>,
  *   coaches: Array<{ id: string, name: string }>,
  *   assignments: Array<Record<string, any>>,
- *   slots: Array<{ id: string, weekIndex: number }>,
+ *   slots: Array<{ id: string, weekIndex: number | null }>,
  *   practices: Array<import('@squadlogic/core/reports/practiceClash.js').ReportPractice>,
  *   tbdGames: Array<{ homeTeamId: string, awayTeamId: string, weekIndex: number, reason: string }>,
  * } } | { ok: false, table: string, message: string }>}
  */
-export async function loadReportsReference(client, params) {
+export async function loadReportsReference(
+  client,
+  params,
+  { groups = ['league', 'coaches'] } = {}
+) {
   const { organizationId, seasonSettingsId } = params ?? {};
   if (!organizationId || !seasonSettingsId) {
     return failure('season', 'an organization and a season are required');
@@ -113,66 +142,64 @@ export async function loadReportsReference(client, params) {
   if (typeof client?.from !== 'function' || typeof client?.rpc !== 'function') {
     return failure('connection', 'there is no database connection to read with');
   }
+  const unknown = groups.filter((group) => !(group in TABLE_GROUPS));
+  if (unknown.length > 0)
+    return failure('groups', `unknown report data group: ${unknown.join(', ')}`);
 
   const read = (table, columns) =>
     fetchAllPages(() => client.from(table).select(columns).eq('organization_id', organizationId));
-  /** @type {Array<[string, () => Promise<any>]>} */
-  const reads = [
-    ['locations', () => read('locations', 'id, name')],
-    ['fields', () => read('fields', 'id, name, location_id')],
-    [
-      'divisions',
-      () =>
-        fetchAllPages(() =>
-          client
-            .from('divisions')
-            .select('id, name')
-            .eq('organization_id', organizationId)
-            .eq('season_settings_id', seasonSettingsId)
-        ),
-    ],
-    ['teams', () => read('teams', 'id, name, division_id')],
-    [
-      'coaches',
-      () =>
-        fetchAllPages(() =>
-          client
-            .from('coaches')
-            .select('id, full_name')
-            .eq('organization_id', organizationId)
-            .eq('season_settings_id', seasonSettingsId)
-        ),
-    ],
-    [
-      'team_coach_assignments',
-      () =>
-        read('team_coach_assignments', 'id, team_id, coach_id, role, effective_from, effective_to'),
-    ],
-    ['game_slots', () => read('game_slots', 'id, week_index')],
-    [
-      'practice_assignments',
-      async () => {
-        const result = await loadSeasonPracticeRows(client, {
-          organizationId,
-          seasonSettingsId,
-          select: PRACTICE_READ_SELECT,
-        });
-        if (result.ok !== true) throw new Error(result.message);
-        return result.rows;
-      },
-    ],
-    ['get_schedule_tbd', () => readScheduleTbd(client, seasonSettingsId)],
-  ];
-  const results = await Promise.all(reads.map(([table, run]) => named(table, run)));
-  // The first failure in the table order above, so the same break gives the same sentence.
+  /** @type {Record<string, () => Promise<any>>} */
+  const readers = {
+    locations: () => read('locations', 'id, name'),
+    fields: () => read('fields', 'id, name, location_id'),
+    divisions: () =>
+      fetchAllPages(() =>
+        client
+          .from('divisions')
+          .select('id, name')
+          .eq('organization_id', organizationId)
+          .eq('season_settings_id', seasonSettingsId)
+      ),
+    teams: () => read('teams', 'id, name, division_id'),
+    coaches: () =>
+      fetchAllPages(() =>
+        client
+          .from('coaches')
+          .select('id, full_name')
+          .eq('organization_id', organizationId)
+          .eq('season_settings_id', seasonSettingsId)
+      ),
+    team_coach_assignments: () =>
+      read('team_coach_assignments', 'id, team_id, coach_id, role, effective_from, effective_to'),
+    game_slots: () => read('game_slots', 'id, week_index'),
+    practice_assignments: async () => {
+      const result = await loadSeasonPracticeRows(client, {
+        organizationId,
+        seasonSettingsId,
+        select: PRACTICE_READ_SELECT,
+      });
+      if (result.ok !== true) throw new Error(result.message);
+      return result.rows;
+    },
+    get_schedule_tbd: () => readScheduleTbd(client, seasonSettingsId),
+  };
+  const wanted = new Set(groups.flatMap((group) => TABLE_GROUPS[group]));
+  const tables = TABLE_ORDER.filter((table) => wanted.has(table));
+  const results = await Promise.all(tables.map((table) => named(table, readers[table])));
+  // The first failure in the table order, so the same break gives the same sentence.
   const failed = results.find((result) => result.ok === false);
   if (failed && failed.ok === false) return failed;
-  const [locations, fields, divisions, teams, coaches, assignments, slots, practices, tbd] =
-    results.map((result) => /** @type {any} */ (result).value);
+  /** @type {Record<string, any>} */
+  const got = Object.fromEntries(
+    tables.map((table, index) => [table, /** @type {any} */ (results[index]).value])
+  );
+  const rows = (table) => got[table] ?? [];
 
-  const divisionName = new Map(divisions.map((row) => [String(row.id), String(row.name ?? '')]));
+  const divisionName = new Map(
+    rows('divisions').map((row) => [String(row.id), String(row.name ?? '')])
+  );
   // A team carries no season of its own: it is the season's through its division.
-  const seasonTeams = teams
+  const seasonTeams = rows('teams')
     .filter((row) => divisionName.has(String(row.division_id)))
     .map((row) => ({
       id: String(row.id),
@@ -184,18 +211,30 @@ export async function loadReportsReference(client, params) {
   return {
     ok: true,
     data: {
-      venues: locations.map((row) => ({ id: String(row.id), name: String(row.name ?? '') })),
-      fields: fields.map((row) => ({
+      venues: rows('locations').map((row) => ({
+        id: String(row.id),
+        name: String(row.name ?? ''),
+      })),
+      fields: rows('fields').map((row) => ({
         id: String(row.id),
         name: String(row.name ?? ''),
         venueId: row.location_id ? String(row.location_id) : null,
       })),
       teams: seasonTeams,
-      coaches: coaches.map((row) => ({ id: String(row.id), name: String(row.full_name ?? '') })),
-      assignments: assignments.filter((row) => seasonTeamIds.has(String(row.team_id))),
-      slots: slots.map((row) => ({ id: String(row.id), weekIndex: Number(row.week_index) })),
-      practices: practicesFromRows(practices),
-      tbdGames: tbd.items
+      coaches: rows('coaches').map((row) => ({
+        id: String(row.id),
+        name: String(row.full_name ?? ''),
+      })),
+      assignments: rows('team_coach_assignments').filter((row) =>
+        seasonTeamIds.has(String(row.team_id))
+      ),
+      // A slot with no week has no week: `Number(null)` is 0, which is not one (reports/gameKey.js, `positiveWeek`).
+      slots: rows('game_slots').map((row) => ({
+        id: String(row.id),
+        weekIndex: positiveWeek(row.week_index),
+      })),
+      practices: practicesFromRows(rows('practice_assignments')),
+      tbdGames: (got.get_schedule_tbd?.items ?? [])
         .filter((item) => item.kind === 'game')
         .map((item) => ({
           homeTeamId: item.homeTeamId,

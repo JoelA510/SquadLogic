@@ -6,9 +6,10 @@ Feature: Schedule reports on the Exports page (schedule expansion, PR 7)
   Three read-only views over the saved game schedule, each with a CSV file. Names only: no email or phone is read or
   shown (the coaches' rows in the mock database carry both, and the page must not reach for them).
 
-  What this feature does NOT assert, because it is not true: that a moved game is "the same game". The save keys a game
-  on (home, away, slot, week) and writes no id, so a game moved to another slot or week is a new record. The Changes
-  view shows the old place as no longer in the saved schedule and the new place as new, and says it does not link them.
+  What this feature does NOT assert, because it is not true: that a moved game is "the same game". A baseline records
+  each game's teams, slot and week, not which game is which, so a game moved to another slot or week is compared by that
+  tuple. The Changes view shows the old place as no longer in the saved schedule and the new place as new, and says it
+  does not link them.
 
   The league: U10 Boys (Lions, Wolves, Comets, Bulls) and U12 Girls (Hawks, Owls) on two fields at two venues. A
   baseline was published with four games and one game on the TIME TBD list. Since then Comets v Bulls was cancelled,
@@ -49,7 +50,7 @@ Feature: Schedule reports on the Exports page (schedule expansion, PR 7)
     And the changes list "Lions" v "Comets" as no longer in the saved schedule with the reason "Coach request"
     And the changes list "Lions" v "Comets" as new
     And the changes list "Wolves" v "Bulls" as new
-    And the changes say a moved game is saved as a new game and is not linked
+    And the changes say a moved game appears twice and is not linked
 
   Scenario: The Day Sheet passes axe in both themes
     When I open the Exports page and its "Day Sheet" report

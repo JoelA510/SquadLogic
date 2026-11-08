@@ -32,6 +32,7 @@ import {
 import { TIMING_REASON } from '../timing/index.js';
 import { practiceRangeBounds, practiceRangeLowerBound } from '../utils/practiceOccurrences.js';
 import { makeNamers } from './daySheet.js';
+import { positiveWeek } from './gameKey.js';
 import { PRACTICE_UNREADABLE, coachPracticeClashes, readPractice } from './practiceClash.js';
 import { instantMs, wallOfInstant, weekdayOfDate } from './wall.js';
 
@@ -406,8 +407,8 @@ function markGameClashes({ coach, entries, teams, assignments, asOf, names }) {
   const weeks = new Map();
   for (const entry of entries) {
     const game = entry.game;
-    const week = Number(game?.weekIndex);
-    if (!game || !Number.isInteger(week) || week <= 0 || !slotOf(game)) continue;
+    const week = positiveWeek(game?.weekIndex);
+    if (!game || week === null || !slotOf(game)) continue;
     const bucket = weeks.get(week) ?? new Map();
     bucket.set(`${idOf(game.id)}|${slotOf(game)}|${idOf(game.homeTeamId)}`, game);
     weeks.set(week, bucket);

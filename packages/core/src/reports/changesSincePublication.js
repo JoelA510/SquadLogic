@@ -6,10 +6,11 @@
  * cancelled game, which has no "now", is listed (the lesson `buildChangeNotices` states for teams). The counts
  * reconcile: baseline games = unchanged + changed + removed, and saved games = unchanged + changed + new.
  *
- * **Identity, truthfully.** `persist_game_schedule` keys a game on the tuple (home, away, slot, week) and writes no id,
- * so a game moved to another slot or week is a new row (lesson 95). Every game is keyed by `gameKey` (one place to
- * swap when an identity layer exists), and a moved game is therefore one game removed and one game new. The view says
- * so in its own words and never calls the two the same game; it only shows the same two teams beside each other.
+ * **Identity, truthfully.** A baseline records each game's teams, slot and week, not which game is which, so every
+ * game is keyed by that tuple (`gameKey`, the one place that decides) and a game moved to another slot or week is one
+ * game removed and one game new. That holds with or without an identity layer: the baseline never stored an id. The
+ * view says so in its own words and never calls the two the same game; it only shows the same two teams beside each
+ * other.
  *
  * **The baseline is the master export's rows** (`publication_baselines`), one row per team per event. A game is
  * rebuilt from its Home row and its Away row (the Home row names the opponent, the Away row has the away team's id);
@@ -29,7 +30,7 @@ import { formatCsv } from '../outputGeneration.js';
 import { PUBLICATION_TBD } from '../reserve/reasonCodes.js';
 import { describeScheduleTbdReason, parseGameTbdNote } from '../scheduleTbd.js';
 import { makeNamers } from './daySheet.js';
-import { gameKey, tbdGameKey } from './gameKey.js';
+import { gameKey, positiveWeek, tbdGameKey } from './gameKey.js';
 import { instantMs, wallOfInstant, weekdayOfDate } from './wall.js';
 
 /** What happened to a game since the baseline. */
@@ -70,10 +71,10 @@ const KIND_ORDER = Object.freeze([
 ]);
 
 const MOVED_NOTE =
-  'A game moved to another time slot or week is saved as a new game, so it appears here twice: once as no ' +
-  'longer in the saved schedule, at its old time, and once as new, at its new time. This view does not link the two. ' +
-  'A game that was cancelled appears only as no longer in the saved schedule: the app does not record whether a ' +
-  'game was cancelled or moved.';
+  "A baseline records each game's teams, slot and week, not which game is which, so a game moved to another time " +
+  'slot or week appears here twice: once as no longer in the saved schedule, at its old time, and once as new, at ' +
+  'its new time. This view does not link the two. A game that was cancelled appears only as no longer in the saved ' +
+  'schedule: the app does not record whether a game was cancelled or moved.';
 
 /** @param {unknown} value */
 const text = (value) => (value === null || value === undefined ? '' : String(value));
@@ -247,13 +248,18 @@ export function buildChangesSincePublication({
   if (recordedMs === null) throw new TypeError('the baseline has no readable time it was recorded');
   const names = makeNamers({ teams, fields, venues });
 
-  // The week of a slot: the registry, and where it lacks a slot, the saved games that name it.
+  // The week of a slot: the saved games that name it, then the registry. Only a real week (a positive whole number)
+  // is written: a slot whose `week_index` is null must not overwrite the week a saved game carries with 0.
   const weekOfSlot = new Map();
   for (const game of savedGames) {
     const slot = idText(game.slotId ?? game.gameSlotId);
-    if (slot && game.weekIndex) weekOfSlot.set(slot, Number(game.weekIndex));
+    const week = positiveWeek(game.weekIndex);
+    if (slot && week !== null) weekOfSlot.set(slot, week);
   }
-  for (const slot of slots) weekOfSlot.set(idText(slot.id), Number(slot.weekIndex));
+  for (const slot of slots) {
+    const week = positiveWeek(slot.weekIndex);
+    if (week !== null) weekOfSlot.set(idText(slot.id), week);
+  }
 
   const read = readBaselineGames(baseline.rows, weekOfSlot);
 

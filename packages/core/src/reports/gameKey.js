@@ -1,14 +1,16 @@
 /**
  * How the schedule reports tell one game from another: the one place that decides.
  *
- * `persist_game_schedule` keys a game on the TUPLE (home team, away team, game slot, week) and writes no id
- * (lesson 95), so a game moved to another slot or week is a new row, and anything keyed by `game_assignments.id`
- * (the Published flag, its audit rows) stays with the old one. The reports therefore compare games by this tuple and
- * never by an id. If the owner decides on an identity layer (the F11 plan), this is the function to change, and
- * nothing else in `reports/` names a game's key.
+ * A game is identified by its MATCHUP TUPLE (home team, away team, game slot, week), and by nothing else. That is how
+ * `persist_game_schedule` upserts a game (it writes no id from the save, lesson 95), and it is also all a baseline can
+ * be compared by: a publication baseline is the master export's rows, which carry each game's teams, slot and week
+ * and not which game is which. So the tuple stays the comparison key even if the owner's identity layer (the F11
+ * plan) gives a moved game its id: a baseline cannot be keyed by an id it never stored. If the layer changes what
+ * identifies a game on the saved side, this is the function to look at, and nothing else in `reports/` names a key.
  *
  * A key with a part missing is `null`, and a `null` key matches nothing: a game that cannot be keyed is listed, not
- * paired with another by accident.
+ * paired with another by accident. A week is a positive whole number (`positiveWeek`): a null, a zero or a fraction
+ * is no week, and is never turned into one.
  *
  * @module reports/gameKey
  */
@@ -20,12 +22,18 @@ const idPart = (value) => {
   return text === '' ? null : text;
 };
 
-/** A week index: a positive whole number, or `null`. @param {unknown} value */
-const weekPart = (value) => {
+/**
+ * A week index: a positive whole number, or `null`. `Number(null)` is 0 and `Number('')` is 0, neither a week, so a
+ * missing week is `null` here and nowhere is it read as a number first.
+ *
+ * @param {unknown} value
+ * @returns {number | null}
+ */
+export function positiveWeek(value) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const week = Number(value);
   return Number.isInteger(week) && week > 0 ? week : null;
-};
+}
 
 /**
  * The key of a placed game.
@@ -38,7 +46,7 @@ export function gameKey(game) {
   const home = idPart(game.homeTeamId);
   const away = idPart(game.awayTeamId);
   const slot = idPart(game.slotId ?? game.gameSlotId);
-  const week = weekPart(game.weekIndex);
+  const week = positiveWeek(game.weekIndex);
   if (home === null || away === null || slot === null || week === null) return null;
   return `${home}|${away}|${slot}|${week}`;
 }
@@ -53,7 +61,7 @@ export function tbdGameKey(game) {
   if (!game || typeof game !== 'object') return null;
   const home = idPart(game.homeTeamId);
   const away = idPart(game.awayTeamId);
-  const week = weekPart(game.weekIndex);
+  const week = positiveWeek(game.weekIndex);
   if (home === null || away === null || week === null) return null;
   return `tbd|${home}|${away}|${week}`;
 }

@@ -13,14 +13,15 @@ import { csvBlob, saveFile } from '../../utils/scheduleDownloads.js';
 
 /** What the view holds between choosing a baseline and its answer arriving. */
 const READING = Object.freeze({ status: 'loading' });
+/** What the view holds with no baseline chosen: nothing, whatever was read before. */
+const IDLE = Object.freeze({ status: 'idle' });
 
 /**
  * "Changes since publication" (task G4): for each game, what it was in a chosen published baseline, what it is in the
  * saved schedule, and why. A view, not a store.
  *
- * A game moved to another slot or week is saved as a new game (the save keys a game on its teams, slot and week, and
- * writes no id), so it is shown as one game no longer saved and one game new, and the page says so. It never claims
- * they are the same game.
+ * A baseline records each game's teams, slot and week, not which game is which, so a game moved to another slot or week
+ * is shown as one game no longer saved and one game new, and the page says so. It never claims they are the same game.
  */
 export default function ChangesView({
   games,
@@ -69,7 +70,9 @@ export default function ChangesView({
     };
   }, [baselineId, organizationId, supabaseClient, readBaseline]);
 
-  const reading = baselineId && read.id !== baselineId ? READING : read;
+  // An answer is the selected baseline's or it is nothing: with no selection there is no comparison (and no download),
+  // and a comparison read for another baseline is never shown under this one.
+  const reading = !baselineId ? IDLE : read.id !== baselineId ? READING : read;
 
   const result = useMemo(() => {
     if (reading.status !== 'ready') return null;

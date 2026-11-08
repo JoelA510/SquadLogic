@@ -23,7 +23,7 @@ const { Given, When, Then } = createBdd();
  * | ga-1      | U10 Boys  | Lions v Wolves  | 1    | s-1  | North | yes             | unchanged         |
  * | ga-2      | U12 Girls | Hawks v Owls    | 1    | s-2  | South | yes             | unchanged         |
  * | ga-3      | U10 Boys  | Comets v Bulls  | 2    | s-3  | North | yes             | cancelled         |
- * | ga-4      | U10 Boys  | Lions v Comets  | 2    | s-4  | South | yes             | moved to s-5 (new row) |
+ * | ga-4      | U10 Boys  | Lions v Comets  | 2    | s-4  | South | yes             | moved to s-5 |
  * | ga-5      | U10 Boys  | Wolves v Bulls  | 3    | s-6  | South | no              | new               |
  * TIME TBD: Wolves v Bulls, week 2 (then and now).
  */
@@ -64,7 +64,7 @@ const BASELINE_GAMES: SeedGame[] = [
 const SAVED_GAMES: SeedGame[] = [
   BASELINE_GAMES[0],
   BASELINE_GAMES[1],
-  // Moved: a NEW row (new id) at another slot and week.
+  // Moved: another slot and week (under another id here; the reports compare by teams, slot and week and never read it).
   {
     id: 'e2e-ga-4-moved',
     division: 'U10 Boys',
@@ -585,8 +585,10 @@ Then(
   }
 );
 
-Then('the changes say a moved game is saved as a new game and is not linked', async ({ page }) => {
+Then('the changes say a moved game appears twice and is not linked', async ({ page }) => {
   const notes = page.getByTestId('changes-notes');
-  await expect(notes).toContainText('moved to another time slot or week is saved as a new game');
+  await expect(notes).toContainText(
+    "A baseline records each game's teams, slot and week, not which game is which, so a game moved to another time slot or week appears here twice"
+  );
   await expect(notes).toContainText('does not link');
 });

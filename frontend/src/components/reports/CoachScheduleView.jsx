@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import Badge from '../ui/Badge.jsx';
 import Button from '../ui/Button.jsx';
@@ -8,6 +8,10 @@ import {
   buildCoachSchedule,
   coachScheduleCsv,
 } from '@squadlogic/core/reports/coachSchedule.js';
+import {
+  coachPracticeChangesLines,
+  readCoachPracticeChanges,
+} from '../../utils/coachPracticeChanges.js';
 import { csvBlob, saveFile } from '../../utils/scheduleDownloads.js';
 import { todayIso } from '../../utils/today.js';
 
@@ -23,7 +27,14 @@ const slug = (name) =>
  * clash column, and a CSV. A coach is marked as being on more than one team by counting the teams on the team list,
  * not from the flag the Coaches page shows. Names only.
  */
-export default function CoachScheduleView({ games, reference, timeZone }) {
+export default function CoachScheduleView({
+  games,
+  reference,
+  timeZone,
+  organizationId,
+  supabaseClient,
+  noGameRun = false,
+}) {
   const selectId = useId();
   const [coachId, setCoachId] = useState('');
   // The teams a coach has today: an assignment that ended is not a team of theirs.
@@ -61,6 +72,30 @@ export default function CoachScheduleView({ games, reference, timeZone }) {
     [coachId, reference, asOf, games, timeZone]
   );
 
+  // The coach's practices are the weekly series; the exceptions are not applied, and the report says how many practices
+  // they change (the Exports panel's own warning, read for the coach chosen and for nobody else).
+  const coachPractices = useMemo(() => {
+    if (!schedule) return [];
+    const mine = new Set(schedule.teams.map((team) => team.id));
+    return reference.practices.filter((practice) => mine.has(String(practice.teamId)));
+  }, [schedule, reference.practices]);
+  const [changes, setChanges] = useState(/** @type {any} */ ({ coachId: null, result: null }));
+  useEffect(() => {
+    if (!coachId || coachPractices.length === 0) return undefined;
+    let current = true;
+    readCoachPracticeChanges(supabaseClient, coachPractices, organizationId).then((result) => {
+      // Only the coach chosen when the read was asked: an answer for another is nobody's.
+      if (current) setChanges({ coachId, result });
+    });
+    return () => {
+      current = false;
+    };
+  }, [coachId, coachPractices, supabaseClient, organizationId]);
+  const changeLines =
+    coachId && coachPractices.length > 0
+      ? coachPracticeChangesLines(changes.coachId === coachId ? changes.result : null)
+      : [];
+
   const download = () => {
     if (schedule)
       saveFile(
@@ -97,6 +132,11 @@ export default function CoachScheduleView({ games, reference, timeZone }) {
       <p className="mt-2 text-xs text-text-muted" data-testid="coach-multi-count">
         {`${multi} of ${directory.coaches.length} ${plural(directory.coaches.length, 'coach is', 'coaches are')} on more than one team, counted from the team list (head and assistant), not from the flag on the Coaches page.`}
       </p>
+      {noGameRun && (
+        <p className="mt-1 text-xs text-text-muted" role="status" data-testid="coach-no-games">
+          No game schedule is saved, so there are no games to list.
+        </p>
+      )}
       {(directory.unknownCoachIds.length > 0 || directory.unknownTeamIds.length > 0) && (
         <p
           className="mt-1 text-xs text-status-error-text"
@@ -127,6 +167,17 @@ export default function CoachScheduleView({ games, reference, timeZone }) {
               <li key={note}>{note}</li>
             ))}
           </ul>
+          {changeLines.length > 0 && (
+            <ul
+              className="mt-1 text-xs text-text-muted list-disc pl-5"
+              role="status"
+              data-testid="coach-practice-changes"
+            >
+              {changeLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
           {schedule.rows.length > 0 && (
             <ScrollRegion label={`Games and practices of ${schedule.coach.name}`}>
               <table className="grid grid-prose" data-testid="coach-schedule-table">
@@ -190,4 +241,7 @@ CoachScheduleView.propTypes = {
   games: PropTypes.array.isRequired,
   reference: PropTypes.object.isRequired,
   timeZone: PropTypes.string.isRequired,
+  organizationId: PropTypes.string.isRequired,
+  supabaseClient: PropTypes.object.isRequired,
+  noGameRun: PropTypes.bool,
 };

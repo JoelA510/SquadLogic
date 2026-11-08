@@ -4,10 +4,10 @@
  * originally (the chosen baseline's rows), now (the saved schedule), why (the audit rows of `get_schedule_audit_log`).
  *
  * The identity facts this file is built around (lesson 95, verified): `persist_game_schedule` upserts a game on the
- * TUPLE (home, away, slot, week) and writes no id, so a game moved to another slot or week is a NEW row, and the flag
- * and the audit history stay with the old one. The view therefore keys every game with `gameKey` (one place to swap
- * when an identity layer exists) and says a moved game is one game removed and one game new. It never claims the two
- * are the same game.
+ * TUPLE (home, away, slot, week), and the baseline is the master export's rows, which carry no game id at all. So the
+ * view keys every game with `gameKey` (the matchup tuple, and it stays the key even if an identity layer gives a
+ * moved game its id, because a baseline cannot be keyed by an id it never stored) and says a game moved to another
+ * slot or week is one game removed and one game new. It never claims the two are the same game.
  *
  * What this file holds:
  * - the rows are enumerated from the baseline rows AND the saved rows together, never from the changed ones, so a
@@ -71,7 +71,7 @@ const input = (extra = {}) => ({
 const view = (extra = {}) => buildChangesSincePublication(input(extra));
 const kinds = (result) => result.rows.map((row) => row.kind);
 
-/** A saved game as another save would leave it: a new row (new id), the tuple of where it went. */
+/** A saved game as a later save would leave it: another slot and week (under another id here, which no report reads). */
 const moved = (id, slotId, weekIndex, start, end, extra = {}) => ({
   ...savedGames().find((g) => g.id === id),
   id: `${id}-moved`,
@@ -263,7 +263,11 @@ describe('a moved game is one removed and one new, and is not called the same ga
   it('says what a removed game and a new game may mean, in the app’s own words', () => {
     const { notes } = movedView();
     const text = notes.join(' ');
-    expect(text).toMatch(/moved to another time slot or week is saved as a new game/i);
+    expect(text).toMatch(
+      /A baseline records each game's teams, slot and week, not which game is which, so a game moved to another time slot or week appears here twice/
+    );
+    // Said for the baseline, which is true with or without an identity layer: not about how the save writes a row.
+    expect(text).not.toMatch(/saved as a new game|writes no id|new row/i);
     expect(text).toMatch(/does not link/i);
     expect(text).toMatch(/does not record whether/i);
   });
@@ -574,6 +578,34 @@ describe('what cannot be read is counted and named', () => {
     const gone = view({ slots: noS3, savedGames: savedGames({ g3: null }) });
     expect(gone.counts).toMatchObject({ baselineGames: 6, unchanged: 5, removed: 1, added: 0 });
     expect(gone.rows[0].kind).toBe(CHANGE_KIND.REMOVED);
+  });
+
+  it('keeps the week a saved game names when the registry’s week for the slot is null, so an unchanged game is unchanged', () => {
+    // `game_slots.week_index` can be null (the Games page reads such a slot as week 1). A null must not overwrite
+    // the week the saved game carries: Number(null) is 0, a week no key can have, and the game would read as
+    // removed and new while the comparison called itself sound.
+    const nullWeek = SLOTS.map((slot) => (slot.id === 's-3' ? { ...slot, weekIndex: null } : slot));
+    const result = view({ slots: nullWeek });
+    expect(result.counts).toMatchObject({
+      unchanged: 6,
+      removed: 0,
+      added: 0,
+      baselineUnreadable: 0,
+    });
+    expect(result.rows).toEqual([]);
+    expect(result.sound).toBe(true);
+    // The same for a week that is not a positive whole number: only a real week overrides.
+    for (const bad of [0, -2, 1.5, Number.NaN, '', undefined]) {
+      const odd = SLOTS.map((slot) => (slot.id === 's-3' ? { ...slot, weekIndex: bad } : slot));
+      expect(view({ slots: odd }).counts, String(bad)).toMatchObject({
+        unchanged: 6,
+        removed: 0,
+        added: 0,
+      });
+    }
+    // And a real week in the registry still wins over a saved game's (the registry is the slot's own record).
+    const agree = SLOTS.map((slot) => (slot.id === 's-3' ? { ...slot, weekIndex: 2 } : slot));
+    expect(view({ slots: agree }).counts).toMatchObject({ unchanged: 6 });
   });
 
   it('refuses a baseline with no rows or no recording time', () => {

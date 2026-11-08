@@ -13,7 +13,7 @@
  *   baseline that fails its integrity check.
  */
 import React from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ScheduleReportsPanel from '../frontend/src/components/reports/ScheduleReportsPanel.jsx';
@@ -182,6 +182,29 @@ function clientFailing(table, how = 'error') {
   });
 }
 
+/** A client whose read of one table never answers, so a view over it can be seen before its inputs arrive. */
+function clientPending(table) {
+  return new Proxy(mockSupabase, {
+    get(target, prop) {
+      if (prop === 'from') {
+        return (name) => {
+          if (name !== table) return target.from(name);
+          const builder = {
+            select: () => builder,
+            eq: () => builder,
+            order: () => builder,
+            range: () => builder,
+            then: () => new Promise(() => {}),
+          };
+          return builder;
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 const openTab = (name) => fireEvent.click(screen.getByRole('tab', { name }));
 const downloaded = () => {
   const [call] = vi.mocked(saveFile).mock.calls.slice(-1);
@@ -236,18 +259,106 @@ describe('a read that fails says which table and draws no row', () => {
     expect(screen.queryByText(/no games/i)).toBeNull();
   });
 
+  // The league (venues, fields, divisions, teams, slots, the TIME TBD list) is read by every report.
   it.each([
     ['fields', 'error'],
     ['fields', 'reject'],
-    ['team_coach_assignments', 'error'],
-    ['practice_assignments', 'reject'],
-    ['coaches', 'error'],
+    ['teams', 'error'],
+    ['game_slots', 'reject'],
   ])('names %s when that read fails as a %s, and shows no report at all', async (table, how) => {
     mount({ supabaseClient: clientFailing(table, how) });
     const alert = await screen.findByTestId('reports-read-error');
     expect(alert).toHaveTextContent(table);
     expect(screen.queryByTestId('day-sheet-table')).toBeNull();
     expect(screen.queryByRole('tab', { name: 'Day Sheet' })).toBeNull();
+  });
+
+  // The coaches, their assignments and the practices are read by the coach report alone: a failure names the table
+  // and blocks that report, and leaves the Day Sheet and Changes usable (a report is not blocked by a read it does not
+  // use; Codex finding 1's sibling).
+  it.each([
+    ['team_coach_assignments', 'error'],
+    ['practice_assignments', 'reject'],
+    ['coaches', 'error'],
+    ['coaches', 'reject'],
+  ])(
+    'names %s when that read fails as a %s, blocks the coach schedule only, and leaves the Day Sheet drawn',
+    async (table, how) => {
+      mount({ supabaseClient: clientFailing(table, how) });
+      // The Day Sheet is there and works.
+      fireEvent.change(await screen.findByLabelText('Date'), { target: { value: '2026-10-03' } });
+      expect(await screen.findByTestId('day-sheet-table')).toBeInTheDocument();
+      openTab('Coach schedule');
+      const alert = await screen.findByTestId('reports-read-error');
+      expect(alert).toHaveTextContent(table);
+      expect(screen.queryByTestId('coach-schedule-table')).toBeNull();
+      expect(screen.queryByLabelText('Coach')).toBeNull();
+      // Changes is not blocked either.
+      openTab('Changes since publication');
+      expect(await screen.findByTestId('changes-no-baseline')).toBeInTheDocument();
+    }
+  );
+});
+
+describe('with no game run saved', () => {
+  const noRun = { gameAssignments: [], gameRunId: null };
+
+  it('says no schedule is saved on the Day Sheet and on Changes, and draws no row', async () => {
+    mount(noRun);
+    expect(await screen.findByTestId('reports-no-schedule')).toHaveTextContent(
+      /no game schedule is saved/i
+    );
+    expect(screen.queryByLabelText('Date')).toBeNull();
+    openTab('Changes since publication');
+    expect(await screen.findByTestId('reports-no-schedule')).toHaveTextContent(
+      /no game schedule is saved/i
+    );
+    expect(screen.queryByLabelText('Compare with baseline')).toBeNull();
+    expect(screen.queryByTestId('changes-table')).toBeNull();
+  });
+
+  it('keeps the coach schedule usable: the practices, the marker, the practice clash and the file; one line says there are no games', async () => {
+    mount(noRun);
+    await screen.findByTestId('reports-no-schedule');
+    openTab('Coach schedule');
+    fireEvent.change(await screen.findByLabelText('Coach'), { target: { value: 'c-1' } });
+    const table = await screen.findByTestId('coach-schedule-table');
+    // Alex's three practices, and no game at all.
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => row.textContent.includes('Practice'))).toBe(true);
+    expect(screen.getByTestId('coach-marker')).toHaveTextContent(/more than one team/i);
+    expect(table.textContent).toContain(
+      'Overlaps the Tuesday 18:00 to 19:00 practice of Synthetic Planets'
+    );
+    expect(screen.getByTestId('coach-no-games')).toHaveTextContent(
+      'No game schedule is saved, so there are no games to list.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: /download alex sample/i }));
+    const { name, csv } = downloaded();
+    expect(name).toBe('coach-schedule-alex-sample.csv');
+    expect(csv.split('\n')).toHaveLength(1 + 3);
+    expect(csv).not.toMatch(/,Game,/);
+  });
+
+  it('does not say "no games" on the coach schedule when a game run is saved', async () => {
+    mount();
+    await screen.findByLabelText('Date');
+    openTab('Coach schedule');
+    fireEvent.change(await screen.findByLabelText('Coach'), { target: { value: 'c-1' } });
+    await screen.findByTestId('coach-schedule-table');
+    expect(screen.queryByTestId('coach-no-games')).toBeNull();
+  });
+
+  it('still blocks every report, the coach schedule too, when the saved games are being read or could not be', () => {
+    mount({ ...noRun, sourceLoading: { ...NOT_LOADING, game: true } });
+    expect(screen.getByTestId('reports-not-checked')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Coach schedule' })).toBeNull();
+    cleanup();
+    mount({ ...noRun, sourceErrors: { ...NO_ERRORS, game: 'game_assignments: boom' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/boom/);
+    expect(screen.queryByRole('tab', { name: 'Coach schedule' })).toBeNull();
+    expect(screen.queryByTestId('coach-no-games')).toBeNull();
   });
 });
 
@@ -371,6 +482,92 @@ describe('the coach schedule', () => {
     expect(csv).not.toMatch(/example\.invalid|555-0100/);
   });
 
+  describe('practices are the weekly series: temporary changes are not applied, and the report says so', () => {
+    const exception = (id, assignmentId, window, extra = {}) => ({
+      id,
+      organization_id: ORG_ID,
+      assignment_id: assignmentId,
+      window,
+      kind: 'relocated',
+      tbd_reason: null,
+      withdrawn_at: null,
+      ...extra,
+    });
+    const pickAlex = async (props = {}) => {
+      mount(props);
+      await screen.findByLabelText('Date');
+      openTab('Coach schedule');
+      fireEvent.change(await screen.findByLabelText('Coach'), { target: { value: 'c-1' } });
+      return screen.findByTestId('coach-schedule-table');
+    };
+    const SERIES =
+      /The practice clash column is computed on the weekly series, not on those changes\./;
+
+    it('names a relocated practice with the existing warning’s sentence, and that the clash column is computed on the series', async () => {
+      // Tue 2026-10-06 is a series date of p-1 (the Comets, Alex's).
+      seedMockDb({ practice_exceptions: [exception('e-1', 'p-1', '[2026-10-06,2026-10-07)')] });
+      const table = await pickAlex();
+      const note = await screen.findByTestId('coach-practice-changes');
+      expect(note).toHaveTextContent('1 practice has temporary changes not shown in this export.');
+      expect(note).toHaveTextContent(SERIES);
+      // The row is still the series (not applied): Scheduled, Tuesday 17:00.
+      expect(table.textContent).toContain('Tuesdays');
+      expect(table.textContent).toContain('17:00 to 18:30');
+      // The note is on the screen only, as the practice export's is: the file carries no note line.
+      fireEvent.click(screen.getByRole('button', { name: /download alex sample/i }));
+      expect(downloaded().csv).not.toMatch(/temporary changes/);
+    });
+
+    it('says nothing about changes when there are none, or only another coach’s or a withdrawn one', async () => {
+      seedMockDb({
+        practice_exceptions: [
+          exception('e-1', 'p-4', '[2026-10-08,2026-10-09)'),
+          exception('e-2', 'p-1', '[2026-10-13,2026-10-14)', {
+            withdrawn_at: '2026-10-01T00:00:00Z',
+          }),
+        ],
+      });
+      await pickAlex();
+      await waitFor(() => expect(screen.queryByText(/not checked yet/i)).toBeNull());
+      expect(screen.queryByTestId('coach-practice-changes')).toBeNull();
+      expect(document.body.textContent).not.toMatch(/temporary changes/);
+    });
+
+    it.each(['error', 'reject'])(
+      'says the changes could not be checked, in the existing words and with the table, when the read fails as an %s, and never "no changes"',
+      async (how) => {
+        await pickAlex({ supabaseClient: clientFailing('practice_exceptions', how) });
+        const note = await screen.findByTestId('coach-practice-changes');
+        expect(note).toHaveTextContent(
+          'Practice changes could not be read, so this export may list practices that have moved or have no confirmed time.'
+        );
+        expect(note).toHaveTextContent('practice_exceptions');
+        expect(note).toHaveTextContent(SERIES);
+        expect(note.textContent).not.toMatch(/no (temporary )?changes/i);
+        // The rest of the report is drawn: this read qualifies the practice rows, it does not hide any.
+        expect(screen.getByTestId('coach-schedule-table')).toBeInTheDocument();
+      }
+    );
+
+    it('says "not checked yet" while the changes are being read, not "no changes"', async () => {
+      await pickAlex({ supabaseClient: clientPending('practice_exceptions') });
+      expect(await screen.findByTestId('coach-practice-changes')).toHaveTextContent(
+        'Practice changes: not checked yet.'
+      );
+    });
+
+    it('reads for the coach chosen: another coach’s changes do not carry over', async () => {
+      seedMockDb({ practice_exceptions: [exception('e-1', 'p-1', '[2026-10-06,2026-10-07)')] });
+      await pickAlex();
+      expect(await screen.findByTestId('coach-practice-changes')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Coach'), { target: { value: 'c-2' } });
+      await screen.findByTestId('coach-schedule-table');
+      await waitFor(() => expect(screen.queryByTestId('coach-practice-changes')).toBeNull());
+      fireEvent.change(screen.getByLabelText('Coach'), { target: { value: '' } });
+      expect(screen.queryByTestId('coach-practice-changes')).toBeNull();
+    });
+  });
+
   it('says a coach with no team has no current team', async () => {
     seedWorld();
     seedMockDb({
@@ -442,7 +639,7 @@ describe('Changes since publication', () => {
     expect(text.filter((t) => t.includes('No longer in the saved schedule'))).toHaveLength(2);
     expect(text.filter((t) => t.includes('New since publication'))).toHaveLength(1);
     expect(screen.getByTestId('changes-notes')).toHaveTextContent(
-      /moved to another time slot or week is saved as a new game/i
+      /A baseline records each game's teams, slot and week, not which game is which, so a game moved to another time slot or week appears here twice/
     );
     expect(screen.getByTestId('changes-notes')).toHaveTextContent(/does not link/i);
     expect(screen.getByTestId('changes-summary')).toHaveTextContent(

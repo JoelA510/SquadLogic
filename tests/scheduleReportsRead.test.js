@@ -265,6 +265,93 @@ describe('loadReportsReference: the league the reports are built over', () => {
     }
   });
 
+  it('reads a slot with no week as no week, never as week 0 (a null is not a number)', async () => {
+    const tables = /** @type {Record<string, any>} */ (SEASON_TABLES());
+    tables.game_slots = [
+      { id: 's-1', week_index: 1 },
+      { id: 's-2', week_index: null },
+      { id: 's-3', week_index: 0 },
+      { id: 's-4', week_index: '4' },
+      { id: 's-5', week_index: 2.5 },
+    ];
+    const result = await loadReportsReference(fakeClient({ tables, rpcs: RPCS() }), params);
+    expect(result.data.slots).toEqual([
+      { id: 's-1', weekIndex: 1 },
+      { id: 's-2', weekIndex: null },
+      { id: 's-3', weekIndex: null },
+      { id: 's-4', weekIndex: 4 },
+      { id: 's-5', weekIndex: null },
+    ]);
+  });
+
+  describe('in two groups, so a report is not blocked by a read it does not use', () => {
+    const LEAGUE = ['locations', 'fields', 'divisions', 'teams', 'game_slots'];
+    const COACHES_GROUP = ['coaches', 'team_coach_assignments', 'practice_assignments'];
+    const tablesRead = (client) =>
+      [...new Set(client.calls.filter((c) => c.table).map((c) => c.table))].sort();
+
+    it('the league group reads the venues, fields, divisions, teams, slots and the TIME TBD list, and no coach or practice', async () => {
+      const client = fakeClient({ tables: SEASON_TABLES(), rpcs: RPCS() });
+      const result = await loadReportsReference(client, params, { groups: ['league'] });
+      expect(result.ok).toBe(true);
+      expect(tablesRead(client)).toEqual([...LEAGUE].sort());
+      expect(client.calls.some((c) => c.rpc === 'get_schedule_tbd')).toBe(true);
+      expect(result.data.coaches).toEqual([]);
+      expect(result.data.practices).toEqual([]);
+      expect(result.data.teams.length).toBe(2);
+    });
+
+    it('the coaches group reads the coaches, the assignments and the practices, with the teams that scope them, and no TIME TBD list', async () => {
+      const client = fakeClient({ tables: SEASON_TABLES(), rpcs: RPCS() });
+      const result = await loadReportsReference(client, params, { groups: ['coaches'] });
+      expect(result.ok).toBe(true);
+      expect(tablesRead(client)).toEqual([...COACHES_GROUP, 'divisions', 'teams'].sort());
+      expect(client.calls.some((c) => c.rpc)).toBe(false);
+      expect(result.data.assignments.map((a) => a.id).sort()).toEqual([
+        'ca-1',
+        'ca-2',
+        'ca-6',
+        'ca-7',
+      ]);
+      expect(result.data.practices.length).toBe(3);
+      expect(result.data.tbdGames).toEqual([]);
+    });
+
+    it.each(COACHES_GROUP)('a failure of %s does not fail the league group', async (table) => {
+      const client = fakeClient({
+        tables: SEASON_TABLES(),
+        rpcs: RPCS(),
+        failures: { [table]: 'denied' },
+      });
+      expect((await loadReportsReference(client, params, { groups: ['league'] })).ok).toBe(true);
+      const failed = await loadReportsReference(client, params, { groups: ['coaches'] });
+      expect(failed).toMatchObject({ ok: false, table });
+    });
+
+    it.each(['locations', 'fields', 'game_slots'])(
+      'a failure of %s does not fail the coaches group',
+      async (table) => {
+        const client = fakeClient({
+          tables: SEASON_TABLES(),
+          rpcs: RPCS(),
+          failures: { [table]: 'denied' },
+        });
+        expect((await loadReportsReference(client, params, { groups: ['coaches'] })).ok).toBe(true);
+        expect(await loadReportsReference(client, params, { groups: ['league'] })).toMatchObject({
+          ok: false,
+          table,
+        });
+      }
+    );
+
+    it('refuses a group it does not know, rather than reading nothing and calling it a league', async () => {
+      const result = await loadReportsReference(fakeClient(), params, {
+        groups: /** @type {any} */ (['nonsense']),
+      });
+      expect(result.ok).toBe(false);
+    });
+  });
+
   it('refuses without an organization or a season, and without a client that can read', async () => {
     expect((await loadReportsReference(fakeClient(), { organizationId: ORG_ID })).ok).toBe(false);
     expect((await loadReportsReference(fakeClient(), { seasonSettingsId: SEASON_ID })).ok).toBe(

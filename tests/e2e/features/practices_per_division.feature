@@ -49,3 +49,45 @@ Feature: Practices per division (Phase D PR B)
     And I run the auto-scheduler on the Practice Scheduling page
     Then the auto-scheduler places 0 practices and leaves 1 unplaced
     And the panel says "Hawks" has 0 of 1 practices because no practice slot is exactly as long as the division's practice
+
+  # Schedule expansion PR 13: before any run, "Before you run: slots against what each division needs"
+  # sets each division's practices against the room in the slots it may use. It reads the saved teams
+  # (the roster), the division's settings, the practice slots and the saved practices, says what its
+  # figures are based on and that they are an upper bound, and is scanned with axe in both themes.
+  Scenario: Before a run, the capacity panel sets a division's practices against its slots
+    Given 24 players are imported into the "U10 Girls" program
+    When I set the "U10 Girls" division to 2 practices a week on the Teams page
+    And these saved teams in "U10 Girls":
+      | team  |
+      | Hawks |
+      | Bears |
+    And a Tuesday and a Thursday practice slot of 90 minutes with room for 2 teams each
+    And I look at the Practice Scheduling page
+    Then the capacity panel row for "U10 Girls" says:
+      | Teams | Wanted a week | Held | Still needed | Length     | Slots it may use  | Room left | Verdict (upper bound) |
+      | 2     | 4             | 0    | 4            | Any length | 2 slots: Tue, Thu | 4 of 4    | 0 to spare            |
+    And the capacity panel says what its figures are based on
+    And the capacity panel says that times held outside the app are unknown to it
+    And the capacity panel says that every verdict is an upper bound
+    And axe finds no serious or critical violations in the capacity panel in the "light" theme
+    When I switch to the dark theme on this page
+    Then axe finds no serious or critical violations in the capacity panel in the "dark" theme
+
+  # The panel and the run read one rule: slots on fewer weekdays than the practices a week are named
+  # before the run, and the run then gives the same reason.
+  Scenario: The capacity panel names the shortage of weekdays before the run, and the run gives the same reason
+    Given 24 players are imported into the "U10 Girls" program
+    When I set the "U10 Girls" division to 2 practices a week on the Teams page
+    And these teams and coaches in "U10 Girls":
+      | team  | coach        |
+      | Hawks | Coach Rivera |
+      | Bears | Coach Chen   |
+    And these saved teams in "U10 Girls":
+      | team  |
+      | Hawks |
+      | Bears |
+    And a Thursday practice slot of 90 minutes with room for 2 teams
+    And I look at the Practice Scheduling page
+    Then the capacity panel verdict for "U10 Girls" says "slots fall on fewer weekdays than its practices a week"
+    When I run the auto-scheduler on the Practice Scheduling page
+    Then the panel says "Hawks" has 1 of 2 practices because the division's slots fall on fewer weekdays

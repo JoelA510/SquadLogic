@@ -397,6 +397,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/slots.js',
     functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
     importers: Object.freeze([
+      // The capacity-against-demand model dates a slot on the same weekday walk as the others
+      // (schedule expansion, PR 13).
+      'packages/core/src/practice/capacityDemand.js',
       // The duration-phase adapter builds its slot set through the one
       // validating builder, as the repair does.
       'packages/core/src/practice/durationPhaseAdapter.js',
@@ -412,6 +415,7 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/capacityDemand.js',
       'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
@@ -420,12 +424,16 @@ const LAYERS = Object.freeze([
       // The Practice daylight page's wording test builds a rig's slot set for the one flag the
       // stored rows cannot reach.
       'tests/daylightOutlookText.test.js',
+      // The capacity panel's differential test dates each slot's first occurrence with it, as the
+      // page does, to hand the real optimizer the same slots (schedule expansion, PR 13).
+      'tests/practiceCapacityDemandVsOptimizer.test.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/capacityDemand.js',
       'packages/core/src/practice/durationPhaseAdapter.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',

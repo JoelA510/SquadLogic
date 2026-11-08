@@ -1,12 +1,15 @@
 /**
  * How the schedule reports tell one game from another: the one place that decides.
  *
- * A game is identified by its MATCHUP TUPLE (home team, away team, game slot, week), and by nothing else. That is how
- * `persist_game_schedule` upserts a game (it writes no id from the save, lesson 95), and it is also all a baseline can
- * be compared by: a publication baseline is the master export's rows, which carry each game's teams, slot and week
- * and not which game is which. So the tuple stays the comparison key even if the owner's identity layer (the F11
- * plan) gives a moved game its id: a baseline cannot be keyed by an id it never stored. If the layer changes what
- * identifies a game on the saved side, this is the function to look at, and nothing else in `reports/` names a key.
+ * A game is identified HERE by its MATCHUP TUPLE (home team, away team, game slot, week), and by nothing else. A
+ * publication baseline is the master export's rows, which carry each game's teams, slot and week and not which game is
+ * which, so the tuple is all a baseline can be compared by. That stays true now that the saved side has an identity:
+ * since `20261120010000_game_identity.sql` (F11-1) `persist_game_schedule` updates a game IN PLACE when an assignment
+ * names it by id, so a moved game keeps its id, its Published flag and its history (lesson 100); it upserts on this
+ * tuple only for an assignment sent without an id. A baseline cannot be keyed by an id it never stored, so the reports
+ * still compare by the tuple, deliberately, and a moved game is one removed and one new in "Changes since
+ * publication" even though it is one game in the table. This is the function to look at if a baseline ever stores an
+ * id, and nothing else in `reports/` names a key.
  *
  * A key with a part missing is `null`, and a `null` key matches nothing: a game that cannot be keyed is listed, not
  * paired with another by accident. A week is a positive whole number (`positiveWeek`): a null, a zero or a fraction

@@ -11,16 +11,20 @@
  *   and its history; an assignment without an id is upserted on the matchup tuple (home, away, slot, week) as it always
  *   was. Refused, in the database's order and writing nothing: an id that is not a uuid (22023
  *   `game_identity_invalid`), a game named twice (22023 `game_identity_repeated`), an id that is not a game of the
- *   organization, another organization's included, in the same words (23503 `game_not_found`), a game that would end
- *   where another stored game or another game of the save is (22023 `game_identity_conflict`, DETAIL `ids=<first>[,
- *   <second>]`), a held game of the season the save leaves out, counted present by its id OR its tuple (22023
- *   `game_published_omitted count=<n> ids=<first 50>`), a held game that would be moved (22023 `game_published`, the
- *   guard), a game of a completed season (22023 `season_completed`). Two games that swap places in one save work.
+ *   organization, another organization's included, in the same words (23503 `game_not_found`), a game whose stored
+ *   season is another one than the save's season (22023 `game_identity_season`, DETAIL `ids=<first by id>`; a game with
+ *   no stored season, and a save with no season, are not refused), a game that would end where another stored game or
+ *   another game of the save is (22023 `game_identity_conflict`, DETAIL `ids=<first>[,<second>]`), a held game of the
+ *   season the save leaves out, counted present by its id OR its tuple (22023 `game_published_omitted count=<n>
+ *   ids=<first 50>`), a held game that would be moved (22023 `game_published`, the guard), a game of a completed
+ *   season (22023 `season_completed`). Two games that swap places in one save work.
  *
- * **Written independently of `@squadlogic/core/gameIdentity.js` on purpose.** The predicate, the id shape and the
- * clash rule below are a second copy, so that `tests/mockGameIdentity.test.js` can run one input that reaches every
- * outcome through the mock and the pure helper and require the two to agree (lesson 77); importing the helper here
- * would make that test compare a function with itself.
+ * **Written independently of `@squadlogic/core/gameIdentity.js` and of the test oracle on purpose.** The predicate, the
+ * id shape and the clash rule below are a second copy, so that `tests/mockGameIdentity.test.js` can run one input that
+ * reaches every outcome through the mock and the oracle (`tests/helpers/gameIdentityRefusal.js`, not shipped code) and
+ * require the two to agree (lesson 77); importing either here would make that test compare a function with itself.
+ * Ids are compared by code unit (`<`, `>`), never by locale collation: for the lower-case uuid text the database
+ * produces that is its bytewise order, and the "first" clash must be the one the database names.
  *
  * **Not mirrored** (stated so nobody reads this as the database): the organization's advisory lock and the row locks,
  * the `game.saved` audit row and its SLA01 rollback, the TIME TBD list the save also records, and the exemptions of the
@@ -222,6 +226,21 @@ export function mockPersistGameSchedule(db, runData, assignments, ctx) {
   if (unknown !== undefined) {
     return fail('23503', `game ${unknown} does not exist in this organization`, 'game_not_found');
   }
+  // A save that names a season names only games of that season. A game with no stored season (saved before the column)
+  // and a save with no season are not refused.
+  if (seasonId) {
+    const otherSeason = [...named].sort().find((id) => {
+      const stored = mineById.get(id)?.season_settings_id;
+      return stored !== null && stored !== undefined && stored !== '' && !same(stored, seasonId);
+    });
+    if (otherSeason !== undefined) {
+      return fail(
+        '22023',
+        `game ${otherSeason} is a game of another season: a save names only games of its own season`,
+        `game_identity_season ids=${otherSeason}`
+      );
+    }
+  }
   // No two games end at one place.
   const clashes = [];
   for (const a of rows.filter((row) => row.id !== null)) {
@@ -236,9 +255,10 @@ export function mockPersistGameSchedule(db, runData, assignments, ctx) {
     if (rows.some((b) => b.id === null && tupleOf(b) === place)) clashes.push([a.id]);
   }
   if (clashes.length > 0) {
-    clashes.sort((x, y) =>
-      x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : String(x[1] ?? '￿').localeCompare(String(y[1] ?? '￿'))
-    );
+    // By code unit, as the database orders uuids; a clash with no second game comes last (the sentinel is the highest
+    // code unit, which sorts after any id).
+    const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    clashes.sort((x, y) => compare(x[0], y[0]) || compare(x[1] ?? '\uffff', y[1] ?? '\uffff'));
     const [first, second] = clashes[0];
     return fail(
       '22023',

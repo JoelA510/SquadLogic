@@ -33,7 +33,11 @@
 --     refusal writing nothing: an id is a uuid (22023 `game_identity_invalid`); each game is named once (22023
 --     `game_identity_repeated`); each id is a game of THIS organization (23503 `game_not_found`, in the same words for
 --     an id that does not exist and one that belongs to another organization, so an admin cannot probe another tenant);
---     the rows are locked in id order after the organization's lock; no two games end the save at one place, and no
+--     the rows are locked in id order after the organization's lock; a save that names a season refuses a game whose
+--     STORED season is another one (22023 `game_identity_season`, DETAIL `game_identity_season ids=<the first by id>`:
+--     the id check is organization-wide, so without this an id of a game of another season would be rewritten into
+--     this save's season; a game with no stored season, saved before the column, and a save that names no season are
+--     not refused); no two games end the save at one place, and no
 --     game ends where a stored game the save does not name by id already is (22023 `game_identity_conflict`, DETAIL
 --     `game_identity_conflict ids=<first>,<second>`, the second absent when the other game is a new one of the same
 --     save). A game of a completed season, and a held game that would change, are refused by the triggers on the row
@@ -41,6 +45,14 @@
 --     as before. Nothing is deleted by a save. Two games that swap places in one save work: the unique index is not
 --     deferrable, so a game whose place another is about to take steps out of it first. The omission check counts a
 --     game present if its id OR its tuple is in the payload.
+--
+-- ## What still derives a game's season from its home team's division (until F11-3)
+--
+-- The new check above is the only reader of `game_assignments.season_settings_id`. The Published guard, the omission
+-- check and the completed-season trigger (20261111010000) find a game's season through its home team's division, as they
+-- always have, and are NOT changed here: moving them to the column is F11-3's job. Until then the two can disagree for
+-- a game whose home team has been moved to a division of another season after the game was saved: those paths follow the
+-- team, the new check follows the column the last save wrote.
 --
 -- ## Cost, said plainly
 --
@@ -232,6 +244,7 @@ DECLARE
     v_locked integer;
     v_clash_first uuid;
     v_clash_second uuid;
+    v_season_first uuid;
 BEGIN
     IF run_data IS NULL OR jsonb_typeof(run_data) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'run_data must be a JSON object'
@@ -708,10 +721,15 @@ BEGIN
     --   2. each id is a game of THIS organization, and an id of another organization reads exactly as one that does not
     --      exist (the words of admin_set_games_published, lesson 95): an admin learns nothing of another tenant's games;
     --   3. the rows are locked FOR UPDATE in id order, after the organization's lock and before any is written;
-    --   4. no two games end the save at one place: an in-place update whose new tuple is another row's tuple is
+    --   4. a save that names a season names only games of that season: the check above is organization-wide, so a game
+    --      STORED in another season of the organization would otherwise be rewritten into this one. It reads the stored
+    --      column after the lock, so it cannot change under the check. A game with no stored season (saved before the
+    --      column) and a save that names no season are not refused. The id is already known to belong to this
+    --      organization, so naming it tells an admin nothing they could not see;
+    --   5. no two games end the save at one place: an in-place update whose new tuple is another row's tuple is
     --      refused, both ids named, because the unique index would otherwise refuse it with a message that names no
     --      game, or (for a row without an id) merge two games into one without a word;
-    --   5. a game of a completed season, and a held game that would change, are refused by the triggers on the row.
+    --   6. a game of a completed season, and a held game that would change, are refused by the triggers on the row.
     SELECT x.id
       INTO v_dup_id
       FROM jsonb_to_recordset(v_resolved) AS x(id uuid)
@@ -753,6 +771,25 @@ BEGIN
     IF v_locked <> v_named THEN
         RAISE EXCEPTION 'a game was removed while this save was being checked: nothing was saved, try again'
             USING ERRCODE = '40001';
+    END IF;
+
+    IF v_season_id IS NOT NULL THEN
+        SELECT ga.id
+          INTO v_season_first
+          FROM public.game_assignments ga
+         WHERE ga.organization_id = v_org_id
+           AND ga.id IN (SELECT y.id
+                           FROM jsonb_to_recordset(v_resolved) AS y(id uuid)
+                          WHERE y.id IS NOT NULL)
+           AND ga.season_settings_id IS NOT NULL
+           AND ga.season_settings_id <> v_season_id
+         ORDER BY ga.id
+         LIMIT 1;
+        IF v_season_first IS NOT NULL THEN
+            RAISE EXCEPTION 'game % is a game of another season: a save names only games of its own season', v_season_first
+                USING ERRCODE = '22023',
+                      DETAIL = format('game_identity_season ids=%s', v_season_first);
+        END IF;
     END IF;
 
     WITH i AS (

@@ -14,9 +14,10 @@
  *     (`changed: false`). The SQL rebuilds the practice rows from the roster, the division counts and
  *     the saved assignments, keeps each row's reason and run, and audits a change
  *     (`schedule_tbd.refreshed`);
- *   - the writers: the mock persists no practice or game schedule through the SQL, so
- *     `persist_practice_schedule` does not rebuild this list and `persist_game_schedule` does not
- *     record the run's unscheduled games; a test or scenario seeds `db.schedule_tbd` itself;
+ *   - the writers: the mock persists no practice schedule through the SQL, and its `persist_game_schedule` arm
+ *     (`mockGameIdentity.js`) does not record the run's unscheduled games, so `persist_practice_schedule` does
+ *     not rebuild this list and the game save does not record it; a test or scenario seeds `db.schedule_tbd`
+ *     itself;
  *   - the table's RLS and its CHECKs (a seeded row is trusted as written).
  *
  * Pure over `db` so a test can drive it directly; `mockSupabaseClient.js` wires it into `rpc()`.

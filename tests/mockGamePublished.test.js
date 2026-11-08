@@ -11,8 +11,9 @@
  *     SQL's outcome, written out.
  * A meta-assertion requires every outcome to have been reached (a table that reaches nothing compares zeros).
  *
- * Not mirrored, and said: persist_game_schedule (no mock arm; the omission rule is pgTAP's and the helper's), the
- * trigger's exemptions, row locks, the SLA01 rollback.
+ * Not mirrored here, and said: persist_game_schedule (its mock arm is mockGameIdentity.js, held by
+ * tests/mockGameIdentity.test.js; the omission rule is pgTAP's and that file's), the trigger's exemptions, row locks, the
+ * SLA01 rollback.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 

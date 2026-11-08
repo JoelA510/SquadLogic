@@ -19,7 +19,10 @@ import {
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
-import { gamePublishedErrorResponse } from '../_shared/game-persistence-errors.ts';
+import {
+  gameIdentityErrorResponse,
+  gamePublishedErrorResponse,
+} from '../_shared/game-persistence-errors.ts';
 
 // ── Inlined constants & config ──────────────────────────────────────────────
 const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role', 'admin', 'scheduler'];
@@ -418,6 +421,11 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       // it is a 409 with the games named and is not logged as a failure. Every other error falls through, as before.
       const published = gamePublishedErrorResponse(error);
       if (published) return jsonResponse(published.body, published.status);
+      // A save that names a game by id and is refused for it (20261120010000: an id that is not a game of this
+      // organization or season, a game named twice, two games at one place, a game another admin removed a moment
+      // ago): caused by what was sent or by another admin, so a 409 with the database's words, not a logged failure.
+      const identity = gameIdentityErrorResponse(error);
+      if (identity) return jsonResponse(identity.body, identity.status);
       await logFailure(logCtx, 'Game persistence failed', error);
       return jsonResponse(
         {

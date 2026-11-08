@@ -12,8 +12,6 @@
  * @module gameIdentity
  */
 
-import { changesPublishedPlacement, publishedOmissions } from './gamePublished.js';
-
 const read = (game, camel, snake) => game?.[camel] ?? game?.[snake];
 
 const idOf = (game) => {
@@ -42,6 +40,12 @@ const weekOf = (game) => {
   return Number.isFinite(week) ? /** @type {number} */ (week) : 0;
 };
 
+/** The slot a game is in (either spelling of it), or null when it names none. */
+const slotOf = (game) => {
+  const slot = read(game, 'gameSlotId', 'game_slot_id') ?? read(game, 'slotId', 'slot_id');
+  return typeof slot === 'string' && slot !== '' ? slot : null;
+};
+
 /**
  * Whether a game is held where it is: it cannot be moved, cancelled, dropped by a save or re-solved by a regeneration.
  * A game is held when it is Published, or (F11-2) when it has a score. The score is not a column of the saved game, so
@@ -51,8 +55,11 @@ const weekOf = (game) => {
  *
  * Only a boolean `true` holds: a string such as `'true'` is not a flag (the database column is a boolean).
  *
+ * `scored` is a parameter now so that F11-2 does not change this function's shape: nothing passes it until the score
+ * table exists, and it stays `false` until then.
+ *
  * @param {{ published?: unknown } | null | undefined} game
- * @param {boolean} [scored] - whether the game has a score (false until scores exist)
+ * @param {boolean} [scored] - whether the game has a score (false until scores exist; F11-2 passes it)
  * @returns {boolean}
  */
 export function isHeld(game, scored = false) {
@@ -67,11 +74,16 @@ export function isHeld(game, scored = false) {
  * regenerated game and no saved game is claimed twice. A pair that meets twice (a double round robin) is matched meeting
  * to meeting by week, not by the order the games are given in.
  *
- * How the matching is decided, per pair: every (saved, regenerated) combination is ordered by how far apart their
- * weeks are, then by the earlier saved week, then by the earlier regenerated week, then by the order given; the
- * combinations are taken in that order, skipping any whose saved or regenerated game is already taken. The count matched
- * is the smaller of the two counts, and the answer does not depend on the order the games are given in unless two
- * combinations are identical in all three weeks.
+ * How the matching is decided, per pair: every (saved, regenerated) combination is ordered first by whether the two are
+ * at the same place (the same slot AND the same week: a combination that is, comes before any that is not), then by how
+ * far apart their weeks are, then by the earlier saved week, then by the earlier regenerated week, then by the order
+ * given; the combinations are taken in that order, skipping any whose saved or regenerated game is already taken. The
+ * count matched is the smaller of the two counts, and the answer does not depend on the order the games are given in
+ * unless two combinations are identical in all four. The exact place comes first because the save updates a game in
+ * place: a game that takes the id of a saved game of its pair that is somewhere else MOVES that game, and if another
+ * saved game of the pair already holds that place the save refuses the whole Apply (`game_identity_conflict`). A pair
+ * with two saved games in one week, at slots s1 and s2, and one regenerated meeting at s2 therefore gives it to the
+ * saved game at s2, whichever of the two is listed first.
  *
  * A regenerated game that already carries the id of a saved game keeps it and that saved game is spent (the generator
  * hands a held game back as itself: it must not lose its id to a free game of the same pair). A regenerated game that
@@ -137,9 +149,12 @@ export function carryGameIds(saved, generated) {
     const candidates = [];
     for (const s of group.saved) {
       for (const g of group.generated) {
+        const slot = slotOf(s.game);
         candidates.push({
           s,
           g,
+          // The same slot and the same week: the place the saved game is already at.
+          exact: slot !== null && slot === slotOf(g.game) && weekOf(s.game) === weekOf(g.game),
           distance: Math.abs(weekOf(s.game) - weekOf(g.game)),
           savedWeek: weekOf(s.game),
           generatedWeek: weekOf(g.game),
@@ -148,6 +163,7 @@ export function carryGameIds(saved, generated) {
     }
     candidates.sort(
       (a, b) =>
+        Number(b.exact) - Number(a.exact) ||
         a.distance - b.distance ||
         a.savedWeek - b.savedWeek ||
         a.generatedWeek - b.generatedWeek ||
@@ -168,133 +184,4 @@ export function carryGameIds(saved, generated) {
     const id = claimed.get(index);
     return id === undefined ? game : { ...game, id };
   });
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const lower = (value) => String(value).toLowerCase();
-
-/** The matchup tuple (home, away, slot, week) of a row, or null when a part is missing (as in SQL, NULL matches nothing). */
-function tupleOf(row) {
-  const parts = [
-    read(row, 'homeTeamId', 'home_team_id'),
-    read(row, 'awayTeamId', 'away_team_id'),
-    read(row, 'gameSlotId', 'game_slot_id') ?? read(row, 'slotId', 'slot_id'),
-    read(row, 'weekIndex', 'week_index'),
-  ];
-  return parts.some((part) => part === null || part === undefined || part === '')
-    ? null
-    : parts.map(lower).join('|');
-}
-
-/**
- * The refusal `persist_game_schedule` gives a save that names games by id, or null: the pure twin of the checks in
- * `20261120010000_game_identity.sql`, in the database's order, so the Games page, the mock and a test can say what the
- * database will say. `tests/mockGameIdentity.test.js` holds this and the mock's own copy to the same answers over one
- * input that reaches every outcome (lesson 77).
- *
- * In order: an `id` that is not a uuid (22023 `game_identity_invalid`); a game named twice (22023
- * `game_identity_repeated`); an id that is not a game of the organization, another organization's included, in the same
- * words (23503 `game_not_found`); a game that would end where another stored game, or another game of the same save, is
- * (22023 `game_identity_conflict`, DETAIL `game_identity_conflict ids=<first>[,<second>]`); a held game the save leaves
- * out (22023 `game_published_omitted count=<n> ids=<first 50>`); a held game moved or flipped (22023 `game_published`).
- * Not here: a completed season (a trigger on the row), the audit, the TIME TBD list.
- *
- * @param {Object} input
- * @param {ReadonlyArray<Record<string, any>>} input.stored - every stored game, of every organization (`organizationId`)
- * @param {ReadonlyArray<Record<string, any>>} input.payload - the save's assignments, with or without an `id`
- * @param {string} input.organizationId - the organization the save is for
- * @param {ReadonlyArray<Record<string, any>>} [input.carryable] - the stored games the omission check ranges over (the
- *   caller scopes them to the season, as the database does); default: the organization's stored games
- * @returns {null | { sqlstate: string, detail: string, ids: string[] }}
- */
-export function gameIdentityRefusal({ stored, payload, organizationId, carryable }) {
-  const rows = Array.isArray(payload) ? payload : [];
-  const mine = (stored ?? []).filter(
-    (game) => lower(read(game, 'organizationId', 'organization_id')) === lower(organizationId)
-  );
-
-  // 1. an id is a uuid (absent, null and empty are no id)
-  for (const row of rows) {
-    const id = row?.id;
-    if (id === undefined || id === null || id === '') continue;
-    if (typeof id !== 'string' || !UUID.test(id)) {
-      return { sqlstate: '22023', detail: 'game_identity_invalid', ids: [] };
-    }
-  }
-  const named = rows
-    .map((row) => (typeof row?.id === 'string' && row.id !== '' ? lower(row.id) : null))
-    .filter((id) => id !== null);
-
-  // 2. each game once
-  // (Set#add returns the set, so an unchanged size means the id was already there.)
-  const seen = new Set();
-  const repeated = [...named].sort().find((id) => seen.size === seen.add(id).size);
-  if (repeated !== undefined)
-    return { sqlstate: '22023', detail: 'game_identity_repeated', ids: [repeated] };
-
-  // 3. each id is a game of this organization
-  const mineById = new Map(mine.map((game) => [lower(game.id), game]));
-  const missing = [...named].sort().find((id) => !mineById.has(id));
-  if (missing !== undefined) return { sqlstate: '23503', detail: 'game_not_found', ids: [missing] };
-
-  // 4. no two games end the save at one place
-  const namedIds = new Set(named);
-  const ends = rows.map((row) => ({
-    id: typeof row?.id === 'string' && row.id !== '' ? lower(row.id) : null,
-    tuple: tupleOf(row),
-  }));
-  const clashes = [];
-  for (const a of ends) {
-    if (a.id === null || a.tuple === null) continue;
-    for (const b of ends) {
-      if (b.id !== null && b.id > a.id && b.tuple === a.tuple) clashes.push([a.id, b.id]);
-    }
-    for (const game of stored ?? []) {
-      if (lower(game.id) !== a.id && !namedIds.has(lower(game.id)) && tupleOf(game) === a.tuple) {
-        clashes.push([a.id, lower(game.id)]);
-      }
-    }
-    if (ends.some((b) => b.id === null && b.tuple === a.tuple)) clashes.push([a.id]);
-  }
-  if (clashes.length > 0) {
-    // The first by id, a clash with no second game last: the order the database takes it in.
-    const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-    clashes.sort((x, y) => cmp(x[0], y[0]) || cmp(x[1] ?? '\uffff', y[1] ?? '\uffff'));
-    const ids = clashes[0];
-    return { sqlstate: '22023', detail: `game_identity_conflict ids=${ids.join(',')}`, ids };
-  }
-
-  // 5. a held game the save leaves out
-  const omitted = publishedOmissions([...(carryable ?? mine)], rows);
-  if (omitted.length > 0) {
-    const ids = omitted.slice(0, 50).map((game) => game.id);
-    return {
-      sqlstate: '22023',
-      detail: `game_published_omitted count=${omitted.length} ids=${ids.join(',')}`,
-      ids,
-    };
-  }
-
-  // 6. a held game moved or flipped (judged on the stored row; by id, or by tuple for an assignment without one)
-  for (const row of rows) {
-    const stored1 =
-      typeof row?.id === 'string' && row.id !== ''
-        ? mineById.get(lower(row.id))
-        : mine.find((game) => tupleOf(game) !== null && tupleOf(game) === tupleOf(row));
-    // As the database stores it: the slot is both columns, and an assignment that names no field keeps the one it has
-    // (the database would take the slot's, which this helper cannot see).
-    const slot = read(row, 'gameSlotId', 'game_slot_id') ?? read(row, 'slotId', 'slot_id');
-    const after = stored1
-      ? {
-          ...row,
-          game_slot_id: slot,
-          slot_id: slot,
-          field_id: read(row, 'fieldId', 'field_id') ?? read(stored1, 'fieldId', 'field_id'),
-        }
-      : row;
-    if (stored1 && isHeld(stored1) && changesPublishedPlacement(stored1, after)) {
-      return { sqlstate: '22023', detail: 'game_published', ids: [stored1.id] };
-    }
-  }
-  return null;
 }

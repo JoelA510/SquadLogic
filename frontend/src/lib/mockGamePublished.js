@@ -21,8 +21,12 @@
  * here would make that test compare a function with itself.
  *
  * **Not mirrored** (stated so nobody reads this as the database):
- *   - `persist_game_schedule` has no mock arm (the save is an Edge function over SQL), so the save's omission
- *     refusal and the trigger's refusal of a moving save are held by pgTAP and by the pure helper, not here;
+ *   - `persist_game_schedule` HAS a mock arm, in `mockGameIdentity.js` (20261120010000), which asks this file's
+ *     guard and `isRowHeld` and gives the save's omission refusal and the trigger's refusal of a moving save. The
+ *     Games page does not reach it: it saves through the `game-persistence` Edge function over `fetch`, which the mock
+ *     does not intercept, so the arm is reached only by direct `rpc('persist_game_schedule')` calls in tests (and by a
+ *     test that wires the page's save to it). The rules are held by pgTAP, by `tests/mockGameIdentity.test.js` and by
+ *     its test oracle (`tests/helpers/gameIdentityRefusal.js`), not by this file;
  *   - the exemptions of the trigger (a job with no signed-in user, the cascade of a deleted organization): the
  *     mock's direct writes are always the signed-in app's;
  *   - the mock's OWN cascades: `admin_delete_field` (confirmed), the field-import rollback and slot removal delete

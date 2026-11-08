@@ -264,8 +264,9 @@ const tupleOf = (game) =>
  * The saved games with a Published history that a staged schedule no longer holds: the new schedule has no game for
  * them, so the save leaves them in the old run, hidden, with their history. A game is held by the staged schedule when
  * a staged game carries its id (a game moved, flipped or regenerated keeps its id, so it is held wherever it now is) or,
- * for a staged game with no id, when its matchup tuple (home, away, slot, week) is the saved game's: the two ways the save
- * recognises a game, and the omission check's own rule.
+ * for a staged game with no saved id (a new game, whose id is only a placeholder), when its matchup tuple (home, away, slot,
+ * week) is the saved game's: the two ways the save recognises a game. A staged game that carries a saved id holds THAT
+ * game and no other, wherever it sits.
  *
  * Judged on the saved side: a regenerated game with a fresh id does not hide the game it replaced. A Published game
  * is in the staged schedule by construction (the generator carries it and the save refuses a schedule that leaves
@@ -280,7 +281,12 @@ export function leftBehindHistoryGames(review, saved) {
   const carriedIds = new Set(
     review.map((game) => String(game.id)).filter((id) => savedIds.has(id))
   );
-  const carriedTuples = new Set(review.map(tupleOf));
+  // Only a staged game that carries no saved id is saved on its tuple. One that carries a saved id is saved in place under
+  // that id: it holds that game, not the saved game whose tuple it now sits on (the save refuses a game that would end
+  // where a stored game it does not name already is, so on an accepted save that tuple is no one's but its own).
+  const carriedTuples = new Set(
+    review.filter((game) => !savedIds.has(String(game.id))).map(tupleOf)
+  );
   return saved.filter((game) => {
     const hasHistory = game.published === true || Boolean(game.publishedAt ?? game.published_at);
     return hasHistory && !carriedIds.has(String(game.id)) && !carriedTuples.has(tupleOf(game));

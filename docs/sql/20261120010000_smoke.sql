@@ -40,6 +40,7 @@ DECLARE
     v_s4      uuid := gen_random_uuid();   -- week 1, 14:00
     v_s5      uuid := gen_random_uuid();   -- week 2, 08:00
     v_s6      uuid := gen_random_uuid();   -- week 2, 10:00
+    v_season2 uuid := gen_random_uuid();   -- another season of the same organization (a draft: one season is active at a time)
     v_run0    uuid := gen_random_uuid();
     v_pub     uuid := gen_random_uuid();   -- T1>T2, s1: Published
     v_mover   uuid := gen_random_uuid();   -- T3>T4, s2: moved by id
@@ -247,11 +248,28 @@ BEGIN
             RAISE EXCEPTION 'the clash was refused with the wrong detail (%)', v_detail;
         END IF;
     END;
+    -- A game stored in ANOTHER season of the organization, named by its id under this season: refused, the game named.
+    INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES (v_season2, v_org, 'Identity Season Two', 'draft', 2027);
+    UPDATE public.game_assignments SET season_settings_id = v_season2 WHERE id = v_y;
+    BEGIN
+        PERFORM public.persist_game_schedule(
+            jsonb_build_object('organization_id', v_org, 'season_settings_id', v_season, 'run_type', 'game', 'status', 'completed'),
+            jsonb_build_array(v_pub_i, v_x_i, v_y_i));
+        RAISE EXCEPTION 'a save naming a game of another season was accepted' USING ERRCODE = 'XX000';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
+        IF v_detail IS DISTINCT FROM format('game_identity_season ids=%s', v_y) THEN
+            RAISE EXCEPTION 'the game of another season was refused with the wrong detail (%)', v_detail;
+        END IF;
+    END;
+    IF (SELECT season_settings_id FROM public.game_assignments WHERE id = v_y) IS DISTINCT FROM v_season2 THEN
+        RAISE EXCEPTION 'the refused save rewrote the season of a game';
+    END IF;
     IF (SELECT count(*) FROM public.scheduler_runs WHERE organization_id = v_org) <> v_run0_n THEN
         RAISE EXCEPTION 'a refused save left a scheduler run behind';
     END IF;
-    v_checks := v_checks + 4;
-    RAISE NOTICE 'refusals: an unknown id (23503 game_not_found), a repeated id (22023 game_identity_repeated), a Published game moved by its id (22023 game_published) and a game moved onto an older hidden row (22023 game_identity_conflict, both ids) were each refused and left no run behind';
+    v_checks := v_checks + 5;
+    RAISE NOTICE 'refusals: an unknown id (23503 game_not_found), a repeated id (22023 game_identity_repeated), a Published game moved by its id (22023 game_published), a game stored in another season (22023 game_identity_season, the game named) and a game moved onto an older hidden row (22023 game_identity_conflict, both ids) were each refused and left no run behind';
 
     RAISE NOTICE 'game_identity smoke: % checks', v_checks;
 END

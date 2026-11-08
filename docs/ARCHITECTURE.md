@@ -364,7 +364,7 @@ scheduler columns" (`20260503030000_repair_game_persistence_rpc.sql:1-3`).
 **Update, 2026-11-07 (F11-1, `20261120010000_game_identity.sql`).** A saved game's identity is its `game_assignments.id`:
 `persist_game_schedule` updates a game in place when an assignment names it by `id` (a move or a flip keeps the row, its
 Published flag and its history) and upserts on the matchup tuple only for an assignment without one; the table gains
-`season_settings_id`, set by the save, and a unique index on `(id, organization_id, home_team_id, away_team_id)` for the
+`season_settings_id`, set by the save and read back by it (a named game stored in another season is refused), and a unique index on `(id, organization_id, home_team_id, away_team_id)` for the
 score table that follows; "held where it is" is one predicate (`game_is_held`). `games` is untouched and still unread by
 any save. The plan is `docs/changes/2026-11-06-games-table-source-of-truth.md`; `docs/architecture/game-scheduling.md`
 ("Identity") has the rules.

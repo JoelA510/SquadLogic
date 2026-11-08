@@ -16,8 +16,8 @@
  * **Identity.** Since 20261120010000 the game save updates a game in place when an assignment names it by `id`, and
  * upserts on the matchup tuple (home, away, slot, week) for one without; `publishedOmissions` counts a game carried by
  * either. A game sent without its id at another slot or week is a new tuple, hence a new row: a Published original is
- * then an OMISSION, and anything keyed by the old id stays with the old row. The twin of the whole save is
- * `gameIdentityRefusal` in `gameIdentity.js`.
+ * then an OMISSION, and anything keyed by the old id stays with the old row. The test oracle for the whole save's
+ * identity checks is `tests/helpers/gameIdentityRefusal.js` (not shipped code).
  *
  * @module gamePublished
  */

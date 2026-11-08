@@ -5535,7 +5535,9 @@ plant "M68 the switch no longer needs a reason to allow changes" "$M68" \
 # red for each plant (the pgTAP file, supabase/tests/game_identity.sql, is CI's and holds the full table):
 #   - the save reads no ids (the payload's id is NULL), so a moved game is a new row again, as before this migration;
 #   - the clash check is removed, so a game moved onto an older hidden row meets the unique index (23505) instead of
-#     being refused by name with both ids.
+#     being refused by name with both ids;
+#   - the season check is removed, so a game stored in another season of the organization, named by its id, is rewritten
+#     into the save's season instead of being refused (22023 game_identity_season).
 plant "M69 the game save reads no ids, so a moved game is a new row again" "$M69" \
   "                    assignment_items.ordinality AS assignment_ordinal,
                     NULLIF(value->>'id', '')::uuid AS id," \
@@ -5546,6 +5548,11 @@ plant "M69 the game save reads no ids, so a moved game is a new row again" "$M69
 plant "M69 the clash check is removed" "$M69" \
   "    IF v_clash_first IS NOT NULL THEN" \
   "    IF false THEN" \
+  "smoke 20261120010000"
+
+plant "M69 the season of a named game is not checked" "$M69" \
+  "        IF v_season_first IS NOT NULL THEN" \
+  "        IF false THEN" \
   "smoke 20261120010000"
 
 # ---------------------------------------------------------------------------

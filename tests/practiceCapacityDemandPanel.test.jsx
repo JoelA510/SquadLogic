@@ -596,6 +596,38 @@ describe('every kind of verdict is worded', () => {
     );
   });
 
+  it('the right-length slot reserved away reads as the reservation, not as "no slot is that long"', async () => {
+    oneDivision({
+      minutes: 60,
+      teams: 1,
+      slots: [{ day_of_week: 'tue', division_id: 'someone-else' }],
+    });
+    expect(await verdict()).toBe(
+      "No slot open. Every slot of the division's length with a date left from today is reserved to another division. Short by 1."
+    );
+  });
+
+  it('every live slot the wrong length reads as the length', async () => {
+    oneDivision({ minutes: 60, teams: 1, slots: [{ day_of_week: 'tue', end_time: '17:45:00' }] });
+    expect(await verdict()).toBe(
+      "No slot open. No practice slot is exactly as long as the division's practice. Short by 1."
+    );
+  });
+
+  it('wrong-length slots beside a right-length one reserved away read as the reservation', async () => {
+    oneDivision({
+      minutes: 60,
+      teams: 1,
+      slots: [
+        { day_of_week: 'tue', end_time: '17:45:00' },
+        { day_of_week: 'wed', division_id: 'someone-else' },
+      ],
+    });
+    expect(await verdict()).toBe(
+      "No slot open. Every slot of the division's length with a date left from today is reserved to another division. Short by 1."
+    );
+  });
+
   it('a division with no team', async () => {
     oneDivision({ teams: 0, slots: [{ day_of_week: 'tue' }] });
     expect(await verdict()).toBe('No teams');

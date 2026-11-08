@@ -38,6 +38,11 @@ import {
 } from '@squadlogic/core/practice/index.js';
 import { PRACTICE_UNPLACED_REASON } from '@squadlogic/core/practiceUnplacedReasons.js';
 import { planTeamsForRun } from '../supabase/functions/_shared/engines/practice-lock.js';
+import { runPracticeOptimizer } from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
+import { applySlotReservations } from '../supabase/functions/_shared/engines/practice-reservations.js';
+import { toDaylightSlot } from '../supabase/functions/_shared/engines/practice-daylight.js';
+import { seasonLongDating } from './fixtures/solverDatedCases.js';
 
 /** A Monday: "today" for every case unless a case says otherwise. */
 const LIVE_FROM = '2026-10-05';
@@ -657,6 +662,117 @@ describe('short by N, and N to spare', () => {
       slots: [slot('s', 'tue', { divisionId: 'someone-else' })],
     });
     expect(row(reserved, 'd').verdict.reason).toBe(PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE);
+  });
+});
+
+describe('why no slot is open: the filter that left the live slots none [plant P4]', () => {
+  const league = (slots, minutes = 60) => ({
+    divisions: [division('d', 1, minutes)],
+    teams: [team('t', 'd')],
+    slots,
+  });
+  const verdictOf = (slots, minutes = 60) => row(run(league(slots, minutes)), 'd').verdict;
+  const short45 = (id, day, over = {}) => slot(id, day, { endTime: '17:45:00', ...over });
+
+  it('(a) the live slot of the right length is reserved to another division: no-slot-available, not practice-length', () => {
+    expect(verdictOf([slot('s60', 'tue', { divisionId: 'someone-else' })])).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE,
+      short: 1,
+    });
+  });
+
+  it('(b) every live slot is the wrong length: practice-length', () => {
+    expect(verdictOf([short45('a', 'tue'), short45('b', 'wed')])).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH,
+    });
+  });
+
+  it('(c) mixed: some live slots the wrong length, the ones of the right length reserved away: no-slot-available', () => {
+    // A slot of the division's length exists, so "no slot is that long" would be false; what keeps
+    // the division off it is the reservation, so that is the reason. The run itself says
+    // practice-length here (pinned below), because it tests the length only among the slots left
+    // after the reservation; this panel names the filter that actually excluded the right-length slot.
+    expect(
+      verdictOf([short45('a', 'tue'), slot('s60', 'wed', { divisionId: 'someone-else' })])
+    ).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE,
+    });
+  });
+
+  it('(d) no practice length set and every live slot reserved away: no-slot-available', () => {
+    expect(verdictOf([slot('s', 'tue', { divisionId: 'someone-else' })], null)).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE,
+    });
+  });
+
+  it('(e) no live date outranks everything: a length set, every slot ended, still no-live-date', () => {
+    expect(
+      verdictOf([
+        slot('old', 'tue', { validUntil: '2026-09-20' }),
+        short45('old45', 'wed', { validUntil: '2026-09-20' }),
+      ])
+    ).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: PRACTICE_UNPLACED_REASON.NO_LIVE_DATE,
+    });
+  });
+
+  it('the control: the same right-length slot, not reserved, is open (no reason at all)', () => {
+    expect(verdictOf([slot('s60', 'tue')])).toMatchObject({ kind: CAPACITY_VERDICT.SPARE });
+  });
+
+  it('pinned difference from the run: for (a) and (c) the solver reports practice-length, the panel says more', async () => {
+    // The solver's reason is derived from the slots left after the reservation, so a right-length
+    // slot reserved away reads there as "no slot is that long" (`explainUnplaced`,
+    // `auto-scheduler-solver.ts`). The panel deliberately does not copy that. If the solver is made
+    // precise, this fails and the panel and the run are to be aligned on purpose.
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    const edgeSlot = (id, day, minutes) => {
+      const start = new Date(Date.UTC(2026, 8, 7 + day, 16, 0, 0));
+      return {
+        id,
+        day: days[day],
+        start,
+        end: new Date(start.getTime() + minutes * 60_000),
+        capacity: 1,
+      };
+    };
+    const solverReason = async (slots, reservedIds) => {
+      const t = {
+        ...prepareTeam({ id: 't', division: 'U10', coachId: 'c' }),
+        practicesPerWeek: 1,
+        practiceMinutes: 60,
+      };
+      const applied = applySlotReservations([t], slots, {
+        slotDivision: new Map(
+          slots.map((x) => [x.id, reservedIds.includes(x.id) ? 'other' : null])
+        ),
+        teamDivision: new Map([['t', 'mine']]),
+        reservedDivisionIds: new Set(['other']),
+      });
+      const result = await runPracticeOptimizer({
+        teams: applied.teams,
+        slots: applied.slots,
+        locked: [],
+        placeableTeamIds: ['t'],
+        unitsNeeded: { t: 1 },
+        dating: seasonLongDating(slots, toDaylightSlot, {
+          timeZone: 'UTC',
+          until: '2026-11-30',
+          liveFrom: '2026-09-01',
+        }),
+        config: { timeBudgetMs: 5000, maxIterations: 100, seed: 7 },
+      });
+      return result.unassigned.map((u) => u.reason);
+    };
+    const a = [edgeSlot('wed60', 2, 60)];
+    const c = [edgeSlot('mon45', 0, 45), edgeSlot('wed60', 2, 60)];
+    expect(await solverReason(a, ['wed60'])).toEqual(['practice-length']);
+    expect(await solverReason(c, ['wed60'])).toEqual(['practice-length']);
   });
 });
 

@@ -183,13 +183,15 @@ const capacityRow = (page: Page, division: string) =>
     .getByTestId('capacity-row')
     .filter({ has: page.getByRole('heading', { name: division, exact: true }) });
 
-/** The value of one labelled figure of a division's card ("Held", "Verdict (upper bound)"). */
+/**
+ * The value of one labelled figure of a division's card ("Held", "Verdict (upper bound)"). The label
+ * is matched as exact text, not as a pattern built from it: "Held" must not match a longer label,
+ * and nothing in it needs escaping.
+ */
 const capacityFigure = (row: ReturnType<typeof capacityRow>, label: string) =>
   row
     .locator('dl > div')
-    .filter({
-      has: row.page().locator('dt', { hasText: new RegExp(`^${label.replace(/[()]/g, '\\$&')}$`) }),
-    })
+    .filter({ has: row.page().locator('dt').getByText(label, { exact: true }) })
     .locator('dd');
 
 Given('these saved teams in {string}:', async ({ page }, division: string, table: DataTable) => {

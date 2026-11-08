@@ -11,10 +11,14 @@ import { seasonCalendarDate } from '@squadlogic/core/timing/index.js';
  *
  * **All or nothing** (lessons 90 and 93). A figure over a partial read says a division has room
  * because the slot that fills it was never read, or has no team because the team was. Every table
- * is read to completion (paged, so the server row cap cannot truncate it), the season's saved
- * practices through `loadSeasonPracticeAssignments` (the Practices page's own complete-read
- * contract), and any failed read makes the whole read `{ ok: false }` naming the table: the panel
- * then says it could not read the season and draws no row.
+ * is read page by page until a short page (`fetchAllPages`, 1000 rows a page), which is complete
+ * only while the server's row cap is at least the page size: the project's `max_rows` is 1000
+ * (`supabase/config.toml`), equal to the page size, so a project that lowered its cap below 1000
+ * would truncate these three reads, and every other read that uses `fetchAllPages`, and still
+ * report them complete. The season's saved practices come through `loadSeasonPracticeAssignments`
+ * (the Practices page's own complete-read contract), which stops only on an empty page and does
+ * not depend on the cap. Any failed read makes the whole read `{ ok: false }` naming the table:
+ * the panel then says it could not read the season and draws no row.
  *
  * What is read, and why only this:
  *

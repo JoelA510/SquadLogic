@@ -9,10 +9,8 @@ import {
   buildCapacityDemand,
   capacityDemandInputFromRows,
 } from '@squadlogic/core/practice/capacityDemand.js';
-import {
-  PRACTICE_UNPLACED_REASON,
-  describeUnplacedReason,
-} from '@squadlogic/core/practiceUnplacedReasons.js';
+import { describeNoSlotReason } from '@squadlogic/core/practice/capacityDemandText.js';
+import { describeUnplacedReason } from '@squadlogic/core/practiceUnplacedReasons.js';
 
 /**
  * The sentences on this panel's face (owner decisions 28 and 29, 2026-11-06): what the numbers are
@@ -43,22 +41,6 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
- * Why no slot is open, in words. The two reasons the run itself gives have its words
- * (`describeUnplacedReason`); the third, a division reserved away from every slot that still has a
- * date, has none there ("no slot was free for it" does not say what is wrong before a run).
- */
-function noSlotReason(reason, practiceMinutes) {
-  if (reason === PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE) {
-    // With a practice length set, the slots of that length are what is reserved away: the ones of
-    // another length are not reserved, they are the wrong length, and the sentence says which.
-    return practiceMinutes === null || practiceMinutes === undefined
-      ? 'Every slot with a date left from today is reserved to another division.'
-      : "Every slot of the division's length with a date left from today is reserved to another division.";
-  }
-  return `${capitalise(describeUnplacedReason(reason))}.`;
-}
-
-/**
  * The verdict's badge label, tone and the sentence under it, from the model's verdict.
  *
  * @returns {{ tone: 'neutral' | 'success' | 'warning' | 'danger' | 'info', label: string,
@@ -78,7 +60,7 @@ function describeVerdict(verdict, row = undefined) {
       return {
         tone: 'danger',
         label: 'No slot open',
-        detail: `${noSlotReason(verdict.reason, row?.practiceMinutes)} Short by ${verdict.short}.`,
+        detail: `${describeNoSlotReason(verdict.reason, row?.practiceMinutes)} Short by ${verdict.short}.`,
       };
     default:
       return {

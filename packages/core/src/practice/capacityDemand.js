@@ -10,7 +10,7 @@
  * ## What the numbers are, and are not (decisions 28 and 29)
  *
  * The room counts **every open slot** a division may use: live from today on, as long as the
- * division's practice, and not reserved to another division. Nothing in the app records a time
+ * division's practice, and not closed to it by a reservation. Nothing in the app records a time
  * that is held outside it, so the calculation cannot leave one out: its verdict is an **upper
  * bound** (the room can only be too high), and the page that shows it says so. Excluding held times
  * for real is a stored hold, which the owner has not asked for.
@@ -33,7 +33,8 @@
  * - **A slot is open to a division** when it has a live date from today
  *   (`assignmentLiveSpan` with `notBefore`, as the solver dates it), is exactly the division's
  *   practice length when the division sets one (`practiceLengthRefuses`), and no reservation refuses
- *   it (`reservationRefusal`, core's twin of the solver's rule).
+ *   it (`reservationRefusal`, core's twin of the solver's rule). When none is open, the reason is
+ *   what refused each live slot ({@link noSlotReason}), never a count or a setting.
  * - **A saved practice uses its place** in its slot over the dates it covers from today on; the
  *   room of a slot is its capacity less the busiest date's load (`peakLiveCount`), as the solver's
  *   capacity rule reads it. A range that cannot be read is counted as filling the whole slot and
@@ -50,7 +51,11 @@
 import { z } from 'zod';
 
 import { IdSchema, IsoDateSchema } from '../availability/schemas.js';
-import { reservationRefusal, reservedDivisionIdsOf } from '../practiceScheduling.js';
+import {
+  RESERVATION_REASON,
+  reservationRefusal,
+  reservedDivisionIdsOf,
+} from '../practiceScheduling.js';
 import { PRACTICE_UNPLACED_REASON } from '../practiceUnplacedReasons.js';
 import {
   LIVE_SPAN_STATUS,
@@ -75,6 +80,26 @@ export const CAPACITY_VERDICT = Object.freeze({
   SHORT: 'short',
   /** The room covers what is still needed (possibly with none to spare). */
   SPARE: 'spare',
+});
+
+/**
+ * Why no slot is open to a division, one code each (the codes of a verdict of kind
+ * {@link CAPACITY_VERDICT}.NO_SLOT). The date and length codes are the run's own words
+ * (`PRACTICE_UNPLACED_REASON`); the reservation codes are **every** reason `reservationRefusal` has
+ * (`RESERVATION_REASON`, spread here so a reason added there is a code here at once, and
+ * `tests/practiceCapacityDemandReasons.test.js` then fails until it has panel words); and
+ * `RESERVATIONS_MIXED` is for right-length live slots refused for more than one of them. Words:
+ * `capacityDemandText.js`.
+ */
+export const CAPACITY_NO_SLOT_REASON = Object.freeze({
+  /** No slot has a date left from today. */
+  NO_LIVE_DATE: PRACTICE_UNPLACED_REASON.NO_LIVE_DATE,
+  /** The division sets a length and no live slot is that long. */
+  PRACTICE_LENGTH: PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH,
+  /** `RESERVED_FOR_ANOTHER_DIVISION` and `OUTSIDE_DIVISION_RESERVATION`, from the run's own list. */
+  ...RESERVATION_REASON,
+  /** The right-length live slots are refused for more than one reservation reason. */
+  RESERVATIONS_MIXED: 'reservations-mixed',
 });
 
 /** Weekday codes as `practice_slots.day_of_week` stores them, in the order a week is shown. */
@@ -173,7 +198,9 @@ const VerdictSchema = z
   .object({
     kind: z.enum(Object.values(CAPACITY_VERDICT)),
     /** For {@link CAPACITY_VERDICT.NO_SLOT} and {@link CAPACITY_VERDICT.NOT_ENOUGH_DAYS}. */
-    reason: z.enum(Object.values(PRACTICE_UNPLACED_REASON)).nullable(),
+    reason: z
+      .enum([...Object.values(CAPACITY_NO_SLOT_REASON), PRACTICE_UNPLACED_REASON.NOT_ENOUGH_DAYS])
+      .nullable(),
     short: Count,
     spare: Count,
   })
@@ -301,6 +328,53 @@ function lengthRefuses(practiceMinutes, slot) {
   return slot.endSec - slot.startSec !== practiceMinutes * 60;
 }
 
+/** Why a slot is not open to a division, besides a reservation (a reservation's own code is `reservationRefusal`'s). */
+const NOT_LIVE = 'not-live';
+const WRONG_LENGTH = 'wrong-length';
+
+/**
+ * Whether a slot is open to a division, and if not what refused it, in one order per slot: no date
+ * left from today; else not the division's length; else the reservation (`reservationRefusal`'s
+ * code). `null` is open. This is the one place a slot is judged for a division: the slots it may use
+ * and the reason it has none both come from it.
+ *
+ * @param {{ id: string, practiceMinutes?: number | null }} division
+ * @param {ReturnType<typeof readSlot> & {}} slot
+ * @param {Set<string>} reservedDivisionIds
+ * @returns {string | null}
+ */
+function refusalOf(division, slot, reservedDivisionIds) {
+  if (slot.span === null) return NOT_LIVE;
+  if (lengthRefuses(division.practiceMinutes, slot)) return WRONG_LENGTH;
+  return reservationRefusal(
+    { divisionId: division.id },
+    { divisionId: slot.divisionId },
+    reservedDivisionIds
+  );
+}
+
+/**
+ * The reason a division has no open slot, from what refused each of its slots, in one stated
+ * priority: no slot has a date left from today (`no-live-date`); else no live slot is the division's
+ * length (`practice-length`); else the reservation reason of the right-length live slots (they are
+ * all refused by a reservation, or one would be open): that reason when it is one, `reservations-mixed`
+ * when they are refused for more than one. A slot judged for its length is never judged for its
+ * reservation, so a wrong-length slot never reads as a reservation.
+ *
+ * @param {Array<string | null>} refusals - {@link refusalOf} of every slot, none of them `null`
+ * @returns {string}
+ */
+function noSlotReason(refusals) {
+  const live = refusals.filter((why) => why !== NOT_LIVE);
+  if (live.length === 0) return CAPACITY_NO_SLOT_REASON.NO_LIVE_DATE;
+  const rightLength = live.filter((why) => why !== WRONG_LENGTH);
+  if (rightLength.length === 0) return CAPACITY_NO_SLOT_REASON.PRACTICE_LENGTH;
+  const reasons = new Set(rightLength);
+  return reasons.size === 1
+    ? /** @type {string} */ ([...reasons][0])
+    : CAPACITY_NO_SLOT_REASON.RESERVATIONS_MIXED;
+}
+
 // ---------------------------------------------------------------------------
 // The calculation
 // ---------------------------------------------------------------------------
@@ -377,7 +451,6 @@ export function buildCapacityDemand(rawInput) {
     teamsByDivision.set(team.divisionId, list);
   }
 
-  const anyLive = slots.some((slot) => slot.span !== null);
   const openUnion = new Set();
 
   const divisions = [...input.divisions]
@@ -397,31 +470,16 @@ export function buildCapacityDemand(rawInput) {
         if (rows > division.practicesPerWeek) teamsOverCount += 1;
       }
 
-      // A division that wants nothing uses no slot, so none is counted for it.
-      const open =
-        wanted > 0
-          ? slots.filter(
-              (slot) =>
-                slot.span !== null &&
-                !lengthRefuses(division.practiceMinutes, slot) &&
-                reservationRefusal(
-                  { divisionId: division.id },
-                  { divisionId: slot.divisionId },
-                  reservedDivisionIds
-                ) === null
-            )
-          : [];
+      // A division that wants nothing uses no slot, so none is counted for it. Every slot is judged
+      // once for the division: it is open, or something refused it, and that is the reason.
+      const refusals =
+        wanted > 0 ? slots.map((slot) => refusalOf(division, slot, reservedDivisionIds)) : [];
+      const open = slots.filter((_, index) => wanted > 0 && refusals[index] === null);
       for (const slot of open) openUnion.add(slot.id);
       const weekdays = WEEKDAYS.filter((day) => open.some((slot) => slot.day === day));
       const capacity = open.reduce((sum, slot) => sum + slot.capacity, 0);
       const room = open.reduce((sum, slot) => sum + (roomOf.get(slot.id) ?? 0), 0);
       const slotFigures = { open: open.length, weekdays, capacity, room };
-      // The live slots of the division's length, before any reservation: what says whether the
-      // length, or the reservation, is what left it no slot (`divisionVerdict`).
-      const liveOfLength = slots.filter(
-        (slot) => slot.span !== null && !lengthRefuses(division.practiceMinutes, slot)
-      ).length;
-
       return {
         divisionId: division.id,
         name: division.name,
@@ -438,8 +496,7 @@ export function buildCapacityDemand(rawInput) {
           teams: teams.length,
           stillNeeded,
           slots: slotFigures,
-          anyLive,
-          liveOfLength,
+          noSlotReason: open.length === 0 ? noSlotReason(refusals) : null,
         }),
       };
     });
@@ -482,21 +539,24 @@ export function buildCapacityDemand(rawInput) {
 
 /**
  * A division's verdict. In order: nothing wanted; no team; nothing more needed (the room is then
- * all spare); no slot open; too few weekdays for the practices a week; else short by what the room
- * lacks or the room to spare.
+ * all spare); no slot open, with the reason {@link noSlotReason} gives from what refused each of its
+ * slots; too few weekdays for the practices a week; else short by what the room lacks or the room to
+ * spare.
  *
- * **Why no slot is open is the filter that excluded the live slots, not the division's setting.**
- * In the order the solver tests them (`explainUnplaced`, `auto-scheduler-solver.ts`): no slot has a
- * date left from today (`no-live-date`); else no live slot is the division's length
- * (`practice-length`); else a live slot of the length exists and the reservation is what keeps the
- * division off every one (`no-slot-available`; with no length set, every live slot passes the length
- * test, so this is the reservation too). **One deliberate difference from the run:** the solver
- * tests the length only among the slots left after the reservation, so a right-length slot reserved
- * to another division reads there as `practice-length`; this tests the length among all live slots,
- * so the panel does not tell an admin that no slot is that long when one is (Codex, #711).
- * `tests/practiceCapacityDemand.test.js` pins the solver's reason for those cases.
+ * **The reason is what refused the live slots, not a count or the division's setting** (Codex,
+ * #711, three findings of one shape: the length reason was chosen on the setting alone; then the
+ * reservation reason was one sentence for the two reasons `reservationRefusal` has). One deliberate
+ * difference from the run: the solver (`explainUnplaced`, `auto-scheduler-solver.ts`) tests the length
+ * only among the slots left after the reservation and reports `practice-length` when a right-length
+ * slot is reserved away; this judges each slot once, length before reservation, so it does not tell
+ * an admin that no slot is that long when one is. `tests/practiceCapacityDemand.test.js` pins the
+ * solver's reason for those cases.
+ *
+ * @param {{ practicesPerWeek: number, teams: number, stillNeeded: number,
+ *   slots: { open: number, weekdays: string[], capacity: number, room: number },
+ *   noSlotReason: string | null }} input - `noSlotReason` is set exactly when `slots.open` is 0
  */
-function divisionVerdict({ practicesPerWeek, teams, stillNeeded, slots, anyLive, liveOfLength }) {
+function divisionVerdict({ practicesPerWeek, teams, stillNeeded, slots, noSlotReason: why }) {
   const short = Math.max(stillNeeded - slots.room, 0);
   const spare = Math.max(slots.room - stillNeeded, 0);
   if (practicesPerWeek === 0) {
@@ -505,11 +565,7 @@ function divisionVerdict({ practicesPerWeek, teams, stillNeeded, slots, anyLive,
   if (teams === 0) return { kind: CAPACITY_VERDICT.NO_TEAMS, reason: null, short: 0, spare: 0 };
   if (stillNeeded === 0) return { kind: CAPACITY_VERDICT.SPARE, reason: null, short: 0, spare };
   if (slots.open === 0) {
-    /** @type {string} */
-    let reason = PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE;
-    if (!anyLive) reason = PRACTICE_UNPLACED_REASON.NO_LIVE_DATE;
-    else if (liveOfLength === 0) reason = PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH;
-    return { kind: CAPACITY_VERDICT.NO_SLOT, reason, short, spare: 0 };
+    return { kind: CAPACITY_VERDICT.NO_SLOT, reason: why, short, spare: 0 };
   }
   if (practicesPerWeek > 1 && slots.weekdays.length < practicesPerWeek) {
     return {

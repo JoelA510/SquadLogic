@@ -176,6 +176,7 @@ export {
 export { toSeason2026PracticePlan } from './adapters/season2026PracticeGrid.js';
 
 export {
+  CAPACITY_NO_SLOT_REASON,
   CAPACITY_VERDICT,
   CapacityDemandInputSchema,
   CapacityDemandReportSchema,
@@ -183,3 +184,5 @@ export {
   capacityDemandInputFromRows,
   practicesStillNeeded,
 } from './capacityDemand.js';
+
+export { NO_SLOT_REASON_WORDS, describeNoSlotReason } from './capacityDemandText.js';

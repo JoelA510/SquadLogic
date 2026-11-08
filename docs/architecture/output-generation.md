@@ -49,6 +49,20 @@ once schedules are finalized. It assumes team, practice, game, and evaluation da
    - For per-team exports, optionally bundle files into a ZIP archive for convenience using a streaming compressor to avoid
      exceeding serverless memory limits.
 
+## Schedule reports (2026-11-07)
+
+Three read-only views sit below the files on the Exports page (admin only; no migration; `packages/core/src/reports/`,
+`frontend/src/components/reports/`; plan `docs/changes/2026-11-03-schedule-expansion.md`, 5.1 and 5.6): the **Day Sheet**
+(a date and an optional venue, one row per saved game, the TIME TBD games apart; its rows are the master export's for the
+same filter, one per game where the export writes one per team), a **coach's schedule** (games and practices across every
+team the coach has, head and assistant, with a clash column and a marker for a coach on more than one team, counted from
+the team list; practices are the weekly series, so the report says how many have temporary changes it does not apply, as the practice export does) and **Changes since publication** (a chosen baseline against the saved schedule, with the reasons recorded
+when changes were allowed). Each has a CSV through the export's one cell writer. A game is identified by its teams, slot and
+week (`reports/gameKey.js`), because a baseline records those and not which game is which: a moved game is one game no longer saved and one game new. The
+audit read (`get_schedule_audit_log`) returns only the two Published actions, so a save or a cancel cannot be matched to a
+game and the view says it does not record whether a game was cancelled or moved. The baseline is read through the existing
+store hook, which gains `readBaseline` (`compareWithBaseline` now uses it), so the publication seam still has one caller.
+
 ## TeamSnap Integration Considerations
 
 - Maintain a mapping of Supabase fields to TeamSnap import columns (referenced historically as `teamsnap-mapping.md`, see [**`docs/README.md`**](../README.md) for current active indices).

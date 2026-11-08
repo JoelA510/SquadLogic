@@ -1476,9 +1476,9 @@ Depends on: PR 1 only (the audit rows and `get_schedule_audit_log`). G3 and G5 m
 test and extend lives. Review (a): nothing here persists, writes through an Edge function, changes the solver or holds
 import logic.
 
-- [ ] G1 (S) Day Sheet (5.1). [ ] G2 (S) Coach schedule (5.1). [ ] G4 (M) "Changes since publication" (5.6). Tests: as
+- [x] G1 (S) Day Sheet (5.1). [x] G2 (S) Coach schedule (5.1). [x] G4 (M) "Changes since publication" (5.6). Tests: as
       5.1 and 5.6, each with a case for a cancelled game and a TIME TBD game.
-- [ ] G2b (S, added 2026-11-06) Practices, and a multi-team marker derived from the team list, in the coach schedule
+- [x] G2b (S, added 2026-11-06) Practices, and a multi-team marker derived from the team list, in the coach schedule
       (5.1, F17, decision 31). It reads `practice_assignments`, so it needs no import and no migration. Tests: as the
       last paragraph of 5.1.
 

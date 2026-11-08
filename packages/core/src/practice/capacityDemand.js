@@ -221,6 +221,8 @@ const DivisionReportSchema = z
     stillNeeded: Count,
     /** Teams holding more rows than the division wants. */
     teamsOverCount: Count,
+    /** The most practices any one team of the division still needs. */
+    largestNeed: Count,
     slots: z
       .object({
         open: Count,
@@ -463,10 +465,13 @@ export function buildCapacityDemand(rawInput) {
       let held = 0;
       let stillNeeded = 0;
       let teamsOverCount = 0;
+      let largestNeed = 0;
       for (const team of teams) {
         const rows = heldBy.get(team.id) ?? 0;
+        const needs = practicesStillNeeded(division.practicesPerWeek, rows);
         held += rows;
-        stillNeeded += practicesStillNeeded(division.practicesPerWeek, rows);
+        stillNeeded += needs;
+        largestNeed = Math.max(largestNeed, needs);
         if (rows > division.practicesPerWeek) teamsOverCount += 1;
       }
 
@@ -490,11 +495,13 @@ export function buildCapacityDemand(rawInput) {
         held,
         stillNeeded,
         teamsOverCount,
+        largestNeed,
         slots: slotFigures,
         verdict: divisionVerdict({
           practicesPerWeek: division.practicesPerWeek,
           teams: teams.length,
           stillNeeded,
+          largestNeed,
           slots: slotFigures,
           noSlotReason: open.length === 0 ? noSlotReason(refusals) : null,
         }),
@@ -540,8 +547,19 @@ export function buildCapacityDemand(rawInput) {
 /**
  * A division's verdict. In order: nothing wanted; no team; nothing more needed (the room is then
  * all spare); no slot open, with the reason {@link noSlotReason} gives from what refused each of its
- * slots; too few weekdays for the practices a week; else short by what the room lacks or the room to
- * spare.
+ * slots; too few weekdays for the practices a team still needs; else short by what the room lacks or
+ * the room to spare.
+ *
+ * **A verdict fires on a condition that is necessary for the run to fail, never on a coarse one**
+ * (the face says each verdict is an upper bound, so it may be generous and must not be strict). The
+ * weekday verdict is the case that taught it (Codex, #711, the fourth finding): a practice held on an
+ * expired slot still counts toward a team's target, so comparing the open weekdays with the weekly
+ * target said "too few weekdays" of a team that holds one of two and has one weekday left, which the
+ * run places. It now compares them with the most any one team still needs
+ * (`largestNeed`, target less held, never below zero), whichever weekdays the team already holds:
+ * no team can be placed on more different weekdays than are open, so a team that needs more than
+ * that cannot be given them all. `tests/practiceCapacityDemandVsOptimizer.test.js` holds every
+ * failure the panel claims to the real optimizer.
  *
  * **The reason is what refused the live slots, not a count or the division's setting** (Codex,
  * #711, three findings of one shape: the length reason was chosen on the setting alone; then the
@@ -552,11 +570,18 @@ export function buildCapacityDemand(rawInput) {
  * an admin that no slot is that long when one is. `tests/practiceCapacityDemand.test.js` pins the
  * solver's reason for those cases.
  *
- * @param {{ practicesPerWeek: number, teams: number, stillNeeded: number,
+ * @param {{ practicesPerWeek: number, teams: number, stillNeeded: number, largestNeed: number,
  *   slots: { open: number, weekdays: string[], capacity: number, room: number },
  *   noSlotReason: string | null }} input - `noSlotReason` is set exactly when `slots.open` is 0
  */
-function divisionVerdict({ practicesPerWeek, teams, stillNeeded, slots, noSlotReason: why }) {
+function divisionVerdict({
+  practicesPerWeek,
+  teams,
+  stillNeeded,
+  largestNeed,
+  slots,
+  noSlotReason: why,
+}) {
   const short = Math.max(stillNeeded - slots.room, 0);
   const spare = Math.max(slots.room - stillNeeded, 0);
   if (practicesPerWeek === 0) {
@@ -567,7 +592,7 @@ function divisionVerdict({ practicesPerWeek, teams, stillNeeded, slots, noSlotRe
   if (slots.open === 0) {
     return { kind: CAPACITY_VERDICT.NO_SLOT, reason: why, short, spare: 0 };
   }
-  if (practicesPerWeek > 1 && slots.weekdays.length < practicesPerWeek) {
+  if (largestNeed > slots.weekdays.length) {
     return {
       kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS,
       reason: PRACTICE_UNPLACED_REASON.NOT_ENOUGH_DAYS,

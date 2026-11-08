@@ -68,7 +68,7 @@ function describeVerdict(verdict, row = undefined) {
         label: 'Too few weekdays',
         detail:
           `${capitalise(describeUnplacedReason(verdict.reason))} ` +
-          `(the division wants ${row?.practicesPerWeek ?? 0} a week; its open slots fall on ` +
+          `(a team still needs ${row?.largestNeed ?? 0} practices; its open slots fall on ` +
           `${plural(row?.slots.weekdays.length ?? 0, 'weekday', 'weekdays')}).` +
           (verdict.short > 0 ? ` Short by ${verdict.short}.` : ''),
       };

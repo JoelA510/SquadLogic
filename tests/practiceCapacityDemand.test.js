@@ -425,6 +425,112 @@ describe('fewer weekdays than practices a week (not-enough-days)', () => {
   });
 });
 
+describe('the weekday verdict fires on what a team still needs, not on the weekly target [plant P6]', () => {
+  const two = division('two', 2);
+
+  it('a team that holds one of two on an expired slot needs one, and one open weekday gives it: no weekday verdict (Codex, #711; the run places it)', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('t', 'two')],
+      assignments: [saved('r1', 't', 'old-mon')],
+      slots: [slot('old-mon', 'mon', { validUntil: '2026-09-29' }), slot('tue', 'tue')],
+    });
+    expect(row(report, 'two')).toMatchObject({
+      stillNeeded: 1,
+      largestNeed: 1,
+      slots: { open: 1, weekdays: ['tue'], room: 1 },
+      verdict: { kind: CAPACITY_VERDICT.SPARE, spare: 0, short: 0 },
+    });
+  });
+
+  it('the genuine case: a team that holds nothing needs two and one weekday cannot give two different days', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('t', 'two')],
+      slots: [slot('thu', 'thu', { capacity: 2 })],
+    });
+    expect(row(report, 'two')).toMatchObject({
+      largestNeed: 2,
+      verdict: {
+        kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS,
+        reason: PRACTICE_UNPLACED_REASON.NOT_ENOUGH_DAYS,
+      },
+    });
+  });
+
+  it('a team holding two of two on expired slots needs nothing: no weekday verdict, with no live slot at all', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('t', 'two')],
+      assignments: [saved('r1', 't', 'a'), saved('r2', 't', 'b')],
+      slots: [
+        slot('a', 'mon', { validUntil: '2026-09-29' }),
+        slot('b', 'tue', { validUntil: '2026-09-29' }),
+      ],
+    });
+    expect(row(report, 'two')).toMatchObject({ stillNeeded: 0, largestNeed: 0 });
+    expect(row(report, 'two').verdict.kind).not.toBe(CAPACITY_VERDICT.NOT_ENOUGH_DAYS);
+    expect(row(report, 'two').verdict.kind).toBe(CAPACITY_VERDICT.SPARE);
+  });
+
+  it('two teams, only one of which still needs two: that one decides, and it fires', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('full', 'two'), team('empty', 'two')],
+      assignments: [saved('r1', 'full', 'x'), saved('r2', 'full', 'y')],
+      slots: [slot('thu', 'thu', { capacity: 5 })],
+    });
+    expect(row(report, 'two')).toMatchObject({
+      stillNeeded: 2,
+      largestNeed: 2,
+      verdict: { kind: CAPACITY_VERDICT.NOT_ENOUGH_DAYS },
+    });
+  });
+
+  it('two teams that each still need one, on one weekday: no team needs two different days, so no weekday verdict', () => {
+    const report = run({
+      divisions: [two],
+      teams: [team('a', 'two'), team('b', 'two')],
+      assignments: [saved('r1', 'a', 'x'), saved('r2', 'b', 'y')],
+      slots: [slot('thu', 'thu', { capacity: 5 })],
+    });
+    expect(row(report, 'two')).toMatchObject({ stillNeeded: 2, largestNeed: 1 });
+    expect(row(report, 'two').verdict.kind).toBe(CAPACITY_VERDICT.SPARE);
+  });
+
+  it("a team over its count needs nothing and offsets nobody: it neither fires nor hides another team's need", () => {
+    const over = run({
+      divisions: [division('one', 1)],
+      teams: [team('over', 'one'), team('needs', 'one')],
+      assignments: [saved('r1', 'over', 'x'), saved('r2', 'over', 'y'), saved('r3', 'over', 'z')],
+      slots: [slot('thu', 'thu', { capacity: 5 })],
+    });
+    expect(row(over, 'one')).toMatchObject({ stillNeeded: 1, largestNeed: 1, teamsOverCount: 1 });
+    expect(row(over, 'one').verdict.kind).toBe(CAPACITY_VERDICT.SPARE);
+    const both = run({
+      divisions: [two],
+      teams: [team('over', 'two'), team('needs', 'two')],
+      assignments: [saved('r1', 'over', 'x'), saved('r2', 'over', 'y'), saved('r3', 'over', 'z')],
+      slots: [slot('thu', 'thu', { capacity: 5 })],
+    });
+    expect(row(both, 'two')).toMatchObject({ largestNeed: 2, teamsOverCount: 1 });
+    expect(row(both, 'two').verdict.kind).toBe(CAPACITY_VERDICT.NOT_ENOUGH_DAYS);
+  });
+
+  it('three practices still needed on two open weekdays fires; the same need on three weekdays does not', () => {
+    const three = division('three', 3);
+    const slots2 = [slot('tue', 'tue', { capacity: 3 }), slot('thu', 'thu', { capacity: 3 })];
+    const fires = run({ divisions: [three], teams: [team('t', 'three')], slots: slots2 });
+    expect(row(fires, 'three').verdict.kind).toBe(CAPACITY_VERDICT.NOT_ENOUGH_DAYS);
+    const fine = run({
+      divisions: [three],
+      teams: [team('t', 'three')],
+      slots: [...slots2, slot('wed', 'wed', { capacity: 3 })],
+    });
+    expect(row(fine, 'three').verdict.kind).toBe(CAPACITY_VERDICT.SPARE);
+  });
+});
+
 describe('live from today', () => {
   const oneTeam = { divisions: [division('d')], teams: [team('t', 'd')] };
   const open = (s) => row(run({ ...oneTeam, slots: [s], season: SEASON }), 'd').slots.open;

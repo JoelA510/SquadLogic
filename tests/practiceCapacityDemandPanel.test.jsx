@@ -566,11 +566,11 @@ describe('every kind of verdict is worded', () => {
     expect(await verdict()).toBe('Short by 1');
   });
 
-  it('too few weekdays, in the words of the run’s own reason, with the shortage when there is one', async () => {
+  it('too few weekdays, in the words of the run’s own reason, with what a team still needs and the shortage when there is one', async () => {
     oneDivision({ perWeek: 2, teams: 1, slots: [{ day_of_week: 'thu', capacity: 1 }] });
     expect(await verdict()).toBe(
       "Too few weekdays. The division's slots fall on fewer weekdays than its practices a week " +
-        '(the division wants 2 a week; its open slots fall on 1 weekday). Short by 1.'
+        '(a team still needs 2 practices; its open slots fall on 1 weekday). Short by 1.'
     );
   });
 
@@ -578,8 +578,28 @@ describe('every kind of verdict is worded', () => {
     oneDivision({ perWeek: 2, teams: 1, slots: [{ day_of_week: 'thu', capacity: 5 }] });
     expect(await verdict()).toBe(
       "Too few weekdays. The division's slots fall on fewer weekdays than its practices a week " +
-        '(the division wants 2 a week; its open slots fall on 1 weekday).'
+        '(a team still needs 2 practices; its open slots fall on 1 weekday).'
     );
+  });
+
+  it('a team that holds one of two on an expired slot is not told it has too few weekdays: one weekday gives it its second', async () => {
+    oneDivision({
+      perWeek: 2,
+      teams: 1,
+      slots: [
+        { id: 'old', day_of_week: 'mon', valid_until: '2026-09-29' },
+        { day_of_week: 'tue', capacity: 1 },
+      ],
+    });
+    h.tables.practice_assignments = [
+      {
+        ...capacityTables().practice_assignments[0],
+        id: 'held',
+        team_id: 't0',
+        practice_slot_id: 'old',
+      },
+    ];
+    expect(await verdict()).toBe('0 to spare');
   });
 
   it('no slot with a date left from today', async () => {

@@ -29,6 +29,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  CAPACITY_NO_SLOT_REASON,
   CAPACITY_VERDICT,
   CapacityDemandInputSchema,
   CapacityDemandReportSchema,
@@ -37,6 +38,7 @@ import {
   practicesStillNeeded,
 } from '@squadlogic/core/practice/index.js';
 import { PRACTICE_UNPLACED_REASON } from '@squadlogic/core/practiceUnplacedReasons.js';
+import { RESERVATION_REASON } from '@squadlogic/core/practiceScheduling.js';
 import { planTeamsForRun } from '../supabase/functions/_shared/engines/practice-lock.js';
 import { runPracticeOptimizer } from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
@@ -661,7 +663,9 @@ describe('short by N, and N to spare', () => {
       ...league(2, 1),
       slots: [slot('s', 'tue', { divisionId: 'someone-else' })],
     });
-    expect(row(reserved, 'd').verdict.reason).toBe(PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE);
+    expect(row(reserved, 'd').verdict.reason).toBe(
+      RESERVATION_REASON.RESERVED_FOR_ANOTHER_DIVISION
+    );
   });
 });
 
@@ -674,10 +678,10 @@ describe('why no slot is open: the filter that left the live slots none [plant P
   const verdictOf = (slots, minutes = 60) => row(run(league(slots, minutes)), 'd').verdict;
   const short45 = (id, day, over = {}) => slot(id, day, { endTime: '17:45:00', ...over });
 
-  it('(a) the live slot of the right length is reserved to another division: no-slot-available, not practice-length', () => {
+  it('(a) the live slot of the right length is reserved to another division: that reservation, not practice-length', () => {
     expect(verdictOf([slot('s60', 'tue', { divisionId: 'someone-else' })])).toMatchObject({
       kind: CAPACITY_VERDICT.NO_SLOT,
-      reason: PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE,
+      reason: RESERVATION_REASON.RESERVED_FOR_ANOTHER_DIVISION,
       short: 1,
     });
   });
@@ -689,7 +693,7 @@ describe('why no slot is open: the filter that left the live slots none [plant P
     });
   });
 
-  it('(c) mixed: some live slots the wrong length, the ones of the right length reserved away: no-slot-available', () => {
+  it('(c) mixed: some live slots the wrong length, the ones of the right length reserved to another division: that reservation', () => {
     // A slot of the division's length exists, so "no slot is that long" would be false; what keeps
     // the division off it is the reservation, so that is the reason. The run itself says
     // practice-length here (pinned below), because it tests the length only among the slots left
@@ -698,14 +702,14 @@ describe('why no slot is open: the filter that left the live slots none [plant P
       verdictOf([short45('a', 'tue'), slot('s60', 'wed', { divisionId: 'someone-else' })])
     ).toMatchObject({
       kind: CAPACITY_VERDICT.NO_SLOT,
-      reason: PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE,
+      reason: RESERVATION_REASON.RESERVED_FOR_ANOTHER_DIVISION,
     });
   });
 
-  it('(d) no practice length set and every live slot reserved away: no-slot-available', () => {
+  it('(d) no practice length set and every live slot reserved to another division: that reservation', () => {
     expect(verdictOf([slot('s', 'tue', { divisionId: 'someone-else' })], null)).toMatchObject({
       kind: CAPACITY_VERDICT.NO_SLOT,
-      reason: PRACTICE_UNPLACED_REASON.NO_SLOT_AVAILABLE,
+      reason: RESERVATION_REASON.RESERVED_FOR_ANOTHER_DIVISION,
     });
   });
 
@@ -719,6 +723,63 @@ describe('why no slot is open: the filter that left the live slots none [plant P
       kind: CAPACITY_VERDICT.NO_SLOT,
       reason: PRACTICE_UNPLACED_REASON.NO_LIVE_DATE,
     });
+  });
+
+  it("(f) the division's own reserved slots are all out of date and a live right-length slot is unreserved: its own reservation, not another division's", () => {
+    // `reservationRefusal` has two reasons. A division with reserved slots may use only those, so an
+    // unreserved slot is refused to it (`outside-division-reservation`) when every one of its own
+    // is out of date; nothing is reserved to another division here, and saying so sends the admin to
+    // the wrong fix (Codex, #711).
+    expect(
+      verdictOf([
+        slot('own', 'tue', { divisionId: 'd', validUntil: '2026-09-29' }),
+        slot('open', 'wed'),
+      ])
+    ).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: RESERVATION_REASON.OUTSIDE_DIVISION_RESERVATION,
+      short: 1,
+    });
+  });
+
+  it("(f2) the same with no practice length set, and with the division's own reserved slot live but the wrong length", () => {
+    expect(
+      verdictOf(
+        [slot('own', 'tue', { divisionId: 'd', validUntil: '2026-09-29' }), slot('open', 'wed')],
+        null
+      ).reason
+    ).toBe(RESERVATION_REASON.OUTSIDE_DIVISION_RESERVATION);
+    // Its own reserved slot is live but 45 minutes: not a slot of its length, so it may use only
+    // that and the unreserved 60-minute slot is closed to it.
+    expect(
+      verdictOf([short45('own', 'tue', { divisionId: 'd' }), slot('open', 'wed')]).reason
+    ).toBe(RESERVATION_REASON.OUTSIDE_DIVISION_RESERVATION);
+  });
+
+  it("(g) both reasons among the right-length live slots: one slot reserved to another division, one closed by the division's own reservation", () => {
+    expect(
+      verdictOf([
+        slot('other', 'tue', { divisionId: 'someone-else' }),
+        slot('own', 'wed', { divisionId: 'd', validUntil: '2026-09-29' }),
+        slot('open', 'thu'),
+      ])
+    ).toMatchObject({
+      kind: CAPACITY_VERDICT.NO_SLOT,
+      reason: CAPACITY_NO_SLOT_REASON.RESERVATIONS_MIXED,
+    });
+  });
+
+  it('priority: a wrong-length live slot is refused for its length before its reservation, so it never reads as a reservation', () => {
+    expect(verdictOf([short45('x', 'tue', { divisionId: 'someone-else' })])).toMatchObject({
+      reason: PRACTICE_UNPLACED_REASON.PRACTICE_LENGTH,
+    });
+    // Only the right-length live slots decide between the reservation reasons.
+    expect(
+      verdictOf([
+        short45('wrong', 'tue', { divisionId: 'someone-else' }),
+        slot('right', 'wed', { divisionId: 'someone-else-too' }),
+      ]).reason
+    ).toBe(RESERVATION_REASON.RESERVED_FOR_ANOTHER_DIVISION);
   });
 
   it('the control: the same right-length slot, not reserved, is open (no reason at all)', () => {

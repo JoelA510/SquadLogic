@@ -628,6 +628,48 @@ describe('every kind of verdict is worded', () => {
     );
   });
 
+  it("the division's own reserved slots out of date: it says so, and not that they are reserved to another division", async () => {
+    oneDivision({
+      minutes: 60,
+      teams: 1,
+      slots: [
+        { day_of_week: 'tue', division_id: 'd1', valid_until: '2026-09-29' },
+        { day_of_week: 'wed' },
+      ],
+    });
+    expect(await verdict()).toBe(
+      'No slot open. The division has reserved slots, so it may use only those, and none of them is a live slot of its length. Short by 1.'
+    );
+  });
+
+  it("the same with no practice length set: none of the division's reserved slots has a date left", async () => {
+    oneDivision({
+      teams: 1,
+      slots: [
+        { day_of_week: 'tue', division_id: 'd1', valid_until: '2026-09-29' },
+        { day_of_week: 'wed' },
+      ],
+    });
+    expect(await verdict()).toBe(
+      'No slot open. The division has reserved slots, so it may use only those, and none of them has a date left from today. Short by 1.'
+    );
+  });
+
+  it('both reservations among the right-length slots: one sentence that covers both', async () => {
+    oneDivision({
+      minutes: 60,
+      teams: 1,
+      slots: [
+        { day_of_week: 'tue', division_id: 'someone-else' },
+        { day_of_week: 'wed', division_id: 'd1', valid_until: '2026-09-29' },
+        { day_of_week: 'thu' },
+      ],
+    });
+    expect(await verdict()).toBe(
+      "No slot open. Every slot of the division's length with a date left from today is closed to the division: some are reserved to another division, and it has reserved slots of its own, so it may use only those, and none of them is a live slot of its length. Short by 1."
+    );
+  });
+
   it('a division with no team', async () => {
     oneDivision({ teams: 0, slots: [{ day_of_week: 'tue' }] });
     expect(await verdict()).toBe('No teams');

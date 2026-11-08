@@ -141,6 +141,18 @@ describe('which saved games a staged schedule leaves behind (their history stays
     expect(leftBehindHistoryGames(staged, before)).toEqual([]);
   });
 
+  it('a staged game that carries ANOTHER saved id at the tuple of a saved game does not hold it (only a game without a saved id holds a tuple)', () => {
+    // g1 has a history and sits at s-g1. The staged schedule carries g1 nowhere; it has g2 (a different saved game, carried
+    // by its id) now sitting exactly at g1's tuple. The save recognises a game by its id or, for a game sent WITHOUT an id,
+    // by its tuple: g2's row is sent with g2's id, so it holds g2 and not g1, and g1 is left behind.
+    const before = [saved('g1', HISTORY), saved('g2', HISTORY)];
+    const staged = [{ ...saved('g2', HISTORY), slotId: 's-g1', weekIndex: 1 }];
+    expect(leftBehindHistoryGames(staged, before).map((g) => g.id)).toEqual(['g1']);
+    // The control: the same staged game WITHOUT a saved id (a placeholder) at that tuple does hold g1 (it is upserted on it).
+    const control = [{ ...saved('review-9'), slotId: 's-g1', weekIndex: 1, persisted: false }];
+    expect(leftBehindHistoryGames(control, before).map((g) => g.id)).toEqual(['g2']);
+  });
+
   it('another tuple, and no saved id, does not hold it: a week change or a team change leaves it', () => {
     const before = [saved('g1', HISTORY)];
     expect(

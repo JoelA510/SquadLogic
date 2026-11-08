@@ -1,7 +1,8 @@
 /**
- * The mock's in-place save and held predicate (`frontend/src/lib/mockGameIdentity.js`) held to the pure helper
+ * The mock's in-place save and held predicate (`frontend/src/lib/mockGameIdentity.js`) held to a test oracle
+ * (`tests/helpers/gameIdentityRefusal.js`, which is not shipped code) and to core's `isHeld`
  * (`packages/core/src/gameIdentity.js`) by ONE table of inputs that reaches every outcome (LESSONS_LEARNED #77; the
- * shape of `tests/mockGamePublished.test.js`). The mock and the helper are written independently on purpose: a test that
+ * shape of `tests/mockGamePublished.test.js`). The mock and the oracle are written independently on purpose: a test that
  * imported one into the other would compare a function with itself.
  *
  * Plan `docs/changes/2026-11-06-games-table-source-of-truth.md`, I1 to I3, task A4. The database's own table is
@@ -15,8 +16,11 @@
  * The meta-assertions: the table reaches every outcome (a table that reached half of them would compare half), and the
  * comparison can fail (a deliberately wrong answer is shown to be a mismatch).
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { gameIdentityRefusal, isHeld } from '../packages/core/src/gameIdentity.js';
+import { isHeld } from '../packages/core/src/gameIdentity.js';
+import { gameIdentityRefusal } from './helpers/gameIdentityRefusal.js';
 import {
   mockGameHeldIds,
   mockGameIsHeld,
@@ -26,14 +30,15 @@ import {
 const ORG = '00000000-0000-4000-8000-0000000000a1';
 const OTHER = '00000000-0000-4000-8000-0000000000b2';
 const SEASON = '00000000-0000-4000-8000-0000000000a5';
+const OTHER_SEASON = '00000000-0000-4000-8000-0000000000a6'; // another, active season of the same organization
 const DONE = '00000000-0000-4000-8000-0000000000c5';
 const DIV = '00000000-0000-4000-8000-0000000000d1';
 const DIV_DONE = '00000000-0000-4000-8000-0000000000d2';
 const ADMIN = '00000000-0000-4000-8000-0000000000e1';
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const T = [0, 1, 2, 3, 4, 5, 6].map((n) => id(1000 + n)); // T[1]..T[6] play; T[0] unused
-const SLOT = Object.fromEntries([1, 2, 3, 4, 5, 6, 8, 9, 10].map((n) => [n, id(2000 + n)]));
-const G = Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [n, id(3000 + n)]));
+const SLOT = Object.fromEntries([1, 2, 3, 4, 5, 6, 8, 9, 10, 11].map((n) => [n, id(2000 + n)]));
+const G = Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => [n, id(3000 + n)]));
 const GP = id(3999); // the other organization's game
 
 const slotRow = (n, week, hour) => ({
@@ -57,6 +62,7 @@ function world() {
     slotRow(8, 2, 14),
     slotRow(9, 3, 8),
     slotRow(10, 4, 8),
+    slotRow(11, 4, 10),
   ];
   const slot = (n) => slots.find((s) => s.id === SLOT[n]);
   const game = (n, home, away, slotNo, extra = {}) => ({
@@ -83,6 +89,7 @@ function world() {
     organizations: [{ id: ORG }, { id: OTHER }],
     season_settings: [
       { id: SEASON, organization_id: ORG, status: 'active' },
+      { id: OTHER_SEASON, organization_id: ORG, status: 'active' },
       { id: DONE, organization_id: ORG, status: 'completed' },
     ],
     divisions: [
@@ -111,6 +118,11 @@ function world() {
       game(7, 5, 6, 4),
       // An older row, hidden (no run), where G4 may be told to go: T2>T4 at slot 8, week 2.
       game(8, 2, 4, 8, { run_id: null }),
+      // Games with a stored season: 10 and 12 belong to ANOTHER season of the organization, 11 to the save's own. None is
+      // Published and none is in the page's whole schedule (ALL); a case names them on purpose.
+      game(10, 3, 5, 10, { season_settings_id: OTHER_SEASON }), // T3>T5, slot 10, week 4
+      game(11, 2, 5, 11, { season_settings_id: SEASON }), // T2>T5, slot 11, week 4
+      game(12, 1, 6, 11, { season_settings_id: OTHER_SEASON }), // T1>T6, slot 11, week 4
       // A game of the completed season.
       {
         ...game(9, 1, 2, 1),
@@ -176,11 +188,15 @@ const ctx = {
   now: new Date('2026-11-07T00:00:00Z'),
 };
 
+/** The same save with no season named (only the organization): it skips the season check. */
+const SEASONLESS = { organization_id: ORG, run_type: 'game', status: 'completed' };
+
 /**
- * One row per outcome: [label, payload, expected outcome]. `expected` is '' for an accepted save, else
- * `sqlstate detail`. The payloads read the world, so they are functions of it.
+ * One row per outcome: [label, payload, expected outcome, run]. `expected` is '' for an accepted save, else
+ * `sqlstate detail`. The payloads read the world, so they are functions of it. `run` is the save's run data (default
+ * {@link RUN}, which names the season).
  */
-/** @type {Array<[string, (db: any) => Array<Record<string, any>>, string]>} */
+/** @type {Array<[string, (db: any) => Array<Record<string, any>>, string, Record<string, any>?]>} */
 const CASES = [
   ["the page's whole schedule, carried by id", (db) => ALL.map((n) => item(db, n)), ''],
   [
@@ -232,6 +248,50 @@ const CASES = [
     '23503 game_not_found',
   ],
   [
+    'a game of another season named by its id: refused, the game named',
+    (db) => [...ALL.map((n) => item(db, n)), item(db, 10)],
+    `22023 game_identity_season ids=${G[10]}`,
+  ],
+  [
+    'two games of other seasons: the first by id is named',
+    (db) => [...ALL.map((n) => item(db, n)), item(db, 12), item(db, 10)],
+    `22023 game_identity_season ids=${G[10]}`,
+  ],
+  [
+    'a game of another season, moved by its id: still refused (it would be rewritten into this season)',
+    (db) => [...ALL.map((n) => item(db, n)), item(db, 10, { to: 9 })],
+    `22023 game_identity_season ids=${G[10]}`,
+  ],
+  [
+    "a game of the save's own season named by its id: accepted",
+    (db) => [...ALL.map((n) => item(db, n)), item(db, 11)],
+    '',
+  ],
+  [
+    'a game with no stored season (saved before the column) named by its id: accepted',
+    (db) => ALL.map((n) => item(db, n)),
+    '',
+  ],
+  [
+    'a save that names no season skips the check: a game of another season is accepted',
+    (db) => [...ALL.map((n) => item(db, n)), item(db, 10)],
+    '',
+    SEASONLESS,
+  ],
+  [
+    'the season is checked after the id exists: an unknown id wins over a game of another season',
+    (db) => [
+      ...ALL.map((n) => (n === 2 ? { ...item(db, 2), id: id(9) } : item(db, n))),
+      item(db, 10),
+    ],
+    '23503 game_not_found',
+  ],
+  [
+    'the season is checked before the clash: a game of another season wins over a game moved onto an older row',
+    (db) => [...ALL.map((n) => (n === 4 ? item(db, 4, { to: 8 }) : item(db, n))), item(db, 10)],
+    `22023 game_identity_season ids=${G[10]}`,
+  ],
+  [
     'a game moved onto an older hidden row of the same pair',
     (db) => ALL.map((n) => (n === 4 ? item(db, 4, { to: 8 }) : item(db, n))),
     `22023 game_identity_conflict ids=${G[4]},${G[8]}`,
@@ -281,8 +341,8 @@ const CASES = [
 
 const asOutcome = (refusal) => (refusal ? `${refusal.sqlstate} ${refusal.detail}` : '');
 
-describe('the mock save and the pure helper say the same thing, over one table that reaches every outcome', () => {
-  it.each(CASES)('%s', (_label, payload, expected) => {
+describe('the mock save and the test oracle say the same thing, over one table that reaches every outcome', () => {
+  it.each(CASES)('%s', (_label, payload, expected, run = RUN) => {
     const db = world();
     const items = payload(db).map((row) => JSON.parse(JSON.stringify(row)));
     const before = JSON.stringify(db.game_assignments);
@@ -290,8 +350,9 @@ describe('the mock save and the pure helper say the same thing, over one table t
       stored: db.game_assignments,
       payload: items,
       organizationId: ORG,
+      seasonId: run.season_settings_id ?? null,
     });
-    const mock = mockPersistGameSchedule(db, RUN, items, ctx);
+    const mock = mockPersistGameSchedule(db, run, items, ctx);
     expect(asOutcome(helper)).toBe(expected);
     const mockOutcome = mock.error ? `${mock.error.code} ${mock.error.details}` : '';
     expect(mockOutcome).toBe(expected);
@@ -304,13 +365,14 @@ describe('the mock save and the pure helper say the same thing, over one table t
 
   it('the table reaches every outcome it claims to (a table that reached half would compare half)', () => {
     const reached = new Set(
-      CASES.map(([, payload]) => {
+      CASES.map(([, payload, , run = RUN]) => {
         const db = world();
         return asOutcome(
           gameIdentityRefusal({
             stored: db.game_assignments,
             payload: payload(db).map((row) => JSON.parse(JSON.stringify(row))),
             organizationId: ORG,
+            seasonId: run.season_settings_id ?? null,
           })
         )
           .replace(/ ids=.*$/, '')
@@ -323,6 +385,7 @@ describe('the mock save and the pure helper say the same thing, over one table t
         '22023 game_identity_conflict',
         '22023 game_identity_invalid',
         '22023 game_identity_repeated',
+        '22023 game_identity_season',
         '22023 game_published',
         '22023 game_published_omitted',
         '23503 game_not_found',
@@ -340,6 +403,53 @@ describe('the mock save and the pure helper say the same thing, over one table t
     });
     expect(asOutcome(helper)).not.toBe('22023 game_identity_conflict ids=wrong');
     expect(asOutcome(helper)).not.toBe('');
+  });
+});
+
+describe("which clash is first: the database's byte order, not a locale's collation", () => {
+  // Two stored games stand where game 2 is sent: the save names the first of them by the order the database sorts uuids in
+  // (bytewise; for the lower-case uuid text the database produces, the same as comparing the strings by code unit). A
+  // locale collation orders `_` before `-` where code units order `-` (45) before `_` (95), so a mock that sorted its
+  // second ids with `localeCompare` would name the other game. The ids are not uuids on purpose: a collation and a code
+  // unit comparison cannot disagree on two canonical lower-case uuids, so only ids like these can tell the two apart. The
+  // case is the table's idea of a tie, which the real unique index would not let two stored games make; it is here to pin
+  // the comparison, not a state the database reaches.
+  const standIn = (db, rowId) => {
+    const base = db.game_assignments.find((g) => g.id === G[2]);
+    db.game_assignments.push({
+      ...base,
+      id: rowId,
+      game_slot_id: SLOT[9],
+      slot_id: SLOT[9],
+      week_index: 3,
+    });
+  };
+
+  it('the mock names the same second game as the oracle: the lower code unit first', () => {
+    const db = world();
+    standIn(db, 'a_1');
+    standIn(db, 'a-2');
+    const items = ALL.map((n) => (n === 2 ? item(db, 2, { to: 9 }) : item(db, n)));
+    const expected = `22023 game_identity_conflict ids=${G[2]},a-2`;
+    expect(
+      asOutcome(
+        gameIdentityRefusal({ stored: db.game_assignments, payload: items, organizationId: ORG })
+      )
+    ).toBe(expected);
+    const mock = mockPersistGameSchedule(db, RUN, items, ctx);
+    expect(`${mock.error.code} ${mock.error.details}`).toBe(expected);
+    // The collation and the code units do disagree on these two ids (the case can tell them apart).
+    expect('a_1'.localeCompare('a-2')).toBeLessThan(0);
+    expect('a_1' < 'a-2').toBe(false);
+  });
+
+  it('the mock source holds no raw noncharacter and no locale comparison (an escape stands for the last place)', () => {
+    const source = readFileSync(
+      path.join(process.cwd(), 'frontend/src/lib/mockGameIdentity.js'),
+      'utf8'
+    );
+    expect(source).not.toMatch(/[\uFFFE\uFFFF]/u);
+    expect(source).not.toMatch(/localeCompare/);
   });
 });
 
@@ -455,7 +565,7 @@ describe('what an accepted save leaves in the mock', () => {
   });
 });
 
-describe('the held predicate: the mock and the pure helper agree', () => {
+describe('the held predicate: the mock and core isHeld agree', () => {
   const db = world();
   const rows = db.game_assignments;
 

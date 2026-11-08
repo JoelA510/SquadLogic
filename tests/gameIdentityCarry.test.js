@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import { carryGameIds, isHeld } from '../packages/core/src/gameIdentity.js';
 
+/** @returns {Record<string, any>} */
 const saved = (id, home, away, weekIndex, extra = {}) => ({
   id,
   homeTeamId: home,
@@ -25,6 +26,7 @@ const saved = (id, home, away, weekIndex, extra = {}) => ({
   weekIndex,
   ...extra,
 });
+/** @returns {Record<string, any>} */
 const gen = (home, away, weekIndex, extra = {}) => ({
   homeTeamId: home,
   awayTeamId: away,
@@ -78,6 +80,55 @@ describe('carryGameIds', () => {
     // then 12 with 9 (3 apart), and week 5 is left with week 1 (4 apart).
     const out = carryGameIds(s, [gen('A', 'B', 4), gen('A', 'B', 5), gen('A', 'B', 12)]);
     expect(out.map((r) => r.id)).toEqual(['w4', 'w1', 'w9']);
+  });
+
+  it("a game at a saved game's exact place (same slot, same week) takes that saved game, not the first of two tied by week", () => {
+    // X and Y are the same pair in the same week, at slots s1 and s2, and the regenerated meeting is exactly at s2. Tied on
+    // the week alone, the first saved game (X) would take it and move from s1 to s2, onto the place Y already holds: the
+    // save then refuses the Apply (`game_identity_conflict`). The exact place decides first.
+    const s = [
+      saved('X', 'A', 'B', 1, { slotId: 's1' }),
+      saved('Y', 'A', 'B', 1, { slotId: 's2' }),
+    ];
+    const out = carryGameIds(s, [gen('A', 'B', 1, { slotId: 's2' })]);
+    expect(out).toHaveLength(1);
+    expect({ slotId: out[0].slotId, id: out[0].id }).toEqual({ slotId: 's2', id: 'Y' });
+    expect(claimsOf(s, out)).toEqual([null, 0]);
+  });
+
+  it("the mirror: two regenerated meetings in one week and one saved game at the second one's slot", () => {
+    // The first regenerated meeting is at s1, the second at s2, and the one saved game is at s2. In the order given the
+    // first would take it; the exact place gives it to the second, which stays where the saved game is.
+    const s = [saved('Y', 'A', 'B', 1, { slotId: 's2' })];
+    const out = carryGameIds(s, [
+      gen('A', 'B', 1, { slotId: 's1' }),
+      gen('A', 'B', 1, { slotId: 's2' }),
+    ]);
+    expect(out.map((r) => r.id)).toEqual([undefined, 'Y']);
+  });
+
+  it('reads either spelling of the slot, and a flipped pair, for the exact place', () => {
+    // Saved: g_week at week 3 / slot s1, g_slot at week 3 / slot s2 (database spelling). Regenerated: one meeting at week 3
+    // slot s2 (camel spelling). Both saved games are 0 weeks away; only g_slot is at the same place.
+    const s = [
+      { id: 'g_week', home_team_id: 'A', away_team_id: 'B', week_index: 3, game_slot_id: 's1' },
+      { id: 'g_slot', home_team_id: 'A', away_team_id: 'B', week_index: 3, slot_id: 's2' },
+    ];
+    expect(carryGameIds(s, [gen('A', 'B', 3, { gameSlotId: 's2' })])[0].id).toBe('g_slot');
+    expect(carryGameIds(s, [gen('B', 'A', 3, { slotId: 's2' })])[0].id).toBe('g_slot');
+  });
+
+  it('with no slot to compare, or no game at the same place, the week still decides (the order of the keys)', () => {
+    // Without slots (as every case above) the week keys decide, unchanged. With slots that match nowhere, the same.
+    const s = [
+      saved('w1', 'A', 'B', 1, { slotId: 's1' }),
+      saved('w4', 'A', 'B', 4, { slotId: 's1' }),
+    ];
+    const out = carryGameIds(s, [
+      gen('A', 'B', 4, { slotId: 's9' }),
+      gen('A', 'B', 2, { slotId: 's9' }),
+    ]);
+    expect(out.map((r) => r.id)).toEqual(['w4', 'w1']);
   });
 
   it('an odd division with byes: a game with no counterpart keeps no id, a saved game with none is not claimed', () => {
@@ -210,9 +261,10 @@ describe('carryGameIds', () => {
       };
     };
 
-    it('holds over 400 seeded leagues, each applying every invariant from the saved set', () => {
+    it('holds over 400 seeded leagues, each applying all five invariants from the saved set', () => {
       let examined = 0;
       let matchedTotal = 0;
+      let exactPlaces = 0;
       for (let seed = 1; seed <= 400; seed += 1) {
         const rand = prng(seed);
         const teams = Array.from({ length: 3 + Math.floor(rand() * 5) }, (_, i) => `T${i}`);
@@ -227,7 +279,8 @@ describe('carryGameIds', () => {
                   `s${savedGames.length}`,
                   rand() < 0.5 ? teams[a] : teams[b],
                   rand() < 0.5 ? teams[b] : teams[a],
-                  1 + Math.floor(rand() * 12)
+                  1 + Math.floor(rand() * 12),
+                  { slotId: `slot${Math.floor(rand() * 3)}` }
                 )
               );
             }
@@ -238,18 +291,38 @@ describe('carryGameIds', () => {
           if (game.homeTeamId === game.awayTeamId)
             game.awayTeamId = teams.find((t) => t !== game.homeTeamId);
         }
+        // A regenerated game is often at the very place (week and slot) of the saved game it came from, so exact places
+        // are common in these leagues; one in ten is a saved game handed back as itself (a carried Published game).
         const generated = savedGames
           .filter(() => rand() < 0.85)
-          .map((game) =>
-            gen(
+          .map((game) => {
+            const sameWeek = rand() < 0.5;
+            const sameSlot = rand() < 0.5;
+            return gen(
               rand() < 0.5 ? game.homeTeamId : game.awayTeamId,
               rand() < 0.5 ? game.awayTeamId : game.homeTeamId,
-              1 + Math.floor(rand() * 12)
-            )
-          )
+              sameWeek ? game.weekIndex : 1 + Math.floor(rand() * 12),
+              {
+                slotId: sameSlot ? game.slotId : `slot${Math.floor(rand() * 3)}`,
+                ...(rand() < 0.1
+                  ? {
+                      id: game.id,
+                      homeTeamId: game.homeTeamId,
+                      awayTeamId: game.awayTeamId,
+                      weekIndex: game.weekIndex,
+                      slotId: game.slotId,
+                    }
+                  : {}),
+              }
+            );
+          })
           .filter((g) => g.homeTeamId !== g.awayTeamId);
         for (let extra = Math.floor(rand() * 3); extra > 0; extra -= 1)
-          generated.push(gen(teams[0], teams[1], 1 + Math.floor(rand() * 12)));
+          generated.push(
+            gen(teams[0], teams[1], 1 + Math.floor(rand() * 12), {
+              slotId: `slot${Math.floor(rand() * 3)}`,
+            })
+          );
         generated.sort(() => rand() - 0.5);
 
         const out = carryGameIds(savedGames, generated);
@@ -277,10 +350,32 @@ describe('carryGameIds', () => {
         }
         // 4. One game out for each game in.
         expect(out).toHaveLength(generated.length);
+        // 5. An exact place decides first: a regenerated game at a saved game's exact place (the pair, the slot and the
+        //    week) takes that saved game's id, unless the saved game is spent by a game that already carries its id. In
+        //    each exact place the games taking part (neither carries an id) are matched as far as the smaller of the
+        //    two counts, whatever else is in the league. Enumerated from the saved set, as every invariant here is.
+        const carriedIds = new Set(generated.filter((g) => g.id !== undefined).map((g) => g.id));
+        const place = (g) => `${pair(g)}|${g.slotId}|${g.weekIndex}`;
+        const places = new Set(savedGames.map(place));
+        for (const key of places) {
+          const here = savedGames.filter((g) => place(g) === key && !carriedIds.has(g.id));
+          const meetingsHere = generated.filter((g) => g.id === undefined && place(g) === key);
+          const takenHere = here.filter((g) =>
+            out.some(
+              (r, index) => r.id === g.id && generated[index].id === undefined && place(r) === key
+            )
+          ).length;
+          exactPlaces += Math.min(here.length, meetingsHere.length) > 0 ? 1 : 0;
+          expect(takenHere, `seed ${seed} place ${key}`).toBe(
+            Math.min(here.length, meetingsHere.length)
+          );
+        }
       }
       // The meta-assertion: the leagues examined something, and the matcher matched something.
       expect(examined).toBeGreaterThan(5000);
       expect(matchedTotal).toBeGreaterThan(2000);
+      // ... and invariant 5 met exact places that had a saved game and a regenerated one to match.
+      expect(exactPlaces).toBeGreaterThan(300);
     });
   });
 });

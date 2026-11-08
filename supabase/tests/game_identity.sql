@@ -18,7 +18,9 @@
 --   * two games that swap places in one save succeed (the unique index is not deferrable, so the save has to take the
 --     moving rows out of it first);
 --   * the omission check counts a Published game as present if its id OR its tuple is in the payload;
---   * the season is stored on the game by the save;
+--   * the season is stored on the game by the save, and a save that names a season refuses a game named by its id
+--     whose STORED season is another one (`game_identity_season`), after the ids exist and before the collisions; a game
+--     with no stored season, and a save with no season, are not refused;
 --   * one predicate: the guard trigger, `admin_cancel_game_assignment`, `admin_delete_team`, the omission check and an
 --     in-place move all ask `game_held_ids`/`game_is_held`, shown by replacing that one body inside the transaction.
 --
@@ -31,7 +33,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(88);
+SELECT plan(99);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 -- err: SQLSTATE:DETAIL of the first error, or 'no error' (the statement's effect stays).
@@ -161,6 +163,9 @@ INSERT INTO public.season_settings (id, organization_id, name, status, season_ye
     ('a1111111-1111-1111-1111-1111111100c1', 'a1111111-1111-1111-1111-111111111111', 'Org A Season C', 'draft', 2025);
 INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
     ('a1111111-1111-1111-1111-1111111d00c1', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-1111111100c1', 'C U10');
+-- Season D: another season of Org A that is NOT completed (the season a game of "another season" is stored in).
+INSERT INTO public.season_settings (id, organization_id, name, status, season_year) VALUES
+    ('a1111111-1111-1111-1111-1111111100d1', 'a1111111-1111-1111-1111-111111111111', 'Org A Season D', 'draft', 2027);
 INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
     ('a1111111-1111-1111-1111-0000000d0001', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'Id One'),
     ('a1111111-1111-1111-1111-0000000d0002', 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-11111111abcd', 'Id Two'),
@@ -386,6 +391,46 @@ SELECT is(pg_temp.val($$SELECT (SELECT org_a_games FROM idbase) = (SELECT count(
 SELECT is(pg_temp.val($$SELECT (SELECT org_a_runs FROM idbase) = (SELECT count(*) FROM public.scheduler_runs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111' AND run_type = 'game')$$), 'true',
     'and left no run behind');
 
+-- ── 3b. The season of a game named by its id ───────────────────────────────
+-- The id check is organization-wide, so an id of a game stored in ANOTHER season of the organization would be rewritten
+-- into this save's season. A save that names a season refuses a game whose stored season is another one (22023
+-- `game_identity_season`, DETAIL `game_identity_season ids=<the first by id>`); a game with no stored season (saved before
+-- the column) is accepted, and so is any game when the save names no season. The guard, the omission check and the
+-- completed-season trigger still find a game's season through its home team's division (F11-3 moves them to this column).
+UPDATE public.game_assignments SET season_settings_id = 'a1111111-1111-1111-1111-1111111100d1' WHERE id = 'a1111111-1111-1111-1111-0000000d0e07';
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$),
+    '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e07',
+    'a game stored in another season, named by its id, is refused and named');
+SELECT ok(pg_temp.msg($$SELECT pg_temp.save(pg_temp.set7())$$) ~ 'a1111111-1111-1111-1111-0000000d0e07'
+          AND pg_temp.msg($$SELECT pg_temp.save(pg_temp.set7())$$) ~ 'another season',
+    'and the message names the game and says why');
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e07', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e07', 'a1111111-1111-1111-1111-0000000d00d9'))))$$),
+    '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e07',
+    'moving it in the same save does not get it past the check (it would be rewritten into this season)');
+SELECT is(pg_temp.val($$SELECT (SELECT org_a_runs FROM idbase) = (SELECT count(*) FROM public.scheduler_runs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111' AND run_type = 'game')
+                        AND (SELECT season_settings_id::text FROM public.game_assignments WHERE id = 'a1111111-1111-1111-1111-0000000d0e07') = 'a1111111-1111-1111-1111-1111111100d1'
+                        AND pg_temp.placed('a1111111-1111-1111-1111-0000000d0e07') = '0005>0006@00d4/1'$$), 'true',
+    'the refusals wrote nothing: no run, the game still in its season and at its place');
+UPDATE public.game_assignments SET season_settings_id = 'a1111111-1111-1111-1111-1111111100d1' WHERE id = 'a1111111-1111-1111-1111-0000000d0e03';
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$),
+    '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e03',
+    'two games of another season: the first by id is named');
+UPDATE public.game_assignments SET season_settings_id = NULL WHERE id = 'a1111111-1111-1111-1111-0000000d0e03';
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(), NULL)$$), 'no error',
+    'a save that names no season skips the check: the same payload is accepted');
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e02', pg_temp.gi('a1111111-1111-1111-1111-0000000d0e02') || '{"id": "a1111111-1111-1111-1111-0000000d0eee"}')))$$),
+    '23503:game_not_found',
+    'the season is checked after the id exists: an unknown id is refused as not found, ahead of a game of another season');
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7(jsonb_build_object('a1111111-1111-1111-1111-0000000d0e04', pg_temp.mv('a1111111-1111-1111-1111-0000000d0e04', 'a1111111-1111-1111-1111-0000000d00d8'))))$$),
+    '22023:game_identity_season ids=a1111111-1111-1111-1111-0000000d0e07',
+    'and before the collisions: a game of another season is named ahead of a game moved onto an older row');
+UPDATE public.game_assignments SET season_settings_id = 'a1111111-1111-1111-1111-111111111aaa' WHERE id = 'a1111111-1111-1111-1111-0000000d0e07';
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error',
+    'control: the same game stored in the save''s OWN season is accepted');
+UPDATE public.game_assignments SET season_settings_id = NULL WHERE id = 'a1111111-1111-1111-1111-0000000d0e07';
+SELECT is(pg_temp.errx($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error',
+    'control: and with no stored season (saved before the column) it is accepted');
+
 -- ── 4. A save updates in place ─────────────────────────────────────────────
 -- The page''s whole schedule, carried: the same games, the same ids, a new run, the season on every row.
 SELECT is(pg_temp.err($$SELECT pg_temp.save(pg_temp.set7())$$), 'no error', 'the page''s whole schedule is saved by id');
@@ -475,6 +520,11 @@ SELECT ok(COALESCE((SELECT position('pg_advisory_xact_lock(hashtextextended(''ga
     'the save takes the organization''s lock first, then validates the ids (shape, repeats, existence), then the collisions, then the omissions, and only then writes');
 SELECT ok(COALESCE((SELECT p.prosrc ~ 'ORDER BY ga\.id\s+FOR UPDATE' FROM pg_proc p WHERE p.oid = 'public.persist_game_schedule(jsonb,jsonb)'::regprocedure), false),
     'the games it updates in place are locked FOR UPDATE in id order');
+SELECT ok(COALESCE((SELECT position('game_not_found' IN p.prosrc) < position('a game was removed while this save was being checked' IN p.prosrc)
+                       AND position('a game was removed while this save was being checked' IN p.prosrc) < position('game_identity_season' IN p.prosrc)
+                       AND position('game_identity_season' IN p.prosrc) < position('game_identity_conflict' IN p.prosrc)
+                      FROM pg_proc p WHERE p.oid = 'public.persist_game_schedule(jsonb,jsonb)'::regprocedure), false),
+    'the season of a named game is read after the rows are locked (so it cannot change under the check), after the ids exist and before the collisions');
 
 SELECT * FROM finish();
 ROLLBACK;

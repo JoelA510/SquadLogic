@@ -1354,7 +1354,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018060000 20261018070000 20261019010000 20261020010000 20261020020000 20261020030000 20261020040000 20261021010000 20261021020000 20261021030000 20261021040000 20261022010000 20261022020000 20261022030000 20261023010000 20261024010000 20261025010000 20261026010000 20261028010000 20261029010000 20261029020000 20261030010000 20261031010000 20261101010000 20261101020000 20261102010000 20261103020000 20261104010000 20261104020000 20261105010000 20261106010000 20261108010000 20261108020000 20261110010000 20261111010000 20261112010000 20261113010000 20261114010000 20261115010000 20261116010000 20261117010000 20261118010000 20261119010000 20261120010000 20261121010000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2581,6 +2581,64 @@ NEEDLES
               UPDATE public.game_assignments SET published = true WHERE id = '1d000000-0000-4000-8000-0000000000c1';" \
          >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the two games the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **20261121010000's revert refuses while a games import is applied, and keeps every game when it is not.** An
+  # applied import is planted (two application records not rolled back, an outside club, a TIME TBD game from a file,
+  # two games that carry a Game ID, one of them the club's opponent), and the revert is run onto it FIRST: it must refuse
+  # in its own words, change nothing and leave every column of the migration standing. The import is then taken back by
+  # hand (the records marked rolled back, the club's game, the club and the TIME TBD game deleted: what the rollback does)
+  # and the revert runs again, as every other revert in this set does, below. Every name is synthetic.
+  if [ "$id" = "20261121010000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('1e000000-0000-4000-8000-00000000000a','Import Revert Org','import-revert');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('1e000000-0000-4000-8000-0000000000a1','1e000000-0000-4000-8000-00000000000a','Import Revert Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('1e000000-0000-4000-8000-0000000000a2','1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000a1','Import Revert Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name, is_external) VALUES
+                ('1e000000-0000-4000-8000-0000000000b1','1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000a2','Revert One', false),
+                ('1e000000-0000-4000-8000-0000000000b2','1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000a2','Revert Two', false),
+                ('1e000000-0000-4000-8000-0000000000b3','1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000a2','Revert Club', true);
+              INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, season_settings_id) VALUES
+                ('1e000000-0000-4000-8000-0000000000d1','1e000000-0000-4000-8000-00000000000a','games','imports/x/revert.csv','completed','1e000000-0000-4000-8000-0000000000a1');
+              INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors) VALUES
+                ('1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000d1','games',1,'{}'::jsonb,NULL,'[]'::jsonb);
+              INSERT INTO public.game_assignments (id, organization_id, home_team_id, away_team_id, division, week_index, season_settings_id, external_ref, import_job_id) VALUES
+                ('1e000000-0000-4000-8000-0000000000c1','1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000b1','1e000000-0000-4000-8000-0000000000b3','Import Revert Division',1,'1e000000-0000-4000-8000-0000000000a1','RV-1','1e000000-0000-4000-8000-0000000000d1'),
+                ('1e000000-0000-4000-8000-0000000000c2','1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000b2','1e000000-0000-4000-8000-0000000000b1','Import Revert Division',2,'1e000000-0000-4000-8000-0000000000a1','RV-2','1e000000-0000-4000-8000-0000000000d1');
+              INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload) VALUES
+                ('1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000d1','games','game_assignments','1e000000-0000-4000-8000-0000000000c1','inserted',NULL,'{}'::jsonb),
+                ('1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000d1','games','teams','1e000000-0000-4000-8000-0000000000b3','inserted',NULL,'{}'::jsonb);
+              INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index, reason) VALUES
+                ('1e000000-0000-4000-8000-00000000000a','1e000000-0000-4000-8000-0000000000a1','game','1e000000-0000-4000-8000-0000000000a2','1e000000-0000-4000-8000-0000000000b2','1e000000-0000-4000-8000-0000000000b1',3,'imported-without-time');" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the applied games import the revert check requires was never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refused 2>&1; then
+      echo "FAIL revert ${id}: planted an applied games import (2 records not rolled back, 1 outside club, 1 TIME TBD game from a file) and the revert ran onto it"
+      STATUS=1
+    elif ! grep -qF 'a games import is still applied: 2 record(s) not rolled back, 1 outside club(s), 1 TIME TBD game(s) from a file.' $SCRATCH/harness_rev_refused; then
+      echo "FAIL revert ${id}: refused an applied games import, but not in the words that name the 2 records, the club and the TIME TBD game"
+      dump 10 $SCRATCH/harness_rev_refused; STATUS=1
+    elif [ "$(psql_cmd "SELECT (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'teams' AND column_name = 'is_external') || ':' ||
+                      (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'game_assignments' AND column_name IN ('external_ref', 'import_job_id')) || ':' ||
+                      (SELECT count(*) FROM public.import_jobs WHERE id = '1e000000-0000-4000-8000-0000000000d1') || ':' ||
+                      (SELECT count(*) FROM public.game_assignments WHERE organization_id = '1e000000-0000-4000-8000-00000000000a');" 2>/dev/null)" != "1:2:1:2" ]; then
+      echo "FAIL revert ${id}: the refused revert changed the database (a column, the job or a game is not as it was)"
+      STATUS=1
+    else
+      echo "  revert ${id}: refused an applied games import in its words (2 records not rolled back, 1 outside club, 1 TIME TBD game) and changed nothing"
+    fi
+    if ! psql_cmd "UPDATE public.import_application_records SET rolled_back_at = now() WHERE import_job_id = '1e000000-0000-4000-8000-0000000000d1';
+              DELETE FROM public.game_assignments WHERE id = '1e000000-0000-4000-8000-0000000000c1';
+              DELETE FROM public.teams WHERE id = '1e000000-0000-4000-8000-0000000000b3';
+              DELETE FROM public.schedule_tbd WHERE reason = 'imported-without-time';" \
+         >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the import could not be taken back by hand before the revert"
       dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
@@ -4042,6 +4100,37 @@ PROBE
       else
         echo "FAIL revert ${id}: the revert did not leave the planted games and the 20261119010000 bodies as they were"
         dump 10 $SCRATCH/harness_idrevert; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261121010000" ]; then
+      # What the revert must leave: the one game that stays (its Game ID gone with the column), the NOTICE counts of what it
+      # dropped, the job, its staged row and its records gone, no column or function of the migration, the five lists as they
+      # were, and the audit action kept (an audit row may cite it). The revert checks the md5 of each restored body itself.
+      if ! grep -qF 'this revert drops game_assignments.external_ref (1 game(s) carry a Game ID, which is lost)' $SCRATCH/harness_rev \
+         || ! grep -qF 'it deletes 1 games import job(s), 1 staged row(s) and 2 rolled-back record(s)' $SCRATCH/harness_rev; then
+        echo "FAIL revert ${id}: planted 1 game with a Game ID, 1 job, 1 staged row and 2 records, and the revert did not say so"
+        STATUS=1
+      fi
+      if psql_cmd "SELECT 'IMPREVERT-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM public.game_assignments WHERE id = '1e000000-0000-4000-8000-0000000000c2') <> 1 THEN 'game-lost'
+               WHEN (SELECT count(*) FROM public.import_jobs WHERE id = '1e000000-0000-4000-8000-0000000000d1') <> 0 THEN 'job-left'
+               WHEN (SELECT count(*) FROM public.staging_import_rows WHERE import_job_id = '1e000000-0000-4000-8000-0000000000d1') <> 0 THEN 'rows-left'
+               WHEN (SELECT count(*) FROM public.import_application_records WHERE import_job_id = '1e000000-0000-4000-8000-0000000000d1') <> 0 THEN 'records-left'
+               WHEN EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.teams'::regclass AND a.attname = 'is_external' AND NOT a.attisdropped)
+                    OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.game_assignments'::regclass AND a.attname IN ('external_ref', 'import_job_id') AND NOT a.attisdropped) THEN 'column-left'
+               WHEN to_regprocedure('public.apply_game_import_job(uuid, boolean)') IS NOT NULL OR to_regprocedure('public.rollback_game_import_job(uuid)') IS NOT NULL
+                    OR to_regprocedure('public.map_game_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.game_import_image(jsonb)') IS NOT NULL THEN 'function-left'
+               WHEN NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'game.slot_created') THEN 'action-lost'
+               WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'import_jobs_job_type_check') ~ 'games' THEN 'list-left'
+               WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'schedule_tbd_reason_check') ~ 'imported-without-time' THEN 'reason-left'
+               WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public.game_assignments_published_guard()'))
+                    IS DISTINCT FROM '2ffcfb1f9651757594b63d273cd65206' THEN 'guard-wrong'
+               ELSE 'restored' END;" \
+         >$SCRATCH/harness_impreverts 2>&1 && grep -q 'IMPREVERT-VERDICT:restored' $SCRATCH/harness_impreverts; then
+        echo "  revert ${id}: the revert keeps the planted game, deletes the job, its staged row and records, leaves no column or function of the migration, puts the lists and the guard back and keeps the audit action"
+      else
+        echo "FAIL revert ${id}: the revert did not leave the planted game and the pre-migration objects as they were"
+        dump 10 $SCRATCH/harness_impreverts; STATUS=1
       fi
     fi
     if [ "$id" = "20261112010000" ]; then

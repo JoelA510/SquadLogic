@@ -286,6 +286,7 @@ export default function CoachesPage() {
           .from('teams')
           .select('id, name, division_id, coach_id, organization_id')
           .eq('organization_id', currentOrganization.id)
+          .neq('is_external', true)
           .order('name', { ascending: true }),
         // Paged: the history only grows (nothing is deleted), and an unranged
         // select is cut at the server's row cap -- a partial history would

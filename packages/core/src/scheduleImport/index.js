@@ -9,6 +9,7 @@
  * | `parseRows.js` | the CSV rows: dates, times, the week rule, the allowlist, the season clock |
  * | `mapping.js` | the file's labels against the organization's records: proposals, decisions, outside clubs |
  * | `audit.js` | the conflict audit, with what it did not check |
+ * | `staging.js` | what a parsed row becomes in `staging_import_rows` (the keys the SQL apply reads) |
  *
  * ## What it is not
  *
@@ -23,3 +24,4 @@ export * from './reasonCodes.js';
 export * from './parseRows.js';
 export * from './mapping.js';
 export * from './audit.js';
+export * from './staging.js';

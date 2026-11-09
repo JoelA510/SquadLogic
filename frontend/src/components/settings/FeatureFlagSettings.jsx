@@ -84,7 +84,8 @@ export default function FeatureFlagSettings({
         const { data, error } = await supabase
           .from('teams')
           .select('id')
-          .eq('organization_id', orgId);
+          .eq('organization_id', orgId)
+          .neq('is_external', true);
         if (!cancelled && !error) setTeamsExist((data || []).length > 0);
       } catch {
         /* leave teamsExist=false */

@@ -29,11 +29,14 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
   // A builder that records its equality filters and resolves to the rows that satisfy them.
   const builder = (table, options) => {
     const filters = [];
+    const neqs = [];
     let range = null;
     const run = () => {
       mocks.requests.push({ table, filters: [...filters] });
-      const rows = (mocks.tables[table] || []).filter((row) =>
-        filters.every(([column, value]) => String(row[column]) === String(value))
+      const rows = (mocks.tables[table] || []).filter(
+        (row) =>
+          filters.every(([column, value]) => String(row[column]) === String(value)) &&
+          neqs.every(([column, value]) => String(row[column]) !== String(value))
       );
       const page = range ? rows.slice(range[0], range[1] + 1) : rows;
       return {
@@ -44,6 +47,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
     };
     const self = {
       eq: (column, value) => (filters.push([column, value]), self),
+      neq: (column, value) => (neqs.push([column, value]), self),
       in: () => self,
       order: () => self,
       range: (from, to) => ((range = [from, to]), self),

@@ -36,7 +36,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(165);
+SELECT plan(167);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -585,7 +585,7 @@ SELECT pg_temp.stage(pg_temp.j('j1b'), 19, 'ok',  'G-903', 'Org A U10', 'Park On
 SELECT pg_temp.stage(pg_temp.j('j1b'), 20, 'ok',  NULL,    'Org A U10', 'Park One', 'Field 1', 'Lions',    'Wolves',         '2026-05-30', '09:00', '10:00', 5);
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 -- The same decisions, now that what was created exists: an exact match is a `map` (a `create` over an existing name would be refused).
-SELECT public.map_game_import_job(pg_temp.j('j1b'), jsonb_build_object(
+INSERT INTO marks VALUES ('map_j1b', (public.map_game_import_job(pg_temp.j('j1b'), jsonb_build_object(
     'options', jsonb_build_object('arrive_published', true),
     'divisions', jsonb_build_object(
         'org a u10', jsonb_build_object('action', 'map', 'id', 'a1111111-1111-1111-1111-11111111abcd'),
@@ -607,7 +607,7 @@ SELECT public.map_game_import_job(pg_temp.j('j1b'), jsonb_build_object(
         pg_temp.k2('Org A U12', 'Hawks'),   jsonb_build_object('action', 'map', 'id', pg_temp.u(5)),
         pg_temp.k2('Org A U12', 'New Shell FC'), jsonb_build_object('action', 'map', 'id', (SELECT id FROM public.teams WHERE name = 'New Shell FC')),
         pg_temp.k2('U14 Boys', 'Sharks'),   jsonb_build_object('action', 'map', 'id', (SELECT id FROM public.teams WHERE name = 'Sharks')),
-        pg_temp.k2('U14 Boys', 'Rays'),     jsonb_build_object('action', 'map', 'id', (SELECT id FROM public.teams WHERE name = 'Rays')))));
+        pg_temp.k2('U14 Boys', 'Rays'),     jsonb_build_object('action', 'map', 'id', (SELECT id FROM public.teams WHERE name = 'Rays'))))))::text);
 INSERT INTO marks VALUES ('fp_before_reimport', pg_temp.fp()), ('runs1', (SELECT count(*)::text FROM public.scheduler_runs WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'));
 INSERT INTO marks VALUES ('reimport', (public.apply_game_import_job(pg_temp.j('j1b'), false))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'reimport'), 'games,inserted'), '0', 're-importing the same file inserts no game');
@@ -668,7 +668,7 @@ SET LOCAL "request.jwt.claims" TO '{}';
 SELECT pg_temp.stage(pg_temp.j('j3'), 1, 'ok', 'G-300', 'Org A U10', 'Park One', 'Field 2', 'Bears', 'Tigers', '2026-07-04', '09:00', '10:00', 9);
 SELECT pg_temp.stage(pg_temp.j('j3'), 2, 'ok', 'G-301', 'Org A U10', 'Park Three', 'Field Z', 'Wolves', 'Gulls FC', '2026-07-04', '10:00', '11:00', 9);
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
-SELECT public.map_game_import_job(pg_temp.j('j3'), jsonb_build_object(
+INSERT INTO marks VALUES ('map_j3', (public.map_game_import_job(pg_temp.j('j3'), jsonb_build_object(
     'divisions', jsonb_build_object('org a u10', jsonb_build_object('action', 'map', 'id', 'a1111111-1111-1111-1111-11111111abcd')),
     'venues', jsonb_build_object('park one', jsonb_build_object('action', 'map', 'id', pg_temp.u(30)), 'park three', jsonb_build_object('action', 'create', 'name', 'Park Three')),
     'fields', jsonb_build_object(pg_temp.k2('Park One', 'Field 2'), jsonb_build_object('action', 'map', 'id', pg_temp.u(32)), pg_temp.k2('Park Three', 'Field Z'), jsonb_build_object('action', 'create', 'name', 'Field Z')),
@@ -676,7 +676,7 @@ SELECT public.map_game_import_job(pg_temp.j('j3'), jsonb_build_object(
         pg_temp.k2('Org A U10', 'Bears'), jsonb_build_object('action', 'map', 'id', pg_temp.u(3)),
         pg_temp.k2('Org A U10', 'Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(2)),
         pg_temp.k2('Org A U10', 'Wolves'), jsonb_build_object('action', 'map', 'id', pg_temp.u(4)),
-        pg_temp.k2('Org A U10', 'Gulls FC'), jsonb_build_object('action', 'outside'))));
+        pg_temp.k2('Org A U10', 'Gulls FC'), jsonb_build_object('action', 'outside')))))::text);
 INSERT INTO marks VALUES ('fps_before_j3', pg_temp.fps()), ('games_before_j3', (SELECT count(*)::text FROM public.game_assignments));
 INSERT INTO marks VALUES ('apply3', (public.apply_game_import_job(pg_temp.j('j3'), false))::text);
 SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply3'), 'games,inserted'), '2', 'J3 inserted two games (one against a new outside club, in a new venue and field)');

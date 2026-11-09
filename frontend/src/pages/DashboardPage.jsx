@@ -92,7 +92,9 @@ function useHomeData() {
                   .eq('season_settings_id', seasonId)
               )
             : [],
-          fetchAllPages(() => supabase.from('teams').select('*').eq('organization_id', orgId)),
+          fetchAllPages(() =>
+            supabase.from('teams').select('*').eq('organization_id', orgId).neq('is_external', true)
+          ),
           seasonId
             ? fetchAllPages(() =>
                 supabase

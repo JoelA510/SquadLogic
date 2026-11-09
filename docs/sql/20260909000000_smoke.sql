@@ -470,7 +470,13 @@ BEGIN
   -- Stated as an exact set, so a FOURTH deleter arriving fails here and has to
   -- be argued rather than absorbed by a `FOREACH` that only checks whoever it
   -- happens to find.
-  IF v_deleters <> ARRAY['admin_delete_field','rollback_field_import_job'] THEN
+  --
+  -- **20261121010000 ARGUES the third one.** `rollback_game_import_job` deletes the fields a games import created, and
+  -- only those: a field the import inserted (its application record says so) that no game, game slot or booking
+  -- names, asked of this same producer (`field_bookings`) in the DELETE itself. It has no `p_confirm` parameter, so it
+  -- never deletes over a refusal and needs no prune; the loop below holds both facts (the producer's name in its
+  -- definition, and exactly one deleter with a confirmation override).
+  IF v_deleters <> ARRAY['admin_delete_field','rollback_field_import_job','rollback_game_import_job'] THEN
     RAISE EXCEPTION
       'the set of functions deleting public.fields is now %. Every one of them must enumerate through public.field_bookings before it deletes.',
       v_deleters;

@@ -8,15 +8,17 @@
  * page sends to be recorded.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'vitest';
 
 import { PRACTICE_UNPLACED_REASON } from '../packages/core/src/practiceUnplacedReasons.js';
 import {
+  IMPORTED_WITHOUT_TIME,
   NOT_SCHEDULED_YET,
   SCHEDULE_TBD_GAME_REASONS,
   SCHEDULE_TBD_PRACTICE_REASONS,
+  SCHEDULE_TBD_STORED_GAME_REASONS,
   describeScheduleTbdReason,
   parseGameUnscheduled,
   scheduleTbdItemsFromRows,
@@ -28,6 +30,25 @@ const read = (file) => readFileSync(path.join(process.cwd(), file), 'utf8');
 const MIGRATION = read('supabase/migrations/20261108020000_schedule_tbd.sql');
 const REVERT = read('docs/sql/20261108020000_revert.sql');
 
+/**
+ * The migration that last set the table's reason CHECK (the CHECK is replaced, never edited in place: 20261121010000
+ * added the game reason `imported-without-time`), found from the files and not named here, so a later one is read.
+ */
+const CHECK_MIGRATION = (() => {
+  const dir = path.join(process.cwd(), 'supabase/migrations');
+  const setters = readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .map((name) => ({ name, text: readFileSync(path.join(dir, name), 'utf8') }))
+    .filter(
+      ({ text }) =>
+        /ADD CONSTRAINT schedule_tbd_reason_check\b/.test(text) ||
+        /CONSTRAINT schedule_tbd_reason_check\s+CHECK/.test(text)
+    );
+  assert.ok(setters.length >= 2, 'the CHECK is set by the table migration and by the games import');
+  return setters.at(-1);
+})();
+
 /** The quoted words of the first `IN ( ... )` list after a marker. */
 function listAfter(text, marker) {
   const at = text.indexOf(marker);
@@ -38,14 +59,52 @@ function listAfter(text, marker) {
 }
 
 describe('the reasons: core and the SQL say the same things', () => {
-  it('the table CHECK lists exactly the practice reasons and exactly the game reasons', () => {
+  it('the table CHECK lists exactly the practice reasons and exactly the stored game reasons (its latest setter)', () => {
+    assert.equal(CHECK_MIGRATION.name.startsWith('20261121010000'), true, CHECK_MIGRATION.name);
     assert.deepEqual(
-      listAfter(MIGRATION, "(kind = 'practice' AND reason IN ").sort(),
+      listAfter(CHECK_MIGRATION.text, "(kind = 'practice' AND reason IN ").sort(),
       [...SCHEDULE_TBD_PRACTICE_REASONS].sort()
     );
     assert.deepEqual(
+      listAfter(CHECK_MIGRATION.text, "OR (kind = 'game' AND reason IN ").sort(),
+      [...SCHEDULE_TBD_STORED_GAME_REASONS].sort()
+    );
+    // The first spelling (the table's own migration) is the scheduler's six: the game writer's list below is that one.
+    assert.deepEqual(
       listAfter(MIGRATION, "OR (kind = 'game' AND reason IN ").sort(),
       [...SCHEDULE_TBD_GAME_REASONS].sort()
+    );
+  });
+
+  it('only the import gives the one reason the scheduler does not: no time or no field in the file', () => {
+    assert.deepEqual(
+      SCHEDULE_TBD_STORED_GAME_REASONS.filter((r) => !SCHEDULE_TBD_GAME_REASONS.includes(r)),
+      [IMPORTED_WITHOUT_TIME]
+    );
+    // A stored import row reads back (the list page and the exports); a game SAVE does not record it.
+    const stored = scheduleTbdItemsFromRows([
+      {
+        id: 'a',
+        kind: 'game',
+        home_team_id: 'h',
+        away_team_id: 'v',
+        week_index: 2,
+        reason: IMPORTED_WITHOUT_TIME,
+      },
+    ]);
+    assert.equal(stored[0].reason, IMPORTED_WITHOUT_TIME);
+    assert.match(
+      scheduleTbdNote(stored[0]),
+      /^Game not scheduled \(week 2\): the imported file gave it no time or no field\.$/
+    );
+    assert.throws(() =>
+      parseGameUnscheduled([
+        {
+          weekIndex: 2,
+          reason: IMPORTED_WITHOUT_TIME,
+          matchup: { homeTeamId: 'h', awayTeamId: 'v' },
+        },
+      ])
     );
   });
 
@@ -95,7 +154,7 @@ describe('the reasons: core and the SQL say the same things', () => {
       const words = describeScheduleTbdReason('practice', reason);
       assert.ok(words.length > 10 && words !== reason, `no words for practice reason ${reason}`);
     }
-    for (const reason of SCHEDULE_TBD_GAME_REASONS) {
+    for (const reason of SCHEDULE_TBD_STORED_GAME_REASONS) {
       const words = describeScheduleTbdReason('game', reason);
       assert.ok(words.length > 10 && words !== reason, `no words for game reason ${reason}`);
     }

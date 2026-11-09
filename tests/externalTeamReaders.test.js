@@ -411,7 +411,7 @@ describe('every reader of `teams` is classified, from the code', () => {
   const sqlLatest = latestSqlDefinitions(migrationFiles());
   const sql = sqlTeamReaders(sqlLatest);
   /** @type {Map<string, any>} */
-  const found = new Map([...js, ...sql]);
+  const found = new Map(/** @type {Array<[string, any]>} */ ([...js, ...sql]));
 
   it('finds the readers (a census that examined nothing is a failure)', () => {
     expect(js.size).toBeGreaterThanOrEqual(20);
@@ -517,7 +517,13 @@ describe('the scanners find each kind of read, and only reads', () => {
 // ---------------------------------------------------------------------------------------------------------------
 
 const DIVISION = 'div-1';
-/** A minimal PostgREST double: chainable, thenable, applying `eq` and `neq` to the rows it holds. */
+/**
+ * A minimal PostgREST double: chainable, thenable, applying `eq` and `neq` to the rows it holds.
+ *
+ * @param {Record<string, any[]>} tables
+ * @param {string[]} [calls]
+ * @returns {any}
+ */
 function fakeClient(tables, calls = []) {
   return {
     from(table) {
@@ -593,8 +599,9 @@ describe('exclude: the capacity panel leaves an outside club out of the demand (
 
   it('CONTROL: without the filter the same client returns the outside club (so the test can fail)', async () => {
     const client = fakeClient(tables);
+    /** @type {any} */
     const all = await client.from('teams').select('id, division_id').eq('organization_id', 'org');
-    expect(all.data.map((team) => team.id)).toContain('club-1');
+    expect(all.data.map((/** @type {any} */ team) => team.id)).toContain('club-1');
   });
 });
 

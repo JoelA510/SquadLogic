@@ -191,6 +191,10 @@ export function makeFrom(tables, errors, reads = []) {
         filters.push((row) => String(row[column]) === String(value));
         return b;
       },
+      neq: (column, value) => {
+        filters.push((row) => String(row[column]) !== String(value));
+        return b;
+      },
       in: (column, values) => {
         filters.push((row) => values.map(String).includes(String(row[column])));
         return b;

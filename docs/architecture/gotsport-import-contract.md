@@ -340,6 +340,28 @@ true)`: the same statement with its writes switched off, so the numbers shown ar
   team. The import accepts the Skill Tier column whatever the option, so a file can be loaded before the
   option is turned on.
 
+## Schedule import — kept fields (`20261121010000`)
+
+A club that already has a game schedule can bring it in as a file (plan `docs/changes/2026-11-03-schedule-expansion.md`,
+4.5 to 4.7; PR 5 is the database, the Edge validation and the Games page are PR 6). The `games` type keeps **21
+snake_case keys** per staged row and nothing else (`GAME_IMPORT_KEYS` in `frontend/src/utils/importAllowlist.js`, its Edge
+twin, and `import_allowed_keys('games')`; `tests/importAllowlistParity.test.js` holds the three equal to the keys the apply
+reads). A format, a note, a coach, an email or a phone in the file is never read, so it is never staged.
+
+| Staged key(s)                                                            | Becomes                                           | Rule                                                                                        |
+| ------------------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `row_key`                                                                | the row's name in the result's lists and warnings | Made by the parse (`row-<n>`); never stored                                                 |
+| `game_id`                                                                | `game_assignments.external_ref`                   | Text of at most 40 characters, exact after trimming, unique per season, never a number      |
+| `status`, `tbd_reason`                                                   | a game, or a TIME TBD game                        | `ok` (placed) or `tbd` (no time or no field: reason `imported-without-time`, never dropped) |
+| `date`, `start_time`, `end_time`, `start`, `end`, `week_index`           | the slot and the game's instants                  | Put on the season's clock by the parse; the SQL never recomputes an instant                 |
+| `flags`                                                                  | warnings of the preview                           | The parse's flags (`time-ambiguous`, `week-differs`, ...), listed, never a refusal          |
+| `division`, `venue`, `field`, `home_team`, `away_team` and their `*_key` | the admin's decisions, by key                     | A label as typed, and beside it the decision key core computes; the SQL matches by equality |
+
+What is stored on the way: `game_assignments.external_ref` (the Game ID), `game_assignments.import_job_id` (the job that
+last wrote the row) and `teams.is_external` (an outside club: one row per division and club label, a side of a game and
+nothing else: no players, no coach, no practice, in no team run). No birthdate, name of a person or contact is in the file's
+allowlist, and none is stored.
+
 ## Dropped on import (never stored)
 
 Everything not listed above, including: guardian and parent names, emails,

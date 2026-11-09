@@ -49,6 +49,7 @@ import {
 } from './mockFacilityPermits.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handleEvaluationImportRpc } from './mockEvaluations.js';
+import { handleGameImportRpc } from './mockGameImport.js';
 import { validateEvaluationRow } from '../utils/importEvaluations.js';
 import { handleScheduleTbdRpc } from './mockScheduleTbd.js';
 import {
@@ -2718,6 +2719,16 @@ export const mockSupabase = {
         if (!evaluation.error && evaluation.data?.dry_run !== true) saveDB(db);
         return evaluation;
       }
+      // The games import: map, preview and apply, roll back, and the slot a game is placed in (migration
+      // 20261121010000), refusals included.
+      const gameImport = handleGameImportRpc(db, name, params, {
+        isOrgAdmin,
+        currentUserId: storedSession ? currentUserId : null,
+      });
+      if (gameImport) {
+        if (!gameImport.error && gameImport.data?.dry_run !== true) saveDB(db);
+        return gameImport;
+      }
       // Heat forecast settings (migration 20261006000000), refusals included.
       const heat = handleHeatSettingsRpc(db, name, params, { currentUserId });
       if (heat) {
@@ -4587,6 +4598,7 @@ export const mockSupabase = {
           'field_availability',
           'practice_preferences',
           'evaluations',
+          'games',
         ].includes(importType)
       ) {
         return { data: null, error: { message: `invalid import type: ${p_import_type}` } };
@@ -4649,7 +4661,9 @@ export const mockSupabase = {
             ? 'field_availability'
             : importType === 'evaluations'
               ? 'evaluations'
-              : 'registration';
+              : importType === 'games'
+                ? 'games'
+                : 'registration';
       const job = {
         id: mockId('import-job-'),
         organization_id: p_organization_id,
@@ -4984,13 +4998,14 @@ export const mockSupabase = {
           'field_availability',
           'practice_preferences',
           'evaluations',
+          'games',
         ].includes(importType)
       ) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, field_availability, practice_preferences, and evaluations imports support deferred apply',
+              'Only coach, field, field_availability, practice_preferences, evaluations, and games imports support deferred apply',
           },
         };
       }
@@ -5002,6 +5017,9 @@ export const mockSupabase = {
       }
       if (importType === 'evaluations' && job.job_type !== 'evaluations') {
         return { data: null, error: { message: 'Import job is not evaluations' } };
+      }
+      if (importType === 'games' && job.job_type !== 'games') {
+        return { data: null, error: { message: 'Import job is not games' } };
       }
       if (importType === 'fields' && job.job_type !== 'fields') {
         return { data: null, error: { message: 'Import job is not fields' } };
@@ -5068,18 +5086,22 @@ export const mockSupabase = {
           'field_availability',
           'practice_preferences',
           'evaluations',
+          'games',
         ].includes(importType)
       ) {
         return {
           data: null,
           error: {
             message:
-              'Only coach, field, field_availability, practice_preferences, and evaluations imports support deferred cancellation',
+              'Only coach, field, field_availability, practice_preferences, evaluations, and games imports support deferred cancellation',
           },
         };
       }
       if (importType === 'evaluations' && job.job_type !== 'evaluations') {
         return { data: null, error: { message: 'Import job is not evaluations' } };
+      }
+      if (importType === 'games' && job.job_type !== 'games') {
+        return { data: null, error: { message: 'Import job is not games' } };
       }
       if (job.status !== 'ready_to_apply') {
         return { data: null, error: { message: `Import job is ${job.status}` } };

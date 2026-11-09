@@ -71,7 +71,11 @@ export function usePreferenceContext(orgId, seasonId) {
               .eq('organization_id', orgId)
           ),
           fetchAllPages(() =>
-            supabase.from('teams').select('id, name, division_id').eq('organization_id', orgId)
+            supabase
+              .from('teams')
+              .select('id, name, division_id')
+              .eq('organization_id', orgId)
+              .neq('is_external', true)
           ),
           fetchAllPages(() =>
             supabase.from('divisions').select('id, season_settings_id').eq('organization_id', orgId)

@@ -51,6 +51,23 @@ export const SCHEDULE_TBD_GAME_REASONS = Object.freeze([
   'no-slot-available',
 ]);
 
+/**
+ * Why a game the schedule import read has no time: the file row carried no time or no field (PR 5, migration
+ * `20261121010000`; `apply_game_import_job` records it). The scheduler never gives it, so it is not one of
+ * {@link SCHEDULE_TBD_GAME_REASONS} (the entries a game save records are checked against that list); it is one of the
+ * reasons a row of the table may carry.
+ */
+export const IMPORTED_WITHOUT_TIME = 'imported-without-time';
+
+/**
+ * Every reason a stored game row may carry: the scheduler's, and {@link IMPORTED_WITHOUT_TIME}. The table's CHECK
+ * spells the same list (the latest migration that sets it; `tests/scheduleTbd.test.js` reads that one).
+ */
+export const SCHEDULE_TBD_STORED_GAME_REASONS = Object.freeze([
+  ...SCHEDULE_TBD_GAME_REASONS,
+  IMPORTED_WITHOUT_TIME,
+]);
+
 const GAME_REASON_TEXT = Object.freeze({
   'unknown-team': 'a team in the matchup is not on the roster',
   'division-mismatch': 'the teams are not in the division',
@@ -58,6 +75,7 @@ const GAME_REASON_TEXT = Object.freeze({
   'coach-coaches-both-teams': 'one coach coaches both teams',
   'coach-scheduling-conflict': "a coach's other games leave no free time",
   'no-slot-available': 'no game slot was free for it',
+  [IMPORTED_WITHOUT_TIME]: 'the imported file gave it no time or no field',
 });
 
 /**
@@ -122,7 +140,7 @@ const gameItem = z.object({
   awayTeamId: z.string().min(1),
   weekIndex: z.number().int().min(1).max(255),
   reason: z.enum(
-    /** @type {[string, ...string[]]} */ (/** @type {unknown} */ (SCHEDULE_TBD_GAME_REASONS))
+    /** @type {[string, ...string[]]} */ (/** @type {unknown} */ (SCHEDULE_TBD_STORED_GAME_REASONS))
   ),
 });
 

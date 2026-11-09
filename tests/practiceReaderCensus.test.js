@@ -113,6 +113,12 @@ const REGISTRY = {
     class: 'series-only',
     why: 'X12: an existence check before a field-import rollback',
   },
+  'sql:rollback_game_import_job': {
+    class: 'series-only',
+    why:
+      'PR 5: an existence check before a games-import rollback deletes a team shell it created ' +
+      "(20261121010000), as rollback_field_import_job's check is: a shell with a practice row stays",
+  },
   'sql:persist_practice_schedule': { class: 'writer', why: 'X10: the practice writer (v3)' },
   'sql:practice_new_auto_row_refusals': {
     class: 'writer',

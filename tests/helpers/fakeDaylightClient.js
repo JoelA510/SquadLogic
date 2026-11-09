@@ -28,6 +28,10 @@ export function fakeDaylightClient(state) {
         if (!col.includes('.')) rows = rows.filter((r) => String(r[col]) === String(val));
         return q;
       },
+      neq: (/** @type {string} */ col, /** @type {unknown} */ val) => {
+        rows = rows.filter((r) => String(r[col]) !== String(val));
+        return q;
+      },
       order: () => q,
       range: (/** @type {number} */ lo, /** @type {number} */ hi) => {
         state.reads.push({ table, columns });

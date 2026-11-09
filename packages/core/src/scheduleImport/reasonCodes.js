@@ -106,6 +106,14 @@ export const SCHEDULE_IMPORT_FLAGS = Object.freeze([
   R.WEEK_DIFFERS,
 ]);
 
+/**
+ * Why a game the file names is NOT written by the apply (PR 5): a closed list that can grow by one (F11-2 adds
+ * `skipped-scored`, when a score holds a game as Published does). The SQL emits these literals
+ * (`apply_game_import_job`, `skipped` of its result and `skipped_games` of its list); `tests/gameImportSkipReasons.test.js`
+ * holds this list to the SQL text and requires words for each, so a reason added in one place and not the other fails.
+ */
+export const SCHEDULE_IMPORT_SKIP_REASONS = Object.freeze(['skipped-published']);
+
 /** The reasons a TIME TBD game from an import may carry. */
 export const SCHEDULE_IMPORT_TBD_REASONS = Object.freeze([R.IMPORTED_WITHOUT_TIME]);
 
@@ -147,6 +155,25 @@ const DESCRIPTIONS = Object.freeze({
   [R.WEEK_DIFFERS]: 'The Week in the file is not the week the date falls in.',
   [R.IMPORTED_WITHOUT_TIME]: 'The file gave no time or no field for the game.',
 });
+
+const SKIP_DESCRIPTIONS = Object.freeze({
+  'skipped-published':
+    'The game is Published and the file would change it. Allow changes to it first, then import again.',
+});
+
+/**
+ * A sentence for a skip reason, for a screen that has only the reason.
+ *
+ * @param {string} reason
+ * @returns {string}
+ * @throws {Error} on a reason that is not in {@link SCHEDULE_IMPORT_SKIP_REASONS}, or that has no words
+ */
+export function describeScheduleImportSkip(reason) {
+  if (!SCHEDULE_IMPORT_SKIP_REASONS.includes(reason) || !Object.hasOwn(SKIP_DESCRIPTIONS, reason)) {
+    throw new Error(`scheduleImport: "${String(reason)}" is not a skip reason with words`);
+  }
+  return SKIP_DESCRIPTIONS[reason];
+}
 
 /**
  * A sentence for a code, for a screen that has only the code.

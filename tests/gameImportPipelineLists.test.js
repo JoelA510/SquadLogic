@@ -301,11 +301,12 @@ describe('the code names games where the plan says it does, and not where PR 6 o
   });
 
   it('PLANT: a ready file that stops naming games is reported', () => {
-    const source = (lists.get('frontend/src/lib/mockSupabaseClient.js') ?? '').replace(
-      /'games'/g,
-      "'gamez'"
-    );
-    expect(namesGames(source)).toBe(false);
+    const original = lists.get('frontend/src/lib/mockSupabaseClient.js') ?? '';
+    // CONTROL first: the real file names games, so the plant below is what turns it off.
+    expect(namesGames(original)).toBe(true);
+    const planted = original.replace(/(['"`])games\1/g, '$1gamez$1');
+    expect(planted).not.toBe(original);
+    expect(namesGames(planted)).toBe(false);
   });
 });
 

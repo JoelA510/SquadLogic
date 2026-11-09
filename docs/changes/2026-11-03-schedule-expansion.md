@@ -6,9 +6,10 @@ Kind: FEATURE (thirteen active pull requests, PR 1 to 13; PR 14 is held by the o
 2026-11-06 twice, `origin/main` still `c3d190d` ; Owner: the repository owner ; Status: **PLAN ONLY: no code, migration,
 fixture or test is written by this change.** The owner approved the scope on 2026-11-03 and the practice-side
 additions on 2026-11-06, answered all thirty-one decisions on 2026-11-06 and said "Let's proceed with your changes and
-recommendations" (the messages are verbatim at the top of section 10). **The hold is lifted.** One gate remains before
-PR 5: the F11 plan, a separate document the owner approves (decision 12); PR 14 is held (decision 28). Work starts with
-PR 1 together with PR 4 (section 14). A new scope, a new dependency or anything outside this plan still needs the owner.
+recommendations" (the messages are verbatim at the top of section 10). **The hold is lifted.** The gate before PR 5, the
+F11 plan (decision 12), was approved on 2026-11-07 and its F11-1 is merged; PR 14 is held (decision 28). Work started with
+PR 1 together with PR 4; what is merged and what is next is in section 14 (updated 2026-11-09; the rest of this header is
+the 2026-11-06 text). A new scope, a new dependency or anything outside this plan still needs the owner.
 Order of work around this plan (owner, 2026-11-06): dependency updates are cleared now and are a separate wave, not in
 this plan; then this expansion; then the owner's manual testing; then the test-suite audit; then the desktop build (the
 desktop build, including the Windows version, is **not** in this plan).
@@ -1298,8 +1299,8 @@ never a second `/code-review` on the same PR. Documentation and very minor PRs, 
 `/code-review`. The tag is in each PR header below; the one-line reasons are in decision 16. **(c): PRs 1, 2, 4, 5, 6, 8,
 9, 10, 11, 12. (a): PRs 3, 7, 13.** PR 4 and PR 9 are on the (c) list although the rule-14 sentence above does not name
 them: they persist nothing, so rule 14 does not apply, but they hold the label-matching, conflict-audit, alias and
-probable-move logic that a review exists to check. Until task A6 (PR 1) merges, every agent brief names this policy as an
-owner-approved exception to AGENTS.md section 3.
+probable-move logic that a review exists to check. Task A6 (PR 1) landed this policy in AGENTS.md section 3 and CLAUDE.md's
+Review bullet (#707), so no agent brief needs to name an exception.
 
 **Cost note for every PR (the owner's budget rules, 2026-11-03).** Run only the touched test files while iterating; one
 `npm run test:coverage` at the end; run only the **new** E2E feature locally, after `bddgen`; pgTAP and the `dbharness`
@@ -1340,8 +1341,9 @@ path. **Its first commits cherry-pick the plan commits `0cafa0e`, `0869b07` and 
       PRs need no review; every other PR is reviewed by Codex first, then gets one `/code-review` after the Codex
       findings are addressed. The owner approved this edit in principle (message 1, section 10) and the hold on it is
       lifted. Before editing, `rg` the repository for the two bullets' text; a test or doc that quotes them is updated in
-      the same commit. No code; labelled _statically reviewed_. Until it merges, every agent brief names the policy as an
-      owner-approved exception.
+      the same commit. No code; labelled _statically reviewed_. It landed in #707, so no agent brief needs to name an
+      exception. _(The "every other PR gets one `/code-review`" wording above was narrowed on 2026-11-09 to decision 16's
+      class (c) only: AGENTS.md section 3 is the current text.)_
 
 Plants (each turns the named test red, then is reverted; `scripts/dbharness/prove.sh` entries): the guard's column list
 omits `home_team_id` (the "refuses a team swap on a Published game" case); the omission check removed (the "save that
@@ -1809,21 +1811,20 @@ Only what was read in the code (_statically reviewed_); the references are the o
   desktop version is not in scope.
 - **Installs and dependencies:** none added; reading `.xlsx` would add one and is deferred past the dependency-update
   wave (decisions 8 and 21).
-- **A departure from AGENTS.md section 3, now the owner's decision 16 (2026-11-06).** Section 3 asks for an adversarial
+- **A departure from AGENTS.md section 3, now the owner's decision 16 (2026-11-06).** Section 3 asked for an adversarial
   review (`/code-review`) before every PR. The owner decided a content-based policy instead (section 7, "Review", and
   decision 16): a (c) PR opens without `/code-review`, gets the Codex review, then one `/code-review high`; an (a) PR
   gets a labelled self-review plus the Codex review; documentation, very minor and dependency PRs get no `/code-review`.
-  This plan records it. PR 1's task A6 edits AGENTS.md section 3's review bullet and CLAUDE.md's Review bullet (a
-  separate commit) so agents stop seeing a contradiction; until it merges, every agent brief names the policy as an
-  owner-approved exception.
+  This plan records it. PR 1's task A6 edited AGENTS.md section 3's review bullet and CLAUDE.md's Review bullet (a
+  separate commit, landed in #707) so agents stop seeing a contradiction; no agent brief needs to name an exception now.
 - **No ADR folder exists**, so the decisions are recorded here and, once settled, in `docs/LESSONS_LEARNED.md`.
 
 ## 10. Owner decisions
 
 Each decision below keeps its options and the recommendation as offered; the owner's answer is in the block that
 follows and in the "Answer (2026-11-06)" line under the decisions that carry one. **The hold is lifted (change 9
-below).** No decision blocks a PR now. What still gates work: the F11 plan before PR 5 (decision 12), and PR 14 is held
-(decision 28).
+below).** No decision blocks a PR now. What still gates work: PR 14 is held (decision 28); the F11 plan before PR 5
+(decision 12) was approved on 2026-11-07 and its F11-1 is merged.
 
 ### Owner answers (2026-11-06)
 
@@ -1958,6 +1959,125 @@ owner asked for, and no work for it is planned here).
 | B6  | (a) GitHub and the transcript (overrides the recommendation of (b))                                                                       |
 | B7  | the owner's checks; manual testing moves to the end                                                                                       |
 
+### Owner answers (2026-11-09)
+
+The owner's answers of 2026-11-09, one dated entry each. Words in quotation marks are the owner's, as sent (only
+whitespace is normalised: entry 2 had two spaces after "etc."); a line labelled "Consequence" is the agent's reading, not
+the owner's. Nothing here adds a pull request, a decision number or scope; where an answer opens something unplanned, the
+entry says so and plans nothing.
+
+1. **2026-11-09, merging #712 (F11-1) without a completed Codex review.** "A - as recommended." Context (the
+   coordinator's account, not re-run here): Codex failed six times on that PR; CI was green; one `/code-review high` pass
+   and one independent read-only review of the fix round found no shipped-behaviour defect; #712 was merged on the owner's
+   explicit word as `e5ce8b8`. Consequence: F11-1 is merged; PR 5 and F11-2 to F11-5 are next (section 14).
+2. **2026-11-09, B5.10: what `registration_status`, `experience_years` and `buddy_request_name` are for** (the buddy
+   request was answered earlier and is not restated). "Registration status allows players to be in the system, but not
+   teamed, if they are currently on a waitlist or haven't yet paid. This gives better visibility into how many more
+   players can be accepted anyways within the divisions teaming limits on team size/etc. The years of experience are a
+   stand-in for skill level for many rec programs that do not establish skill ratings for players."
+   **Follow-up, 2026-11-09 (later), on my recommendation to plan the registration-state and experience work after PR 5.**
+   The owner: "As for the plan; your recommendation suffices here." And: "The registration_status should be almost
+   unanimously "FALSE" in the Waitlist column for the initial import. In the real example, there's 36 "TRUE" waitlisted
+   players and 1427 "FALSE" players that are not waitlisted and safe to team. No need for the payment guardrail, and this
+   should be mappable upon import like other columns where a user can use a drop down to identify the correct mapping from
+   their data to the program's value (with best effort matching that lists current recommendations where possible, which
+   I think also already exists.) If info isn't present in the import data, relevant features like teaming with a balance
+   of coaching leads or years of experience for players (as listed by registrants during registration, not held by this
+   program) should be defaulted to off (or on, if available.)" The consequences below are the agent's reading, revised
+   after the follow-up; they are **UNPLANNED and not decided** (no work is planned for them here). File references are as
+   of `e5ce8b8`, read statically; nothing was executed.
+   - (a) The signal is the platform's Waitlist column: TRUE is not yet teamed, FALSE is safe to team (counts from the real
+     example, no names: 36 and 1427). That closes the earlier ask for the distinct values. A per-division "how many more
+     players can be accepted" view, or any new stored registration state, would still be a domain-model and persistence
+     change (AGENTS.md rule 14: a plan first). What the repository already says: the import maps `waitlist` and
+     `waitlisted` to `status` (`docs/architecture/gotsport-import-contract.md`: "the waitlist status stays the teaming
+     gate"); the finalizer stores `waitlist` for the values `true`, `t`, `yes`, `y` and `1` and `active` for anything
+     else, blank included, while the organization's Waitlist setting is on, which is its default
+     (`supabase/migrations/20261101010000_one_active_season.sql:475-476` and `:528-529`); generation seats nobody on the
+     waitlist (`packages/core/src/playUp.js:74`); and `years_played` is stored as `players.years_played` (the contract:
+     teaming reads it when the Years Played option is on). Whether `registration_status` and `experience_years` duplicate
+     these is not decided here; `docs/changes/2026-11-03-drop-placement-eligible.md` ("Owner notes") records that the two
+     columns are named only by `20260530000000`, its smoke and its revert, and that their production state was not read.
+   - (b) My earlier payment-guardrail consequence is withdrawn: the owner says no payment guardrail is needed, because the
+     column is Waitlist, not payment. Nothing here asks for payment data, and AGENTS.md section 2's scope rule is
+     unchanged.
+   - (c) Mapping at import (the owner wrote "I think also already exists"). Found, statically:
+     - Auto-matching exists: `matchHeaders` (`frontend/src/utils/telemetryUtils.js:345`) matches a header by system key, a
+       GotSport profile bias, the alias table `HEADER_ALIASES` (`waitlist` and `waitlisted` map to `waitlist` at
+       `:171-172`; the server's own alias map does the same, `supabase/functions/import-validation/index.ts:217-218`), and a
+       fuzzy match (similarity above 0.85) to the organization's declared custom fields; a match under 0.95 is listed as
+       needing confirmation.
+     - A dropdown mapper with "(suggested)" hints exists: `frontend/src/components/ColumnMapper.jsx` has a `<select>` per
+       field over the file's columns with the matcher's pick marked "(suggested)" (`:350-367`), remembered per import type
+       in localStorage (`:89`, `:217`).
+     - It does not reach the Waitlist column as the owner describes. The mapper opens by itself only when a required column
+       is missing (`frontend/src/components/ImportPanel.jsx:367-373`, `findMissingRequiredHeaders` in
+       `frontend/src/utils/importHeaders.js`; a player file requires first name, last name and date of birth), or by
+       "Adjust mapping" after the preview (`ImportPanel.jsx:1045-1057`); and its player fields are first name, last name,
+       date of birth and skill tier only (`ColumnMapper.jsx:15-22`; the evaluations import adds years played and rating,
+       `:32-44`). There is no Waitlist field to map to. So today a column counts as the waitlist only when its header
+       reads as `waitlist` or `waitlisted`; a differently named column is not offered a dropdown for it.
+     - NOT confirmed: that the real file's header is `Waitlist` (the file was not seen); that the setting "Fuzzy Data
+       Alignment (AI)" (`fuzzy_import_mapping`, `frontend/src/components/settings/FeatureFlagSettings.jsx:41-44`,
+       `frontend/src/constants/featureFlags.js:40`) does anything, since `git grep` finds no reader of it outside those two
+       files; and any behaviour in a browser.
+   - (d) Features that depend on optional import data (the owner: off when the data is absent, on when it is present).
+     Found, statically:
+     - They are organization settings: `years_played` on, `player_rating` off, `teaming_spread_coaching_leads` on,
+       `coaching_interest` on and `waitlist` on by default (`frontend/src/constants/featureFlags.js:136-145`), and
+       `skill_tier` off unless turned on (`:45-50`). An admin sets them; whether the file carried the column does not
+       switch them, so "on if available" is not automatic.
+     - Absent data is inert in what I read: the Teams page gives a generator player `years_played`, `skillRating`,
+       `isCoachingLead` or `status: 'waitlist'` only when its row carries one
+       (`frontend/src/pages/TeamAnalysisPage.jsx:897-902`); the coaching-lead deal does not apply in a division with no
+       lead (`resolveLeadPolicy` returns null, "placement exactly as it was before B6",
+       `packages/core/src/teamGeneration.js:1386-1396`; `countLeads`, `packages/core/src/coachingLeads.js:85`); and with
+       the years signal on but no player carrying it, the lead compensation is 0
+       (`packages/core/src/balanceSignals.js:55-62` and `:85-87`; `teamGeneration.js:72`).
+     - The registered evaluators are `BuddyEvaluator` and `WeightedAttributeEvaluator`
+       (`packages/core/src/evaluators/index.js`). The weighted one defaults to weights `{ skill_rating: 1.0 }` when none
+       are given (`WeightedAttributeEvaluator.js:29-37`), reads an absent attribute as the league mean and treats equal
+       values as neutral (`:43-60`); it has no switch for the data's presence. There is no evaluator for coaching leads or
+       years played by name: those are the lead deal in `teamGeneration.js` and `balanceSignals.js`.
+     - NOT confirmed: whether the Teams page feeds the Years Played setting into the evaluator's weights (in
+       `packages/core/src` only `balanceSignals.js` reads `years_played`, and I did not trace the page's other uses);
+       whether any screen tells an admin that a feature is idle because the column is missing; and any behaviour in a
+       browser. `experience_years` as a stand-in for skill level stays a candidate evaluator input (the
+       `squadlogic-evaluator-designer` skill; plan first).
+   - (e) Still UNPLANNED. The owner agreed to plan it after PR 5 ("your recommendation suffices here"): it needs a
+     plan-change (AGENTS.md rule 14), listed in section 14 as "plan: registration state and optional-data features (after
+     PR 5)" with no PR number. The data-minimisation rule (AGENTS.md section 2) and the import allowlist
+     (`docs/architecture/gotsport-import-contract.md`) still apply to any new stored field.
+3. **2026-11-09, the upstream Tailwind report is filed** (reported, not a quotation):
+   https://github.com/tailwindlabs/tailwindcss/issues/20685. Consequence: a Dependabot ignore for `tailwindcss` and
+   `@tailwindcss/vite` 4.3.4 and 4.3.5, citing it (AGENTS.md rule 16), is a separate config-only pull request; the
+   repository stays on 4.3.3.
+4. **2026-11-09, B7 (the 2026-11-09 numbering, not the "B7" row of the 2026-11-06 table above): the official domain shows
+   "Try the demo".** "Yes". Follow-up, 2026-11-09 (later), from the owner: "The vercel key VITE_DEMO_ENABLED was already
+   set to true." Consequence: `VITE_DEMO_ENABLED` is set to true on the official Vercel project (owner, 2026-11-09), so
+   nothing is left to set for it. The other steps of `docs/operations/release-prep.md` (3 to 5: Turnstile, the Vercel
+   variables, Supabase anonymous sign-ins and CAPTCHA) are also needed for the demo: not verified by the agent.
+5. **2026-11-09, manual testing of `main`.** "I'll do this a little later, I'd prefer we shore up more of the open work
+   first." Consequence: no start date for the owner's manual testing; the open work comes first.
+6. **2026-11-09, F11 unknown U2 (does a scheduling platform reuse Game IDs across seasons).** "Game IDs should be
+   specific to each game, not reused, as to remain clear on what game is being affected during changes (such as venue or
+   time change.)" Consequence: PR 5 keeps `external_ref` unique on `(season_settings_id, external_ref)`, which is safe
+   either way; nothing else changes.
+7. **2026-11-09, the non-blocking decisions.** "Agree" to the coordinator's recommendations:
+   - The capacity panel leaves TIME TBD teams out of its reading, as declared on its face (no change).
+   - The practice solver's `practice-length` reason for a right-length slot reserved elsewhere is left alone (the panel is
+     more precise and a test pins the solver); fix it only if it confuses in testing.
+   - `fetchAllPages` stops on a short page, and that assumption stays (`config.toml` `max_rows = 1000` equals the page
+     size); revisit only if the cap is lowered.
+   - The reports do not name a cancel or a save from the audit log now (revisit with F11-3).
+   - The Changes note stays out of the CSV.
+   - No XLSX for the coach schedule now.
+   - No Published column on the Day Sheet.
+   - The one-line refetch after a 409 `GAME_IDENTITY` on the Games page is folded into F11-3 (task C6 of
+     `docs/changes/2026-11-06-games-table-source-of-truth.md`).
+   - `publishedOmissions` and `changesPublishedPlacement` (no shipped caller since F11-1) are removed in F11-3 if still
+     unused (task C7 there).
+
 ### The thirty-one decisions (as offered, with the answer under those that carry one)
 
 1. **Who may override, and what it needs.** Recommended: any `is_org_admin` (admin, tenant admin, staff, as every
@@ -2048,7 +2168,7 @@ owner asked for, and no work for it is planned here).
     opens WITHOUT `/code-review`; Codex reviews it; the Codex findings are addressed; then ONE `/code-review high` runs on
     the result and its findings are fixed in the same push. Never a second `/code-review` on the same PR. AGENTS.md
     section 3 and CLAUDE.md's Review bullet are edited in PR 1 (task A6, a separate commit) so agents stop seeing a
-    contradiction; until it merges, every agent brief names this as an owner-approved exception.
+    contradiction; A6 landed in #707, so no agent brief needs to name an exception.
 
 17. **Week numbers for imported games.** Recommended: the `Week` column if present, else derived from the season's start
     date (4.8), required when the season has no start date. Alternative: always require `Week`.
@@ -2277,9 +2397,10 @@ delete path was not re-searched.
 
 1. Size verdict: planned, not small (above). No test is named for a small change because none is small.
 2. Departures from AGENTS.md: one, the owner's review policy (decision 16), recorded in section 9 and edited into
-   AGENTS.md and CLAUDE.md by PR 1's task A6. No ADR is drafted (the repository has no ADR folder). Open questions: none;
-   all thirty-one decisions were answered on 2026-11-06 (section 10; 1 to 18 as drawn up on 2026-11-03, 19 to 31 added
-   2026-11-06). The hold is lifted. One gate remains, the F11 plan before PR 5 (decision 12); PR 14 is held.
+   AGENTS.md and CLAUDE.md by PR 1's task A6 (landed in #707). No ADR is drafted (the repository has no ADR folder). Open
+   questions: none; all thirty-one decisions were answered on 2026-11-06 (section 10; 1 to 18 as drawn up on 2026-11-03,
+   19 to 31 added 2026-11-06). The hold is lifted. The one gate that remained, the F11 plan before PR 5 (decision 12), was
+   approved on 2026-11-07 and its F11-1 is merged (#712); PR 14 is held.
 3. The first tasks: PR 1's A1, starting with `supabase/tests/game_published.sql`, red against today's code, and, in the
    second slot, PR 4's D1 (the fixture and its test).
 4. What the planning taught: section 12.
@@ -2289,7 +2410,7 @@ delete path was not re-searched.
 **Read, in this order.** (1) This plan: the Amendments, the owner's answers at the top of section 10, sections 2 and 2.1, 3,
 4 (with 4.6 and 4.11), 5.7 to 5.9, 6.2, 7, 10. (2) `AGENTS.md` sections 2 and 3 (operating rules 1 to 16,
 the Verification conventions, the Definition of Done) and `docs/LESSONS_LEARNED.md` 5, 37, 42, 46, 47, 56, 59, 64, 65, 66, 70,
-72, 73, 74, 77, 86, 87, 90, 92, 93, 94. (3) The precedents to copy: `supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql`
+72, 73, 74, 77, 86, 87, 90, 92, 93 to 100. (3) The precedents to copy: `supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql`
 (header and `unlock`), `20261111010000_season_rollover.sql:520-655` (the read-only triggers and their exemptions),
 `20261108020000_schedule_tbd.sql:1763-2440` (`persist_game_schedule` as it stands), `20260613000003:68`
 (`admin_cancel_game_assignment`), `20261029010000:1008-1100` (find-or-create game slot), `20260503060000` (staging and
@@ -2304,42 +2425,56 @@ must join). (4) The pgTAP shapes: `supabase/tests/season_schedule_readonly.sql` 
 (5) The page: `frontend/src/pages/GameSchedulingPage.jsx` (`handleAutoGenerate:918`, `handleApplySchedule:1099`,
 `moveGameTo:1203`, `handleCancelGameAssignment:1374`), `GameCard.jsx`, `GridOverrideDialog.jsx`, `gridOverridePrompt.js`.
 (6) Core: `gameScheduling.js` (`scheduleGames:307`, `savedSides:84`), `gameMetrics.js` (`evaluateGameSchedule:93`),
-`timing/seasonClock.js`, `externalImport/mapping.js` (`normaliseExternalLabel`).
+`timing/seasonClock.js`, `externalImport/mapping.js` (`normaliseExternalLabel`). Line numbers in (3), (5) and (6) are as of
+`c3d190d` and have moved: search by name.
 
 **Re-verify before relying on anything here (main moves).** `git log -1` and the highest file in `supabase/migrations`
-(it was `20261118010000` at `c3d190d`); then re-run the searches of section 11 (R1 to R5 and the absence counts) and read
-the numbers against it; confirm `scheduleGames` still has no `pinned` and still refuses `freeze`; confirm no other
+(it was `20261118010000` at `c3d190d` and `20261120010000` at `e5ce8b8`); then re-run the searches of section 11 (R1 to R5
+and the absence counts) and read the numbers against it; confirm `scheduleGames` takes `pinned` (PR 2) and still refuses
+`freeze`; confirm no other
 writer of `game_assignments` has appeared (R5). For the practice side re-run R17 to R28 and confirm that
 `persist_practice_schedule`, `practice_new_auto_row_refusals` and `refresh_schedule_tbd_practices` are still the bodies
 read here, and that `admin_delete_team`'s latest body is still `20261112010000:1413` (R19). The owner's two workbooks
 are **outside the repository** (the second, a practice grid, was recomputed on 2026-11-06); if a figure from them is
 needed again, ask the owner for the files and recompute counts only. Never copy a name or value.
 
-**Where this stands (2026-11-06).** The owner answered all thirty-one decisions and lifted the hold. The verbatim messages,
-the nine agreed changes and the answer table are at the top of section 10: read them first. Nothing is built yet.
+**Where this stands (updated 2026-11-09; first written 2026-11-06).** The owner answered all thirty-one decisions and
+lifted the hold. The verbatim messages, the nine agreed changes and the answer table are at the top of section 10, and the
+owner's answers of 2026-11-09 follow them: read them first. **Merged on `main`** (statically read from `git log` at
+`e5ce8b8`; whether each migration is deployed was not checked): PR 4 (#706), PR 1 (#707), PR 9 (#708), PR 2 (#709), PR 3
+(#710), PR 13 (#711), PR 7 (#713), and the F11 plan's F11-1 (#712). **Not merged:** PR 5, 6, 8, 10, 11 and 12, and F11-2 to
+F11-5; no pull request was open on 2026-11-09. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28).
-- **Gated.** The F11 plan (decision 12) must be approved by the owner before PR 5 starts. It is a separate document that
-  compares options against four criteria and picks no approach in advance (section 7); its own PR list is added to the
-  order when it is approved. Nothing else gates a start; an agent still merges only when the owner has said so for that PR
-  (AGENTS.md section 3), and new scope, a new dependency or anything outside this plan still needs the owner.
+  held (decision 28). Left in that order: PR 5 (next; confirm F11-1's migration `20261120010000` is deployed first), PR 6,
+  PR 10, PR 8, PR 11, PR 12. The F11 plan's own order: F11-2 and F11-3 after PR 6, ahead of PR 10; F11-4 before PR 12;
+  F11-5 last and only on the owner's word. Also next, with no PR number: plan: registration state and optional-data
+  features (after PR 5), a plan-change the owner agreed to on 2026-11-09 (section 10, entry 2).
+- **Gate cleared.** The F11 plan (decision 12; `docs/changes/2026-11-06-games-table-source-of-truth.md`) was approved by
+  the owner on 2026-11-07 and its F11-1 (identity) is merged (#712). PR 5 is specified with that plan's amendments ("What
+  PR 5, and the other pull requests, must do or avoid"); the owner answered on 2026-11-09 that Game IDs are not reused, so
+  its `external_ref` index stays unique on `(season_settings_id, external_ref)`. Nothing else gates a start; an agent
+  still merges only when the owner has said so for that PR (AGENTS.md section 3), and new scope, a new dependency or
+  anything outside this plan still needs the owner.
 - **Review.** By content (decision 16; section 7, "Review"): (c) for PRs 1, 2, 4, 5, 6, 8, 9, 10, 11, 12; (a) for PRs 3, 7, 13. A (c) PR opens without `/code-review`; Codex reviews it; its findings are addressed; then one `/code-review high`
-  runs and its findings are fixed in the same push; never a second. Documentation, very minor and dependency PRs get no
-  `/code-review`. Until PR 1's task A6 merges, every agent brief names this as an owner-approved exception to AGENTS.md
-  section 3.
+  runs and its findings are fixed in the same push; never a second. An (a) PR gets a labelled self-review and the Codex
+  review, no `/code-review`. Documentation, very minor and dependency PRs get no `/code-review`. AGENTS.md section 3 and
+  CLAUDE.md's Review bullet say exactly this (task A6 of PR 1 first edited them; a later docs pull request made them match
+  the (c) and (a) split), so no agent brief needs to name an exception.
 - **Cost rules** (section 7, cost note): only the touched test files while iterating; one `npm run test:coverage` at the
   end; only the new E2E feature locally, after `bddgen`; pgTAP and the `dbharness` plants run in CI; docs stay short; each
   PR description says what it did not run; no dependency is added.
-- **Start with PR 1 together with PR 4**; neither needs the other. PR 1's first commits cherry-pick the plan commits.
-  The dependency updates are a separate wave and are not in this plan; the owner's manual testing, the test-suite audit
-  and the desktop build come after this expansion (header).
-- **Decisions.** None open (section 10). Owed to the owner outside this plan: the read-only review of B5.10 (message 1),
-  labelled static review, with no work planned for it.
+- **PR 1 and PR 4 started together and are merged.** The dependency updates are a separate wave and are not in this plan;
+  the owner's manual testing (2026-11-09: "I'll do this a little later, I'd prefer we shore up more of the open work
+  first."), the test-suite audit and the desktop build come after this expansion (header).
+- **Decisions.** None open (section 10). B5.10 was answered on 2026-11-09 (section 10, entry 2): the signal is the
+  platform's Waitlist column. What the owner described is still UNPLANNED and not decided; it needs a plan-change
+  (AGENTS.md rule 14) after PR 5, which the owner agreed to ("your recommendation suffices here"), and no work is
+  planned for it in this plan.
 
-**How to start PR 1 without re-deriving anything.**
+**How PR 1 was started (merged as #707; kept as a record, not a to-do).**
 
 1. `git fetch origin main`; branch `feat/game-published-db`; check that fewer than two pull requests are open;
    cherry-pick the plan commits `0cafa0e`, `0869b07` and the 2026-11-06 amendment commit (see `git log`) as the branch's
@@ -2359,14 +2494,14 @@ the nine agreed changes and the answer table are at the top of section 10: read 
    `assignment_source` or its `locked` mapping; edit `prompts/` or the template skills; copy any value from the owner's
    workbooks; use the word "override" for anything but "allow changes" (finding on the Edge `overrides` field).
 
-**How to start PR 4** (together with PR 1; it needs nothing from it).
+**How PR 4 was started** (merged as #706; kept as a record, not a to-do; it needed nothing from PR 1).
 
 1. `git fetch origin main`; branch `feat/schedule-import-core`; check that fewer than two pull requests are open.
 2. Write `tests/scheduleFixture.test.js` first (4.9), get it red, then `scripts/build-schedule-fixture.mjs` and the files.
    Never take a name, venue or value from the owner's workbook.
 3. Then D2's tests before the code (`scheduleImportParse`, `scheduleImportMapping`, `scheduleImportAudit`).
 
-**How to start PR 9** (only after PR 4 has merged; decisions 19, 21 and 30 are answered).
+**How PR 9 was started** (merged as #708; kept as a record, not a to-do; it waited for PR 4; decisions 19, 21 and 30 were answered).
 
 1. `git fetch origin main`; branch `feat/practice-import-core`; check that fewer than two pull requests are open.
 2. Write `tests/practiceScheduleFixture.test.js` first, counting the plants **from the CSV** (not from the product) and

@@ -605,6 +605,11 @@ becomes "create the `games` view" and is smaller.
 - [ ] C4 (S) The census `tests/gamesTableReaders.test.js` (from the code); it is red while any reader names `games`.
 - [ ] C5 (S) The parity test `tests/currentGameRunsParity.test.js`: the SQL view and `useSchedulerRun` pick the same run
       over two seasons, a run with no season and an older run.
+- [ ] C6 (S) (owner, 2026-11-09) The Games page reads the saved schedule once more after a 409 `GAME_IDENTITY`. Test: a page
+      test that answers the save with that 409 and asserts the extra read (the file is named when it is written).
+- [ ] C7 (S) (owner, 2026-11-09) Remove `publishedOmissions` and `changesPublishedPlacement` (`packages/core/src/gamePublished.js`)
+      if still without a shipped caller (today only tests call them, statically searched 2026-11-09; two page tests use
+      `publishedOmissions` as an oracle and move or go with it). Test: `npm run check:unused` green and their own tests gone.
 
 Plants: a reader still on `games` (the census); the team page reading every run instead of the current one (a moved game
 appears twice); the feed swallowing a failed read. Stop and report if any reader's markup changes, or if an embed needs a
@@ -723,6 +728,19 @@ Order after this: F11-1, then PR 5 (with the amendments in "What PR 5 ... must d
 after PR 6, ahead of PR 10; F11-4 before PR 12; F11-5 last and only on the owner's word. U1 (the PostgREST view spike),
 U2 (do platforms repeat Game IDs across seasons: ask the owner) and U5 stay open as written.
 
+### Owner answers (2026-11-09)
+
+- **F11-1 is merged.** The owner answered "A - as recommended." to whether #712 (F11-1) could merge without a completed Codex
+  review (Codex failed six times on it; the coordinator's account, not re-run here: CI was green, and one
+  `/code-review high` pass and one independent read-only review of the fix round found no shipped-behaviour defect).
+  Merge commit `e5ce8b8`. Consequence: PR 5 is next on the schedule side, then PR 6; F11-2 to F11-5 follow the order above.
+- **U2 is answered.** The owner: "Game IDs should be specific to each game, not reused, as to remain clear on what game is
+  being affected during changes (such as venue or time change.)" Consequence: PR 5's `external_ref` stays unique on
+  `(season_settings_id, external_ref)`, which is safe either way; nothing else changes.
+- **Agreed, non-blocking (owner: "Agree").** Two of the agreed items are tasks of F11-3 below (C6 and C7): the one-line
+  refetch after a 409 `GAME_IDENTITY` on the Games page, and removing `publishedOmissions` and `changesPublishedPlacement`
+  if still unused. The others are in the expansion plan, section 10, "Owner answers (2026-11-09)".
+
 ## Unknowns, and what would resolve them
 
 - **U1. Whether PostgREST embeds `teams` and `game_slots` through a view named `games`, and resolves the feed's
@@ -730,7 +748,7 @@ U2 (do platforms repeat Game IDs across seasons: ask the owner) and U5 stay open
   assignment, the three embed shapes) decides C versus A at F11-3. It also covers the to-one embed of a score on the Games
   page's read.
 - **U2. Whether a platform's Game IDs repeat from one season to the next.** Ask the owner; the per-season scope is safe
-  either way.
+  either way. **Answered 2026-11-09:** not reused (see "Owner answers (2026-11-09)").
 - **U3. Whether PR 1 has started or merged.** `git log` and `gh pr list` when this plan is read; it decides whether F11-1 rides
   PR 1 or is a fifth migration.
 - **U4. Whether any pgTAP or vitest file other than the named ones relies on a hidden row after a move.** A search of

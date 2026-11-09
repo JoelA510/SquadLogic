@@ -74,6 +74,20 @@ updates:
       # and running `npm run typecheck`.
       - dependency-name: '@sentry/react'
         versions: ['11.10.x']
+      # 2026-11-09: tailwindcss and @tailwindcss/vite stay on 4.3.3.
+      # `@tailwindcss/oxide-wasm32-wasi` 4.3.3 declares `"cpu": ["wasm32"]`; 4.3.4 and
+      # 4.3.5 declare no cpu field, so npm installs that WASI fallback (about 6.7 MB and
+      # six extra packages) on every platform; no functional break was found. This is
+      # a workaround for an upstream bug, reported at
+      # https://github.com/tailwindlabs/tailwindcss/issues/20685 (AGENTS.md, operating
+      # rule 16). Remove these two entries when a tailwind release restores the cpu
+      # field; check a release by bumping both packages by hand in a scratch branch and
+      # looking for `@tailwindcss/oxide-wasm32-wasi` in the lockfile on this platform.
+      # The two packages move together, so both carry the same versions.
+      - dependency-name: tailwindcss
+        versions: ['4.3.4', '4.3.5']
+      - dependency-name: '@tailwindcss/vite'
+        versions: ['4.3.4', '4.3.5']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       minor-and-patch:

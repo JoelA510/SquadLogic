@@ -54,6 +54,7 @@ import {
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { useSeasonReadOnly } from '../hooks/useSeasonReadOnly.js';
+import { useSeasonTeamDirectory } from '../hooks/useSeasonTeamDirectory.js';
 import SeasonReadOnlyNote from '../components/chrome/SeasonReadOnlyNote.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
@@ -910,6 +911,16 @@ export default function GameSchedulingPage() {
     return map;
   }, [schedulerTeams]);
 
+  // The names of the teams a saved game names: the season's teams as the tables hold them (an outside club is in no team
+  // run, so the run's teams would show it as its id), with the run's teams, which the solver is handed, taking their entries.
+  const seasonTeams = useSeasonTeamDirectory();
+  const displayTeamById = useMemo(() => {
+    const map = new Map();
+    for (const entry of seasonTeams) map.set(entry.id, entry);
+    for (const [id, entry] of teamById) map.set(id, entry);
+    return map;
+  }, [seasonTeams, teamById]);
+
   const divisionById = useMemo(() => {
     const map = new Map();
     for (const entry of team?.divisions ?? []) {
@@ -951,12 +962,12 @@ export default function GameSchedulingPage() {
           assignment,
           index,
           runId: game?.runId,
-          teamById,
+          teamById: displayTeamById,
           slotById,
           fieldById,
         })
       ),
-    [fieldById, game?.assignments, game?.runId, slotById, teamById]
+    [displayTeamById, fieldById, game?.assignments, game?.runId, slotById]
   );
 
   useEffect(() => {
@@ -1388,7 +1399,7 @@ export default function GameSchedulingPage() {
           assignment,
           index,
           runId: null,
-          teamById,
+          teamById: displayTeamById,
           slotById,
           fieldById,
         })
@@ -1438,7 +1449,7 @@ export default function GameSchedulingPage() {
     publishedGames,
     schedulerDisabled,
     slotById,
-    teamById,
+    displayTeamById,
   ]);
 
   // Auto-run when arriving from the dashboard "Run Game Scheduling" button.

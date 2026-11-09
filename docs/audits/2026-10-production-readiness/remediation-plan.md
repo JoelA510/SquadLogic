@@ -93,8 +93,8 @@ declined.
   `docs/…`, `chore/…`); the CLAUDE.md verification sequence (`lint`, `typecheck`, `test`,
   `frontend:build`, `check:advisors`, `check:bundle`) before each commit; the season-2026 fixture
   suite after any change to domain types, constraints or solver stages; a plan shown and approved
-  before any change to the solver, the domain model or persistence; `/code-review` before each PR;
-  migrations with `docs/sql/<version>_revert.sql` and `_smoke.sql`, applied only by CI.
+  before any change to the solver, the domain model or persistence; a `/code-review` on class (c) PRs
+  only (AGENTS.md section 3); migrations with `docs/sql/<version>_revert.sql` and `_smoke.sql`, applied only by CI.
 - **Do not do** (out of scope for this plan, even if tempting):
   no framework, router, Vite or TypeScript major upgrade; no move off Supabase or Vercel; no
   schema reset, and no edit or rename of an applied migration; no `supabase db push`, Supabase

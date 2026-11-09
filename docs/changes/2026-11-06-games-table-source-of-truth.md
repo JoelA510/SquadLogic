@@ -5,8 +5,8 @@ Drawn up: 2026-11-06 against `origin/main` `c3d190d`. Owner: the repository owne
 Status: **APPROVED by the owner, 2026-11-07 (see "Owner answers (2026-11-07)" under "Owner decisions"); this change itself is plan only: no code, migration, test or fixture is written by it.** This is the F11 plan that
 decision 12 of the schedule-expansion plan requires the owner to approve before PR 5 starts. AGENTS.md rule 14 applies
 (persistence and the domain model), so nothing here is built until the owner agrees. The expansion plan is
-`docs/changes/2026-11-03-schedule-expansion.md` on the branch `claude/vibrant-allen-hr7y7s-schedule-expansion-plan` (it is
-not on `main` yet); "expansion section N" below means that file.
+`docs/changes/2026-11-03-schedule-expansion.md` (on `main` since PR 1, #707; when this was drawn up it was on the branch
+`claude/vibrant-allen-hr7y7s-schedule-expansion-plan`); "expansion section N" below means that file.
 
 ## Labels and method
 
@@ -531,9 +531,11 @@ Each task names its test. A plant is a defect put in to prove the test can fail;
 ### F11-1: Identity (L; migration inside PR 1, or its own; rule 14; Review: (c))
 
 Depends on: PR 1, or lands inside it as separate commits. If PR 1 has merged, F11-1 replaces `persist_game_schedule` again
-and re-aims PR 1's plants (lesson 70) as the fifth migration.
+and re-aims PR 1's plants (lesson 70) as the fifth migration. **Merged as #712 (`e5ce8b8`); A1 to A5 are ticked
+because each task's files are in that merge** (statically checked on 2026-11-09: the migration, `supabase/tests/game_identity.sql`,
+its revert and smoke, `packages/core/src/gameIdentity.js`, the three test files, the mock and the docs; not re-run here).
 
-- [ ] A1 (L) Migration: `season_settings_id` on `game_assignments` and the four-column unique index; `persist_game_schedule`
+- [x] A1 (L) Migration: `season_settings_id` on `game_assignments` and the four-column unique index; `persist_game_schedule`
       updates a row in place when its payload row names an existing game; the omission check counts ids and tuples;
       `game_is_held` (Published only) and its set form; the guard, cancel and omission check call it. Revert and smoke;
       catalogue snapshot regenerated. **First** `supabase/tests/game_identity.sql`, red against today's code: a move keeps
@@ -542,16 +544,16 @@ and re-aims PR 1's plants (lesson 70) as the fifth migration.
       repeated id and a completed season are refused with nothing written; the tuple-collision case refuses with
       `game_identity_conflict`; a Published game still cannot be moved by id; each refusal paired with a control that the
       allowed twin passes.
-- [ ] A2 (M) Core `gameIdentity.js`: `carryGameIds` and `isHeld`, registered in the index. Tests
+- [x] A2 (M) Core `gameIdentity.js`: `carryGameIds` and `isHeld`, registered in the index. Tests
       `tests/gameIdentityCarry.test.js`: the saved set is the subject (enumerated from the saved games); a pair moved across
       weeks keeps its id; a double round robin matches each of the two meetings once; an odd division with byes; a flipped
       pair; a team removed; no saved game is claimed twice (made to fail by a planted double claim).
-- [ ] A3 (S) The page sends ids and applies the matcher before the review; Edge schema unchanged (the optional `id` exists).
+- [x] A3 (S) The page sends ids and applies the matcher before the review; Edge schema unchanged (the optional `id` exists).
       Test `tests/gameSchedulingIdentity.test.jsx`: regenerate and Apply twice; the visible set equals today's, the ids of
       unmoved and moved games are unchanged.
-- [ ] A4 (S) Mock client mirrors the in-place save. Test `tests/mockGameIdentity.test.js`: one input that reaches every
+- [x] A4 (S) Mock client mirrors the in-place save. Test `tests/mockGameIdentity.test.js`: one input that reaches every
       outcome gives the same answers through the mock and the pure helper (lesson 77).
-- [ ] A5 (S) Docs: `docs/ARCHITECTURE.md` (the `games` and `game_assignments` paragraph), `docs/architecture/game-scheduling.md`
+- [x] A5 (S) Docs: `docs/ARCHITECTURE.md` (the `games` and `game_assignments` paragraph), `docs/architecture/game-scheduling.md`
       (identity), one lesson (section "What the planning taught").
 
 Plants: the save inserts instead of updating in place (the "move keeps the id" case); the matcher ignores the week

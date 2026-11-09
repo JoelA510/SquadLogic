@@ -1299,8 +1299,8 @@ never a second `/code-review` on the same PR. Documentation and very minor PRs, 
 `/code-review`. The tag is in each PR header below; the one-line reasons are in decision 16. **(c): PRs 1, 2, 4, 5, 6, 8,
 9, 10, 11, 12. (a): PRs 3, 7, 13.** PR 4 and PR 9 are on the (c) list although the rule-14 sentence above does not name
 them: they persist nothing, so rule 14 does not apply, but they hold the label-matching, conflict-audit, alias and
-probable-move logic that a review exists to check. Until task A6 (PR 1) merges, every agent brief names this policy as an
-owner-approved exception to AGENTS.md section 3.
+probable-move logic that a review exists to check. Task A6 (PR 1) landed this policy in AGENTS.md section 3 and CLAUDE.md's
+Review bullet (#707), so no agent brief needs to name an exception.
 
 **Cost note for every PR (the owner's budget rules, 2026-11-03).** Run only the touched test files while iterating; one
 `npm run test:coverage` at the end; run only the **new** E2E feature locally, after `bddgen`; pgTAP and the `dbharness`
@@ -1341,8 +1341,9 @@ path. **Its first commits cherry-pick the plan commits `0cafa0e`, `0869b07` and 
       PRs need no review; every other PR is reviewed by Codex first, then gets one `/code-review` after the Codex
       findings are addressed. The owner approved this edit in principle (message 1, section 10) and the hold on it is
       lifted. Before editing, `rg` the repository for the two bullets' text; a test or doc that quotes them is updated in
-      the same commit. No code; labelled _statically reviewed_. Until it merges, every agent brief names the policy as an
-      owner-approved exception.
+      the same commit. No code; labelled _statically reviewed_. It landed in #707, so no agent brief needs to name an
+      exception. _(The "every other PR gets one `/code-review`" wording above was narrowed on 2026-11-09 to decision 16's
+      class (c) only: AGENTS.md section 3 is the current text.)_
 
 Plants (each turns the named test red, then is reverted; `scripts/dbharness/prove.sh` entries): the guard's column list
 omits `home_team_id` (the "refuses a team swap on a Published game" case); the omission check removed (the "save that
@@ -1810,13 +1811,12 @@ Only what was read in the code (_statically reviewed_); the references are the o
   desktop version is not in scope.
 - **Installs and dependencies:** none added; reading `.xlsx` would add one and is deferred past the dependency-update
   wave (decisions 8 and 21).
-- **A departure from AGENTS.md section 3, now the owner's decision 16 (2026-11-06).** Section 3 asks for an adversarial
+- **A departure from AGENTS.md section 3, now the owner's decision 16 (2026-11-06).** Section 3 asked for an adversarial
   review (`/code-review`) before every PR. The owner decided a content-based policy instead (section 7, "Review", and
   decision 16): a (c) PR opens without `/code-review`, gets the Codex review, then one `/code-review high`; an (a) PR
   gets a labelled self-review plus the Codex review; documentation, very minor and dependency PRs get no `/code-review`.
-  This plan records it. PR 1's task A6 edits AGENTS.md section 3's review bullet and CLAUDE.md's Review bullet (a
-  separate commit) so agents stop seeing a contradiction; until it merges, every agent brief names the policy as an
-  owner-approved exception.
+  This plan records it. PR 1's task A6 edited AGENTS.md section 3's review bullet and CLAUDE.md's Review bullet (a
+  separate commit, landed in #707) so agents stop seeing a contradiction; no agent brief needs to name an exception now.
 - **No ADR folder exists**, so the decisions are recorded here and, once settled, in `docs/LESSONS_LEARNED.md`.
 
 ## 10. Owner decisions
@@ -2111,7 +2111,7 @@ entry says so and plans nothing.
     opens WITHOUT `/code-review`; Codex reviews it; the Codex findings are addressed; then ONE `/code-review high` runs on
     the result and its findings are fixed in the same push. Never a second `/code-review` on the same PR. AGENTS.md
     section 3 and CLAUDE.md's Review bullet are edited in PR 1 (task A6, a separate commit) so agents stop seeing a
-    contradiction; until it merges, every agent brief names this as an owner-approved exception.
+    contradiction; A6 landed in #707, so no agent brief needs to name an exception.
 
 17. **Week numbers for imported games.** Recommended: the `Week` column if present, else derived from the season's start
     date (4.8), required when the season has no start date. Alternative: always require `Week`.
@@ -2340,9 +2340,10 @@ delete path was not re-searched.
 
 1. Size verdict: planned, not small (above). No test is named for a small change because none is small.
 2. Departures from AGENTS.md: one, the owner's review policy (decision 16), recorded in section 9 and edited into
-   AGENTS.md and CLAUDE.md by PR 1's task A6. No ADR is drafted (the repository has no ADR folder). Open questions: none;
-   all thirty-one decisions were answered on 2026-11-06 (section 10; 1 to 18 as drawn up on 2026-11-03, 19 to 31 added
-   2026-11-06). The hold is lifted. One gate remains, the F11 plan before PR 5 (decision 12); PR 14 is held.
+   AGENTS.md and CLAUDE.md by PR 1's task A6 (landed in #707). No ADR is drafted (the repository has no ADR folder). Open
+   questions: none; all thirty-one decisions were answered on 2026-11-06 (section 10; 1 to 18 as drawn up on 2026-11-03,
+   19 to 31 added 2026-11-06). The hold is lifted. The one gate that remained, the F11 plan before PR 5 (decision 12), was
+   approved on 2026-11-07 and its F11-1 is merged (#712); PR 14 is held.
 3. The first tasks: PR 1's A1, starting with `supabase/tests/game_published.sql`, red against today's code, and, in the
    second slot, PR 4's D1 (the fixture and its test).
 4. What the planning taught: section 12.

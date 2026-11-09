@@ -31,8 +31,11 @@
 -- It reads the staged rows (each a row of the file, already put on the season's clock by the Edge function: this SQL never
 -- recomputes an instant), resolves every label through the decisions the admin confirmed (`map_game_import_job`), and
 -- plans EVERYTHING in temporary tables before it writes anything: a dry run is the same code path with the writes off,
--- so the preview's counts cannot disagree with the apply's (lesson 74), and an apply that writes a different number than
--- it planned raises. A game found by (season, Game ID) is updated IN PLACE by its id whether its row is in the visible
+-- so on the same state the preview's counts are the apply's (lesson 74), and an apply that writes a different number than
+-- it planned raises. **The apply plans again, against the state it finds**: another admin can publish, cancel or move a
+-- game between the preview and the apply, so its counts can differ from the preview's, and its result reports what was
+-- done, not what was previewed. (Making the apply refuse when its counts differ from the confirmed ones is a change to
+-- the RPC's signature, proposed for PR 6 and not made here.) A game found by (season, Game ID) is updated IN PLACE by its id whether its row is in the visible
 -- run or hidden in an older one; a row with a Game ID is never matched by its tuple and never inserted a second time; a
 -- held game (`game_is_held`, F11-1's one predicate) whose row changed is `skipped-published`, not written; a row with no
 -- Game ID matches on (home, away, slot, week), as the save does. New games arrive Published when the job says so
@@ -43,7 +46,10 @@
 -- run shadows an earlier one for a division, so a run of only the new shells would make the old teams look absent);
 -- outside clubs are inserted here, in no team run. The conflict flags are two checks the SQL can judge from the stored
 -- games (a field and a team in two games at once) plus the flags the file carried; the coach overlap and the hosting
--- balance are the preview's audit (the result says so in `not_judged`).
+-- balance are the preview's audit (the result says so in `not_judged`). **A known limitation:** the check that a row's
+-- place is free treats a game the same file moves away from a place as still standing on it, so two games of one pair in
+-- one week whose times the file swaps by Game ID are both refused (reason `duplicate-row`, in words that name this case);
+-- the swap has to be imported in steps. A pair playing twice in one week is rare and a step-out is not built.
 --
 -- ## The rollback
 --
@@ -162,6 +168,8 @@ ALTER TABLE public.schedule_tbd ADD CONSTRAINT schedule_tbd_reason_check CHECK (
     OR (kind = 'game' AND reason IN ('unknown-team', 'division-mismatch', 'duplicate-matchup', 'coach-coaches-both-teams', 'coach-scheduling-conflict', 'no-slot-available', 'imported-without-time')));
 
 INSERT INTO public.audit_actions (action) VALUES ('game.slot_created')
+    ON CONFLICT (action) DO NOTHING;
+INSERT INTO public.audit_actions (action) VALUES ('import.mapped')
     ON CONFLICT (action) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
@@ -708,11 +716,12 @@ DECLARE
     v_id uuid;
     v_arrive boolean := true;
     v_counts jsonb := '{}'::jsonb;
+    v_decisions jsonb := '{}'::jsonb;
     v_actions text[];
     v_known boolean;
 BEGIN
     IF v_uid IS NULL THEN
-        RAISE EXCEPTION 'map_game_import_job needs a signed-in caller' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'map_game_import_job needs a signed-in caller to audit the mapping' USING ERRCODE = '42501';
     END IF;
     IF p_import_job_id IS NULL THEN
         RAISE EXCEPTION 'p_import_job_id is required' USING ERRCODE = '22023';
@@ -808,12 +817,26 @@ BEGIN
         END IF;
         v_clean := v_clean || jsonb_build_object(v_group, v_group_clean);
         v_counts := v_counts || jsonb_build_object(v_group, (SELECT count(*) FROM jsonb_object_keys(v_group_clean)));
+        v_decisions := v_decisions || jsonb_build_object(v_group, (SELECT COALESCE(jsonb_object_agg(x.action, x.n), '{}'::jsonb)
+                                                                    FROM (SELECT e.value ->> 'action' AS action, count(*) AS n
+                                                                            FROM jsonb_each(v_group_clean) e GROUP BY 1) x));
     END LOOP;
     v_clean := v_clean || jsonb_build_object('options', jsonb_build_object('arrive_published', v_arrive));
 
     UPDATE public.import_jobs
        SET warning_summary = jsonb_set(COALESCE(warning_summary, '{}'::jsonb), '{game_mapping}', v_clean, true)
      WHERE id = p_import_job_id;
+
+    -- The mapping is the sole input of the apply, so storing it is an administrative action and is audited (AGENTS.md
+    -- section 3): the number of decisions per group and action and the Published default, never a label of the file. The
+    -- audit write is in this transaction; a failure rolls the mapping back and SLA01 says it was the audit.
+    BEGIN
+        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', p_import_job_id,
+            jsonb_build_object('import_type', 'games', 'arrive_published', v_arrive, 'decisions', v_decisions));
+    EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'audit write failed, nothing was saved: %', SQLERRM
+            USING ERRCODE = 'SLA01', DETAIL = SQLSTATE;
+    END;
 
     RETURN jsonb_build_object('job_id', p_import_job_id, 'arrive_published', v_arrive) || v_counts;
 END;
@@ -830,8 +853,10 @@ COMMENT ON FUNCTION public.map_game_import_job(uuid, jsonb) IS
 -- ---------------------------------------------------------------------------
 --
 -- The plan is built in temporary tables (`_gi_*`, all schema-qualified `pg_temp.` below and dropped at commit) before a
--- single row is written; `p_dry_run` stops after it. Every row the apply writes is counted against the plan and a
--- difference raises, so the preview an admin confirmed is what was done (lesson 74).
+-- single row is written; `p_dry_run` stops after it. Every row the apply writes is counted against ITS OWN plan and a
+-- difference raises (lesson 74). The apply does not receive the preview's plan: it plans again against the state it finds,
+-- so if another admin changed a game between the two its counts can differ from the preview's, and the result it returns
+-- is what was done.
 
 CREATE FUNCTION public.apply_game_import_job(p_import_job_id uuid, p_dry_run boolean DEFAULT false)
 RETURNS jsonb
@@ -1035,7 +1060,9 @@ BEGIN
      WHERE e.value ->> 'action' = ANY (CASE WHEN g.kind = 'team' THEN ARRAY['map', 'create', 'outside', 'skip']
                                             ELSE ARRAY['map', 'create', 'skip'] END);
 
-    -- Divisions: of this season. A `create` over a name the season already has would meet UNIQUE (season, name).
+    -- Divisions: of this season. A `create` over a name the season already has would meet UNIQUE (season, name), and so
+    -- would two labels that create one name: those are ONE creation (the first label by key makes it, the others share its
+    -- id), as core's resolveScheduleRows coalesces them. `creator` marks the label whose row writes the record.
     CREATE TEMP TABLE _gi_div ON COMMIT DROP AS
     WITH keys AS (
         SELECT r.division_key AS dkey, (array_agg(r.division_label ORDER BY r.rowno))[1] AS label
@@ -1052,13 +1079,19 @@ BEGIN
                (j.action = 'create' AND NOT EXISTS (SELECT 1 FROM public.divisions dv
                     WHERE dv.organization_id = v_org AND dv.season_settings_id = v_season
                       AND lower(btrim(dv.name)) = lower(btrim(j.cname)))) AS can_create,
-               gen_random_uuid() AS new_id
+               gen_random_uuid() AS own_id
           FROM j
+    ), k3 AS (
+        SELECT k2.*,
+               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.dkey) AS new_id,
+               first_value(k2.cname) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.dkey) AS final_cname,
+               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.dkey) = 1) AS creator
+          FROM k2
     )
-    SELECT k2.dkey, k2.label, k2.action, k2.existing_id, k2.cname, k2.can_create, k2.new_id,
-           COALESCE(k2.existing_id, CASE WHEN k2.can_create THEN k2.new_id END) AS ref,
-           COALESCE((SELECT dv.name FROM public.divisions dv WHERE dv.id = k2.existing_id), CASE WHEN k2.can_create THEN k2.cname END) AS final_name
-      FROM k2;
+    SELECT k3.dkey, k3.label, k3.action, k3.existing_id, k3.final_cname AS cname, k3.can_create, k3.creator, k3.new_id,
+           COALESCE(k3.existing_id, CASE WHEN k3.can_create THEN k3.new_id END) AS ref,
+           COALESCE((SELECT dv.name FROM public.divisions dv WHERE dv.id = k3.existing_id), CASE WHEN k3.can_create THEN k3.final_cname END) AS final_name
+      FROM k3;
 
     -- Venues (locations of the organization).
     CREATE TEMP TABLE _gi_venue ON COMMIT DROP AS
@@ -1075,12 +1108,18 @@ BEGIN
         SELECT j.*,
                (j.action = 'create' AND NOT EXISTS (SELECT 1 FROM public.locations l
                     WHERE l.organization_id = v_org AND lower(btrim(l.name)) = lower(btrim(j.cname)))) AS can_create,
-               gen_random_uuid() AS new_id
+               gen_random_uuid() AS own_id
           FROM j
+    ), k3 AS (
+        SELECT k2.*,
+               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.vkey) AS new_id,
+               first_value(k2.cname) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.vkey) AS final_cname,
+               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.vkey) = 1) AS creator
+          FROM k2
     )
-    SELECT k2.vkey, k2.label, k2.action, k2.existing_id, k2.cname, k2.can_create, k2.new_id,
-           COALESCE(k2.existing_id, CASE WHEN k2.can_create THEN k2.new_id END) AS ref
-      FROM k2;
+    SELECT k3.vkey, k3.label, k3.action, k3.existing_id, k3.final_cname AS cname, k3.can_create, k3.creator, k3.new_id,
+           COALESCE(k3.existing_id, CASE WHEN k3.can_create THEN k3.new_id END) AS ref
+      FROM k3;
 
     -- Fields, judged inside their venue.
     CREATE TEMP TABLE _gi_field ON COMMIT DROP AS
@@ -1102,14 +1141,23 @@ BEGIN
                (j.action = 'create' AND j.venue_ref IS NOT NULL
                 AND NOT (j.venue_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.fields f
                     WHERE f.location_id = j.venue_existing AND lower(btrim(f.name)) = lower(btrim(j.cname))))) AS can_create,
-               gen_random_uuid() AS new_id
+               gen_random_uuid() AS own_id
           FROM j
+    ), k3 AS (
+        SELECT k2.*,
+               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, k2.venue_ref, lower(btrim(k2.cname)) ORDER BY k2.fkey) AS new_id,
+               first_value(k2.cname) OVER (PARTITION BY k2.can_create, k2.venue_ref, lower(btrim(k2.cname)) ORDER BY k2.fkey) AS final_cname,
+               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, k2.venue_ref, lower(btrim(k2.cname)) ORDER BY k2.fkey) = 1) AS creator
+          FROM k2
     )
-    SELECT k2.fkey, k2.vkey, k2.label, k2.action, k2.venue_ref, k2.existing_id, k2.cname, k2.can_create, k2.new_id,
-           COALESCE(k2.existing_id, CASE WHEN k2.can_create THEN k2.new_id END) AS ref
-      FROM k2;
+    SELECT k3.fkey, k3.vkey, k3.label, k3.action, k3.venue_ref, k3.existing_id, k3.final_cname AS cname, k3.can_create, k3.creator, k3.new_id,
+           COALESCE(k3.existing_id, CASE WHEN k3.can_create THEN k3.new_id END) AS ref
+      FROM k3;
 
-    -- Teams, judged inside their division. kind: skip | existing | shell | ext-existing | ext-new | own-name | bad.
+    -- Teams, judged inside their division. kind: skip | existing | shell | ext-existing | ext-new | own-name | bad. Two labels
+    -- that resolve to one new team (the same final name in the same resolved division) are ONE creation, shell or outside
+    -- club, as core coalesces them; and an outside club whose name a shell created here already takes is the same refusal as
+    -- one named like an own team (`own-name`), for UNIQUE (division_id, name) holds for both.
     CREATE TEMP TABLE _gi_team ON COMMIT DROP AS
     WITH keys AS (
         SELECT t.tkey, t.dkey, (array_agg(t.label ORDER BY t.rowno, t.side))[1] AS label
@@ -1138,7 +1186,11 @@ BEGIN
                    AND lower(btrim(t.name)) = lower(btrim(j.cname)) ORDER BY t.id LIMIT 1) AS ext_id,
                (j.division_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.teams t
                     WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken,
-               gen_random_uuid() AS new_id
+               (j.action = 'outside' AND j.division_ref IS NOT NULL AND EXISTS (SELECT 1 FROM j j2
+                    WHERE j2.action = 'create' AND j2.division_ref = j.division_ref AND lower(btrim(j2.cname)) = lower(btrim(j.cname))
+                      AND NOT (j2.division_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.teams t
+                                WHERE t.division_id = j2.division_existing AND lower(btrim(t.name)) = lower(btrim(j2.cname)))))) AS shell_here,
+               gen_random_uuid() AS own_id
           FROM j
     ), k3 AS (
         SELECT k2.*,
@@ -1146,19 +1198,27 @@ BEGIN
                    WHEN k2.action = 'skip' THEN 'skip'
                    WHEN k2.action = 'map' AND k2.map_id IS NOT NULL THEN 'existing'
                    WHEN k2.action = 'create' AND k2.division_ref IS NOT NULL AND NOT k2.name_taken THEN 'shell'
-                   WHEN k2.action = 'outside' AND k2.division_ref IS NOT NULL AND k2.own_named THEN 'own-name'
+                   WHEN k2.action = 'outside' AND k2.division_ref IS NOT NULL AND (k2.own_named OR k2.shell_here) THEN 'own-name'
                    WHEN k2.action = 'outside' AND k2.division_ref IS NOT NULL AND k2.ext_id IS NOT NULL THEN 'ext-existing'
                    WHEN k2.action = 'outside' AND k2.division_ref IS NOT NULL THEN 'ext-new'
                    ELSE 'bad'
                END AS kind
           FROM k2
+    ), k4 AS (
+        SELECT k3.*,
+               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) AS new_id,
+               first_value(k3.cname) OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) AS final_cname,
+               (row_number() OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) = 1) AS creator
+          FROM k3
     )
-    SELECT k3.tkey, k3.dkey, k3.label, k3.action, k3.kind, k3.cname, k3.division_ref, k3.new_id,
-           CASE k3.kind WHEN 'existing' THEN k3.map_id WHEN 'ext-existing' THEN k3.ext_id
-                        WHEN 'shell' THEN k3.new_id WHEN 'ext-new' THEN k3.new_id END AS ref,
-           (k3.kind IN ('ext-existing', 'ext-new')
-            OR (k3.kind = 'existing' AND EXISTS (SELECT 1 FROM public.teams t WHERE t.id = k3.map_id AND t.is_external))) AS is_outside
-      FROM k3;
+    SELECT k4.tkey, k4.dkey, k4.label, k4.action, k4.kind,
+           CASE WHEN k4.kind IN ('shell', 'ext-new') THEN k4.final_cname ELSE k4.cname END AS cname, k4.division_ref, k4.new_id,
+           (k4.kind IN ('shell', 'ext-new') AND k4.creator) AS creator,
+           CASE k4.kind WHEN 'existing' THEN k4.map_id WHEN 'ext-existing' THEN k4.ext_id
+                        WHEN 'shell' THEN k4.new_id WHEN 'ext-new' THEN k4.new_id END AS ref,
+           (k4.kind IN ('ext-existing', 'ext-new')
+            OR (k4.kind = 'existing' AND EXISTS (SELECT 1 FROM public.teams t WHERE t.id = k4.map_id AND t.is_external))) AS is_outside
+      FROM k4;
 
     -- ------------------------------------------------------------------ 3. Each row, resolved, in the order core does it.
     CREATE TEMP TABLE _gi_res ON COMMIT DROP AS
@@ -1356,11 +1416,11 @@ BEGIN
     UNION ALL
     SELECT t.division_ref, NULL, t.home_ref, t.away_ref FROM _gi_t t WHERE NOT t.present;
 
-    SELECT count(*) INTO n_div FROM _gi_div d WHERE d.can_create AND d.new_id IN (SELECT division_ref FROM _gi_newgames);
-    SELECT count(*) INTO n_fld FROM _gi_field f WHERE f.can_create AND f.new_id IN (SELECT field_ref FROM _gi_newgames);
-    SELECT count(*) INTO n_ven FROM _gi_venue v WHERE v.can_create
+    SELECT count(*) INTO n_div FROM _gi_div d WHERE d.creator AND d.new_id IN (SELECT division_ref FROM _gi_newgames);
+    SELECT count(*) INTO n_fld FROM _gi_field f WHERE f.creator AND f.new_id IN (SELECT field_ref FROM _gi_newgames);
+    SELECT count(*) INTO n_ven FROM _gi_venue v WHERE v.creator
        AND v.new_id IN (SELECT f.venue_ref FROM _gi_field f WHERE f.ref IN (SELECT field_ref FROM _gi_newgames));
-    SELECT count(*) FILTER (WHERE t.kind = 'shell'), count(*) FILTER (WHERE t.kind = 'ext-new') INTO n_shell, n_out
+    SELECT count(*) FILTER (WHERE t.kind = 'shell' AND t.creator), count(*) FILTER (WHERE t.kind = 'ext-new' AND t.creator) INTO n_shell, n_out
       FROM _gi_team t WHERE t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames);
     SELECT count(*) INTO n_slot_new FROM _gi_slotnew;
     SELECT count(DISTINCT g.slot_id) INTO n_slot_reused FROM _gi_g g
@@ -1460,7 +1520,7 @@ BEGIN
                 UNION ALL
                 SELECT g.rowno,
                        jsonb_build_object('row_number', g.rowno, 'row_key', g.row_key, 'reason', 'duplicate-row',
-                           'message', 'A game already stands on this place, and this row''s Game ID (or the lack of one) does not name it: nothing is written for the row.')
+                           'message', 'A game already stands on this place, and this row''s Game ID (or the lack of one) does not name it. A game this file moves away from a place still stands on it until the import has run, so two games of one pair that swap places in one week are not imported. Nothing is written for the row.')
                   FROM _gi_g g WHERE g.verdict = 'collision') z) x;
 
     SELECT COALESCE(jsonb_agg(jsonb_build_object('row_number', w.rowno, 'row_key', w.row_key,
@@ -1508,7 +1568,7 @@ BEGIN
         -- Divisions, venues, fields.
         INSERT INTO public.divisions (id, organization_id, season_settings_id, name)
         SELECT d.new_id, v_org, v_season, d.cname FROM _gi_div d
-         WHERE d.can_create AND d.new_id IN (SELECT division_ref FROM _gi_newgames);
+         WHERE d.creator AND d.new_id IN (SELECT division_ref FROM _gi_newgames);
         GET DIAGNOSTICS v_rc = ROW_COUNT;
         IF v_rc <> n_div THEN RAISE EXCEPTION 'game import planned % divisions and wrote %', n_div, v_rc USING ERRCODE = 'XX000'; END IF;
         INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
@@ -1517,7 +1577,7 @@ BEGIN
 
         INSERT INTO public.locations (id, organization_id, name)
         SELECT v.new_id, v_org, v.cname FROM _gi_venue v
-         WHERE v.can_create AND v.new_id IN (SELECT f.venue_ref FROM _gi_field f WHERE f.ref IN (SELECT field_ref FROM _gi_newgames));
+         WHERE v.creator AND v.new_id IN (SELECT f.venue_ref FROM _gi_field f WHERE f.ref IN (SELECT field_ref FROM _gi_newgames));
         GET DIAGNOSTICS v_rc = ROW_COUNT;
         IF v_rc <> n_ven THEN RAISE EXCEPTION 'game import planned % venues and wrote %', n_ven, v_rc USING ERRCODE = 'XX000'; END IF;
         INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
@@ -1527,7 +1587,7 @@ BEGIN
 
         INSERT INTO public.fields (id, organization_id, location_id, name)
         SELECT f.new_id, v_org, f.venue_ref, f.cname FROM _gi_field f
-         WHERE f.can_create AND f.new_id IN (SELECT field_ref FROM _gi_newgames);
+         WHERE f.creator AND f.new_id IN (SELECT field_ref FROM _gi_newgames);
         GET DIAGNOSTICS v_rc = ROW_COUNT;
         IF v_rc <> n_fld THEN RAISE EXCEPTION 'game import planned % fields and wrote %', n_fld, v_rc USING ERRCODE = 'XX000'; END IF;
         INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
@@ -1539,7 +1599,7 @@ BEGIN
         FOR v_div IN
             SELECT t.division_ref, array_agg(t.new_id ORDER BY t.new_id) AS shell_ids
               FROM _gi_team t
-             WHERE t.kind = 'shell' AND t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames)
+             WHERE t.kind = 'shell' AND t.creator AND t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames)
              GROUP BY t.division_ref
              ORDER BY t.division_ref
         LOOP
@@ -1576,7 +1636,7 @@ BEGIN
                        'division_id', v_div.division_ref, 'name', t.cname, 'coach_id', NULL, 'assistant_coach_ids', '[]'::jsonb,
                        'players', '[]'::jsonb) ORDER BY t.cname), '[]'::jsonb)
               INTO v_shells
-              FROM _gi_team t WHERE t.kind = 'shell' AND t.division_ref = v_div.division_ref AND t.new_id = ANY (v_div.shell_ids);
+              FROM _gi_team t WHERE t.kind = 'shell' AND t.creator AND t.division_ref = v_div.division_ref AND t.new_id = ANY (v_div.shell_ids);
             v_shell_ids := to_jsonb(v_div.shell_ids);
             v_team_run := public.persist_team_schedule(
                 jsonb_build_object('organization_id', v_org, 'season_settings_id', v_season, 'run_type', 'team', 'status', 'completed',
@@ -1599,7 +1659,7 @@ BEGIN
         -- Outside clubs: team rows flagged is_external, in NO team run.
         INSERT INTO public.teams (id, organization_id, division_id, name, is_external)
         SELECT t.new_id, v_org, t.division_ref, t.cname, true FROM _gi_team t
-         WHERE t.kind = 'ext-new' AND t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames);
+         WHERE t.kind = 'ext-new' AND t.creator AND t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames);
         GET DIAGNOSTICS v_rc = ROW_COUNT;
         IF v_rc <> n_out THEN RAISE EXCEPTION 'game import planned % outside clubs and wrote %', n_out, v_rc USING ERRCODE = 'XX000'; END IF;
         INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
@@ -1710,7 +1770,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.apply_game_import_job(uuid, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.apply_game_import_job(uuid, boolean) TO authenticated;
 COMMENT ON FUNCTION public.apply_game_import_job(uuid, boolean) IS
-    'Admin-only, signed in: the preview (p_dry_run, writes nothing) and the apply of a games import. Resolves each staged row through the job''s mapping; updates a game found by (season, Game ID) in place by its id, hidden rows included; never matches a row that has a Game ID by its tuple; skips a held (Published) game whose row changed (skipped-published); stores a conflicting file and flags it; creates the divisions, venues, fields, team shells (through the team writer, in team runs) and outside clubs (is_external, in no run) a written game uses; makes one new game run holding the whole schedule when anything is written, and none when nothing would change. Audited import.completed and game.published_set. A finished job answers with its stored result. 20261121010000.';
+    'Admin-only, signed in: the preview (p_dry_run, writes nothing) and the apply of a games import. Resolves each staged row through the job''s mapping; updates a game found by (season, Game ID) in place by its id, hidden rows included; never matches a row that has a Game ID by its tuple; skips a held (Published) game whose row changed (skipped-published); stores a conflicting file and flags it; creates the divisions, venues, fields, team shells (through the team writer, in team runs) and outside clubs (is_external, in no run) a written game uses; makes one new game run holding the whole schedule when anything is written, and none when nothing would change. Audited import.completed and game.published_set. A finished job answers with its stored result. The apply plans again against the state it finds, so its counts can differ from an earlier preview''s if a game changed in between: the result reports what was done. 20261121010000.';
 
 
 -- ---------------------------------------------------------------------------
@@ -1843,9 +1903,22 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.game_slot_id = gs.id OR ga.slot_id = gs.id);
     GET DIAGNOSTICS n_slots = ROW_COUNT;
 
+    -- The ids every OTHER team run of the organization names anywhere in its results, read ONCE. (The check used to cast
+    -- each run's whole results to text for every team: 150 shells and ten megabytes of other runs took 7 seconds. An id
+    -- found anywhere keeps its team, as before; the scan is for uuid-shaped text, which is what an id is.)
+    DROP TABLE IF EXISTS pg_temp._gr_named;
+    CREATE TEMP TABLE _gr_named ON COMMIT DROP AS
+    SELECT DISTINCT lower(m[1]) AS id
+      FROM public.scheduler_runs sr,
+           LATERAL regexp_matches(sr.results::text, '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', 'g') AS m
+     WHERE sr.run_type = 'team' AND sr.organization_id = v_org
+       AND sr.parameters ->> 'import_job_id' IS DISTINCT FROM p_import_job_id::text;
+    CREATE UNIQUE INDEX ON _gr_named (id);
+
     -- Teams (shells and outside clubs) nothing references: no game, no TIME TBD game, no player, coach, practice,
     -- preference, assigned player (players.team_id has no foreign key) and no later team run that names it. A shell or
-    -- club that is referenced stays, and is reported. The practice TIME TBD rows are derived and go with the cascade.
+    -- club that is referenced stays, and is reported. The practice TIME TBD rows are derived and go with the cascade,
+    -- and so does the feed token a trigger makes for every team.
     DELETE FROM public.teams t USING public.import_application_records r
      WHERE r.target_id = t.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
        AND r.target_table = 'teams' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
@@ -1857,10 +1930,7 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.practice_exceptions pe WHERE pe.team_id = t.id)
        AND NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences cp WHERE cp.team_id = t.id)
        AND NOT EXISTS (SELECT 1 FROM public.players p WHERE p.team_id = t.id)
-       AND NOT EXISTS (SELECT 1 FROM public.scheduler_runs sr
-                        WHERE sr.run_type = 'team' AND sr.organization_id = v_org
-                          AND sr.parameters ->> 'import_job_id' IS DISTINCT FROM p_import_job_id::text
-                          AND sr.results::text LIKE '%' || t.id::text || '%');
+       AND NOT EXISTS (SELECT 1 FROM _gr_named n WHERE n.id = t.id::text);
     GET DIAGNOSTICS n_teams = ROW_COUNT;
 
     -- The import's team runs whose shells are all gone (one that still carries a kept shell stays).
@@ -1870,18 +1940,27 @@ BEGIN
                         WHERE EXISTS (SELECT 1 FROM public.teams t WHERE t.id::text = sid));
     GET DIAGNOSTICS n_team_runs = ROW_COUNT;
 
-    -- Fields, venues and divisions the import created and nothing else uses.
+    -- Fields, venues and divisions the import created and nothing else uses. Everything an admin attached afterwards keeps
+    -- its record: a permit scope, a blackout or a subunit would be taken by the cascade, and a field that holds a booking
+    -- (the shared producer) or a game or slot does not go either. The pgTAP file derives from the catalogue every
+    -- foreign key that cascades or sets null onto the five tables this function deletes from and fails unless the
+    -- DELETE guards it (or it is on that file's short, argued list).
     DELETE FROM public.fields f USING public.import_application_records r
      WHERE r.target_id = f.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
        AND r.target_table = 'fields' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
        AND NOT EXISTS (SELECT 1 FROM public.game_slots gs WHERE gs.field_id = f.id)
        AND NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.field_id = f.id)
+       AND NOT EXISTS (SELECT 1 FROM public.facility_permit_scopes ps WHERE ps.field_id = f.id)
+       AND NOT EXISTS (SELECT 1 FROM public.field_blackouts fb WHERE fb.field_id = f.id)
+       AND NOT EXISTS (SELECT 1 FROM public.field_subunits su WHERE su.field_id = f.id)
        AND NOT EXISTS (SELECT 1 FROM public.field_bookings(v_org, f.id, NULL) b);
     GET DIAGNOSTICS n_fields = ROW_COUNT;
     DELETE FROM public.locations l USING public.import_application_records r
      WHERE r.target_id = l.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
        AND r.target_table = 'locations' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM public.fields f WHERE f.location_id = l.id);
+       AND NOT EXISTS (SELECT 1 FROM public.fields f WHERE f.location_id = l.id)
+       AND NOT EXISTS (SELECT 1 FROM public.facility_permit_scopes ps WHERE ps.location_id = l.id)
+       AND NOT EXISTS (SELECT 1 FROM public.field_blackouts fb WHERE fb.location_id = l.id);
     GET DIAGNOSTICS n_venues = ROW_COUNT;
     DELETE FROM public.divisions d USING public.import_application_records r
      WHERE r.target_id = d.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
@@ -1889,7 +1968,8 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.teams t WHERE t.division_id = d.id)
        AND NOT EXISTS (SELECT 1 FROM public.players p WHERE p.division_id = d.id)
        AND NOT EXISTS (SELECT 1 FROM public.game_slots gs WHERE gs.division_id = d.id)
-       AND NOT EXISTS (SELECT 1 FROM public.practice_slots ps WHERE ps.division_id = d.id);
+       AND NOT EXISTS (SELECT 1 FROM public.practice_slots ps WHERE ps.division_id = d.id)
+       AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd s WHERE s.division_id = d.id);
     GET DIAGNOSTICS n_divs = ROW_COUNT;
 
     -- What was created and is still there (referenced by something that came after), named, never deleted silently.
@@ -2007,8 +2087,8 @@ BEGIN
                     AND g.tgname = 'game_assignments_published_guard' AND NOT g.tgisinternal AND g.tgenabled = 'O') THEN
         RAISE EXCEPTION 'the Published guard trigger is missing or off';
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'game.slot_created') THEN
-        RAISE EXCEPTION 'audit_actions lacks game.slot_created';
+    IF (SELECT count(*) FROM public.audit_actions WHERE action IN ('game.slot_created', 'import.mapped')) <> 2 THEN
+        RAISE EXCEPTION 'audit_actions lacks game.slot_created or import.mapped';
     END IF;
     IF (SELECT array_agg(a.attname::text ORDER BY a.attnum) FROM pg_attribute a
          WHERE a.attrelid = 'public.view_org_metrics'::regclass AND a.attnum > 0 AND NOT a.attisdropped)

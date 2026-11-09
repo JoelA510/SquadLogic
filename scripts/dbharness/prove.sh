@@ -5619,6 +5619,20 @@ plant "M70 the metrics count an outside club as a team" "$M70" \
   "        AND NOT (t.is_external AND false)) AS total_teams," \
   "smoke 20261121010000"
 
+# Fix round 1 of the games import (the reviews of its first push): the smoke also holds
+#   - the stored mapping is audited, one `import.mapped` row for the job (the plant cites another resource, so the job has none);
+#   - two labels that create one name are ONE creation (the plant gives each label its own id, so the preview counts one and
+#     the apply writes a team the games do not name, or two).
+plant "M70 the stored mapping's audit row cites no job" "$M70" \
+  "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', p_import_job_id," \
+  "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', gen_random_uuid()," \
+  "smoke 20261121010000"
+
+plant "M70 two labels that create one team are two creations" "$M70" \
+  "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) AS new_id," \
+  "               k3.own_id AS new_id," \
+  "smoke 20261121010000"
+
 # The revert (docs/sql/20261121010000_revert.sql) refuses while an import is applied, and leaves no column of the
 # migration behind. The harness plants an applied import (an unrolled record, an outside club, a TIME TBD game from a
 # file), requires the first run to refuse in its words and change nothing, rolls the import back by hand, and runs it again.

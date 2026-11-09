@@ -36,7 +36,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(167);
+SELECT plan(205);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -735,6 +735,267 @@ SELECT ok((SELECT bool_and(n > 0) FROM (VALUES
         ((SELECT (v::jsonb #>> '{created,teams}')::int FROM marks WHERE name = 'apply')),
         ((SELECT (v::jsonb #>> '{not_in_file,count}')::int FROM marks WHERE name = 'apply'))) AS t(n)),
     'meta: the file reaches every outcome the counts name (a file that reached half of them would compare half)');
+
+-- ── 12. Fix round 1 (the reviews of 87b696a) ───────────────────────────────
+-- A division of its own for this block, so what the earlier jobs left does not matter.
+SET LOCAL "request.jwt.claims" TO '{}';
+INSERT INTO public.divisions (id, organization_id, season_settings_id, name, practices_per_week) VALUES
+    (pg_temp.u(300), 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'Fix U9', 1);
+INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+    (pg_temp.u(301), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(300), 'Fix Lions'),
+    (pg_temp.u(302), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(300), 'Fix Tigers');
+
+-- 12.1 (Codex 1) The rollback never deletes what an admin attached after the import: a permit scope or a blackout on
+-- a field or a venue it created, a subunit of a field it created. Six venues, each with a field.
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO jobs SELECT 'jk', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'estate.csv')).id;
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT pg_temp.stage(pg_temp.j('jk'), 1, 'ok', 'G-K1', 'Fix U9', 'Perm One',   'Field K1', 'Fix Lions', 'Fix Tigers', '2026-09-05', '09:00', '10:00', 1);
+SELECT pg_temp.stage(pg_temp.j('jk'), 2, 'ok', 'G-K2', 'Fix U9', 'Perm Two',   'Field K2', 'Fix Lions', 'Fix Tigers', '2026-09-12', '09:00', '10:00', 2);
+SELECT pg_temp.stage(pg_temp.j('jk'), 3, 'ok', 'G-K3', 'Fix U9', 'Perm Three', 'Field K3', 'Fix Lions', 'Fix Tigers', '2026-09-19', '09:00', '10:00', 3);
+SELECT pg_temp.stage(pg_temp.j('jk'), 4, 'ok', 'G-K4', 'Fix U9', 'Perm Four',  'Field K4', 'Fix Lions', 'Fix Tigers', '2026-09-26', '09:00', '10:00', 4);
+SELECT pg_temp.stage(pg_temp.j('jk'), 5, 'ok', 'G-K5', 'Fix U9', 'Perm Five',  'Field K5', 'Fix Lions', 'Fix Tigers', '2026-10-03', '09:00', '10:00', 5);
+SELECT pg_temp.stage(pg_temp.j('jk'), 6, 'ok', 'G-K6', 'Fix U9', 'Perm Six',   'Field K6', 'Fix Lions', 'Fix Tigers', '2026-10-10', '09:00', '10:00', 6);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('map_jk', (public.map_game_import_job(pg_temp.j('jk'), jsonb_build_object(
+    'divisions', jsonb_build_object('fix u9', jsonb_build_object('action', 'map', 'id', pg_temp.u(300))),
+    'venues', jsonb_build_object('perm one', jsonb_build_object('action', 'create'), 'perm two', jsonb_build_object('action', 'create'),
+        'perm three', jsonb_build_object('action', 'create'), 'perm four', jsonb_build_object('action', 'create'),
+        'perm five', jsonb_build_object('action', 'create'), 'perm six', jsonb_build_object('action', 'create')),
+    'fields', jsonb_build_object(pg_temp.k2('Perm One', 'Field K1'), jsonb_build_object('action', 'create'), pg_temp.k2('Perm Two', 'Field K2'), jsonb_build_object('action', 'create'),
+        pg_temp.k2('Perm Three', 'Field K3'), jsonb_build_object('action', 'create'), pg_temp.k2('Perm Four', 'Field K4'), jsonb_build_object('action', 'create'),
+        pg_temp.k2('Perm Five', 'Field K5'), jsonb_build_object('action', 'create'), pg_temp.k2('Perm Six', 'Field K6'), jsonb_build_object('action', 'create')),
+    'teams', jsonb_build_object(pg_temp.k2('Fix U9', 'Fix Lions'), jsonb_build_object('action', 'map', 'id', pg_temp.u(301)),
+        pg_temp.k2('Fix U9', 'Fix Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(302))))))::text);
+INSERT INTO marks VALUES ('apply_jk', (public.apply_game_import_job(pg_temp.j('jk'), false))::text);
+SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jk'), 'created,fields') || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jk'), 'created,venues'), '6 6',
+    'control: the import made six venues and six fields');
+-- What an admin attached afterwards (no signed-in user: the seed).
+SET LOCAL "request.jwt.claims" TO '{}';
+INSERT INTO public.facility_permits (id, organization_id, issuer, valid_from, valid_to) VALUES
+    (pg_temp.u(310), 'a1111111-1111-1111-1111-111111111111', 'City Parks', '2026-01-01', '2026-12-31');
+INSERT INTO public.facility_permit_scopes (permit_id, organization_id, field_id)
+    SELECT pg_temp.u(310), organization_id, id FROM public.fields WHERE name = 'Field K1';
+INSERT INTO public.facility_permit_scopes (permit_id, organization_id, location_id)
+    SELECT pg_temp.u(310), organization_id, id FROM public.locations WHERE name = 'Perm Two';
+INSERT INTO public.field_blackouts (organization_id, field_id, blackout_from, blackout_until)
+    SELECT organization_id, id, '2026-09-19', '2026-09-19' FROM public.fields WHERE name = 'Field K3';
+INSERT INTO public.field_subunits (organization_id, field_id, label)
+    SELECT organization_id, id, 'Half A' FROM public.fields WHERE name = 'Field K4';
+INSERT INTO public.field_blackouts (organization_id, location_id, blackout_from, blackout_until)
+    SELECT organization_id, id, '2026-10-03', '2026-10-03' FROM public.locations WHERE name = 'Perm Five';
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('rb_jk', (public.rollback_game_import_job(pg_temp.j('jk')))::text);
+SELECT is(pg_temp.val($$SELECT string_agg(name, ',' ORDER BY name) FROM public.fields WHERE name LIKE 'Field K%'$$), 'Field K1,Field K3,Field K4',
+    'the fields a permit scope, a blackout and a subunit were attached to stay; the three nothing names are gone');
+SELECT is(pg_temp.val($$SELECT string_agg(name, ',' ORDER BY name) FROM public.locations WHERE name LIKE 'Perm %'$$), 'Perm Five,Perm Four,Perm One,Perm Three,Perm Two',
+    'the venues stay too (a field stands in four; a permit scope and a blackout name the other two); the venue nothing names is gone');
+SELECT is(pg_temp.val($$SELECT (SELECT count(*) FROM public.facility_permit_scopes WHERE permit_id = pg_temp.u(310))
+                              || ' ' || (SELECT count(*) FROM public.field_blackouts WHERE field_id IN (SELECT id FROM public.fields WHERE name = 'Field K3')
+                                                                                      OR location_id IN (SELECT id FROM public.locations WHERE name = 'Perm Five'))
+                              || ' ' || (SELECT count(*) FROM public.field_subunits WHERE label = 'Half A')$$), '2 2 1',
+    'and what was attached is intact: both permit scopes, both blackouts, the subunit (a cascade would have taken them)');
+SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'rb_jk'), 'fields_deleted') || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'rb_jk'), 'venues_deleted'), '3 1',
+    'the rollback says it deleted three fields and one venue');
+SELECT is(jsonb_array_length((SELECT v::jsonb -> 'kept' FROM marks WHERE name = 'rb_jk'))::text, '8', 'and names the eight it kept (three fields, five venues), never silently');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE import_job_id = pg_temp.j('jk')$$), '0', 'the six games are gone either way');
+
+-- 12.2 (Codex 1, the class) Every foreign key that cascades or sets null onto what the rollback deletes is guarded by a
+-- NOT EXISTS in its DELETE (or by the shared field producer, whose own source names the table) or is on this list. The
+-- subject set is the CATALOGUE, never the rollback's own text (lessons 46 and 92).
+CREATE FUNCTION pg_temp.rb_pairs() RETURNS text LANGUAGE sql AS $f$
+    SELECT string_agg(par.relname || '<-' || ch.relname, ', ' ORDER BY par.relname, ch.relname)
+      FROM (SELECT DISTINCT k.confrelid, k.conrelid FROM pg_constraint k
+             WHERE k.contype = 'f' AND k.confdeltype IN ('c', 'n')) k
+      JOIN pg_class par ON par.oid = k.confrelid AND par.relnamespace = 'public'::regnamespace
+      JOIN pg_class ch ON ch.oid = k.conrelid
+     WHERE par.relname IN ('teams', 'fields', 'locations', 'divisions', 'game_slots')
+$f$;
+CREATE FUNCTION pg_temp.rb_unguarded(p_src text) RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE
+    r record; v_seg text; v_i int; v_out text[] := '{}';
+    -- Allowed without a guard, each for a stated reason:
+    --   teams<-team_calendar_tokens   a trigger makes one token for EVERY team row, so every shell has one: derived by design;
+    --   teams<-games, game_slots<-games   the legacy `games` table: the F11 plan forbids this import to read, write or
+    --                                 reference it, and nothing in the repository writes it (the product only reads it), so
+    --                                 no row of it can name a team or a slot this import made.
+    v_allowed constant text[] := ARRAY['teams<-team_calendar_tokens', 'teams<-games', 'game_slots<-games'];
+    v_bookings text := (SELECT p.prosrc FROM pg_proc p WHERE p.proname = 'field_bookings' AND p.pronamespace = 'public'::regnamespace LIMIT 1);
+BEGIN
+    FOR r IN SELECT DISTINCT par.relname AS parent, ch.relname AS child
+               FROM pg_constraint k JOIN pg_class par ON par.oid = k.confrelid JOIN pg_class ch ON ch.oid = k.conrelid
+              WHERE k.contype = 'f' AND par.relnamespace = 'public'::regnamespace
+                AND par.relname IN ('teams', 'fields', 'locations', 'divisions', 'game_slots') AND k.confdeltype IN ('c', 'n')
+              ORDER BY 1, 2 LOOP
+        v_i := position('DELETE FROM public.' || r.parent || ' ' IN p_src);
+        IF v_i = 0 THEN v_out := v_out || (r.parent || '<-' || r.child || ' (no DELETE of the parent)'); CONTINUE; END IF;
+        v_seg := substr(p_src, v_i);
+        v_seg := substr(v_seg, 1, position('GET DIAGNOSTICS' IN v_seg));
+        IF v_seg ~ ('NOT EXISTS \(SELECT 1 FROM public\.' || r.child || '\M') THEN CONTINUE; END IF;
+        IF v_seg LIKE '%public.field_bookings(%' AND v_bookings ~ ('public\.' || r.child || '\M') THEN CONTINUE; END IF;
+        IF (r.parent || '<-' || r.child) = ANY (v_allowed) THEN CONTINUE; END IF;
+        v_out := v_out || (r.parent || '<-' || r.child);
+    END LOOP;
+    RETURN COALESCE(array_to_string(v_out, ', '), '');
+END
+$f$;
+GRANT EXECUTE ON FUNCTION pg_temp.rb_pairs(), pg_temp.rb_unguarded(text) TO PUBLIC;
+SELECT ok(array_length(string_to_array(pg_temp.rb_pairs(), ', '), 1) >= 25,
+    'meta: the catalogue gives at least 25 foreign keys that cascade or set null onto the five tables (a census over nothing would pass)');
+SELECT is(pg_temp.rb_unguarded((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure)), '',
+    'every such foreign key is guarded in the rollback or allowed above with its reason');
+CREATE TABLE public.zz_fk_plant (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    field_id uuid REFERENCES public.fields(id) ON DELETE CASCADE, team_id uuid REFERENCES public.teams(id) ON DELETE SET NULL);
+SELECT is(pg_temp.rb_unguarded((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure)),
+    'fields<-zz_fk_plant, teams<-zz_fk_plant', 'PLANT: a new table with a cascade onto fields and a set null onto teams is reported by the census');
+DROP TABLE public.zz_fk_plant;
+SELECT is(pg_temp.rb_unguarded(replace((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure),
+        'NOT EXISTS (SELECT 1 FROM public.facility_permit_scopes', 'NOT EXISTS (SELECT 1 FROM public.nothing')),
+    'fields<-facility_permit_scopes, locations<-facility_permit_scopes', 'PLANT: the permit-scope guard taken out of the rollback is reported (the migration without this round''s fix)');
+
+-- 12.3 (Codex 2) Two labels of the file that resolve to one record the import would create are ONE creation: one team per
+-- (division, name), one division per name, one venue per name, one field per (venue, name), one outside club. The dry run
+-- says so and the apply writes it; neither used to, and the apply aborted on UNIQUE (division_id, name).
+-- (a) two source divisions that map to the SAME existing division, each with a new team of the same name.
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO jobs SELECT 'je', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'twice.csv')).id;
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT pg_temp.stage(pg_temp.j('je'), 1, 'ok', 'G-E1', 'Fix U9',     'Park One', 'Field 1', 'Dupe FC', 'Fix Lions',  '2026-11-07', '09:00', '10:00', 40);
+SELECT pg_temp.stage(pg_temp.j('je'), 2, 'ok', 'G-E2', 'Fix U9 Alt', 'Park One', 'Field 1', 'Dupe FC', 'Fix Tigers', '2026-11-14', '09:00', '10:00', 41);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('map_je', (public.map_game_import_job(pg_temp.j('je'), jsonb_build_object(
+    'divisions', jsonb_build_object('fix u9', jsonb_build_object('action', 'map', 'id', pg_temp.u(300)), 'fix u9 alt', jsonb_build_object('action', 'map', 'id', pg_temp.u(300))),
+    'venues', jsonb_build_object('park one', jsonb_build_object('action', 'map', 'id', pg_temp.u(30))),
+    'fields', jsonb_build_object(pg_temp.k2('Park One', 'Field 1'), jsonb_build_object('action', 'map', 'id', pg_temp.u(31))),
+    'teams', jsonb_build_object(pg_temp.k2('Fix U9', 'Dupe FC'), jsonb_build_object('action', 'create'), pg_temp.k2('Fix U9 Alt', 'Dupe FC'), jsonb_build_object('action', 'create'),
+        pg_temp.k2('Fix U9', 'Fix Lions'), jsonb_build_object('action', 'map', 'id', pg_temp.u(301)),
+        pg_temp.k2('Fix U9 Alt', 'Fix Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(302))))))::text);
+INSERT INTO marks VALUES ('dry_je', (public.apply_game_import_job(pg_temp.j('je'), true))::text);
+SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'dry_je'), 'created,teams'), '1', 'the dry run counts ONE new team for the two labels (not two)');
+SELECT is(pg_temp.errx($$SELECT public.apply_game_import_job(pg_temp.j('je'), false)$$), 'no error', 'and the apply is not refused by UNIQUE (division_id, name): it writes what the dry run said');
+INSERT INTO marks VALUES ('apply_je', (public.apply_game_import_job(pg_temp.j('je'), false))::text);
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.teams WHERE division_id = pg_temp.u(300) AND name = 'Dupe FC'$$), '1', 'exactly one team named Dupe FC stands in the division');
+SELECT is(pg_temp.val($$SELECT count(DISTINCT home_team_id) FROM public.game_assignments WHERE import_job_id = pg_temp.j('je')$$) || ' ' || pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE import_job_id = pg_temp.j('je')$$), '1 2',
+    'and both games name it');
+SELECT is(pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'apply_je')), pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'dry_je')), 'the apply''s result is the dry run''s in every count, list and warning');
+-- 12.5 (Code review 2) A shell that a later team run names is kept (the rollback's check of the other runs), with its run. This
+-- rolls job je back at once: a rollback after a later job has carried its games into a newer run is refused, as it should be.
+SET LOCAL "request.jwt.claims" TO '{}';
+INSERT INTO public.scheduler_runs (id, organization_id, season_id, season_settings_id, run_type, status, parameters, results, completed_at) VALUES
+    (pg_temp.u(320), 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', 'a1111111-1111-1111-1111-111111111aaa', 'team', 'completed',
+     '{}'::jsonb, jsonb_build_object('teams', jsonb_build_array(jsonb_build_object('id', (SELECT id FROM public.teams WHERE name = 'Dupe FC' AND division_id = pg_temp.u(300)), 'name', 'Dupe FC'))), '2026-12-30T00:00:00Z');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('rb_je', (public.rollback_game_import_job(pg_temp.j('je')))::text);
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.teams WHERE division_id = pg_temp.u(300) AND name = 'Dupe FC'$$), '1', 'a shell a later team run names is kept by the rollback');
+SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'rb_je'), 'teams_deleted'), '0', 'and the result says no team was deleted');
+SELECT is(pg_temp.val($$SELECT count(*) FROM jsonb_array_elements((SELECT v::jsonb -> 'kept' FROM marks WHERE name = 'rb_je')) e WHERE e ->> 'table' = 'teams'$$), '1', 'and names it in kept');
+
+-- (b) the same for a new division, venue and field named by two labels (the same name), and for a new team and an outside club
+-- named by two labels with names that differ only in case (the key is the lower-cased, trimmed name, as core's is).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO jobs SELECT 'jf', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'zeta.csv')).id;
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT pg_temp.stage(pg_temp.j('jf'), 1, 'ok', 'G-F1', 'Zeta A', 'Venue X', 'Field 1', 'Alpha',     'Club A',     '2026-11-21', '09:00', '10:00', 42);
+SELECT pg_temp.stage(pg_temp.j('jf'), 2, 'ok', 'G-F2', 'Zeta B', 'Venue Y', 'Field 9', 'Alpha Two', 'Club A Alt', '2026-11-28', '09:00', '10:00', 43);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('map_jf', (public.map_game_import_job(pg_temp.j('jf'), jsonb_build_object(
+    'divisions', jsonb_build_object('zeta a', jsonb_build_object('action', 'create', 'name', 'Zeta U9'), 'zeta b', jsonb_build_object('action', 'create', 'name', 'Zeta U9')),
+    'venues', jsonb_build_object('venue x', jsonb_build_object('action', 'create', 'name', 'Park Zeta'), 'venue y', jsonb_build_object('action', 'create', 'name', 'Park Zeta')),
+    'fields', jsonb_build_object(pg_temp.k2('Venue X', 'Field 1'), jsonb_build_object('action', 'create', 'name', 'Field Z'), pg_temp.k2('Venue Y', 'Field 9'), jsonb_build_object('action', 'create', 'name', 'Field Z')),
+    'teams', jsonb_build_object(pg_temp.k2('Zeta A', 'Alpha'), jsonb_build_object('action', 'create', 'name', 'Alpha FC'), pg_temp.k2('Zeta B', 'Alpha Two'), jsonb_build_object('action', 'create', 'name', 'alpha fc'),
+        pg_temp.k2('Zeta A', 'Club A'), jsonb_build_object('action', 'outside', 'name', 'Gulls'), pg_temp.k2('Zeta B', 'Club A Alt'), jsonb_build_object('action', 'outside', 'name', 'gulls')))))::text);
+INSERT INTO marks VALUES ('dry_jf', (public.apply_game_import_job(pg_temp.j('jf'), true))::text);
+SELECT is((SELECT v::jsonb -> 'created' FROM marks WHERE name = 'dry_jf'), '{"divisions": 1, "venues": 1, "fields": 1, "teams": 1, "outside_teams": 1, "slots": 2}'::jsonb,
+    'the dry run counts one division, one venue, one field, one team, one outside club (and two slots)');
+SELECT is(pg_temp.errx($$SELECT public.apply_game_import_job(pg_temp.j('jf'), false)$$), 'no error', 'and the apply writes them without a unique violation');
+INSERT INTO marks VALUES ('apply_jf', (public.apply_game_import_job(pg_temp.j('jf'), false))::text);
+SELECT is(pg_temp.val($$SELECT (SELECT count(*) FROM public.divisions WHERE lower(name) = 'zeta u9') || ' ' || (SELECT count(*) FROM public.locations WHERE lower(name) = 'park zeta')
+        || ' ' || (SELECT count(*) FROM public.fields WHERE lower(name) = 'field z') || ' ' || (SELECT count(*) FROM public.teams WHERE lower(name) = 'alpha fc' AND NOT is_external)
+        || ' ' || (SELECT count(*) FROM public.teams WHERE lower(name) = 'gulls' AND is_external)$$), '1 1 1 1 1', 'one of each stands in the database');
+SELECT is(pg_temp.val($$SELECT string_agg(DISTINCT t.name, ',') FROM public.game_assignments ga JOIN public.teams t ON t.id IN (ga.home_team_id, ga.away_team_id) WHERE ga.import_job_id = pg_temp.j('jf')$$), 'Alpha FC,Gulls',
+    'both games are between the same two sides, named by the first label of each (the key order decides which spelling)');
+SELECT is(pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'apply_jf')), pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'dry_jf')), 'and the apply is the dry run again');
+-- (c) a team created and a club marked outside under one name in one division are two sides for one name: the outside club
+-- is refused as the own team it would collide with (the same refusal as a club named like an own team).
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO jobs SELECT 'jg', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'pelican.csv')).id;
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT pg_temp.stage(pg_temp.j('jg'), 1, 'ok', 'G-G1', 'Fix U9', 'Park One', 'Field 1', 'Gull Shell',   'Fix Lions',  '2026-12-12', '09:00', '10:00', 44);
+SELECT pg_temp.stage(pg_temp.j('jg'), 2, 'ok', 'G-G2', 'Fix U9', 'Park One', 'Field 1', 'Pelican Club', 'Fix Tigers', '2026-12-19', '09:00', '10:00', 45);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('map_jg', (public.map_game_import_job(pg_temp.j('jg'), jsonb_build_object(
+    'divisions', jsonb_build_object('fix u9', jsonb_build_object('action', 'map', 'id', pg_temp.u(300))),
+    'venues', jsonb_build_object('park one', jsonb_build_object('action', 'map', 'id', pg_temp.u(30))),
+    'fields', jsonb_build_object(pg_temp.k2('Park One', 'Field 1'), jsonb_build_object('action', 'map', 'id', pg_temp.u(31))),
+    'teams', jsonb_build_object(pg_temp.k2('Fix U9', 'Gull Shell'), jsonb_build_object('action', 'create', 'name', 'Pelicans'),
+        pg_temp.k2('Fix U9', 'Pelican Club'), jsonb_build_object('action', 'outside', 'name', 'Pelicans'),
+        pg_temp.k2('Fix U9', 'Fix Lions'), jsonb_build_object('action', 'map', 'id', pg_temp.u(301)),
+        pg_temp.k2('Fix U9', 'Fix Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(302))))))::text);
+INSERT INTO marks VALUES ('dry_jg', (public.apply_game_import_job(pg_temp.j('jg'), true))::text);
+SELECT is(pg_temp.errx($$SELECT public.apply_game_import_job(pg_temp.j('jg'), false)$$), 'no error', 'the apply is not aborted by the two creations of one name');
+INSERT INTO marks VALUES ('apply_jg', (public.apply_game_import_job(pg_temp.j('jg'), false))::text);
+SELECT is((SELECT v::jsonb -> 'refused_by_reason' FROM marks WHERE name = 'apply_jg'), '{"label-is-own-team": 1}'::jsonb, 'the club row is refused, listed under that reason');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.teams WHERE division_id = pg_temp.u(300) AND name = 'Pelicans'$$) || ' ' || pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jg'), 'games,inserted'), '1 1',
+    'one Pelicans team (the own shell) and one game written');
+SELECT is(pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'apply_jg')), pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'dry_jg')), 'and the dry run said the same');
+
+-- 12.4 (Code review 1) A row with a time and no field is a TIME TBD game, and core stages it with no instants: the apply
+-- takes it. A row that says tbd and still carries instants is not one core stages, and the SQL stays strict about it.
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO jobs SELECT 'jh', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'tbd.csv')).id;
+INSERT INTO jobs SELECT 'ji', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'tbd-bad.csv')).id;
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT pg_temp.stage(pg_temp.j('jh'), 1, 'tbd', 'G-H1', 'Fix U9', '', '', 'Fix Lions', 'Fix Tigers', '2027-01-09', NULL, NULL, 46);
+SELECT pg_temp.stage(pg_temp.j('ji'), 1, 'tbd', 'G-I1', 'Fix U9', '', '', 'Fix Lions', 'Fix Tigers', '2027-01-16', '09:00', '10:00', 47);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('map_jh', (public.map_game_import_job(pg_temp.j('jh'), jsonb_build_object(
+    'divisions', jsonb_build_object('fix u9', jsonb_build_object('action', 'map', 'id', pg_temp.u(300))),
+    'teams', jsonb_build_object(pg_temp.k2('Fix U9', 'Fix Lions'), jsonb_build_object('action', 'map', 'id', pg_temp.u(301)),
+        pg_temp.k2('Fix U9', 'Fix Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(302))))))::text);
+INSERT INTO marks VALUES ('map_ji', (public.map_game_import_job(pg_temp.j('ji'), (SELECT v::jsonb FROM (SELECT warning_summary -> 'game_mapping' AS v FROM public.import_jobs WHERE id = pg_temp.j('jh')) q)))::text);
+INSERT INTO marks VALUES ('apply_jh', (public.apply_game_import_job(pg_temp.j('jh'), false))::text);
+SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_jh'), 'time_tbd,inserted'), '1', 'a staged tbd row with no instants becomes one TIME TBD game');
+SELECT is(pg_temp.val($$SELECT reason || ' w' || week_index FROM public.schedule_tbd WHERE kind = 'game' AND home_team_id = pg_temp.u(301) AND week_index = 46$$), 'imported-without-time w46',
+    'with the import''s reason and its week');
+SELECT is(pg_temp.errx($$SELECT public.apply_game_import_job(pg_temp.j('ji'), false)$$), '22023:game_import_staged_invalid',
+    'a tbd row that still carries instants is refused whole as not a games row (the SQL stays strict)');
+
+-- 12.6 (Code review 4) The limitation, pinned: two games of one pair in one week that the file swaps by Game ID are both
+-- refused, because the place each moves to still holds the other until the import has run. The words say so.
+SET LOCAL "request.jwt.claims" TO '{}';
+INSERT INTO public.game_slots (id, organization_id, field_id, start, "end", slot_date, start_time, end_time, week_index, capacity) VALUES
+    (pg_temp.u(330), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(31), '2027-02-06T09:00:00-08:00', '2027-02-06T10:00:00-08:00', '2027-02-06', '09:00', '10:00', 50, 1),
+    (pg_temp.u(331), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(31), '2027-02-06T10:00:00-08:00', '2027-02-06T11:00:00-08:00', '2027-02-06', '10:00', '11:00', 50, 1);
+INSERT INTO public.game_assignments (id, organization_id, season_settings_id, game_slot_id, slot_id, field_id, home_team_id, away_team_id, division, week_index, start, "end", assignment_source, external_ref) VALUES
+    (pg_temp.u(332), 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', pg_temp.u(330), pg_temp.u(330), pg_temp.u(31), pg_temp.u(301), pg_temp.u(302), 'Fix U9', 50, '2027-02-06T09:00:00-08:00', '2027-02-06T10:00:00-08:00', 'auto', 'SW-1'),
+    (pg_temp.u(333), 'a1111111-1111-1111-1111-111111111111', 'a1111111-1111-1111-1111-111111111aaa', pg_temp.u(331), pg_temp.u(331), pg_temp.u(31), pg_temp.u(301), pg_temp.u(302), 'Fix U9', 50, '2027-02-06T10:00:00-08:00', '2027-02-06T11:00:00-08:00', 'auto', 'SW-2');
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO jobs SELECT 'js', (public.create_import_job('a1111111-1111-1111-1111-111111111111', 'games', 'swap.csv')).id;
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT pg_temp.stage(pg_temp.j('js'), 1, 'ok', 'SW-1', 'Fix U9', 'Park One', 'Field 1', 'Fix Lions', 'Fix Tigers', '2027-02-06', '10:00', '11:00', 50);
+SELECT pg_temp.stage(pg_temp.j('js'), 2, 'ok', 'SW-2', 'Fix U9', 'Park One', 'Field 1', 'Fix Lions', 'Fix Tigers', '2027-02-06', '09:00', '10:00', 50);
+SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
+INSERT INTO marks VALUES ('map_js', (public.map_game_import_job(pg_temp.j('js'), jsonb_build_object(
+    'divisions', jsonb_build_object('fix u9', jsonb_build_object('action', 'map', 'id', pg_temp.u(300))),
+    'venues', jsonb_build_object('park one', jsonb_build_object('action', 'map', 'id', pg_temp.u(30))),
+    'fields', jsonb_build_object(pg_temp.k2('Park One', 'Field 1'), jsonb_build_object('action', 'map', 'id', pg_temp.u(31))),
+    'teams', jsonb_build_object(pg_temp.k2('Fix U9', 'Fix Lions'), jsonb_build_object('action', 'map', 'id', pg_temp.u(301)),
+        pg_temp.k2('Fix U9', 'Fix Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(302))))))::text);
+INSERT INTO marks VALUES ('apply_js', (public.apply_game_import_job(pg_temp.j('js'), false))::text);
+SELECT is((SELECT v::jsonb -> 'refused_by_reason' FROM marks WHERE name = 'apply_js'), '{"duplicate-row": 2}'::jsonb, 'the swap of two games of one pair in one week by Game ID is refused (known limitation): both rows');
+SELECT is(pg_temp.gj(pg_temp.u(332)) || ' | ' || pg_temp.gj(pg_temp.u(333)), '2d>2e@1f/2027-02-06/09:00 w50 pub=false ref=SW-1 | 2d>2e@1f/2027-02-06/10:00 w50 pub=false ref=SW-2',
+    'and neither game moved');
+SELECT is(((SELECT v::jsonb #>> '{listed,refused,0,message}' FROM marks WHERE name = 'apply_js')) ~ 'moves away', 'true',
+    'the words name the case: a game the file moves away from a place still holds it until the import has run');
+
+-- 12.7 (Code review 6) The mapping is the sole input of the apply, and storing it is audited: import.mapped, with the
+-- number of decisions per group and action and the Published default. No label is written to the audit row.
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = pg_temp.j('je')$$), '1', 'storing a mapping writes one import.mapped audit row');
+SELECT is(pg_temp.val($$SELECT (metadata #>> '{decisions,teams,create}') || ' ' || (metadata #>> '{decisions,teams,map}') || ' ' || (metadata #>> '{decisions,divisions,map}') || ' ' || (metadata ->> 'arrive_published')
+        FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = pg_temp.j('je')$$), '2 2 2 true', 'carrying the counts per group and action and the Published default');
+SELECT is(pg_temp.val($$SELECT (metadata::text ~* 'Dupe FC|Fix U9')::text FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = pg_temp.j('je')$$), 'false', 'and no label of the file');
+SET LOCAL "request.jwt.claims" TO '{}';
+SELECT is(pg_temp.errx($$SELECT public.map_game_import_job(pg_temp.j('je'), '{}'::jsonb)$$), '42501:', 'a caller with no signed-in user cannot store a mapping, so there is never an audit row without an actor');
 
 SELECT * FROM finish();
 ROLLBACK;

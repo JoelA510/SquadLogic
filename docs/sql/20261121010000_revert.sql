@@ -16,9 +16,9 @@
 --
 -- **What it deletes:** the games import's own bookkeeping (its jobs, staged rows and rolled-back application records:
 -- the CHECKs that name `games` cannot be put back while one stands). **What it keeps:** every game, slot, division,
--- venue, field and team the imports made and left (they are ordinary rows now), and the `game.slot_created` and the
--- audit rows that cite it (an audit trail a revert can edit is not an audit trail: `audit_log` rows cite the action,
--- so the `audit_actions` row stays too). **What it loses:** the Game ID of every game that carries one (the NOTICE
+-- venue, field and team the imports made and left (they are ordinary rows now), and the `game.slot_created` and `import.mapped` audit actions and the
+-- audit rows that cite them (an audit trail a revert can edit is not an audit trail: `audit_log` rows cite the action,
+-- so the `audit_actions` rows stay too). **What it loses:** the Game ID of every game that carries one (the NOTICE
 -- counts them) and which import wrote a game.
 --
 -- Order matters: the guard trigger goes before its function is replaced and the helper the new guard calls goes after;
@@ -44,7 +44,7 @@ BEGIN
         RAISE EXCEPTION 'a games import is still applied: % record(s) not rolled back, % outside club(s), % TIME TBD game(s) from a file. Roll the import(s) back first (rollback_game_import_job); this revert changes nothing.',
             v_live, v_clubs, v_tbd USING ERRCODE = '55000';
     END IF;
-    RAISE NOTICE 'this revert drops game_assignments.external_ref (% game(s) carry a Game ID, which is lost), game_assignments.import_job_id and teams.is_external; it deletes % games import job(s), % staged row(s) and % rolled-back record(s); every game, slot, division, venue, field and team stays; the game.slot_created audit action stays',
+    RAISE NOTICE 'this revert drops game_assignments.external_ref (% game(s) carry a Game ID, which is lost), game_assignments.import_job_id and teams.is_external; it deletes % games import job(s), % staged row(s) and % rolled-back record(s); every game, slot, division, venue, field and team stays; the game.slot_created and import.mapped audit actions stay',
         (SELECT count(*) FROM public.game_assignments WHERE external_ref IS NOT NULL),
         (SELECT count(*) FROM public.import_jobs WHERE job_type = 'games'),
         (SELECT count(*) FROM public.staging_import_rows WHERE import_type = 'games'),

@@ -12,6 +12,8 @@
 --      and makes ONE new run that holds the whole schedule.
 --   3. The same file again inserts nothing and makes no run.
 --   4. The rollback refuses after a change (naming the game) and, before one, restores the schedule exactly.
+--   5. Fix round 1: storing a mapping is audited (`import.mapped`, with the counts); and two source divisions that map to
+--      one division, each with a new team of one name, are ONE team (the apply used to abort on the unique key).
 --
 -- The pgTAP file (supabase/tests/game_import_apply_rollback.sql) holds the full table; this is the part the migration
 -- harness can run without pgTAP, and the part its plants are shown to turn red (scripts/dbharness/prove.sh).
@@ -86,6 +88,7 @@ DECLARE
     v_g3      uuid := gen_random_uuid();   -- S-3 B>C s3, HIDDEN in run0
     v_job     uuid;
     v_job2    uuid;
+    v_job3    uuid;
     v_mapping jsonb;
     v_dry     jsonb;
     v_apply   jsonb;
@@ -200,6 +203,12 @@ BEGIN
             '["smoke u10","charlie"]', jsonb_build_object('action', 'map', 'id', v_c),
             '["smoke u10","visiting club"]', jsonb_build_object('action', 'outside')));
     PERFORM public.map_game_import_job(v_job, v_mapping);
+    IF (SELECT count(*) FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = v_job) <> 1
+       OR (SELECT metadata #>> '{decisions,teams,outside}' FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = v_job) IS DISTINCT FROM '1'
+       OR (SELECT metadata::text ~ 'Visiting Club' FROM public.audit_log WHERE action = 'import.mapped' AND resource_id = v_job) THEN
+        RAISE EXCEPTION 'storing a mapping did not write one import.mapped audit row carrying the counts and no label';
+    END IF;
+    v_checks := v_checks + 1;
 
     v_fp := pg_temp.fp();
     v_dry := public.apply_game_import_job(v_job, true);
@@ -295,6 +304,30 @@ BEGIN
     END IF;
     v_checks := v_checks + 3;
     RAISE NOTICE 'rollback: refused after a change (the game named, nothing deleted), and before one it restored the schedule exactly';
+
+    -- ---- 5. two labels, one creation -----------------------------------------------------------------------
+    v_job3 := (public.create_import_job(v_org, 'games', 'twice.csv')).id;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM pg_temp.stage(v_org, v_job3, 1, 'ok', 'S-6', 'Smoke U10',   'Smoke Park', 'Smoke Field', 'Zed FC', 'Alpha', '2026-05-23', '09:00', '10:00', 4);
+    PERFORM pg_temp.stage(v_org, v_job3, 2, 'ok', 'S-7', 'Smoke U10 B', 'Smoke Park', 'Smoke Field', 'Zed FC', 'Bravo', '2026-05-23', '10:00', '11:00', 4);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.map_game_import_job(v_job3, jsonb_build_object(
+        'divisions', jsonb_build_object('smoke u10', jsonb_build_object('action', 'map', 'id', v_div), 'smoke u10 b', jsonb_build_object('action', 'map', 'id', v_div)),
+        'venues', jsonb_build_object('smoke park', jsonb_build_object('action', 'map', 'id', v_loc)),
+        'fields', jsonb_build_object('["smoke park","smoke field"]', jsonb_build_object('action', 'map', 'id', v_f1)),
+        'teams', jsonb_build_object('["smoke u10","alpha"]', jsonb_build_object('action', 'map', 'id', v_a),
+                                    '["smoke u10 b","bravo"]', jsonb_build_object('action', 'map', 'id', v_b),
+                                    '["smoke u10","zed fc"]', jsonb_build_object('action', 'create'),
+                                    '["smoke u10 b","zed fc"]', jsonb_build_object('action', 'create'))));
+    v_dry := public.apply_game_import_job(v_job3, true);
+    IF (v_dry #>> '{created,teams}') <> '1' THEN RAISE EXCEPTION 'the preview counts % new teams for two labels of one name, not 1', v_dry #>> '{created,teams}'; END IF;
+    v_apply := public.apply_game_import_job(v_job3, false);
+    IF (SELECT count(*) FROM public.teams WHERE division_id = v_div AND name = 'Zed FC') <> 1
+       OR (v_apply #>> '{games,inserted}') <> '2' OR (v_apply -> 'created') IS DISTINCT FROM (v_dry -> 'created') THEN
+        RAISE EXCEPTION 'two labels of one new team were not written as one team the preview counted: %', v_apply;
+    END IF;
+    v_checks := v_checks + 2;
+    RAISE NOTICE 'coalescing: two source divisions mapped to one division, each with a new team of one name, are one team, as previewed';
 
     RAISE NOTICE 'game_import smoke: % checks', v_checks;
 END

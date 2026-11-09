@@ -4120,7 +4120,7 @@ PROBE
                     OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.game_assignments'::regclass AND a.attname IN ('external_ref', 'import_job_id') AND NOT a.attisdropped) THEN 'column-left'
                WHEN to_regprocedure('public.apply_game_import_job(uuid, boolean)') IS NOT NULL OR to_regprocedure('public.rollback_game_import_job(uuid)') IS NOT NULL
                     OR to_regprocedure('public.map_game_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.game_import_image(jsonb)') IS NOT NULL THEN 'function-left'
-               WHEN NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'game.slot_created') THEN 'action-lost'
+               WHEN (SELECT count(*) FROM public.audit_actions WHERE action IN ('game.slot_created', 'import.mapped')) <> 2 THEN 'action-lost'
                WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'import_jobs_job_type_check') ~ 'games' THEN 'list-left'
                WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'schedule_tbd_reason_check') ~ 'imported-without-time' THEN 'reason-left'
                WHEN (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public.game_assignments_published_guard()'))

@@ -17,6 +17,12 @@
  *
  * The allowlist's copies are held equal by `tests/importAllowlistParity.test.js`; this file requires only that each
  * copy has the games arm.
+ *
+ * - **Retention (fix round 1, code review 3):** every import type the staged-row CHECK admits is on a retention job that
+ *   deletes a finished job's staged rows, or is on a short list of EXEMPTIONS with a reason. The jobs are the latest
+ *   `cron.schedule` of each name in the migrations, read for the import types their DELETE names; the subject set is the
+ *   CHECK's own list. The decision for `games` (not on a job: its rows hold no personal data, as the field types' do not)
+ *   is stated here, in the docs, and cannot be silent: a type that is neither covered nor exempt fails.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -363,5 +369,146 @@ describe('the migration is guarded, reversible and in the harness', () => {
       // once in the allowed list and once in the control list that checks every name is still callable
       expect((fence.match(new RegExp(`'${name}'`, 'g')) ?? []).length, name).toBe(2);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Retention: which staged rows a job deletes (fix round 1, code review 3)
+// ---------------------------------------------------------------------------------------------------------------------
+
+/**
+ * The latest command of every pg_cron job the migrations schedule, by job name (`cron.schedule` with an existing name
+ * replaces that job's command; `cron.unschedule` removes it).
+ *
+ * @param {Array<{ name: string, sql: string }>} files
+ * @returns {Map<string, { file: string, command: string }>}
+ */
+export function latestCronCommands(files) {
+  const latest = new Map();
+  for (const { name: file, sql } of files) {
+    const src = stripSqlComments(sql);
+    const events = [
+      ...[
+        ...src.matchAll(
+          /cron\.schedule\(\s*'([\w-]+)'\s*,\s*'[^']*'\s*,\s*\$\$([\s\S]*?)\$\$\s*\)/g
+        ),
+      ].map((m) => ({
+        at: m.index,
+        name: m[1],
+        command: m[2],
+      })),
+      ...[...src.matchAll(/cron\.unschedule\(\s*'([\w-]+)'\s*\)/g)].map((m) => ({
+        at: m.index,
+        name: m[1],
+        command: null,
+      })),
+    ].sort((a, b) => a.at - b.at);
+    for (const e of events) {
+      if (e.command === null) latest.delete(e.name);
+      else latest.set(e.name, { file, command: e.command });
+    }
+  }
+  return latest;
+}
+
+/**
+ * The import types the retention jobs delete staged rows of: a job whose command deletes from `staging_import_rows` and
+ * names `import_type = '<type>'` (or `IN (...)`).
+ *
+ * @param {Map<string, { file: string, command: string }>} cron
+ * @returns {Map<string, string[]>} type -> the job names
+ */
+export function retentionCoverage(cron) {
+  const covered = new Map();
+  for (const [job, { command }] of cron) {
+    if (!/DELETE\s+FROM\s+public\.staging_import_rows\b/i.test(command)) continue;
+    const types = new Set();
+    for (const m of command.matchAll(/import_type\s*=\s*'(\w+)'/gi)) types.add(m[1]);
+    for (const m of command.matchAll(/import_type\s+IN\s*\(([^)]*)\)/gi)) {
+      for (const t of m[1].matchAll(/'(\w+)'/g)) types.add(t[1]);
+    }
+    for (const t of types) covered.set(t, [...(covered.get(t) ?? []), job]);
+  }
+  return covered;
+}
+
+/**
+ * What is wrong with a retention picture: a type the CHECK admits that is neither covered nor exempt; an exemption with
+ * no reason, one for a type the CHECK does not admit, and one for a type that IS covered (a stale entry).
+ *
+ * @param {string[]} types  the staged-row CHECK's import types
+ * @param {Map<string, string[]>} covered
+ * @param {Record<string, string>} exempt  type -> reason
+ * @returns {string[]}
+ */
+export function retentionGaps(types, covered, exempt) {
+  const problems = [];
+  for (const t of types) {
+    if (!covered.has(t) && !(t in exempt)) problems.push(`${t}: no retention job and no exemption`);
+  }
+  for (const [t, reason] of Object.entries(exempt)) {
+    if (!types.includes(t)) problems.push(`${t}: exempt, but not an import type of the CHECK`);
+    if (covered.has(t)) problems.push(`${t}: exempt, but a retention job covers it`);
+    if (reason.trim().length < 20) problems.push(`${t}: exempt without a reason`);
+  }
+  return problems;
+}
+
+/** Staged rows of these types stay with their job, each for a stated reason (a person's data is on a job). */
+const RETENTION_EXEMPT = {
+  fields: 'venue, field and subunit names, sizes and times: nothing that names a person',
+  field_availability: 'field availability windows and blackouts: nothing that names a person',
+  games:
+    'venue, field, division and team labels, Game IDs, dates and times: the allowlist keeps no name of a person, no email and no contact, so a staged games row holds no personal data',
+};
+
+describe('every staged import type is on a retention job or exempt for a reason', () => {
+  const files = migrationFiles();
+  const checks = latestChecks(files);
+  const stagedCheck = checks.get('staging_import_rows.staging_import_rows_import_type_check');
+  const types = [...(stagedCheck?.text.matchAll(/'(\w+)'/g) ?? [])].map((m) => m[1]);
+  const cron = latestCronCommands(files);
+  const covered = retentionCoverage(cron);
+
+  it('finds the staged-row types, the retention jobs and what they cover (a census over nothing would pass)', () => {
+    expect(types).toEqual(
+      expect.arrayContaining(['coaches', 'practice_preferences', 'evaluations', 'games'])
+    );
+    expect(cron.has('cleanup-staging-import-rows')).toBe(true);
+    expect(cron.has('cleanup-staging-evaluation-rows')).toBe(true);
+    // The latest body of the first job holds BOTH of its arms (20261112010000 replaced the one of 20261022010000).
+    expect(cron.get('cleanup-staging-import-rows')?.file).toBe(
+      '20261112010000_practice_preference_rules.sql'
+    );
+    expect([...covered.keys()].sort()).toEqual(['coaches', 'evaluations', 'practice_preferences']);
+  });
+
+  it('has no type that is neither covered nor exempt, and no stale or reasonless exemption', () => {
+    expect(retentionGaps(types, covered, RETENTION_EXEMPT)).toEqual([]);
+  });
+
+  it('PLANT: without the games exemption (the migration as 87b696a left it) games is reported', () => {
+    const { games, ...others } = RETENTION_EXEMPT;
+    expect(games).toBeTruthy();
+    expect(retentionGaps(types, covered, others)).toEqual([
+      'games: no retention job and no exemption',
+    ]);
+  });
+
+  it('PLANT: a new type with no job and no exemption, a stale exemption and a reasonless one are each reported', () => {
+    expect(retentionGaps([...types, 'schedule'], covered, RETENTION_EXEMPT)).toEqual([
+      'schedule: no retention job and no exemption',
+    ]);
+    expect(
+      retentionGaps(types, covered, { ...RETENTION_EXEMPT, coaches: 'a long enough reason here' })
+    ).toEqual(['coaches: exempt, but a retention job covers it']);
+    expect(retentionGaps(types, covered, { ...RETENTION_EXEMPT, games: 'none' })).toEqual([
+      'games: exempt without a reason',
+    ]);
+  });
+
+  it('the decision for games is stated where an operator reads it', () => {
+    const doc = read('docs/operations/ingestion-pipeline.md');
+    expect(doc).toContain('Staged games rows are not on a retention job');
   });
 });

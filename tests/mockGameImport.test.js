@@ -26,7 +26,7 @@ import {
   teamDecisionKey,
   toStagedGameRow,
 } from '../packages/core/src/scheduleImport/index.js';
-import { handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
+import { COLLISION_MESSAGE, handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
 import { loadScheduleFixture, outsideDecisionsFor } from './helpers/scheduleFixtureLoad.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -975,5 +975,562 @@ describe("the PR 4 fixture through the mock equals core's own resolution of it",
     expect(out.data.rows.skipped).toBe(resolved.counts.skipped);
     expect(out.data.games.inserted).toBeGreaterThan(500);
     expect(db.teams.filter((t) => t.is_external).length).toBeGreaterThan(20);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Fix round 1: the mock holds the numbers the pgTAP file's new section asserts, through the same inputs.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A new section of the pgTAP file asserts this, in these words (so the number cannot change in one place only). */
+const pgtapAsserts = (pattern) => {
+  expect(PGTAP).toMatch(pattern);
+};
+/**
+ * A world with a division of its own, two teams and the park (what pgTAP 12 seeds).
+ *
+ * @returns {any}
+ */
+function fixWorld() {
+  /** @type {any} */
+  const db = world();
+  const D = U(300);
+  db.divisions.push({ id: D, organization_id: ORG, season_settings_id: SEASON, name: 'Fix U9' });
+  db.teams.push(
+    { id: U(301), organization_id: ORG, division_id: D, name: 'Fix Lions' },
+    { id: U(302), organization_id: ORG, division_id: D, name: 'Fix Tigers' }
+  );
+  db.facility_permit_scopes = [];
+  db.field_blackouts = [];
+  db.field_subunits = [];
+  return db;
+}
+/** @param {string} id @returns {any} */
+const mapDecision = (id) => ({ action: 'map', id });
+/** pgTAP's job je: two source divisions mapped to one division, each with a new team called Dupe FC. */
+/** @returns {any} */
+const jeMapping = () => {
+  const m = fixBase();
+  m.divisions['fix u9 alt'] = mapDecision(U(300));
+  delete m.teams[teamDecisionKey('Fix U9', 'Fix Tigers')];
+  m.teams[teamDecisionKey('Fix U9', 'Dupe FC')] = { action: 'create' };
+  m.teams[teamDecisionKey('Fix U9 Alt', 'Dupe FC')] = { action: 'create' };
+  m.teams[teamDecisionKey('Fix U9 Alt', 'Fix Tigers')] = mapDecision(U(302));
+  return m;
+};
+/** The standing decisions of a Fix U9 file: the division, Park One and its Field 1, and the two teams. */
+/** @returns {any} */
+const fixBase = () => ({
+  options: { arrive_published: true },
+  divisions: { 'fix u9': mapDecision(U(300)) },
+  venues: { 'park one': mapDecision(U(30)) },
+  fields: { [fieldDecisionKey('Park One', 'Field 1')]: mapDecision(F1) },
+  teams: {
+    [teamDecisionKey('Fix U9', 'Fix Lions')]: mapDecision(U(301)),
+    [teamDecisionKey('Fix U9', 'Fix Tigers')]: mapDecision(U(302)),
+  },
+});
+
+describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the same numbers)', () => {
+  it('Codex 2 (a): two labels that map to one division, each with a new team of one name, are one team', () => {
+    const db = fixWorld();
+    const m = jeMapping();
+    const id = addJob(
+      db,
+      [
+        stage(
+          1,
+          'ok',
+          'G-E1',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Dupe FC',
+          'Fix Lions',
+          '2026-11-07',
+          '09:00',
+          '10:00',
+          40
+        ),
+        stage(
+          2,
+          'ok',
+          'G-E2',
+          'Fix U9 Alt',
+          'Park One',
+          'Field 1',
+          'Dupe FC',
+          'Fix Tigers',
+          '2026-11-14',
+          '09:00',
+          '10:00',
+          41
+        ),
+      ],
+      m
+    );
+    const dry = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: true });
+    expect(dry.data.created.teams).toBe(1);
+    pgtapAsserts(/'created,teams'\), '1', 'the dry run counts ONE new team for the two labels/);
+    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    expect(out.error).toBeNull();
+    expect(db.teams.filter((t) => t.division_id === U(300) && t.name === 'Dupe FC')).toHaveLength(
+      1
+    );
+    const homes = new Set(
+      db.game_assignments.filter((g) => g.import_job_id === id).map((g) => g.home_team_id)
+    );
+    expect(homes.size).toBe(1);
+    expect(out.data.created).toEqual(dry.data.created);
+  });
+
+  it('Codex 2 (b): one division, venue, field, new team and outside club for the labels that name them alike', () => {
+    const db = fixWorld();
+    const id = addJob(
+      db,
+      [
+        stage(
+          1,
+          'ok',
+          'G-F1',
+          'Zeta A',
+          'Venue X',
+          'Field 1',
+          'Alpha',
+          'Club A',
+          '2026-11-21',
+          '09:00',
+          '10:00',
+          42
+        ),
+        stage(
+          2,
+          'ok',
+          'G-F2',
+          'Zeta B',
+          'Venue Y',
+          'Field 9',
+          'Alpha Two',
+          'Club A Alt',
+          '2026-11-28',
+          '09:00',
+          '10:00',
+          43
+        ),
+      ],
+      {
+        options: { arrive_published: true },
+        divisions: {
+          'zeta a': { action: 'create', name: 'Zeta U9' },
+          'zeta b': { action: 'create', name: 'Zeta U9' },
+        },
+        venues: {
+          'venue x': { action: 'create', name: 'Park Zeta' },
+          'venue y': { action: 'create', name: 'Park Zeta' },
+        },
+        fields: {
+          [fieldDecisionKey('Venue X', 'Field 1')]: { action: 'create', name: 'Field Z' },
+          [fieldDecisionKey('Venue Y', 'Field 9')]: { action: 'create', name: 'Field Z' },
+        },
+        teams: {
+          [teamDecisionKey('Zeta A', 'Alpha')]: { action: 'create', name: 'Alpha FC' },
+          [teamDecisionKey('Zeta B', 'Alpha Two')]: { action: 'create', name: 'alpha fc' },
+          [teamDecisionKey('Zeta A', 'Club A')]: { action: 'outside', name: 'Gulls' },
+          [teamDecisionKey('Zeta B', 'Club A Alt')]: { action: 'outside', name: 'gulls' },
+        },
+      }
+    );
+    const dry = rpc(db, 'apply_game_import_job', { p_import_job_id: id, p_dry_run: true });
+    expect(dry.data.created).toEqual({
+      divisions: 1,
+      venues: 1,
+      fields: 1,
+      teams: 1,
+      outside_teams: 1,
+      slots: 2,
+    });
+    expect(PGTAP).toContain(
+      `'{"divisions": 1, "venues": 1, "fields": 1, "teams": 1, "outside_teams": 1, "slots": 2}'::jsonb`
+    );
+    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    expect(out.error).toBeNull();
+    expect(out.data.created).toEqual(dry.data.created);
+    const count = (rows, test) => rows.filter(test).length;
+    expect(
+      [
+        count(db.divisions, (d) => d.name.toLowerCase() === 'zeta u9'),
+        count(db.locations, (l) => l.name.toLowerCase() === 'park zeta'),
+        count(db.fields, (f) => f.name.toLowerCase() === 'field z'),
+        count(db.teams, (t) => t.name.toLowerCase() === 'alpha fc' && !t.is_external),
+        count(db.teams, (t) => t.name.toLowerCase() === 'gulls' && t.is_external),
+      ].join(' ')
+    ).toBe('1 1 1 1 1');
+    pgtapAsserts(/'1 1 1 1 1', 'one of each stands in the database'/);
+  });
+
+  it('Codex 2 (c): an outside club that takes the name of a team created here is refused as an own team', () => {
+    const db = fixWorld();
+    const m = fixBase();
+    m.teams[teamDecisionKey('Fix U9', 'Gull Shell')] = { action: 'create', name: 'Pelicans' };
+    m.teams[teamDecisionKey('Fix U9', 'Pelican Club')] = { action: 'outside', name: 'Pelicans' };
+    const id = addJob(
+      db,
+      [
+        stage(
+          1,
+          'ok',
+          'G-G1',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Gull Shell',
+          'Fix Lions',
+          '2026-12-12',
+          '09:00',
+          '10:00',
+          44
+        ),
+        stage(
+          2,
+          'ok',
+          'G-G2',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Pelican Club',
+          'Fix Tigers',
+          '2026-12-19',
+          '09:00',
+          '10:00',
+          45
+        ),
+      ],
+      m
+    );
+    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    expect(out.error).toBeNull();
+    expect(out.data.refused_by_reason).toEqual({ 'label-is-own-team': 1 });
+    expect(out.data.games.inserted).toBe(1);
+    expect(db.teams.filter((t) => t.division_id === U(300) && t.name === 'Pelicans')).toHaveLength(
+      1
+    );
+    pgtapAsserts(
+      /'\{"label-is-own-team": 1\}'::jsonb, 'the club row is refused, listed under that reason'/
+    );
+  });
+
+  it('Code review 1: a row with a time and no field, parsed and staged as core does, is a TIME TBD game', () => {
+    const db = fixWorld();
+    const season = {
+      timeZone: 'America/Los_Angeles',
+      startDate: '2026-09-07',
+      endDate: '2027-03-31',
+    };
+    const [parsedRow] = parseScheduleRows({
+      headers: [
+        'Game ID',
+        'Date',
+        'Start Time',
+        'End Time',
+        'Venue',
+        'Field',
+        'Division',
+        'Home Team',
+        'Away Team',
+        'Week',
+      ],
+      rows: [
+        {
+          'Game ID': 'G-H1',
+          Date: '2027-01-09',
+          'Start Time': '09:00',
+          'End Time': '10:00',
+          Venue: 'Park One',
+          Field: '',
+          Division: 'Fix U9',
+          'Home Team': 'Fix Lions',
+          'Away Team': 'Fix Tigers',
+          Week: '19',
+        },
+      ],
+      season,
+    }).rows;
+    expect(parsedRow.status).toBe('tbd');
+    const id = addJob(db, [toStagedGameRow(parsedRow)], fixBase());
+    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    expect(out.error).toBeNull();
+    expect(out.data.time_tbd.inserted).toBe(1);
+    pgtapAsserts(
+      /'time_tbd,inserted'\), '1', 'a staged tbd row with no instants becomes one TIME TBD game'/
+    );
+  });
+
+  it('Codex 1: the rollback keeps a field or venue something was attached to, and says so', () => {
+    const db = fixWorld();
+    const names = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+    const m = fixBase();
+    m.venues = {};
+    m.fields = {};
+    names.forEach((n) => {
+      m.venues[`perm ${n.toLowerCase()}`] = { action: 'create' };
+      m.fields[fieldDecisionKey(`Perm ${n}`, `Field K${names.indexOf(n) + 1}`)] = {
+        action: 'create',
+      };
+    });
+    const dates = [
+      '2026-09-05',
+      '2026-09-12',
+      '2026-09-19',
+      '2026-09-26',
+      '2026-10-03',
+      '2026-10-10',
+    ];
+    const rows = names.map((n, i) =>
+      stage(
+        i + 1,
+        'ok',
+        `G-K${i + 1}`,
+        'Fix U9',
+        `Perm ${n}`,
+        `Field K${i + 1}`,
+        'Fix Lions',
+        'Fix Tigers',
+        dates[i],
+        '09:00',
+        '10:00',
+        i + 1
+      )
+    );
+    const id = addJob(db, rows, m);
+    expect(rpc(db, 'apply_game_import_job', { p_import_job_id: id }).error).toBeNull();
+    const field = (name) => db.fields.find((f) => f.name === name).id;
+    const venue = (name) => db.locations.find((l) => l.name === name).id;
+    db.facility_permit_scopes.push({
+      id: 's1',
+      permit_id: 'p',
+      organization_id: ORG,
+      field_id: field('Field K1'),
+      location_id: null,
+    });
+    db.facility_permit_scopes.push({
+      id: 's2',
+      permit_id: 'p',
+      organization_id: ORG,
+      field_id: null,
+      location_id: venue('Perm Two'),
+    });
+    db.field_blackouts.push({
+      id: 'b1',
+      organization_id: ORG,
+      field_id: field('Field K3'),
+      location_id: null,
+    });
+    db.field_subunits.push({
+      id: 'u1',
+      organization_id: ORG,
+      field_id: field('Field K4'),
+      label: 'Half A',
+    });
+    db.field_blackouts.push({
+      id: 'b2',
+      organization_id: ORG,
+      field_id: null,
+      location_id: venue('Perm Five'),
+    });
+    const back = rpc(db, 'rollback_game_import_job', { p_import_job_id: id });
+    expect(back.error).toBeNull();
+    expect(
+      db.fields
+        .filter((f) => f.name.startsWith('Field K'))
+        .map((f) => f.name)
+        .sort()
+    ).toEqual(['Field K1', 'Field K3', 'Field K4']);
+    expect(
+      db.locations
+        .filter((l) => l.name.startsWith('Perm '))
+        .map((l) => l.name)
+        .sort()
+    ).toEqual(['Perm Five', 'Perm Four', 'Perm One', 'Perm Three', 'Perm Two']);
+    expect(`${back.data.fields_deleted} ${back.data.venues_deleted}`).toBe('3 1');
+    expect(back.data.kept).toHaveLength(8);
+    expect(db.facility_permit_scopes).toHaveLength(2);
+    pgtapAsserts(/'3 1',\s*'the rollback says it deleted three fields and one venue'/);
+    pgtapAsserts(/'8', 'and names the eight it kept/);
+  });
+
+  it('Code review 2: a shell a later team run names is kept, with its run', () => {
+    const db = fixWorld();
+    const m = fixBase();
+    m.teams[teamDecisionKey('Fix U9', 'Dupe FC')] = { action: 'create' };
+    const id = addJob(
+      db,
+      [
+        stage(
+          1,
+          'ok',
+          'G-E1',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Dupe FC',
+          'Fix Lions',
+          '2026-11-07',
+          '09:00',
+          '10:00',
+          40
+        ),
+      ],
+      m
+    );
+    expect(rpc(db, 'apply_game_import_job', { p_import_job_id: id }).error).toBeNull();
+    const shell = db.teams.find((t) => t.name === 'Dupe FC').id;
+    db.scheduler_runs.push({
+      id: U(320),
+      organization_id: ORG,
+      season_id: SEASON,
+      season_settings_id: SEASON,
+      run_type: 'team',
+      status: 'completed',
+      parameters: {},
+      results: { teams: [{ id: shell, name: 'Dupe FC' }] },
+      created_at: '2026-12-30T00:00:00Z',
+    });
+    const back = rpc(db, 'rollback_game_import_job', { p_import_job_id: id });
+    expect(back.error).toBeNull();
+    expect(db.teams.filter((t) => t.name === 'Dupe FC')).toHaveLength(1);
+    expect(back.data.teams_deleted).toBe(0);
+    expect(back.data.kept.filter((k) => k.table === 'teams')).toHaveLength(1);
+    pgtapAsserts(/a shell a later team run names is kept by the rollback/);
+  });
+
+  it('Code review 4: a swap of two games of one pair in one week is refused in words that name the case', () => {
+    const db = fixWorld();
+    const slot = (n, start, end) => ({
+      id: U(330 + n),
+      organization_id: ORG,
+      field_id: F1,
+      division_id: null,
+      slot_date: '2027-02-06',
+      start_time: start,
+      end_time: end,
+      week_index: 50,
+      capacity: 1,
+      start: `2027-02-06T${start}:00-08:00`,
+      end: `2027-02-06T${end}:00-08:00`,
+      created_at: '2026-04-01T00:00:00Z',
+    });
+    db.game_slots.push(slot(0, '09:00', '10:00'), slot(1, '10:00', '11:00'));
+    const g = (n, ref, s) => ({
+      id: U(332 + n),
+      organization_id: ORG,
+      season_settings_id: SEASON,
+      run_id: null,
+      game_slot_id: s.id,
+      slot_id: s.id,
+      field_id: F1,
+      home_team_id: U(301),
+      away_team_id: U(302),
+      division: 'Fix U9',
+      week_index: 50,
+      start: s.start,
+      end: s.end,
+      external_ref: ref,
+      published: false,
+    });
+    db.game_assignments.push(
+      g(0, 'SW-1', db.game_slots.at(-2)),
+      g(1, 'SW-2', db.game_slots.at(-1))
+    );
+    const id = addJob(
+      db,
+      [
+        stage(
+          1,
+          'ok',
+          'SW-1',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Fix Lions',
+          'Fix Tigers',
+          '2027-02-06',
+          '10:00',
+          '11:00',
+          50
+        ),
+        stage(
+          2,
+          'ok',
+          'SW-2',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Fix Lions',
+          'Fix Tigers',
+          '2027-02-06',
+          '09:00',
+          '10:00',
+          50
+        ),
+      ],
+      fixBase()
+    );
+    const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
+    expect(out.error).toBeNull();
+    expect(out.data.refused_by_reason).toEqual({ 'duplicate-row': 2 });
+    expect(out.data.listed.refused[0].message).toMatch(/moves away/);
+    // The words are the SQL's: the migration carries the same sentence (its quotes doubled).
+    const migration = readFileSync(
+      path.join(REPO, 'supabase/migrations/20261121010000_game_import.sql'),
+      'utf8'
+    );
+    expect(migration).toContain(COLLISION_MESSAGE.replaceAll("'", "''"));
+    pgtapAsserts(
+      /'\{"duplicate-row": 2\}'::jsonb, 'the swap of two games of one pair in one week by Game ID is refused/
+    );
+  });
+
+  it('Code review 6: storing a mapping is audited with the counts per group and action, and no label', () => {
+    const db = fixWorld();
+    const m = jeMapping();
+    const id = addJob(
+      db,
+      [
+        stage(
+          1,
+          'ok',
+          'G-E1',
+          'Fix U9',
+          'Park One',
+          'Field 1',
+          'Dupe FC',
+          'Fix Lions',
+          '2026-11-07',
+          '09:00',
+          '10:00',
+          40
+        ),
+      ],
+      m
+    );
+    const rows = db.audit_log.filter((a) => a.action === 'import.mapped' && a.resource_id === id);
+    expect(rows).toHaveLength(1);
+    const d = rows[0].metadata.decisions;
+    expect(
+      `${d.teams.create} ${d.teams.map} ${d.divisions.map} ${rows[0].metadata.arrive_published}`
+    ).toBe('2 2 2 true');
+    expect(JSON.stringify(rows[0].metadata)).not.toMatch(/Dupe FC|Fix U9/);
+    pgtapAsserts(
+      /'2 2 2 true', 'carrying the counts per group and action and the Published default'/
+    );
+    // A caller with no signed-in user cannot store one, so there is never an audit row without an actor.
+    expect(
+      rpc(
+        db,
+        'map_game_import_job',
+        { p_import_job_id: id, p_mapping: {} },
+        ctx({ currentUserId: null })
+      ).error.code
+    ).toBe('42501');
   });
 });

@@ -10,10 +10,13 @@
  *
  * - A row the parse refused is staged with NO payload and its reason in `validation_errors` (`code`, `message`): the
  *   apply lists it and writes nothing for it.
- * - A row it accepted is staged with `status` `ok` (placed) or `tbd` (no time or no field: a TIME TBD game), the wall
- *   readings and instants, the week, the flags, the labels as typed and, beside each label, the decision key the mapping
- *   step stores its decision under (`mapping.js`'s `*DecisionKey`): the one normaliser stays in JavaScript, so the SQL
- *   matches keys by equality and never normalises a label.
+ * - A row it accepted is staged with `status` `ok` (placed) or `tbd` (no time or no field: a TIME TBD game), the date,
+ *   the week, the flags, the labels as typed and, beside each label, the decision key the mapping step stores its
+ *   decision under (`mapping.js`'s `*DecisionKey`): the one normaliser stays in JavaScript, so the SQL matches keys by
+ *   equality and never normalises a label. An `ok` row carries its wall readings and instants; **a `tbd` row carries
+ *   none**: a TIME TBD game has no place in time, and the parse assigns the instants of a row that has a time and no
+ *   field before it knows the field is blank, so they are dropped here (the SQL's shape check refuses a `tbd` row that
+ *   holds an instant, and one such row would otherwise refuse the whole apply).
  *
  * Nothing else of the file is staged (a format, a note, a coach, an email, a phone): the parse never read it.
  */
@@ -75,10 +78,10 @@ export function toStagedGameRow(row) {
       status: row.status,
       tbd_reason: placed ? null : row.tbdReason,
       date: row.date,
-      start_time: row.startTime,
-      end_time: row.endTime,
-      start: row.start,
-      end: row.end,
+      start_time: placed ? row.startTime : null,
+      end_time: placed ? row.endTime : null,
+      start: placed ? row.start : null,
+      end: placed ? row.end : null,
       week_index: row.weekIndex,
       flags: row.flags.map((flag) => flag.code),
       division: row.divisionLabel,

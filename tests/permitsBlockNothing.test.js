@@ -40,6 +40,9 @@ const ALLOWED = new Set([
   'supabase/migrations/20261102010000_facility_permits.sql',
   // the admin-only migration replaces the permit writers and get_facility_permits (no coach arm)
   'supabase/migrations/20261104010000_admin_only.sql',
+  // the games import's rollback (fix round 1): it deletes a field or venue its import created only when nothing else names
+  // it, and a permit scope names it. That is a record kept, never a rollback refused: nothing is blocked on a permit.
+  'supabase/migrations/20261121010000_game_import.sql',
 ]);
 
 // What reads a permit: the tables, the RPC, the hooks and the core helpers. In JavaScript the tables

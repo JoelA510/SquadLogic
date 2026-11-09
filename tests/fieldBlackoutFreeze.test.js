@@ -340,6 +340,11 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
     // enact smoke seeds the saved blackout and rewrites each of its stored
     // columns in turn for witness B8 (the scope cannot change through the
     // update RPC), and its pgTAP suite seeds one inside its ROLLBACK.
+    //
+    // The games import's fix round (20261121010000) adds two more test writers, neither a producer: its pgTAP file
+    // seeds a field-level and a venue-level blackout (inside a ROLLBACK) to show the import's rollback keeps a field or
+    // venue an admin attached one to, and the mock client's test of the same rollback pushes two into the mock's
+    // table. The rollback only READS the table (a guard), so its migration is not a writer.
     expect(writersOf('field_blackouts')).toEqual([
       'docs/sql/20260906000100_smoke.sql',
       'docs/sql/20261007000000_smoke.sql',
@@ -349,7 +354,9 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
       'supabase/migrations/20260910000000_admin_update_field_blackout.sql',
       'supabase/tests/admin_update_field_blackout.sql',
       'supabase/tests/enact_blackout.sql',
+      'supabase/tests/game_import_apply_rollback.sql',
       'supabase/tests/rls_field_blackouts.sql',
+      'tests/mockGameImport.test.js',
     ]);
   });
 

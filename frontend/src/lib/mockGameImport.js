@@ -116,7 +116,7 @@ export function handleGameImportRpc(db, name, params, ctx) {
   if (name === 'ensure_game_slot') return ensureGameSlot(db, params, ctx, env);
   const gated = jobGates(db, params?.p_import_job_id, ctx);
   if (gated.error) return gated;
-  if (name === 'map_game_import_job') return mapJob(db, gated.job, params?.p_mapping);
+  if (name === 'map_game_import_job') return mapJob(db, gated.job, params?.p_mapping, ctx, env);
   if (name === 'rollback_game_import_job') return rollbackJob(db, gated.job, ctx, env);
   return applyJob(db, gated.job, params?.p_dry_run === true, ctx, env);
 }
@@ -198,6 +198,12 @@ function ensureGameSlot(db, params, ctx, env) {
 
 // --------------------------------------------------------------------------------------------- map_game_import_job
 
+/** What a row refused because another game stands on its place is told (the SQL's words; a test holds the two equal). */
+export const COLLISION_MESSAGE =
+  "A game already stands on this place, and this row's Game ID (or the lack of one) does not name it. A game this file moves away from a place still stands on it until the import has run, so two games of one pair that swap places in one week are not imported. Nothing is written for the row.";
+
+const UUID_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
 const ACTIONS = {
   divisions: ['map', 'create', 'skip'],
   venues: ['map', 'create', 'skip'],
@@ -205,7 +211,7 @@ const ACTIONS = {
   teams: ['map', 'create', 'outside', 'skip'],
 };
 
-function mapJob(db, job, mapping) {
+function mapJob(db, job, mapping, ctx, env) {
   if (!['importing', 'ready_to_apply'].includes(job.status)) {
     return fail(
       '22023',
@@ -246,6 +252,7 @@ function mapJob(db, job, mapping) {
   }
   const clean = {};
   const counts = {};
+  const decisions = {};
   for (const group of Object.keys(ACTIONS)) {
     const entries = mapping[group];
     clean[group] = {};
@@ -314,9 +321,24 @@ function mapJob(db, job, mapping) {
       }
     }
     counts[group] = Object.keys(clean[group]).length;
+    decisions[group] = {};
+    for (const d of Object.values(clean[group]))
+      decisions[group][d.action] = (decisions[group][d.action] ?? 0) + 1;
   }
   clean.options = { arrive_published: arrive };
   job.warning_summary = { ...(job.warning_summary || {}), game_mapping: clean };
+  // The mapping is the sole input of the apply, so storing it is audited: the number of decisions per group and action and
+  // the Published default, never a label of the file (the SQL's `import.mapped`).
+  (db.audit_log = db.audit_log || []).push({
+    id: env.newId(),
+    organization_id: job.organization_id,
+    user_id: ctx.currentUserId,
+    action: 'import.mapped',
+    resource_type: 'import_job',
+    resource_id: job.id,
+    metadata: { import_type: 'games', arrive_published: arrive, decisions },
+    created_at: env.now(),
+  });
   return { data: { job_id: job.id, arrive_published: arrive, ...counts }, error: null };
 }
 
@@ -465,6 +487,29 @@ function applyJob(db, job, dry, ctx, env) {
     outcome: r.status === 'ok' || r.status === 'tbd' ? 'ok' : r.status,
   }));
 
+  // An outside club whose name a team created here already takes is refused as the own team it would collide with
+  // (UNIQUE (division_id, name) holds for both): the SQL's `own-name`, which core's pure resolution does not know.
+  const shellNames = new Set(
+    resolved.creations.teamShells.map((c) => JSON.stringify([c.divisionId, c.key]))
+  );
+  const collidingClubs = new Set(
+    resolved.creations.outsideTeams
+      .filter((c) => shellNames.has(JSON.stringify([c.divisionId, c.key])))
+      .map((c) => c.id)
+  );
+  for (const r of rows) {
+    if (
+      r.outcome === 'ok' &&
+      (collidingClubs.has(r.ids?.home) || collidingClubs.has(r.ids?.away))
+    ) {
+      r.outcome = 'refused';
+      r.status = 'refused';
+      r.reason = 'label-is-own-team';
+      r.message =
+        'A label was marked as an outside club, but the division has a team of that name: map it to that team instead.';
+    }
+  }
+
   // The same game twice by the admin's own mapping, a TIME TBD game that the table holds once per (home, away, week),
   // and one Game ID on two games: the first row of each wins.
   const seenTbd = new Set();
@@ -574,6 +619,7 @@ function applyJob(db, job, dry, ctx, env) {
     p.r.outcome = 'refused';
     p.r.status = 'refused';
     p.r.reason = 'duplicate-row';
+    p.r.message = COLLISION_MESSAGE;
   }
 
   const tbd = rows
@@ -1216,8 +1262,13 @@ function rollbackJob(db, job, ctx, env) {
   const of = (table, op) =>
     records.filter((r) => r.target_table === table && (!op || r.operation === op));
   const gone = (table, ids) => {
+    const before = (db[table] || []).length;
     db[table] = (db[table] || []).filter((row) => !ids.some((id) => same(id, row.id)));
+    return before - db[table].length;
   };
+  // What an admin attached afterwards keeps its record (the SQL's guards; the pgTAP file derives the list from the catalogue).
+  const attached = (table, column, id) =>
+    (db[table] || []).some((row) => same(row[column] ?? '', id));
   const deletedGames = of('game_assignments', 'inserted').map((r) => r.target_id);
   gone('game_assignments', deletedGames);
   const restored = of('game_assignments', 'updated');
@@ -1238,12 +1289,12 @@ function rollbackJob(db, job, ctx, env) {
       import_job_id: p.import_job_id ?? null,
     });
   }
-  gone(
+  const tbdDeleted = gone(
     'schedule_tbd',
     of('schedule_tbd').map((r) => r.target_id)
   );
   const games = db.game_assignments || [];
-  gone(
+  const slotsDeleted = gone(
     'game_slots',
     of('game_slots', 'inserted')
       .map((r) => r.target_id)
@@ -1257,14 +1308,33 @@ function rollbackJob(db, job, ctx, env) {
       (s) => s.kind === 'game' && (same(s.home_team_id ?? '', id) || same(s.away_team_id ?? '', id))
     ) ||
     (db.team_players || []).some((tp) => same(tp.team_id, id)) ||
+    [
+      'team_coach_assignments',
+      'practice_assignments',
+      'practice_exceptions',
+      'coach_practice_preferences',
+    ].some((table) => attached(table, 'team_id', id)) ||
     (db.players || []).some((p) => same(p.team_id ?? '', id));
-  gone(
+  // The ids every OTHER team run of the organization names anywhere in its results (a team a later run names stays).
+  const namedElsewhere = new Set();
+  for (const r of db.scheduler_runs || []) {
+    if (
+      !same(r.organization_id, org) ||
+      r.run_type !== 'team' ||
+      r.parameters?.import_job_id === job.id
+    )
+      continue;
+    for (const m of JSON.stringify(r.results ?? {}).matchAll(UUID_TEXT))
+      namedElsewhere.add(m[0].toLowerCase());
+  }
+  const teamsDeleted = gone(
     'teams',
     of('teams', 'inserted')
       .map((r) => r.target_id)
-      .filter((id) => !teamRefs(id))
+      .filter((id) => !teamRefs(id) && !namedElsewhere.has(String(id).toLowerCase()))
   );
   const liveTeams = new Set((db.teams || []).map((t) => String(t.id).toLowerCase()));
+  const runsBefore = (db.scheduler_runs || []).length;
   db.scheduler_runs = (db.scheduler_runs || []).filter(
     (r) =>
       !(
@@ -1274,28 +1344,58 @@ function rollbackJob(db, job, ctx, env) {
         !(r.parameters.shell_ids || []).some((id) => liveTeams.has(String(id).toLowerCase()))
       )
   );
-  gone(
+  const teamRunsDeleted = runsBefore - db.scheduler_runs.length;
+  const fieldsDeleted = gone(
     'fields',
     of('fields', 'inserted')
       .map((r) => r.target_id)
       .filter(
         (id) =>
           !(db.game_slots || []).some((s) => same(s.field_id, id)) &&
-          !games.some((g) => same(g.field_id ?? '', id))
+          !games.some((g) => same(g.field_id ?? '', id)) &&
+          !attached('facility_permit_scopes', 'field_id', id) &&
+          !attached('field_blackouts', 'field_id', id) &&
+          !attached('field_subunits', 'field_id', id)
       )
   );
-  gone(
+  const venuesDeleted = gone(
     'locations',
     of('locations', 'inserted')
       .map((r) => r.target_id)
-      .filter((id) => !(db.fields || []).some((f) => same(f.location_id, id)))
+      .filter(
+        (id) =>
+          !(db.fields || []).some((f) => same(f.location_id, id)) &&
+          !attached('facility_permit_scopes', 'location_id', id) &&
+          !attached('field_blackouts', 'location_id', id)
+      )
   );
-  gone(
+  const divisionsDeleted = gone(
     'divisions',
     of('divisions', 'inserted')
       .map((r) => r.target_id)
-      .filter((id) => !(db.teams || []).some((t) => same(t.division_id, id)))
+      .filter(
+        (id) =>
+          !(db.teams || []).some((t) => same(t.division_id, id)) &&
+          !attached('schedule_tbd', 'division_id', id)
+      )
   );
+  // What was created and is still there, named, never deleted silently.
+  const stillThere = {
+    game_slots: 'game_slots',
+    teams: 'teams',
+    fields: 'fields',
+    locations: 'locations',
+    divisions: 'divisions',
+  };
+  const kept = records
+    .filter(
+      (r) =>
+        r.operation === 'inserted' &&
+        stillThere[r.target_table] &&
+        (db[stillThere[r.target_table]] || []).some((row) => same(row.id, r.target_id))
+    )
+    .map((r) => ({ table: r.target_table, id: r.target_id }))
+    .sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : a.id < b.id ? -1 : 1));
   if (run) db.scheduler_runs = db.scheduler_runs.filter((r) => !same(r.id, run.id));
   const stamp = env.now();
   for (const r of records)
@@ -1307,6 +1407,14 @@ function rollbackJob(db, job, ctx, env) {
   const result = {
     job_id: job.id,
     games: { deleted: deletedGames.length, restored: restored.length },
+    time_tbd_deleted: tbdDeleted,
+    slots_deleted: slotsDeleted,
+    teams_deleted: teamsDeleted,
+    team_runs_deleted: teamRunsDeleted,
+    fields_deleted: fieldsDeleted,
+    venues_deleted: venuesDeleted,
+    divisions_deleted: divisionsDeleted,
+    kept,
   };
   (db.audit_log = db.audit_log || []).push({
     id: env.newId(),

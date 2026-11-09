@@ -392,8 +392,10 @@ SELECT ok(NOT has_function_privilege('anon', 'public.get_facility_permits(uuid)'
 
 -- A permit blocks nothing (owner, 2026-10-26): no import, scheduling, publish or export function reads
 -- a permit table. The only functions whose bodies name one are the permit RPCs and their helpers, and
--- admin_delete_field, which lists the permits it unlinks. A function in this list that is not meant to
--- be fails here until someone argues it in.
+-- admin_delete_field, which lists the permits it unlinks, and rollback_game_import_job (20261121010000),
+-- which reads the scopes only to KEEP a field or venue a permit refers to (as admin_delete_field's
+-- permits_linked refusal is about the same link) and refuses nothing on a permit. A function in this
+-- list that is not meant to be fails here until someone argues it in.
 SELECT is(
     (SELECT array_agg(p.proname::text ORDER BY p.proname)
        FROM pg_proc p
@@ -401,8 +403,8 @@ SELECT is(
         AND p.prosrc ~ 'facility_permit(s|_scopes)'),
     ARRAY['admin_create_facility_permit', 'admin_delete_facility_permit', 'admin_delete_field',
           'admin_set_facility_permit_file', 'admin_update_facility_permit', 'facility_permit_json',
-          'get_facility_permits'],
-    'the only functions that read a permit table are the permit RPCs, their helpers and admin_delete_field'
+          'get_facility_permits', 'rollback_game_import_job'],
+    'the only functions that read a permit table are the permit RPCs, their helpers, admin_delete_field and the games import''s rollback'
 );
 
 SELECT * FROM finish();

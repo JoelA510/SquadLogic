@@ -1974,32 +1974,89 @@ entry says so and plans nothing.
    request was answered earlier and is not restated). "Registration status allows players to be in the system, but not
    teamed, if they are currently on a waitlist or haven't yet paid. This gives better visibility into how many more
    players can be accepted anyways within the divisions teaming limits on team size/etc. The years of experience are a
-   stand-in for skill level for many rec programs that do not establish skill ratings for players." Consequences,
-   **UNPLANNED and not decided** (no work is planned for them here):
-   - (a) A registration or eligibility state stored on a player, with a per-division "how many more players can be
-     accepted" view, would be a domain-model and persistence change (AGENTS.md rule 14: a plan first). It also touches the
-     data-minimisation rule (AGENTS.md section 2) and the import allowlist
-     (`docs/architecture/gotsport-import-contract.md`).
-   - (b) The scope guardrail "no payment-related code or UI for end-users" (AGENTS.md section 2) means any such state
-     should be stored as a registration or teaming state (for example waitlisted or pending), never as payment data; the
-     import already drops payment-named columns.
-   - (c) `experience_years` as a stand-in for skill level is a candidate evaluator input (the
-     `squadlogic-evaluator-designer` skill; plan first).
-   - (d) Still needed from the owner before any design: the distinct `registration_status` values with counts (no names).
-   - What the repository already says (statically reviewed in `docs/architecture/gotsport-import-contract.md`, not
-     executed): the import maps `waitlist` and `waitlisted` to `status` ("the waitlist status stays the teaming gate") and
-     `years_played` to `players.years_played` (teaming reads it when the Years Played option is on). Whether
-     `registration_status` and `experience_years` duplicate those is not decided here;
-     `docs/changes/2026-11-03-drop-placement-eligible.md` ("Owner notes") records that the two columns are named only by
-     `20260530000000`, its smoke and its revert, and that their production state was not read.
+   stand-in for skill level for many rec programs that do not establish skill ratings for players."
+   **Follow-up, 2026-11-09 (later), on my recommendation to plan the registration-state and experience work after PR 5.**
+   The owner: "As for the plan; your recommendation suffices here." And: "The registration_status should be almost
+   unanimously "FALSE" in the Waitlist column for the initial import. In the real example, there's 36 "TRUE" waitlisted
+   players and 1427 "FALSE" players that are not waitlisted and safe to team. No need for the payment guardrail, and this
+   should be mappable upon import like other columns where a user can use a drop down to identify the correct mapping from
+   their data to the program's value (with best effort matching that lists current recommendations where possible, which
+   I think also already exists.) If info isn't present in the import data, relevant features like teaming with a balance
+   of coaching leads or years of experience for players (as listed by registrants during registration, not held by this
+   program) should be defaulted to off (or on, if available.)" The consequences below are the agent's reading, revised
+   after the follow-up; they are **UNPLANNED and not decided** (no work is planned for them here). File references are as
+   of `e5ce8b8`, read statically; nothing was executed.
+   - (a) The signal is the platform's Waitlist column: TRUE is not yet teamed, FALSE is safe to team (counts from the real
+     example, no names: 36 and 1427). That closes the earlier ask for the distinct values. A per-division "how many more
+     players can be accepted" view, or any new stored registration state, would still be a domain-model and persistence
+     change (AGENTS.md rule 14: a plan first). What the repository already says: the import maps `waitlist` and
+     `waitlisted` to `status` (`docs/architecture/gotsport-import-contract.md`: "the waitlist status stays the teaming
+     gate"); the finalizer stores `waitlist` for the values `true`, `t`, `yes`, `y` and `1` and `active` for anything
+     else, blank included, while the organization's Waitlist setting is on, which is its default
+     (`supabase/migrations/20261101010000_one_active_season.sql:475-476` and `:528-529`); generation seats nobody on the
+     waitlist (`packages/core/src/playUp.js:74`); and `years_played` is stored as `players.years_played` (the contract:
+     teaming reads it when the Years Played option is on). Whether `registration_status` and `experience_years` duplicate
+     these is not decided here; `docs/changes/2026-11-03-drop-placement-eligible.md` ("Owner notes") records that the two
+     columns are named only by `20260530000000`, its smoke and its revert, and that their production state was not read.
+   - (b) My earlier payment-guardrail consequence is withdrawn: the owner says no payment guardrail is needed, because the
+     column is Waitlist, not payment. Nothing here asks for payment data, and AGENTS.md section 2's scope rule is
+     unchanged.
+   - (c) Mapping at import (the owner wrote "I think also already exists"). Found, statically:
+     - Auto-matching exists: `matchHeaders` (`frontend/src/utils/telemetryUtils.js:345`) matches a header by system key, a
+       GotSport profile bias, the alias table `HEADER_ALIASES` (`waitlist` and `waitlisted` map to `waitlist` at
+       `:171-172`; the server's own alias map does the same, `supabase/functions/import-validation/index.ts:217-218`), and a
+       fuzzy match (similarity above 0.85) to the organization's declared custom fields; a match under 0.95 is listed as
+       needing confirmation.
+     - A dropdown mapper with "(suggested)" hints exists: `frontend/src/components/ColumnMapper.jsx` has a `<select>` per
+       field over the file's columns with the matcher's pick marked "(suggested)" (`:350-367`), remembered per import type
+       in localStorage (`:89`, `:217`).
+     - It does not reach the Waitlist column as the owner describes. The mapper opens by itself only when a required column
+       is missing (`frontend/src/components/ImportPanel.jsx:367-373`, `findMissingRequiredHeaders` in
+       `frontend/src/utils/importHeaders.js`; a player file requires first name, last name and date of birth), or by
+       "Adjust mapping" after the preview (`ImportPanel.jsx:1045-1057`); and its player fields are first name, last name,
+       date of birth and skill tier only (`ColumnMapper.jsx:15-22`; the evaluations import adds years played and rating,
+       `:32-44`). There is no Waitlist field to map to. So today a column counts as the waitlist only when its header
+       reads as `waitlist` or `waitlisted`; a differently named column is not offered a dropdown for it.
+     - NOT confirmed: that the real file's header is `Waitlist` (the file was not seen); that the setting "Fuzzy Data
+       Alignment (AI)" (`fuzzy_import_mapping`, `frontend/src/components/settings/FeatureFlagSettings.jsx:41-44`,
+       `frontend/src/constants/featureFlags.js:40`) does anything, since `git grep` finds no reader of it outside those two
+       files; and any behaviour in a browser.
+   - (d) Features that depend on optional import data (the owner: off when the data is absent, on when it is present).
+     Found, statically:
+     - They are organization settings: `years_played` on, `player_rating` off, `teaming_spread_coaching_leads` on,
+       `coaching_interest` on and `waitlist` on by default (`frontend/src/constants/featureFlags.js:136-145`), and
+       `skill_tier` off unless turned on (`:45-50`). An admin sets them; whether the file carried the column does not
+       switch them, so "on if available" is not automatic.
+     - Absent data is inert in what I read: the Teams page gives a generator player `years_played`, `skillRating`,
+       `isCoachingLead` or `status: 'waitlist'` only when its row carries one
+       (`frontend/src/pages/TeamAnalysisPage.jsx:897-902`); the coaching-lead deal does not apply in a division with no
+       lead (`resolveLeadPolicy` returns null, "placement exactly as it was before B6",
+       `packages/core/src/teamGeneration.js:1386-1396`; `countLeads`, `packages/core/src/coachingLeads.js:85`); and with
+       the years signal on but no player carrying it, the lead compensation is 0
+       (`packages/core/src/balanceSignals.js:55-62` and `:85-87`; `teamGeneration.js:72`).
+     - The registered evaluators are `BuddyEvaluator` and `WeightedAttributeEvaluator`
+       (`packages/core/src/evaluators/index.js`). The weighted one defaults to weights `{ skill_rating: 1.0 }` when none
+       are given (`WeightedAttributeEvaluator.js:29-37`), reads an absent attribute as the league mean and treats equal
+       values as neutral (`:43-60`); it has no switch for the data's presence. There is no evaluator for coaching leads or
+       years played by name: those are the lead deal in `teamGeneration.js` and `balanceSignals.js`.
+     - NOT confirmed: whether the Teams page feeds the Years Played setting into the evaluator's weights (in
+       `packages/core/src` only `balanceSignals.js` reads `years_played`, and I did not trace the page's other uses);
+       whether any screen tells an admin that a feature is idle because the column is missing; and any behaviour in a
+       browser. `experience_years` as a stand-in for skill level stays a candidate evaluator input (the
+       `squadlogic-evaluator-designer` skill; plan first).
+   - (e) Still UNPLANNED. The owner agreed to plan it after PR 5 ("your recommendation suffices here"): it needs a
+     plan-change (AGENTS.md rule 14), listed in section 14 as "plan: registration state and optional-data features (after
+     PR 5)" with no PR number. The data-minimisation rule (AGENTS.md section 2) and the import allowlist
+     (`docs/architecture/gotsport-import-contract.md`) still apply to any new stored field.
 3. **2026-11-09, the upstream Tailwind report is filed** (reported, not a quotation):
    https://github.com/tailwindlabs/tailwindcss/issues/20685. Consequence: a Dependabot ignore for `tailwindcss` and
    `@tailwindcss/vite` 4.3.4 and 4.3.5, citing it (AGENTS.md rule 16), is a separate config-only pull request; the
    repository stays on 4.3.3.
 4. **2026-11-09, B7 (the 2026-11-09 numbering, not the "B7" row of the 2026-11-06 table above): the official domain shows
-   "Try the demo".** "Yes". Consequence: the official Vercel project needs `VITE_DEMO_ENABLED=true`, with the other steps
-   of `docs/operations/release-prep.md` (3 to 5: Turnstile, the Vercel variables, Supabase anonymous sign-ins and
-   CAPTCHA) if not already done; it is NOT yet set, and the owner's explicit go to set it has been asked for.
+   "Try the demo".** "Yes". Follow-up, 2026-11-09 (later), from the owner: "The vercel key VITE_DEMO_ENABLED was already
+   set to true." Consequence: `VITE_DEMO_ENABLED` is set to true on the official Vercel project (owner, 2026-11-09), so
+   nothing is left to set for it. The other steps of `docs/operations/release-prep.md` (3 to 5: Turnstile, the Vercel
+   variables, Supabase anonymous sign-ins and CAPTCHA) are also needed for the demo: not verified by the agent.
 5. **2026-11-09, manual testing of `main`.** "I'll do this a little later, I'd prefer we shore up more of the open work
    first." Consequence: no start date for the owner's manual testing; the open work comes first.
 6. **2026-11-09, F11 unknown U2 (does a scheduling platform reuse Game IDs across seasons).** "Game IDs should be
@@ -2393,7 +2450,8 @@ F11-5; no pull request was open on 2026-11-09. PR 14 stays held.
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
   held (decision 28). Left in that order: PR 5 (next; confirm F11-1's migration `20261120010000` is deployed first), PR 6,
   PR 10, PR 8, PR 11, PR 12. The F11 plan's own order: F11-2 and F11-3 after PR 6, ahead of PR 10; F11-4 before PR 12;
-  F11-5 last and only on the owner's word.
+  F11-5 last and only on the owner's word. Also next, with no PR number: plan: registration state and optional-data
+  features (after PR 5), a plan-change the owner agreed to on 2026-11-09 (section 10, entry 2).
 - **Gate cleared.** The F11 plan (decision 12; `docs/changes/2026-11-06-games-table-source-of-truth.md`) was approved by
   the owner on 2026-11-07 and its F11-1 (identity) is merged (#712). PR 5 is specified with that plan's amendments ("What
   PR 5, and the other pull requests, must do or avoid"); the owner answered on 2026-11-09 that Game IDs are not reused, so
@@ -2411,9 +2469,10 @@ F11-5; no pull request was open on 2026-11-09. PR 14 stays held.
 - **PR 1 and PR 4 started together and are merged.** The dependency updates are a separate wave and are not in this plan;
   the owner's manual testing (2026-11-09: "I'll do this a little later, I'd prefer we shore up more of the open work
   first."), the test-suite audit and the desktop build come after this expansion (header).
-- **Decisions.** None open (section 10). B5.10 was answered on 2026-11-09 (section 10): what the owner described is
-  UNPLANNED and not decided, needs a plan first (rule 14) and, from the owner, the distinct `registration_status` values
-  with counts; no work is planned for it here.
+- **Decisions.** None open (section 10). B5.10 was answered on 2026-11-09 (section 10, entry 2): the signal is the
+  platform's Waitlist column. What the owner described is still UNPLANNED and not decided; it needs a plan-change
+  (AGENTS.md rule 14) after PR 5, which the owner agreed to ("your recommendation suffices here"), and no work is
+  planned for it in this plan.
 
 **How PR 1 was started (merged as #707; kept as a record, not a to-do).**
 

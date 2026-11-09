@@ -5629,8 +5629,79 @@ plant "M70 the stored mapping's audit row cites no job" "$M70" \
   "smoke 20261121010000"
 
 plant "M70 two labels that create one team are two creations" "$M70" \
-  "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) AS new_id," \
+  "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS new_id," \
   "               k3.own_id AS new_id," \
+  "smoke 20261121010000"
+
+# Fix round 2 of the games import (Codex's four findings and the owner's two answers of 2026-11-09). The smoke also holds
+#   - the shells are ONE team run in the shape the pages read (teamsByDivision beside teams and team_players);
+#   - a TIME TBD game is found by its Game ID (not its week), keeps its date, and a Published game's row is skipped, not converted;
+#   - two games that swap places are both written (the step-out), a place a game the file moves holds is not a clash, and the
+#     rollback steps the pair out of the unique place too and stands a converted game up again;
+#   - a name that differs from one that exists only by a run of spaces is the existing name (core's comparison).
+# The pgTAP files (supabase/tests/game_import_round2.sql and game_import_apply_rollback.sql) hold the full table; the plants
+# the smoke does not catch (a venue, a division, an outside club named with a run of spaces; another Game ID on a held TIME
+# TBD tuple; the conversion warning) were run against the pgTAP stand-in only and are in the pull request.
+plant "M70 the shells' team run carries no teamsByDivision" "$M70" \
+  "                'teamsByDivision', v_grouped," \
+  "                'teamsByDivisionMissing', v_grouped," \
+  "smoke 20261121010000"
+
+plant "M70 a TIME TBD game is not found by its Game ID" "$M70" \
+  "                            AND ((w.game_id IS NOT NULL AND s.external_ref = w.game_id)" \
+  "                            AND ((false AND s.external_ref = w.game_id)" \
+  "smoke 20261121010000"
+
+plant "M70 a TIME TBD game's date is not stored" "$M70" \
+  "v_run_id, t.game_id, t.gdate
+          FROM _gi_t t WHERE t.verdict = 'insert';" \
+  "v_run_id, t.game_id, NULL
+          FROM _gi_t t WHERE t.verdict = 'insert';" \
+  "smoke 20261121010000"
+
+plant "M70 a held game's TIME TBD row converts it" "$M70" \
+  "            WHEN t.ga_id IS NOT NULL AND t.ga_id = ANY (v_held) THEN 'skip-held'" \
+  "            WHEN false THEN 'skip-held'" \
+  "smoke 20261121010000"
+
+plant "M70 a swap has no step-out" "$M70" \
+  "         WHERE ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
+           AND EXISTS (SELECT 1 FROM _gi_g h" \
+  "         WHERE false AND ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
+           AND EXISTS (SELECT 1 FROM _gi_g h" \
+  "smoke 20261121010000"
+
+plant "M70 a swap is a clash (the games the file moves still hold their places)" "$M70" \
+  "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
+                          AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
+  "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE false)
+                          AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
+  "smoke 20261121010000"
+
+plant "M70 the rollback does not step a swapped pair out of the unique place" "$M70" \
+  "       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
+       AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
+           IS DISTINCT FROM ((r.previous_payload" \
+  "       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
+       AND false AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
+           IS DISTINCT FROM ((r.previous_payload" \
+  "smoke 20261121010000"
+
+plant "M70 a team name with a run of spaces is not the name that exists" "$M70" \
+  "                    WHERE t.division_id = j.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS name_taken," \
+  "                    WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken," \
+  "smoke 20261121010000"
+
+plant "M70 the rollback does not stand a converted game up again" "$M70" \
+  "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL;
+    GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
+  "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL AND false;
+    GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
+  "smoke 20261121010000"
+
+plant "M70 a placed game made TIME TBD is not warned" "$M70" \
+  "              FROM _gi_t t WHERE t.conv) w;" \
+  "              FROM _gi_t t WHERE false) w;" \
   "smoke 20261121010000"
 
 # The revert (docs/sql/20261121010000_revert.sql) refuses while an import is applied, and leaves no column of the
@@ -5639,6 +5710,11 @@ plant "M70 two labels that create one team are two creations" "$M70" \
 plant "R70 the revert does not refuse while an import is applied" "$R70" \
   "    IF v_live > 0 OR v_clubs > 0 OR v_tbd > 0 THEN" \
   "    IF false THEN" \
+  "revert 20261121010000"
+
+plant "R70 the revert leaves the TIME TBD date column" "$R70" \
+  "ALTER TABLE public.schedule_tbd DROP COLUMN IF EXISTS game_date;" \
+  "SELECT 1;" \
   "revert 20261121010000"
 
 plant "R70 the revert leaves the outside-club column" "$R70" \

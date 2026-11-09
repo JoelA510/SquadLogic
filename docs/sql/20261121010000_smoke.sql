@@ -14,6 +14,11 @@
 --   4. The rollback refuses after a change (naming the game) and, before one, restores the schedule exactly.
 --   5. Fix round 1: storing a mapping is audited (`import.mapped`, with the counts); and two source divisions that map to
 --      one division, each with a new team of one name, are ONE team (the apply used to abort on the unique key).
+--   6. Fix round 2: the team run the apply writes is in the shape the pages read (`teamsByDivision`, `teams`,
+--      `team_players`); a name that differs from one that exists only by a run of spaces is the same name; a TIME TBD game
+--      holds its DATE, is found by its Game ID and changed in place; a placed game the file now gives no time is
+--      converted with a warning; two games that swap places are both written, with a warning, and the rollback puts every
+--      game back.
 --
 -- The pgTAP file (supabase/tests/game_import_apply_rollback.sql) holds the full table; this is the part the migration
 -- harness can run without pgTAP, and the part its plants are shown to turn red (scripts/dbharness/prove.sh).
@@ -89,6 +94,9 @@ DECLARE
     v_job     uuid;
     v_job2    uuid;
     v_job3    uuid;
+    v_job4    uuid;
+    v_job5    uuid;
+    v_fps4    text;
     v_mapping jsonb;
     v_dry     jsonb;
     v_apply   jsonb;
@@ -139,7 +147,21 @@ BEGIN
         RAISE EXCEPTION 'the guard, the metrics view or the practice sync does not carry its change';
     END IF;
     IF cardinality(public.import_allowed_keys('games')) <> 21 THEN RAISE EXCEPTION 'import_allowed_keys(games) is not the 21 keys the apply reads'; END IF;
-    v_checks := v_checks + 8;
+    IF (SELECT array_agg(a.attname::text || ' ' || format_type(a.atttypid, a.atttypmod) ORDER BY a.attname) FROM pg_attribute a
+         WHERE a.attrelid = 'public.schedule_tbd'::regclass AND a.attname IN ('external_ref', 'game_date') AND NOT a.attisdropped AND NOT a.attnotnull)
+       IS DISTINCT FROM ARRAY['external_ref text', 'game_date date'] THEN
+        RAISE EXCEPTION 'schedule_tbd does not hold external_ref (text) and game_date (date), both nullable';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = 'public.schedule_tbd'::regclass AND i.indisunique AND i.indpred IS NOT NULL
+                    AND (SELECT array_agg(a.attname::text ORDER BY k.ord) FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+                          JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum) = ARRAY['season_settings_id', 'external_ref']) THEN
+        RAISE EXCEPTION 'a TIME TBD game''s Game ID is not unique on (season_settings_id, external_ref) for the rows that have one';
+    END IF;
+    IF has_function_privilege('authenticated', 'public.normalise_external_label(text)'::regprocedure, 'EXECUTE')
+       OR public.normalise_external_label('  Blue ' || chr(160) || E'\t' || 'Jays ') IS DISTINCT FROM 'blue jays' THEN
+        RAISE EXCEPTION 'normalise_external_label is open to a client role, or is not core''s trim, collapse and lower-case';
+    END IF;
+    v_checks := v_checks + 11;
     RAISE NOTICE 'shape: is_external, external_ref and import_job_id, the per-season Game ID index, six lists that take games, 4 client RPCs pinned and closed to anon and PUBLIC, the guard exemption, the view and the sync';
 
     -- ---- seed (no signed-in user) --------------------------------------------------------------------
@@ -328,6 +350,90 @@ BEGIN
     END IF;
     v_checks := v_checks + 2;
     RAISE NOTICE 'coalescing: two source divisions mapped to one division, each with a new team of one name, are one team, as previewed';
+    -- The team run is in the shape the pages read: the latest run's results carried (here none: the division's own teams), the new
+    -- shell in its division's group, the flat list and the players, in ONE run.
+    IF (SELECT count(*) FROM public.scheduler_runs WHERE organization_id = v_org AND run_type = 'team' AND parameters ->> 'import_job_id' = v_job3::text) <> 1
+       OR NOT EXISTS (SELECT 1 FROM public.scheduler_runs r
+                       WHERE r.organization_id = v_org AND r.run_type = 'team' AND r.parameters ->> 'import_job_id' = v_job3::text
+                         AND jsonb_typeof(r.results -> 'teamsByDivision') = 'object'
+                         AND jsonb_array_length(r.results -> 'teamsByDivision' -> 'Smoke U10') = 4
+                         AND (SELECT string_agg(t ->> 'name', ',' ORDER BY t ->> 'name') FROM jsonb_array_elements(r.results -> 'teamsByDivision' -> 'Smoke U10') t) = 'Alpha,Bravo,Charlie,Zed FC'
+                         AND jsonb_array_length(r.results -> 'teams') = 4 AND jsonb_typeof(r.results -> 'team_players') = 'array') THEN
+        RAISE EXCEPTION 'the shells are not in ONE team run in the shape the pages read (teamsByDivision, teams, team_players)';
+    END IF;
+    v_checks := v_checks + 1;
+    RAISE NOTICE 'team run: one run, teamsByDivision lists the carried teams and the shell, teams and team_players beside it';
+
+    -- ---- 6. fix round 2: TIME TBD with a date, a swap, a conversion, a name with a run of spaces ------------------------
+    -- First file (the games arrive unplaced-as-published: not Published, so they can be changed): two games of one pair in one
+    -- week, a game that will lose its time, and a TIME TBD game with a date.
+    v_job4 := (public.create_import_job(v_org, 'games', 'round2-a.csv')).id;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM pg_temp.stage(v_org, v_job4, 1, 'ok',  'G-SW1', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Alpha',   'Bravo', '2026-06-06', '08:00', '09:00', 6);
+    PERFORM pg_temp.stage(v_org, v_job4, 2, 'ok',  'G-SW2', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Alpha',   'Bravo', '2026-06-06', '09:00', '10:00', 6);
+    PERFORM pg_temp.stage(v_org, v_job4, 3, 'ok',  'G-CV1', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Charlie', 'Alpha', '2026-06-06', '10:00', '11:00', 6);
+    PERFORM pg_temp.stage(v_org, v_job4, 4, 'tbd', 'G-TB1', 'Smoke U10', '',           '',            'Bravo',   'Charlie', '2026-06-13', NULL, NULL, 7);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.map_game_import_job(v_job4, jsonb_set(v_mapping, '{options,arrive_published}', 'false'));
+    v_apply := public.apply_game_import_job(v_job4, false);
+    IF (v_apply #>> '{games,inserted}') <> '3' OR (v_apply #>> '{time_tbd,inserted}') <> '1'
+       OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE organization_id = v_org AND external_ref = 'G-TB1' AND game_date = '2026-06-13' AND week_index = 7) THEN
+        RAISE EXCEPTION 'the first round-2 file did not write 3 games and a dated TIME TBD game: %', v_apply;
+    END IF;
+    v_fps4 := pg_temp.fps();
+    -- Second file: the two games swap places by Game ID, one game now has no time, the TIME TBD game is moved a week (found by its
+    -- Game ID, not by its old week), and a team is created under a name that differs from an existing team's only by a run of spaces.
+    v_job5 := (public.create_import_job(v_org, 'games', 'round2-b.csv')).id;
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM pg_temp.stage(v_org, v_job5, 1, 'ok',  'G-SW1', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Alpha',   'Bravo',   '2026-06-06', '09:00', '10:00', 6);
+    PERFORM pg_temp.stage(v_org, v_job5, 2, 'ok',  'G-SW2', 'Smoke U10', 'Smoke Park', 'Smoke Field', 'Alpha',   'Bravo',   '2026-06-06', '08:00', '09:00', 6);
+    PERFORM pg_temp.stage(v_org, v_job5, 3, 'tbd', 'G-CV1', 'Smoke U10', '',           '',            'Charlie', 'Alpha',   '2026-06-06', NULL, NULL, 6);
+    PERFORM pg_temp.stage(v_org, v_job5, 4, 'tbd', 'G-TB1', 'Smoke U10', '',           '',            'Bravo',   'Charlie', '2026-06-20', NULL, NULL, 8);
+    PERFORM pg_temp.stage(v_org, v_job5, 5, 'ok',  'G-Z1',  'Smoke U10', 'Smoke Park', 'Smoke Field', 'Dupe',    'Alpha',   '2026-06-20', '09:00', '10:00', 8);
+    -- A Published game the file now gives no time: not converted (a held game is never taken out); the row is skipped.
+    PERFORM pg_temp.stage(v_org, v_job5, 6, 'tbd', 'S-1',   'Smoke U10', '',           '',            'Alpha',   'Bravo',   '2026-05-02', NULL, NULL, 1);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM public.map_game_import_job(v_job5, jsonb_set(jsonb_set(v_mapping, '{options,arrive_published}', 'false'),
+        ARRAY['teams', '["smoke u10","dupe"]'], jsonb_build_object('action', 'create', 'name', 'Zed  FC')));
+    v_fp := pg_temp.fp();
+    v_dry := public.apply_game_import_job(v_job5, true);
+    IF pg_temp.fp() IS DISTINCT FROM v_fp THEN RAISE EXCEPTION 'the preview of the second round-2 file wrote something'; END IF;
+    v_apply := public.apply_game_import_job(v_job5, false);
+    IF (v_dry - 'dry_run' - 'ids') IS DISTINCT FROM (v_apply - 'dry_run' - 'ids') THEN
+        RAISE EXCEPTION 'the second round-2 file: the preview was not the apply: % against %', v_dry - 'dry_run' - 'ids', v_apply - 'dry_run' - 'ids';
+    END IF;
+    IF (v_apply #>> '{games,updated}') <> '2' OR (v_apply -> 'time_tbd') IS DISTINCT FROM '{"inserted": 1, "updated": 1, "unchanged": 0, "removed": 0, "converted": 1}'::jsonb THEN
+        RAISE EXCEPTION 'the swap and the TIME TBD changes were not counted as the file says: %', v_apply;
+    END IF;
+    IF (SELECT count(*) FROM jsonb_array_elements(v_apply -> 'warnings') w WHERE w ->> 'type' = 'games-swapped') <> 2
+       OR (SELECT count(*) FROM jsonb_array_elements(v_apply -> 'warnings') w WHERE w ->> 'type' = 'game-made-time-tbd') <> 1 THEN
+        RAISE EXCEPTION 'a swap and a conversion are warnings: expected 2 games-swapped and 1 game-made-time-tbd in %', v_apply -> 'warnings';
+    END IF;
+    IF (SELECT to_char(gs.start_time, 'HH24:MI') FROM public.game_assignments ga JOIN public.game_slots gs ON gs.id = ga.game_slot_id WHERE ga.external_ref = 'G-SW1') <> '09:00'
+       OR (SELECT to_char(gs.start_time, 'HH24:MI') FROM public.game_assignments ga JOIN public.game_slots gs ON gs.id = ga.game_slot_id WHERE ga.external_ref = 'G-SW2') <> '08:00' THEN
+        RAISE EXCEPTION 'the two games did not swap places';
+    END IF;
+    IF (SELECT count(*) FROM public.schedule_tbd WHERE organization_id = v_org AND external_ref = 'G-TB1') <> 1
+       OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE organization_id = v_org AND external_ref = 'G-TB1' AND game_date = '2026-06-20' AND week_index = 8)
+       OR NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE organization_id = v_org AND external_ref = 'G-CV1' AND game_date = '2026-06-06')
+       OR EXISTS (SELECT 1 FROM public.game_assignments WHERE organization_id = v_org AND external_ref = 'G-CV1') THEN
+        RAISE EXCEPTION 'the TIME TBD game was not found by its Game ID and changed in place, or the converted game stands as well as its TIME TBD row';
+    END IF;
+    IF (v_apply #>> '{games,skipped,skipped-published}') <> '1' OR NOT EXISTS (SELECT 1 FROM public.game_assignments WHERE id = v_g1 AND published)
+       OR EXISTS (SELECT 1 FROM public.schedule_tbd WHERE organization_id = v_org AND external_ref = 'S-1') THEN
+        RAISE EXCEPTION 'a Published game the file gives no time was taken out, or its row was written: %', v_apply;
+    END IF;
+    IF (v_apply #>> '{refused_by_reason,unknown-team}') <> '1' OR EXISTS (SELECT 1 FROM public.teams WHERE division_id = v_div AND name = 'Zed  FC') THEN
+        RAISE EXCEPTION 'a name that differs from an existing team''s only by a run of spaces was created beside it: %', v_apply -> 'refused_by_reason';
+    END IF;
+    v_checks := v_checks + 7;
+    RAISE NOTICE 'round 2: the swap is two updates and a warning, the dated TIME TBD game changed in place by its Game ID, the game with no time converted with a warning, a name with a run of spaces is the existing name';
+    PERFORM public.rollback_game_import_job(v_job5);
+    IF pg_temp.fps() IS DISTINCT FROM v_fps4 THEN
+        RAISE EXCEPTION 'the rollback did not put the swapped games, the converted game and the TIME TBD game back exactly';
+    END IF;
+    v_checks := v_checks + 1;
+    RAISE NOTICE 'round 2 rollback: the swapped pair, the converted game and the TIME TBD game are back as they were';
 
     RAISE NOTICE 'game_import smoke: % checks', v_checks;
 END

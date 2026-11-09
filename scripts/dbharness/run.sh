@@ -131,7 +131,10 @@ start_cluster() {
   echo "$$" >"$RUN_DIR/owner.pid" || return 1
   report_stale
   as_pg "mkdir $RUN_DIR/sock" >/dev/null 2>&1 || return 1
-  as_pg "initdb -D $RUN_DIR/pgdata -U postgres --auth=trust" >/dev/null 2>&1 || return 1
+  # UTF-8, as the production database is (a no-break space is one character there and a byte pair in SQL_ASCII, and the games
+  # import's label comparison, `normalise_external_label`, is held to core's over such characters). C.UTF-8 so the collation
+  # stays the byte order the harness has always had.
+  as_pg "initdb -D $RUN_DIR/pgdata -U postgres --auth=trust -E UTF8 --locale=C.UTF-8" >/dev/null 2>&1 || return 1
   as_pg "pg_ctl -D $RUN_DIR/pgdata -o '-k $RUN_DIR/sock -c listen_addresses=' -l $RUN_DIR/pg.log -w start" \
     >/dev/null 2>&1 || return 1
   PM_PID="$(head -n 1 "$RUN_DIR/pgdata/postmaster.pid" 2>/dev/null)"
@@ -4117,9 +4120,11 @@ PROBE
                WHEN (SELECT count(*) FROM public.staging_import_rows WHERE import_job_id = '1e000000-0000-4000-8000-0000000000d1') <> 0 THEN 'rows-left'
                WHEN (SELECT count(*) FROM public.import_application_records WHERE import_job_id = '1e000000-0000-4000-8000-0000000000d1') <> 0 THEN 'records-left'
                WHEN EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.teams'::regclass AND a.attname = 'is_external' AND NOT a.attisdropped)
-                    OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.game_assignments'::regclass AND a.attname IN ('external_ref', 'import_job_id') AND NOT a.attisdropped) THEN 'column-left'
+                    OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.game_assignments'::regclass AND a.attname IN ('external_ref', 'import_job_id') AND NOT a.attisdropped)
+                    OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.schedule_tbd'::regclass AND a.attname IN ('external_ref', 'game_date') AND NOT a.attisdropped) THEN 'column-left'
                WHEN to_regprocedure('public.apply_game_import_job(uuid, boolean)') IS NOT NULL OR to_regprocedure('public.rollback_game_import_job(uuid)') IS NOT NULL
-                    OR to_regprocedure('public.map_game_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.game_import_image(jsonb)') IS NOT NULL THEN 'function-left'
+                    OR to_regprocedure('public.map_game_import_job(uuid, jsonb)') IS NOT NULL OR to_regprocedure('public.game_import_image(jsonb)') IS NOT NULL
+                    OR to_regprocedure('public.normalise_external_label(text)') IS NOT NULL THEN 'function-left'
                WHEN (SELECT count(*) FROM public.audit_actions WHERE action IN ('game.slot_created', 'import.mapped')) <> 2 THEN 'action-lost'
                WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'import_jobs_job_type_check') ~ 'games' THEN 'list-left'
                WHEN (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'schedule_tbd_reason_check') ~ 'imported-without-time' THEN 'reason-left'

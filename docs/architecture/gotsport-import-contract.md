@@ -359,10 +359,19 @@ reads). A format, a note, a coach, an email or a phone in the file is never read
 
 A row with a time and no field is a TIME TBD game, like a row with no time: it is staged with `status` `tbd` and **no instants and no wall times** (the parse assigns them before it knows the field is blank; the SQL's shape check refuses a `tbd` row that holds one). A row with no Game ID is matched on (home, away, slot, week); a row with one is matched on (season, Game ID) and never on its tuple.
 
-**Known limitation.** A game the same file moves away from a place still stands on it until the import has run, so two games of one pair in one week whose times the file swaps by Game ID are both refused as `duplicate-row` (the words name this case); the swap has to be imported in steps. It is rare and a step-out is not built.
+**A swap is a warning.** A game moved onto the place another game of the same file moves away from (two games of one pair in
+one week that swap times, a chain of moves) is written, with the warning `games-swapped` in the preview and the result; a
+place held by a game the file does not move still refuses the row (`duplicate-row`), and a held (Published) game is never
+moved.
+
+**A TIME TBD game keeps a date and its Game ID, and no time** (`schedule_tbd.game_date`, `schedule_tbd.external_ref`; the
+staged row carries the date and no instants). A row is found by (season, Game ID) first, and changed in place; the
+`week_index` is the file's week, and a week that is not the date's is the warning `week-differs`, never renumbered. A game
+the file now places leaves the TIME TBD list; a placed game the file now gives no time is converted with the warning
+`game-made-time-tbd` unless it is held.
 
 What is stored on the way: `game_assignments.external_ref` (the Game ID), `game_assignments.import_job_id` (the job that
-last wrote the row) and `teams.is_external` (an outside club: one row per division and club label, a side of a game and
+last wrote the row), `schedule_tbd.external_ref` and `schedule_tbd.game_date` (a TIME TBD game's Game ID and date) and `teams.is_external` (an outside club: one row per division and club label, a side of a game and
 nothing else: no players, no coach, no practice, in no team run). No birthdate, name of a person or contact is in the file's
 allowlist, and none is stored.
 

@@ -357,6 +357,10 @@ reads). A format, a note, a coach, an email or a phone in the file is never read
 | `flags`                                                                  | warnings of the preview                           | The parse's flags (`time-ambiguous`, `week-differs`, ...), listed, never a refusal          |
 | `division`, `venue`, `field`, `home_team`, `away_team` and their `*_key` | the admin's decisions, by key                     | A label as typed, and beside it the decision key core computes; the SQL matches by equality |
 
+A row with a time and no field is a TIME TBD game, like a row with no time: it is staged with `status` `tbd` and **no instants and no wall times** (the parse assigns them before it knows the field is blank; the SQL's shape check refuses a `tbd` row that holds one). A row with no Game ID is matched on (home, away, slot, week); a row with one is matched on (season, Game ID) and never on its tuple.
+
+**Known limitation.** A game the same file moves away from a place still stands on it until the import has run, so two games of one pair in one week whose times the file swaps by Game ID are both refused as `duplicate-row` (the words name this case); the swap has to be imported in steps. It is rare and a step-out is not built.
+
 What is stored on the way: `game_assignments.external_ref` (the Game ID), `game_assignments.import_job_id` (the job that
 last wrote the row) and `teams.is_external` (an outside club: one row per division and club label, a side of a game and
 nothing else: no players, no coach, no practice, in no team run). No birthdate, name of a person or contact is in the file's

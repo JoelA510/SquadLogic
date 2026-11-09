@@ -18,8 +18,9 @@
  *     the job says so; slots are found by (field, date, start) or made, only for a game that is written;
  *   - when anything is written ONE new game run is made holding the whole schedule (the previous run's games and the
  *     hidden games the file found are carried into it); when nothing would change, no run and no write;
- *   - team shells go into a team run per division (carrying the division's earlier teams), outside clubs are team rows
- *     flagged `is_external` in no run; every created record has an application record;
+ *   - team shells go into ONE team run for the apply, in the shape every reader of a team run reads
+ *     (`carryTeamRunResults`: the latest run's results carried forward, the shells added to their divisions), outside
+ *     clubs are team rows flagged `is_external` in no run; every created record has an application record;
  *   - `p_dry_run` computes the same result and writes nothing;
  *   - the rollback refuses (22023 `game_import_changed`, up to 50 games) when a game it wrote is gone, differs from the
  *     image the apply stored or is in a later run; otherwise it undoes the apply.
@@ -35,6 +36,7 @@ import {
   SCHEDULE_IMPORT_ROW_REFUSALS,
   resolveScheduleRows,
 } from '@squadlogic/core/scheduleImport/index.js';
+import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { mockGameHeldIds } from './mockGameIdentity.js';
 
 export const GAME_IMPORT_RPCS = Object.freeze([
@@ -52,10 +54,6 @@ const fail = (code, message, details) => ({
   data: null,
   error: { code, message, details: details ?? null, hint: null },
 });
-const norm = (text) =>
-  String(text ?? '')
-    .trim()
-    .toLowerCase();
 const byRow = (a, b) => (a.source_row_number ?? Infinity) - (b.source_row_number ?? Infinity);
 const instantOf = (value) =>
   value === null || value === undefined ? null : new Date(value).toISOString();
@@ -200,7 +198,11 @@ function ensureGameSlot(db, params, ctx, env) {
 
 /** What a row refused because another game stands on its place is told (the SQL's words; a test holds the two equal). */
 export const COLLISION_MESSAGE =
-  "A game already stands on this place, and this row's Game ID (or the lack of one) does not name it. A game this file moves away from a place still stands on it until the import has run, so two games of one pair that swap places in one week are not imported. Nothing is written for the row.";
+  "A game this file does not move already stands on this place, and this row's Game ID (or the lack of one) does not name it. Nothing is written for the row.";
+
+/** What a row refused because another TIME TBD game holds its (home, away, week) is told (the SQL's words). */
+export const TBD_CONFLICT_MESSAGE =
+  "Another TIME TBD game already holds this home team, away team and week, and this row's Game ID (or the lack of one) does not name it. Nothing is written for the row.";
 
 const UUID_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
@@ -587,33 +589,146 @@ function applyJob(db, job, dry, ctx, env) {
         Boolean(mslot) &&
         String(mslot.slot_date) === String(r.date) &&
         String(mslot.start_time).slice(0, 5) === r.startTime;
-      const collides =
-        Boolean(slot) &&
-        games.some(
-          (g) =>
-            same(g.home_team_id, r.ids.home) &&
-            same(g.away_team_id, r.ids.away) &&
-            same(g.game_slot_id, slot.id) &&
-            Number(g.week_index) === r.weekIndex &&
-            !(match && same(g.id, match.id))
+      // The game this row names stands on a place that is not the one the row puts it on: if the row is written, it
+      // LEAVES its place.
+      const leaves =
+        Boolean(match) &&
+        !(
+          same(match.home_team_id, r.ids.home) &&
+          same(match.away_team_id, r.ids.away) &&
+          Boolean(slot) &&
+          same(match.game_slot_id ?? '', slot.id) &&
+          Number(match.week_index) === r.weekIndex
         );
-      return { r, slot, match, sameContent, collides };
+      return { r, slot, match, sameContent, leaves, swappedWith: null };
     });
-  for (const id of mockGameHeldIds(
-    db,
-    placed.filter((p) => p.match).map((p) => p.match.id)
-  ))
+  // TIME TBD games: a date and no time. A row is found by (season, Game ID) FIRST (the table's `external_ref`); a row with
+  // no Game ID, and a row whose Game ID no TIME TBD game carries yet but whose (home, away, week) one does that has no Game
+  // ID of its own, is found by the tuple, as the placed games are. `conflict` is another TIME TBD game that already holds
+  // the tuple the row would stand on (the table is unique on it); `ga` is the placed game the row's Game ID names (the file
+  // now says it has no time).
+  const tbdTable = (db.schedule_tbd || []).filter(
+    (s) => s.kind === 'game' && same(s.organization_id, org) && same(s.season_settings_id, seasonId)
+  );
+  const tupleHeld = (s, home, away, week) =>
+    same(s.home_team_id, home) && same(s.away_team_id, away) && Number(s.week_index) === week;
+  const findTbd = (gameId, home, away, week) => {
+    const byRef = gameId ? tbdTable.find((s) => s.external_ref === gameId) : undefined;
+    if (byRef) return byRef;
+    return tbdTable
+      .filter((s) => tupleHeld(s, home, away, week) && (!gameId || s.external_ref == null))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))[0];
+  };
+  /** @type {Array<any>} */
+  const tbd = rows
+    .filter((r) => r.outcome === 'ok' && r.status === 'tbd')
+    .map((r) => {
+      const m = findTbd(r.gameId, r.ids.home, r.ids.away, r.weekIndex);
+      return {
+        r,
+        m,
+        conflict: tbdTable.some(
+          (s) => !(m && same(s.id, m.id)) && tupleHeld(s, r.ids.home, r.ids.away, r.weekIndex)
+        ),
+        ga: r.gameId
+          ? games.find((g) => same(g.season_settings_id, seasonId) && g.external_ref === r.gameId)
+          : undefined,
+        newId: env.newId(),
+      };
+    });
+
+  // The one predicate: a game is held where it is. The games a row names, a placed one or one a TIME TBD row would take out.
+  for (const id of mockGameHeldIds(db, [
+    ...placed.filter((p) => p.match).map((p) => p.match.id),
+    ...tbd.filter((t) => t.ga).map((t) => t.ga.id),
+  ]))
     heldIds.add(String(id).toLowerCase());
+  const isHeld = (g) => heldIds.has(String(g.id).toLowerCase());
   for (const p of placed) {
-    p.verdict = p.collides
-      ? 'collision'
-      : !p.match
-        ? 'insert'
-        : p.sameContent
-          ? 'unchanged'
-          : heldIds.has(String(p.match.id).toLowerCase())
-            ? 'skip-held'
-            : 'update';
+    p.verdict = !p.match
+      ? 'insert'
+      : p.sameContent
+        ? 'unchanged'
+        : isHeld(p.match)
+          ? 'skip-held'
+          : 'update';
+  }
+  // The TIME TBD rows' verdicts: a held placed game of the Game ID is not taken out (the row is skipped, as a held game's
+  // row that changed is), another TIME TBD game on the tuple refuses the row.
+  for (const t of tbd) {
+    const m = t.m;
+    t.verdict =
+      t.ga && isHeld(t.ga)
+        ? 'skip-held'
+        : t.conflict
+          ? 'conflict'
+          : !m
+            ? 'insert'
+            : (m.game_date ?? null) === t.r.date &&
+                Number(m.week_index) === t.r.weekIndex &&
+                same(m.division_id, t.r.ids.division) &&
+                same(m.home_team_id, t.r.ids.home) &&
+                same(m.away_team_id, t.r.ids.away) &&
+                (t.r.gameId == null || (m.external_ref ?? null) === t.r.gameId) &&
+                m.reason === 'imported-without-time'
+              ? 'unchanged'
+              : 'update';
+    t.conv = Boolean(t.ga) && !['skip-held', 'conflict'].includes(t.verdict);
+    if (t.verdict === 'conflict') {
+      t.r.outcome = 'refused';
+      t.r.status = 'refused';
+      t.r.reason = 'duplicate-row';
+      t.r.message = TBD_CONFLICT_MESSAGE;
+    }
+  }
+  // A place another game already stands on refuses the row (the same word as a duplicate), UNLESS the game standing there
+  // is one the file itself moves away: then the row is written after that game has left, and it is a warning
+  // (`games-swapped`). A game that moves is judged against the games the file does NOT move, so a row that cannot be
+  // written is not counted among the movers and the rows that depended on it are judged again, until none changes.
+  const placeHolder = (p, movers) =>
+    p.slot
+      ? games.find(
+          (g) =>
+            same(g.home_team_id, p.r.ids.home) &&
+            same(g.away_team_id, p.r.ids.away) &&
+            same(g.game_slot_id ?? '', p.slot.id) &&
+            Number(g.week_index) === p.r.weekIndex &&
+            !(p.match && same(g.id, p.match.id)) &&
+            !movers.has(String(g.id))
+        )
+      : undefined;
+  // The games that leave their places: a game a row moves, and a placed game the file now gives no time (taken out).
+  const moversOf = () =>
+    new Set([
+      ...placed.filter((p) => p.verdict === 'update' && p.leaves).map((p) => String(p.match.id)),
+      ...tbd.filter((t) => t.conv).map((t) => String(t.ga.id)),
+    ]);
+  for (;;) {
+    const movers = moversOf();
+    let changed = false;
+    for (const p of placed) {
+      if ((p.verdict === 'insert' || p.verdict === 'update') && placeHolder(p, movers)) {
+        p.verdict = 'collision';
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  {
+    const movers = moversOf();
+    for (const p of placed.filter((x) => x.verdict === 'insert' || x.verdict === 'update')) {
+      if (!p.slot) continue;
+      p.swappedWith =
+        games.find(
+          (g) =>
+            same(g.home_team_id, p.r.ids.home) &&
+            same(g.away_team_id, p.r.ids.away) &&
+            same(g.game_slot_id ?? '', p.slot.id) &&
+            Number(g.week_index) === p.r.weekIndex &&
+            !(p.match && same(g.id, p.match.id)) &&
+            movers.has(String(g.id))
+        )?.id ?? null;
+    }
   }
   for (const p of placed.filter((x) => x.verdict === 'collision')) {
     p.r.outcome = 'refused';
@@ -621,33 +736,54 @@ function applyJob(db, job, dry, ctx, env) {
     p.r.reason = 'duplicate-row';
     p.r.message = COLLISION_MESSAGE;
   }
-
-  const tbd = rows
-    .filter((r) => r.outcome === 'ok' && r.status === 'tbd')
-    .map((r) => ({
-      r,
-      present: (db.schedule_tbd || []).some(
-        (s) =>
-          s.kind === 'game' &&
-          same(s.home_team_id, r.ids.home) &&
-          same(s.away_team_id, r.ids.away) &&
-          Number(s.week_index) === r.weekIndex
-      ),
-    }));
+  // A TIME TBD row the file now places: the game it names is written and the row goes.
+  for (const p of placed.filter((x) => x.verdict === 'insert' || x.verdict === 'update')) {
+    p.tbdRow = findTbd(p.r.gameId, p.r.ids.home, p.r.ids.away, p.r.weekIndex) ?? null;
+  }
 
   const prevRun = latestGameRun(db, org, seasonId);
   const written = placed.filter((p) => p.verdict === 'insert' || p.verdict === 'update');
-  const hidden = placed.filter(
-    (p) =>
-      ['unchanged', 'skip-held'].includes(p.verdict) &&
-      (p.match.run_id ?? null) !== (prevRun?.id ?? null)
-  );
+  const heldSkipTbd = tbd.filter((t) => t.verdict === 'skip-held');
+  const hidden = [
+    ...placed.filter(
+      (p) =>
+        ['unchanged', 'skip-held'].includes(p.verdict) &&
+        (p.match.run_id ?? null) !== (prevRun?.id ?? null)
+    ),
+    // A held game a TIME TBD row names but that is not in the latest run becomes visible again too.
+    ...heldSkipTbd.filter((t) => (t.ga.run_id ?? null) !== (prevRun?.id ?? null)),
+  ];
   const inserts = written.filter((p) => p.verdict === 'insert');
   const updates = written.filter((p) => p.verdict === 'update');
-  const tbdNew = tbd.filter((t) => !t.present);
-  const work = inserts.length + updates.length + tbdNew.length + hidden.length;
+  const tbdIns = tbd.filter((t) => t.verdict === 'insert');
+  const tbdUpd = tbd.filter((t) => t.verdict === 'update');
+  const tbdSame = tbd.filter((t) => t.verdict === 'unchanged');
+  const tbdConflict = tbd.filter((t) => t.verdict === 'conflict');
+  const converted = tbd.filter((t) => t.conv);
+  // TIME TBD rows the file now places: one per row, however many placed rows name it, and not one the file also writes.
+  const tbdRowsWritten = new Set(
+    tbd
+      .filter((t) => t.m && ['insert', 'update', 'unchanged'].includes(t.verdict))
+      .map((t) => String(t.m.id))
+  );
+  const tbdRemoved = [
+    ...new Map(
+      written
+        .filter((p) => p.tbdRow && !tbdRowsWritten.has(String(p.tbdRow.id)))
+        .map((p) => [String(p.tbdRow.id), p.tbdRow])
+    ).values(),
+  ];
+  const work =
+    inserts.length +
+    updates.length +
+    tbdIns.length +
+    tbdUpd.length +
+    tbdRemoved.length +
+    converted.length +
+    hidden.length;
   const nothing = work === 0;
   const updatedIds = new Set(updates.map((p) => String(p.match.id)));
+  const convertedIds = new Set(converted.map((t) => String(t.ga.id)));
   const matchedIds = new Set(
     placed.filter((p) => p.match && p.verdict !== 'collision').map((p) => String(p.match.id))
   );
@@ -660,9 +796,10 @@ function applyJob(db, job, dry, ctx, env) {
             placed.some(
               (p) =>
                 p.match && same(p.match.id, g.id) && ['unchanged', 'skip-held'].includes(p.verdict)
-            )
+            ) ||
+            heldSkipTbd.some((t) => same(t.ga.id, g.id))
         )
-        .filter((g) => !updatedIds.has(String(g.id)));
+        .filter((g) => !updatedIds.has(String(g.id)) && !convertedIds.has(String(g.id)));
 
   // New slots, one per place no slot stands on, among the games that are written.
   const newSlots = new Map();
@@ -702,12 +839,12 @@ function applyJob(db, job, dry, ctx, env) {
   // What a written row uses decides what is created.
   const usedTeams = new Set([
     ...written.flatMap((p) => [p.r.ids.home, p.r.ids.away]),
-    ...tbdNew.flatMap((t) => [t.r.ids.home, t.r.ids.away]),
+    ...[...tbdIns, ...tbdUpd].flatMap((t) => [t.r.ids.home, t.r.ids.away]),
   ]);
   const usedFields = new Set(written.map((p) => p.r.ids.field));
   const usedDivisions = new Set([
     ...written.map((p) => p.r.ids.division),
-    ...tbdNew.map((t) => t.r.ids.division),
+    ...[...tbdIns, ...tbdUpd].map((t) => t.r.ids.division),
   ]);
   const cr = resolved.creations;
   const newDivisions = cr.divisions.filter((c) => usedDivisions.has(c.id));
@@ -780,22 +917,72 @@ function applyJob(db, job, dry, ctx, env) {
         (w.type === 'team-double-booked' && !externalIds.has(w.details.teamId))
     ),
     ...[...flagged.entries()].flatMap(([p, codes]) =>
-      codes.map((code) => ({ type: code, details: { rowKey: p.r.rowKey } }))
+      codes.map((code) => ({
+        type: code,
+        details: { rowKey: p.r.rowKey },
+        rowNumber: p.r.rowNumber,
+      }))
     ),
+    // A TIME TBD game's week is judged against its date as a placed game's is: the file's week is kept, and said.
+    ...[...tbdIns, ...tbdUpd].flatMap((t) =>
+      t.r.flags.map((f) => ({
+        type: f.code,
+        details: { rowKey: t.r.rowKey },
+        rowNumber: t.r.rowNumber,
+      }))
+    ),
+    // A game moved onto the place of a game this same file moves away (a swap, or a chain of moves): written, in an order
+    // the unique place allows, and said.
+    ...written
+      .filter((p) => p.swappedWith)
+      .map((p) => ({
+        type: 'games-swapped',
+        message: 'This game takes the place of a game the file moves away: both are written.',
+        details: { rowKey: p.r.rowKey, gameId: p.r.gameId, takesPlaceOf: p.swappedWith },
+        rowNumber: p.r.rowNumber,
+      })),
+    // A placed game the file now says has no time: taken out, and a dated TIME TBD game stands for it.
+    ...converted.map((t) => ({
+      type: 'game-made-time-tbd',
+      message:
+        'The file gives this game a date and no time: it is no longer placed, and stands on the TIME TBD list.',
+      details: { rowKey: t.r.rowKey, gameId: t.r.gameId, game: t.ga.id, date: t.r.date },
+      rowNumber: t.r.rowNumber,
+    })),
   ];
   const orderOf = {
     'field-overlap': 1,
     'team-double-booked': 2,
     'time-ambiguous': 3,
     'week-differs': 4,
+    'games-swapped': 5,
+    'game-made-time-tbd': 6,
   };
-  warnings.sort((a, b) => orderOf[a.type] - orderOf[b.type]);
+  warnings.sort(
+    (a, b) => orderOf[a.type] - orderOf[b.type] || (a.rowNumber ?? 0) - (b.rowNumber ?? 0)
+  );
 
   const reasons = {};
   const refusedRows = rows.filter((r) => r.outcome === 'refused');
   for (const r of refusedRows) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
   const skippedRows = rows.filter((r) => r.outcome === 'skipped');
-  const heldSkips = placed.filter((p) => p.verdict === 'skip-held');
+  // The held games a row would have changed or taken out: a placed row that moves one, a TIME TBD row for one.
+  const heldSkips = [
+    ...placed
+      .filter((p) => p.verdict === 'skip-held')
+      .map((p) => ({
+        rowNumber: p.r.rowNumber,
+        rowKey: p.r.rowKey,
+        gameId: p.r.gameId,
+        game: p.match.id,
+      })),
+    ...heldSkipTbd.map((t) => ({
+      rowNumber: t.r.rowNumber,
+      rowKey: t.r.rowKey,
+      gameId: t.r.gameId,
+      game: t.ga.id,
+    })),
+  ].sort((a, b) => a.rowNumber - b.rowNumber);
   const result = {
     dry_run: dry,
     job_id: job.id,
@@ -806,7 +993,7 @@ function applyJob(db, job, dry, ctx, env) {
       refused: refusedRows.length,
       skipped: skippedRows.length,
       games: placed.filter((p) => p.verdict !== 'collision').length,
-      time_tbd: tbd.length,
+      time_tbd: tbd.length - tbdConflict.length,
     },
     refused_by_reason: reasons,
     games: {
@@ -816,7 +1003,13 @@ function applyJob(db, job, dry, ctx, env) {
       repointed: carry.length,
       skipped: heldSkips.length > 0 ? { 'skipped-published': heldSkips.length } : {},
     },
-    time_tbd: { inserted: tbdNew.length, unchanged: tbd.length - tbdNew.length },
+    time_tbd: {
+      inserted: tbdIns.length,
+      updated: tbdUpd.length,
+      unchanged: tbdSame.length,
+      removed: tbdRemoved.length,
+      converted: converted.length,
+    },
     created: {
       divisions: newDivisions.length,
       venues: newVenues.length,
@@ -835,7 +1028,12 @@ function applyJob(db, job, dry, ctx, env) {
     not_in_file: (() => {
       const ids = prevRun
         ? games
-            .filter((g) => same(g.run_id ?? '', prevRun.id) && !matchedIds.has(String(g.id)))
+            .filter(
+              (g) =>
+                same(g.run_id ?? '', prevRun.id) &&
+                !matchedIds.has(String(g.id)) &&
+                !tbd.some((t) => t.ga && same(t.ga.id, g.id))
+            )
             .map((g) => g.id)
             .sort()
         : [];
@@ -859,11 +1057,11 @@ function applyJob(db, job, dry, ctx, env) {
         kind: r.skippedBecause?.kind ?? null,
         label: r.skippedBecause?.label ?? null,
       })),
-      skipped_games: heldSkips.slice(0, LISTED).map((p) => ({
-        row_number: p.r.rowNumber,
-        row_key: p.r.rowKey,
-        game_id: p.r.gameId,
-        game: p.match.id,
+      skipped_games: heldSkips.slice(0, LISTED).map((h) => ({
+        row_number: h.rowNumber,
+        row_key: h.rowKey,
+        game_id: h.gameId,
+        game: h.game,
         reason: 'skipped-published',
       })),
     },
@@ -933,10 +1131,13 @@ function applyJob(db, job, dry, ctx, env) {
       (db.fields = db.fields || []).push(row);
       record('fields', row.id, 'inserted', null, { ...row });
     }
-    // Shells: one team run per division, carrying the division's earlier teams.
+    // Shells: ONE team run for the whole apply, in the shape every reader of a team run reads (`carryTeamRunResults`): the
+    // latest run's results carried forward whole, each division's shells added to the division. The pages read the latest
+    // team run, so a run of only the new shells (or of one division) would make every other team look absent.
     const byDivision = new Map();
     for (const c of newShells)
       byDivision.set(c.divisionId, [...(byDivision.get(c.divisionId) ?? []), c]);
+    const shellDivisions = [];
     for (const [placeholder, shells] of [...byDivision.entries()].sort(([a], [b]) =>
       String(a) < String(b) ? -1 : 1
     )) {
@@ -951,30 +1152,31 @@ function applyJob(db, job, dry, ctx, env) {
         updated_at: stamp,
       }));
       shells.forEach((c, i) => idOf.set(c.id, rowsOf[i].id));
+      shellDivisions.push({
+        id: divisionId,
+        name: nameOfDivision(placeholder),
+        teams: rowsOf.map((r) => ({ id: r.id, name: r.name })),
+      });
+      for (const r of rowsOf) {
+        (db.teams = db.teams || []).push(r);
+        record('teams', r.id, 'inserted', null, { ...r });
+      }
+    }
+    if (shellDivisions.length > 0) {
       const prev = (db.scheduler_runs || [])
         .filter(
           (sr) =>
             same(sr.organization_id, org) &&
             sr.run_type === 'team' &&
-            Array.isArray(sr.results?.teams) &&
-            sr.results.teams.some(
-              (t) => String(t.division ?? t.division_id ?? '') === String(divisionId)
-            )
+            sr.status === 'completed' &&
+            (same(sr.season_settings_id ?? '', seasonId) || same(sr.season_id ?? '', seasonId))
         )
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-      const carried = prev
-        ? prev.results.teams.filter(
-            (t) => String(t.division ?? t.division_id ?? '') === String(divisionId)
-          )
-        : (db.teams || [])
-            .filter((t) => same(t.division_id, divisionId) && t.is_external !== true)
-            .map((t) => ({
-              id: t.id,
-              division: String(divisionId),
-              division_id: divisionId,
-              name: t.name,
-              players: [],
-            }));
+        .sort(
+          (a, b) =>
+            String(b.created_at).localeCompare(String(a.created_at)) ||
+            String(b.id).localeCompare(String(a.id))
+        )[0];
+      const shellIds = shellDivisions.flatMap((d) => d.teams.map((t) => t.id));
       const teamRun = {
         id: env.newId(),
         organization_id: org,
@@ -985,34 +1187,21 @@ function applyJob(db, job, dry, ctx, env) {
         parameters: {
           source: 'import',
           import_job_id: job.id,
-          selectedProgramId: String(divisionId),
-          shell_ids: rowsOf.map((r) => r.id),
+          shell_ids: shellIds,
         },
-        results: {
-          teams: [
-            ...carried,
-            ...rowsOf.map((r) => ({
-              id: r.id,
-              division: String(divisionId),
-              division_id: divisionId,
-              name: r.name,
-              coach_id: null,
-              assistant_coach_ids: [],
-              players: [],
-            })),
-          ],
-          team_players: prev?.results?.team_players ?? [],
-        },
+        results: carryTeamRunResults({
+          base: prev?.results ?? null,
+          divisions: shellDivisions,
+          ownTeams: (db.teams || []).filter(
+            (t) => t.is_external !== true && !shellIds.some((id) => same(id, t.id))
+          ),
+        }),
         created_by: ctx.currentUserId,
         completed_at: stamp,
         created_at: stamp,
       };
       (db.scheduler_runs = db.scheduler_runs || []).push(teamRun);
       teamRunIds.push(teamRun.id);
-      for (const r of rowsOf) {
-        (db.teams = db.teams || []).push(r);
-        record('teams', r.id, 'inserted', null, { ...r });
-      }
     }
     for (const c of newOutside) {
       const row = {
@@ -1083,6 +1272,16 @@ function applyJob(db, job, dry, ctx, env) {
       created_at: stamp,
     });
     db.game_assignments = db.game_assignments || [];
+    // The before-images of the TIME TBD rows the file changes or removes (a rollback puts them back).
+    const tbdBefore = new Map(
+      [...tbdUpd.map((t) => t.m), ...tbdRemoved].map((row) => [String(row.id), { ...row }])
+    );
+    // Placed games the file now says have no time are taken out (a dated TIME TBD game stands for each, below): only a game
+    // that is not held is here (a held one was skipped), and its image is kept so a rollback can put it back.
+    for (const t of converted) {
+      record('game_assignments', t.ga.id, 'deleted', { ...t.ga }, {});
+      db.game_assignments = db.game_assignments.filter((g) => !same(g.id, t.ga.id));
+    }
     for (const p of inserts) {
       const row = {
         id: env.newId(),
@@ -1137,9 +1336,33 @@ function applyJob(db, job, dry, ctx, env) {
       record('game_assignments', id, 'updated', img, {
         ...db.game_assignments.find((x) => same(x.id, id)),
       });
-    for (const t of tbdNew) {
+    // TIME TBD games: a DATE and no time (`game_date`), the Game ID in `external_ref`. A row the file names is changed in
+    // place; one the file now places is removed (the placed game stands for it); a new one is inserted. Every one has an
+    // application record, with the image it had.
+    db.schedule_tbd = db.schedule_tbd || [];
+    for (const t of tbdUpd) {
+      const row = db.schedule_tbd.find((x) => same(x.id, t.m.id));
+      const ref = t.r.gameId ?? row.external_ref ?? null;
+      Object.assign(row, {
+        division_id: real(t.r.ids.division),
+        home_team_id: real(t.r.ids.home),
+        away_team_id: real(t.r.ids.away),
+        week_index: t.r.weekIndex,
+        external_ref: ref,
+        game_date: t.r.date,
+        reason: 'imported-without-time',
+        detail: { ...(ref ? { game_id: ref } : {}), import_job_id: job.id },
+        run_id: runId,
+      });
+      record('schedule_tbd', row.id, 'updated', tbdBefore.get(String(row.id)), { ...row });
+    }
+    for (const row of tbdRemoved) {
+      db.schedule_tbd = db.schedule_tbd.filter((x) => !same(x.id, row.id));
+      record('schedule_tbd', row.id, 'deleted', tbdBefore.get(String(row.id)), {});
+    }
+    for (const t of tbdIns) {
       const row = {
-        id: env.newId(),
+        id: t.newId,
         organization_id: org,
         season_settings_id: seasonId,
         kind: 'game',
@@ -1148,11 +1371,13 @@ function applyJob(db, job, dry, ctx, env) {
         away_team_id: real(t.r.ids.away),
         week_index: t.r.weekIndex,
         reason: 'imported-without-time',
-        detail: { game_id: t.r.gameId ?? undefined, date: t.r.date, import_job_id: job.id },
+        detail: { ...(t.r.gameId ? { game_id: t.r.gameId } : {}), import_job_id: job.id },
         run_id: runId,
+        external_ref: t.r.gameId ?? null,
+        game_date: t.r.date,
         created_at: stamp,
       };
-      (db.schedule_tbd = db.schedule_tbd || []).push(row);
+      db.schedule_tbd.push(row);
       record('schedule_tbd', row.id, 'inserted', null, { ...row });
     }
     result.ids = { run_id: runId, team_run_ids: teamRunIds };
@@ -1243,6 +1468,8 @@ function rollbackJob(db, job, ctx, env) {
   const changed = gameRecords
     .filter((r) => {
       const now = (db.game_assignments || []).find((g) => same(g.id, r.target_id));
+      // A game the apply took out is still out: one that stands again would be put back twice.
+      if (r.operation === 'deleted') return Boolean(now);
       return (
         !now ||
         imageOf(now) !== imageOf(r.applied_payload) ||
@@ -1289,10 +1516,43 @@ function rollbackJob(db, job, ctx, env) {
       import_job_id: p.import_job_id ?? null,
     });
   }
+  // Games the apply took out (the file gave them no time) stand again, as they were.
+  const reinsertedGames = of('game_assignments', 'deleted');
+  for (const r of reinsertedGames)
+    (db.game_assignments = db.game_assignments || []).push({ ...r.previous_payload });
+  // TIME TBD games: what the import inserted goes, what it changed in place is put back, and what it removed (the file
+  // placed the game) is put back; a removed row whose place in the table was taken is counted, never skipped in silence.
   const tbdDeleted = gone(
     'schedule_tbd',
-    of('schedule_tbd').map((r) => r.target_id)
+    of('schedule_tbd', 'inserted').map((r) => r.target_id)
   );
+  const tbdRestored = of('schedule_tbd', 'updated');
+  for (const r of tbdRestored)
+    Object.assign(
+      db.schedule_tbd.find((x) => same(x.id, r.target_id)),
+      { ...r.previous_payload }
+    );
+  let tbdReinserted = 0;
+  for (const r of of('schedule_tbd', 'deleted')) {
+    const p = r.previous_payload;
+    const taken = (db.schedule_tbd || []).some(
+      (x) =>
+        same(x.id, r.target_id) ||
+        (x.kind === 'game' &&
+          same(x.home_team_id ?? '', p.home_team_id) &&
+          same(x.away_team_id ?? '', p.away_team_id) &&
+          Number(x.week_index) === Number(p.week_index)) ||
+        (same(x.season_settings_id ?? '', p.season_settings_id) &&
+          p.external_ref != null &&
+          x.external_ref === p.external_ref)
+    );
+    if (taken) continue;
+    db.schedule_tbd.push({ ...p });
+    tbdReinserted += 1;
+  }
+  const tbdNotReinserted = of('schedule_tbd', 'deleted').filter(
+    (r) => !(db.schedule_tbd || []).some((x) => same(x.id, r.target_id))
+  ).length;
   const games = db.game_assignments || [];
   const slotsDeleted = gone(
     'game_slots',
@@ -1406,8 +1666,15 @@ function rollbackJob(db, job, ctx, env) {
     });
   const result = {
     job_id: job.id,
-    games: { deleted: deletedGames.length, restored: restored.length },
+    games: {
+      deleted: deletedGames.length,
+      restored: restored.length,
+      reinserted: reinsertedGames.length,
+    },
     time_tbd_deleted: tbdDeleted,
+    time_tbd_restored: tbdRestored.length,
+    time_tbd_reinserted: tbdReinserted,
+    time_tbd_not_reinserted: tbdNotReinserted,
     slots_deleted: slotsDeleted,
     teams_deleted: teamsDeleted,
     team_runs_deleted: teamRunsDeleted,
@@ -1428,6 +1695,5 @@ function rollbackJob(db, job, ctx, env) {
   });
   job.status = 'needs_fix';
   job.warning_summary = { ...(job.warning_summary || {}), game_import_rollback: result };
-  void norm;
   return { data: result, error: null };
 }

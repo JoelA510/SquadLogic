@@ -8,6 +8,9 @@
 --
 -- ## What this adds
 --
+--   * (fix round 2) `schedule_tbd.external_ref` and `schedule_tbd.game_date` (a TIME TBD game's Game ID and DATE, with a shape
+--     check and a per-season unique index), `normalise_external_label(text)` (core's label comparison, internal), and the
+--     application record's `operation` gains `deleted`;
 --   * `game_assignments.external_ref` (the Game ID: text, at most 40 characters, no space at either end, never empty) and
 --     `game_assignments.import_job_id` (the job that wrote the row; ON DELETE SET NULL). A unique index on
 --     (season_settings_id, external_ref) for the rows that have a Game ID: PER SEASON (F11 decision D6 and the owner's
@@ -42,21 +45,45 @@
 -- (decision 4). When anything is written, ONE new game run is made and holds the whole schedule: every game of the
 -- previous latest run is carried into it (a run change, which the guard allows), and so is every hidden game the file
 -- found. When nothing would change (a re-import) no run is made and nothing is written. Team shells go through the
--- existing audited team writer, one team run per division that gained any, carrying the division's earlier teams (a later
--- run shadows an earlier one for a division, so a run of only the new shells would make the old teams look absent);
+-- existing audited team writer in ONE team run, in the shape the pages read (the latest completed run's results carried
+-- forward whole, `teamsByDivision`, `teams` and `team_players` among them, with the shells added to their divisions: the
+-- pages read the latest team run, so a run of only the new shells would make every other team look absent);
 -- outside clubs are inserted here, in no team run. The conflict flags are two checks the SQL can judge from the stored
 -- games (a field and a team in two games at once) plus the flags the file carried; the coach overlap and the hosting
--- balance are the preview's audit (the result says so in `not_judged`). **A known limitation:** the check that a row's
--- place is free treats a game the same file moves away from a place as still standing on it, so two games of one pair in
--- one week whose times the file swaps by Game ID are both refused (reason `duplicate-row`, in words that name this case);
--- the swap has to be imported in steps. A pair playing twice in one week is rare and a step-out is not built.
+-- balance are the preview's audit (the result says so in `not_judged`).
+--
+-- **Swaps are warnings, not blockers** (the owner, 2026-11-09). A game moved onto a place another game of THE SAME FILE
+-- moves away from (two games of one pair in one week that swap times, a chain of moves, a new game on a place a game
+-- leaves) is written, with the warning `games-swapped` in the preview and the result. The place is unique and not
+-- deferrable, so the apply takes a game that leaves a place another row is about to take out of the unique place first (its
+-- slot set null, as `persist_game_schedule` does since 20261120010000) and gives it its place in the same transaction; the
+-- rollback does the same. A place is judged only against the games the file does NOT move: a row whose place is held by one
+-- of those is refused (`duplicate-row`: a genuine clash), a held game is never moved, and a game moving onto its place is
+-- refused too. A row that cannot be written is not counted among the movers, and the rows that depended on it are judged
+-- again until none changes.
+--
+-- **A TIME TBD game holds a date and no time, and is found by its Game ID** (the owner, 2026-11-09, and Codex). `schedule_tbd`
+-- gains `external_ref` (the Game ID, unique per season) and `game_date`. A row is found by (season, Game ID) first, then, for a
+-- row with no Game ID or a Game ID no TIME TBD game carries yet, by (home, away, week) among the rows with no Game ID of their
+-- own; it is changed in place (the date and week it now holds, the reason `imported-without-time`), or inserted when none is
+-- found. A game the file places that stood on the TIME TBD list is written and the list's row removed; a placed game the file
+-- now gives no time is converted (the game removed, a dated TIME TBD row written, the warning `game-made-time-tbd`) unless it
+-- is held, in which case the row is skipped as `skipped-published`. Another TIME TBD game that already holds the tuple a
+-- row would stand on is a different game: the row is refused (`duplicate-row`), because the table is unique on it. Every
+-- change has an application record with the image it had (`operation` gains `deleted`), and the rollback puts it all back.
+--
+-- **Labels are compared as core compares them**: `normalise_external_label` (trim, collapse every run of whitespace,
+-- lower-case) is core's `normaliseExternalLabel` in SQL, and every comparison of a name the apply would create with a name that
+-- exists, and every coalescing of two labels that create one record, goes through it.
 --
 -- ## The rollback
 --
 -- It refuses, naming up to 50 games, if any game the import wrote has been changed, cancelled, had changes allowed or
--- been saved into a later run since (compared with the stored application record). Otherwise it deletes what the import
--- inserted and puts back what it updated, through the guard's rollback exemption, removes the slots, clubs, shells,
--- fields, venues and divisions it created when nothing else references them, and removes its runs.
+-- been saved into a later run since (compared with the stored application record), or a game it took out stands again.
+-- Otherwise it deletes what the import inserted and puts back what it updated (a swapped pair is taken out of the unique
+-- place first, as the apply took it), through the guard's rollback exemption, stands up again the games the apply took out
+-- and the TIME TBD rows it removed, puts back the TIME TBD rows it changed, removes the slots, clubs, shells, fields, venues
+-- and divisions it created when nothing else references them, and removes its runs.
 --
 -- ## Cost, said plainly
 --
@@ -166,6 +193,30 @@ ALTER TABLE public.schedule_tbd DROP CONSTRAINT IF EXISTS schedule_tbd_reason_ch
 ALTER TABLE public.schedule_tbd ADD CONSTRAINT schedule_tbd_reason_check CHECK (
     (kind = 'practice' AND reason IN ('no-slot-available', 'no-live-date', 'coach-preference', 'practice-length', 'not-enough-days', 'not-scheduled-yet'))
     OR (kind = 'game' AND reason IN ('unknown-team', 'division-mismatch', 'duplicate-matchup', 'coach-coaches-both-teams', 'coach-scheduling-conflict', 'no-slot-available', 'imported-without-time')));
+
+-- A TIME TBD game keeps what the file gave: its Game ID (so a re-import finds the game by it, as it finds a placed game)
+-- and its DATE (a game with no time still has a day). NULL for every row the solver or the practice sync wrote and for a
+-- row the file gave no Game ID. The Game ID is unique per season, for the rows that have one, as a placed game's is.
+ALTER TABLE public.schedule_tbd
+    ADD COLUMN IF NOT EXISTS external_ref text,
+    ADD COLUMN IF NOT EXISTS game_date date;
+ALTER TABLE public.schedule_tbd
+    ADD CONSTRAINT schedule_tbd_import_fields
+    CHECK ((external_ref IS NULL OR (kind = 'game' AND char_length(external_ref) BETWEEN 1 AND 40 AND external_ref = btrim(external_ref)))
+           AND (game_date IS NULL OR kind = 'game'));
+CREATE UNIQUE INDEX IF NOT EXISTS schedule_tbd_season_external_ref_key
+    ON public.schedule_tbd (season_settings_id, external_ref)
+    WHERE external_ref IS NOT NULL;
+COMMENT ON COLUMN public.schedule_tbd.external_ref IS
+    'The Game ID a schedule import carried for this TIME TBD game (20261121010000): at most 40 characters, exact after trimming, unique per season, NULL for a game the solver listed or a file gave no Game ID. A re-import finds the game by it.';
+COMMENT ON COLUMN public.schedule_tbd.game_date IS
+    'The DATE a schedule import gave this TIME TBD game (20261121010000): a game with no time still has a day. NULL for a game the solver could not place and for a practice. The week_index is the file''s week (a week that is not the date''s is a week-differs warning, never renumbered).';
+
+-- An application record can say a row was deleted (a placed game the file now gives no time; a TIME TBD game the file now
+-- places): the image it had is the previous payload, and the rollback puts it back.
+ALTER TABLE public.import_application_records DROP CONSTRAINT IF EXISTS import_application_records_operation_check;
+ALTER TABLE public.import_application_records ADD CONSTRAINT import_application_records_operation_check
+    CHECK (operation IN ('inserted', 'updated', 'deleted'));
 
 INSERT INTO public.audit_actions (action) VALUES ('game.slot_created')
     ON CONFLICT (action) DO NOTHING;
@@ -849,6 +900,44 @@ COMMENT ON FUNCTION public.map_game_import_job(uuid, jsonb) IS
 
 
 -- ---------------------------------------------------------------------------
+-- 6b. normalise_external_label: the one way the SQL compares two labels.
+-- ---------------------------------------------------------------------------
+--
+-- The apply compares a name it would create with the names the season already has (a division, a venue, a field, a team,
+-- an outside club) and coalesces two labels that would create one record. Core does that by `normaliseExternalLabel`
+-- (packages/core/src/externalImport/mapping.js): trim, collapse every run of whitespace to one space, lower-case. The SQL
+-- compared `lower(btrim(name))`, which trims spaces only and collapses nothing, so "Blue  Jays", "Blue<tab>Jays" and "Blue
+-- <no-break space>Jays" were three names to the apply and one to the preview: the preview refused (or coalesced) what the
+-- apply then wrote, a near-duplicate record beside the one the admin meant. This function is core's, in SQL, and every
+-- label comparison of the apply goes through it (tests/gameImportLabelParity.test.js holds the apply's text to that, and
+-- runs one table of label cases through core and through this function in the pgTAP file).
+--
+-- Whitespace is JavaScript's: `\s`, which is also what `trim` strips (tab, line feed, vertical tab, form feed, carriage
+-- return, space, no-break space, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000, and the byte order mark),
+-- written out because the database's own `[[:space:]]` is its locale's idea of it (no-break space is not in it).
+-- **Not mirrored:** the two letters whose lower case JavaScript takes by a special rule (a capital I with a dot above, and
+-- a capital sigma at the end of a word); `lower` here takes the simple mapping. A label that differs from a stored name
+-- only in one of them reads as two names here and one in the preview, which is the safe side (a record is created, never
+-- one merged), and nothing in the program's labels is spelled that way.
+-- IMMUTABLE and strict, no table read; closed to every role (the SECURITY DEFINER functions call it as their owner).
+
+CREATE FUNCTION public.normalise_external_label(p_label text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+STRICT
+PARALLEL SAFE
+SET search_path = public
+AS $function$
+    SELECT lower(btrim(regexp_replace(p_label,
+        '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g'), ' '))
+$function$;
+
+REVOKE ALL ON FUNCTION public.normalise_external_label(text) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.normalise_external_label(text) IS
+    'The games import''s one comparison of two labels: core''s normaliseExternalLabel in SQL (trim, collapse every run of whitespace, JavaScript''s whitespace, to one space, lower-case). IMMUTABLE, closed to every role; the import functions call it as their owner. 20261121010000.';
+
+-- ---------------------------------------------------------------------------
 -- 7. apply_game_import_job: preview (dry run) and apply, one plan.
 -- ---------------------------------------------------------------------------
 --
@@ -897,7 +986,7 @@ DECLARE
     v_planned bigint;
     n_staged integer; n_refused integer; n_skipped integer; n_ok integer; n_tbd integer;
     n_ins integer; n_upd integer; n_unch integer; n_skip_pub integer; n_repoint integer; n_hidden integer;
-    n_tbd_ins integer; n_tbd_unch integer;
+    n_tbd_ins integer; n_tbd_unch integer; n_tbd_upd integer; n_tbd_rem integer; n_tbd_conflict integer; n_tbd_held integer; n_conv integer;
     n_div integer; n_ven integer; n_fld integer; n_shell integer; n_out integer; n_slot_new integer; n_slot_reused integer;
     n_not_in_file integer; v_not_in_file jsonb;
     v_work integer;
@@ -912,8 +1001,7 @@ DECLARE
     v_status text;
     v_published_ids uuid[];
     v_div record;
-    v_carry_teams jsonb; v_carry_players jsonb; v_prev_team_run public.scheduler_runs%ROWTYPE;
-    v_shells jsonb; v_shell_ids jsonb; v_team_run uuid;
+    v_base jsonb; v_grouped jsonb; v_results jsonb; v_key text; v_label text; v_shell_arr uuid[]; v_team_run uuid;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'apply_game_import_job needs a signed-in caller' USING ERRCODE = '42501';
@@ -975,7 +1063,7 @@ BEGIN
     v_arrive := COALESCE((v_map -> 'options' ->> 'arrive_published')::boolean, true);
 
     -- ------------------------------------------------------------------ 1. The staged rows, read once.
-    DROP TABLE IF EXISTS pg_temp._gi_rows, pg_temp._gi_dec, pg_temp._gi_div, pg_temp._gi_venue, pg_temp._gi_field,
+    DROP TABLE IF EXISTS pg_temp._gi_tbefore, pg_temp._gi_rows, pg_temp._gi_dec, pg_temp._gi_div, pg_temp._gi_venue, pg_temp._gi_field,
         pg_temp._gi_team, pg_temp._gi_res, pg_temp._gi_work, pg_temp._gi_g, pg_temp._gi_slotnew, pg_temp._gi_t,
         pg_temp._gi_carry, pg_temp._gi_final, pg_temp._gi_before, pg_temp._gi_newgames;
 
@@ -1078,14 +1166,14 @@ BEGIN
         SELECT j.*,
                (j.action = 'create' AND NOT EXISTS (SELECT 1 FROM public.divisions dv
                     WHERE dv.organization_id = v_org AND dv.season_settings_id = v_season
-                      AND lower(btrim(dv.name)) = lower(btrim(j.cname)))) AS can_create,
+                      AND public.normalise_external_label(dv.name) = public.normalise_external_label(j.cname))) AS can_create,
                gen_random_uuid() AS own_id
           FROM j
     ), k3 AS (
         SELECT k2.*,
-               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.dkey) AS new_id,
-               first_value(k2.cname) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.dkey) AS final_cname,
-               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.dkey) = 1) AS creator
+               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.dkey) AS new_id,
+               first_value(k2.cname) OVER (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.dkey) AS final_cname,
+               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.dkey) = 1) AS creator
           FROM k2
     )
     SELECT k3.dkey, k3.label, k3.action, k3.existing_id, k3.final_cname AS cname, k3.can_create, k3.creator, k3.new_id,
@@ -1107,14 +1195,14 @@ BEGIN
     ), k2 AS (
         SELECT j.*,
                (j.action = 'create' AND NOT EXISTS (SELECT 1 FROM public.locations l
-                    WHERE l.organization_id = v_org AND lower(btrim(l.name)) = lower(btrim(j.cname)))) AS can_create,
+                    WHERE l.organization_id = v_org AND public.normalise_external_label(l.name) = public.normalise_external_label(j.cname))) AS can_create,
                gen_random_uuid() AS own_id
           FROM j
     ), k3 AS (
         SELECT k2.*,
-               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.vkey) AS new_id,
-               first_value(k2.cname) OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.vkey) AS final_cname,
-               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, lower(btrim(k2.cname)) ORDER BY k2.vkey) = 1) AS creator
+               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.vkey) AS new_id,
+               first_value(k2.cname) OVER (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.vkey) AS final_cname,
+               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, public.normalise_external_label(k2.cname) ORDER BY k2.vkey) = 1) AS creator
           FROM k2
     )
     SELECT k3.vkey, k3.label, k3.action, k3.existing_id, k3.final_cname AS cname, k3.can_create, k3.creator, k3.new_id,
@@ -1140,14 +1228,14 @@ BEGIN
         SELECT j.*,
                (j.action = 'create' AND j.venue_ref IS NOT NULL
                 AND NOT (j.venue_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.fields f
-                    WHERE f.location_id = j.venue_existing AND lower(btrim(f.name)) = lower(btrim(j.cname))))) AS can_create,
+                    WHERE f.location_id = j.venue_existing AND public.normalise_external_label(f.name) = public.normalise_external_label(j.cname)))) AS can_create,
                gen_random_uuid() AS own_id
           FROM j
     ), k3 AS (
         SELECT k2.*,
-               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, k2.venue_ref, lower(btrim(k2.cname)) ORDER BY k2.fkey) AS new_id,
-               first_value(k2.cname) OVER (PARTITION BY k2.can_create, k2.venue_ref, lower(btrim(k2.cname)) ORDER BY k2.fkey) AS final_cname,
-               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, k2.venue_ref, lower(btrim(k2.cname)) ORDER BY k2.fkey) = 1) AS creator
+               first_value(k2.own_id) OVER (PARTITION BY k2.can_create, k2.venue_ref, public.normalise_external_label(k2.cname) ORDER BY k2.fkey) AS new_id,
+               first_value(k2.cname) OVER (PARTITION BY k2.can_create, k2.venue_ref, public.normalise_external_label(k2.cname) ORDER BY k2.fkey) AS final_cname,
+               (k2.can_create AND row_number() OVER (PARTITION BY k2.can_create, k2.venue_ref, public.normalise_external_label(k2.cname) ORDER BY k2.fkey) = 1) AS creator
           FROM k2
     )
     SELECT k3.fkey, k3.vkey, k3.label, k3.action, k3.venue_ref, k3.existing_id, k3.final_cname AS cname, k3.can_create, k3.creator, k3.new_id,
@@ -1180,16 +1268,16 @@ BEGIN
                      WHERE t.id = j.ref_id AND t.organization_id = v_org AND t.division_id = j.division_existing) END AS map_id,
                (j.division_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.teams t
                     WHERE t.division_id = j.division_existing AND NOT t.is_external
-                      AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS own_named,
+                      AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS own_named,
                (SELECT t.id FROM public.teams t
                  WHERE j.division_existing IS NOT NULL AND t.division_id = j.division_existing AND t.is_external
-                   AND lower(btrim(t.name)) = lower(btrim(j.cname)) ORDER BY t.id LIMIT 1) AS ext_id,
+                   AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname) ORDER BY t.id LIMIT 1) AS ext_id,
                (j.division_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.teams t
-                    WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken,
+                    WHERE t.division_id = j.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS name_taken,
                (j.action = 'outside' AND j.division_ref IS NOT NULL AND EXISTS (SELECT 1 FROM j j2
-                    WHERE j2.action = 'create' AND j2.division_ref = j.division_ref AND lower(btrim(j2.cname)) = lower(btrim(j.cname))
+                    WHERE j2.action = 'create' AND j2.division_ref = j.division_ref AND public.normalise_external_label(j2.cname) = public.normalise_external_label(j.cname)
                       AND NOT (j2.division_existing IS NOT NULL AND EXISTS (SELECT 1 FROM public.teams t
-                                WHERE t.division_id = j2.division_existing AND lower(btrim(t.name)) = lower(btrim(j2.cname)))))) AS shell_here,
+                                WHERE t.division_id = j2.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j2.cname))))) AS shell_here,
                gen_random_uuid() AS own_id
           FROM j
     ), k3 AS (
@@ -1206,9 +1294,9 @@ BEGIN
           FROM k2
     ), k4 AS (
         SELECT k3.*,
-               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) AS new_id,
-               first_value(k3.cname) OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) AS final_cname,
-               (row_number() OVER (PARTITION BY k3.kind, k3.division_ref, lower(btrim(k3.cname)) ORDER BY k3.tkey) = 1) AS creator
+               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS new_id,
+               first_value(k3.cname) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS final_cname,
+               (row_number() OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) = 1) AS creator
           FROM k3
     )
     SELECT k4.tkey, k4.dkey, k4.label, k4.action, k4.kind,
@@ -1306,29 +1394,104 @@ BEGIN
             AND ga.week_index IS NOT DISTINCT FROM b.week_index AND ga.start IS NOT DISTINCT FROM b.start_ts
             AND ga."end" IS NOT DISTINCT FROM b.end_ts AND ga.division IS NOT DISTINCT FROM b.division_name
             AND gsm.slot_date IS NOT DISTINCT FROM b.gdate AND gsm.start_time IS NOT DISTINCT FROM b.start_time) AS same,
-           -- Another game already stands on the place this row would put its game: (home, away, slot, week) is unique.
-           (b.slot_id IS NOT NULL AND EXISTS (SELECT 1 FROM public.game_assignments g2
-                WHERE g2.home_team_id = b.home_ref AND g2.away_team_id = b.away_ref AND g2.game_slot_id = b.slot_id
-                  AND g2.week_index = b.week_index AND g2.id IS DISTINCT FROM b.match_id)) AS collides
+           -- The game this row names stands on a place (home, away, slot, week) that is not the one the row puts it on: if the
+           -- row is written, the game LEAVES its place. (A game that changes only its division label does not.)
+           (ga.id IS NOT NULL
+            AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
+                IS DISTINCT FROM (b.home_ref, b.away_ref, b.slot_id, b.week_index)) AS leaves
       FROM base b
       LEFT JOIN public.game_assignments ga ON ga.id = b.match_id
       LEFT JOIN public.game_slots gsm ON gsm.id = ga.game_slot_id;
 
-    -- The one predicate: a game is held where it is (F11-1's game_held_ids; F11-2 adds a score).
-    SELECT COALESCE(array_agg(DISTINCT g.match_id), ARRAY[]::uuid[]) INTO v_held
-      FROM _gi_g g WHERE g.match_id IS NOT NULL;
+    -- TIME TBD games: a date and no time (the staged row has no instants, and a game with no field has no slot). A row is
+    -- found by (season, Game ID) FIRST, in the table's own `external_ref`; a row with no Game ID, and a row whose Game ID
+    -- no TIME TBD game carries yet but whose (home, away, week) one does that has no Game ID of its own, is found by the
+    -- tuple, as the placed games are. `c_id` is another TIME TBD game that already holds the tuple this row would stand
+    -- on (the table is unique on it): a different game, so the row is refused as a duplicate. `ga_id` is the placed game
+    -- the row's Game ID names: the file now says it has no time.
+    CREATE TEMP TABLE _gi_t ON COMMIT DROP AS
+    SELECT w.rowno, w.row_key, w.game_id, w.home_ref, w.away_ref, w.week_index, w.division_ref, w.gdate, w.tbd_reason, w.flags,
+           m.id AS m_id, m.external_ref AS m_ref, m.game_date AS m_date, m.week_index AS m_week, m.division_id AS m_div,
+           m.home_team_id AS m_home, m.away_team_id AS m_away, m.reason AS m_reason,
+           c.id AS c_id, a.id AS ga_id, gen_random_uuid() AS new_id
+      FROM _gi_work w
+      LEFT JOIN LATERAL (SELECT s.* FROM public.schedule_tbd s
+                          WHERE s.organization_id = v_org AND s.season_settings_id = v_season AND s.kind = 'game'
+                            AND ((w.game_id IS NOT NULL AND s.external_ref = w.game_id)
+                                 OR (s.home_team_id = w.home_ref AND s.away_team_id = w.away_ref AND s.week_index = w.week_index
+                                     AND (w.game_id IS NULL OR s.external_ref IS NULL)))
+                          ORDER BY (s.external_ref IS NOT DISTINCT FROM w.game_id) DESC, s.id LIMIT 1) m ON true
+      LEFT JOIN LATERAL (SELECT s.id FROM public.schedule_tbd s
+                          WHERE s.season_settings_id = v_season AND s.kind = 'game'
+                            AND s.home_team_id = w.home_ref AND s.away_team_id = w.away_ref AND s.week_index = w.week_index
+                            AND s.id IS DISTINCT FROM m.id LIMIT 1) c ON true
+      LEFT JOIN LATERAL (SELECT ga.id FROM public.game_assignments ga
+                          WHERE w.game_id IS NOT NULL AND ga.organization_id = v_org AND ga.season_settings_id = v_season
+                            AND ga.external_ref = w.game_id LIMIT 1) a ON true
+     WHERE w.final_outcome = 'ok' AND w.status = 'tbd';
+
+    -- The one predicate: a game is held where it is (F11-1's game_held_ids; F11-2 adds a score). The games a row names, a
+    -- placed one or one a TIME TBD row would take out.
+    SELECT COALESCE(array_agg(DISTINCT x.id), ARRAY[]::uuid[]) INTO v_held
+      FROM (SELECT g.match_id AS id FROM _gi_g g UNION SELECT t.ga_id FROM _gi_t t) x WHERE x.id IS NOT NULL;
     v_held := ARRAY(SELECT public.game_held_ids(v_held));
 
-    ALTER TABLE _gi_g ADD COLUMN verdict text, ADD COLUMN new_id uuid DEFAULT gen_random_uuid(), ADD COLUMN slot_final uuid, ADD COLUMN flagged text[];
+    ALTER TABLE _gi_g ADD COLUMN verdict text, ADD COLUMN new_id uuid DEFAULT gen_random_uuid(), ADD COLUMN slot_final uuid, ADD COLUMN flagged text[],
+                      ADD COLUMN tbd_id uuid, ADD COLUMN swapped_with uuid;
     UPDATE _gi_g g SET verdict = CASE
-            WHEN g.collides THEN 'collision'
             WHEN NOT g.matched THEN 'insert'
             WHEN g.same THEN 'unchanged'
             WHEN g.match_id = ANY (v_held) THEN 'skip-held'
             ELSE 'update' END;
 
-    -- A collision is a refusal of the row, the same word as a duplicate: it names a game the file cannot be placed beside.
-    -- (A row with a Game ID is never matched by its tuple, so it cannot be written over the place of a game that has none.)
+    -- The TIME TBD rows' verdicts. A placed game of the Game ID that is held (Published) is not taken out: the row is
+    -- skipped, as a held game's row that changed is. Another game on the tuple refuses the row.
+    ALTER TABLE _gi_t ADD COLUMN verdict text, ADD COLUMN conv boolean;
+    UPDATE _gi_t t SET verdict = CASE
+            WHEN t.ga_id IS NOT NULL AND t.ga_id = ANY (v_held) THEN 'skip-held'
+            WHEN t.c_id IS NOT NULL THEN 'conflict'
+            WHEN t.m_id IS NULL THEN 'insert'
+            WHEN t.m_date IS NOT DISTINCT FROM t.gdate AND t.m_week = t.week_index AND t.m_div = t.division_ref
+                 AND t.m_home = t.home_ref AND t.m_away = t.away_ref AND t.m_ref IS NOT DISTINCT FROM COALESCE(t.game_id, t.m_ref)
+                 AND t.m_reason = 'imported-without-time' THEN 'unchanged'
+            ELSE 'update' END;
+    UPDATE _gi_t t SET conv = (t.ga_id IS NOT NULL AND t.verdict NOT IN ('skip-held', 'conflict'));
+
+    -- Another game already stands on the place a row would put its game ((home, away, slot, week) is unique): that is a
+    -- refusal of the row, the same word as a duplicate, UNLESS the game standing there is one the file itself moves away
+    -- (a row that names it, and writes it, to another place): then the row is written after that game has left, and it is
+    -- a warning, `games-swapped`. A game that moves is judged against the games the file does NOT move, so a row that
+    -- cannot be written (its own place is taken) is not counted among the movers, and the rows that depended on it are
+    -- judged again, until no row changes: collisions only ever grow, so this ends. A placed game the file now gives no time
+    -- is taken out of the schedule, so it leaves its place too.
+    LOOP
+        UPDATE _gi_g g SET verdict = 'collision'
+         WHERE g.verdict IN ('insert', 'update') AND g.slot_id IS NOT NULL
+           AND EXISTS (SELECT 1 FROM public.game_assignments g2
+                        WHERE g2.home_team_id = g.home_ref AND g2.away_team_id = g.away_ref AND g2.game_slot_id = g.slot_id
+                          AND g2.week_index = g.week_index AND g2.id IS DISTINCT FROM g.match_id
+                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
+                          AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        EXIT WHEN v_rc = 0;
+    END LOOP;
+    -- The rows that take the place of a game this file moves away, named for the warning.
+    UPDATE _gi_g g SET swapped_with = (SELECT g2.id FROM public.game_assignments g2
+                                        WHERE g2.home_team_id = g.home_ref AND g2.away_team_id = g.away_ref AND g2.game_slot_id = g.slot_id
+                                          AND g2.week_index = g.week_index AND g2.id IS DISTINCT FROM g.match_id
+                                          AND (g2.id IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
+                                               OR g2.id IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv))
+                                        LIMIT 1)
+     WHERE g.verdict IN ('insert', 'update') AND g.slot_id IS NOT NULL;
+
+    -- A TIME TBD row the file now places: the game it names is written (a new or updated placed game) and the row goes.
+    UPDATE _gi_g g SET tbd_id = (SELECT s.id FROM public.schedule_tbd s
+                                  WHERE s.organization_id = v_org AND s.season_settings_id = v_season AND s.kind = 'game'
+                                    AND ((g.game_id IS NOT NULL AND s.external_ref = g.game_id)
+                                         OR (s.home_team_id = g.home_ref AND s.away_team_id = g.away_ref AND s.week_index = g.week_index
+                                             AND (g.game_id IS NULL OR s.external_ref IS NULL)))
+                                  ORDER BY (s.external_ref IS NOT DISTINCT FROM g.game_id) DESC, s.id LIMIT 1)
+     WHERE g.verdict IN ('insert', 'update');
 
     -- New slots: one per place no slot stands on yet, among the rows that write (a skipped or unchanged game makes none).
     CREATE TEMP TABLE _gi_slotnew ON COMMIT DROP AS
@@ -1349,15 +1512,6 @@ BEGIN
                                   AND NOT ('week-differs' = ANY (g.flags)) THEN ARRAY['week-differs'] ELSE ARRAY[]::text[] END
      WHERE g.verdict IN ('insert', 'update');
 
-    -- TIME TBD games: no time or no field, so no slot; listed for both teams.
-    CREATE TEMP TABLE _gi_t ON COMMIT DROP AS
-    SELECT w.rowno, w.row_key, w.game_id, w.home_ref, w.away_ref, w.week_index, w.division_ref, w.gdate, w.tbd_reason,
-           EXISTS (SELECT 1 FROM public.schedule_tbd s
-                    WHERE s.kind = 'game' AND s.home_team_id = w.home_ref AND s.away_team_id = w.away_ref
-                      AND s.week_index = w.week_index) AS present
-      FROM _gi_work w
-     WHERE w.final_outcome = 'ok' AND w.status = 'tbd';
-
     -- ------------------------------------------------------------------ 5. The schedule it makes, and what is carried.
     SELECT sr.id INTO v_prev_run
       FROM public.scheduler_runs sr
@@ -1370,12 +1524,22 @@ BEGIN
            count(*) FILTER (WHERE verdict = 'unchanged'), count(*) FILTER (WHERE verdict = 'skip-held')
       INTO n_ins, n_upd, n_unch, n_skip_pub
       FROM _gi_g;
-    SELECT count(*) FILTER (WHERE NOT present), count(*) FILTER (WHERE present) INTO n_tbd_ins, n_tbd_unch FROM _gi_t;
+    SELECT count(*) FILTER (WHERE verdict = 'insert'), count(*) FILTER (WHERE verdict = 'update'),
+           count(*) FILTER (WHERE verdict = 'unchanged'), count(*) FILTER (WHERE verdict = 'conflict'),
+           count(*) FILTER (WHERE verdict = 'skip-held'), count(*) FILTER (WHERE conv)
+      INTO n_tbd_ins, n_tbd_upd, n_tbd_unch, n_tbd_conflict, n_tbd_held, n_conv
+      FROM _gi_t;
+    -- TIME TBD rows the file now places: one per row, however many placed rows name it.
+    SELECT count(DISTINCT g.tbd_id) INTO n_tbd_rem FROM _gi_g g WHERE g.verdict IN ('insert', 'update') AND g.tbd_id IS NOT NULL
+       AND g.tbd_id NOT IN (SELECT t.m_id FROM _gi_t t WHERE t.m_id IS NOT NULL AND t.verdict IN ('insert', 'update', 'unchanged'));
+    n_skip_pub := n_skip_pub + n_tbd_held;
 
     -- A matched game the file leaves as it is or skips, but that is not in the latest run, becomes visible again.
     SELECT count(*) INTO n_hidden FROM _gi_g g
      WHERE g.verdict IN ('unchanged', 'skip-held') AND g.m_run IS DISTINCT FROM v_prev_run;
-    v_work := n_ins + n_upd + n_tbd_ins + n_hidden;
+    n_hidden := n_hidden + (SELECT count(*) FROM public.game_assignments ga
+                             WHERE ga.id IN (SELECT t.ga_id FROM _gi_t t WHERE t.verdict = 'skip-held') AND ga.run_id IS DISTINCT FROM v_prev_run);
+    v_work := n_ins + n_upd + n_tbd_ins + n_tbd_upd + n_tbd_rem + n_conv + n_hidden;
     v_nothing := (v_work = 0);
 
     -- Carried into the new run without a write to the game but its run: every game of the previous latest run that is
@@ -1385,8 +1549,10 @@ BEGIN
       FROM public.game_assignments ga
      WHERE NOT v_nothing AND ga.organization_id = v_org
        AND ((v_prev_run IS NOT NULL AND ga.run_id = v_prev_run)
-            OR ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict IN ('unchanged', 'skip-held')))
-       AND ga.id NOT IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update');
+            OR ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict IN ('unchanged', 'skip-held'))
+            OR ga.id IN (SELECT t.ga_id FROM _gi_t t WHERE t.verdict = 'skip-held'))
+       AND ga.id NOT IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update')
+       AND ga.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv);
     SELECT count(*) INTO n_repoint FROM _gi_carry;
 
     -- The games the previous run held that no row of the file names (listed, never deleted).
@@ -1395,7 +1561,8 @@ BEGIN
       FROM (SELECT ga.id, row_number() OVER (ORDER BY ga.id) AS rn
               FROM public.game_assignments ga
              WHERE v_prev_run IS NOT NULL AND ga.organization_id = v_org AND ga.run_id = v_prev_run
-               AND ga.id NOT IN (SELECT g.match_id FROM _gi_g g WHERE g.match_id IS NOT NULL AND g.verdict <> 'collision')) x;
+               AND ga.id NOT IN (SELECT g.match_id FROM _gi_g g WHERE g.match_id IS NOT NULL AND g.verdict <> 'collision')
+               AND ga.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.ga_id IS NOT NULL)) x;
 
     -- The schedule the new run holds, for the conflict flags: carried games as they are, rewritten ones as they will be,
     -- new ones as planned.
@@ -1414,7 +1581,7 @@ BEGIN
     CREATE TEMP TABLE _gi_newgames ON COMMIT DROP AS
     SELECT g.division_ref, g.field_ref, g.home_ref, g.away_ref FROM _gi_g g WHERE g.verdict IN ('insert', 'update')
     UNION ALL
-    SELECT t.division_ref, NULL, t.home_ref, t.away_ref FROM _gi_t t WHERE NOT t.present;
+    SELECT t.division_ref, NULL, t.home_ref, t.away_ref FROM _gi_t t WHERE t.verdict IN ('insert', 'update');
 
     SELECT count(*) INTO n_div FROM _gi_div d WHERE d.creator AND d.new_id IN (SELECT division_ref FROM _gi_newgames);
     SELECT count(*) INTO n_fld FROM _gi_field f WHERE f.creator AND f.new_id IN (SELECT field_ref FROM _gi_newgames);
@@ -1461,6 +1628,11 @@ BEGIN
             SELECT g.rowno, g.row_key, g.game_id, g.gdate, fl AS flag
               FROM _gi_g g, LATERAL unnest(g.flagged) AS fl
              WHERE g.verdict IN ('insert', 'update')
+            UNION ALL
+            -- A TIME TBD game's week is judged against its date as a placed game's is: the file's week is kept, and said.
+            SELECT t.rowno, t.row_key, t.game_id, t.gdate, fl
+              FROM _gi_t t, LATERAL unnest(t.flags) AS fl
+             WHERE t.verdict IN ('insert', 'update')
         )
         SELECT COALESCE(jsonb_agg(w.warning ORDER BY w.sort_type, w.sort_key), '[]'::jsonb) INTO v_warnings
           FROM (
@@ -1483,7 +1655,22 @@ BEGIN
                        'message', CASE fr.flag WHEN 'time-ambiguous' THEN 'The clocks repeat this time on its date; the first occurrence was taken.'
                                                ELSE 'The week is not the week the date falls in.' END,
                        'details', jsonb_build_object('rowKey', fr.row_key, 'gameId', fr.game_id, 'date', fr.gdate))
-              FROM flag_rows fr) w;
+              FROM flag_rows fr
+            UNION ALL
+            -- A game moved onto the place of a game this same file moves away (a swap, or a chain of moves): written, in an
+            -- order the unique place allows, and said.
+            SELECT 5, lpad(g.rowno::text, 8, '0'),
+                   jsonb_build_object('type', 'games-swapped',
+                       'message', 'This game takes the place of a game the file moves away: both are written.',
+                       'details', jsonb_build_object('rowKey', g.row_key, 'gameId', g.game_id, 'takesPlaceOf', g.swapped_with))
+              FROM _gi_g g WHERE g.verdict IN ('insert', 'update') AND g.swapped_with IS NOT NULL
+            UNION ALL
+            -- A placed game the file now says has no time: taken out, and a dated TIME TBD game stands for it.
+            SELECT 6, lpad(t.rowno::text, 8, '0'),
+                   jsonb_build_object('type', 'game-made-time-tbd',
+                       'message', 'The file gives this game a date and no time: it is no longer placed, and stands on the TIME TBD list.',
+                       'details', jsonb_build_object('rowKey', t.row_key, 'gameId', t.game_id, 'game', t.ga_id, 'date', t.gdate))
+              FROM _gi_t t WHERE t.conv) w;
     END IF;
 
     -- ------------------------------------------------------------------ 8. The answer, from the plan.
@@ -1492,14 +1679,17 @@ BEGIN
       INTO n_refused, n_skipped, n_ok, n_tbd
       FROM _gi_work;
     -- A placed row another game's place refuses is refused too (listed, counted, nothing written for it).
-    n_refused := n_refused + (SELECT count(*) FROM _gi_g WHERE verdict = 'collision');
+    n_refused := n_refused + (SELECT count(*) FROM _gi_g WHERE verdict = 'collision') + n_tbd_conflict;
     n_ok := n_ok - (SELECT count(*) FROM _gi_g WHERE verdict = 'collision');
+    n_tbd := n_tbd - n_tbd_conflict;
 
     SELECT COALESCE(jsonb_object_agg(x.reason, x.n), '{}'::jsonb) INTO v_refused_by_reason
       FROM (SELECT z.reason, count(*) AS n FROM (
                 SELECT substr(w.final_outcome, 9) AS reason FROM _gi_work w WHERE w.final_outcome LIKE 'refused:%'
                 UNION ALL
-                SELECT 'duplicate-row' FROM _gi_g g WHERE g.verdict = 'collision') z GROUP BY z.reason) x;
+                SELECT 'duplicate-row' FROM _gi_g g WHERE g.verdict = 'collision'
+                UNION ALL
+                SELECT 'duplicate-row' FROM _gi_t t WHERE t.verdict = 'conflict') z GROUP BY z.reason) x;
 
     SELECT COALESCE(jsonb_agg(x.item ORDER BY x.rowno) FILTER (WHERE x.rn <= c_listed), '[]'::jsonb) INTO v_listed_refused
       FROM (SELECT z.rowno, z.item, row_number() OVER (ORDER BY z.rowno) AS rn FROM (
@@ -1520,8 +1710,13 @@ BEGIN
                 UNION ALL
                 SELECT g.rowno,
                        jsonb_build_object('row_number', g.rowno, 'row_key', g.row_key, 'reason', 'duplicate-row',
-                           'message', 'A game already stands on this place, and this row''s Game ID (or the lack of one) does not name it. A game this file moves away from a place still stands on it until the import has run, so two games of one pair that swap places in one week are not imported. Nothing is written for the row.')
-                  FROM _gi_g g WHERE g.verdict = 'collision') z) x;
+                           'message', 'A game this file does not move already stands on this place, and this row''s Game ID (or the lack of one) does not name it. Nothing is written for the row.')
+                  FROM _gi_g g WHERE g.verdict = 'collision'
+                UNION ALL
+                SELECT t.rowno,
+                       jsonb_build_object('row_number', t.rowno, 'row_key', t.row_key, 'reason', 'duplicate-row',
+                           'message', 'Another TIME TBD game already holds this home team, away team and week, and this row''s Game ID (or the lack of one) does not name it. Nothing is written for the row.')
+                  FROM _gi_t t WHERE t.verdict = 'conflict') z) x;
 
     SELECT COALESCE(jsonb_agg(jsonb_build_object('row_number', w.rowno, 'row_key', w.row_key,
                         'kind', substr(w.final_outcome, 9), 'label', w.skip_label) ORDER BY w.rowno)
@@ -1531,7 +1726,10 @@ BEGIN
     SELECT COALESCE(jsonb_agg(jsonb_build_object('row_number', g.rowno, 'row_key', g.row_key, 'game_id', g.game_id,
                         'game', g.match_id, 'reason', c_skip_published) ORDER BY g.rowno) FILTER (WHERE g.rn <= c_listed), '[]'::jsonb)
       INTO v_listed_games
-      FROM (SELECT z.*, row_number() OVER (ORDER BY z.rowno) AS rn FROM _gi_g z WHERE z.verdict = 'skip-held') g;
+      FROM (SELECT z.rowno, z.row_key, z.game_id, z.match_id, row_number() OVER (ORDER BY z.rowno) AS rn
+              FROM (SELECT g2.rowno, g2.row_key, g2.game_id, g2.match_id FROM _gi_g g2 WHERE g2.verdict = 'skip-held'
+                    UNION ALL
+                    SELECT t.rowno, t.row_key, t.game_id, t.ga_id FROM _gi_t t WHERE t.verdict = 'skip-held') z) g;
     v_skipped_obj := CASE WHEN n_skip_pub > 0 THEN jsonb_build_object(c_skip_published, n_skip_pub) ELSE '{}'::jsonb END;
 
     v_result := jsonb_build_object(
@@ -1543,7 +1741,8 @@ BEGIN
         'refused_by_reason', v_refused_by_reason,
         'games', jsonb_build_object('inserted', n_ins, 'updated', n_upd, 'unchanged', n_unch, 'repointed', n_repoint,
                                     'skipped', v_skipped_obj),
-        'time_tbd', jsonb_build_object('inserted', n_tbd_ins, 'unchanged', n_tbd_unch),
+        'time_tbd', jsonb_build_object('inserted', n_tbd_ins, 'updated', n_tbd_upd, 'unchanged', n_tbd_unch, 'removed', n_tbd_rem,
+                                       'converted', n_conv),
         'created', jsonb_build_object('divisions', n_div, 'venues', n_ven, 'fields', n_fld, 'teams', n_shell,
                                       'outside_teams', n_out, 'slots', n_slot_new),
         'reused', jsonb_build_object('slots', n_slot_reused),
@@ -1564,6 +1763,13 @@ BEGIN
         CREATE TEMP TABLE _gi_before ON COMMIT DROP AS
         SELECT ga.id, to_jsonb(ga) AS img FROM public.game_assignments ga
          WHERE ga.id IN (SELECT id FROM _gi_carry) OR ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update');
+        -- The before-images of the TIME TBD rows the file changes or removes (a rollback puts them back).
+        CREATE TEMP TABLE _gi_tbefore ON COMMIT DROP AS
+        SELECT s.id, to_jsonb(s) AS img, (s.id IN (SELECT t.m_id FROM _gi_t t WHERE t.verdict = 'update')) AS changed
+          FROM public.schedule_tbd s
+         WHERE s.id IN (SELECT t.m_id FROM _gi_t t WHERE t.verdict = 'update')
+            OR s.id IN (SELECT g.tbd_id FROM _gi_g g WHERE g.verdict IN ('insert', 'update') AND g.tbd_id IS NOT NULL
+                           AND g.tbd_id NOT IN (SELECT t.m_id FROM _gi_t t WHERE t.m_id IS NOT NULL AND t.verdict IN ('insert', 'update', 'unchanged')));
 
         -- Divisions, venues, fields.
         INSERT INTO public.divisions (id, organization_id, season_settings_id, name)
@@ -1594,61 +1800,82 @@ BEGIN
         SELECT v_org, p_import_job_id, 'games', 'fields', f.id, 'inserted', NULL, to_jsonb(f), v_now, v_uid
           FROM public.fields f WHERE f.id IN (SELECT x.new_id FROM _gi_field x WHERE x.can_create AND x.new_id IN (SELECT field_ref FROM _gi_newgames));
 
-        -- Team shells, through the audited team writer: one team run per division that gained any, carrying the
-        -- division's earlier teams (a later run shadows an earlier one for a division).
-        FOR v_div IN
-            SELECT t.division_ref, array_agg(t.new_id ORDER BY t.new_id) AS shell_ids
-              FROM _gi_team t
-             WHERE t.kind = 'shell' AND t.creator AND t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames)
-             GROUP BY t.division_ref
-             ORDER BY t.division_ref
-        LOOP
-            SELECT * INTO v_prev_team_run
+        -- Team shells, through the audited team writer, in ONE team run for the whole apply. The Teams, Practices and Games
+        -- pages read the LATEST team run (`mapSchedulerRunToSummary` reads `results.teamsByDivision`), so the run is the
+        -- latest completed run's results carried forward whole (every key, every division it names) with each division's
+        -- shells added to the division: a run of only the new shells, or of one division, would make every other team look
+        -- absent, and one run in the keys `TEAM_RUN_RESULT_KEYS` (packages/core/src/utils/teamRunResults.js, which the mock
+        -- uses; tests/gameImportTeamRunShape.test.js holds this text to that list) carries what the readers read. A division
+        -- is grouped under the key the carried run already uses for it (its id, its name, or the key of a group whose teams
+        -- carry its id), else under its name; a division no saved run names is seeded with its own teams as the table has
+        -- them (an outside club is not one).
+        SELECT COALESCE(array_agg(t.new_id ORDER BY t.new_id), ARRAY[]::uuid[]) INTO v_shell_arr
+          FROM _gi_team t
+         WHERE t.kind = 'shell' AND t.creator AND t.ref IN (SELECT home_ref FROM _gi_newgames UNION SELECT away_ref FROM _gi_newgames);
+        IF cardinality(v_shell_arr) > 0 THEN
+            SELECT sr.results INTO v_base
               FROM public.scheduler_runs sr
-             WHERE sr.organization_id = v_org AND sr.run_type = 'team'
+             WHERE sr.organization_id = v_org AND sr.run_type = 'team' AND sr.status = 'completed'
                AND (sr.season_settings_id = v_season OR sr.season_id = v_season)
-               AND jsonb_typeof(sr.results -> 'teams') = 'array'
-               AND EXISTS (SELECT 1 FROM jsonb_array_elements(sr.results -> 'teams') et
-                            WHERE COALESCE(NULLIF(et ->> 'division', ''), NULLIF(et ->> 'division_id', '')) = v_div.division_ref::text)
              ORDER BY sr.created_at DESC, sr.id DESC
              LIMIT 1;
-            IF FOUND THEN
-                SELECT COALESCE(jsonb_agg(et), '[]'::jsonb) INTO v_carry_teams
-                  FROM jsonb_array_elements(v_prev_team_run.results -> 'teams') et
-                 WHERE COALESCE(NULLIF(et ->> 'division', ''), NULLIF(et ->> 'division_id', '')) = v_div.division_ref::text;
-                SELECT COALESCE(jsonb_agg(tp), '[]'::jsonb) INTO v_carry_players
-                  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(v_prev_team_run.results -> 'team_players') = 'array'
-                                                 THEN v_prev_team_run.results -> 'team_players' ELSE '[]'::jsonb END) tp
-                 WHERE tp ->> 'team_id' IN (SELECT et ->> 'id' FROM jsonb_array_elements(v_carry_teams) et);
+            IF jsonb_typeof(v_base) IS DISTINCT FROM 'object' THEN v_base := '{}'::jsonb; END IF;
+            IF jsonb_typeof(v_base -> 'teamsByDivision') = 'object' THEN
+                SELECT COALESCE(jsonb_object_agg(e.key, CASE WHEN jsonb_typeof(e.value) = 'array' THEN e.value ELSE '[]'::jsonb END), '{}'::jsonb)
+                  INTO v_grouped FROM jsonb_each(v_base -> 'teamsByDivision') e;
+            ELSIF jsonb_typeof(v_base -> 'teams') = 'array' THEN
+                SELECT COALESCE(jsonb_object_agg(g.k, g.arr), '{}'::jsonb) INTO v_grouped
+                  FROM (SELECT COALESCE(NULLIF(et ->> 'division', ''), NULLIF(et ->> 'division_id', ''), 'Unassigned') AS k,
+                               jsonb_agg(et ORDER BY x.ord) AS arr
+                          FROM jsonb_array_elements(v_base -> 'teams') WITH ORDINALITY AS x(et, ord) GROUP BY 1) g;
             ELSE
-                -- No saved run holds the division: its own teams as the table has them (an outside club is not one).
-                SELECT COALESCE(jsonb_agg(jsonb_build_object('id', t.id, 'organization_id', v_org, 'division', v_div.division_ref::text,
-                           'division_id', v_div.division_ref, 'name', t.name, 'coach_id', t.coach_id,
-                           'assistant_coach_ids', to_jsonb(COALESCE(t.assistant_coach_ids, '{}'::uuid[])), 'players', '[]'::jsonb) ORDER BY t.name), '[]'::jsonb)
-                  INTO v_carry_teams
-                  FROM public.teams t WHERE t.division_id = v_div.division_ref AND NOT t.is_external;
-                SELECT COALESCE(jsonb_agg(jsonb_build_object('team_id', tp.team_id, 'player_id', tp.player_id, 'role', tp.role, 'source', tp.source)), '[]'::jsonb)
-                  INTO v_carry_players
-                  FROM public.team_players tp JOIN public.teams t ON t.id = tp.team_id
-                 WHERE t.division_id = v_div.division_ref AND NOT t.is_external;
+                v_grouped := '{}'::jsonb;
             END IF;
-            SELECT COALESCE(jsonb_agg(jsonb_build_object('id', t.new_id, 'organization_id', v_org, 'division', v_div.division_ref::text,
-                       'division_id', v_div.division_ref, 'name', t.cname, 'coach_id', NULL, 'assistant_coach_ids', '[]'::jsonb,
-                       'players', '[]'::jsonb) ORDER BY t.cname), '[]'::jsonb)
-              INTO v_shells
-              FROM _gi_team t WHERE t.kind = 'shell' AND t.creator AND t.division_ref = v_div.division_ref AND t.new_id = ANY (v_div.shell_ids);
-            v_shell_ids := to_jsonb(v_div.shell_ids);
+            FOR v_div IN
+                SELECT t.division_ref,
+                       (SELECT d.final_name FROM _gi_div d WHERE d.ref = t.division_ref ORDER BY d.dkey LIMIT 1) AS dname
+                  FROM _gi_team t
+                 WHERE t.kind = 'shell' AND t.creator AND t.new_id = ANY (v_shell_arr)
+                 GROUP BY t.division_ref
+                 ORDER BY t.division_ref
+            LOOP
+                SELECT e.key INTO v_key
+                  FROM jsonb_each(v_grouped) e
+                 WHERE lower(e.key) = lower(v_div.division_ref::text) OR e.key = v_div.dname
+                    OR EXISTS (SELECT 1 FROM jsonb_array_elements(e.value) et
+                                WHERE lower(COALESCE(et ->> 'division_id', et ->> 'divisionId', '')) = lower(v_div.division_ref::text))
+                 ORDER BY e.key COLLATE "C"
+                 LIMIT 1;
+                IF v_key IS NULL THEN
+                    v_key := v_div.dname;
+                    v_grouped := v_grouped || jsonb_build_object(v_key, COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name, 'division', v_key, 'division_id', v_div.division_ref,
+                                   'coachId', t.coach_id, 'assistantCoachIds', to_jsonb(COALESCE(t.assistant_coach_ids, '{}'::uuid[])),
+                                   'players', '[]'::jsonb) ORDER BY t.name, t.id)
+                          FROM public.teams t
+                         WHERE t.division_id = v_div.division_ref AND NOT t.is_external AND t.id <> ALL (v_shell_arr)), '[]'::jsonb));
+                END IF;
+                v_label := COALESCE(NULLIF(v_grouped -> v_key -> 0 ->> 'division', ''), v_key);
+                v_grouped := jsonb_set(v_grouped, ARRAY[v_key], (v_grouped -> v_key) || COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object('id', t.new_id, 'name', t.cname, 'division', v_label, 'division_id', v_div.division_ref,
+                               'coachId', NULL, 'assistantCoachIds', '[]'::jsonb, 'players', '[]'::jsonb) ORDER BY t.cname, t.new_id)
+                      FROM _gi_team t
+                     WHERE t.kind = 'shell' AND t.creator AND t.division_ref = v_div.division_ref AND t.new_id = ANY (v_shell_arr)), '[]'::jsonb));
+            END LOOP;
+            v_results := v_base || jsonb_build_object(
+                'teamsByDivision', v_grouped,
+                'teams', COALESCE((SELECT jsonb_agg(x.team) FROM jsonb_each(v_grouped) e, jsonb_array_elements(e.value) AS x(team)), '[]'::jsonb),
+                'team_players', CASE WHEN jsonb_typeof(v_base -> 'team_players') = 'array' THEN v_base -> 'team_players' ELSE '[]'::jsonb END);
             v_team_run := public.persist_team_schedule(
                 jsonb_build_object('organization_id', v_org, 'season_settings_id', v_season, 'run_type', 'team', 'status', 'completed',
                     'completed_at', clock_timestamp(),
-                    'parameters', jsonb_build_object('source', 'import', 'import_job_id', p_import_job_id,
-                                                     'selectedProgramId', v_div.division_ref::text, 'shell_ids', v_shell_ids),
-                    'results', jsonb_build_object('teams', v_carry_teams || v_shells, 'team_players', v_carry_players)),
-                (SELECT COALESCE(jsonb_agg(jsonb_build_object('id', s ->> 'id', 'division_id', s ->> 'division_id', 'name', s ->> 'name')), '[]'::jsonb)
-                   FROM jsonb_array_elements(v_shells) s),
+                    'parameters', jsonb_build_object('source', 'import', 'import_job_id', p_import_job_id, 'shell_ids', to_jsonb(v_shell_arr)),
+                    'results', v_results),
+                (SELECT COALESCE(jsonb_agg(jsonb_build_object('id', t.new_id, 'division_id', t.division_ref, 'name', t.cname) ORDER BY t.new_id), '[]'::jsonb)
+                   FROM _gi_team t WHERE t.kind = 'shell' AND t.creator AND t.new_id = ANY (v_shell_arr)),
                 '[]'::jsonb);
             v_team_runs := v_team_runs || to_jsonb(v_team_run);
-        END LOOP;
+        END IF;
         INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
         SELECT v_org, p_import_job_id, 'games', 'teams', t.id, 'inserted', NULL, to_jsonb(t), v_now, v_uid
           FROM public.teams t WHERE t.id IN (SELECT x.new_id FROM _gi_team x WHERE x.kind = 'shell'
@@ -1688,6 +1915,26 @@ BEGIN
                                    'import_job_id', p_import_job_id),
                 v_uid, clock_timestamp(), clock_timestamp(), clock_timestamp());
 
+        -- Placed games the file now says have no time are taken out (a dated TIME TBD game stands for each, below). Only a
+        -- game that is not held is here (a held one was skipped), and its image is kept so a rollback can put it back.
+        INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
+        SELECT v_org, p_import_job_id, 'games', 'game_assignments', ga.id, 'deleted', to_jsonb(ga), '{}'::jsonb, v_now, v_uid
+          FROM public.game_assignments ga WHERE ga.id IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv);
+        DELETE FROM public.game_assignments ga WHERE ga.id IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv);
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        IF v_rc <> n_conv THEN RAISE EXCEPTION 'game import planned % games made TIME TBD and removed %', n_conv, v_rc USING ERRCODE = 'XX000'; END IF;
+
+        -- Room is made first (as `persist_game_schedule` makes it, 20261120010000): the unique place (home, away, slot, week) is
+        -- not deferrable, so a game that leaves a place another row of this file is about to take would meet that row in the
+        -- index whichever is written first. A game that moves, and whose place a row of the file takes, is taken out of the
+        -- index (its slot set null for the length of this apply) and given its final place by the update below, in this
+        -- transaction. The clashes with games the file does NOT move were refused in the plan, so no game ends where another is.
+        UPDATE public.game_assignments ga SET game_slot_id = NULL, slot_id = NULL
+         WHERE ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
+           AND EXISTS (SELECT 1 FROM _gi_g h
+                        WHERE h.verdict IN ('insert', 'update') AND h.slot_final = ga.game_slot_id
+                          AND h.home_ref = ga.home_team_id AND h.away_ref = ga.away_team_id AND h.week_index = ga.week_index);
+
         -- New games, Published when the job says so (decision 4).
         INSERT INTO public.game_assignments (id, organization_id, season_settings_id, run_id, game_slot_id, slot_id, field_id, home_team_id,
                                              away_team_id, division, week_index, start, "end", external_ref, import_job_id,
@@ -1721,17 +1968,36 @@ BEGIN
         SELECT v_org, p_import_job_id, 'games', 'game_assignments', b.id, 'updated', b.img, to_jsonb(ga), v_now, v_uid
           FROM _gi_before b JOIN public.game_assignments ga ON ga.id = b.id;
 
-        -- TIME TBD games.
-        INSERT INTO public.schedule_tbd (organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index,
-                                         reason, detail, run_id)
-        SELECT v_org, v_season, 'game', t.division_ref, t.home_ref, t.away_ref, t.week_index::smallint, 'imported-without-time',
-               jsonb_strip_nulls(jsonb_build_object('game_id', t.game_id, 'date', t.gdate, 'import_job_id', p_import_job_id)), v_run_id
-          FROM _gi_t t WHERE NOT t.present;
+        -- TIME TBD games: a DATE and no time (`game_date`), the Game ID in `external_ref`. A row the file names is changed in
+        -- place; one the file now places is removed (the placed game stands for it); a new one is inserted. Every one has an
+        -- application record, with the image it had, so the rollback puts it back.
+        UPDATE public.schedule_tbd s
+           SET division_id = t.division_ref, home_team_id = t.home_ref, away_team_id = t.away_ref, week_index = t.week_index::smallint,
+               external_ref = COALESCE(t.game_id, s.external_ref), game_date = t.gdate, reason = 'imported-without-time',
+               detail = jsonb_strip_nulls(jsonb_build_object('game_id', COALESCE(t.game_id, s.external_ref), 'import_job_id', p_import_job_id)),
+               run_id = v_run_id
+          FROM _gi_t t WHERE t.verdict = 'update' AND s.id = t.m_id;
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        IF v_rc <> n_tbd_upd THEN RAISE EXCEPTION 'game import planned % TIME TBD updates and wrote %', n_tbd_upd, v_rc USING ERRCODE = 'XX000'; END IF;
+        INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
+        SELECT v_org, p_import_job_id, 'games', 'schedule_tbd', s.id, 'updated', b.img, to_jsonb(s), v_now, v_uid
+          FROM _gi_tbefore b JOIN public.schedule_tbd s ON s.id = b.id WHERE b.changed;
+        DELETE FROM public.schedule_tbd s WHERE s.id IN (SELECT b.id FROM _gi_tbefore b WHERE NOT b.changed);
+        GET DIAGNOSTICS v_rc = ROW_COUNT;
+        IF v_rc <> n_tbd_rem THEN RAISE EXCEPTION 'game import planned % TIME TBD removals and made %', n_tbd_rem, v_rc USING ERRCODE = 'XX000'; END IF;
+        INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
+        SELECT v_org, p_import_job_id, 'games', 'schedule_tbd', b.id, 'deleted', b.img, '{}'::jsonb, v_now, v_uid
+          FROM _gi_tbefore b WHERE NOT b.changed;
+        INSERT INTO public.schedule_tbd (id, organization_id, season_settings_id, kind, division_id, home_team_id, away_team_id, week_index,
+                                         reason, detail, run_id, external_ref, game_date)
+        SELECT t.new_id, v_org, v_season, 'game', t.division_ref, t.home_ref, t.away_ref, t.week_index::smallint, 'imported-without-time',
+               jsonb_strip_nulls(jsonb_build_object('game_id', t.game_id, 'import_job_id', p_import_job_id)), v_run_id, t.game_id, t.gdate
+          FROM _gi_t t WHERE t.verdict = 'insert';
         GET DIAGNOSTICS v_rc = ROW_COUNT;
         IF v_rc <> n_tbd_ins THEN RAISE EXCEPTION 'game import planned % TIME TBD games and wrote %', n_tbd_ins, v_rc USING ERRCODE = 'XX000'; END IF;
         INSERT INTO public.import_application_records (organization_id, import_job_id, import_type, target_table, target_id, operation, previous_payload, applied_payload, applied_at, applied_by)
         SELECT v_org, p_import_job_id, 'games', 'schedule_tbd', s.id, 'inserted', NULL, to_jsonb(s), v_now, v_uid
-          FROM public.schedule_tbd s WHERE s.run_id = v_run_id AND s.kind = 'game';
+          FROM public.schedule_tbd s WHERE s.id IN (SELECT t.new_id FROM _gi_t t WHERE t.verdict = 'insert');
 
         v_ids := jsonb_build_object('run_id', v_run_id, 'team_run_ids', v_team_runs);
     END IF;
@@ -1770,7 +2036,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.apply_game_import_job(uuid, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.apply_game_import_job(uuid, boolean) TO authenticated;
 COMMENT ON FUNCTION public.apply_game_import_job(uuid, boolean) IS
-    'Admin-only, signed in: the preview (p_dry_run, writes nothing) and the apply of a games import. Resolves each staged row through the job''s mapping; updates a game found by (season, Game ID) in place by its id, hidden rows included; never matches a row that has a Game ID by its tuple; skips a held (Published) game whose row changed (skipped-published); stores a conflicting file and flags it; creates the divisions, venues, fields, team shells (through the team writer, in team runs) and outside clubs (is_external, in no run) a written game uses; makes one new game run holding the whole schedule when anything is written, and none when nothing would change. Audited import.completed and game.published_set. A finished job answers with its stored result. The apply plans again against the state it finds, so its counts can differ from an earlier preview''s if a game changed in between: the result reports what was done. 20261121010000.';
+    'Admin-only, signed in: the preview (p_dry_run, writes nothing) and the apply of a games import. Resolves each staged row through the job''s mapping; updates a game found by (season, Game ID) in place by its id, hidden rows included; never matches a row that has a Game ID by its tuple; skips a held (Published) game whose row changed (skipped-published); stores a conflicting file and flags it; creates the divisions, venues, fields, team shells (through the team writer, in team runs) and outside clubs (is_external, in no run) a written game uses; makes one new game run holding the whole schedule when anything is written, and none when nothing would change. Writes a swap (a game moved onto the place another game of the file leaves) with the warning games-swapped, converts a placed game the file gives no time (game-made-time-tbd), and holds a TIME TBD game''s date and Game ID. Audited import.completed and game.published_set. A finished job answers with its stored result. The apply plans again against the state it finds, so its counts can differ from an earlier preview''s if a game changed in between: the result reports what was done. 20261121010000.';
 
 
 -- ---------------------------------------------------------------------------
@@ -1802,7 +2068,8 @@ DECLARE
     v_run uuid;
     v_pending integer;
     v_changed uuid[];
-    n_games_deleted bigint := 0; n_games_restored bigint := 0; n_tbd bigint := 0; n_slots bigint := 0;
+    n_games_deleted bigint := 0; n_games_restored bigint := 0; n_games_reinserted bigint := 0; n_tbd bigint := 0; n_tbd_restored bigint := 0;
+    n_tbd_reinserted bigint := 0; n_tbd_not_reinserted bigint := 0; n_slots bigint := 0;
     n_teams bigint := 0; n_fields bigint := 0; n_venues bigint := 0; n_divs bigint := 0; n_team_runs bigint := 0;
     v_kept jsonb := '[]'::jsonb;
     v_result jsonb;
@@ -1855,9 +2122,12 @@ BEGIN
               LEFT JOIN public.game_assignments ga ON ga.id = r.target_id
              WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.target_table = 'game_assignments'
                AND r.rolled_back_at IS NULL
-               AND (ga.id IS NULL
-                    OR public.game_import_image(to_jsonb(ga)) IS DISTINCT FROM public.game_import_image(r.applied_payload)
-                    OR ga.run_id IS DISTINCT FROM v_run)) x;
+               AND CASE WHEN r.operation = 'deleted'
+                        -- A game the apply took out is still out: one that stands again would be put back twice.
+                        THEN ga.id IS NOT NULL
+                        ELSE ga.id IS NULL
+                             OR public.game_import_image(to_jsonb(ga)) IS DISTINCT FROM public.game_import_image(r.applied_payload)
+                             OR ga.run_id IS DISTINCT FROM v_run END) x;
     IF cardinality(v_changed) > 0 THEN
         RAISE EXCEPTION 'The import cannot be rolled back: % game(s) it wrote were changed, cancelled, had changes allowed or were saved into a later run since', cardinality(v_changed)
             USING ERRCODE = '22023',
@@ -1874,6 +2144,16 @@ BEGIN
        AND r.target_table = 'game_assignments' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL;
     GET DIAGNOSTICS n_games_deleted = ROW_COUNT;
 
+    -- Games the apply moved are put back. Two games that swapped places meet in the unique place if each is put back in turn, so
+    -- a game that is not where it was is first taken out of the index (its slot set null), as the apply took it, and then
+    -- given its own place back; none of them is held (a held one has changed since, and the pre-check above refused).
+    UPDATE public.game_assignments ga SET game_slot_id = NULL, slot_id = NULL
+      FROM public.import_application_records r
+     WHERE r.target_id = ga.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
+       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
+       AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
+           IS DISTINCT FROM ((r.previous_payload ->> 'home_team_id')::uuid, (r.previous_payload ->> 'away_team_id')::uuid,
+                             (r.previous_payload ->> 'game_slot_id')::uuid, (r.previous_payload ->> 'week_index')::smallint);
     UPDATE public.game_assignments ga
        SET game_slot_id = (r.previous_payload ->> 'game_slot_id')::uuid,
            slot_id = (r.previous_payload ->> 'slot_id')::uuid,
@@ -1891,10 +2171,52 @@ BEGIN
        AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL;
     GET DIAGNOSTICS n_games_restored = ROW_COUNT;
 
+    -- Games the apply took out (the file gave them no time) stand again, as they were: after the games the import inserted
+    -- have gone and the moved ones are back, so the places are free, and before the slots are judged.
+    INSERT INTO public.game_assignments
+    SELECT (jsonb_populate_record(NULL::public.game_assignments, r.previous_payload)).*
+      FROM public.import_application_records r
+     WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.target_table = 'game_assignments'
+       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL;
+    GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;
+
+    -- TIME TBD games: what the import inserted goes, what it changed in place is put back, and what it removed (the file
+    -- placed the game) is put back. A removed row whose place in the table has been taken (the table is unique on a Game ID
+    -- and on the home team, away team and week) cannot be put back: it is counted and said, never skipped in silence.
     DELETE FROM public.schedule_tbd s USING public.import_application_records r
      WHERE r.target_id = s.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
-       AND r.target_table = 'schedule_tbd' AND r.rolled_back_at IS NULL;
+       AND r.target_table = 'schedule_tbd' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL;
     GET DIAGNOSTICS n_tbd = ROW_COUNT;
+    UPDATE public.schedule_tbd s
+       SET division_id = (r.previous_payload ->> 'division_id')::uuid,
+           home_team_id = (r.previous_payload ->> 'home_team_id')::uuid,
+           away_team_id = (r.previous_payload ->> 'away_team_id')::uuid,
+           week_index = (r.previous_payload ->> 'week_index')::smallint,
+           reason = r.previous_payload ->> 'reason',
+           detail = COALESCE(r.previous_payload -> 'detail', '{}'::jsonb),
+           run_id = (r.previous_payload ->> 'run_id')::uuid,
+           external_ref = r.previous_payload ->> 'external_ref',
+           game_date = (r.previous_payload ->> 'game_date')::date
+      FROM public.import_application_records r
+     WHERE r.target_id = s.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
+       AND r.target_table = 'schedule_tbd' AND r.operation = 'updated' AND r.rolled_back_at IS NULL;
+    GET DIAGNOSTICS n_tbd_restored = ROW_COUNT;
+    INSERT INTO public.schedule_tbd
+    SELECT (jsonb_populate_record(NULL::public.schedule_tbd, r.previous_payload)).*
+      FROM public.import_application_records r
+     WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.target_table = 'schedule_tbd'
+       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd x
+                        WHERE x.id = r.target_id
+                           OR (x.kind = 'game' AND x.home_team_id = (r.previous_payload ->> 'home_team_id')::uuid
+                               AND x.away_team_id = (r.previous_payload ->> 'away_team_id')::uuid
+                               AND x.week_index = (r.previous_payload ->> 'week_index')::smallint)
+                           OR (x.season_settings_id = (r.previous_payload ->> 'season_settings_id')::uuid
+                               AND x.external_ref = r.previous_payload ->> 'external_ref'));
+    GET DIAGNOSTICS n_tbd_reinserted = ROW_COUNT;
+    SELECT count(*) INTO n_tbd_not_reinserted FROM public.import_application_records r
+     WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.target_table = 'schedule_tbd'
+       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd x WHERE x.id = r.target_id);
 
     -- Slots nothing stands in any more.
     DELETE FROM public.game_slots gs USING public.import_application_records r
@@ -1995,8 +2317,9 @@ BEGIN
 
     v_result := jsonb_build_object(
         'job_id', p_import_job_id,
-        'games', jsonb_build_object('deleted', n_games_deleted, 'restored', n_games_restored),
-        'time_tbd_deleted', n_tbd, 'slots_deleted', n_slots, 'teams_deleted', n_teams, 'team_runs_deleted', n_team_runs,
+        'games', jsonb_build_object('deleted', n_games_deleted, 'restored', n_games_restored, 'reinserted', n_games_reinserted),
+        'time_tbd_deleted', n_tbd, 'time_tbd_restored', n_tbd_restored, 'time_tbd_reinserted', n_tbd_reinserted,
+        'time_tbd_not_reinserted', n_tbd_not_reinserted, 'slots_deleted', n_slots, 'teams_deleted', n_teams, 'team_runs_deleted', n_team_runs,
         'fields_deleted', n_fields, 'venues_deleted', n_venues, 'divisions_deleted', n_divs,
         'kept', v_kept);
 
@@ -2022,7 +2345,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.rollback_game_import_job(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rollback_game_import_job(uuid) TO authenticated;
 COMMENT ON FUNCTION public.rollback_game_import_job(uuid) IS
-    'Admin-only, signed in: take a games import back. Refused (22023, game_import_changed, naming up to 50 games) while a game it wrote has been changed, cancelled, had changes allowed or been saved into a later run; otherwise deletes the games it inserted and puts back the ones it changed (through the Published guard''s rollback exemption), removes the TIME TBD games, slots, outside clubs, shells, fields, venues and divisions it created when nothing else references them, and its runs. Audited import.rolled_back. 20261121010000.';
+    'Admin-only, signed in: take a games import back. Refused (22023, game_import_changed, naming up to 50 games) while a game it wrote has been changed, cancelled, had changes allowed or been saved into a later run; otherwise deletes the games it inserted and puts back the ones it changed (through the Published guard''s rollback exemption), puts back the games it took out and the TIME TBD rows it changed or removed, removes the TIME TBD games, slots, outside clubs, shells, fields, venues and divisions it created when nothing else references them, and its runs. Audited import.rolled_back. 20261121010000.';
 
 -- ---------------------------------------------------------------------------
 -- 9. The end state, or the migration does not commit.
@@ -2052,7 +2375,7 @@ BEGIN
     SELECT string_agg(f.sig, ', ') INTO v_bad
       FROM (VALUES ('apply_game_import_job(uuid,boolean)'), ('rollback_game_import_job(uuid)'), ('map_game_import_job(uuid,jsonb)'),
                    ('ensure_game_slot(uuid,uuid,date,time without time zone,time without time zone,smallint,timestamp with time zone,timestamp with time zone)'),
-                   ('game_import_image(jsonb)')) AS f(sig)
+                   ('game_import_image(jsonb)'), ('normalise_external_label(text)')) AS f(sig)
      WHERE to_regprocedure('public.' || f.sig) IS NULL;
     IF v_bad IS NOT NULL THEN
         RAISE EXCEPTION 'function(s) missing: %', v_bad;
@@ -2071,6 +2394,12 @@ BEGIN
     IF has_function_privilege('authenticated', to_regprocedure('public.game_import_image(jsonb)'), 'EXECUTE')
        OR has_function_privilege('anon', to_regprocedure('public.game_import_image(jsonb)'), 'EXECUTE') THEN
         RAISE EXCEPTION 'game_import_image is internal';
+    END IF;
+    IF has_function_privilege('authenticated', to_regprocedure('public.normalise_external_label(text)'), 'EXECUTE')
+       OR has_function_privilege('anon', to_regprocedure('public.normalise_external_label(text)'), 'EXECUTE')
+       OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+                   WHERE p.oid = to_regprocedure('public.normalise_external_label(text)') AND a.grantee = 0) THEN
+        RAISE EXCEPTION 'normalise_external_label is internal';
     END IF;
 
     -- Each replaced body says what it was replaced for.

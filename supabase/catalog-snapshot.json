@@ -147,6 +147,7 @@
     "min(uuid) returns uuid",
     "min_uuid(uuid, uuid) returns uuid",
     "minimise_import_people_data() returns jsonb",
+    "normalise_external_label(p_label text) returns text",
     "org_flag(p_organization_id uuid, p_key text, p_default boolean) returns boolean",
     "org_local_today(p_organization_id uuid) returns date",
     "organizations_guard_demo_columns() returns trigger",

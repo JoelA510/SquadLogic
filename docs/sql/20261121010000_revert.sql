@@ -1,8 +1,9 @@
 -- Revert for 20261121010000_game_import.sql
 --
--- Takes the games import out: drops the four client RPCs and the internal image helper, gives the five replaced
--- functions and the view back the bodies they had, drops the three columns, the Game ID index and check, and puts the
--- five lists back to what they were. **Those texts are the repository's, not read from production** (lesson 87 reads
+-- Takes the games import out: drops the four client RPCs and the two internal helpers (the image helper and the label
+-- comparison), gives the five replaced functions and the view back the bodies they had, drops the five columns (the three
+-- of the games and teams, and a TIME TBD game's Game ID and date), the Game ID indexes and checks, and puts the six lists
+-- back to what they were (the application record's operation list among them). **Those texts are the repository's, not read from production** (lesson 87 reads
 -- production where it can; this change did not): the end of this file checks each restored function body against the
 -- md5 of the body a build of the migrations up to 20261120010000 holds (carriage returns removed), so a typo here fails
 -- the revert instead of shipping.
@@ -110,6 +111,7 @@ DROP FUNCTION IF EXISTS public.rollback_game_import_job(uuid);
 DROP FUNCTION IF EXISTS public.map_game_import_job(uuid, jsonb);
 DROP FUNCTION IF EXISTS public.ensure_game_slot(uuid, uuid, date, time, time, smallint, timestamptz, timestamptz);
 DROP FUNCTION IF EXISTS public.game_import_image(jsonb);
+DROP FUNCTION IF EXISTS public.normalise_external_label(text);
 
 -- ---------------------------------------------------------------------------
 -- 2. The import pipeline's four functions, as 20261113010000 defined them.
@@ -424,6 +426,11 @@ ALTER TABLE public.import_application_records DROP CONSTRAINT IF EXISTS import_a
 ALTER TABLE public.import_application_records ADD CONSTRAINT import_application_records_import_type_check
     CHECK (import_type IN ('coaches', 'fields', 'field_availability'));
 
+-- The records that said `deleted` went with the rest of the games import's records above.
+ALTER TABLE public.import_application_records DROP CONSTRAINT IF EXISTS import_application_records_operation_check;
+ALTER TABLE public.import_application_records ADD CONSTRAINT import_application_records_operation_check
+    CHECK (operation IN ('inserted', 'updated'));
+
 ALTER TABLE public.import_application_records DROP CONSTRAINT IF EXISTS import_application_records_target_table_check;
 ALTER TABLE public.import_application_records ADD CONSTRAINT import_application_records_target_table_check
     CHECK (target_table IN (
@@ -435,6 +442,12 @@ ALTER TABLE public.schedule_tbd DROP CONSTRAINT IF EXISTS schedule_tbd_reason_ch
 ALTER TABLE public.schedule_tbd ADD CONSTRAINT schedule_tbd_reason_check CHECK (
     (kind = 'practice' AND reason IN ('no-slot-available', 'no-live-date', 'coach-preference', 'practice-length', 'not-enough-days', 'not-scheduled-yet'))
     OR (kind = 'game' AND reason IN ('unknown-team', 'division-mismatch', 'duplicate-matchup', 'coach-coaches-both-teams', 'coach-scheduling-conflict', 'no-slot-available')));
+
+-- A TIME TBD game's Game ID and date (the rows an import wrote were refused above, so none of them is lost here).
+DROP INDEX IF EXISTS public.schedule_tbd_season_external_ref_key;
+ALTER TABLE public.schedule_tbd DROP CONSTRAINT IF EXISTS schedule_tbd_import_fields;
+ALTER TABLE public.schedule_tbd DROP COLUMN IF EXISTS external_ref;
+ALTER TABLE public.schedule_tbd DROP COLUMN IF EXISTS game_date;
 
 DROP INDEX IF EXISTS public.game_assignments_season_external_ref_key;
 DROP INDEX IF EXISTS public.idx_game_assignments_import_job_id;
@@ -473,17 +486,20 @@ BEGIN
     SELECT string_agg(f.sig, ', ') INTO v_bad
       FROM (VALUES ('apply_game_import_job(uuid,boolean)'), ('rollback_game_import_job(uuid)'), ('map_game_import_job(uuid,jsonb)'),
                    ('ensure_game_slot(uuid,uuid,date,time without time zone,time without time zone,smallint,timestamp with time zone,timestamp with time zone)'),
-                   ('game_import_image(jsonb)')) AS f(sig)
+                   ('game_import_image(jsonb)'), ('normalise_external_label(text)')) AS f(sig)
      WHERE to_regprocedure('public.' || f.sig) IS NOT NULL;
     IF v_bad IS NOT NULL THEN
         RAISE EXCEPTION 'function(s) of the migration are still there: %', v_bad;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.teams'::regclass AND a.attname = 'is_external' AND NOT a.attisdropped)
        OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.game_assignments'::regclass
-                   AND a.attname IN ('external_ref', 'import_job_id') AND NOT a.attisdropped) THEN
+                   AND a.attname IN ('external_ref', 'import_job_id') AND NOT a.attisdropped)
+       OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = 'public.schedule_tbd'::regclass
+                   AND a.attname IN ('external_ref', 'game_date') AND NOT a.attisdropped) THEN
         RAISE EXCEPTION 'a column of the migration is still there';
     END IF;
-    IF to_regclass('public.game_assignments_season_external_ref_key') IS NOT NULL OR to_regclass('public.idx_game_assignments_import_job_id') IS NOT NULL THEN
+    IF to_regclass('public.game_assignments_season_external_ref_key') IS NOT NULL OR to_regclass('public.idx_game_assignments_import_job_id') IS NOT NULL
+       OR to_regclass('public.schedule_tbd_season_external_ref_key') IS NOT NULL THEN
         RAISE EXCEPTION 'an index of the migration is still there';
     END IF;
     IF pg_get_viewdef('public.view_org_metrics'::regclass) ~ 'is_external' THEN
@@ -510,7 +526,10 @@ BEGIN
                       AND NOT t.tgisinternal AND t.tgenabled = 'O') THEN
         RAISE EXCEPTION 'the Published guard is not an enabled trigger';
     END IF;
-    RAISE NOTICE 'revert verified: the six restored function bodies are the ones before 20261121010000 (by md5), the view and the five lists are back, and the three columns, the index and check, and the five functions are gone';
+    IF pg_get_constraintdef((SELECT c.oid FROM pg_constraint c WHERE c.conname = 'import_application_records_operation_check')) ~ 'deleted' THEN
+        RAISE EXCEPTION 'the application record still admits the operation deleted';
+    END IF;
+    RAISE NOTICE 'revert verified: the six restored function bodies are the ones before 20261121010000 (by md5), the view and the six lists are back, and the five columns, the indexes and checks, and the six functions are gone';
 END;
 $revert$;
 

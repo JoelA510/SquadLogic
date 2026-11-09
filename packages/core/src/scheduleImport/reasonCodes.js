@@ -61,6 +61,12 @@ export const SCHEDULE_IMPORT_REASON = Object.freeze({
   TIME_AMBIGUOUS: 'time-ambiguous',
   WEEK_DIFFERS: 'week-differs',
 
+  // Warnings the APPLY makes of its own plan (PR 5, fix round 2; the owner: "warnings, not blockers unless necessary"). Never a
+  // refusal, never a staged flag: a game moved onto a place another game of the same file moves away from is written, and a
+  // placed game the file now gives no time is converted to a dated TIME TBD game.
+  GAMES_SWAPPED: 'games-swapped',
+  GAME_MADE_TIME_TBD: 'game-made-time-tbd',
+
   // A game with no time or no field becomes a TIME TBD game with this reason.
   IMPORTED_WITHOUT_TIME: 'imported-without-time',
 });
@@ -104,6 +110,16 @@ export const SCHEDULE_IMPORT_FLAGS = Object.freeze([
   R.HOME_AWAY_IMBALANCE,
   R.TIME_AMBIGUOUS,
   R.WEEK_DIFFERS,
+]);
+
+/**
+ * The warnings the apply adds to its result and its preview, beyond the parse's flags and the two conflict checks
+ * (`field-overlap`, `team-double-booked`): each is a thing that was DONE, said, and none refuses a row.
+ * `tests/gameImportSkipReasons.test.js` holds the SQL's literals to this list and requires words for each.
+ */
+export const SCHEDULE_IMPORT_APPLY_WARNINGS = Object.freeze([
+  R.GAMES_SWAPPED,
+  R.GAME_MADE_TIME_TBD,
 ]);
 
 /**
@@ -154,6 +170,10 @@ const DESCRIPTIONS = Object.freeze({
   [R.TIME_AMBIGUOUS]: 'The clocks repeat that time on that date; the first occurrence was taken.',
   [R.WEEK_DIFFERS]: 'The Week in the file is not the week the date falls in.',
   [R.IMPORTED_WITHOUT_TIME]: 'The file gave no time or no field for the game.',
+  [R.GAMES_SWAPPED]:
+    'The game takes the place of a game this file moves away: both are written, in an order the schedule allows.',
+  [R.GAME_MADE_TIME_TBD]:
+    'The file gives the game a date and no time: it is no longer placed, and stands on the TIME TBD list with its date.',
 });
 
 const SKIP_DESCRIPTIONS = Object.freeze({

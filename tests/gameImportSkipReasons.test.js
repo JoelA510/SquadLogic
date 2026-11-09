@@ -13,8 +13,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  SCHEDULE_IMPORT_APPLY_WARNINGS,
+  SCHEDULE_IMPORT_FLAGS,
   SCHEDULE_IMPORT_ROW_REFUSALS,
   SCHEDULE_IMPORT_SKIP_REASONS,
+  describeScheduleImportReason,
   describeScheduleImportSkip,
 } from '../packages/core/src/scheduleImport/index.js';
 
@@ -71,6 +74,39 @@ describe('the skip reasons are one constant with words, held to the SQL', () => 
       ...new Set([...planted.matchAll(/'(skipped-[a-z-]+)'/g)].map((m) => m[1])),
     ].sort();
     expect(literals).not.toEqual([...SCHEDULE_IMPORT_SKIP_REASONS].sort());
+  });
+});
+
+describe('the warnings the apply makes of its own plan are one list with words, held to the SQL', () => {
+  it('every one has words, and none is also a refusal or a staged flag', () => {
+    expect([...SCHEDULE_IMPORT_APPLY_WARNINGS].sort()).toEqual([
+      'game-made-time-tbd',
+      'games-swapped',
+    ]);
+    for (const code of SCHEDULE_IMPORT_APPLY_WARNINGS) {
+      expect(describeScheduleImportReason(code).length, code).toBeGreaterThan(20);
+      expect(SCHEDULE_IMPORT_ROW_REFUSALS, code).not.toContain(code);
+      expect(SCHEDULE_IMPORT_FLAGS, code).not.toContain(code);
+    }
+  });
+
+  it("the SQL's warning types are core's flags, the two checks, and exactly this list", () => {
+    // Every `'type', '<x>'` the apply builds a warning with, and the flags it passes through.
+    const built = new Set([...APPLY.matchAll(/'type', '([a-z-]+)'/g)].map((m) => m[1]));
+    expect([...built].sort()).toEqual(
+      ['field-overlap', 'game-made-time-tbd', 'games-swapped', 'team-double-booked'].sort()
+    );
+    for (const code of ['time-ambiguous', 'week-differs']) {
+      expect(APPLY, code).toContain(`'${code}'`);
+      expect(SCHEDULE_IMPORT_FLAGS, code).toContain(code);
+    }
+  });
+
+  it('CONTROL: a warning the SQL adds without core knowing it would be found', () => {
+    const planted = `${APPLY} jsonb_build_object('type', 'games-merged')`;
+    const built = new Set([...planted.matchAll(/'type', '([a-z-]+)'/g)].map((m) => m[1]));
+    expect(built.has('games-merged')).toBe(true);
+    expect(SCHEDULE_IMPORT_APPLY_WARNINGS).not.toContain('games-merged');
   });
 });
 

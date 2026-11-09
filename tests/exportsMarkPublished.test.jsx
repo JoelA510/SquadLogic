@@ -314,7 +314,14 @@ describe('files made before the saved schedule changed are refused (finding of t
       />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Generate CSVs' }));
-    await screen.findByText('Generated Files');
+    // 'Generated Files' is already on screen from the first generation, so waiting for it waits for nothing: the click
+    // replaces the status with 'Generating CSVs...' at once, and the second generation is done when it says so again
+    // (it reads the season's teams first, which takes longer under load than a test that raced it allowed for).
+    await waitFor(() =>
+      expect(screen.getByTestId('output-generation-status')).toHaveTextContent(
+        'CSVs generated successfully.'
+      )
+    );
     const rpc = vi.spyOn(mockSupabase, 'rpc');
     upload();
     await waitFor(() => expect(rpcCalls(rpc)).toHaveLength(1));

@@ -656,13 +656,17 @@ describe('the mock applies the world as the database does', () => {
     expect(games.filter((g) => g.import_job_id === jobId && g.published)).toHaveLength(8);
     expect(db.game_slots).toHaveLength(16);
     expect(db.teams.filter((t) => t.is_external)).toHaveLength(1);
-    // Shells in team runs, carrying the division's earlier teams; the outside club in none.
+    // Shells in ONE team run, in the shape the pages read (tests/gameImportTeamRunShape.test.js runs every reader of it),
+    // carrying the earlier run's teams; the outside club in none.
     const teamRuns = db.scheduler_runs.filter(
       (r) => r.run_type === 'team' && r.parameters?.import_job_id === jobId
     );
-    expect(teamRuns).toHaveLength(2);
-    const d2 = teamRuns.find((r) => r.parameters.selectedProgramId === D2);
-    expect(d2.results.teams.map((t) => t.name).sort()).toEqual(['Eagles', 'Hawks', 'New Shell FC']);
+    expect(teamRuns).toHaveLength(1);
+    expect(teamRuns[0].results.teamsByDivision[D2].map((t) => t.name).sort()).toEqual([
+      'Eagles',
+      'Hawks',
+      'New Shell FC',
+    ]);
     expect(JSON.stringify(db.scheduler_runs)).not.toContain('Visiting Club A');
     expect(db.schedule_tbd).toHaveLength(1);
     // One application record per thing written.
@@ -868,7 +872,7 @@ describe('the rollback refuses after a change and restores exactly before one', 
     imported.published = true;
     const back = rpc(db, 'rollback_game_import_job', { p_import_job_id: id });
     expect(back.error).toBeNull();
-    expect(back.data.games).toEqual({ deleted: 8, restored: 7 });
+    expect(back.data.games).toEqual({ deleted: 8, restored: 7, reinserted: 0 });
     expect(
       JSON.stringify(db.game_assignments.map((g) => ({ ...g, updated_at: undefined }))).replaceAll(
         ',"updated_at":null',
@@ -1403,7 +1407,7 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
     pgtapAsserts(/a shell a later team run names is kept by the rollback/);
   });
 
-  it('Code review 4: a swap of two games of one pair in one week is refused in words that name the case', () => {
+  it('the owner (2026-11-09): a swap of two games of one pair in one week is written, with a warning, and rolled back', () => {
     const db = fixWorld();
     const slot = (n, start, end) => ({
       id: U(330 + n),
@@ -1477,17 +1481,34 @@ describe('fix round 1: the mock and the pgTAP file agree (the same inputs, the s
     );
     const out = rpc(db, 'apply_game_import_job', { p_import_job_id: id });
     expect(out.error).toBeNull();
-    expect(out.data.refused_by_reason).toEqual({ 'duplicate-row': 2 });
-    expect(out.data.listed.refused[0].message).toMatch(/moves away/);
-    // The words are the SQL's: the migration carries the same sentence (its quotes doubled).
+    expect(out.data.refused_by_reason).toEqual({});
+    // Each game stands on the other's old place.
+    const slotOf = (gid) =>
+      db.game_slots.find((x) => x.id === db.game_assignments.find((a) => a.id === gid).game_slot_id)
+        .start_time;
+    expect(`${slotOf(U(332))} ${slotOf(U(333))}`).toBe('10:00 09:00');
+    expect(out.data.games.updated).toBe(2);
+    expect(out.data.warnings.filter((w) => w.type === 'games-swapped')).toHaveLength(2);
+    // The words of the one warning are the SQL's: the migration carries the same sentence.
     const migration = readFileSync(
       path.join(REPO, 'supabase/migrations/20261121010000_game_import.sql'),
       'utf8'
     );
-    expect(migration).toContain(COLLISION_MESSAGE.replaceAll("'", "''"));
-    pgtapAsserts(
-      /'\{"duplicate-row": 2\}'::jsonb, 'the swap of two games of one pair in one week by Game ID is refused/
+    expect(migration).toContain(
+      out.data.warnings.find((w) => w.type === 'games-swapped').message.replaceAll("'", "''")
     );
+    // The same numbers the pgTAP file asserts for the same world (12.6).
+    pgtapAsserts(
+      /'12\.6c both are counted updated, and each carries the non-blocking warning games-swapped/
+    );
+    expect(PGTAP).toContain(
+      "'2d>2e@1f/2027-02-06/10:00 w50 pub=false ref=SW-1 | 2d>2e@1f/2027-02-06/09:00 w50 pub=false ref=SW-2'"
+    );
+    // What still refuses (a game this file does not move already stands on the place) keeps the SQL's words.
+    expect(migration).toContain(COLLISION_MESSAGE.replaceAll("'", "''"));
+    const back = rpc(db, 'rollback_game_import_job', { p_import_job_id: id });
+    expect(back.error).toBeNull();
+    expect(`${slotOf(U(332))} ${slotOf(U(333))}`).toBe('09:00 10:00');
   });
 
   it('Code review 6: storing a mapping is audited with the counts per group and action, and no label', () => {

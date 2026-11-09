@@ -36,7 +36,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(205);
+SELECT plan(209);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -512,15 +512,25 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.locations l JOIN public.fiel
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.teams WHERE name IN ('New Shell FC', 'Sharks', 'Rays') AND NOT is_external$$), '3', 'three own-team shells were created');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.team_players tp JOIN public.teams t ON t.id = tp.team_id WHERE t.name IN ('New Shell FC', 'Sharks', 'Rays')$$), '0',
     'a shell has no players and no coach (the audit says how many teams have none)');
--- Team shells land in a team run; the division's earlier teams are carried.
-SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs WHERE run_type = 'team' AND parameters ->> 'import_job_id' = pg_temp.j('j1')::text$$), '2',
-    'the shells are recorded in team runs of the import (one per division that gained shells), through the existing audited writer');
-SELECT is(pg_temp.val($$SELECT string_agg(t ->> 'name', ',' ORDER BY t ->> 'name') FROM public.scheduler_runs sr, jsonb_array_elements(sr.results -> 'teams') t
-        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text AND t ->> 'division' = pg_temp.u(20)::text$$), 'Eagles,Hawks,New Shell FC',
-    'the run of a division that already had a saved team run carries that run''s teams with the new shell (a later run shadows an earlier one per division, so it must hold them all)');
-SELECT is(pg_temp.val($$SELECT string_agg(t ->> 'name', ',' ORDER BY t ->> 'name') FROM public.scheduler_runs sr, jsonb_array_elements(sr.results -> 'teams') t
-        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text AND t ->> 'division' <> pg_temp.u(20)::text$$), 'Rays,Sharks',
-    'and the run of the division the import created holds its two shells');
+-- Team shells land in ONE team run, in the shape the pages read (fix round 2, Codex P1): the latest team run's results are
+-- carried forward whole and each division's shells are added to its group. The pages read the LATEST team run through
+-- `results.teamsByDivision`, so a run of only the shells (or of one division) would list no other team.
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs WHERE run_type = 'team' AND parameters ->> 'import_job_id' = pg_temp.j('j1')::text$$), '1',
+    'the shells are recorded in ONE team run of the import (not one per division: the pages read the latest run), through the existing audited writer');
+SELECT is(pg_temp.val($$SELECT string_agg(k, ',' ORDER BY k) FROM public.scheduler_runs sr, jsonb_object_keys(sr.results) k
+        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text$$), 'team_players,teams,teamsByDivision',
+    'its results carry exactly the key set the readers read (TEAM_RUN_RESULT_KEYS: teamsByDivision, teams, team_players)');
+SELECT is(pg_temp.val($$SELECT string_agg(t ->> 'name', ',' ORDER BY t ->> 'name') FROM public.scheduler_runs sr, jsonb_array_elements(sr.results -> 'teamsByDivision' -> pg_temp.u(20)::text) t
+        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text$$), 'Eagles,Hawks,New Shell FC',
+    'the group of a division the carried run already named (under its id) holds that run''s teams with the new shell');
+SELECT is(pg_temp.val($$SELECT string_agg(t ->> 'name', ',' ORDER BY t ->> 'name') FROM public.scheduler_runs sr, jsonb_each(sr.results -> 'teamsByDivision') e, jsonb_array_elements(e.value) t
+        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text AND e.key <> pg_temp.u(20)::text AND t ->> 'name' IN ('Sharks', 'Rays')$$), 'Rays,Sharks',
+    'the division the import created has its group, keyed by its name, with its two shells');
+SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs sr, jsonb_array_elements(sr.results -> 'teams') t
+        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text$$),
+    pg_temp.val($$SELECT sum(jsonb_array_length(e.value)) FROM public.scheduler_runs sr, jsonb_each(sr.results -> 'teamsByDivision') e
+        WHERE sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = pg_temp.j('j1')::text$$),
+    'the flat teams list is exactly the groups'' teams (one list of what the groups say)');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.scheduler_runs sr, jsonb_array_elements(sr.results -> 'teams') t WHERE sr.run_type = 'team'
         AND sr.organization_id = 'a1111111-1111-1111-1111-111111111111' AND (t ->> 'name' = 'Visiting Club A')$$), '0', 'an outside club is in NO team run: teaming never sees one');
 -- The outside club.
@@ -560,8 +570,8 @@ SELECT is(pg_temp.val($$SELECT count(*) FROM public.audit_log WHERE organization
         AND metadata -> 'scope' ->> 'kind' = 'import' AND (metadata ->> 'count') = '8'$$), '1',
     'and game.published_set once, with scope import, for the eight games that arrived Published');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.audit_log a WHERE a.action = 'team.saved' AND a.resource_id IN
-        (SELECT id FROM public.scheduler_runs WHERE run_type = 'team' AND parameters ->> 'import_job_id' = pg_temp.j('j1')::text)$$), '2',
-    'the shells were audited by the team writer, once per run');
+        (SELECT id FROM public.scheduler_runs WHERE run_type = 'team' AND parameters ->> 'import_job_id' = pg_temp.j('j1')::text)$$), '1',
+    'the shells were audited by the team writer, once (one run)');
 SELECT is((SELECT v::jsonb ->> 'replayed' FROM (SELECT (public.apply_game_import_job(pg_temp.j('j1'), false))::text AS v) x), 'true',
     'a finished job answers a second call with the result it stored (a retry after a lost response writes nothing)');
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE organization_id = 'a1111111-1111-1111-1111-111111111111'$$), '15', 'and the games are still fifteen');
@@ -960,8 +970,10 @@ SELECT is(pg_temp.val($$SELECT reason || ' w' || week_index FROM public.schedule
 SELECT is(pg_temp.errx($$SELECT public.apply_game_import_job(pg_temp.j('ji'), false)$$), '22023:game_import_staged_invalid',
     'a tbd row that still carries instants is refused whole as not a games row (the SQL stays strict)');
 
--- 12.6 (Code review 4) The limitation, pinned: two games of one pair in one week that the file swaps by Game ID are both
--- refused, because the place each moves to still holds the other until the import has run. The words say so.
+-- 12.6 (Code review 4, then the owner's answer of 2026-11-09: "for swaps, warnings, not blockers") Two games of one pair in
+-- one week that the file swaps by Game ID are BOTH written, with a warning: the place each moves to is the place the other
+-- leaves, so the apply takes them out of the unique place first (the step-out `persist_game_schedule` uses) and gives each its
+-- own. This used to be refused (both rows, `duplicate-row`, "the swap has to be imported in steps"); the limitation is gone.
 SET LOCAL "request.jwt.claims" TO '{}';
 INSERT INTO public.game_slots (id, organization_id, field_id, start, "end", slot_date, start_time, end_time, week_index, capacity) VALUES
     (pg_temp.u(330), 'a1111111-1111-1111-1111-111111111111', pg_temp.u(31), '2027-02-06T09:00:00-08:00', '2027-02-06T10:00:00-08:00', '2027-02-06', '09:00', '10:00', 50, 1),
@@ -981,12 +993,19 @@ INSERT INTO marks VALUES ('map_js', (public.map_game_import_job(pg_temp.j('js'),
     'fields', jsonb_build_object(pg_temp.k2('Park One', 'Field 1'), jsonb_build_object('action', 'map', 'id', pg_temp.u(31))),
     'teams', jsonb_build_object(pg_temp.k2('Fix U9', 'Fix Lions'), jsonb_build_object('action', 'map', 'id', pg_temp.u(301)),
         pg_temp.k2('Fix U9', 'Fix Tigers'), jsonb_build_object('action', 'map', 'id', pg_temp.u(302))))))::text);
+INSERT INTO marks VALUES ('dry_js', (public.apply_game_import_job(pg_temp.j('js'), true))::text);
 INSERT INTO marks VALUES ('apply_js', (public.apply_game_import_job(pg_temp.j('js'), false))::text);
-SELECT is((SELECT v::jsonb -> 'refused_by_reason' FROM marks WHERE name = 'apply_js'), '{"duplicate-row": 2}'::jsonb, 'the swap of two games of one pair in one week by Game ID is refused (known limitation): both rows');
+SELECT is((SELECT v::jsonb -> 'refused_by_reason' FROM marks WHERE name = 'apply_js'), '{}'::jsonb, '12.6a the swap of two games of one pair in one week by Game ID is not refused: nothing is listed refused');
+SELECT is(pg_temp.gj(pg_temp.u(332)) || ' | ' || pg_temp.gj(pg_temp.u(333)), '2d>2e@1f/2027-02-06/10:00 w50 pub=false ref=SW-1 | 2d>2e@1f/2027-02-06/09:00 w50 pub=false ref=SW-2',
+    '12.6b and both games are written: each stands on the other''s old place');
+SELECT is(pg_temp.num((SELECT v::jsonb FROM marks WHERE name = 'apply_js'), 'games,updated') || ' ' ||
+          (SELECT count(*)::text FROM jsonb_array_elements((SELECT v::jsonb -> 'warnings' FROM marks WHERE name = 'apply_js')) w WHERE w ->> 'type' = 'games-swapped'), '2 2',
+    '12.6c both are counted updated, and each carries the non-blocking warning games-swapped (it is a warning, not a refusal)');
+SELECT is(pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'apply_js')), pg_temp.same((SELECT v::jsonb FROM marks WHERE name = 'dry_js')),
+    '12.6d the preview said the same: the dry run counts, lists and warns exactly what the apply did');
+INSERT INTO marks VALUES ('rb_js', (public.rollback_game_import_job(pg_temp.j('js')))::text);
 SELECT is(pg_temp.gj(pg_temp.u(332)) || ' | ' || pg_temp.gj(pg_temp.u(333)), '2d>2e@1f/2027-02-06/09:00 w50 pub=false ref=SW-1 | 2d>2e@1f/2027-02-06/10:00 w50 pub=false ref=SW-2',
-    'and neither game moved');
-SELECT is(((SELECT v::jsonb #>> '{listed,refused,0,message}' FROM marks WHERE name = 'apply_js')) ~ 'moves away', 'true',
-    'the words name the case: a game the file moves away from a place still holds it until the import has run');
+    '12.6e the rollback puts the two games back on their own places (it steps them out of the unique place too)');
 
 -- 12.7 (Code review 6) The mapping is the sole input of the apply, and storing it is audited: import.mapped, with the
 -- number of decisions per group and action and the Published default. No label is written to the audit row.

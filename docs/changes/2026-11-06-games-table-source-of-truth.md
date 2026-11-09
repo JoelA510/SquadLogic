@@ -5,8 +5,8 @@ Drawn up: 2026-11-06 against `origin/main` `c3d190d`. Owner: the repository owne
 Status: **APPROVED by the owner, 2026-11-07 (see "Owner answers (2026-11-07)" under "Owner decisions"); this change itself is plan only: no code, migration, test or fixture is written by it.** This is the F11 plan that
 decision 12 of the schedule-expansion plan requires the owner to approve before PR 5 starts. AGENTS.md rule 14 applies
 (persistence and the domain model), so nothing here is built until the owner agrees. The expansion plan is
-`docs/changes/2026-11-03-schedule-expansion.md` on the branch `claude/vibrant-allen-hr7y7s-schedule-expansion-plan` (it is
-not on `main` yet); "expansion section N" below means that file.
+`docs/changes/2026-11-03-schedule-expansion.md` (on `main` since PR 1, #707; when this was drawn up it was on the branch
+`claude/vibrant-allen-hr7y7s-schedule-expansion-plan`); "expansion section N" below means that file.
 
 ## Labels and method
 
@@ -531,9 +531,11 @@ Each task names its test. A plant is a defect put in to prove the test can fail;
 ### F11-1: Identity (L; migration inside PR 1, or its own; rule 14; Review: (c))
 
 Depends on: PR 1, or lands inside it as separate commits. If PR 1 has merged, F11-1 replaces `persist_game_schedule` again
-and re-aims PR 1's plants (lesson 70) as the fifth migration.
+and re-aims PR 1's plants (lesson 70) as the fifth migration. **Merged as #712 (`e5ce8b8`); A1 to A5 are ticked
+because each task's files are in that merge** (statically checked on 2026-11-09: the migration, `supabase/tests/game_identity.sql`,
+its revert and smoke, `packages/core/src/gameIdentity.js`, the three test files, the mock and the docs; not re-run here).
 
-- [ ] A1 (L) Migration: `season_settings_id` on `game_assignments` and the four-column unique index; `persist_game_schedule`
+- [x] A1 (L) Migration: `season_settings_id` on `game_assignments` and the four-column unique index; `persist_game_schedule`
       updates a row in place when its payload row names an existing game; the omission check counts ids and tuples;
       `game_is_held` (Published only) and its set form; the guard, cancel and omission check call it. Revert and smoke;
       catalogue snapshot regenerated. **First** `supabase/tests/game_identity.sql`, red against today's code: a move keeps
@@ -542,16 +544,16 @@ and re-aims PR 1's plants (lesson 70) as the fifth migration.
       repeated id and a completed season are refused with nothing written; the tuple-collision case refuses with
       `game_identity_conflict`; a Published game still cannot be moved by id; each refusal paired with a control that the
       allowed twin passes.
-- [ ] A2 (M) Core `gameIdentity.js`: `carryGameIds` and `isHeld`, registered in the index. Tests
+- [x] A2 (M) Core `gameIdentity.js`: `carryGameIds` and `isHeld`, registered in the index. Tests
       `tests/gameIdentityCarry.test.js`: the saved set is the subject (enumerated from the saved games); a pair moved across
       weeks keeps its id; a double round robin matches each of the two meetings once; an odd division with byes; a flipped
       pair; a team removed; no saved game is claimed twice (made to fail by a planted double claim).
-- [ ] A3 (S) The page sends ids and applies the matcher before the review; Edge schema unchanged (the optional `id` exists).
+- [x] A3 (S) The page sends ids and applies the matcher before the review; Edge schema unchanged (the optional `id` exists).
       Test `tests/gameSchedulingIdentity.test.jsx`: regenerate and Apply twice; the visible set equals today's, the ids of
       unmoved and moved games are unchanged.
-- [ ] A4 (S) Mock client mirrors the in-place save. Test `tests/mockGameIdentity.test.js`: one input that reaches every
+- [x] A4 (S) Mock client mirrors the in-place save. Test `tests/mockGameIdentity.test.js`: one input that reaches every
       outcome gives the same answers through the mock and the pure helper (lesson 77).
-- [ ] A5 (S) Docs: `docs/ARCHITECTURE.md` (the `games` and `game_assignments` paragraph), `docs/architecture/game-scheduling.md`
+- [x] A5 (S) Docs: `docs/ARCHITECTURE.md` (the `games` and `game_assignments` paragraph), `docs/architecture/game-scheduling.md`
       (identity), one lesson (section "What the planning taught").
 
 Plants: the save inserts instead of updating in place (the "move keeps the id" case); the matcher ignores the week
@@ -605,6 +607,11 @@ becomes "create the `games` view" and is smaller.
 - [ ] C4 (S) The census `tests/gamesTableReaders.test.js` (from the code); it is red while any reader names `games`.
 - [ ] C5 (S) The parity test `tests/currentGameRunsParity.test.js`: the SQL view and `useSchedulerRun` pick the same run
       over two seasons, a run with no season and an older run.
+- [ ] C6 (S) (owner, 2026-11-09) The Games page reads the saved schedule once more after a 409 `GAME_IDENTITY`. Test: a page
+      test that answers the save with that 409 and asserts the extra read (the file is named when it is written).
+- [ ] C7 (S) (owner, 2026-11-09) Remove `publishedOmissions` and `changesPublishedPlacement` (`packages/core/src/gamePublished.js`)
+      if still without a shipped caller (today only tests call them, statically searched 2026-11-09; two page tests use
+      `publishedOmissions` as an oracle and move or go with it). Test: `npm run check:unused` green and their own tests gone.
 
 Plants: a reader still on `games` (the census); the team page reading every run instead of the current one (a moved game
 appears twice); the feed swallowing a failed read. Stop and report if any reader's markup changes, or if an embed needs a
@@ -723,6 +730,19 @@ Order after this: F11-1, then PR 5 (with the amendments in "What PR 5 ... must d
 after PR 6, ahead of PR 10; F11-4 before PR 12; F11-5 last and only on the owner's word. U1 (the PostgREST view spike),
 U2 (do platforms repeat Game IDs across seasons: ask the owner) and U5 stay open as written.
 
+### Owner answers (2026-11-09)
+
+- **F11-1 is merged.** The owner answered "A - as recommended." to whether #712 (F11-1) could merge without a completed Codex
+  review (Codex failed six times on it; the coordinator's account, not re-run here: CI was green, and one
+  `/code-review high` pass and one independent read-only review of the fix round found no shipped-behaviour defect).
+  Merge commit `e5ce8b8`. Consequence: PR 5 is next on the schedule side, then PR 6; F11-2 to F11-5 follow the order above.
+- **U2 is answered.** The owner: "Game IDs should be specific to each game, not reused, as to remain clear on what game is
+  being affected during changes (such as venue or time change.)" Consequence: PR 5's `external_ref` stays unique on
+  `(season_settings_id, external_ref)`, which is safe either way; nothing else changes.
+- **Agreed, non-blocking (owner: "Agree").** Two of the agreed items are tasks of F11-3 below (C6 and C7): the one-line
+  refetch after a 409 `GAME_IDENTITY` on the Games page, and removing `publishedOmissions` and `changesPublishedPlacement`
+  if still unused. The others are in the expansion plan, section 10, "Owner answers (2026-11-09)".
+
 ## Unknowns, and what would resolve them
 
 - **U1. Whether PostgREST embeds `teams` and `game_slots` through a view named `games`, and resolves the feed's
@@ -730,7 +750,7 @@ U2 (do platforms repeat Game IDs across seasons: ask the owner) and U5 stay open
   assignment, the three embed shapes) decides C versus A at F11-3. It also covers the to-one embed of a score on the Games
   page's read.
 - **U2. Whether a platform's Game IDs repeat from one season to the next.** Ask the owner; the per-season scope is safe
-  either way.
+  either way. **Answered 2026-11-09:** not reused (see "Owner answers (2026-11-09)").
 - **U3. Whether PR 1 has started or merged.** `git log` and `gh pr list` when this plan is read; it decides whether F11-1 rides
   PR 1 or is a fifth migration.
 - **U4. Whether any pgTAP or vitest file other than the named ones relies on a hidden row after a move.** A search of

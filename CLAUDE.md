@@ -5,9 +5,9 @@
 Everything above is shared with every other agent (`AGENTS.md`); this section is Claude Code's
 own. The numbered sections that older docs and comments cite as "CLAUDE.md §N" are AGENTS.md's.
 
-- **Review:** the adversarial review AGENTS.md §3 asks for (every PR but documentation and very
-  minor ones) is one `/code-review` in Claude Code, after Codex's findings are addressed; fix its
-  findings in that same PR.
+- **Review:** the adversarial review AGENTS.md §3 asks for, on class (c) PRs only, is one
+  `/code-review high <branch-name>` in Claude Code, after Codex's findings are addressed; fix its
+  findings in that same PR. A class (a), documentation, minor or dependency PR gets none.
 - **Skills:** the workflow skills in `.claude/skills/` (Claude Code's copies of `.agents/skills/`;
   AGENTS.md §3 says where they come from and how a gap in one is fixed): `/discovery`,
   `/plan-change`, `/root-cause`, `/review-change`, `/pre-pr`, `/verify` (Claude Code runs it

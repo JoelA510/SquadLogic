@@ -7,6 +7,7 @@ import { formatTime } from '../../utils/formatters.js';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import { divisionDisplayName } from '../../utils/divisions.js';
 import PublishedControls from './PublishedSwitch.jsx';
+import { isHeld } from '@squadlogic/core/gameIdentity.js';
 
 /**
  * The grid's move targets and its one move handler, provided by
@@ -125,7 +126,7 @@ export default function GameCard({
   isDragDisabled = false,
   timezone = undefined,
 }) {
-  const isPublishedGame = assignment.published === true;
+  const isPublishedGame = isHeld(assignment);
   const held = isDragDisabled || isPublishedGame;
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } =
     useDraggable({

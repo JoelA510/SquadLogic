@@ -18,9 +18,9 @@
  * and over a small league that reaches every reason a matchup can be left unplaced. A digest
  * that cannot move proves nothing, so the block also shows it moves when the input does.
  *
- * **Identity, said plainly.** The save keys its upsert on (home, away, slot, week) and writes no
- * id, so a pinned game keeps its row, and its id, only if it comes back with the same tuple.
- * `carried` is the pinned game itself, id and all; nothing here can move one.
+ * **Identity, said plainly.** `carried` is the pinned game itself, id and all, and the page sends it back
+ * with that id (the save updates a game in place by its id since 20261120010000; before, it kept a row only
+ * if the tuple came back unchanged). Nothing here can move one.
  */
 
 import { createHash } from 'node:crypto';

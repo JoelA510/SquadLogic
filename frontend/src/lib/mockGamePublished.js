@@ -21,8 +21,12 @@
  * here would make that test compare a function with itself.
  *
  * **Not mirrored** (stated so nobody reads this as the database):
- *   - `persist_game_schedule` has no mock arm (the save is an Edge function over SQL), so the save's omission
- *     refusal and the trigger's refusal of a moving save are held by pgTAP and by the pure helper, not here;
+ *   - `persist_game_schedule` HAS a mock arm, in `mockGameIdentity.js` (20261120010000), which asks this file's
+ *     guard and `isRowHeld` and gives the save's omission refusal and the trigger's refusal of a moving save. The
+ *     Games page does not reach it: it saves through the `game-persistence` Edge function over `fetch`, which the mock
+ *     does not intercept, so the arm is reached only by direct `rpc('persist_game_schedule')` calls in tests (and by a
+ *     test that wires the page's save to it). The rules are held by pgTAP, by `tests/mockGameIdentity.test.js` and by
+ *     its test oracle (`tests/helpers/gameIdentityRefusal.js`), not by this file;
  *   - the exemptions of the trigger (a job with no signed-in user, the cascade of a deleted organization): the
  *     mock's direct writes are always the signed-in app's;
  *   - the mock's OWN cascades: `admin_delete_field` (confirmed), the field-import rollback and slot removal delete
@@ -105,6 +109,17 @@ function sameInstantOrText(field, a, b) {
 const refusal = (message) => fail('22023', message, 'game_published');
 
 /**
+ * Whether a stored game is held where it is: the mock's copy of `game_held_ids` (today: Published). Every refusal in
+ * this file asks it, and `mockGameIdentity.js` imports it, so the mock has one place to change when a score also holds a
+ * game (F11-2).
+ *
+ * @param {Record<string, any> | null | undefined} row
+ */
+export function isRowHeld(row) {
+  return row?.published === true;
+}
+
+/**
  * The guard for a direct write: `pairs` are `{ before, after }` per row, `after` null for a delete. Only a row that
  * is Published BEFORE the write is judged (so clearing the flag and moving in one write is refused).
  *
@@ -115,7 +130,7 @@ const refusal = (message) => fail('22023', message, 'game_published');
 export function publishedWriteRefusal(table, pairs) {
   if (table !== 'game_assignments') return null;
   for (const { before, after } of pairs || []) {
-    if (before?.published !== true) continue;
+    if (!isRowHeld(before)) continue;
     if (after == null) {
       return refusal(
         `Game ${before.id} is Published and cannot be deleted: allow changes to it first`
@@ -144,7 +159,7 @@ export function publishedWriteRefusal(table, pairs) {
 export function publishedRpcRefusal(db, what) {
   if (what.kind === 'cancel') {
     const game = (db.game_assignments || []).find((row) => same(row.id, what.id));
-    if (game?.published === true) {
+    if (isRowHeld(game)) {
       return refusal(
         `game ${game.id} is Published and cannot be cancelled: allow changes to it first`
       );
@@ -152,8 +167,7 @@ export function publishedRpcRefusal(db, what) {
     return null;
   }
   const count = (db.game_assignments || []).filter(
-    (row) =>
-      row.published === true && (same(row.home_team_id, what.id) || same(row.away_team_id, what.id))
+    (row) => isRowHeld(row) && (same(row.home_team_id, what.id) || same(row.away_team_id, what.id))
   ).length;
   if (count > 0) {
     return refusal(

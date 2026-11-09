@@ -5,10 +5,12 @@
  * The words are "Published" and "Allow changes" (owner, 2026-11-06). Not "lock", and not "override": the Edge
  * function's `overrides` field and the page's "Manual Override" mode mean something else.
  *
- * **A moved game is a new record.** The save keys a game on (home, away, slot, week) and writes no id, so a game moved
- * to another slot or week is a new row. Its Published flag, when it was published and the audit history stay with the
- * old row, and the new row starts not Published (lesson 95; the identity layer is a separate, pending decision).
- * {@link movedGameNote} says so wherever a move is offered; it does not promise anything survives a move.
+ * **A moved game is the same game.** Since `20261120010000_game_identity.sql` the save updates a game in place when the
+ * page names it by its id, and the page does, so a game moved to another slot or week keeps its id, its Published
+ * flag, when it was published and its history (lesson 95 said the opposite, and was true until then). A game that is
+ * Published is still not moved without Allow changes first; after Allow changes the game is not Published until it is
+ * published again. What does NOT carry over: a game the new schedule no longer holds (its pair does not meet again, or
+ * it could not be placed) stays in the old run with its history, and {@link leftBehindNote} says so.
  *
  * @module gamePublishedText
  */
@@ -38,8 +40,8 @@ export const NOTE_HELPER_TEXT =
 
 /** What a person is told once, wherever a move is offered. */
 export const movedGameNote =
-  'If you then move a game to another time slot or week, it is saved as a new game. The new game starts ' +
-  'not Published, so publish it again after you apply the move; this game’s history stays with the old record.';
+  'If you then move a game to another time slot or week, it is still the same game and keeps its history. ' +
+  'Allowing changes leaves it not Published, so publish it again once the move is applied.';
 
 /** The matchup as the screen names it: team names when the game has them, else the ids. */
 export function matchupOf(game) {
@@ -65,20 +67,23 @@ export function cancelRefusal(game) {
   return `${home} vs ${away} was not cancelled: it is Published. Use Allow changes on it first, then cancel it.`;
 }
 
-/** The status line for a staged move of a game that has been Published (it has a history to leave behind). */
+/** The status line for a staged move of a game that has been Published (it has a history, which it keeps). */
 export function stagedMoveNote(game) {
   const { home, away } = matchupOf(game);
   return (
     'Manual game move staged. Apply the schedule to persist it. ' +
-    `${home} vs ${away} will be saved as a new game, which starts not Published.`
+    `${home} vs ${away} keeps its history and stays not Published until you publish it again.`
   );
 }
 
-/** Said after an Apply that saved moved games which had a Published history. */
-export function movedGamesNote(count) {
+/**
+ * Said after an Apply that left behind games which had a Published history: the new schedule does not hold them (their
+ * pair does not meet again, or the game could not be placed), so they stay in the old run with their history.
+ */
+export function leftBehindNote(count) {
   return count === 1
-    ? ' 1 moved game was saved as a new game: it starts not Published, so publish it again.'
-    : ` ${count} moved games were saved as new games: they start not Published, so publish them again.`;
+    ? ' 1 game that had been Published is no longer in the schedule (its pair does not meet again, or it could not be placed): its history stays with the old record.'
+    : ` ${count} games that had been Published are no longer in the schedule (their pairs do not meet again, or they could not be placed): their history stays with the old records.`;
 }
 
 /**

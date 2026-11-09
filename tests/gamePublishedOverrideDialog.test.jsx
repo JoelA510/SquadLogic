@@ -92,14 +92,13 @@ describe('what the dialog shows', () => {
     expect(screen.getByTestId('allow-changes-more')).toHaveTextContent('and 564 more');
   });
 
-  it('says once, truthfully, that a game moved to another slot or week is a new record', () => {
+  it('says once, truthfully, that a game moved to another slot or week is still the same game', () => {
     renderDialog();
     const note = screen.getByTestId('allow-changes-moved-note');
-    expect(note).toHaveTextContent(/saved as a new game/);
-    expect(note).toHaveTextContent(/starts not Published/);
-    expect(note).toHaveTextContent(/history stays with the old record/);
-    // It does not promise that anything survives the move.
-    expect(note).not.toHaveTextContent(/keeps its history|history is kept|remains Published/i);
+    expect(note).toHaveTextContent(/still the same game and keeps its history/);
+    expect(note).toHaveTextContent(/leaves it not Published, so publish it again/);
+    // It does not say the move makes a new game (it did, before the save updated a game in place).
+    expect(note).not.toHaveTextContent(/new game|new record|history stays with the old record/i);
   });
 
   it('offers the closed list of reasons, "Published in error" among them, and nothing free-text', () => {

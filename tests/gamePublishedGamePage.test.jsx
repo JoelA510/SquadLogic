@@ -5,10 +5,11 @@
  * - The list says each game's state in words and carries a switch; turning one on is one call with one id and no dialog.
  * - Turning one off opens "Allow changes", sends nothing until Confirm, and gives focus back.
  * - A game's history shows each Published and each "Changes allowed" with the reason and the note, as the database
- *   returns it for that game's row, and says plainly that a game moved to another slot or week starts with none.
+ *   returns it for that game's row, and says plainly that a game keeps its history when moved, and that a new game starts with none.
  *
  * Not asserted, because it is not true: that a game's Published state or history follows it to another slot or week
- * (the save keys a game on (home, away, slot, week) and writes no id; lesson 95).
+ * (it does since 20261120010000, which updates a game in place by its id; the database's own table is
+ * supabase/tests/game_identity.sql, and nothing here can see a save).
  */
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
@@ -611,7 +612,7 @@ describe('a game’s history', () => {
     expect(entries[1]).not.toHaveTextContent(/Reason:/);
   });
 
-  it('says that a moved game is a new record: it starts with no history, and the old record keeps this one', async () => {
+  it('says that a game keeps its history when it is moved, and that a new game starts with none', async () => {
     await mount();
     fireEvent.click(
       screen.getByRole('button', { name: 'History: Synthetic Comets versus Synthetic Rockets' })
@@ -620,8 +621,11 @@ describe('a game’s history', () => {
     expect(await within(dialog).findByTestId('game-history-empty')).toHaveTextContent(
       'No history is recorded for this game yet.'
     );
-    expect(dialog).toHaveTextContent(/saved as a new game: it starts with no history/);
-    expect(dialog).toHaveTextContent(/the old record keeps this one/);
+    expect(dialog).toHaveTextContent(/A game keeps its history when it is moved/);
+    expect(dialog).toHaveTextContent(
+      /A new game, one that continues no saved game, starts with none/
+    );
+    expect(dialog).not.toHaveTextContent(/saved as a new game|the old record keeps this one/);
   });
 
   it('a read the database refuses is an alert in its words, not an empty list', async () => {

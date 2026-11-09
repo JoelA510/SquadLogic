@@ -56,6 +56,7 @@ import {
   publishedRpcRefusal,
   publishedWriteRefusal,
 } from './mockGamePublished.js';
+import { mockPersistGameSchedule } from './mockGameIdentity.js';
 import { handleServerSideReadRpc } from './mockServerSideReads.js';
 import { applyMockReadPolicy, RESTRICTED_TABLES } from './mockReadPolicies.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
@@ -2701,6 +2702,15 @@ export const mockSupabase = {
       if (publishedSwitch) {
         if (!publishedSwitch.error) saveDB(db);
         return publishedSwitch;
+      }
+      // The game save (migration 20261120010000): a game named by its id is updated in place; refusals included.
+      if (name === 'persist_game_schedule') {
+        const savedGames = mockPersistGameSchedule(db, params?.run_data, params?.assignments, {
+          currentUserId: storedSession ? currentUserId : null,
+          isOrgAdmin,
+        });
+        if (!savedGames.error) saveDB(db);
+        return savedGames;
       }
       // The evaluations import's finalizer (migration 20261113010000), dry run and refusals included.
       const evaluation = handleEvaluationImportRpc(db, name, params, { isOrgAdmin, currentUserId });

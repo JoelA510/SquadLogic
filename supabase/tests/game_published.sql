@@ -24,11 +24,10 @@
 -- A two-session race is not reproducible in one pgTAP transaction; the rows are locked in id order
 -- (asserted from the source) and that is what this file can say about it.
 --
--- Identity: persist_game_schedule keys its upsert on the matchup tuple (home, away, slot, week) and writes no id, so
--- "moves a Published game" below is the SAME-tuple case (another field, start or end), and a move to another slot is
--- another tuple: a new row, and the Published original is then an omission. Nothing here says a game's id, its
--- Published flag or its audit rows follow it through a move; one assertion pins that they do not (today's behaviour of
--- the save, outside this PR's scope).
+-- Identity: a payload row WITHOUT an id is upserted on the matchup tuple (home, away, slot, week), so "moves a Published
+-- game" below is the SAME-tuple case (another field, start or end), and a move to another slot is another tuple: a new
+-- row, and the Published original is then an omission. Every payload here is without ids, as the page sent them before
+-- 20261120010000; a row WITH an id is updated in place (supabase/tests/game_identity.sql), and this file runs unchanged.
 
 BEGIN;
 
@@ -448,7 +447,7 @@ SELECT is(pg_temp.errx($$SELECT pg_temp.save(jsonb_build_array(pg_temp.g('a11111
 SELECT is(pg_temp.errx($$SELECT pg_temp.save(jsonb_build_array(pg_temp.g('a1111111-1111-1111-1111-0000000c0e03')), 'a1111111-1111-1111-1111-1111111100b1')$$),
     'no error', 'a save for season B carries Q and does not need season A''s P');
 SELECT is(pg_temp.probe_move(), 'rows=2 old_id_kept=true new_id_differs=true',
-    'identity is the matchup tuple: moving an unpublished game to another slot adds a row with a new id and leaves the old one behind (what a game''s id keys does not follow a move)');
+    'a payload row without an id is keyed on the matchup tuple: moving an unpublished game to another slot that way adds a row with a new id and leaves the old one behind (a row WITH an id is updated in place: game_identity.sql)');
 SELECT is((SELECT count(*)::int FROM public.scheduler_runs) - (SELECT n FROM runs_before), 1,
     'the refusals wrote nothing: of all the saves above only the first, accepted one left a scheduler run');
 

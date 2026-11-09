@@ -11,9 +11,10 @@ import { describeHistoryRow, matchupOf } from '../../utils/gamePublishedText.js'
  * reason, the note and how the game was chosen (plan `docs/changes/2026-11-03-schedule-expansion.md`, 3.4 and 3.6;
  * the rows are `get_schedule_audit_log`'s, admin only).
  *
- * The history is the database's, for this game's row id, as it returns it. A game moved to another slot or week is a
- * NEW row (the save keys on home, away, slot and week and writes no id), so the old row keeps the history and the
- * new one starts with none; the dialog says so rather than let an empty list read as "never published".
+ * The history is the database's, for this game's row id, as it returns it. A game moved to another slot or week keeps
+ * its id (the save updates it in place), so its history stays with it; a game the new schedule no longer holds stays in
+ * the old run with its history, and a game the schedule has that continues no saved game is new and starts with none.
+ * The dialog says so rather than let an empty list read as "never published".
  *
  * Opened for one game and remounted (a new `key`) for the next, so the read is the dialog's own.
  *
@@ -122,8 +123,9 @@ export default function GameHistoryDialog({
         </ol>
       )}
       <p className="text-xs text-text-muted mt-2">
-        This is the history of this game as it is saved. A game moved to another time slot or week
-        is saved as a new game: it starts with no history, and the old record keeps this one.
+        This is the history of this game as it is saved. A game keeps its history when it is moved
+        to another time slot or week. A new game, one that continues no saved game, starts with
+        none.
       </p>
     </Modal>
   );

@@ -23,8 +23,8 @@ const LISTED = 10;
  * - Focus goes to the heading on open and back to what opened it on close (`Modal` restores it). A refusal after
  *   Confirm is shown here, as an alert, in the database's words.
  *
- * It also says, once, what a move does to a game's identity: a game moved to another slot or week is a new record
- * (see `movedGameNote`).
+ * It also says, once, what a move does to a game's identity: a game moved to another slot or week is still the same
+ * game and keeps its history (see `movedGameNote`).
  *
  * The parent remounts it (a new `key`) for each opening, so a tick or a reason never carries over to another set of
  * games.

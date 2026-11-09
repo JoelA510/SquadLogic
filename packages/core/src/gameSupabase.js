@@ -24,7 +24,10 @@ function normalizeAssignmentSource(value) {
  * Convert scheduler assignments into Supabase-ready rows for `game_assignments`.
  *
  * @param {Object} params
- * @param {Array<Object>} params.assignments - Game assignments from the scheduler.
+ * @param {Array<Object>} params.assignments - Game assignments from the scheduler. An assignment that carries a
+ *   non-empty string `id` names the saved game it continues, and its row carries that `id`: the save updates that game
+ *   in place (`20261120010000_game_identity.sql`). The caller sends an id only for a game that is saved (the Games
+ *   page's `persisted` ones), never a placeholder; an empty or non-string id is no id.
  * @param {string} [params.runId] - Optional scheduler run identifier.
  * @returns {Array<Object>} Supabase row payloads with snake_case keys.
  */
@@ -50,7 +53,10 @@ export function buildGameAssignmentRows({ assignments, runId } = { assignments: 
       throw new Error(`assignments[${index}] end must be after start`);
     }
 
+    const id = typeof assignment.id === 'string' && assignment.id !== '' ? assignment.id : null;
+
     return {
+      ...(id === null ? {} : { id }),
       division,
       week_index: weekIndex,
       game_slot_id: slotId,

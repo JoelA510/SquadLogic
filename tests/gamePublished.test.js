@@ -243,6 +243,23 @@ describe('publishedOmissions', () => {
     ).toEqual(['g3']);
   });
 
+  it('a game named by its id is carried wherever it is sent (20261120010000); one named only elsewhere is not', () => {
+    // g1 is sent by id to another slot and week: present (the guard then judges the move, as the database does).
+    const byId = [
+      { id: 'g1', home_team_id: 'h1', away_team_id: 'a1', game_slot_id: 'sX', week_index: 9 },
+    ];
+    expect(publishedOmissions(saved, byId).map((row) => row.id)).toEqual(['g3']);
+    // The same place without the id is another tuple: g1 is still omitted.
+    const byPlaceOnly = [
+      { home_team_id: 'h1', away_team_id: 'a1', game_slot_id: 'sX', week_index: 9 },
+    ];
+    expect(publishedOmissions(saved, byPlaceOnly).map((row) => row.id)).toEqual(['g1', 'g3']);
+    // An id compares without regard to case, as a uuid does; an empty or non-string id carries nothing.
+    expect(
+      publishedOmissions(saved, [{ id: 'G1' }, { id: '' }, { id: 7 }]).map((row) => row.id)
+    ).toEqual(['g3']);
+  });
+
   it('an unpublished game left out is not an omission', () => {
     const carried = [saved[0], saved[1]].map((row) => ({ ...row }));
     expect(publishedOmissions(saved, carried)).toEqual([]);

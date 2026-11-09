@@ -11,13 +11,14 @@
  * What is held:
  *   - the three Published games come back with the id, slot and time they were saved with: their
  *     cards sit in the same cells under the same ids, and the games sent to the save carry the
- *     same (home, away, slot, week) tuple and the same instants (the save keys its upsert on the
- *     tuple and writes no id, so the same tuple is what keeps a row and its id);
+ *     same (home, away, slot, week) tuple and the same instants (a Published game is sent with its own id and
+ *     its own tuple, so the save keeps the row either way);
  *   - the games sent satisfy `publishedOmissions`, PR 1's oracle for what a save must not leave out;
  *   - the three that are not Published are generated again, as before (decision 14);
  *   - the control: with the same rows NOT Published (or from a database without the column, as
  *     production is until PR 1's migration lands) the page does what it always did, the three
- *     games move, the oracle names all three, and no sentence about kept games is shown.
+ *     games move (each carrying its own id since 20261120010000, so the oracle names none; the
+ *     tuples alone would name all three), and no sentence about kept games is shown.
  */
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
@@ -304,12 +305,21 @@ describe('with nothing Published the page does what it always did', () => {
     ['every row says published: false', false],
     ['the rows have no published column (a database before the migration)', 'absent'],
   ]) {
-    it(`${label}: the three games move, the oracle names all three, and no kept-games sentence is shown`, async () => {
+    it(`${label}: the three games move, each carries its own id, and no kept-games sentence is shown`, async () => {
       await generate(column);
       expect(screen.queryByText(/Published games? kept/)).not.toBeInTheDocument();
       const sent = await applyAndRead();
-      // The same six rows, but with the three flagged as the oracle sees them: every one is left out.
-      expect(publishedOmissions(FLAGGED, sent).map((row) => row.id)).toEqual([
+      // The same six rows, but with the three flagged as the oracle sees them. Since 20261120010000 a moved game is sent
+      // with its own id, which carries it wherever it now is: nothing is left out. Without the ids (the tuple alone, as
+      // the page sent them before) every one of the three would be: the control that the oracle can still say so.
+      expect(publishedOmissions(FLAGGED, sent)).toEqual([]);
+      expect(sent.map((game) => game.id).sort()).toEqual(
+        savedGames(column)
+          .map((row) => row.id)
+          .sort()
+      );
+      const tupleOnly = sent.map(({ id: _id, ...rest }) => rest);
+      expect(publishedOmissions(FLAGGED, tupleOnly).map((row) => row.id)).toEqual([
         'ga-pub-1',
         'ga-pub-2',
         'ga-pub-3',

@@ -3,7 +3,8 @@
 -- Run on the database built to head, inside one transaction that is ROLLED BACK. Synthetic organization, users, teams
 -- and games; no real data.
 --
---   1. Shape: the three columns, the partial index, the enabled guard trigger WHEN (OLD.published), the two audit
+--   1. Shape: the three columns, the partial index, the enabled guard trigger (a trigger WHEN (OLD.published) when this
+--      migration ran; since 20261120010000 it has no WHEN clause and asks game_is_held), the two audit
 --      actions, and the five functions the migration touched (definer, pinned, closed to anon and PUBLIC).
 --   2. The guard, for a signed-in caller: a Published game cannot have its home team, field or start changed or be
 --      deleted (22023, game_published), each beside an unpublished twin that can; the flag alone can be cleared; a job
@@ -67,8 +68,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_trigger t
                     WHERE t.tgrelid = 'public.game_assignments'::regclass AND t.tgname = 'game_assignments_published_guard'
-                      AND NOT t.tgisinternal AND t.tgenabled = 'O' AND pg_get_triggerdef(t.oid) ~ 'WHEN \(old\.published\)') THEN
-        RAISE EXCEPTION 'the guard is not an enabled trigger WHEN (OLD.published)';
+                      AND NOT t.tgisinternal AND t.tgenabled = 'O'
+                      AND pg_get_triggerdef(t.oid) ~ 'BEFORE (DELETE OR UPDATE|UPDATE OR DELETE) ON public.game_assignments FOR EACH ROW') THEN
+        RAISE EXCEPTION 'the guard is not an enabled BEFORE UPDATE OR DELETE row trigger';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'game_assignments'
                     AND indexdef ~ '\(organization_id\) WHERE published') THEN
@@ -95,7 +97,7 @@ BEGIN
        OR NOT has_function_privilege('authenticated', 'public.get_schedule_audit_log(uuid, uuid, integer)', 'EXECUTE') THEN
         RAISE EXCEPTION 'the grants to authenticated are wrong';
     END IF;
-    RAISE NOTICE 'shape: 3 columns, the partial index, the guard trigger WHEN (OLD.published), 2 audit actions, 6 functions pinned and closed to anon and PUBLIC';
+    RAISE NOTICE 'shape: 3 columns, the partial index, the guard trigger, 2 audit actions, 6 functions pinned and closed to anon and PUBLIC';
 
     -- ---- seed (no signed-in user) --------------------------------------------------------------------
     PERFORM set_config('request.jwt.claim.sub', '', true);

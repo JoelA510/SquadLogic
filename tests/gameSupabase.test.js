@@ -38,6 +38,31 @@ test('buildGameAssignmentRows normalizes scheduler output for Supabase', () => {
   ]);
 });
 
+test('buildGameAssignmentRows carries the id of a saved game, and only that', () => {
+  const base = {
+    division: 'U10',
+    weekIndex: 1,
+    slotId: 'slot-1',
+    start: '2024-08-10T16:00:00Z',
+    end: '2024-08-10T17:00:00Z',
+    homeTeamId: 'team-1',
+    awayTeamId: 'team-2',
+  };
+  const rows = buildGameAssignmentRows({
+    assignments: [
+      { ...base, id: '11111111-1111-4111-8111-111111111111' },
+      { ...base, id: '', slotId: 'slot-2' },
+      { ...base, id: 42, slotId: 'slot-3' },
+      { ...base, slotId: 'slot-4' },
+    ],
+  });
+  // A game named by its id is saved in place (20261120010000); an empty, non-string or missing id is no id.
+  assert.equal(rows[0].id, '11111111-1111-4111-8111-111111111111');
+  assert.equal('id' in rows[1], false);
+  assert.equal('id' in rows[2], false);
+  assert.equal('id' in rows[3], false);
+});
+
 test('buildGameAssignmentRows validates inputs and ordering', () => {
   assert.throws(
     () => buildGameAssignmentRows({ assignments: null }),

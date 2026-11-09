@@ -10,9 +10,9 @@
  * view of it: a scope that read the filtered list would publish a smaller set than the count promised (lesson 92, and
  * the plant of PR 3). The page passes one array to the bar and a different, filtered one to the list.
  *
- * **Identity.** A game is its row: `persist_game_schedule` keys on (home, away, slot, week) and writes no id, so a
- * game moved to another slot or week is a NEW row that starts not Published (lesson 95). Nothing here pretends a flag
- * follows a move; the screen says so (see `movedGameNote` in `gamePublishedText.js`).
+ * **Identity.** A game is its row's id: `persist_game_schedule` updates a game in place when the page names it by id
+ * (`20261120010000_game_identity.sql`), so a game moved to another slot or week keeps its id, its flag and its history.
+ * The one thing that does not carry over is a game the new schedule no longer holds ({@link leftBehindHistoryGames}).
  *
  * @module gamePublishedScope
  */
@@ -249,7 +249,7 @@ export function resolveScope(saved, scope, want, context = {}) {
 }
 
 const lowerOf = (value) => String(value ?? '').toLowerCase();
-// The matchup tuple the save keys a game on: a game with another tuple is another row (lesson 95).
+// The matchup tuple (home, away, slot, week): the key a game WITHOUT an id is saved on.
 const tupleOf = (game) =>
   [
     game.homeTeamId ?? game.home_team_id,
@@ -261,26 +261,35 @@ const tupleOf = (game) =>
     .join('|');
 
 /**
- * The saved games with a Published history that a staged schedule no longer holds where they were: moved by hand, or
- * placed elsewhere by a new run. The save keys a game on (home, away, slot, week) and writes no id, so the staged game
- * at another slot or week is saved as a NEW row that starts not Published, and the history stays with the old row.
- * The page says so when a move is staged and when the schedule is applied, so nobody expects the flag to follow the
- * game (lesson 95; an identity layer is a separate, pending decision).
+ * The saved games with a Published history that a staged schedule no longer holds: the new schedule has no game for
+ * them, so the save leaves them in the old run, hidden, with their history. A game is held by the staged schedule when
+ * a staged game carries its id (a game moved, flipped or regenerated keeps its id, so it is held wherever it now is) or,
+ * for a staged game with no saved id (a new game, whose id is only a placeholder), when its matchup tuple (home, away, slot,
+ * week) is the saved game's: the two ways the save recognises a game. A staged game that carries a saved id holds THAT
+ * game and no other, wherever it sits.
  *
- * Judged on the tuple and not on any changed field: a change to the field, start or end alone, with the same slot and
- * week, keeps the row (and so the flag and the history). A Published game is in the staged schedule by construction
- * (the generator carries it and the save refuses a schedule that leaves one out), so in practice these are the games
- * that had changes allowed.
+ * Judged on the saved side: a regenerated game with a fresh id does not hide the game it replaced. A Published game
+ * is in the staged schedule by construction (the generator carries it and the save refuses a schedule that leaves
+ * one out), so in practice these are games that had changes allowed.
  *
  * @param {Array<Record<string, any>>} review - the staged games
  * @param {Array<Record<string, any>>} saved - the saved set
  * @returns {Array<Record<string, any>>} the saved games left behind, in the saved order
  */
-export function movedHistoryGames(review, saved) {
-  const staged = new Set(review.map(tupleOf));
+export function leftBehindHistoryGames(review, saved) {
+  const savedIds = new Set(saved.map((game) => String(game.id)));
+  const carriedIds = new Set(
+    review.map((game) => String(game.id)).filter((id) => savedIds.has(id))
+  );
+  // Only a staged game that carries no saved id is saved on its tuple. One that carries a saved id is saved in place under
+  // that id: it holds that game, not the saved game whose tuple it now sits on (the save refuses a game that would end
+  // where a stored game it does not name already is, so on an accepted save that tuple is no one's but its own).
+  const carriedTuples = new Set(
+    review.filter((game) => !savedIds.has(String(game.id))).map(tupleOf)
+  );
   return saved.filter((game) => {
     const hasHistory = game.published === true || Boolean(game.publishedAt ?? game.published_at);
-    return hasHistory && !staged.has(tupleOf(game));
+    return hasHistory && !carriedIds.has(String(game.id)) && !carriedTuples.has(tupleOf(game));
   });
 }
 

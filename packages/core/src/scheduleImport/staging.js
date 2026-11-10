@@ -31,6 +31,9 @@ import {
 import { SCHEDULE_IMPORT_COLUMNS, parseScheduleRows } from './parseRows.js';
 import { SCHEDULE_IMPORT_STAGED_FLAGS } from './reasonCodes.js';
 
+/** The staged flags as plain text, for a membership test of any code. */
+const STAGED_FLAGS = /** @type {readonly string[]} */ (SCHEDULE_IMPORT_STAGED_FLAGS);
+
 /** The keys of a staged games row, in the order the allowlist lists them. */
 export const GAME_STAGED_KEYS = Object.freeze([
   'row_key',
@@ -88,9 +91,7 @@ export function toStagedGameRow(row) {
       week_index: row.weekIndex,
       // Only the flags the SQL knows: the parse's own warnings (`bad-time`, `bad-week`) are said at
       // the upload and in the preview, and a staged row that carried one would refuse the whole apply.
-      flags: row.flags
-        .map((flag) => flag.code)
-        .filter((code) => SCHEDULE_IMPORT_STAGED_FLAGS.includes(code)),
+      flags: row.flags.map((flag) => flag.code).filter((code) => STAGED_FLAGS.includes(code)),
       division: row.divisionLabel,
       division_key: divisionDecisionKey(row.divisionLabel),
       venue: row.venueLabel,
@@ -118,10 +119,13 @@ export const SCHEDULE_IMPORT_CHUNK_LIMITS = Object.freeze({
 /** A cell as text, without markup or control characters, cut to the cell limit. @param {unknown} value */
 function cleanCell(value) {
   if (value === undefined || value === null) return '';
-  return String(value)
-    .replace(/<[^>]*>/g, '')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
-    .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH);
+  return (
+    String(value)
+      .replace(/<[^>]*>/g, '')
+      // eslint-disable-next-line no-control-regex -- the class is the point: control characters are not text of a label
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+      .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH)
+  );
 }
 
 /**

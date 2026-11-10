@@ -141,7 +141,11 @@ function warningLine(warning, league) {
   return `${where ? `${where}: ` : ''}${words(warning.type)}`;
 }
 
-/** A list of sentences, the first `NAMED` named and the rest counted. */
+/**
+ * A list of sentences, the first `NAMED` named and the rest counted.
+ *
+ * @param {{ items: string[], total: number, testId: string, heading: string }} props
+ */
 function NamedList({ items, total, testId, heading }) {
   if (total <= 0) return null;
   const shown = items.slice(0, NAMED);
@@ -159,7 +163,11 @@ function NamedList({ items, total, testId, heading }) {
   );
 }
 
-/** A message with an icon and a word, never colour alone. */
+/**
+ * A message with an icon and a word, never colour alone.
+ *
+ * @param {{ tone?: 'info' | 'error' | 'warning' | 'success', testId?: string, children: any, role?: string }} props
+ */
 function Notice({ tone = 'info', testId, children, role }) {
   const styles = {
     info: 'border-border-subtle bg-bg-surface text-text-secondary',
@@ -239,20 +247,27 @@ export default function ScheduleImportPanel({
     stepHeadingRef.current?.focus();
   }, [step]);
 
-  // The season's last applied import, so it can still be rolled back after a reload.
-  const refreshLast = useCallback(async () => {
-    if (!organizationId || !seasonSettingsId) return;
-    try {
-      setLastImport(await K.latest(client, { organizationId, seasonSettingsId }));
-    } catch (err) {
-      // Said, not swallowed: the upload still works without it.
-      logger.warn('The last schedule import could not be read:', err);
-      setLastImport(null);
-    }
-  }, [K, client, organizationId, seasonSettingsId]);
+  // The season's last applied import, so it can still be rolled back after a reload. `lastKey` asks for it again
+  // (after an apply or a roll back).
+  const [lastKey, setLastKey] = useState(0);
+  const refreshLast = useCallback(() => setLastKey((n) => n + 1), []);
   useEffect(() => {
-    refreshLast();
-  }, [refreshLast]);
+    if (!organizationId || !seasonSettingsId) return undefined;
+    let current = true;
+    K.latest(client, { organizationId, seasonSettingsId }).then(
+      (job) => {
+        if (current) setLastImport(job);
+      },
+      (err) => {
+        // Said, not swallowed: the upload still works without it.
+        logger.warn('The last schedule import could not be read:', err);
+        if (current) setLastImport(null);
+      }
+    );
+    return () => {
+      current = false;
+    };
+  }, [K, client, organizationId, seasonSettingsId, lastKey]);
 
   const decisions = useMemo(() => decisionsFromChoices(choices), [choices]);
   const proposal = useMemo(

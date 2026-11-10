@@ -327,7 +327,9 @@ describe('F7: a preview that went stale is refused, in the mock and in the Edge 
     expect(confirmed).toEqual(core.scheduleImportConfirmCounts(preview));
     await publishTheMovedGame();
     const before = await snapshot();
-    const outcome = await edge.applyGameImportConfirmed({ rpc, jobId, confirmed });
+    const outcome = /** @type {any} */ (
+      await edge.applyGameImportConfirmed({ rpc, jobId, confirmed })
+    );
     expect(outcome.kind).toBe('stale');
     expect(outcome.code).toBe('game_import_preview_stale');
     // the game is now held: its row is skipped, not an update, and the slot the move needed is not made
@@ -340,14 +342,18 @@ describe('F7: a preview that went stale is refused, in the mock and in the Edge 
     expect(outcome.current['games.updated']).toBe(0);
     expect(await snapshot()).toBe(before);
     // CONTROL in the same code: the fresh counts apply, and a retry after that answers with the stored result
-    const applied = await edge.applyGameImportConfirmed({
-      rpc,
-      jobId,
-      confirmed: edge.gameImportConfirmCounts(outcome.preview),
-    });
+    const applied = /** @type {any} */ (
+      await edge.applyGameImportConfirmed({
+        rpc,
+        jobId,
+        confirmed: edge.gameImportConfirmCounts(outcome.preview),
+      })
+    );
     expect(applied.kind).toBe('applied');
     expect(applied.result.dry_run).toBe(false);
-    const retry = await edge.applyGameImportConfirmed({ rpc, jobId, confirmed });
+    const retry = /** @type {any} */ (
+      await edge.applyGameImportConfirmed({ rpc, jobId, confirmed })
+    );
     expect(retry.kind).toBe('applied');
     expect(retry.result.replayed).toBe(true);
   });

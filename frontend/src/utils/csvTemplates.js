@@ -167,7 +167,7 @@ function toCsv(rows) {
 
 /**
  * Generate a template CSV and trigger a browser download.
- * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'} type
+ * @param {'players'|'coaches'|'evaluations'|'fields'|'field_availability'|'games'} type
  */
 export function downloadTemplate(type) {
   const tmpl = CSV_TEMPLATES[type];

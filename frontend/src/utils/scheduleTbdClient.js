@@ -9,7 +9,8 @@ import { fetchAllPages } from '../lib/pagedFetch.js';
  *
  * @param {any} client
  * @param {string} seasonSettingsId
- * @param {unknown} rows - the RPC's `data`
+ * @param {any} rows - the RPC's `data`
+ * @returns {Promise<any>} the rows (an array), or the RPC's own answer untouched when it is not one
  */
 async function withGameDates(client, seasonSettingsId, rows) {
   if (!Array.isArray(rows) || !rows.some((row) => row?.kind === 'game')) return rows;

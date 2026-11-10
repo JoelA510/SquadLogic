@@ -73,6 +73,13 @@ const upload = (csv = fileCsv(), name = 'schedule.csv') =>
     target: { files: [new File([csv], name, { type: 'text/csv' })] },
   });
 const step = () => screen.getByTestId('schedule-import-step').textContent;
+/** A `<select>` by the name it carries. @param {string} name @returns {HTMLSelectElement} */
+const select = (name) =>
+  /** @type {HTMLSelectElement} */ (screen.getByRole('combobox', { name: `What ${name} is` }));
+/** @param {string} name @returns {HTMLButtonElement} */
+const button = (name) => /** @type {HTMLButtonElement} */ (screen.getByRole('button', { name }));
+/** @param {string | RegExp} label @returns {HTMLInputElement} */
+const checkbox = (label) => /** @type {HTMLInputElement} */ (screen.getByLabelText(label));
 const toMapping = async () => {
   upload();
   await waitFor(() => expect(step()).toMatch(/2 of 4/));
@@ -155,13 +162,9 @@ describe('mapping (F8): a match opens on "use existing", no match opens undecide
     render(<ScheduleImportPanel />);
     await toMapping();
     // matched: one record of that name, in its division and in its venue
-    expect(screen.getByRole('combobox', { name: 'What U05B Team 01 (U05 Boys) is' }).value).toBe(
-      `map:${TEAMS.t1}`
-    );
-    expect(screen.getByRole('combobox', { name: 'What U05 Boys is' }).value).toMatch(/^map:/);
-    expect(screen.getByRole('combobox', { name: 'What Field 1 (Venue A) is' }).value).toMatch(
-      /^map:/
-    );
+    expect(select('U05B Team 01 (U05 Boys)').value).toBe(`map:${TEAMS.t1}`);
+    expect(select('U05 Boys').value).toMatch(/^map:/);
+    expect(select('Field 1 (Venue A)').value).toMatch(/^map:/);
     // CONTROL: no record of that name, so nothing is chosen for the admin (never "create")
     for (const name of [
       'Visiting Club A (U05 Boys)',
@@ -169,16 +172,14 @@ describe('mapping (F8): a match opens on "use existing", no match opens undecide
       'Field 9 (Venue A)',
       'U07 Girls',
     ]) {
-      expect(screen.getByRole('combobox', { name: `What ${name} is` }).value).toBe('undecided');
+      expect(select(name).value).toBe('undecided');
     }
     // said in words beside each, not by colour
     expect(screen.getAllByText('Not decided: its rows will not be imported.').length).toBe(4);
     // a team of a division nobody decided is not asked about yet
     expect(screen.queryByRole('combobox', { name: 'What U07G Team 01 (U07 Girls) is' })).toBeNull();
     choose('U07 Girls', 'create');
-    expect(screen.getByRole('combobox', { name: 'What U07G Team 01 (U07 Girls) is' }).value).toBe(
-      'undecided'
-    );
+    expect(select('U07G Team 01 (U07 Girls)').value).toBe('undecided');
   });
 
   it('lets the admin map a label to any record in its place, and turn a match down', async () => {
@@ -201,9 +202,7 @@ describe('mapping (F8): a match opens on "use existing", no match opens undecide
     choose('Mystery Team (U05 Boys)', `map:${TEAMS.t6}`);
     // turning a match down leaves the label undecided (the proposal does not come back)
     choose('U05B Team 05 (U05 Boys)', 'undecided');
-    expect(screen.getByRole('combobox', { name: 'What U05B Team 05 (U05 Boys) is' }).value).toBe(
-      'undecided'
-    );
+    expect(select('U05B Team 05 (U05 Boys)').value).toBe('undecided');
     await toPreview();
     // row 11 now imports (mapped), and the rows of the label turned down do not
     const refused = screen.getByTestId('schedule-import-refused').textContent;
@@ -318,7 +317,7 @@ describe('confirm: everything that will be created is listed, and nothing is cre
     expect(await table('teams')).toHaveLength(6);
     expect(await table('divisions')).toHaveLength(1);
     expect(await table('game_assignments')).toHaveLength(3);
-    const confirm = screen.getByRole('button', { name: 'Confirm and import' });
+    const confirm = button('Confirm and import');
     expect(confirm.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
     expect(confirm.disabled).toBe(false);
@@ -400,7 +399,7 @@ describe('F7: a preview that went stale is refused at the confirm, and nothing i
     // the fresh preview is on screen, and it must be confirmed again (the tick is asked for again)
     expect(step()).toMatch(/3 of 4/);
     expect(count('games.updated')).toBe(0);
-    const confirm = screen.getByRole('button', { name: 'Confirm and import' });
+    const confirm = button('Confirm and import');
     expect(confirm.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
     fireEvent.click(confirm);
@@ -524,9 +523,7 @@ describe('accessibility: keyboard, names, and no state by colour alone', () => {
     decideEverything();
     await toPreview();
     fireEvent.click(screen.getByLabelText(/Games arrive Published/));
-    await waitFor(() =>
-      expect(screen.getByLabelText(/Games arrive Published/).checked).toBe(false)
-    );
+    await waitFor(() => expect(checkbox(/Games arrive Published/).checked).toBe(false));
     await waitFor(() => expect(screen.queryByTestId('schedule-import-busy')).toBeNull());
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
@@ -545,7 +542,7 @@ describe('G3: the saved schedule as a file the import reads', () => {
     const note = await screen.findByTestId('schedule-import-export-note');
     expect(note.textContent).toBe('Downloaded 3 games.');
     expect(saveFile).toHaveBeenCalledTimes(1);
-    const [name, blob] = saveFile.mock.calls[0];
+    const [name, blob] = /** @type {any} */ (saveFile).mock.calls[0];
     expect(name).toBe('squadlogic-game-schedule.csv');
     const text = await blob.text();
     const lines = text.split('\n');

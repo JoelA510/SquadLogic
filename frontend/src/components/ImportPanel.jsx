@@ -868,7 +868,7 @@ export default function ImportPanel({ onImport }) {
             }
           >
             <ScheduleImportPanel
-              kind={importType}
+              kind={/** @type {'games'} */ (importType)}
               isDemo={isDemo}
               onDemoBlocked={() => setDemoNoticeOpen(true)}
               onDone={() => onImport?.()}

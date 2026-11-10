@@ -59,7 +59,13 @@ export async function stageMapPreview(
   };
 }
 
-/** Confirm a preview as the panel does: with the counts of the preview on screen. */
+/**
+ * Confirm a preview as the panel does: with the counts of the preview on screen.
+ *
+ * @param {any} client
+ * @param {{ organizationId: string, jobId: string, preview: any }} input
+ * @returns {Promise<any>} `{ status: 'applied', result }` or `{ status: 'stale', differing, confirmed, current, preview }`
+ */
 export const confirmPreview = (client, { organizationId, jobId, preview }) =>
   confirmGameImport(client, {
     organizationId,

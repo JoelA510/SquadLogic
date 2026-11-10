@@ -786,6 +786,7 @@ function cleanCell(value: unknown): string {
     String(value)
       .replace(/<[^>]*>/g, '')
       // deno-lint-ignore no-control-regex
+      // eslint-disable-next-line no-control-regex -- the class is the point: control characters are not text of a label
       .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
       .slice(0, GAME_IMPORT_LIMITS.MAX_CELL_LENGTH)
   );

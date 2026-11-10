@@ -231,8 +231,8 @@ export async function readStagedGameRows(client, jobId) {
  *
  * @param {any} client
  * @param {string} jobId
- * @param {{ options: { arrive_published: boolean }, divisions: Record<string, any>, venues: Record<string, any>,
- *   fields: Record<string, any>, teams: Record<string, any> }} mapping
+ * @param {Record<string, any>} mapping  `{ options: { arrive_published }, divisions, venues, fields, teams }`, each
+ *   group a decision per decision key (`mappingForJob` builds it)
  */
 export async function saveGameImportMapping(client, jobId, mapping) {
   requireClient(client);
@@ -269,8 +269,9 @@ export async function previewGameImport(client, jobId) {
  *
  * @param {any} client
  * @param {{ organizationId: string, jobId: string, confirmed: Record<string, number | boolean> }} input
- * @returns {Promise<{ status: 'applied', result: any }
- *   | { status: 'stale', message: string, differing: string[], confirmed: any, current: any, preview: any }>}
+ * @returns {Promise<{ status: 'applied' | 'stale', result?: any, message?: string, differing?: string[],
+ *   confirmed?: any, current?: any, preview?: any }>} `applied` with the `result`; or `stale` with the message, the
+ *   counts that differ, both sets of counts and the fresh `preview` (nothing was written)
  */
 export async function confirmGameImport(client, { organizationId, jobId, confirmed }) {
   requireClient(client);

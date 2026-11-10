@@ -111,31 +111,36 @@ export default function GameTimeTbdSection({
   supabaseClient,
 }) {
   const client = supabaseClient ?? supabase;
+  // What was read, and the season it was read for: a list read for another season is never drawn for this one.
   const [state, setState] = useState(
-    /** @type {{ rows: Array<Record<string, any>>, error: string | null }} */ ({
+    /** @type {{ season: string | null, rows: Array<Record<string, any>>, error: string | null }} */ ({
+      season: null,
       rows: [],
       error: null,
     })
   );
   useEffect(() => {
-    if (!enabled || !seasonSettingsId) {
-      setState({ rows: [], error: null });
-      return undefined;
-    }
+    if (!enabled || !seasonSettingsId) return undefined;
     let current = true;
     readScheduleTbd(client, seasonSettingsId).then(
       (read) => {
-        if (current) setState({ rows: read.rows, error: null });
+        if (current) setState({ season: seasonSettingsId, rows: read.rows, error: null });
       },
       (err) => {
-        if (current) setState({ rows: [], error: err?.message || 'the read failed' });
+        if (current) {
+          setState({
+            season: seasonSettingsId,
+            rows: [],
+            error: err?.message || 'the read failed',
+          });
+        }
       }
     );
     return () => {
       current = false;
     };
   }, [client, enabled, seasonSettingsId, refreshKey]);
-  if (!enabled) return null;
+  if (!enabled || !seasonSettingsId || state.season !== seasonSettingsId) return null;
   return <GameTimeTbdList rows={state.rows} placed={placed} error={state.error} />;
 }
 

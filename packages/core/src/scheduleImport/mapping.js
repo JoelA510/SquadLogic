@@ -205,7 +205,7 @@ const SKIP = Object.freeze({ type: 'skip' });
 /**
  * Everything the mapping step knows: the entries to show and the references rows resolve through.
  *
- * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any>, explicitOnly?: boolean }} input
  */
 function analyse({ rows, league, decisions, explicitOnly = false }) {
   requireArray(rows, 'rows');

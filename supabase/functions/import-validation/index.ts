@@ -45,6 +45,8 @@ import {
   applyGameImportConfirmed,
   GAME_IMPORT_LIMITS,
   isGameImportConfirmCounts,
+  loadGameImportSeason,
+  type SeasonReader,
   stageGameChunk,
 } from '../_shared/schedule-import.ts';
 
@@ -784,12 +786,13 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     }
 
     // The clock and the window are the season the JOB imports into: never the request's word.
-    const { data: seasonRow, error: seasonError } = await serviceClient
-      .from('season_settings')
-      .select('id, timezone, season_start, season_end')
-      .eq('id', job.season_settings_id)
-      .eq('organization_id', organizationId)
-      .maybeSingle();
+    // Read by the shared module: the handler itself reads no season (the player arm's rule is one call, and
+    // `_shared/tests/import-age-rule_test.ts` holds the handler to that).
+    const { data: seasonRow, error: seasonError } = await loadGameImportSeason(
+      // The client's own query types are wider than the three calls this read makes.
+      serviceClient as unknown as SeasonReader,
+      { seasonSettingsId: job.season_settings_id, organizationId }
+    );
     if (seasonError) {
       await logFailure(logCtx, 'Season lookup failed', seasonError);
       return jsonResponse({ status: 'error', message: 'Season lookup failed' }, 500);

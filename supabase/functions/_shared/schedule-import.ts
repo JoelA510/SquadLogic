@@ -883,6 +883,44 @@ export function stageGameChunk({
   };
 }
 
+// ------------------------------------------------------------------------------------------------ the job's season
+
+/** The season row a games import is read against. */
+export interface GameImportSeasonRow {
+  id: string;
+  timezone: string | null;
+  season_start: string | null;
+  season_end: string | null;
+}
+
+/** The part of a supabase client this read uses. */
+export interface SeasonQuery {
+  select(columns: string): SeasonQuery;
+  eq(column: string, value: string): SeasonQuery;
+  maybeSingle(): PromiseLike<{ data: unknown; error: { message?: string } | null }>;
+}
+export interface SeasonReader {
+  from(table: string): SeasonQuery;
+}
+
+/**
+ * The season a games import job imports into: its clock and its window. The season is the JOB's, of the job's
+ * organization, never the request's word. No row is `data: null` with no error (the caller answers `season_missing`).
+ */
+export async function loadGameImportSeason(
+  client: SeasonReader,
+  { seasonSettingsId, organizationId }: { seasonSettingsId: string | null; organizationId: string }
+): Promise<{ data: GameImportSeasonRow | null; error: { message?: string } | null }> {
+  if (!seasonSettingsId) return { data: null, error: null };
+  const { data, error } = await client
+    .from('season_settings')
+    .select('id, timezone, season_start, season_end')
+    .eq('id', seasonSettingsId)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+  return { data: (data as GameImportSeasonRow | null) ?? null, error: error ?? null };
+}
+
 // ------------------------------------------------------------------------------------------------ the confirm (F7)
 
 const FIXED_COUNTS: Readonly<Record<string, readonly string[]>> = Object.freeze({

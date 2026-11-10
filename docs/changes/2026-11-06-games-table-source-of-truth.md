@@ -632,6 +632,10 @@ eight pgTAP files that insert into `games`. Proved by the census going green wit
 
 ## What PR 5, and the other pull requests, must do or avoid because of this plan
 
+**PR 5 is merged as #719 (`ad18861`)**, specified with the amendments below (statically checked on 2026-11-10 in
+`20261121010000_game_import.sql`: the unique index on `(season_settings_id, external_ref)` and the guard's call of
+`game_is_held`; the rest not re-read, and nothing re-run here).
+
 **PR 5 must:**
 
 1. Make `external_ref` unique per season, `(season_settings_id, external_ref)`, not per organization; `season_settings_id`

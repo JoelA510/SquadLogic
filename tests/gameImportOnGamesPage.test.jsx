@@ -188,22 +188,50 @@ describe('F9: the Games page lists what an import said, in words', () => {
 describe('F6: the Games page lists a TIME TBD game with its date and no time', () => {
   it('a dated game from the import beside an undated one the scheduler could not place', async () => {
     await importFile(FILE_ROWS);
-    // An undated TIME TBD game, as a generated save records one (the table's own row, in the shape the game save
-    // writes: no date, the scheduler's reason).
+    // An undated TIME TBD game. The production writer of one is the game save (`persist_game_schedule` records the
+    // scheduler's unplaced games); the mock's game save does not model that table, so the row cannot be produced by
+    // a call here. It is seeded in EXACTLY the shape the save inserts, and that is checked against the save's own
+    // text below: the columns it writes, `kind` 'game', and no `game_date` (only an import gives one).
+    const save = readFileSync('supabase/migrations/20261120010000_game_identity.sql', 'utf8');
+    const insert =
+      /INSERT INTO public\.schedule_tbd \(\s*([a-z_,\s]+?)\s*\)\s*SELECT DISTINCT ON \(u\.h, u\.a, u\.wk\)\s*v_org_id, v_season_id, 'game'/.exec(
+        save
+      );
+    expect(insert).not.toBeNull();
+    const savedColumns = insert[1].split(',').map((c) => c.trim());
+    expect(savedColumns).toEqual([
+      'organization_id',
+      'season_settings_id',
+      'kind',
+      'division_id',
+      'home_team_id',
+      'away_team_id',
+      'week_index',
+      'reason',
+      'detail',
+      'run_id',
+    ]);
+    const undatedRow = {
+      organization_id: ORG,
+      season_settings_id: SEASON,
+      kind: 'game',
+      division_id: '0a000000-0000-4000-8000-000000000010',
+      home_team_id: TEAMS.t1,
+      away_team_id: TEAMS.t6,
+      week_index: 9,
+      reason: 'no-slot-available',
+      detail: { division: 'U05 Boys' },
+      run_id: null,
+    };
+    // the seeded row carries the save's columns and nothing else of its own (the id and timestamp are the table's)
+    expect(Object.keys(undatedRow)).toEqual(savedColumns);
+    expect(savedColumns).not.toContain('game_date');
     seedMockDb({
       schedule_tbd: [
         {
           id: '0a000000-0000-4000-8000-0000000000f1',
-          organization_id: ORG,
-          season_settings_id: SEASON,
-          kind: 'game',
-          division_id: '0a000000-0000-4000-8000-000000000010',
-          home_team_id: TEAMS.t1,
-          away_team_id: TEAMS.t6,
-          week_index: 9,
-          reason: 'no-slot-available',
-          game_date: null,
           created_at: '2026-09-02T00:00:00Z',
+          ...undatedRow,
         },
       ],
     });

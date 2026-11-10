@@ -1470,7 +1470,8 @@ preview and apply parity.
 - [x] G3 (S, moved from PR 7) The SquadLogic schedule CSV, whose test exports the fixture's imported schedule and
       re-imports it as a dry run: **zero changes**. It is here because the importer it tests is here.
 - [ ] G5 (S, moved from PR 7) Optional "record as baseline" at import (decision 15), ticked by default when the games
-      arrive Published. Tests of G3 and G5: as they were in PR 7 (as 5.1 and 5.6, each with a case for a cancelled game
+      arrive Published. **Deferred, 2026-11-10 (the coordinating agent, under the delegation of section 10): to PR 6b
+      (baseline at import). It needs the Exports page's generation as a shared function.** Tests of G3 and G5: as they were in PR 7 (as 5.1 and 5.6, each with a case for a cancelled game
       and a TIME TBD game).
 
 - [x] F5 (S, added 2026-11-10; section 10, the 2026-11-10 answers, entry 4) Core's parse turns a `bad-time` row into a
@@ -1497,10 +1498,10 @@ preview and apply parity.
 Plants: the conversion reads the host zone; an unmatched label created without the confirm list; the preview's counts
 computed apart from the dry run.
 
-**As built (2026-11-10; the pull request has the detail).** Eleven of the twelve tasks are done; **G5 is not** (a
-baseline is the master export's rows, and the import panel does not make that file: recording one from the panel needs
-the Exports page's own generation, which is a change to that page and was not started). What differs from the text
-above, each a decision of the build under the delegation of 2026-11-10 (section 10):
+**As built (2026-11-10; the pull request has the detail).** Eleven of the twelve tasks are done; **G5 is deferred to
+PR 6b** (a baseline is the master export's rows, and the import panel does not make that file: recording one from the
+panel needs the Exports page's own generation as a shared function, a refactor that goes in its own pull request,
+AGENTS.md section 3). What differs from the text above, each a decision of the build under the delegation of 2026-11-10 (section 10):
 
 - F1/F5: `bad-time` and `bad-week` are warnings of the parse that are **not staged**. The apply's shape check takes two
   staged flags (`time-ambiguous`, `week-differs`) and this PR has no migration, so a third would refuse the whole apply.
@@ -1520,6 +1521,35 @@ above, each a decision of the build under the delegation of 2026-11-10 (section 
   what it did not check, as the SQL result does (`not_judged`).
 - Found while building: the mock resolved a single match with no stored decision; the database does not. Core takes
   `explicitOnly` and the mock passes it (lesson 107).
+- Fix round 1 (2026-11-10, Codex and CI): the panel's workflow is keyed by organization and season, and a roll back is
+  refused for a job of another scope; a blank Division or team, and a time and field with no Venue, are refused as a
+  row at staging (`unknown-division`, `unknown-team`, `unknown-venue`) instead of failing the apply's shape check for
+  the whole job; a value is read by the header as the file wrote it; the schedule CSV writes a game's own start and
+  end on the season clock, not its slot's; the Edge handler reads the job's season through the shared module.
+
+**For the next replacement of `apply_game_import_job` and `get_schedule_tbd` (noted 2026-11-10; F11-2 replaces
+neither, so whichever pull request next replaces one takes its line):**
+
+- `apply_game_import_job` is callable directly by an admin, without the preview-stale check the Edge function makes.
+  Moving the comparison into the function (the confirmed counts as a parameter) closes that, and makes the re-run and
+  the apply one statement.
+- Its staged-flag list (`time-ambiguous`, `week-differs`) should take `bad-time` and `bad-week`, so the two warnings
+  reach the saved result, and `c_row_refusals` should drop the two codes.
+- `get_schedule_tbd` should return `game_date` and `external_ref`; the client's second read of `schedule_tbd` then
+  goes.
+
+### PR 6b: baseline at import (S after its refactor; no migration; Review: (a); added 2026-11-10)
+
+Depends on: PR 6 merged. On no other pull request's dependency path; placed after F11-3 in the order.
+
+- [ ] G5a (M) Lift the Exports page's master-file generation (`buildExportPayload`, the directory read and
+      `generateScheduleExports` as `OutputGenerationPanel` calls them) into one function both callers use. A refactor,
+      in its own pull request first if it is more than a move. Test: the Exports page's existing tests unchanged, and
+      the function's rows equal to the page's for one seeded league.
+- [ ] G5 (S) The import's result offers "record this import as the publication baseline", ticked by default when the
+      games arrive Published, and records the shared function's rows through `admin_publish_schedule_baseline`. Tests
+      as 5.1 and 5.6 (each with a case for a cancelled game and a TIME TBD game), and "Changes since publication"
+      against that baseline shows no change right after the import.
 
 ### PR 7: reports (M; no migration; Review: (a))
 
@@ -2542,6 +2572,7 @@ section 7). **Not merged:** PR 8, 10, 11 and 12, and F11-2 to F11-5. PR 14 stays
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
   held (decision 28). Left, with the F11 plan's pull requests in their places: PR 6 (in review; PR 5's migration
   `20261121010000` was deployed first; its task list grew on 2026-11-10, F5 to F9 and F3b), then F11-2, F11-3,
+  PR 6b (baseline at import, task G5, deferred from PR 6 on 2026-11-10; it is on no dependency path),
   PR 10, PR 8, PR 11, F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
   answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside

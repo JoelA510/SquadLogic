@@ -17,7 +17,14 @@ export const FIELD_1 = '0a000000-0000-4000-8000-000000000021';
 export const FIELD_2 = '0a000000-0000-4000-8000-000000000022';
 export const RUN = '0a000000-0000-4000-8000-000000000030';
 const team = (n) => `0a000000-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`;
-export const TEAMS = Object.freeze({ t1: team(1), t2: team(2), t3: team(3), t4: team(4), t5: team(5), t6: team(6) });
+export const TEAMS = Object.freeze({
+  t1: team(1),
+  t2: team(2),
+  t3: team(3),
+  t4: team(4),
+  t5: team(5),
+  t6: team(6),
+});
 export const SAVED = Object.freeze({
   open: '0a000000-0000-4000-8000-000000000041',
   published: '0a000000-0000-4000-8000-000000000042',
@@ -86,7 +93,9 @@ export function seedGameImportWorld() {
     organization_members: [{ organization_id: ORG, profile_id: ADMIN, role: 'admin' }],
     profiles: [{ id: ADMIN, full_name: 'Placeholder Admin' }],
     season_settings: [{ ...SEASON_ROW }],
-    divisions: [{ id: DIVISION, organization_id: ORG, season_settings_id: SEASON, name: 'U05 Boys' }],
+    divisions: [
+      { id: DIVISION, organization_id: ORG, season_settings_id: SEASON, name: 'U05 Boys' },
+    ],
     teams: Object.values(TEAMS).map((id, i) => ({
       id,
       organization_id: ORG,

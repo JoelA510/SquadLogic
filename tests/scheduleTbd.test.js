@@ -234,7 +234,12 @@ describe('the RPC rows become export items, or an error', () => {
   });
 
   it('F6: a dated TIME TBD game carries its date and no time, beside an undated one that reads as it always has', () => {
-    const dated = { ...gameRow, id: 'r3', reason: 'imported-without-time', game_date: '2026-10-17' };
+    const dated = {
+      ...gameRow,
+      id: 'r3',
+      reason: 'imported-without-time',
+      game_date: '2026-10-17',
+    };
     assert.deepEqual(scheduleTbdItemsFromRows([gameRow, dated]), [
       // CONTROL: the undated game, to the last key, with no `gameDate` invented for it
       {

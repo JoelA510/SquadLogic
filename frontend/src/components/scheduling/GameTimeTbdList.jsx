@@ -47,8 +47,8 @@ export function GameTimeTbdList({ rows, placed = [], error = null }) {
         {`TIME TBD games (${games.length})`}
       </h2>
       <p className="text-xs text-text-muted max-w-prose">
-        These games have no time yet, so they are not on the grid. A game with a date is listed
-        with its date and no time.
+        These games have no time yet, so they are not on the grid. A game with a date is listed with
+        its date and no time.
       </p>
       <ul className="text-sm text-text-secondary mt-2 space-y-1">
         {games.map((row) => {
@@ -56,7 +56,11 @@ export function GameTimeTbdList({ rows, placed = [], error = null }) {
             JSON.stringify([row.home_team_id, row.away_team_id, row.week_index])
           );
           return (
-            <li key={row.id} data-testid="game-time-tbd-item" data-dated={row.game_date ? 'yes' : 'no'}>
+            <li
+              key={row.id}
+              data-testid="game-time-tbd-item"
+              data-dated={row.game_date ? 'yes' : 'no'}
+            >
               <span className="text-text-primary">
                 {`${row.division_name ? `${row.division_name}: ` : ''}${row.home_team_name ?? 'A team'} v ${
                   row.away_team_name ?? 'a team'
@@ -108,7 +112,10 @@ export default function GameTimeTbdSection({
 }) {
   const client = supabaseClient ?? supabase;
   const [state, setState] = useState(
-    /** @type {{ rows: Array<Record<string, any>>, error: string | null }} */ ({ rows: [], error: null })
+    /** @type {{ rows: Array<Record<string, any>>, error: string | null }} */ ({
+      rows: [],
+      error: null,
+    })
   );
   useEffect(() => {
     if (!enabled || !seasonSettingsId) {

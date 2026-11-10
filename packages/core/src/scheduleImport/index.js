@@ -11,6 +11,7 @@
  * | `audit.js` | the conflict audit, with what it did not check |
  * | `staging.js` | what a parsed row becomes in `staging_import_rows` (the keys the SQL apply reads) |
  * | `previewCounts.js` | the counts a confirm shows, and whether an apply would still do them (PR 6, F7) |
+ * | `scheduleCsv.js` | the saved schedule as a file this import reads (PR 6, G3: the round trip) |
  *
  * ## What it is not
  *
@@ -27,3 +28,4 @@ export * from './mapping.js';
 export * from './audit.js';
 export * from './staging.js';
 export * from './previewCounts.js';
+export * from './scheduleCsv.js';

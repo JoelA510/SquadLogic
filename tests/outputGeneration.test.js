@@ -245,7 +245,12 @@ test('F6: a TIME TBD game that holds a date says its date and still has no time,
     weekIndex: 4,
     reason: 'coach-scheduling-conflict',
   };
-  const dated = { ...undated, weekIndex: 6, reason: 'imported-without-time', gameDate: '2026-10-17' };
+  const dated = {
+    ...undated,
+    weekIndex: 6,
+    reason: 'imported-without-time',
+    gameDate: '2026-10-17',
+  };
   const before = generateScheduleExports({ teams: TBD_TEAMS, tbdItems: [undated] });
   const exports = generateScheduleExports({ teams: TBD_TEAMS, tbdItems: [undated, dated] });
   assert.equal(exports.master.rows.length, 4);
@@ -256,7 +261,10 @@ test('F6: a TIME TBD game that holds a date says its date and still has no time,
   assert.equal(onDate.length, 2);
   for (const row of onDate) {
     // the date is said; the time is the TIME TBD token every reader of the master file keys on, and no clock time
-    assert.equal(row.Notes, 'Game not scheduled (week 6, on 2026-10-17): the imported file gave it no time or no field.');
+    assert.equal(
+      row.Notes,
+      'Game not scheduled (week 6, on 2026-10-17): the imported file gave it no time or no field.'
+    );
     assert.equal(row.Start, 'TIME TBD');
     assert.equal(row.End, '');
     assert.equal(row.Field, 'LOCATION TBD');

@@ -14,12 +14,14 @@ import { supabase } from '../../lib/supabaseClient.js';
 import { logger } from '../../lib/logger.js';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import Button from '../ui/Button.jsx';
+import { csvBlob, saveFile } from '../../utils/scheduleDownloads.js';
 import {
   confirmGameImport,
   discardGameImport,
   previewGameImport,
   readGameImportLeague,
   readLatestGameImportJob,
+  readSavedScheduleCsv,
   readStagedGameRows,
   rollbackGameImport,
   saveGameImportMapping,
@@ -74,6 +76,8 @@ const KINDS = Object.freeze({
     rollback: rollbackGameImport,
     discard: discardGameImport,
     latest: readLatestGameImportJob,
+    exportSaved: readSavedScheduleCsv,
+    exportFileName: 'squadlogic-game-schedule.csv',
   },
 });
 
@@ -431,6 +435,38 @@ export default function ScheduleImportPanel({
     }
   };
 
+  // G3: the saved schedule as a file this import reads (a file exported here imports here, with no change).
+  const [exportNote, setExportNote] = useState(/** @type {string | null} */ (null));
+  const handleExport = async () => {
+    if (!organizationId || !seasonSettingsId) return;
+    setError(null);
+    setExportNote(null);
+    setBusy('Reading the saved schedule');
+    try {
+      const saved = await K.exportSaved(client, { organizationId, seasonSettingsId });
+      setBusy(null);
+      if (saved.rows.length === 0) {
+        setExportNote('There is no saved game to download yet.');
+        return;
+      }
+      saveFile(K.exportFileName, csvBlob(saved.csv));
+      const left = saved.omitted.noPlace + saved.omitted.unknownRecord;
+      setExportNote(
+        `Downloaded ${saved.rows.length} games.${
+          left > 0
+            ? ` ${left} saved games could not be written (no readable time, field or team) and are not in the file.`
+            : ''
+        }${
+          saved.omitted.undatedTbd > 0
+            ? ` ${saved.omitted.undatedTbd} TIME TBD games have no date and are not in the file (the file needs a date).`
+            : ''
+        }`
+      );
+    } catch (err) {
+      fail(err, 'The saved schedule could not be read.');
+    }
+  };
+
   const handleDiscard = async () => {
     if (jobId) {
       try {
@@ -535,7 +571,15 @@ export default function ScheduleImportPanel({
                 Download the template
               </Button>
             )}
+            <Button variant="ghost" disabled={busy !== null} onClick={handleExport}>
+              Download the saved schedule as CSV
+            </Button>
           </div>
+          {exportNote && (
+            <div className="mt-3">
+              <Notice testId="schedule-import-export-note">{exportNote}</Notice>
+            </div>
+          )}
 
           {lastImport && !rolledBack && (
             <section
@@ -843,9 +887,7 @@ export default function ScheduleImportPanel({
             testId="schedule-import-warnings"
             heading="Flagged, and imported anyway"
             total={(preview.warnings ?? []).length}
-            items={(preview.warnings ?? []).map((w) =>
-              warningLine(w, league)
-            )}
+            items={(preview.warnings ?? []).map((w) => warningLine(w, league))}
           />
           {staging && (
             <NamedList

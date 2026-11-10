@@ -604,10 +604,16 @@ describe('ImportPanel', () => {
     expect(tab).toHaveAttribute('aria-pressed', 'true');
     const panel = await screen.findByTestId('schedule-import-panel');
     expect(panel).toHaveAttribute('data-kind', 'games');
-    expect(within(panel).getByRole('heading', { name: 'Import a game schedule' })).toBeInTheDocument();
+    expect(
+      within(panel).getByRole('heading', { name: 'Import a game schedule' })
+    ).toBeInTheDocument();
     expect(screen.queryByText('Drag and drop your CSV file here')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /download games template/i })).not.toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: 'Download the template' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /download games template/i })
+    ).not.toBeInTheDocument();
+    expect(
+      within(panel).getByRole('button', { name: 'Download the template' })
+    ).toBeInTheDocument();
     // back to a people import: the generic upload returns
     fireEvent.click(screen.getByRole('button', { name: /^players/i }));
     expect(screen.getByText('Drag and drop your CSV file here')).toBeInTheDocument();

@@ -115,7 +115,9 @@ describe('F9: the Games page lists what an import said, in words', () => {
       .from('game_assignments')
       .select('*')
       .eq('organization_id', ORG);
-    const ids = games.filter((g) => ['N-1', 'N-12', 'N-2', 'N-10'].includes(g.external_ref)).map((g) => g.id);
+    const ids = games
+      .filter((g) => ['N-1', 'N-12', 'N-2', 'N-10'].includes(g.external_ref))
+      .map((g) => g.id);
     expect(ids).toHaveLength(4);
     const released = await mockSupabase.rpc('admin_set_games_published', {
       p_organization_id: ORG,
@@ -210,8 +212,12 @@ describe('F6: the Games page lists a TIME TBD game with its date and no time', (
     const list = await screen.findByTestId('game-time-tbd-list');
     expect(within(list).getByRole('heading').textContent).toBe('TIME TBD games (3)');
     const items = within(list).getAllByTestId('game-time-tbd-item');
-    const dated = items.filter((li) => li.getAttribute('data-dated') === 'yes').map((li) => li.textContent);
-    const undated = items.filter((li) => li.getAttribute('data-dated') === 'no').map((li) => li.textContent);
+    const dated = items
+      .filter((li) => li.getAttribute('data-dated') === 'yes')
+      .map((li) => li.textContent);
+    const undated = items
+      .filter((li) => li.getAttribute('data-dated') === 'no')
+      .map((li) => li.textContent);
     // the import's two: the one with no time, and the one whose time could not be read (F5), each on its date
     expect(dated.sort()).toEqual([
       'U05 Boys: U05B Team 03 v U05B Team 05. 2026-10-10, no time yet (week 5). the imported file gave it no time or no field.',

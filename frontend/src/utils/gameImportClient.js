@@ -21,8 +21,11 @@ import {
   SCHEDULE_IMPORT_CHUNK_LIMITS,
   stagedRowToParsed,
 } from '@squadlogic/core/scheduleImport/staging.js';
+import { buildScheduleCsv } from '@squadlogic/core/scheduleImport/scheduleCsv.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
+import { readCurrentSavedGameIds } from './gamePublishedClient.js';
 import { readSeasonTeamDirectory } from './scheduleReportsRead.js';
+import { readScheduleTbd } from './scheduleTbdClient.js';
 
 /** An error that carries the code a refusal gave. @param {string} message @param {string | null} [code] @param {any} [body] */
 function refusal(message, code = null, body = null) {
@@ -356,4 +359,77 @@ export async function readLatestGameImportJob(client, { organizationId, seasonSe
     completedAt: job.completed_at ?? null,
     result,
   };
+}
+
+/**
+ * The season's saved schedule as a file the games import reads (G3): the current run's games with their slots, the
+ * season's teams, the venues and fields, and the TIME TBD games that hold a date. Read whole or not at all.
+ *
+ * @param {any} client
+ * @param {{ organizationId: string, seasonSettingsId: string }} params
+ * @returns {Promise<ReturnType<typeof buildScheduleCsv> & { games: number }>}
+ */
+export async function readSavedScheduleCsv(client, { organizationId, seasonSettingsId }) {
+  requireClient(client);
+  // The same reading of "the current run" the Published controls use (one place decides it).
+  const { runId } = await readCurrentSavedGameIds({ organizationId, seasonSettingsId, client });
+  const [games, slots, league, tbd] = await Promise.all([
+    runId === null
+      ? []
+      : fetchAllPages(() =>
+          client
+            .from('game_assignments')
+            .select(
+              'id, external_ref, game_slot_id, field_id, home_team_id, away_team_id, division, week_index'
+            )
+            .eq('run_id', runId)
+        ),
+    fetchAllPages(() =>
+      client
+        .from('game_slots')
+        .select('id, field_id, slot_date, start_time, end_time, week_index')
+        .eq('organization_id', organizationId)
+    ),
+    readGameImportLeague(client, { organizationId, seasonSettingsId }),
+    readScheduleTbd(client, seasonSettingsId),
+  ]);
+  const divisionName = new Map(league.divisions.map((d) => [d.id, d.name]));
+  const built = buildScheduleCsv({
+    games: games.map((g) => ({
+      id: String(g.id),
+      externalRef: g.external_ref ?? null,
+      gameSlotId: g.game_slot_id ?? null,
+      fieldId: g.field_id ?? null,
+      homeTeamId: String(g.home_team_id),
+      awayTeamId: String(g.away_team_id),
+      division: g.division ?? null,
+      weekIndex: g.week_index ?? null,
+    })),
+    slots: slots.map((s) => ({
+      id: String(s.id),
+      date: s.slot_date ?? null,
+      startTime: s.start_time ?? null,
+      endTime: s.end_time ?? null,
+      fieldId: s.field_id ?? null,
+      weekIndex: s.week_index ?? null,
+    })),
+    teams: league.teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      division: divisionName.get(t.divisionId) ?? null,
+    })),
+    fields: league.fields,
+    venues: league.venues,
+    tbdGames: tbd.rows
+      .filter((row) => row.kind === 'game')
+      .map((row) => ({
+        externalRef: row.external_ref ?? null,
+        gameDate: row.game_date ?? null,
+        weekIndex: row.week_index,
+        homeTeamId: String(row.home_team_id),
+        awayTeamId: String(row.away_team_id),
+        division: row.division_name ?? null,
+      })),
+  });
+  return { ...built, games: games.length };
 }

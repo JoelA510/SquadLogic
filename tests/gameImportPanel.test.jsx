@@ -47,6 +47,10 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
     },
   }),
 }));
+vi.mock('../frontend/src/utils/scheduleDownloads.js', async (original) => ({
+  ...(await original()),
+  saveFile: vi.fn(),
+}));
 vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
 }));
@@ -119,7 +123,11 @@ describe('upload: the file is read by the server, and what it kept or refused is
     // one job, for this season, waiting for its confirm
     const jobs = await table('import_jobs');
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({ job_type: 'games', status: 'ready_to_apply', season_settings_id: SEASON });
+    expect(jobs[0]).toMatchObject({
+      job_type: 'games',
+      status: 'ready_to_apply',
+      season_settings_id: SEASON,
+    });
   });
 
   it('refuses a file with a missing column before anything is created, in words', async () => {
@@ -151,7 +159,9 @@ describe('mapping (F8): a match opens on "use existing", no match opens undecide
       `map:${TEAMS.t1}`
     );
     expect(screen.getByRole('combobox', { name: 'What U05 Boys is' }).value).toMatch(/^map:/);
-    expect(screen.getByRole('combobox', { name: 'What Field 1 (Venue A) is' }).value).toMatch(/^map:/);
+    expect(screen.getByRole('combobox', { name: 'What Field 1 (Venue A) is' }).value).toMatch(
+      /^map:/
+    );
     // CONTROL: no record of that name, so nothing is chosen for the admin (never "create")
     for (const name of [
       'Visiting Club A (U05 Boys)',
@@ -176,7 +186,11 @@ describe('mapping (F8): a match opens on "use existing", no match opens undecide
     await toMapping();
     const mystery = screen.getByRole('combobox', { name: 'What Mystery Team (U05 Boys) is' });
     // every team of the division is offered, not only a same-named one
-    expect(within(mystery).getAllByRole('option').map((o) => o.textContent)).toEqual(
+    expect(
+      within(mystery)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(
       expect.arrayContaining([
         'Use existing team: U05B Team 06',
         'Create the team "Mystery Team" (no players or coach yet)',
@@ -208,8 +222,12 @@ describe('confirm: everything that will be created is listed, and nothing is cre
     );
     // game slots are places in time, counted apart; no division, venue, field, team or club is made
     const refused = screen.getByTestId('schedule-import-refused');
-    expect(within(refused).getByRole('heading').textContent).toBe('Rows that will not be imported (5)');
-    const lines = within(refused).getAllByRole('listitem').map((li) => li.textContent);
+    expect(within(refused).getByRole('heading').textContent).toBe(
+      'Rows that will not be imported (5)'
+    );
+    const lines = within(refused)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
     expect(lines).toEqual([
       expect.stringMatching(/^Row 5: The team "Visiting Club A" is not one of your teams/),
       expect.stringMatching(/^Row 6: The field "Field 9" is not one of "Venue A"'s/),
@@ -237,8 +255,12 @@ describe('confirm: everything that will be created is listed, and nothing is cre
 
     const created = screen.getByTestId('schedule-import-creations');
     expect(within(created).getByRole('heading').textContent).toBe('What will be created (5)');
-    expect(screen.getByTestId('schedule-import-created-divisions').textContent).toBe('Divisions: 1U07 Girls');
-    expect(screen.getByTestId('schedule-import-created-fields').textContent).toBe('Fields: 1Field 9');
+    expect(screen.getByTestId('schedule-import-created-divisions').textContent).toBe(
+      'Divisions: 1U07 Girls'
+    );
+    expect(screen.getByTestId('schedule-import-created-fields').textContent).toBe(
+      'Fields: 1Field 9'
+    );
     expect(screen.getByTestId('schedule-import-created-teamShells').textContent).toBe(
       'Teams (no players or coach yet): 2U07G Team 01, U07G Team 02'
     );
@@ -284,7 +306,9 @@ describe('confirm: everything that will be created is listed, and nothing is cre
     const flagged = screen.getByTestId('schedule-import-warnings').textContent;
     expect(flagged).toMatch(/Field Field 1: Two games are on one field at overlapping times\./);
     expect(flagged).toMatch(/Row 12: The Week in the file is not the week the date falls in\./);
-    expect(screen.getByTestId('schedule-import-kept-warnings').textContent).toMatch(/Row 8:.*Row 13:/);
+    expect(screen.getByTestId('schedule-import-kept-warnings').textContent).toMatch(
+      /Row 8:.*Row 13:/
+    );
     // declared, not implied: what was not checked
     expect(screen.getByTestId('schedule-import-coverage').textContent).toMatch(
       /Not checked by the import: coach overlap, hosting balance/
@@ -312,7 +336,11 @@ describe('confirm: everything that will be created is listed, and nothing is cre
         .sort()
     ).toEqual(['U07G Team 01', 'U07G Team 02']);
     expect((await table('divisions')).map((d) => d.name).sort()).toEqual(['U05 Boys', 'U07 Girls']);
-    expect((await table('fields')).map((f) => f.name).sort()).toEqual(['Field 1', 'Field 2', 'Field 9']);
+    expect((await table('fields')).map((f) => f.name).sort()).toEqual([
+      'Field 1',
+      'Field 2',
+      'Field 9',
+    ]);
     const games = await table('game_assignments');
     expect(games).toHaveLength(10); // 3 saved + 7 added
     // the new games arrive Published; the saved game the file moved keeps its own state
@@ -408,7 +436,9 @@ describe('the result, the rollback, and the import that can still be rolled back
     await applyEverything();
     fireEvent.click(screen.getByRole('button', { name: 'Roll back this import' }));
     const done = await screen.findByTestId('schedule-import-rolled-back');
-    expect(done.textContent).toMatch(/The import was rolled back: 7 games removed, 3 put back as they were\./);
+    expect(done.textContent).toMatch(
+      /The import was rolled back: 7 games removed, 3 put back as they were\./
+    );
     const after = await table('game_assignments');
     expect(after.map((g) => g.id).sort()).toEqual(before.map((g) => g.id).sort());
     expect(after.find((g) => g.id === SAVED.open)).toMatchObject({
@@ -426,7 +456,9 @@ describe('the result, the rollback, and the import that can still be rolled back
     first.unmount();
     render(<ScheduleImportPanel />);
     const last = await screen.findByTestId('schedule-import-last');
-    expect(last.textContent).toMatch(/schedule\.csv: 7 games added, 1 changed, 2 TIME TBD games added\./);
+    expect(last.textContent).toMatch(
+      /schedule\.csv: 7 games added, 1 changed, 2 TIME TBD games added\./
+    );
     fireEvent.click(within(last).getByRole('button', { name: 'Roll back the last import' }));
     await screen.findByTestId('schedule-import-rolled-back');
     expect(await table('game_assignments')).toHaveLength(3);
@@ -492,7 +524,9 @@ describe('accessibility: keyboard, names, and no state by colour alone', () => {
     decideEverything();
     await toPreview();
     fireEvent.click(screen.getByLabelText(/Games arrive Published/));
-    await waitFor(() => expect(screen.getByLabelText(/Games arrive Published/).checked).toBe(false));
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Games arrive Published/).checked).toBe(false)
+    );
     await waitFor(() => expect(screen.queryByTestId('schedule-import-busy')).toBeNull());
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
@@ -500,6 +534,28 @@ describe('accessibility: keyboard, names, and no state by colour alone', () => {
     const games = await table('game_assignments');
     expect(games.filter((g) => g.import_job_id && g.published)).toHaveLength(0);
     expect(screen.getByTestId('schedule-import-applied').textContent).not.toMatch(/are Published/);
+  });
+});
+
+describe('G3: the saved schedule as a file the import reads', () => {
+  it('downloads the saved games in the template’s columns, and says how many', async () => {
+    const { saveFile } = await import('../frontend/src/utils/scheduleDownloads.js');
+    render(<ScheduleImportPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download the saved schedule as CSV' }));
+    const note = await screen.findByTestId('schedule-import-export-note');
+    expect(note.textContent).toBe('Downloaded 3 games.');
+    expect(saveFile).toHaveBeenCalledTimes(1);
+    const [name, blob] = saveFile.mock.calls[0];
+    expect(name).toBe('squadlogic-game-schedule.csv');
+    const text = await blob.text();
+    const lines = text.split('\n');
+    expect(lines[0]).toBe(
+      'Game ID,Date,Start Time,End Time,Venue,Field,Division,Home Team,Away Team,Week'
+    );
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toBe(
+      'S-1,2026-09-12,08:00,09:00,Venue A,Field 1,U05 Boys,U05B Team 01,U05B Team 02,1'
+    );
   });
 });
 

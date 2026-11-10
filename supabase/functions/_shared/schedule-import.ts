@@ -36,6 +36,9 @@ export const GAME_IMPORT_REASON = Object.freeze({
   SAME_TEAM: 'same-team',
   OUTSIDE_SEASON_WINDOW: 'outside-season-window',
   TIME_IN_DST_GAP: 'time-in-dst-gap',
+  UNKNOWN_DIVISION: 'unknown-division',
+  UNKNOWN_TEAM: 'unknown-team',
+  UNKNOWN_VENUE: 'unknown-venue',
   DUPLICATE_ROW: 'duplicate-row',
   GAME_ID_REUSED: 'game-id-reused',
   TIME_AMBIGUOUS: 'time-ambiguous',
@@ -525,7 +528,18 @@ function parseRow({
   if (startMin !== null) out.startTime = hhmm(startMin);
   if (endGiven !== null) out.endTime = hhmm(endGiven);
 
-  // 4. The two teams are two teams
+  // 4. A game has a division and two teams, and the two teams are two teams. A blank one is refused HERE, as a row:
+  // staged as an accepted row it would fail the apply's shape check, and that refuses the whole import, not the row.
+  if (scheduleLabelKey(out.divisionLabel) === '') {
+    return refuse(R.UNKNOWN_DIVISION, 'The Division is blank.');
+  }
+  for (const [which, label] of [
+    ['Home', out.homeLabel],
+    ['Away', out.awayLabel],
+  ]) {
+    if (scheduleLabelKey(label) === '')
+      return refuse(R.UNKNOWN_TEAM, `The ${which} Team is blank.`);
+  }
   const homeKey = scheduleLabelKey(out.homeLabel);
   if (homeKey !== '' && homeKey === scheduleLabelKey(out.awayLabel)) {
     return refuse(R.SAME_TEAM, `The home and away teams are both ${quoted(out.homeLabel)}.`);
@@ -562,6 +576,13 @@ function parseRow({
     return refuse(R.OUTSIDE_SEASON_WINDOW, `${date} is after the season ends (${seasonEnd}).`);
   }
   const weekDerived = seasonStart === null ? null : scheduleWeekOf(date, seasonStart);
+  // A week worked out from the date that no slot can hold (a season with no end date, and a date years on).
+  if (weekGiven === null && weekDerived !== null && weekDerived > MAX_WEEK) {
+    return refuse(
+      R.OUTSIDE_SEASON_WINDOW,
+      `${date} is week ${weekDerived} of the season; a schedule holds weeks 1 to ${MAX_WEEK}. Check the date, or give the Week.`
+    );
+  }
   out.weekIndex = weekGiven ?? weekDerived;
   out.weekSource = weekGiven === null ? 'derived' : 'file';
   if (badWeekText !== null) {
@@ -677,7 +698,13 @@ function parseRow({
     }
   }
 
-  // 8. No time, or no field: a TIME TBD game, never a dropped one
+  // 8. A time and a field with no venue: the field cannot be found (a field is one of a venue's). Refused as a row,
+  // as the mapping step always refused it; staged as placed it would fail the apply's shape check for the whole job.
+  if (timed && out.fieldLabel !== '' && scheduleLabelKey(out.venueLabel) === '') {
+    return refuse(R.UNKNOWN_VENUE, 'The Venue is blank.');
+  }
+
+  // No time, or no field: a TIME TBD game, never a dropped one
   if (!timed || out.fieldLabel === '') {
     out.status = 'tbd';
     out.tbdReason = R.IMPORTED_WITHOUT_TIME;
@@ -823,14 +850,20 @@ export function stageGameChunk({
   );
   // The header row as the file wrote it, cut to what a header can be; names the allowlist does not hold stay in the
   // list (so the parse can report them as dropped) and their VALUES are never read.
-  const fileHeaders = headers
+  // A VALUE is read by the header as the file wrote it (the row is keyed by that); the cleaned name only says which
+  // column it is. Reading by the cleaned name lost every value of a column whose header had a stray space.
+  const named = headers
     .slice(0, GAME_IMPORT_LIMITS.MAX_HEADERS)
-    .map((h) => cleanCell(h))
-    .filter((h) => h.trim() !== '');
-  const kept = fileHeaders.filter((h) => byKey.has(scheduleLabelKey(h)));
+    .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
+    .filter((h) => h.cleaned.trim() !== '');
+  const fileHeaders = named.map((h) => h.cleaned);
+  const keptNames = named.filter((h) => byKey.has(scheduleLabelKey(h.cleaned)));
+  const kept = keptNames.map((h) => h.cleaned);
   const allowlisted = rows.map((row) => {
     const out: Record<string, string> = {};
-    for (const h of kept) out[h] = cleanCell(row?.[h]);
+    // Two headers that clean to one name are refused by the parse (`duplicate-column`), so which value stands here
+    // is never read.
+    for (const h of keptNames) out[h.cleaned] = cleanCell(row?.[h.original]);
     return out;
   });
   const parsed = parseGameImportRows({

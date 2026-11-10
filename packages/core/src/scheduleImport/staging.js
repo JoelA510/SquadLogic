@@ -154,15 +154,21 @@ export function stageScheduleChunk({ headers, rows, season, rowOffset, clean }) 
   );
   // The header row as the file wrote it, cut to what a header can be; names the allowlist does not hold stay in the
   // list (so the parse can report them as dropped) and their VALUES are never read.
-  const fileHeaders = headers
+  // A VALUE is read by the header as the file wrote it (the row is keyed by that); the cleaned name only says which
+  // column it is. Reading by the cleaned name lost every value of a column whose header had a stray space.
+  const named = headers
     .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS)
-    .map((h) => cleanCell(h))
-    .filter((h) => h.trim() !== '');
-  const kept = fileHeaders.filter((h) => byKey.has(scheduleLabelKey(h)));
+    .map((h) => ({ original: String(h ?? ''), cleaned: cleanCell(h) }))
+    .filter((h) => h.cleaned.trim() !== '');
+  const fileHeaders = named.map((h) => h.cleaned);
+  const keptNames = named.filter((h) => byKey.has(scheduleLabelKey(h.cleaned)));
+  const kept = keptNames.map((h) => h.cleaned);
   const allowlisted = rows.map((row) => {
     /** @type {Record<string, string>} */
     const out = {};
-    for (const h of kept) out[h] = cleanCell(row?.[h]);
+    // Two headers that clean to one name are refused by the parse (`duplicate-column`), so which value stands here
+    // is never read.
+    for (const h of keptNames) out[h.cleaned] = cleanCell(row?.[h.original]);
     return out;
   });
   const parsed = parseScheduleRows({ headers: fileHeaders, rows: allowlisted, season, rowOffset });

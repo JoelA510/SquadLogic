@@ -1537,6 +1537,42 @@
           "Home Team": "U05B Team 01",
           "Away Team": "U05B Team 02",
           "Week": ""
+        },
+        {
+          "Game ID": "V-8",
+          "Date": "2026-09-12",
+          "Start Time": "09:00",
+          "End Time": "10:00",
+          "Venue": "Venue A",
+          "Field": "Field 1",
+          "Division": " ",
+          "Home Team": "U05B Team 01",
+          "Away Team": "U05B Team 02",
+          "Week": ""
+        },
+        {
+          "Game ID": "V-9",
+          "Date": "2026-09-12",
+          "Start Time": "09:00",
+          "End Time": "10:00",
+          "Venue": "Venue A",
+          "Field": "Field 1",
+          "Division": "U05 Boys",
+          "Home Team": "",
+          "Away Team": "U05B Team 02",
+          "Week": ""
+        },
+        {
+          "Game ID": "V-10",
+          "Date": "2026-09-12",
+          "Start Time": "09:00",
+          "End Time": "10:00",
+          "Venue": "",
+          "Field": "Field 1",
+          "Division": "U05 Boys",
+          "Home Team": "U05B Team 04",
+          "Away Team": "U05B Team 02",
+          "Week": ""
         }
       ],
       "expected": {
@@ -1729,20 +1765,89 @@
               "Away Team": "U05B Team 02",
               "Week": ""
             }
+          },
+          {
+            "source_row_number": 8,
+            "normalized_payload": null,
+            "validation_errors": [
+              {
+                "code": "unknown-division",
+                "message": "The Division is blank."
+              }
+            ],
+            "raw_payload": {
+              "Game ID": "V-8",
+              "Date": "2026-09-12",
+              "Start Time": "09:00",
+              "End Time": "10:00",
+              "Venue": "Venue A",
+              "Field": "Field 1",
+              "Division": "",
+              "Home Team": "U05B Team 01",
+              "Away Team": "U05B Team 02",
+              "Week": ""
+            }
+          },
+          {
+            "source_row_number": 9,
+            "normalized_payload": null,
+            "validation_errors": [
+              {
+                "code": "unknown-team",
+                "message": "The Home Team is blank."
+              }
+            ],
+            "raw_payload": {
+              "Game ID": "V-9",
+              "Date": "2026-09-12",
+              "Start Time": "09:00",
+              "End Time": "10:00",
+              "Venue": "Venue A",
+              "Field": "Field 1",
+              "Division": "U05 Boys",
+              "Home Team": "",
+              "Away Team": "U05B Team 02",
+              "Week": ""
+            }
+          },
+          {
+            "source_row_number": 10,
+            "normalized_payload": null,
+            "validation_errors": [
+              {
+                "code": "unknown-venue",
+                "message": "The Venue is blank."
+              }
+            ],
+            "raw_payload": {
+              "Game ID": "V-10",
+              "Date": "2026-09-12",
+              "Start Time": "09:00",
+              "End Time": "10:00",
+              "Venue": "",
+              "Field": "Field 1",
+              "Division": "U05 Boys",
+              "Home Team": "U05B Team 04",
+              "Away Team": "U05B Team 02",
+              "Week": ""
+            }
           }
         ],
         "summary": {
-          "rows": 7,
+          "rows": 10,
           "ok": 0,
           "tbd": 2,
-          "refused": 5,
+          "refused": 8,
           "flagged": 0,
           "by_reason": {
             "bad-date": 1,
             "end-not-after-start": 1,
             "same-team": 1,
             "outside-season-window": 1,
-            "bad-game-id": 1
+            "bad-game-id": 1,
+            "unknown-division": 1,
+            "unknown-team": 1,
+            "unknown-venue": 1
           },
           "dropped_columns": [],
           "warnings": [],
@@ -1771,8 +1876,113 @@
               "row": 7,
               "code": "bad-game-id",
               "message": "The Game ID is 41 characters; at most 40 are kept."
+            },
+            {
+              "row": 8,
+              "code": "unknown-division",
+              "message": "The Division is blank."
+            },
+            {
+              "row": 9,
+              "code": "unknown-team",
+              "message": "The Home Team is blank."
+            },
+            {
+              "row": 10,
+              "code": "unknown-venue",
+              "message": "The Venue is blank."
             }
           ]
+        }
+      }
+    },
+    {
+      "name": "headers as a file may spell them: a trailing space, a no-break space, another case, a byte order mark",
+      "season": {
+        "timeZone": "America/Los_Angeles",
+        "startDate": "2026-09-07",
+        "endDate": "2027-04-30"
+      },
+      "headers": [
+        "﻿Game ID",
+        "DATE",
+        "Start Time ",
+        "End Time",
+        " Venue",
+        "Field",
+        "Division",
+        "Home Team",
+        "Away Team",
+        "Week"
+      ],
+      "rowOffset": 0,
+      "rows": [
+        {
+          "﻿Game ID": "V-1",
+          "DATE": "2026-09-12",
+          "Start Time ": "09:00",
+          "End Time": "10:00",
+          " Venue": "Venue A",
+          "Field": "Field 1",
+          "Division": "U05 Boys",
+          "Home Team": "U05B Team 01",
+          "Away Team": "U05B Team 02",
+          "Week": ""
+        }
+      ],
+      "expected": {
+        "refusal": null,
+        "staged": [
+          {
+            "source_row_number": 1,
+            "normalized_payload": {
+              "row_key": "row-1",
+              "game_id": "V-1",
+              "status": "ok",
+              "tbd_reason": null,
+              "date": "2026-09-12",
+              "start_time": "09:00",
+              "end_time": "10:00",
+              "start": "2026-09-12T09:00:00-07:00",
+              "end": "2026-09-12T10:00:00-07:00",
+              "week_index": 1,
+              "flags": [],
+              "division": "U05 Boys",
+              "division_key": "u05 boys",
+              "venue": "Venue A",
+              "venue_key": "venue a",
+              "field": "Field 1",
+              "field_key": "[\"venue a\",\"field 1\"]",
+              "home_team": "U05B Team 01",
+              "home_key": "[\"u05 boys\",\"u05b team 01\"]",
+              "away_team": "U05B Team 02",
+              "away_key": "[\"u05 boys\",\"u05b team 02\"]"
+            },
+            "validation_errors": [],
+            "raw_payload": {
+              "Game ID": "V-1",
+              "Date": "2026-09-12",
+              "Start Time": "09:00",
+              "End Time": "10:00",
+              "Venue": "Venue A",
+              "Field": "Field 1",
+              "Division": "U05 Boys",
+              "Home Team": "U05B Team 01",
+              "Away Team": "U05B Team 02",
+              "Week": ""
+            }
+          }
+        ],
+        "summary": {
+          "rows": 1,
+          "ok": 1,
+          "tbd": 0,
+          "refused": 0,
+          "flagged": 0,
+          "by_reason": {},
+          "dropped_columns": [],
+          "warnings": [],
+          "refused_rows": []
         }
       }
     },

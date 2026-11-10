@@ -27,6 +27,7 @@ import {
   SCHEDULE_IMPORT_STAGED_FLAGS,
   diffScheduleImportConfirmCounts,
   isScheduleImportConfirmCounts,
+  parseScheduleRows,
   scheduleImportConfirmCounts,
   scheduleLabelKey,
   stageScheduleChunk as stageWithCleaner,
@@ -487,5 +488,76 @@ describe('the Edge function uses the mirror, and is its only stage for games', (
     // the season comes from the JOB's season, never the request
     expect(INDEX).toMatch(/season_start/);
     expect(INDEX).not.toMatch(/body\.season\b/);
+  });
+});
+
+// ------------------------------------------------------------------- PR 6 fix round 1 (Codex P2): headers as the file wrote them
+describe('a header the file spelled its own way still names its column: the browser parse and both stagings agree', () => {
+  // The staging cleaned the header NAMES and then read each row by the cleaned name, while the row still held its
+  // value under the name the file wrote: `Start Time ` (a trailing space) read as no start time, and every game of the
+  // file became TIME TBD without a word. A value is read by the ORIGINAL header; the cleaned name only decides which
+  // column it is.
+  const CANON = TABLE.vectors[0].headers;
+  const base = TABLE.vectors[0].rows[0];
+  const season = TABLE.vectors[0].season;
+  /** The same file with its headers respelled by `spell(header, index)`. */
+  const respelled = (spell) => {
+    const headers = CANON.map(spell);
+    const row = Object.fromEntries(CANON.map((h, i) => [headers[i], base[h]]));
+    return { headers, rows: [row] };
+  };
+  const VARIANTS = [
+    ['a trailing space', (h) => `${h} `],
+    ['a leading space', (h) => ` ${h}`],
+    ['a no-break space inside and after', (h) => `${h.replace(' ', ' ')} `],
+    ['another case', (h) => h.toUpperCase()],
+    ['a byte order mark on the first header', (h, i) => (i === 0 ? `﻿${h}` : h)],
+    ['doubled inner spaces', (h) => h.replace(' ', '  ')],
+  ];
+  const control = plain(stageScheduleChunk({ headers: CANON, rows: [base], season, rowOffset: 0 }));
+
+  it('CONTROL: the file as the template spells it is one placed game', () => {
+    expect(control.staged[0].normalized_payload).toMatchObject({
+      status: 'ok',
+      start_time: '09:00',
+    });
+  });
+
+  for (const [name, spell] of VARIANTS) {
+    it(`${name}: the same placed game from the browser parse, core's staging and the Edge mirror`, () => {
+      const file = respelled(spell);
+      // CONTROL that the variant is a variant: some header differs from the template's
+      expect(file.headers.join('|')).not.toBe(CANON.join('|'));
+      const browser = parseScheduleRows({ ...file, season });
+      expect(browser.ok).toBe(true);
+      expect(browser.rows[0]).toMatchObject({ status: 'ok', startTime: '09:00', endTime: '10:00' });
+      for (const [who, stage] of [
+        ['core', stageScheduleChunk],
+        ['edge', edge.stageGameChunk],
+      ]) {
+        const staged = plain(stage({ ...file, season, rowOffset: 0 }));
+        expect(staged.refusal, who).toBeNull();
+        // row for row what the template-spelled file stages, and what the browser read
+        expect(
+          staged.staged.map((s) => s.normalized_payload),
+          who
+        ).toEqual(control.staged.map((s) => s.normalized_payload));
+        expect(staged.staged[0].raw_payload, who).toEqual(control.staged[0].raw_payload);
+        expect(staged.summary.dropped_columns, who).toEqual([]);
+        expect(staged.staged[0].normalized_payload.start, who).toBe(browser.rows[0].start);
+      }
+    });
+  }
+
+  it('two headers that clean to one name are reported, never merged, by all three', () => {
+    const headers = [...CANON, 'Start Time '];
+    const rows = [{ ...base, 'Start Time ': '11:00' }];
+    const browser = parseScheduleRows({ headers, rows, season });
+    expect(browser.refusal).toMatchObject({ code: 'duplicate-column', column: 'Start Time' });
+    for (const stage of [stageScheduleChunk, edge.stageGameChunk]) {
+      const staged = plain(stage({ headers, rows, season, rowOffset: 0 }));
+      expect(staged.refusal).toMatchObject({ code: 'duplicate-column', column: 'Start Time' });
+      expect(staged.staged).toEqual([]);
+    }
   });
 });

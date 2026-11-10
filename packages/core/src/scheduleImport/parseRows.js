@@ -24,6 +24,9 @@
  *   the whole weeks since the Monday of the week the season starts. A `Week` that differs from the
  *   date is stored as written and flagged `week-differs`, never renumbered.
  * - **A game with no time or no field** is a TIME TBD game (`imported-without-time`), never dropped.
+ *   **A row with no Division, Home Team or Away Team, or with a time and a field and no Venue,** is
+ *   refused as a row (`unknown-division`, `unknown-team`, `unknown-venue`), with the words the mapping
+ *   step uses for the same blank.
  * - **A time the import cannot read** (`25:00`, `noon`, a Length of `60 min`, an End Time and a Length
  *   that disagree, a game that would pass midnight) is a TIME TBD game too, on its date, with a
  *   `bad-time` warning that says what could not be read (owner, 2026-11-10: prefer a warning to a
@@ -549,7 +552,18 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
   if (startMin !== null) out.startTime = hhmm(startMin);
   if (endGiven !== null) out.endTime = hhmm(endGiven);
 
-  // 4. The two teams are two teams
+  // 4. A game has a division and two teams, and the two teams are two teams. A blank one is refused HERE, as a row:
+  // staged as an accepted row it would fail the apply's shape check, and that refuses the whole import, not the row.
+  if (scheduleLabelKey(out.divisionLabel) === '') {
+    return refuse(R.UNKNOWN_DIVISION, 'The Division is blank.');
+  }
+  for (const [which, label] of [
+    ['Home', out.homeLabel],
+    ['Away', out.awayLabel],
+  ]) {
+    if (scheduleLabelKey(label) === '')
+      return refuse(R.UNKNOWN_TEAM, `The ${which} Team is blank.`);
+  }
   const homeKey = scheduleLabelKey(out.homeLabel);
   if (homeKey !== '' && homeKey === scheduleLabelKey(out.awayLabel)) {
     return refuse(R.SAME_TEAM, `The home and away teams are both ${quoted(out.homeLabel)}.`);
@@ -587,6 +601,13 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     return refuse(R.OUTSIDE_SEASON_WINDOW, `${date} is after the season ends (${seasonEnd}).`);
   }
   const weekDerived = seasonStart === null ? null : scheduleWeekOf(date, seasonStart);
+  // A week worked out from the date that no slot can hold (a season with no end date, and a date years on).
+  if (weekGiven === null && weekDerived !== null && weekDerived > MAX_WEEK) {
+    return refuse(
+      R.OUTSIDE_SEASON_WINDOW,
+      `${date} is week ${weekDerived} of the season; a schedule holds weeks 1 to ${MAX_WEEK}. Check the date, or give the Week.`
+    );
+  }
   out.weekIndex = weekGiven ?? weekDerived;
   out.weekSource = weekGiven === null ? 'derived' : 'file';
   if (badWeekText !== null) {
@@ -712,7 +733,13 @@ function parseRow({ row, index, cell, hasWeek, timeZone, seasonStart, seasonEnd 
     }
   }
 
-  // 8. No time, or no field: a TIME TBD game, never a dropped one
+  // 8. A time and a field with no venue: the field cannot be found (a field is one of a venue's). Refused as a row,
+  // as the mapping step always refused it; staged as placed it would fail the apply's shape check for the whole job.
+  if (timed && out.fieldLabel !== '' && scheduleLabelKey(out.venueLabel) === '') {
+    return refuse(R.UNKNOWN_VENUE, 'The Venue is blank.');
+  }
+
+  // No time, or no field: a TIME TBD game, never a dropped one
   if (!timed || out.fieldLabel === '') {
     out.status = 'tbd';
     out.tbdReason = R.IMPORTED_WITHOUT_TIME;

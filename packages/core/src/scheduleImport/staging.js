@@ -10,8 +10,8 @@
  *
  * - A row the parse refused is staged with NO payload and its reason in `validation_errors` (`code`, `message`): the
  *   apply lists it and writes nothing for it.
- * - A row it accepted is staged with `status` `ok` (placed) or `tbd` (no time or no field: a TIME TBD game), the date,
- *   the week, the flags, the labels as typed and, beside each label, the decision key the mapping step stores its
+ * - A row it accepted is staged with `status` `ok` (placed) or `tbd` (no time, no field, or a time that could not be
+ *   read: a TIME TBD game), the date, the week, the flags the SQL knows (`SCHEDULE_IMPORT_STAGED_FLAGS`), the labels as typed and, beside each label, the decision key the mapping step stores its
  *   decision under (`mapping.js`'s `*DecisionKey`): the one normaliser stays in JavaScript, so the SQL matches keys by
  *   equality and never normalises a label. An `ok` row carries its wall readings and instants; **a `tbd` row carries
  *   none**: a TIME TBD game has no place in time, and the parse assigns the instants of a row that has a time and no
@@ -27,6 +27,7 @@ import {
   teamDecisionKey,
   venueDecisionKey,
 } from './mapping.js';
+import { SCHEDULE_IMPORT_STAGED_FLAGS } from './reasonCodes.js';
 
 /** The keys of a staged games row, in the order the allowlist lists them. */
 export const GAME_STAGED_KEYS = Object.freeze([
@@ -83,7 +84,11 @@ export function toStagedGameRow(row) {
       start: placed ? row.start : null,
       end: placed ? row.end : null,
       week_index: row.weekIndex,
-      flags: row.flags.map((flag) => flag.code),
+      // Only the flags the SQL knows: the parse's own warnings (`bad-time`, `bad-week`) are said at
+      // the upload and in the preview, and a staged row that carried one would refuse the whole apply.
+      flags: row.flags
+        .map((flag) => flag.code)
+        .filter((code) => SCHEDULE_IMPORT_STAGED_FLAGS.includes(code)),
       division: row.divisionLabel,
       division_key: divisionDecisionKey(row.divisionLabel),
       venue: row.venueLabel,

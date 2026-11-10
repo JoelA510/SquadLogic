@@ -24,8 +24,9 @@
  * - **A team is judged inside its division** (`UNIQUE (division_id, name)`: two divisions may each
  *   have a `Lions`), a **field inside its venue**.
  * - **An outside club** (decision 5) is a team row flagged `is_external`, one per division and club
- *   label. An outside label that is the name of an own team in that division is
- *   `label-is-own-team`, never an outside club; a game between two outside clubs is not one of yours.
+ *   label. An outside club whose name (the decision's `name`, else the label) is the name of an own
+ *   team in that division, or of a team this file creates there, is `label-is-own-team`, never an
+ *   outside club; a game between two outside clubs is not one of yours.
  *   An outside team that already exists (a previous import made it) is found and reused.
  * - **Skipped is not refused.** Rows of a label the admin skips are listed apart from the rows the
  *   import refuses.
@@ -430,9 +431,13 @@ function analyse({ rows, league, decisions }) {
       if (refs.team.has(key)) continue;
       const e = entry.effective;
       if (e?.action === 'outside') {
-        // An outside club already on file is reused; an own team's name is not an outside club.
-        const own = candidates.filter((c) => !c.isExternal);
-        const external = candidates.filter((c) => c.isExternal);
+        // An outside club already on file is reused; an own team's name is not an outside club. The
+        // NAME is judged, as the SQL judges it (`cname`): the decision's own name when it carries one,
+        // else the label (PR 6, task F3b: a custom name that is an own team's was `unknown-team` here
+        // and `label-is-own-team` in the SQL).
+        const named = namedHere(scheduleLabelKey(e.name ?? label));
+        const own = named.filter((c) => !c.isExternal);
+        const external = named.filter((c) => c.isExternal);
         if (own.length > 0) {
           refs.team.set(key, { type: 'own-name', label });
         } else if (external.length === 1) {
@@ -465,6 +470,20 @@ function analyse({ rows, league, decisions }) {
             createdRef('team', entry, [divisionRef.id], { divisionId: divisionRef.id }, namedHere)
         )
       );
+    }
+  }
+
+  // An outside club whose name a team shell of this same file takes in the division is refused as one
+  // named like an own team (the SQL's `shell_here`): `UNIQUE (division_id, name)` holds for both, and
+  // the shell is the one created.
+  const shellNames = new Set(
+    [...refs.team.values()]
+      .filter((ref) => ref && ref.type === 'create')
+      .map((ref) => tuple(ref.divisionId, ref.key))
+  );
+  for (const [key, ref] of refs.team) {
+    if (ref && ref.type === 'outside' && shellNames.has(tuple(ref.divisionId, ref.key))) {
+      refs.team.set(key, { type: 'own-name', label: teamEntries.get(key)?.label ?? ref.name });
     }
   }
 

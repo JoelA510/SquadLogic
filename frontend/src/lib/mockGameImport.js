@@ -33,6 +33,7 @@
 
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import {
+  SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS,
   SCHEDULE_IMPORT_ROW_REFUSALS,
   resolveScheduleRows,
 } from '@squadlogic/core/scheduleImport/index.js';
@@ -502,7 +503,12 @@ function applyJob(db, job, dry, ctx, env) {
     return fail('22023', `Import job ${job.id} has no staged games rows`, 'no_rows');
   for (const s of staged) {
     const code = (s.validation_errors || [])[0]?.code;
-    if ((s.validation_errors || []).length > 0 && !SCHEDULE_IMPORT_ROW_REFUSALS.includes(code)) {
+    // As the SQL's `c_row_refusals`: the closed list, and the two codes that refused a row until PR 6 (task F5).
+    if (
+      (s.validation_errors || []).length > 0 &&
+      !SCHEDULE_IMPORT_ROW_REFUSALS.includes(code) &&
+      !SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS.includes(code)
+    ) {
       return fail(
         '22023',
         `staged row ${s.source_row_number} is refused for a reason this import does not know`,

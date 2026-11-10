@@ -13,8 +13,9 @@
  * parse needed four more, each for an input the plan's lists have no word for. They are here, so
  * they are reviewed, rather than reported as a reason that does not exist:
  *
- * - `bad-week`: a `Week` cell that is not a positive whole number. Reading it as "blank, so derive
- *   it" would let a typo pick a week for the admin, which is the guess decision 17 refuses.
+ * - `bad-week`: a `Week` cell that is not a whole number from 1 to 255. It was a refusal until the
+ *   owner's answer of 2026-11-10 (PR 6, task F5): the week is now derived from the date and the row
+ *   is kept, with this code as its warning.
  * - `bad-game-id`: a `Game ID` longer than the 40 characters 4.3 allows. Cutting it would change
  *   the key a later import matches on.
  * - `duplicate-column`: two columns of one name. Reading either would be a guess.
@@ -39,10 +40,8 @@ export const SCHEDULE_IMPORT_REASON = Object.freeze({
   // A row is listed with its reason and not written; the rest of the file imports.
   BAD_GAME_ID: 'bad-game-id',
   BAD_DATE: 'bad-date',
-  BAD_TIME: 'bad-time',
   END_NOT_AFTER_START: 'end-not-after-start',
   SAME_TEAM: 'same-team',
-  BAD_WEEK: 'bad-week',
   OUTSIDE_SEASON_WINDOW: 'outside-season-window',
   TIME_IN_DST_GAP: 'time-in-dst-gap',
   UNKNOWN_DIVISION: 'unknown-division',
@@ -60,6 +59,12 @@ export const SCHEDULE_IMPORT_REASON = Object.freeze({
   HOME_AWAY_IMBALANCE: 'home-away-imbalance',
   TIME_AMBIGUOUS: 'time-ambiguous',
   WEEK_DIFFERS: 'week-differs',
+
+  // Accepted and said by the PARSE (owner, 2026-11-10; PR 6, task F5), where they were refusals: a time
+  // that cannot be read makes the game a dated TIME TBD game, a Week that cannot be stored is derived
+  // from the date. Never staged (the SQL's staged-flag list is closed): the upload and the preview say them.
+  BAD_TIME: 'bad-time',
+  BAD_WEEK: 'bad-week',
 
   // Warnings the APPLY makes of its own plan (PR 5, fix round 2; the owner: "warnings, not blockers unless necessary"). Never a
   // refusal, never a staged flag: a game moved onto a place another game of the same file moves away from is written, and a
@@ -86,10 +91,8 @@ export const SCHEDULE_IMPORT_FILE_REFUSALS = Object.freeze([
 export const SCHEDULE_IMPORT_ROW_REFUSALS = Object.freeze([
   R.BAD_GAME_ID,
   R.BAD_DATE,
-  R.BAD_TIME,
   R.END_NOT_AFTER_START,
   R.SAME_TEAM,
-  R.BAD_WEEK,
   R.MISSING_WEEK,
   R.OUTSIDE_SEASON_WINDOW,
   R.TIME_IN_DST_GAP,
@@ -110,7 +113,28 @@ export const SCHEDULE_IMPORT_FLAGS = Object.freeze([
   R.HOME_AWAY_IMBALANCE,
   R.TIME_AMBIGUOUS,
   R.WEEK_DIFFERS,
+  R.BAD_TIME,
+  R.BAD_WEEK,
 ]);
+
+/**
+ * The flags a STAGED row may carry: the ones `apply_game_import_job` knows (its shape check refuses a
+ * staged row with any other, and with it the whole apply). `staging.js` stages these and no others.
+ */
+export const SCHEDULE_IMPORT_STAGED_FLAGS = Object.freeze([R.TIME_AMBIGUOUS, R.WEEK_DIFFERS]);
+
+/**
+ * The warnings the parse raises and does not stage (PR 6, task F5): the row is kept, changed, and the
+ * change is said at the upload and in the preview. They are in {@link SCHEDULE_IMPORT_FLAGS} too.
+ */
+export const SCHEDULE_IMPORT_PARSE_WARNINGS = Object.freeze([R.BAD_TIME, R.BAD_WEEK]);
+
+/**
+ * Codes that refused a row until PR 6 and that `apply_game_import_job` still takes as the reason of a
+ * staged refusal (its `c_row_refusals`; PR 6 has no migration, and a job staged before it may carry
+ * one). No current parse stages them; the SQL's list is {@link SCHEDULE_IMPORT_ROW_REFUSALS} plus these.
+ */
+export const SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS = Object.freeze([R.BAD_TIME, R.BAD_WEEK]);
 
 /**
  * The warnings the apply adds to its result and its preview, beyond the parse's flags and the two conflict checks
@@ -150,10 +174,12 @@ const DESCRIPTIONS = Object.freeze({
   [R.MISSING_WEEK]: 'There is no Week to use and no season start date to work one out from.',
   [R.BAD_GAME_ID]: 'The Game ID is longer than the import keeps.',
   [R.BAD_DATE]: 'The date is not one the import reads (YYYY-MM-DD or M/D/YYYY).',
-  [R.BAD_TIME]: 'A time is not one the import reads (HH:mm, or h:mm AM or PM).',
+  [R.BAD_TIME]:
+    'A time is not one the import reads (HH:mm, or h:mm AM or PM): the game is kept on its date with no time (TIME TBD).',
   [R.END_NOT_AFTER_START]: 'The game does not end after it starts.',
   [R.SAME_TEAM]: 'The home and away teams are the same team.',
-  [R.BAD_WEEK]: 'The Week is not a positive whole number.',
+  [R.BAD_WEEK]:
+    'The Week is not a whole number from 1 to 255: the week was worked out from the date.',
   [R.OUTSIDE_SEASON_WINDOW]: 'The date is outside the season.',
   [R.TIME_IN_DST_GAP]: 'The time does not exist on that date: the clocks skip it.',
   [R.UNKNOWN_DIVISION]: 'The division is not one of yours, and nothing says what to do with it.',

@@ -230,6 +230,10 @@ export const COLLISION_MESSAGE =
 export const TBD_CONFLICT_MESSAGE =
   "Another TIME TBD game already holds this home team, away team and week, and this row's Game ID (or the lack of one) does not name it. Nothing is written for the row.";
 
+/** What a row refused because another row of the file names the same saved record is told (the SQL's words). */
+export const DUPLICATE_TARGET_MESSAGE =
+  'Another row of this file names the same saved game as this row (one by its Game ID, one by its teams, place and week), and one saved game cannot be written twice. The other row is the one imported; nothing is written for this row.';
+
 const UUID_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 const ACTIONS = {
@@ -707,6 +711,47 @@ function applyJob(db, job, dry, ctx, env) {
       t.r.message = TBD_CONFLICT_MESSAGE;
     }
   }
+  // Two rows of the file that resolve to ONE saved record (a saved game: a placed row's match or the game a TIME TBD
+  // row's Game ID names; a saved TIME TBD game: a TIME TBD row's match). One record cannot be written twice, so the row
+  // that carries the Game ID is kept (then the earlier row) and every other row that names it is refused `duplicate-row`.
+  {
+    const claims = [
+      ...placed
+        .filter((p) => p.match)
+        .map((p) => ({ key: `game:${p.match.id}`, byId: Boolean(p.r.gameId), item: p, src: 'g' })),
+      ...tbd
+        .filter((t) => t.ga && t.verdict !== 'conflict')
+        .map((t) => ({ key: `game:${t.ga.id}`, byId: true, item: t, src: 't' })),
+      ...tbd
+        .filter((t) => t.m && t.verdict !== 'conflict')
+        .map((t) => ({
+          key: `tbd:${t.m.id}`,
+          byId: Boolean(t.r.gameId) && (t.m.external_ref ?? null) === t.r.gameId,
+          item: t,
+          src: 't',
+        })),
+    ];
+    const byKey = new Map();
+    for (const c of claims) byKey.set(c.key, [...(byKey.get(c.key) || []), c]);
+    for (const list of byKey.values()) {
+      list.sort(
+        (a, b) => Number(b.byId) - Number(a.byId) || a.item.r.rowNumber - b.item.r.rowNumber
+      );
+      for (const loser of list.slice(1)) {
+        loser.item.verdict = loser.src === 'g' ? 'collision' : 'conflict';
+        loser.item.dupTarget = true;
+        if (loser.src === 't') {
+          loser.item.conv = false;
+          Object.assign(loser.item.r, {
+            outcome: 'refused',
+            status: 'refused',
+            reason: 'duplicate-row',
+            message: DUPLICATE_TARGET_MESSAGE,
+          });
+        }
+      }
+    }
+  }
   // A place another game already stands on refuses the row (the same word as a duplicate), UNLESS the game standing there
   // is one the file itself moves away: then the row is written after that game has left, and it is a warning
   // (`games-swapped`). A game that moves is judged against the games the file does NOT move, so a row that cannot be
@@ -760,11 +805,57 @@ function applyJob(db, job, dry, ctx, env) {
     p.r.outcome = 'refused';
     p.r.status = 'refused';
     p.r.reason = 'duplicate-row';
-    p.r.message = COLLISION_MESSAGE;
+    p.r.message = p.dupTarget ? DUPLICATE_TARGET_MESSAGE : COLLISION_MESSAGE;
   }
   // A TIME TBD row the file now places: the game it names is written and the row goes.
   for (const p of placed.filter((x) => x.verdict === 'insert' || x.verdict === 'update')) {
     p.tbdRow = findTbd(p.r.gameId, p.r.ids.home, p.r.ids.away, p.r.weekIndex) ?? null;
+  }
+  // One TIME TBD game is placed by ONE row (the row that carries its Game ID, then the earlier row); another row that
+  // would take it is simply a new game.
+  {
+    const writing = placed.filter((x) => x.verdict === 'insert' || x.verdict === 'update');
+    const takers = new Map();
+    for (const p of writing.filter((x) => x.tbdRow))
+      takers.set(String(p.tbdRow.id), [...(takers.get(String(p.tbdRow.id)) || []), p]);
+    for (const list of takers.values()) {
+      list.sort(
+        (a, b) =>
+          Number(Boolean(b.r.gameId)) - Number(Boolean(a.r.gameId)) || a.r.rowNumber - b.r.rowNumber
+      );
+      for (const loser of list.slice(1)) loser.tbdRow = null;
+    }
+    // An identifier a matched record already carries is never erased by a row that omits it: a TIME TBD game with a Game
+    // ID that a row with NO Game ID places becomes a placed game with that Game ID. Not when the TIME TBD row stays (a
+    // TIME TBD row of the file writes it), nor when a game already has the Game ID.
+    const tbdKept = new Set(
+      tbd
+        .filter((t) => t.m && ['insert', 'update', 'unchanged'].includes(t.verdict))
+        .map((t) => String(t.m.id))
+    );
+    for (const p of writing) {
+      const ref = p.tbdRow?.external_ref ?? null;
+      p.carryRef =
+        p.verdict === 'insert' &&
+        !p.r.gameId &&
+        ref &&
+        !tbdKept.has(String(p.tbdRow.id)) &&
+        !games.some((g) => same(g.season_settings_id, seasonId) && g.external_ref === ref) &&
+        !writing.some((o) => o.verdict === 'insert' && o.r.gameId === ref)
+          ? ref
+          : null;
+    }
+    // The invariant of the plan: no saved record is named twice among the rows that are kept.
+    const named = [
+      ...placed
+        .filter((x) => x.match && x.verdict !== 'collision')
+        .map((x) => `game:${x.match.id}`),
+      ...tbd.filter((t) => t.ga && t.verdict !== 'conflict').map((t) => `game:${t.ga.id}`),
+      ...tbd.filter((t) => t.m && t.verdict !== 'conflict').map((t) => `tbd:${t.m.id}`),
+      ...writing.filter((x) => x.tbdRow).map((x) => `placed-tbd:${x.tbdRow.id}`),
+    ];
+    if (new Set(named).size !== named.length)
+      return fail('XX000', 'game import plan names one saved record in two rows');
   }
 
   const prevRun = latestGameRun(db, org, seasonId);
@@ -1324,7 +1415,7 @@ function applyJob(db, job, dry, ctx, env) {
         start: p.r.start,
         end: p.r.end,
         assignment_source: 'auto',
-        external_ref: p.r.gameId,
+        external_ref: p.r.gameId ?? p.carryRef ?? null,
         import_job_id: job.id,
         published: arrive,
         published_at: arrive ? stamp : null,
@@ -1703,6 +1794,39 @@ function rollbackJob(db, job, ctx, env) {
   // The import's own game run goes last, and stays when something else names it.
   if (run && !runNamed(run.id))
     db.scheduler_runs = db.scheduler_runs.filter((r) => !same(r.id, run.id));
+  // A run that stays is kept for HISTORY and is never the current one: it is retired with the status every reader of a
+  // latest run skips (`failed`) and marked rolled back, so the run the games went back to is the latest again. A TEAM run
+  // that stays because it carries a kept shell is NOT retired (it is the only run that lists that shell). Either way the
+  // shells that are gone are taken out of what a kept team run lists.
+  for (const r of db.scheduler_runs || []) {
+    if (!same(r.organization_id, org) || r.parameters?.import_job_id !== job.id) continue;
+    const shellIds = r.parameters.shell_ids || [];
+    const live = shellIds.filter((id) => liveTeams.has(String(id).toLowerCase()));
+    if (r.run_type === 'game' || live.length === 0) {
+      r.status = 'failed';
+      r.parameters = { ...r.parameters, rolled_back: true };
+    }
+    if (r.run_type !== 'team' || live.length === shellIds.length) continue;
+    const gone = new Set(
+      shellIds.filter((id) => !liveTeams.has(String(id).toLowerCase())).map((id) => String(id))
+    );
+    r.parameters = { ...r.parameters, shell_ids: live };
+    const results = { ...(r.results || {}) };
+    if (results.teamsByDivision && typeof results.teamsByDivision === 'object')
+      results.teamsByDivision = Object.fromEntries(
+        Object.entries(results.teamsByDivision)
+          .map(([key, list]) => [
+            key,
+            (Array.isArray(list) ? list : []).filter((t) => !gone.has(String(t?.id))),
+          ])
+          .filter(([, list]) => list.length > 0)
+      );
+    if (Array.isArray(results.teams))
+      results.teams = results.teams.filter((t) => !gone.has(String(t?.id)));
+    if (Array.isArray(results.team_players))
+      results.team_players = results.team_players.filter((tp) => !gone.has(String(tp?.team_id)));
+    r.results = results;
+  }
   // What was created and is still there (referenced by something that came after, or changed since), named, never
   // deleted silently; and a run of the import that is still there for a reason of its own (not for a shell it carries).
   const stillThere = {

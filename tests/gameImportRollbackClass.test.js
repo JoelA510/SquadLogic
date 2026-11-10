@@ -28,6 +28,7 @@ import {
   venueDecisionKey,
 } from '../packages/core/src/scheduleImport/index.js';
 import { handleGameImportRpc } from '../frontend/src/lib/mockGameImport.js';
+import { readCurrentSavedGameIds } from '../frontend/src/utils/gamePublishedClient.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
@@ -269,6 +270,19 @@ const fileQ = () => [
     date: '2027-05-29',
     week: 5,
   }),
+  row(6, {
+    status: 'ok',
+    gameId: 'Q-NEW-3',
+    division: 'QNEW',
+    venue: 'New Park',
+    field: 'New 1',
+    home: 'Shell B',
+    away: 'Outside FC',
+    date: '2027-06-12',
+    start: '11:00',
+    end: '12:00',
+    week: 6,
+  }),
 ];
 const mappingQ = () => ({
   options: { arrive_published: false },
@@ -289,6 +303,7 @@ const mappingQ = () => ({
       [1, 2, 3, 4, 5, 6].map((n) => [teamDecisionKey('QD', `Q${n}`), { action: 'map', id: T[n] }])
     ),
     [teamDecisionKey('QNEW', 'Shell A')]: { action: 'create', name: 'Shell A' },
+    [teamDecisionKey('QNEW', 'Shell B')]: { action: 'create', name: 'Shell B' },
     [teamDecisionKey('QNEW', 'Outside FC')]: { action: 'outside' },
   },
 });
@@ -367,7 +382,7 @@ describe('the scenario table is the one the pgTAP file runs', () => {
       name: m[4],
       expect: m[5],
     }));
-    expect(declared.length).toBeGreaterThanOrEqual(22);
+    expect(declared.length).toBeGreaterThanOrEqual(23);
     expect(declared).toEqual(SCENARIOS);
   });
   it('every pair the apply can write has a scenario, and every scenario names such a pair or an unrecorded table', () => {
@@ -574,7 +589,90 @@ const WRITERS = {
     witness: (db, t) =>
       db.game_assignments.some((g) => g.week_index === 8 && t.includes(g.run_id)) && t.length === 1,
   },
+  'scheduler_runs:unrecorded/evaluation-names-the-run': {
+    mutate: (db, t) =>
+      t.forEach((id) =>
+        db.evaluation_runs.push({
+          id: U(7000 + ++later),
+          organization_id: ORG,
+          scheduler_run_id: id,
+          scheduler_run_type: 'game',
+          status: 'completed',
+        })
+      ),
+    witness: (db, t) => db.evaluation_runs.some((e) => t.includes(e.scheduler_run_id)),
+  },
 };
+
+// ------------------------------------------------------------------ the readers of the CURRENT schedule, after a rollback
+/** A PostgREST-shaped client over the mock's tables: what the real readers call, and nothing else. */
+function clientOver(db) {
+  const query = (table) => {
+    let rows = [...(db[table] || [])];
+    const q = {
+      select: () => q,
+      eq: (k, v) => ((rows = rows.filter((r) => String(r[k]) === String(v))), q),
+      in: (k, list) => ((rows = rows.filter((r) => list.includes(r[k]))), q),
+      or: (expr) => {
+        const alts = expr.split(',').map((part) => part.split('.eq.'));
+        rows = rows.filter((r) => alts.some(([k, v]) => String(r[k]) === v));
+        return q;
+      },
+      order: (k, { ascending = true } = {}) => {
+        rows.sort((a, b) => String(a[k]).localeCompare(String(b[k])) * (ascending ? 1 : -1));
+        return q;
+      },
+      limit: (n) => ((rows = rows.slice(0, n)), q),
+      range: (from, to) => Promise.resolve({ data: rows.slice(from, to + 1), error: null }),
+      maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
+    };
+    return q;
+  };
+  return { from: query };
+}
+/**
+ * What the pages and the exports read as the current schedule, by their own code where it can be called
+ * (`readCurrentSavedGameIds`, which the Exports page uses and whose query is `useSchedulerRun`'s) and by `useTeamSummary`'s
+ * rule for the team run (the latest that is completed or running). 'ok', or what is wrong.
+ */
+async function readers(db, jobId) {
+  const problems = [];
+  const current = await readCurrentSavedGameIds({
+    organizationId: ORG,
+    seasonSettingsId: SEASON,
+    client: /** @type {any} */ (clientOver(db)),
+  });
+  if (current.runId !== U(40))
+    problems.push('the current game run is not the run before the import');
+  if (![U(50), U(51)].every((id) => current.ids.has(id)))
+    problems.push('the current game run does not show the restored games');
+  const live = new Set(db.teams.map((t) => String(t.id)));
+  for (const run of db.scheduler_runs.filter(
+    (r) => r.run_type === 'team' && r.parameters?.import_job_id === jobId
+  )) {
+    const listed = [
+      ...Object.values(run.results?.teamsByDivision || {}).flat(),
+      ...(run.results?.teams || []),
+    ];
+    if (listed.some((t) => !live.has(String(t.id))))
+      problems.push('a team run of the import lists a team that does not exist');
+  }
+  const taken = db.scheduler_runs.filter(
+    (r) => r.run_type === 'team' && ['completed', 'running'].includes(r.status)
+  );
+  for (const r of db.import_application_records.filter(
+    (x) => x.import_job_id === jobId && x.target_table === 'teams'
+  )) {
+    const team = db.teams.find((t) => t.id === r.target_id);
+    if (
+      team &&
+      !team.is_external &&
+      !taken.some((run) => JSON.stringify(run.results).includes(team.id))
+    )
+      problems.push('a kept shell is in no team run a reader takes');
+  }
+  return problems.length ? problems.join('; ') : 'ok';
+}
 /** Every record of the pair still holds the date the apply left, one day on. */
 function tbdMovedOneDay(db, operation, ids) {
   return (
@@ -624,7 +722,7 @@ describe('the rollback judges every record it undoes (the class)', () => {
   });
 
   describe.each(SCENARIOS)('$table $operation: $name -> $expect', (scenario) => {
-    it('is refused, or kept and named, and what the later writer did is still there', () => {
+    it('is refused, or kept and named, and what the later writer did is still there', async () => {
       const db = structuredClone(applied);
       const targets =
         scenario.table === 'scheduler_runs'
@@ -649,7 +747,44 @@ describe('the rollback judges every record it undoes (the class)', () => {
           expect(back.data.kept).toContainEqual({ table: scenario.table, id });
       }
       expect(writer.witness(db, targets)).toBe(true);
+      // After a rollback that went through, the readers of the CURRENT schedule see the restored one (a run the
+      // rollback kept is retired, never current; no team run lists a team that is gone).
+      if (scenario.expect === 'keep') expect(await readers(db, jobId)).toBe('ok');
     });
+  });
+
+  it('a team run kept for a shell that stays is not retired, and lists the kept shell and not the one that is gone', async () => {
+    const db = structuredClone(applied);
+    db.teams.find((t) => t.name === 'Shell A').notes = 'kept';
+    const back = rpc(db, 'rollback_game_import_job', { p_import_job_id: jobId });
+    expect(back.error).toBeNull();
+    expect(
+      db.teams.filter((t) => ['Shell A', 'Shell B'].includes(t.name)).map((t) => t.name)
+    ).toEqual(['Shell A']);
+    const run = db.scheduler_runs.find(
+      (r) => r.run_type === 'team' && r.parameters?.import_job_id === jobId
+    );
+    expect(run.status).toBe('completed');
+    expect(
+      run.results.teams.filter((t) => String(t.name).startsWith('Shell')).map((t) => t.name)
+    ).toEqual(['Shell A']);
+    expect(PGTAP).toContain("'1 completed:Shell A | ok'");
+    expect(await readers(db, jobId)).toBe('ok');
+  });
+
+  it('the readers this file runs are the ones the pages use: both ask for the latest COMPLETED game run', () => {
+    for (const file of [
+      'frontend/src/hooks/useSchedulerRun.js',
+      'frontend/src/utils/gamePublishedClient.js',
+    ]) {
+      const src = read(file);
+      expect(src, file).toMatch(
+        /\.eq\('status', 'completed'\)\s*\.order\('completed_at', \{ ascending: false \}\)/
+      );
+    }
+    expect(read('frontend/src/hooks/useTeamSummary.js')).toMatch(
+      /\.in\('status', \['completed', 'running'\]\)/
+    );
   });
 });
 

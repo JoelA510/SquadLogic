@@ -154,6 +154,13 @@
       "operation": "unrecorded",
       "name": "game-saved-into-the-run",
       "expect": "keep"
+    },
+    {
+      "ord": 23,
+      "table": "scheduler_runs",
+      "operation": "unrecorded",
+      "name": "evaluation-names-the-run",
+      "expect": "keep"
     }
   ]
 }

@@ -31,7 +31,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(23);
+SELECT plan(26);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -207,6 +207,7 @@ SELECT pg_temp.stage(pg_temp.j('jq'), 2, 'tbd', 'Q-PL-1',  'QD',   '', '', 'Q1',
 SELECT pg_temp.stage(pg_temp.j('jq'), 3, 'ok',  'Q-TB-2',  'QD',   'New Park', 'New 1', 'Q2', 'Q4', '2027-06-12', '09:00', '10:00', 6);                 -- the file places it: schedule_tbd deleted; a venue, a field, a slot and a game are made
 SELECT pg_temp.stage(pg_temp.j('jq'), 4, 'ok',  'Q-NEW-2', 'QNEW', 'New Park', 'New 1', 'Shell A', 'Outside FC', '2027-06-12', '10:00', '11:00', 6);   -- a division, a team shell, an outside club and a second slot
 SELECT pg_temp.stage(pg_temp.j('jq'), 5, 'tbd', 'Q-NEW-1', 'QD',   '', '', 'Q2', 'Q3', '2027-05-29', NULL, NULL, 5);                                       -- a new TIME TBD game
+SELECT pg_temp.stage(pg_temp.j('jq'), 6, 'ok',  'Q-NEW-3', 'QNEW', 'New Park', 'New 1', 'Shell B', 'Outside FC', '2027-06-12', '11:00', '12:00', 6);   -- a second team shell (one can be kept while the other goes)
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 CREATE FUNCTION pg_temp.mapping_q() RETURNS jsonb LANGUAGE sql AS $f$
     SELECT jsonb_build_object(
@@ -222,6 +223,7 @@ CREATE FUNCTION pg_temp.mapping_q() RETURNS jsonb LANGUAGE sql AS $f$
             pg_temp.k2('QD', 'Q3'), jsonb_build_object('action', 'map', 'id', pg_temp.u(13)), pg_temp.k2('QD', 'Q4'), jsonb_build_object('action', 'map', 'id', pg_temp.u(14)),
             pg_temp.k2('QD', 'Q5'), jsonb_build_object('action', 'map', 'id', pg_temp.u(15)), pg_temp.k2('QD', 'Q6'), jsonb_build_object('action', 'map', 'id', pg_temp.u(16)),
             pg_temp.k2('QNEW', 'Shell A'), jsonb_build_object('action', 'create', 'name', 'Shell A'),
+            pg_temp.k2('QNEW', 'Shell B'), jsonb_build_object('action', 'create', 'name', 'Shell B'),
             pg_temp.k2('QNEW', 'Outside FC'), jsonb_build_object('action', 'outside')))
 $f$;
 SELECT is(pg_temp.val($$SELECT (public.map_game_import_job(pg_temp.j('jq'), pg_temp.mapping_q())) ->> 'job_id'$$), pg_temp.j('jq')::text, 'control: the class file is mapped');
@@ -331,13 +333,51 @@ INSERT INTO scen VALUES
   $m$INSERT INTO public.game_assignments (id, organization_id, season_settings_id, run_id, field_id, home_team_id, away_team_id, division, week_index, start, "end", assignment_source)
      SELECT gen_random_uuid(), sr.organization_id, sr.season_settings_id, sr.id, pg_temp.u(21), pg_temp.u(12), pg_temp.u(14), 'QD', 8, '2027-07-01T09:00:00Z', '2027-07-01T10:00:00Z', 'auto'
        FROM public.scheduler_runs sr WHERE sr.id IN (%T%)$m$,
-  $m$SELECT EXISTS (SELECT 1 FROM public.game_assignments g WHERE g.division = 'QD' AND g.week_index = 8 AND g.run_id IN (%T%)) AND EXISTS (%T%)$m$);
+  $m$SELECT EXISTS (SELECT 1 FROM public.game_assignments g WHERE g.division = 'QD' AND g.week_index = 8 AND g.run_id IN (%T%)) AND EXISTS (%T%)$m$),
+ (23, 'scheduler_runs', 'unrecorded', 'evaluation-names-the-run', 'keep',
+  $m$SELECT sr.id FROM public.scheduler_runs sr WHERE sr.run_type = 'game' AND sr.parameters ->> 'import_job_id' = %JOB%::text$m$,
+  $m$INSERT INTO public.evaluation_runs (organization_id, scheduler_run_id, scheduler_run_type, status)
+     SELECT sr.organization_id, sr.id, 'game', 'completed' FROM public.scheduler_runs sr WHERE sr.id IN (%T%)$m$,
+  $m$SELECT EXISTS (SELECT 1 FROM public.evaluation_runs e WHERE e.scheduler_run_id IN (%T%)) AND EXISTS (%T%)$m$);
 
+-- readers: what the pages and the exports read as the CURRENT schedule after a rollback that went through, by their own
+-- rule (fix round 4, Codex on e699b1f: a run the rollback keeps must never be the current one). The game readers
+-- (useSchedulerRun, readCurrentSavedGameIds) take the latest COMPLETED game run by completed_at and its games; the team
+-- reader (useTeamSummary) takes the latest team run that is completed or running. 'ok', or what is wrong:
+--   the current game run must be the run before the import, holding the two games it held;
+--   no team run of the import lists a team that does not exist; a shell that was kept is listed by a run a reader takes.
+CREATE FUNCTION pg_temp.readers(p_job uuid) RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE v_run uuid; v_out text := ''; v_n int;
+BEGIN
+    SELECT sr.id INTO v_run FROM public.scheduler_runs sr
+     WHERE sr.organization_id = 'a1111111-1111-1111-1111-111111111111' AND sr.run_type = 'game' AND sr.status = 'completed'
+       AND (sr.season_settings_id = 'a1111111-1111-1111-1111-111111111aaa' OR sr.season_id = 'a1111111-1111-1111-1111-111111111aaa')
+     ORDER BY sr.completed_at DESC LIMIT 1;
+    IF v_run IS DISTINCT FROM pg_temp.u(40) THEN v_out := v_out || 'the current game run is not the run before the import; '; END IF;
+    SELECT count(*) INTO v_n FROM public.game_assignments ga WHERE ga.run_id = v_run AND ga.id IN (pg_temp.u(50), pg_temp.u(51));
+    IF v_n <> 2 THEN v_out := v_out || 'the current game run shows ' || v_n || ' of the 2 restored games; '; END IF;
+    SELECT count(*) INTO v_n
+      FROM public.scheduler_runs sr,
+           LATERAL (SELECT x ->> 'id' AS id FROM jsonb_each(CASE WHEN jsonb_typeof(sr.results -> 'teamsByDivision') = 'object' THEN sr.results -> 'teamsByDivision' ELSE '{}'::jsonb END) e,
+                           LATERAL jsonb_array_elements(e.value) x
+                    UNION ALL
+                    SELECT x ->> 'id' FROM jsonb_array_elements(CASE WHEN jsonb_typeof(sr.results -> 'teams') = 'array' THEN sr.results -> 'teams' ELSE '[]'::jsonb END) x) l
+     WHERE sr.organization_id = 'a1111111-1111-1111-1111-111111111111' AND sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = p_job::text
+       AND NOT EXISTS (SELECT 1 FROM public.teams t WHERE t.id::text = l.id);
+    IF v_n > 0 THEN v_out := v_out || 'a team run of the import lists ' || v_n || ' team(s) that do not exist; '; END IF;
+    SELECT count(*) INTO v_n FROM public.import_application_records r JOIN public.teams t ON t.id = r.target_id AND NOT t.is_external
+     WHERE r.import_job_id = p_job AND r.target_table = 'teams'
+       AND NOT EXISTS (SELECT 1 FROM public.scheduler_runs sr WHERE sr.run_type = 'team' AND sr.status IN ('completed', 'running')
+                          AND position(t.id::text IN sr.results::text) > 0);
+    IF v_n > 0 THEN v_out := v_out || v_n || ' kept shell(s) are in no team run a reader takes; '; END IF;
+    RETURN COALESCE(NULLIF(v_out, ''), 'ok');
+END
+$f$;
 -- trial: apply the later writer's change, call the rollback as the admin, read what is left, and UNDO ALL OF IT (the
 -- sentinel), so every scenario starts from the same applied import. The outcome comes back as jsonb.
 CREATE FUNCTION pg_temp.trial(p_job uuid, p_mutation text, p_witness text) RETURNS jsonb LANGUAGE plpgsql AS $f$
 DECLARE
-    v_res jsonb; v_err text; v_det text; v_wit text; v_state text;
+    v_res jsonb; v_err text; v_det text; v_wit text; v_state text; v_readers text;
 BEGIN
     BEGIN
         PERFORM set_config('request.jwt.claims', '{}', true);
@@ -350,8 +390,9 @@ BEGIN
             v_err := SQLSTATE || ':' || COALESCE(v_det, '');
         END;
         EXECUTE p_witness INTO v_wit;
+        IF v_err IS NULL THEN v_readers := pg_temp.readers(p_job); END IF;
         RAISE EXCEPTION 'undo' USING ERRCODE = 'P1123',
-            DETAIL = jsonb_build_object('refused', v_err, 'result', v_res, 'witness', v_wit)::text;
+            DETAIL = jsonb_build_object('refused', v_err, 'result', v_res, 'witness', v_wit, 'readers', v_readers)::text;
     EXCEPTION WHEN SQLSTATE 'P1123' THEN
         GET STACKED DIAGNOSTICS v_state = PG_EXCEPTION_DETAIL;
         RETURN v_state::jsonb;
@@ -435,7 +476,7 @@ $f$;
 SELECT is(pg_temp.control(), '[] true',
     'Q.8 control: with no later change the rollback keeps nothing and every table is as it was before the apply');
 
-SELECT is(pg_temp.run_scenarios(pg_temp.j('jq')), 22, 'Q.9 meta: all 22 scenarios ran, each from the same applied import');
+SELECT is(pg_temp.run_scenarios(pg_temp.j('jq')), 23, 'Q.9 meta: all 23 scenarios ran, each from the same applied import');
 SELECT is((SELECT string_agg(o.tbl || ':' || o.op || '/' || o.name || ' -> ' || COALESCE(o.outcome ->> 'refused', 'rolled back'), '; ' ORDER BY o.ord)
              FROM scen_out o
             WHERE o.expect = 'refuse'
@@ -453,7 +494,19 @@ SELECT is((SELECT string_agg(o.tbl || ':' || o.op || '/' || o.name || ' -> ' || 
     'Q.11 every scenario that must keep does: the rollback goes through and names every record the later writer touched in kept');
 SELECT is((SELECT string_agg(o.tbl || ':' || o.op || '/' || o.name, '; ' ORDER BY o.ord) FROM scen_out o WHERE o.outcome ->> 'witness' IS DISTINCT FROM 'true'), NULL::text,
     'Q.12 and in every scenario what the later writer did is still there afterwards (an edit, a row, a game in the run): nothing it did was deleted, overwritten or set null');
-SELECT is((SELECT count(*) FROM scen_out WHERE expect IN ('refuse', 'keep'))::int, 22, 'Q.13 meta: the outcomes table holds the 22 scenarios the file declares');
+SELECT is((SELECT count(*) FROM scen_out WHERE expect IN ('refuse', 'keep'))::int, 23, 'Q.13 meta: the outcomes table holds the 23 scenarios the file declares');
+SELECT is((SELECT string_agg(o.tbl || ':' || o.op || '/' || o.name || ' -> ' || COALESCE(o.outcome ->> 'readers', 'not read'), '; ' ORDER BY o.ord)
+             FROM scen_out o WHERE o.outcome ->> 'refused' IS NULL AND o.outcome ->> 'readers' IS DISTINCT FROM 'ok'), NULL::text,
+    'Q.14 after every rollback that went through, the readers of the CURRENT schedule see the restored one: the run before the import is the latest completed game run and holds its games (a run the rollback kept is retired, never current), and no team run lists a team that is gone');
+SELECT ok((SELECT count(*) FROM scen_out o WHERE o.outcome ->> 'refused' IS NULL) >= 12, 'Q.14b meta: at least twelve scenarios went through and were read (a reader check over nothing would pass)');
+-- One shell kept, one gone: the team run stays (it is the only run that lists the kept shell), is still one a reader takes,
+-- and lists the kept shell and not the one that is gone.
+SELECT is((pg_temp.trial(pg_temp.j('jq'), $m$UPDATE public.teams SET notes = 'kept' WHERE name = 'Shell A'$m$,
+        $m$SELECT (SELECT count(*) FROM public.teams WHERE name IN ('Shell A', 'Shell B'))::text || ' ' || (SELECT string_agg(sr.status || ':' || (SELECT string_agg(x ->> 'name', ',' ORDER BY x ->> 'name') FROM jsonb_array_elements(sr.results -> 'teams') x WHERE x ->> 'name' LIKE 'Shell%'), ';')
+              FROM public.scheduler_runs sr WHERE sr.run_type = 'team' AND sr.parameters ? 'import_job_id')$m$)) ->> 'witness'
+          || ' | ' || (pg_temp.trial(pg_temp.j('jq'), $m$UPDATE public.teams SET notes = 'kept' WHERE name = 'Shell A'$m$, 'SELECT true') ->> 'readers'),
+    '1 completed:Shell A | ok',
+    'Q.15 a team run kept for a shell that stays is not retired (retiring it would hide a team that exists): it lists the kept shell and no longer the shell that is gone');
 
 SELECT * FROM finish();
 ROLLBACK;

@@ -72,8 +72,11 @@ updates:
       # Remove this entry once a release outside 11.10.x is taken, or when the upstream
       # fix ships; check a release by bumping @sentry/react by hand in a scratch branch
       # and running `npm run typecheck`.
+      # 2026-11-10: 11.11.0 (proposed in #717) was tried that way and fails with the same
+      # TS2345 at the same line, so the 11.11.x line is held too, by the same rule; the
+      # rest of #717's group was taken without it. Still not filed upstream.
       - dependency-name: '@sentry/react'
-        versions: ['11.10.x']
+        versions: ['11.10.x', '11.11.x']
       # 2026-11-09: tailwindcss and @tailwindcss/vite stay on 4.3.3.
       # `@tailwindcss/oxide-wasm32-wasi` 4.3.3 declares `"cpu": ["wasm32"]`; 4.3.4 and
       # 4.3.5 declare no cpu field, so npm installs that WASI fallback (about 6.7 MB and

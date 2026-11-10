@@ -33,9 +33,15 @@
 
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import {
+  SCHEDULE_IMPORT_CHUNK_LIMITS,
   SCHEDULE_IMPORT_RETIRED_ROW_REFUSALS,
   SCHEDULE_IMPORT_ROW_REFUSALS,
+  diffScheduleImportConfirmCounts,
+  isScheduleImportConfirmCounts,
   resolveScheduleRows,
+  scheduleImportConfirmCounts,
+  stageScheduleChunk,
+  stagedRowToParsed,
 } from '@squadlogic/core/scheduleImport/index.js';
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
 import { mockGameHeldIds } from './mockGameIdentity.js';
@@ -224,6 +230,12 @@ function ensureGameSlot(db, params, ctx, env) {
 // --------------------------------------------------------------------------------------------- map_game_import_job
 
 /** What a row refused because another game stands on its place is told (the SQL's words; a test holds the two equal). */
+/** The SQL's sentence for a flag a staged row carried (section 7 of the apply). @param {string} code */
+const FLAG_MESSAGE = (code) =>
+  code === 'time-ambiguous'
+    ? 'The clocks repeat this time on its date; the first occurrence was taken.'
+    : 'The week is not the week the date falls in.';
+
 export const COLLISION_MESSAGE =
   "A game this file does not move already stands on this place, and this row's Game ID (or the lack of one) does not name it. Nothing is written for the row.";
 
@@ -377,42 +389,8 @@ function mapJob(db, job, mapping, ctx, env) {
 
 // ------------------------------------------------------------------------------------------------- the apply
 
-/** A staged row as core's `resolveScheduleRows` takes a parsed one. */
-function parsedOf(staged) {
-  const p = staged.normalized_payload;
-  if (!p || (staged.validation_errors || []).length > 0) {
-    const e = (staged.validation_errors || [])[0] ?? {};
-    return {
-      rowNumber: staged.source_row_number,
-      rowKey: `row-${staged.source_row_number}`,
-      status: 'refused',
-      reason: e.code ?? null,
-      message: e.message ?? null,
-      flags: [],
-    };
-  }
-  return {
-    rowNumber: staged.source_row_number,
-    rowKey: p.row_key,
-    gameId: p.game_id ?? null,
-    status: p.status,
-    reason: null,
-    message: null,
-    tbdReason: p.tbd_reason ?? null,
-    date: p.date,
-    startTime: p.start_time,
-    endTime: p.end_time,
-    start: p.start,
-    end: p.end,
-    venueLabel: p.venue ?? '',
-    fieldLabel: p.field ?? '',
-    divisionLabel: p.division,
-    homeLabel: p.home_team,
-    awayLabel: p.away_team,
-    weekIndex: p.week_index,
-    flags: (p.flags || []).map((code) => ({ code })),
-  };
-}
+/** A staged row as core's `resolveScheduleRows` takes a parsed one (core's own reading of a staged row). */
+const parsedOf = stagedRowToParsed;
 
 function leagueOf(db, job) {
   const divisions = (db.divisions || []).filter(
@@ -518,7 +496,14 @@ function applyJob(db, job, dry, ctx, env) {
   }
 
   const league = leagueOf(db, job);
-  const resolved = resolveScheduleRows({ rows: staged.map(parsedOf), league, decisions: mapping });
+  // As the SQL: only the decisions STORED on the job are in effect. A label with a single match and no stored decision
+  // is unknown to the database (it guesses nothing), so core's own proposal must not stand in for one here.
+  const resolved = resolveScheduleRows({
+    rows: staged.map(parsedOf),
+    league,
+    decisions: mapping,
+    explicitOnly: true,
+  });
   const rows = resolved.rows.map((r, i) => ({
     ...r,
     staged: staged[i],
@@ -1042,7 +1027,8 @@ function applyJob(db, job, dry, ctx, env) {
     ...[...flagged.entries()].flatMap(([p, codes]) =>
       codes.map((code) => ({
         type: code,
-        details: { rowKey: p.r.rowKey },
+        message: FLAG_MESSAGE(code),
+        details: { rowKey: p.r.rowKey, gameId: p.r.gameId ?? null, date: p.r.date },
         rowNumber: p.r.rowNumber,
       }))
     ),
@@ -1050,7 +1036,8 @@ function applyJob(db, job, dry, ctx, env) {
     ...[...tbdIns, ...tbdUpd].flatMap((t) =>
       t.r.flags.map((f) => ({
         type: f.code,
-        details: { rowKey: t.r.rowKey },
+        message: FLAG_MESSAGE(f.code),
+        details: { rowKey: t.r.rowKey, gameId: t.r.gameId ?? null, date: t.r.date },
         rowNumber: t.r.rowNumber,
       }))
     ),
@@ -1900,4 +1887,220 @@ function rollbackJob(db, job, ctx, env) {
   job.status = 'needs_fix';
   job.warning_summary = { ...(job.warning_summary || {}), game_import_rollback: result };
   return { data: result, error: null };
+}
+
+// ------------------------------------------------------------------------- the Edge function's games arm (PR 6)
+
+/** An Edge function's non-2xx answer as supabase-js hands it over: the body is read from `context`. */
+function httpRefusal(status, body) {
+  const error = new Error('Edge Function returned a non-2xx status code');
+  return {
+    data: null,
+    error: Object.assign(error, { context: { status, json: async () => body } }),
+  };
+}
+
+/**
+ * The mock's `import-validation` for `import_type: 'games'` (the Edge function's games arm,
+ * `supabase/functions/import-validation/index.ts`; plan 4.2 step 3 and PR 6, tasks F1 and F7).
+ *
+ * **Mirrored.** `action: 'stage'`: the job must be a games job of the organization that still takes rows; the season
+ * (and so the clock and the window) is the JOB's; the chunk is read by core's `stageScheduleChunk` (the function the
+ * Edge mirror is held to); a refused file stages nothing and answers `status: 'refused'`; the first chunk
+ * (`row_offset` 0) replaces everything the job had staged, a later one its own row numbers. `action: 'apply'`: the
+ * confirm must carry the counts of the preview; the dry run is run again and, when its counts differ, the answer is
+ * 409 `game_import_preview_stale` with both sets of counts and the fresh preview, and nothing is written; a database
+ * refusal keeps its code in `code`.
+ *
+ * **Not mirrored:** the JWT, the rate limit, the payload size limit, Zod's shape errors beyond the ones named here,
+ * the demo fence (the database's own fence refuses a demo's job) and the audit rows of the staging step.
+ *
+ * @param {any} db
+ * @param {Record<string, any>} body
+ * @param {{ isOrgAdmin: (organizationId: string) => boolean, currentUserId: string | null,
+ *   newId?: () => string, now?: () => string }} ctx
+ * @returns {{ data: any, error: any, wrote: boolean }}
+ */
+export function handleGameImportFunction(db, body, ctx) {
+  const done = (answer, wrote = false) => ({ ...answer, wrote });
+  const newId = ctx.newId ?? (() => globalThis.crypto.randomUUID());
+  const now = ctx.now ?? (() => new Date().toISOString());
+  if (!ctx.currentUserId)
+    return done(httpRefusal(401, { status: 'error', message: 'Unauthorized' }));
+  if (!body?.organization_id || !body?.import_job_id) {
+    return done(httpRefusal(400, { status: 'error', message: 'Invalid payload' }));
+  }
+  if (!ctx.isOrgAdmin(body.organization_id)) {
+    return done(
+      httpRefusal(403, {
+        status: 'error',
+        message: 'Access denied: not an admin of this organization',
+      })
+    );
+  }
+  const job = (db.import_jobs || []).find(
+    (item) => same(item.id, body.import_job_id) && same(item.organization_id, body.organization_id)
+  );
+  if (!job) {
+    return done(
+      httpRefusal(404, { status: 'error', message: 'Import job not found for organization' })
+    );
+  }
+  if (job.job_type !== 'games') {
+    return done(
+      httpRefusal(409, {
+        status: 'error',
+        message: `Import job type ${job.job_type} does not match games`,
+      })
+    );
+  }
+
+  if ((body.action ?? 'stage') === 'apply') {
+    if (!isScheduleImportConfirmCounts(body.confirmed)) {
+      return done(
+        httpRefusal(400, {
+          status: 'error',
+          code: 'confirmed_counts_required',
+          message:
+            'The confirm must carry the counts of the preview it confirms. Preview the import again.',
+        })
+      );
+    }
+    const call = (dry) =>
+      handleGameImportRpc(
+        db,
+        'apply_game_import_job',
+        { p_import_job_id: job.id, p_dry_run: dry },
+        { ...ctx, newId, now }
+      );
+    const refused = (error) => {
+      const status =
+        error.code === '42501'
+          ? 403
+          : error.code === 'P0002'
+            ? 404
+            : error.code === '22023'
+              ? 409
+              : 500;
+      return done(
+        httpRefusal(status, {
+          status: 'error',
+          code: error.details || error.code || 'game_import_failed',
+          message: error.message ?? 'The import was refused.',
+        })
+      );
+    };
+    const preview = call(true);
+    if (preview.error) return refused(preview.error);
+    if (preview.data?.replayed === true) {
+      return done({
+        data: { status: 'success', import_type: 'games', result: preview.data },
+        error: null,
+      });
+    }
+    const current = scheduleImportConfirmCounts(preview.data);
+    const differing = diffScheduleImportConfirmCounts(body.confirmed, current);
+    if (differing.length > 0) {
+      return done(
+        httpRefusal(409, {
+          status: 'error',
+          code: 'game_import_preview_stale',
+          message:
+            'The schedule changed after this preview was made, so the import would no longer do what was confirmed. Nothing was written. Review the new preview and confirm again.',
+          differing,
+          confirmed: body.confirmed,
+          current,
+          preview: preview.data,
+        })
+      );
+    }
+    const applied = call(false);
+    if (applied.error) return refused(applied.error);
+    return done(
+      { data: { status: 'success', import_type: 'games', result: applied.data }, error: null },
+      true
+    );
+  }
+
+  if (['completed', 'completed_with_warnings', 'failed', 'needs_fix'].includes(job.status)) {
+    return done(
+      httpRefusal(409, {
+        status: 'error',
+        message: `Import job cannot accept staged rows while ${job.status}`,
+      })
+    );
+  }
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  const rowOffset = Number.isInteger(body.row_offset) ? body.row_offset : 0;
+  if (rows.length > SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CHUNK_ROWS) {
+    return done(httpRefusal(400, { status: 'error', message: 'Invalid payload' }));
+  }
+  const season = jobSeason(db, job);
+  if (!season) {
+    return done(
+      httpRefusal(409, {
+        status: 'error',
+        code: 'season_missing',
+        message: 'This import has no season to import into. Start the import again.',
+      })
+    );
+  }
+  const chunk = stageScheduleChunk({
+    headers: Array.isArray(body.headers) ? body.headers : [],
+    rows,
+    season: {
+      timeZone: season.timezone ?? null,
+      startDate: season.season_start ?? null,
+      endDate: season.season_end ?? null,
+    },
+    rowOffset,
+  });
+  if (chunk.refusal) {
+    return done({
+      data: {
+        status: 'refused',
+        import_type: 'games',
+        code: chunk.refusal.code,
+        message: chunk.refusal.message,
+        column: chunk.refusal.column ?? null,
+      },
+      error: null,
+    });
+  }
+  const numbers = new Set(chunk.staged.map((row) => row.source_row_number));
+  db.staging_import_rows = (db.staging_import_rows || []).filter(
+    (row) =>
+      !same(row.import_job_id, job.id) ||
+      row.import_type !== 'games' ||
+      (rowOffset !== 0 && !numbers.has(row.source_row_number))
+  );
+  for (const row of chunk.staged) {
+    db.staging_import_rows.push({
+      id: newId(),
+      organization_id: job.organization_id,
+      import_job_id: job.id,
+      import_type: 'games',
+      source_row_number: row.source_row_number,
+      raw_payload: row.raw_payload,
+      normalized_payload: row.normalized_payload,
+      validation_errors: row.validation_errors,
+      created_at: now(),
+    });
+  }
+  return done(
+    {
+      data: {
+        status: 'success',
+        import_type: 'games',
+        row_offset: rowOffset,
+        total_rows: chunk.summary.rows,
+        staged_rows: chunk.staged.length,
+        valid_rows: chunk.summary.ok + chunk.summary.tbd,
+        error_rows: chunk.summary.refused,
+        summary: chunk.summary,
+      },
+      error: null,
+    },
+    true
+  );
 }

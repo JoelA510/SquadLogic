@@ -24,9 +24,11 @@
 import {
   divisionDecisionKey,
   fieldDecisionKey,
+  scheduleLabelKey,
   teamDecisionKey,
   venueDecisionKey,
 } from './mapping.js';
+import { SCHEDULE_IMPORT_COLUMNS, parseScheduleRows } from './parseRows.js';
 import { SCHEDULE_IMPORT_STAGED_FLAGS } from './reasonCodes.js';
 
 /** The keys of a staged games row, in the order the allowlist lists them. */
@@ -101,5 +103,157 @@ export function toStagedGameRow(row) {
       away_key: teamDecisionKey(row.divisionLabel, row.awayLabel),
     },
     validation_errors: [],
+  };
+}
+
+/** Limits of one request to the Edge function (`import-validation`, `import_type: 'games'`; PR 6). */
+export const SCHEDULE_IMPORT_CHUNK_LIMITS = Object.freeze({
+  /** The browser sends a file in chunks of at most this many rows (a request gets 2 s of CPU, lesson 42). */
+  MAX_CHUNK_ROWS: 500,
+  /** A cell longer than this is cut before it is read (no label of a schedule is this long). */
+  MAX_CELL_LENGTH: 500,
+  MAX_HEADERS: 200,
+});
+
+/** A cell as text, without markup or control characters, cut to the cell limit. @param {unknown} value */
+function cleanCell(value) {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .replace(/<[^>]*>/g, '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH);
+}
+
+/**
+ * One request's rows, read and made ready to stage: what the Edge function does with a chunk of a games file
+ * (`supabase/functions/_shared/schedule-import.ts` is the copy it runs; `tests/gameImportEdgeParity.test.js` holds the
+ * two equal). The mock's `import-validation` runs this one.
+ *
+ * The allowlist comes first: only the columns of plan 4.3 are kept (by the header's normalised name), each cell is
+ * cleaned, and everything else of the row is dropped before the parse sees it. `raw_payload` is those same columns as
+ * typed, under the template's names; nothing else of the file is staged or returned.
+ *
+ * @param {Object} input
+ * @param {unknown[]} input.headers
+ * @param {Array<Record<string, unknown>>} input.rows
+ * @param {{ timeZone?: string | null, startDate?: string | null, endDate?: string | null } | null} input.season
+ * @param {number} input.rowOffset  how many rows of the file came before these
+ * @returns {{
+ *   refusal: { code: string, message: string, column?: string } | null,
+ *   staged: Array<ReturnType<typeof toStagedGameRow> & { raw_payload: Record<string, string> }>,
+ *   summary: { rows: number, ok: number, tbd: number, refused: number, flagged: number,
+ *     by_reason: Record<string, number>, dropped_columns: string[],
+ *     warnings: Array<{ row: number, code: string, message: string }>,
+ *     refused_rows: Array<{ row: number, code: string, message: string }> },
+ * }}
+ */
+export function stageScheduleChunk({ headers, rows, season, rowOffset }) {
+  const byKey = new Map(
+    Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => [scheduleLabelKey(name), name])
+  );
+  // The header row as the file wrote it, cut to what a header can be; names the allowlist does not hold stay in the
+  // list (so the parse can report them as dropped) and their VALUES are never read.
+  const fileHeaders = headers
+    .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS)
+    .map((h) => cleanCell(h))
+    .filter((h) => h.trim() !== '');
+  const kept = fileHeaders.filter((h) => byKey.has(scheduleLabelKey(h)));
+  const allowlisted = rows.map((row) => {
+    /** @type {Record<string, string>} */
+    const out = {};
+    for (const h of kept) out[h] = cleanCell(row?.[h]);
+    return out;
+  });
+  const parsed = parseScheduleRows({ headers: fileHeaders, rows: allowlisted, season, rowOffset });
+  const empty = {
+    rows: 0,
+    ok: 0,
+    tbd: 0,
+    refused: 0,
+    flagged: 0,
+    by_reason: {},
+    dropped_columns: [],
+    warnings: [],
+    refused_rows: [],
+  };
+  if (!parsed.ok) return { refusal: parsed.refusal, staged: [], summary: empty };
+  const staged = parsed.rows.map((row, i) => {
+    /** @type {Record<string, string>} */
+    const raw = {};
+    for (const h of kept)
+      raw[/** @type {string} */ (byKey.get(scheduleLabelKey(h)))] = allowlisted[i][h];
+    return { ...toStagedGameRow(row), raw_payload: raw };
+  });
+  return {
+    refusal: null,
+    staged,
+    summary: {
+      ...parsed.counts,
+      by_reason: parsed.byReason,
+      dropped_columns: parsed.droppedColumns,
+      warnings: parsed.rows.flatMap((row) =>
+        row.status === 'refused'
+          ? []
+          : row.flags.map((flag) => ({
+              row: row.rowNumber,
+              code: flag.code,
+              message: flag.message,
+            }))
+      ),
+      refused_rows: parsed.rows
+        .filter((row) => row.status === 'refused')
+        .map((row) => ({
+          row: row.rowNumber,
+          code: String(row.reason),
+          message: String(row.message ?? ''),
+        })),
+    },
+  };
+}
+
+/**
+ * A staged row back as the mapping step takes a parsed one: the inverse of {@link toStagedGameRow} for what the mapping
+ * reads. The mapping screen and the mock's apply both read the STAGED rows through this one function, so what the admin
+ * maps is what was staged (the writer's output), never a second reading of the file.
+ *
+ * A staged flag comes back as its code only (the sentence was the upload's). A refused row comes back with its reason.
+ *
+ * @param {{ source_row_number: number, normalized_payload: Record<string, any> | null,
+ *   validation_errors?: Array<{ code?: string, message?: string }> | null }} staged
+ * @returns {Record<string, any>}
+ */
+export function stagedRowToParsed(staged) {
+  const p = staged.normalized_payload;
+  if (!p || (staged.validation_errors || []).length > 0) {
+    const e = (staged.validation_errors || [])[0] ?? {};
+    return {
+      rowNumber: staged.source_row_number,
+      rowKey: `row-${staged.source_row_number}`,
+      status: 'refused',
+      reason: e.code ?? null,
+      message: e.message ?? null,
+      flags: [],
+    };
+  }
+  return {
+    rowNumber: staged.source_row_number,
+    rowKey: p.row_key,
+    gameId: p.game_id ?? null,
+    status: p.status,
+    reason: null,
+    message: null,
+    tbdReason: p.tbd_reason ?? null,
+    date: p.date,
+    startTime: p.start_time,
+    endTime: p.end_time,
+    start: p.start,
+    end: p.end,
+    venueLabel: p.venue ?? '',
+    fieldLabel: p.field ?? '',
+    divisionLabel: p.division,
+    homeLabel: p.home_team,
+    awayLabel: p.away_team,
+    weekIndex: p.week_index,
+    flags: (p.flags || []).map((/** @type {string} */ code) => ({ code })),
   };
 }

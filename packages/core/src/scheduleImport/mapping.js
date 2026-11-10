@@ -207,7 +207,7 @@ const SKIP = Object.freeze({ type: 'skip' });
  *
  * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
  */
-function analyse({ rows, league, decisions }) {
+function analyse({ rows, league, decisions, explicitOnly = false }) {
   requireArray(rows, 'rows');
   const world = indexLeague(league);
   const usable = rows.filter((r) => r.status === 'ok' || r.status === 'tbd');
@@ -247,7 +247,8 @@ function analyse({ rows, league, decisions }) {
       candidates: candidates.map((c) => ({ id: c.id, name: c.name })),
       proposed,
       decision,
-      effective: invalid ? null : (decision ?? proposed),
+      // With `explicitOnly` a proposal is shown and never in effect: only a decision that was made is.
+      effective: invalid ? null : (decision ?? (explicitOnly ? null : proposed)),
       options: [...ACTIONS[kind]],
       ...(invalid ? { problem: 'invalid-decision' } : {}),
     };
@@ -498,15 +499,16 @@ const sortedEntries = (entries) =>
  * For every distinct label of the file: what the organization has that it could mean, what is
  * proposed (only an exact, single match), what the admin decided, and what is therefore in effect.
  *
- * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any>, explicitOnly?: boolean }} input
  *   `rows` are the parse's rows; only the ones it accepted are asked about
  * @returns {{ divisions: MappingEntry[], venues: MappingEntry[], fields: MappingEntry[], teams: MappingEntry[] }}
  */
-export function proposeScheduleMapping({ rows, league, decisions = {} }) {
+export function proposeScheduleMapping({ rows, league, decisions = {}, explicitOnly = false }) {
   const { divisionEntries, venueEntries, fieldEntries, teamEntries } = analyse({
     rows,
     league,
     decisions,
+    explicitOnly,
   });
   return {
     divisions: sortedEntries(divisionEntries),
@@ -530,18 +532,23 @@ export function proposeScheduleMapping({ rows, league, decisions = {} }) {
  * Order within a row: division, venue, field, home team, away team, then the two teams as a pair.
  * The first to fail is the row's reason; a label the admin skipped makes the row `skipped`.
  *
- * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any> }} input
+ * @param {{ rows: Array<any>, league: LeagueView, decisions?: Record<string, any>, explicitOnly?: boolean }} input
+ *   `explicitOnly`: resolve as the database does (`apply_game_import_job` reads the STORED decisions and guesses
+ *   nothing: a label with a single match and no stored decision is unknown there). The mock's apply and the confirm
+ *   screen pass it, with the decisions as they are stored; without it a single match is in effect on its own, which is
+ *   what the mapping screen proposes before anything is stored.
  * @returns {{
  *   rows: Array<any>,
  *   creations: { divisions: any[], venues: any[], fields: any[], teamShells: any[], outsideTeams: any[] },
  *   counts: { rows: number, ok: number, tbd: number, refused: number, skipped: number, byReason: Record<string, number> },
  * }}
  */
-export function resolveScheduleRows({ rows, league, decisions = {} }) {
+export function resolveScheduleRows({ rows, league, decisions = {}, explicitOnly = false }) {
   const { refs, divisionEntries, venueEntries, fieldEntries, teamEntries } = analyse({
     rows,
     league,
     decisions,
+    explicitOnly,
   });
   /**
    * Why a label is unresolved, in words: a decision that cannot be read or a name that is taken says

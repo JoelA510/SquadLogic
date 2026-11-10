@@ -324,11 +324,18 @@ function fileRefusal(code, message, column) {
  * @param {{ timeZone?: string | null, startDate?: string | null, endDate?: string | null } | null} [input.season]
  *   the season's clock (`season_settings.timezone`) and window; `startDate` is what a blank `Week` is
  *   derived from
+ * @param {number} [input.rowOffset]  how many rows of the file came before these (0 for a whole file).
+ *   The Edge function reads a file in chunks of at most 500 rows (PR 6); a row's number and key are
+ *   its place in the FILE, and the row limit is the file's. A repeat is judged within the rows given:
+ *   one that straddles two chunks is refused by the apply, which judges every staged row together.
  * @returns {ScheduleImportParseResult}
  */
-export function parseScheduleRows({ headers, rows, season }) {
+export function parseScheduleRows({ headers, rows, season, rowOffset = 0 }) {
   if (!Array.isArray(headers)) throw new TypeError('parseScheduleRows: headers must be an array');
   if (!Array.isArray(rows)) throw new TypeError('parseScheduleRows: rows must be an array');
+  if (!Number.isInteger(rowOffset) || rowOffset < 0) {
+    throw new TypeError('parseScheduleRows: rowOffset must be a whole number, 0 or more');
+  }
 
   // Columns: match by the shared normaliser (trim, collapse, fold case; a byte-order mark is
   // whitespace to it), drop every name that is not on the list, and refuse a name given twice.
@@ -406,10 +413,10 @@ export function parseScheduleRows({ headers, rows, season }) {
       C.WEEK
     );
   }
-  if (rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
+  if (rowOffset + rows.length > SCHEDULE_IMPORT_LIMITS.MAX_ROWS) {
     return fileRefusal(
       R.TOO_MANY_ROWS,
-      `The file has ${rows.length.toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`
+      `The file has ${(rowOffset + rows.length).toLocaleString('en-US')} rows; one import takes at most ${SCHEDULE_IMPORT_LIMITS.MAX_ROWS.toLocaleString('en-US')}. Split it and import the parts one after the other.`
     );
   }
 
@@ -422,7 +429,15 @@ export function parseScheduleRows({ headers, rows, season }) {
   };
 
   const parsed = rows.map((row, index) =>
-    parseRow({ row, index, cell, hasWeek: header.has(C.WEEK), timeZone, seasonStart, seasonEnd })
+    parseRow({
+      row,
+      index: rowOffset + index,
+      cell,
+      hasWeek: header.has(C.WEEK),
+      timeZone,
+      seasonStart,
+      seasonEnd,
+    })
   );
   refuseRepeats(parsed);
 

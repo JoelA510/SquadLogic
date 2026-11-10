@@ -34,8 +34,11 @@ import EvaluationImportSummary from './EvaluationImportSummary.jsx';
 
 // A demo opens this instead of the file picker (D4). Lazy: only a demo visitor ever needs it.
 const DemoImportNotice = lazy(() => import('./DemoImportNotice.jsx'));
+// The schedule import (games; PR 11 adds practices as a second kind of the same panel) has its own steps: mapping,
+// a preview that is the apply with its writes off, a confirm. Lazy: only an admin importing a schedule needs it.
+const ScheduleImportPanel = lazy(() => import('./import/ScheduleImportPanel.jsx'));
 
-/** @typedef {'players' | 'coaches' | 'evaluations' | 'fields' | 'field_availability'} ImportType */
+/** @typedef {'players' | 'coaches' | 'evaluations' | 'fields' | 'field_availability' | 'games'} ImportType */
 /** @type {readonly ImportType[]} */
 const IMPORT_TYPES = Object.freeze([
   'players',
@@ -43,7 +46,10 @@ const IMPORT_TYPES = Object.freeze([
   'evaluations',
   'fields',
   'field_availability',
+  'games',
 ]);
+/** The types whose file goes through `ImportContext`; a schedule import runs in its own panel. */
+const SCHEDULE_IMPORT_TYPES = Object.freeze(['games']);
 const COMPLETED_IMPORT_STATUSES = new Set(['completed', 'completed_with_warnings']);
 const IMPORT_TYPE_TOOLTIPS = {
   players: 'Requires first name, last name, and date of birth columns.',
@@ -54,6 +60,8 @@ const IMPORT_TYPE_TOOLTIPS = {
   fields: 'Requires location, name, type, start, and end columns.',
   field_availability:
     'Requires season_label, location, name, available_from, and available_until columns.',
+  games:
+    'Requires date, start time, end time or length, venue, field, division, home team and away team columns. You map the names and review the changes before anything is written.',
 };
 
 /** What each deferrable import is called in a sentence, and on a button. */
@@ -195,7 +203,9 @@ export default function ImportPanel({ onImport }) {
   // job the server holds says what is waiting; once the apply finished, the local type used to take
   // over again and hid the evaluations result and every roll back (Codex, P2 on #684).
   const workflowImportType =
-    (isReadyToApply || isComplete) && IMPORT_TYPES.includes(deferredImportType)
+    (isReadyToApply || isComplete) &&
+    IMPORT_TYPES.includes(deferredImportType) &&
+    !SCHEDULE_IMPORT_TYPES.includes(deferredImportType)
       ? deferredImportType
       : importType;
   // E3c: an evaluations import belongs to the season its job was made for, whatever the header
@@ -796,7 +806,7 @@ export default function ImportPanel({ onImport }) {
 
         <div
           data-testid="import-type-selector"
-          className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8"
         >
           {IMPORT_TYPES.map((type) => (
             <Tooltip key={type} content={IMPORT_TYPE_TOOLTIPS[type]} className="w-full">
@@ -825,7 +835,7 @@ export default function ImportPanel({ onImport }) {
                     <span
                       className={`font-semibold capitalize truncate ${importType === type ? 'text-text-accent' : 'text-text-primary'}`}
                     >
-                      {type}
+                      {type.replace(/_/g, ' ')}
                     </span>
                     {getImportedCount(type) > 0 && (
                       <span className="shrink-0 text-xs bg-green-500/20 text-status-success-text px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -841,6 +851,7 @@ export default function ImportPanel({ onImport }) {
                     {type === 'fields' && 'Upload field configurations'}
                     {type === 'field_availability' &&
                       'Upload seasonal availability metadata (not schedule slots)'}
+                    {type === 'games' && 'Bring in a game schedule that already exists'}
                   </p>
                 </div>
               </button>
@@ -848,63 +859,86 @@ export default function ImportPanel({ onImport }) {
           ))}
         </div>
 
-        {/* Template download + defer-field hint */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 p-3 bg-bg-surface/50 border border-border-subtle rounded-lg">
-          <div className="text-xs text-text-secondary flex items-start gap-2 min-w-0">
-            <Info size={14} className="shrink-0 mt-0.5 text-text-accent" />
-            <span>
-              {importType === 'fields' ? (
-                <>
-                  No fields yet?{' '}
-                  <span className="text-text-primary">
-                    You can skip this step and add them later
-                  </span>{' '}
-                  at <span className="font-mono text-text-accent">/fields</span> — useful if your
-                  permits aren&apos;t finalized.
-                </>
-              ) : importType === 'field_availability' ? (
-                <>
-                  Seasonal availability metadata — not finalized schedule slots. No explicit
-                  day/time slots were provided; schedule slots were not created.
-                </>
-              ) : importType === 'evaluations' ? (
-                <>
-                  <span className="text-text-primary">
-                    {`Updates the players already in ${currentSeasonSetting?.name || 'the season'}.`}
-                  </span>{' '}
-                  Match each row by Registration ID, with any of Years Played, Skill Tier (novice,
-                  developing, advanced) and Rating (1 to 5). A blank cell leaves the stored value as
-                  it is; an id that matches no player is listed and skipped, and no player is
-                  created. You review the changes before they are applied.
-                </>
-              ) : importType === 'coaches' ? (
-                <>
-                  <span className="text-text-primary">Import players first.</span> A Child
-                  Registration ID column (one or more ids separated by ; or ,) links each coach to
-                  their children; an id that matches no player is listed and skipped. Download a
-                  template with the expected columns and an example row.
-                </>
-              ) : (
-                <>
-                  Not sure about the format? Download a template with the expected columns and an
-                  example row.
-                </>
-              )}
-            </span>
-          </div>
-          <Tooltip content={`Download a ${importType} CSV template.`} className="w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={() => downloadTemplate(importType)}
-              className="flex w-full sm:w-auto items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:bg-bg-surface-hover text-text-primary text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
-            >
-              <Download size={14} aria-hidden="true" />
-              Download {importType} template
-            </button>
-          </Tooltip>
-        </div>
+        {SCHEDULE_IMPORT_TYPES.includes(importType) && (
+          <Suspense
+            fallback={
+              <p role="status" className="text-sm text-text-secondary">
+                Loading the schedule import...
+              </p>
+            }
+          >
+            <ScheduleImportPanel
+              kind={importType}
+              isDemo={isDemo}
+              onDemoBlocked={() => setDemoNoticeOpen(true)}
+              onDone={() => onImport?.()}
+              onDownloadTemplate={() => downloadTemplate(importType)}
+            />
+          </Suspense>
+        )}
 
-        {mappingStage ? (
+        {/* Template download + defer-field hint */}
+        {!SCHEDULE_IMPORT_TYPES.includes(importType) && (
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 p-3 bg-bg-surface/50 border border-border-subtle rounded-lg">
+            <div className="text-xs text-text-secondary flex items-start gap-2 min-w-0">
+              <Info size={14} className="shrink-0 mt-0.5 text-text-accent" />
+              <span>
+                {importType === 'fields' ? (
+                  <>
+                    No fields yet?{' '}
+                    <span className="text-text-primary">
+                      You can skip this step and add them later
+                    </span>{' '}
+                    at <span className="font-mono text-text-accent">/fields</span> — useful if your
+                    permits aren&apos;t finalized.
+                  </>
+                ) : importType === 'field_availability' ? (
+                  <>
+                    Seasonal availability metadata — not finalized schedule slots. No explicit
+                    day/time slots were provided; schedule slots were not created.
+                  </>
+                ) : importType === 'evaluations' ? (
+                  <>
+                    <span className="text-text-primary">
+                      {`Updates the players already in ${currentSeasonSetting?.name || 'the season'}.`}
+                    </span>{' '}
+                    Match each row by Registration ID, with any of Years Played, Skill Tier (novice,
+                    developing, advanced) and Rating (1 to 5). A blank cell leaves the stored value
+                    as it is; an id that matches no player is listed and skipped, and no player is
+                    created. You review the changes before they are applied.
+                  </>
+                ) : importType === 'coaches' ? (
+                  <>
+                    <span className="text-text-primary">Import players first.</span> A Child
+                    Registration ID column (one or more ids separated by ; or ,) links each coach to
+                    their children; an id that matches no player is listed and skipped. Download a
+                    template with the expected columns and an example row.
+                  </>
+                ) : (
+                  <>
+                    Not sure about the format? Download a template with the expected columns and an
+                    example row.
+                  </>
+                )}
+              </span>
+            </div>
+            <Tooltip
+              content={`Download a ${importType} CSV template.`}
+              className="w-full sm:w-auto"
+            >
+              <button
+                type="button"
+                onClick={() => downloadTemplate(importType)}
+                className="flex w-full sm:w-auto items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:bg-bg-surface-hover text-text-primary text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+              >
+                <Download size={14} aria-hidden="true" />
+                Download {importType} template
+              </button>
+            </Tooltip>
+          </div>
+        )}
+
+        {SCHEDULE_IMPORT_TYPES.includes(importType) ? null : mappingStage ? (
           <ColumnMapper
             importType={importType}
             rawHeaders={mappingStage.rawHeaders}

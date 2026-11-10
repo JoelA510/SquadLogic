@@ -388,6 +388,9 @@ export function ImportProvider({ children }) {
             .select('*')
             .eq('organization_id', currentOrganization.id)
             .in('status', ['processing', 'importing', 'ready_to_apply'])
+            // A games import waits for its confirm in its own panel (ScheduleImportPanel): this screen has no
+            // apply for it, and its job must not take the screen over after a reload.
+            .neq('job_type', 'games')
             .order('created_at', { ascending: false })
             .limit(1);
 

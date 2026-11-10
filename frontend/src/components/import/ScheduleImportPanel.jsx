@@ -206,6 +206,7 @@ export default function ScheduleImportPanel(props) {
   return <ScheduleImportWorkflow key={scopeKey} {...props} />;
 }
 
+/** @param {Parameters<typeof ScheduleImportPanel>[0]} props */
 function ScheduleImportWorkflow({
   kind = 'games',
   isDemo = false,

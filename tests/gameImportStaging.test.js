@@ -453,6 +453,7 @@ describe('EVERY row staging accepts passes the apply’s shape check, whatever c
   });
   table.push({ name: 'a Week of 256', row: { ...base(), Week: '256' } });
 
+  /** @type {Array<[string, (input: any) => any]>} */
   const stagers = [
     ['core', (input) => stageScheduleChunk({ ...input, clean: sanitizeImportText })],
     ['edge', (input) => edge.stageGameChunk(input)],

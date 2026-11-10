@@ -613,6 +613,7 @@ describe('a switch of organization or season under the panel ends the import on 
     fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
     // hold the confirm's answer until after the switch
     const real = mockSupabase.functions.invoke.bind(mockSupabase.functions);
+    /** @type {(value?: unknown) => void} */
     let release = () => {};
     const gate = new Promise((resolve) => {
       release = resolve;

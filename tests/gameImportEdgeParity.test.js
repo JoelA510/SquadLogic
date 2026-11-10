@@ -237,7 +237,7 @@ describe('the Edge mirror stages what core stages', () => {
     expect(edge.GAME_IMPORT_LIMITS.MAX_HEADERS).toBe(SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS);
     expect([...edge.GAME_IMPORT_STAGED_FLAGS]).toEqual([...SCHEDULE_IMPORT_STAGED_FLAGS]);
     expect(edge.GAME_IMPORT_CONFIRM_MAX_KEYS).toBe(SCHEDULE_IMPORT_CONFIRM_MAX_KEYS);
-    for (const label of ['  Blue  Jays ', 'BLUE\tJAYS', '', null, undefined, 'İstanbul'])
+    for (const label of ['  Blue\u00a0 Jays ', 'BLUE\tJAYS', '', null, undefined, 'İstanbul'])
       expect(edge.scheduleLabelKey(label)).toBe(scheduleLabelKey(label));
   });
 });
@@ -509,9 +509,9 @@ describe('a header the file spelled its own way still names its column: the brow
   const VARIANTS = [
     ['a trailing space', (h) => `${h} `],
     ['a leading space', (h) => ` ${h}`],
-    ['a no-break space inside and after', (h) => `${h.replace(' ', ' ')} `],
+    ['a no-break space inside and after', (h) => `${h.replace(' ', '\u00a0')}\u00a0`],
     ['another case', (h) => h.toUpperCase()],
-    ['a byte order mark on the first header', (h, i) => (i === 0 ? `﻿${h}` : h)],
+    ['a byte order mark on the first header', (h, i) => (i === 0 ? `\ufeff${h}` : h)],
     ['doubled inner spaces', (h) => h.replace(' ', '  ')],
   ];
   const control = plain(stageScheduleChunk({ headers: CANON, rows: [base], season, rowOffset: 0 }));
@@ -531,10 +531,12 @@ describe('a header the file spelled its own way still names its column: the brow
       const browser = parseScheduleRows({ ...file, season });
       expect(browser.ok).toBe(true);
       expect(browser.rows[0]).toMatchObject({ status: 'ok', startTime: '09:00', endTime: '10:00' });
-      for (const [who, stage] of [
+      /** @type {Array<[string, (input: any) => any]>} */
+      const stagers = [
         ['core', stageScheduleChunk],
         ['edge', edge.stageGameChunk],
-      ]) {
+      ];
+      for (const [who, stage] of stagers) {
         const staged = plain(stage({ ...file, season, rowOffset: 0 }));
         expect(staged.refusal, who).toBeNull();
         // row for row what the template-spelled file stages, and what the browser read
@@ -554,7 +556,9 @@ describe('a header the file spelled its own way still names its column: the brow
     const rows = [{ ...base, 'Start Time ': '11:00' }];
     const browser = parseScheduleRows({ headers, rows, season });
     expect(browser.refusal).toMatchObject({ code: 'duplicate-column', column: 'Start Time' });
-    for (const stage of [stageScheduleChunk, edge.stageGameChunk]) {
+    /** @type {Array<(input: any) => any>} */
+    const both = [stageScheduleChunk, edge.stageGameChunk];
+    for (const stage of both) {
       const staged = plain(stage({ headers, rows, season, rowOffset: 0 }));
       expect(staged.refusal).toMatchObject({ code: 'duplicate-column', column: 'Start Time' });
       expect(staged.staged).toEqual([]);

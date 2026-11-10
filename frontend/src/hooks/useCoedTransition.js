@@ -44,6 +44,7 @@ export function useCoedTransition() {
           .from('teams')
           .select('id, division_id')
           .eq('organization_id', orgId)
+          .neq('is_external', true)
           .in('division_id', divisionIds)
       ),
     ]);

@@ -340,6 +340,41 @@ true)`: the same statement with its writes switched off, so the numbers shown ar
   team. The import accepts the Skill Tier column whatever the option, so a file can be loaded before the
   option is turned on.
 
+## Schedule import — kept fields (`20261121010000`)
+
+A club that already has a game schedule can bring it in as a file (plan `docs/changes/2026-11-03-schedule-expansion.md`,
+4.5 to 4.7; PR 5 is the database, the Edge validation and the Games page are PR 6). The `games` type keeps **21
+snake_case keys** per staged row and nothing else (`GAME_IMPORT_KEYS` in `frontend/src/utils/importAllowlist.js`, its Edge
+twin, and `import_allowed_keys('games')`; `tests/importAllowlistParity.test.js` holds the three equal to the keys the apply
+reads). A format, a note, a coach, an email or a phone in the file is never read, so it is never staged.
+
+| Staged key(s)                                                            | Becomes                                           | Rule                                                                                        |
+| ------------------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `row_key`                                                                | the row's name in the result's lists and warnings | Made by the parse (`row-<n>`); never stored                                                 |
+| `game_id`                                                                | `game_assignments.external_ref`                   | Text of at most 40 characters, exact after trimming, unique per season, never a number      |
+| `status`, `tbd_reason`                                                   | a game, or a TIME TBD game                        | `ok` (placed) or `tbd` (no time or no field: reason `imported-without-time`, never dropped) |
+| `date`, `start_time`, `end_time`, `start`, `end`, `week_index`           | the slot and the game's instants                  | Put on the season's clock by the parse; the SQL never recomputes an instant                 |
+| `flags`                                                                  | warnings of the preview                           | The parse's flags (`time-ambiguous`, `week-differs`, ...), listed, never a refusal          |
+| `division`, `venue`, `field`, `home_team`, `away_team` and their `*_key` | the admin's decisions, by key                     | A label as typed, and beside it the decision key core computes; the SQL matches by equality |
+
+A row with a time and no field is a TIME TBD game, like a row with no time: it is staged with `status` `tbd` and **no instants and no wall times** (the parse assigns them before it knows the field is blank; the SQL's shape check refuses a `tbd` row that holds one). A row with no Game ID is matched on (home, away, slot, week); a row with one is matched on (season, Game ID) and never on its tuple.
+
+**A swap is a warning.** A game moved onto the place another game of the same file moves away from (two games of one pair in
+one week that swap times, a chain of moves) is written, with the warning `games-swapped` in the preview and the result; a
+place held by a game the file does not move still refuses the row (`duplicate-row`), and a held (Published) game is never
+moved.
+
+**A TIME TBD game keeps a date and its Game ID, and no time** (`schedule_tbd.game_date`, `schedule_tbd.external_ref`; the
+staged row carries the date and no instants). A row is found by (season, Game ID) first, and changed in place; the
+`week_index` is the file's week, and a week that is not the date's is the warning `week-differs`, never renumbered. A game
+the file now places leaves the TIME TBD list; a placed game the file now gives no time is converted with the warning
+`game-made-time-tbd` unless it is held.
+
+What is stored on the way: `game_assignments.external_ref` (the Game ID), `game_assignments.import_job_id` (the job that
+last wrote the row), `schedule_tbd.external_ref` and `schedule_tbd.game_date` (a TIME TBD game's Game ID and date) and `teams.is_external` (an outside club: one row per division and club label, a side of a game and
+nothing else: no players, no coach, no practice, in no team run). No birthdate, name of a person or contact is in the file's
+allowlist, and none is stored.
+
 ## Dropped on import (never stored)
 
 Everything not listed above, including: guardian and parent names, emails,

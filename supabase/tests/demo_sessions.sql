@@ -633,7 +633,10 @@ SELECT is(
         'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job',
         -- 20261119010000: the Published switch (the writer, like admin_cancel_game_assignment and persist_game_schedule)
         -- and its audit read (like get_settings_audit_log): admin RPCs gated by is_org_admin, so allowed.
-        'admin_set_games_published', 'get_schedule_audit_log'
+        'admin_set_games_published', 'get_schedule_audit_log',
+        -- 20261121010000: the games import (map, preview and apply, roll back) and the slot a game is placed in: admin RPCs gated
+        -- by is_org_admin, so allowed; the import types a demo visitor may start are fenced where every import is (isDemo).
+        'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job'
       ])),
     NULL,
     'every function a signed-in caller may execute is on the anonymous list: refused, required, or allowed'
@@ -677,7 +680,10 @@ SELECT is(
         'admin_edit_practice_preference', 'admin_remove_practice_preference', 'finalize_practice_preference_import_job',
         -- 20261119010000: the Published switch (the writer, like admin_cancel_game_assignment and persist_game_schedule)
         -- and its audit read (like get_settings_audit_log): admin RPCs gated by is_org_admin, so allowed.
-        'admin_set_games_published', 'get_schedule_audit_log'
+        'admin_set_games_published', 'get_schedule_audit_log',
+        -- 20261121010000: the games import (map, preview and apply, roll back) and the slot a game is placed in: admin RPCs gated
+        -- by is_org_admin, so allowed; the import types a demo visitor may start are fenced where every import is (isDemo).
+        'apply_game_import_job', 'ensure_game_slot', 'map_game_import_job', 'rollback_game_import_job'
       ]) n WHERE n NOT IN (SELECT name FROM t_client_fns)),
     NULL,
     'control: every name on the list is still a function a signed-in caller may execute'

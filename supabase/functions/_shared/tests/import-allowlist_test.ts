@@ -162,3 +162,26 @@ Deno.test(
     assertEquals(isAllowedImportHeader('evaluations', 'Shirt Size', lower, ['shirt_size']), false);
   }
 );
+
+Deno.test(
+  'a games payload keeps the staged keys and nothing else a schedule file might carry (PR 5)',
+  () => {
+    const row = {
+      game_id: 'G-1',
+      date: '2026-05-02',
+      home_key: '["u10","lions"]',
+      coach_email: 'email1@example.com',
+      phone: '555-100-0001',
+      notes: 'bring the flags',
+      format: '9v9',
+    };
+    assertEquals(keepAllowedColumns('games', row, lower), {
+      game_id: 'G-1',
+      date: '2026-05-02',
+      home_key: '["u10","lions"]',
+    });
+    // It declares no fields of the organization's: a declared name is not kept, however it is called.
+    assertEquals(isAllowedImportKey('games', 'shirt size', ['shirt_size']), false);
+    assertEquals(isAllowedImportHeader('games', 'Shirt Size', lower, ['shirt_size']), false);
+  }
+);

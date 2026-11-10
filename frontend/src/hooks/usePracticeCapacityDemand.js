@@ -30,8 +30,9 @@ import { seasonCalendarDate } from '@squadlogic/core/timing/index.js';
  *   dates them, reads the reservation (`division_id`) and the length.
  * - `practice_assignments`: the saved rows, counted as the planner counts them.
  *
- * `is_external` (PR 5) does not exist yet: when it does, the census of its readers must classify
- * this read of `teams`, and an external team must not count as demand here.
+ * An outside club (`teams.is_external`, migration 20261121010000) is a side of a game, not one of the
+ * organization's teams: it practices elsewhere, so it is no demand on this organization's slots. The read
+ * leaves it out, and `tests/externalTeamReaders.test.js` holds that (the census of every reader of `teams`).
  */
 
 /** What the panel says when there is nothing to read. */
@@ -67,7 +68,12 @@ export async function loadPracticeCapacityRows(client, { organizationId, seasonS
     [
       'teams',
       'teams',
-      () => client.from('teams').select('id, division_id').eq('organization_id', organizationId),
+      () =>
+        client
+          .from('teams')
+          .select('id, division_id')
+          .eq('organization_id', organizationId)
+          .neq('is_external', true),
     ],
     [
       'practiceSlots',

@@ -261,6 +261,16 @@ R68="$REPO/docs/sql/20261119010000_revert.sql"
 # of its own (the third, the matcher that ignores the week, is a vitest mutation: tests/gameIdentityCarry.test.js).
 M69="$REPO/supabase/migrations/20261120010000_game_identity.sql"
 R69="$REPO/docs/sql/20261120010000_revert.sql"
+# The games import, database half (PR 5): staging, mapping, preview, apply and rollback of a schedule already made, the
+# games type through every pipeline list, `game_assignments.external_ref` and `import_job_id`, `teams.is_external`, and
+# the Published guard's rollback exemption. Plan docs/changes/2026-11-03-schedule-expansion.md 4.5 to 4.7 and
+# docs/changes/2026-11-06-games-table-source-of-truth.md. It replaces create_import_job, import_allowed_keys, the two
+# deferred-apply lifecycle functions, the guard, view_org_metrics and sync_schedule_tbd_practices whole, so the six plants
+# that aimed at the bodies it replaces (create_import_job's audit, the allowlist's key list, three on the practice sync and
+# the guard's column list) are re-aimed here (lesson 70; prove.sh's pre-flight refuses a plant aimed at a replaced body).
+# Its smoke holds the plants of its own, below; the pgTAP file (supabase/tests/game_import_apply_rollback.sql) is CI's.
+M70="$REPO/supabase/migrations/20261121010000_game_import.sql"
+R70="$REPO/docs/sql/20261121010000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3653,7 +3663,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M26 create_import_job still audits the file name" "$M62" \
+plant "M26 create_import_job still audits the file name" "$M70" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
@@ -4559,7 +4569,7 @@ plant "M43 the sanitizer takes date_of_birth again" "$M56" \
   "                 'buddy_request', 'date_of_birth' THEN" \
   "smoke 20261026010000"
 
-plant "M43 the allowlist keeps dob" "$M62" \
+plant "M43 the allowlist keeps dob" "$M70" \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age'," \
   "            'gotsport_id', 'registration_id', 'player_id', 'natural_age', 'dob'," \
   "smoke 20261026010000"
@@ -4911,7 +4921,7 @@ plant "M55 the writer lets a team practise twice on one weekday" "$M55" \
 # on which it is in force: a team whose only series ended in 2020 then holds one practice. Run by hand:
 # the smoke goes red at "A2 (an ended series only) is not listed ..." and the pgTAP at its ended-series
 # tests.
-plant "M57 an ended series counts as a held practice" "$M57" \
+plant "M57 an ended series counts as a held practice" "$M70" \
   "                   AND (pa.effective_date_range IS NULL
                         OR (NOT isempty(pa.effective_date_range)
                             AND (upper_inf(pa.effective_date_range)
@@ -4927,7 +4937,7 @@ plant "M57 an ended series counts as a held practice" "$M57" \
 # practice: the held count is the most fragments in force on one day, not every unexpired row. The plant
 # makes every live fragment count, which lists no missing practice for a team with one split practice of
 # two a week; the smoke must go red at "a split series".
-plant "M57 a split series counts as two practices" "$M57" \
+plant "M57 a split series counts as two practices" "$M70" \
   "FROM live l WHERE l.r IS NULL OR l.r @> s.d" \
   "FROM live l WHERE l.r IS NULL OR true" \
   "smoke 20261108020000"
@@ -4957,7 +4967,7 @@ plant "M57 get_schedule_tbd admits any signed-in user" "$M57" \
 # show the practice save or the refresh (a direct call with no labels would reset the saved labels and
 # write no audit row). The plant makes the stack check pass for any caller; the smoke must go red at
 # "a direct call to the practice sync ... was accepted".
-plant "M57 the practice sync accepts a direct client call" "$M57" \
+plant "M57 the practice sync accepts a direct client call" "$M70" \
   "    IF v_ctx !~ 'PL/pgSQL function (persist_practice_schedule|refresh_schedule_tbd_practices)\\(' THEN" \
   "    IF v_ctx !~ 'PL/pgSQL function' THEN" \
   "smoke 20261108020000"
@@ -5509,7 +5519,7 @@ plant "R67 the revert re-adds the column without its default" "$R67" \
 #   - the guard's column list omits home_team_id, so a team swap on a Published game goes through;
 #   - the omission check is removed, so a save that leaves a Published game out is accepted;
 #   - the switch stops requiring a reason when it turns Published off.
-plant "M69 the guard's column list omits home_team_id" "$M69" \
+plant "M69 the guard's column list omits home_team_id" "$M70" \
   "NEW.field_id, NEW.home_team_id, NEW.away_team_id, NEW.week_index, NEW.start, NEW.\"end\")
        IS NOT DISTINCT FROM
        (OLD.game_slot_id, OLD.slot_id, OLD.field_id, OLD.home_team_id, OLD.away_team_id," \
@@ -5554,6 +5564,169 @@ plant "M69 the season of a named game is not checked" "$M69" \
   "        IF v_season_first IS NOT NULL THEN" \
   "        IF false THEN" \
   "smoke 20261120010000"
+
+# The games import (docs/changes/2026-11-03-schedule-expansion.md 4.5 to 4.7, PR 5). The smoke
+# docs/sql/20261121010000_smoke.sql runs the preview, the apply, the re-import and the rollback for real, as a signed-in
+# admin, and must go red for each plant (the pgTAP file, supabase/tests/game_import_apply_rollback.sql, is CI's and holds
+# the full table; the same plants were also run against a database built from the migrations with the local pgTAP
+# stand-in, which is NOT pgTAP and has missed real CI failures):
+#   - a dry run writes (the preview and the apply stop being one plan with the writes off);
+#   - a row with a Game ID is matched by its tuple, not by (season, Game ID): a moved game is a second row;
+#   - the held predicate is not asked, so a Published game whose row changed is updated instead of skipped-published;
+#   - the rollback no longer refuses after a game it wrote has changed;
+#   - the rollback no longer refuses after a TIME TBD game it wrote has changed (Codex on 305137b);
+#   - a re-import is never "nothing to apply", so it makes a run again;
+#   - the guard's rollback exemption is gone, so the rollback cannot take a Published game back;
+#   - the metrics view counts an outside club as one of the organization's teams (the condition is kept in the text, so the
+#     migration's own end-state check, which wants the view to name the column, does not catch it first).
+plant "M70 a dry run writes" "$M70" \
+  "    IF v_dry THEN
+        RETURN v_result;
+    END IF;" \
+  "    IF false THEN
+        RETURN v_result;
+    END IF;" \
+  "smoke 20261121010000"
+
+plant "M70 a Game ID is matched by its tuple, not by (season, Game ID)" "$M70" \
+  "                                AND CASE WHEN w.game_id IS NOT NULL
+                                         THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
+  "                                AND CASE WHEN false
+                                         THEN ga.season_settings_id = v_season AND ga.external_ref = w.game_id" \
+  "smoke 20261121010000"
+
+plant "M70 a held game is updated, not skipped" "$M70" \
+  "            WHEN g.match_id = ANY (v_held) THEN 'skip-held'" \
+  "            WHEN false THEN 'skip-held'" \
+  "smoke 20261121010000"
+
+plant "M70 the rollback no longer refuses after a change" "$M70" \
+  "    IF cardinality(v_changed) + cardinality(v_changed_tbd) > 0 THEN" \
+  "    IF false THEN" \
+  "smoke 20261121010000"
+
+plant "M70 the rollback does not judge a TIME TBD game against what the apply left" "$M70" \
+  "                        ELSE s.id IS NULL OR NOT public.game_import_row_unchanged(to_jsonb(s), r.applied_payload) END) x;" \
+  "                        ELSE false END) x;" \
+  "smoke 20261121010000"
+
+plant "M70 a re-import is never nothing to apply" "$M70" \
+  "    v_nothing := (v_work = 0);" \
+  "    v_nothing := false;" \
+  "smoke 20261121010000"
+
+plant "M70 the guard has no rollback exemption" "$M70" \
+  "    IF v_job IS NOT NULL AND OLD.import_job_id IS NOT NULL AND OLD.import_job_id::text = v_job THEN" \
+  "    IF false THEN" \
+  "smoke 20261121010000"
+
+plant "M70 the metrics count an outside club as a team" "$M70" \
+  "        AND NOT t.is_external) AS total_teams," \
+  "        AND NOT (t.is_external AND false)) AS total_teams," \
+  "smoke 20261121010000"
+
+# Fix round 1 of the games import (the reviews of its first push): the smoke also holds
+#   - the stored mapping is audited, one `import.mapped` row for the job (the plant cites another resource, so the job has none);
+#   - two labels that create one name are ONE creation (the plant gives each label its own id, so the preview counts one and
+#     the apply writes a team the games do not name, or two).
+plant "M70 the stored mapping's audit row cites no job" "$M70" \
+  "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', p_import_job_id," \
+  "        PERFORM public.record_audit_event(v_job.organization_id, 'import.mapped', 'import_job', gen_random_uuid()," \
+  "smoke 20261121010000"
+
+plant "M70 two labels that create one team are two creations" "$M70" \
+  "               first_value(k3.own_id) OVER (PARTITION BY k3.kind, k3.division_ref, public.normalise_external_label(k3.cname) ORDER BY k3.tkey) AS new_id," \
+  "               k3.own_id AS new_id," \
+  "smoke 20261121010000"
+
+# Fix round 2 of the games import (Codex's four findings and the owner's two answers of 2026-11-09). The smoke also holds
+#   - the shells are ONE team run in the shape the pages read (teamsByDivision beside teams and team_players);
+#   - a TIME TBD game is found by its Game ID (not its week), keeps its date, and a Published game's row is skipped, not converted;
+#   - two games that swap places are both written (the step-out), a place a game the file moves holds is not a clash, and the
+#     rollback steps the pair out of the unique place too and stands a converted game up again;
+#   - a name that differs from one that exists only by a run of spaces is the existing name (core's comparison).
+# The pgTAP files (supabase/tests/game_import_round2.sql and game_import_apply_rollback.sql) hold the full table; the plants
+# the smoke does not catch (a venue, a division, an outside club named with a run of spaces; another Game ID on a held TIME
+# TBD tuple; the conversion warning) were run against the pgTAP stand-in only and are in the pull request.
+plant "M70 the shells' team run carries no teamsByDivision" "$M70" \
+  "                'teamsByDivision', v_grouped," \
+  "                'teamsByDivisionMissing', v_grouped," \
+  "smoke 20261121010000"
+
+plant "M70 a TIME TBD game is not found by its Game ID" "$M70" \
+  "                            AND ((w.game_id IS NOT NULL AND s.external_ref = w.game_id)" \
+  "                            AND ((false AND s.external_ref = w.game_id)" \
+  "smoke 20261121010000"
+
+plant "M70 a TIME TBD game's date is not stored" "$M70" \
+  "v_run_id, t.game_id, t.gdate
+          FROM _gi_t t WHERE t.verdict = 'insert';" \
+  "v_run_id, t.game_id, NULL
+          FROM _gi_t t WHERE t.verdict = 'insert';" \
+  "smoke 20261121010000"
+
+plant "M70 a held game's TIME TBD row converts it" "$M70" \
+  "            WHEN t.ga_id IS NOT NULL AND t.ga_id = ANY (v_held) THEN 'skip-held'" \
+  "            WHEN false THEN 'skip-held'" \
+  "smoke 20261121010000"
+
+plant "M70 a swap has no step-out" "$M70" \
+  "         WHERE ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
+           AND EXISTS (SELECT 1 FROM _gi_g h" \
+  "         WHERE false AND ga.id IN (SELECT g.match_id FROM _gi_g g WHERE g.verdict = 'update' AND g.leaves)
+           AND EXISTS (SELECT 1 FROM _gi_g h" \
+  "smoke 20261121010000"
+
+plant "M70 a swap is a clash (the games the file moves still hold their places)" "$M70" \
+  "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE x.verdict = 'update' AND x.leaves)
+                          AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
+  "                          AND g2.id NOT IN (SELECT x.match_id FROM _gi_g x WHERE false)
+                          AND g2.id NOT IN (SELECT t.ga_id FROM _gi_t t WHERE t.conv));" \
+  "smoke 20261121010000"
+
+plant "M70 the rollback does not step a swapped pair out of the unique place" "$M70" \
+  "       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
+       AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
+           IS DISTINCT FROM ((r.previous_payload" \
+  "       AND r.target_table = 'game_assignments' AND r.operation = 'updated' AND r.rolled_back_at IS NULL
+       AND false AND (ga.home_team_id, ga.away_team_id, ga.game_slot_id, ga.week_index)
+           IS DISTINCT FROM ((r.previous_payload" \
+  "smoke 20261121010000"
+
+plant "M70 a team name with a run of spaces is not the name that exists" "$M70" \
+  "                    WHERE t.division_id = j.division_existing AND public.normalise_external_label(t.name) = public.normalise_external_label(j.cname))) AS name_taken," \
+  "                    WHERE t.division_id = j.division_existing AND lower(btrim(t.name)) = lower(btrim(j.cname)))) AS name_taken," \
+  "smoke 20261121010000"
+
+plant "M70 the rollback does not stand a converted game up again" "$M70" \
+  "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL;
+    GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
+  "       AND r.operation = 'deleted' AND r.rolled_back_at IS NULL AND false;
+    GET DIAGNOSTICS n_games_reinserted = ROW_COUNT;" \
+  "smoke 20261121010000"
+
+plant "M70 a placed game made TIME TBD is not warned" "$M70" \
+  "              FROM _gi_t t WHERE t.conv) w;" \
+  "              FROM _gi_t t WHERE false) w;" \
+  "smoke 20261121010000"
+
+# The revert (docs/sql/20261121010000_revert.sql) refuses while an import is applied, and leaves no column of the
+# migration behind. The harness plants an applied import (an unrolled record, an outside club, a TIME TBD game from a
+# file), requires the first run to refuse in its words and change nothing, rolls the import back by hand, and runs it again.
+plant "R70 the revert does not refuse while an import is applied" "$R70" \
+  "    IF v_live > 0 OR v_clubs > 0 OR v_tbd > 0 THEN" \
+  "    IF false THEN" \
+  "revert 20261121010000"
+
+plant "R70 the revert leaves the TIME TBD date column" "$R70" \
+  "ALTER TABLE public.schedule_tbd DROP COLUMN IF EXISTS game_date;" \
+  "SELECT 1;" \
+  "revert 20261121010000"
+
+plant "R70 the revert leaves the outside-club column" "$R70" \
+  "ALTER TABLE public.teams DROP COLUMN IF EXISTS is_external;" \
+  "SELECT 1;" \
+  "revert 20261121010000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

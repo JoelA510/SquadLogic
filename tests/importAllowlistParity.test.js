@@ -40,6 +40,7 @@ describe('the import allowlist, browser and Edge copies', () => {
       ...browser.PRACTICE_PREFERENCE_IMPORT_KEYS,
     ]);
     expect([...edge.EVALUATION_IMPORT_KEYS]).toEqual([...browser.EVALUATION_IMPORT_KEYS]);
+    expect([...edge.GAME_IMPORT_KEYS]).toEqual([...browser.GAME_IMPORT_KEYS]);
     expect({ ...edge.ALLOWLIST_ENTITY_TYPES }).toEqual({ ...browser.ALLOWLIST_ENTITY_TYPES });
     expect({ ...browser.ALLOWLIST_ENTITY_TYPES }).toEqual({ players: 'player', coaches: 'coach' });
   });
@@ -422,6 +423,7 @@ describe('the header alias maps', () => {
     ...browser.COACH_IMPORT_KEYS,
     ...browser.PRACTICE_PREFERENCE_IMPORT_KEYS,
     ...browser.EVALUATION_IMPORT_KEYS,
+    ...browser.GAME_IMPORT_KEYS,
   ]);
 
   it('reads the Edge map, including the long GotSport questions', () => {
@@ -539,6 +541,8 @@ const READERS = {
   finalize_coach_import_job: 'coaches',
   finalize_practice_preference_import_job: 'practice_preferences',
   finalize_evaluation_import_job: 'evaluations',
+  // The games import's one reader (PR 5): the staged payload the Edge function builds from a schedule file.
+  apply_game_import_job: 'games',
   finalize_field_import_job: 'fields',
   finalize_field_availability_import_job: 'fields',
   // Reduces an unfinished job's staged payloads through import_allowed_payload;
@@ -569,6 +573,7 @@ function sqlCensus(latest) {
     coaches: new Set(),
     practice_preferences: new Set(),
     evaluations: new Set(),
+    games: new Set(),
   };
   for (const [name, body] of readers) {
     const type = READERS[name];
@@ -614,6 +619,25 @@ describe('the allowlist equals what the latest SQL reads', () => {
 
   it('the evaluations finalizer reads exactly the evaluations allowlist', () => {
     expect([...census.read.evaluations].sort()).toEqual([...browser.EVALUATION_IMPORT_KEYS].sort());
+  });
+
+  it('the games apply reads exactly the games allowlist (the staged payload keys, no coach, email, phone or note)', () => {
+    expect([...census.read.games].sort()).toEqual([...browser.GAME_IMPORT_KEYS].sort());
+    for (const key of ['email', 'phone', 'notes', 'coach', 'format', 'first_name']) {
+      expect(census.read.games.has(key), key).toBe(false);
+    }
+  });
+
+  it('POSITIVE CONTROL: a games apply that starts reading a coach or a note fails', () => {
+    const planted = new Map(latest);
+    planted.set(
+      'apply_game_import_job',
+      `${latest.get('apply_game_import_job')}
+       SELECT sr.normalized_payload ->> 'coach_email', sr.normalized_payload ->> 'notes';`
+    );
+    const { read } = sqlCensus(planted);
+    expect(read.games.has('coach_email')).toBe(true);
+    expect([...read.games].sort()).not.toEqual([...browser.GAME_IMPORT_KEYS].sort());
   });
 
   it('POSITIVE CONTROL: an evaluations finalizer that starts reading a name or a note fails', () => {
@@ -701,6 +725,7 @@ describe('the SQL copy of the lists equals the code copies', () => {
     expect(Object.keys(sqlAllowedKeys(body)).sort()).toEqual([
       'coaches',
       'evaluations',
+      'games',
       'players',
       'practice_preferences',
     ]);
@@ -712,6 +737,7 @@ describe('the SQL copy of the lists equals the code copies', () => {
     expect(lists.coaches).toEqual([...browser.COACH_IMPORT_KEYS]);
     expect(lists.practice_preferences).toEqual([...browser.PRACTICE_PREFERENCE_IMPORT_KEYS]);
     expect(lists.evaluations).toEqual([...browser.EVALUATION_IMPORT_KEYS]);
+    expect(lists.games).toEqual([...browser.GAME_IMPORT_KEYS]);
   });
 
   it('POSITIVE CONTROL: a key missing from the evaluations arm fails', () => {

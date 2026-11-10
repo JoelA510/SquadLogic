@@ -15,8 +15,9 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
     from: (table) => ({
       select: (_columns, options) => {
         const filters = [];
+        const neqs = [];
         const answer = () => {
-          mocks.eqs.push({ table, filters: [...filters] });
+          mocks.eqs.push({ table, filters: [...filters], neqs: [...neqs] });
           const rows = mocks.rowsByTable[table] || [];
           if (options?.count === 'exact') {
             return {
@@ -29,6 +30,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
         };
         const query = {
           eq: (column, value) => (filters.push([column, value]), query),
+          neq: (column, value) => (neqs.push([column, value]), query),
           then: (resolve, reject) => Promise.resolve(answer()).then(resolve, reject),
         };
         return query;
@@ -84,6 +86,15 @@ describe('useNavBadges', () => {
     expect(filtersOf('players')).toContainEqual(['season_settings_id', MOCK_SEASON_ID]);
     expect(filtersOf('coaches')).toContainEqual(['season_settings_id', MOCK_SEASON_ID]);
     expect(filtersOf('teams')).toEqual([['organization_id', MOCK_ORG_ID]]);
+  });
+
+  it("leaves an outside club out of the teams badge, and no other table's count (20261121010000)", async () => {
+    const { result } = renderHook(() => useNavBadges());
+    await waitFor(() => expect(result.current.players).toBe(2));
+    const neqsOf = (table) => mocks.eqs.find((request) => request.table === table).neqs;
+    expect(neqsOf('teams')).toEqual([['is_external', true]]);
+    expect(neqsOf('players')).toEqual([]);
+    expect(neqsOf('coaches')).toEqual([]);
   });
 
   it('counts past the server row cap (a league of 1,259 players is not 1000)', async () => {

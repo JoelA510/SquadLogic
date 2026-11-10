@@ -114,6 +114,74 @@ export function practicesFromRows(rows) {
 }
 
 /**
+ * The season's teams, outside clubs included, from the rows of its divisions and of the organization's teams. A team
+ * carries no season of its own: it is the season's through its division. An outside club (`teams.is_external`, one row per
+ * division and club label) is a team row like the others, named by its club label, and carries the flag `isExternal`; it is
+ * in no team run, so a directory built from the latest team run never holds one.
+ *
+ * @param {Array<Record<string, any>>} divisionRows `id, name`
+ * @param {Array<Record<string, any>>} teamRows `id, name, division_id, is_external`
+ * @returns {Array<{ id: string, name: string, divisionId: string, division: string, isExternal: boolean }>}
+ */
+export function seasonTeamsOf(divisionRows, teamRows) {
+  const divisionName = new Map(divisionRows.map((row) => [String(row.id), String(row.name ?? '')]));
+  return teamRows
+    .filter((row) => divisionName.has(String(row.division_id)))
+    .map((row) => ({
+      id: String(row.id),
+      name: String(row.name ?? row.id),
+      divisionId: String(row.division_id),
+      division: divisionName.get(String(row.division_id)) ?? '',
+      isExternal: row.is_external === true,
+    }));
+}
+
+/**
+ * The season's team directory for an export or a display: every team of the season's divisions, own teams and outside
+ * clubs, as the tables hold them. **All or nothing, naming the table** (as `loadReportsReference` is): a failed read is
+ * `{ ok: false, table, message }` and never an empty directory, because a games export drawn over a directory missing its
+ * clubs drops the games they play without a word. The latest team run is NOT the directory: it holds the league's own
+ * teams, and an outside club is in no run.
+ *
+ * @param {any} client - the supabase client
+ * @param {{ organizationId?: string | null, seasonSettingsId?: string | null }} params
+ * @returns {Promise<{ ok: true, teams: ReturnType<typeof seasonTeamsOf> } | { ok: false, table: string, message: string }>}
+ */
+export async function readSeasonTeamDirectory(client, params) {
+  const { organizationId, seasonSettingsId } = params ?? {};
+  if (!organizationId || !seasonSettingsId) {
+    return failure('season', 'an organization and a season are required');
+  }
+  if (typeof client?.from !== 'function') {
+    return failure('connection', 'there is no database connection to read with');
+  }
+  const [divisions, teams] = await Promise.all([
+    named('divisions', () =>
+      fetchAllPages(() =>
+        client
+          .from('divisions')
+          .select('id, name')
+          .eq('organization_id', organizationId)
+          .eq('season_settings_id', seasonSettingsId)
+      )
+    ),
+    named('teams', () =>
+      fetchAllPages(() =>
+        client
+          .from('teams')
+          .select('id, name, division_id, is_external')
+          .eq('organization_id', organizationId)
+      )
+    ),
+  ]);
+  // The first failure in the table order, so the same break gives the same sentence.
+  const failed = [divisions, teams].find((result) => result.ok === false);
+  if (failed && failed.ok === false) return failed;
+  if (divisions.ok !== true || teams.ok !== true) return failure('teams', 'the read failed');
+  return { ok: true, teams: seasonTeamsOf(divisions.value, teams.value) };
+}
+
+/**
  * Read the league the reports are built over.
  *
  * @param {any} client - the supabase client
@@ -122,7 +190,7 @@ export function practicesFromRows(rows) {
  * @returns {Promise<{ ok: true, data: {
  *   venues: Array<{ id: string, name: string }>,
  *   fields: Array<{ id: string, name: string, venueId: string | null }>,
- *   teams: Array<{ id: string, name: string, divisionId: string, division: string }>,
+ *   teams: Array<{ id: string, name: string, divisionId: string, division: string, isExternal: boolean }>,
  *   coaches: Array<{ id: string, name: string }>,
  *   assignments: Array<Record<string, any>>,
  *   slots: Array<{ id: string, weekIndex: number | null }>,
@@ -160,7 +228,7 @@ export async function loadReportsReference(
           .eq('organization_id', organizationId)
           .eq('season_settings_id', seasonSettingsId)
       ),
-    teams: () => read('teams', 'id, name, division_id'),
+    teams: () => read('teams', 'id, name, division_id, is_external'),
     coaches: () =>
       fetchAllPages(() =>
         client
@@ -195,18 +263,7 @@ export async function loadReportsReference(
   );
   const rows = (table) => got[table] ?? [];
 
-  const divisionName = new Map(
-    rows('divisions').map((row) => [String(row.id), String(row.name ?? '')])
-  );
-  // A team carries no season of its own: it is the season's through its division.
-  const seasonTeams = rows('teams')
-    .filter((row) => divisionName.has(String(row.division_id)))
-    .map((row) => ({
-      id: String(row.id),
-      name: String(row.name ?? row.id),
-      divisionId: String(row.division_id),
-      division: divisionName.get(String(row.division_id)) ?? '',
-    }));
+  const seasonTeams = seasonTeamsOf(rows('divisions'), rows('teams'));
   const seasonTeamIds = new Set(seasonTeams.map((team) => team.id));
   return {
     ok: true,

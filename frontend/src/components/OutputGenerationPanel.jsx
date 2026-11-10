@@ -22,6 +22,7 @@ import {
   teamsWithUncorroboratedCoachIdentity,
 } from '@squadlogic/core/people/coachList.js';
 import { teamCoachFields, teamCoaches } from '../utils/teamCoaches.js';
+import { readSeasonTeamDirectory } from '../utils/scheduleReportsRead.js';
 import {
   refreshAndReadScheduleTbd,
   scheduleTbdCounts,
@@ -111,6 +112,8 @@ function normalizeTeamForExport(team) {
     id,
     name: team.name ?? team.teamName ?? id,
     division,
+    // An outside club is named as an opponent and has no rows of its own (`generateScheduleExports`).
+    isExternal: team.isExternal === true || team.is_external === true,
     // 8.2: the row's coach fields under one spelling, **both sources intact**,
     // so `generateScheduleExports()` reconciles them and its `coachFindings`
     // carry any disagreement. Reconciling here and passing the settled list
@@ -194,13 +197,22 @@ function normalizeGameForExport(assignment) {
   };
 }
 
-function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssignments }) {
+export function buildExportPayload({
+  teams,
+  teamSummary,
+  practiceAssignments,
+  gameAssignments,
+  directory = [],
+}) {
   const teamDirectory = new Map();
   const addTeam = (team) => {
     const normalized = normalizeTeamForExport(team);
     if (normalized) teamDirectory.set(normalized.id, normalized);
   };
 
+  // The season's teams as the tables hold them come first, outside clubs included (an outside club is in no team run, so
+  // the run's teams never name one); the run's own teams, which carry the coaches, replace their entries.
+  (Array.isArray(directory) ? directory : []).forEach(addTeam);
   (Array.isArray(teams) ? teams : []).forEach(addTeam);
   (Array.isArray(teamSummary?.teams) ? teamSummary.teams : []).forEach(addTeam);
   (Array.isArray(practiceAssignments) ? practiceAssignments : []).forEach((assignment) => {
@@ -241,6 +253,18 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
         exportTeamIds.has(String(game.awayTeamId))
     );
   const exportGames = exportedGames.map(({ game }) => game);
+  // A game with a time whose home or away team is in no directory cannot be written to the files: counted here and said
+  // beside them, never left out without a word (the games a file holds and the ids "Mark these games Published" names are
+  // the same filter, so they cannot differ).
+  const omitted = {
+    games: gameRows.filter((assignment) => {
+      const game = normalizeGameForExport(assignment);
+      return (
+        game &&
+        !(exportTeamIds.has(String(game.homeTeamId)) && exportTeamIds.has(String(game.awayTeamId)))
+      );
+    }).length,
+  };
   const gameIds = exportedGames
     .map(({ id }) => id)
     .filter((id) => typeof id === 'string' && id !== '');
@@ -251,6 +275,7 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
     gameAssignments: exportGames,
     gameIds,
     untimed,
+    omitted,
   };
 }
 
@@ -266,6 +291,17 @@ export function untimedAssignmentsNote(untimed) {
   ].filter(Boolean);
   if (parts.length === 0) return null;
   return `${parts.join(' and ')} with no start or end time are not in these files. The downloads on each team's page list that team's saved schedule, with every event that has no time marked TIME TBD and its reason.`;
+}
+
+/**
+ * The sentence for the games the files leave out because a team they name is in no directory, or null.
+ *
+ * @param {{ games: number } | undefined} omitted
+ */
+export function omittedGamesNote(omitted) {
+  const count = omitted?.games ?? 0;
+  if (count === 0) return null;
+  return `${count} game(s) name a team that is not on the season's team list, so they are not in these files.`;
 }
 
 /**
@@ -735,11 +771,34 @@ export default function OutputGenerationPanel({
           setMessage(NOTHING_SCHEDULED_TEXT);
           return;
         }
+        // The season's teams as the tables hold them, outside clubs included: the latest team run holds only the league's
+        // own teams, so a directory made from it alone drops every game an outside club plays. A read that fails stops
+        // the files (all or nothing, naming the table), as the TIME TBD read does.
+        let directory = [];
+        if (currentOrganization?.id && seasonSettingsId) {
+          const read = await readSeasonTeamDirectory(supabaseClient, {
+            organizationId: currentOrganization.id,
+            seasonSettingsId,
+          });
+          if (read.ok !== true) {
+            logger.error('Season team directory read error:', read.message);
+            setGenerated(null);
+            setTbdRows(null);
+            clearPracticeChanges();
+            setStatus('error');
+            setMessage(
+              `Generation failed: the season's teams could not be read (${read.table}: ${read.message}), so files made now could leave games out. No files were made. Reload the page to try again.`
+            );
+            return;
+          }
+          directory = read.teams;
+        }
         const exportPayload = buildExportPayload({
           teams,
           teamSummary,
           practiceAssignments,
           gameAssignments,
+          directory,
         });
         if (
           exportPayload.practiceAssignments.length === 0 &&
@@ -756,6 +815,7 @@ export default function OutputGenerationPanel({
             [
               'Nothing to export: none of the applied practices or games can be written to the files.',
               untimedAssignmentsNote(exportPayload.untimed),
+              omittedGamesNote(exportPayload.omitted),
             ]
               .filter(Boolean)
               .join(' ')
@@ -808,6 +868,7 @@ export default function OutputGenerationPanel({
             'CSVs generated successfully.',
             scheduleTbdNote(scheduleTbdCounts(tbd.items)),
             untimedAssignmentsNote(exportPayload.untimed),
+            omittedGamesNote(exportPayload.omitted),
             teamsWithDisagreement.length === 0
               ? null
               : `${teamsWithDisagreement.length} team(s) have sources that disagree about their coaches; every coach is exported and none is treated as the primary.`,

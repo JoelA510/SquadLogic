@@ -1558,6 +1558,12 @@ either — it is still orphaned, exactly as described above. See [`SCENARIOS.md`
 - **Import types are a closed set of four** with no schedule importer
   (`20260522120000_field_availability_phase1.sql:3-5`), so "re-import the published schedule as
   ground truth" — the only recovery that worked in incident #1 — has no path today.
+  *2026-11-09 (schedule expansion, PR 5):* the database half of that path now exists. `games` is a
+  fifth import type (`20261121010000_game_import.sql`; `docs/operations/ingestion-pipeline.md` 2.6):
+  a schedule already made is staged, mapped, previewed (the apply with its writes off), applied in
+  one transaction that updates a game found by its Game ID in place and skips a Published game
+  whose row changed, and rolled back. Nothing in the product stages a games job until PR 6 (the Edge
+  validation and the Games page), so the gap stays open for a person using the app.
 - **`supabase/seed.sql`** seeds a single demo org with a hard-coded venue ("Riverfront Park",
   `:125-126`); harmless, but it is the only worked example of the facility model in the repo.
 

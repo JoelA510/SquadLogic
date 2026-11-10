@@ -1,0 +1,166 @@
+{
+  "_about": "The scenarios of the games import rollback class test: for each (table, operation) pair the apply writes into import_application_records, what a later writer does to the record and what the rollback must then do ('refuse': 22023 game_import_changed naming the record; 'keep': it goes through and names the record in kept). supabase/tests/game_import_rollback_class.sql holds the SQL of each, tests/gameImportRollbackClass.test.js the JavaScript of each against the mock, and that test fails unless this table, the pgTAP table and the pairs the migration and the mock can write all agree.",
+  "scenarios": [
+    {
+      "ord": 1,
+      "table": "divisions",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "keep"
+    },
+    {
+      "ord": 2,
+      "table": "divisions",
+      "operation": "inserted",
+      "name": "attach",
+      "expect": "keep"
+    },
+    {
+      "ord": 3,
+      "table": "locations",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "keep"
+    },
+    {
+      "ord": 4,
+      "table": "locations",
+      "operation": "inserted",
+      "name": "attach",
+      "expect": "keep"
+    },
+    {
+      "ord": 5,
+      "table": "fields",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "keep"
+    },
+    {
+      "ord": 6,
+      "table": "fields",
+      "operation": "inserted",
+      "name": "attach",
+      "expect": "keep"
+    },
+    {
+      "ord": 7,
+      "table": "teams",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "keep"
+    },
+    {
+      "ord": 8,
+      "table": "teams",
+      "operation": "inserted",
+      "name": "attach",
+      "expect": "keep"
+    },
+    {
+      "ord": 9,
+      "table": "game_slots",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "keep"
+    },
+    {
+      "ord": 10,
+      "table": "game_slots",
+      "operation": "inserted",
+      "name": "attach",
+      "expect": "keep"
+    },
+    {
+      "ord": 11,
+      "table": "game_assignments",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "refuse"
+    },
+    {
+      "ord": 12,
+      "table": "game_assignments",
+      "operation": "inserted",
+      "name": "remove",
+      "expect": "refuse"
+    },
+    {
+      "ord": 13,
+      "table": "game_assignments",
+      "operation": "updated",
+      "name": "edit",
+      "expect": "refuse"
+    },
+    {
+      "ord": 14,
+      "table": "game_assignments",
+      "operation": "updated",
+      "name": "remove",
+      "expect": "refuse"
+    },
+    {
+      "ord": 15,
+      "table": "game_assignments",
+      "operation": "updated",
+      "name": "later-run",
+      "expect": "refuse"
+    },
+    {
+      "ord": 16,
+      "table": "game_assignments",
+      "operation": "deleted",
+      "name": "stands-again",
+      "expect": "refuse"
+    },
+    {
+      "ord": 17,
+      "table": "schedule_tbd",
+      "operation": "inserted",
+      "name": "edit",
+      "expect": "refuse"
+    },
+    {
+      "ord": 18,
+      "table": "schedule_tbd",
+      "operation": "inserted",
+      "name": "remove",
+      "expect": "refuse"
+    },
+    {
+      "ord": 19,
+      "table": "schedule_tbd",
+      "operation": "updated",
+      "name": "edit",
+      "expect": "refuse"
+    },
+    {
+      "ord": 20,
+      "table": "schedule_tbd",
+      "operation": "updated",
+      "name": "remove",
+      "expect": "refuse"
+    },
+    {
+      "ord": 21,
+      "table": "schedule_tbd",
+      "operation": "deleted",
+      "name": "stands-again",
+      "expect": "refuse"
+    },
+    {
+      "ord": 22,
+      "table": "scheduler_runs",
+      "operation": "unrecorded",
+      "name": "game-saved-into-the-run",
+      "expect": "keep"
+    },
+    {
+      "ord": 23,
+      "table": "scheduler_runs",
+      "operation": "unrecorded",
+      "name": "evaluation-names-the-run",
+      "expect": "keep"
+    }
+  ]
+}

@@ -35,7 +35,8 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
     rpc: mocks.rpc,
     from: () => ({
       select: () => ({
-        eq: () => Promise.resolve({ data: mocks.teamsRows, error: null }),
+        // The read is `.eq('organization_id', ...).neq('is_external', true)`: an outside club is not a team.
+        eq: () => ({ neq: () => Promise.resolve({ data: mocks.teamsRows, error: null }) }),
       }),
     }),
   },

@@ -61,6 +61,12 @@ export const SCHEDULE_IMPORT_REASON = Object.freeze({
   TIME_AMBIGUOUS: 'time-ambiguous',
   WEEK_DIFFERS: 'week-differs',
 
+  // Warnings the APPLY makes of its own plan (PR 5, fix round 2; the owner: "warnings, not blockers unless necessary"). Never a
+  // refusal, never a staged flag: a game moved onto a place another game of the same file moves away from is written, and a
+  // placed game the file now gives no time is converted to a dated TIME TBD game.
+  GAMES_SWAPPED: 'games-swapped',
+  GAME_MADE_TIME_TBD: 'game-made-time-tbd',
+
   // A game with no time or no field becomes a TIME TBD game with this reason.
   IMPORTED_WITHOUT_TIME: 'imported-without-time',
 });
@@ -106,6 +112,24 @@ export const SCHEDULE_IMPORT_FLAGS = Object.freeze([
   R.WEEK_DIFFERS,
 ]);
 
+/**
+ * The warnings the apply adds to its result and its preview, beyond the parse's flags and the two conflict checks
+ * (`field-overlap`, `team-double-booked`): each is a thing that was DONE, said, and none refuses a row.
+ * `tests/gameImportSkipReasons.test.js` holds the SQL's literals to this list and requires words for each.
+ */
+export const SCHEDULE_IMPORT_APPLY_WARNINGS = Object.freeze([
+  R.GAMES_SWAPPED,
+  R.GAME_MADE_TIME_TBD,
+]);
+
+/**
+ * Why a game the file names is NOT written by the apply (PR 5): a closed list that can grow by one (F11-2 adds
+ * `skipped-scored`, when a score holds a game as Published does). The SQL emits these literals
+ * (`apply_game_import_job`, `skipped` of its result and `skipped_games` of its list); `tests/gameImportSkipReasons.test.js`
+ * holds this list to the SQL text and requires words for each, so a reason added in one place and not the other fails.
+ */
+export const SCHEDULE_IMPORT_SKIP_REASONS = Object.freeze(['skipped-published']);
+
 /** The reasons a TIME TBD game from an import may carry. */
 export const SCHEDULE_IMPORT_TBD_REASONS = Object.freeze([R.IMPORTED_WITHOUT_TIME]);
 
@@ -146,7 +170,30 @@ const DESCRIPTIONS = Object.freeze({
   [R.TIME_AMBIGUOUS]: 'The clocks repeat that time on that date; the first occurrence was taken.',
   [R.WEEK_DIFFERS]: 'The Week in the file is not the week the date falls in.',
   [R.IMPORTED_WITHOUT_TIME]: 'The file gave no time or no field for the game.',
+  [R.GAMES_SWAPPED]:
+    'The game takes the place of a game this file moves away: both are written, in an order the schedule allows.',
+  [R.GAME_MADE_TIME_TBD]:
+    'The file gives the game a date and no time: it is no longer placed, and stands on the TIME TBD list with its date.',
 });
+
+const SKIP_DESCRIPTIONS = Object.freeze({
+  'skipped-published':
+    'The game is Published and the file would change it. Allow changes to it first, then import again.',
+});
+
+/**
+ * A sentence for a skip reason, for a screen that has only the reason.
+ *
+ * @param {string} reason
+ * @returns {string}
+ * @throws {Error} on a reason that is not in {@link SCHEDULE_IMPORT_SKIP_REASONS}, or that has no words
+ */
+export function describeScheduleImportSkip(reason) {
+  if (!SCHEDULE_IMPORT_SKIP_REASONS.includes(reason) || !Object.hasOwn(SKIP_DESCRIPTIONS, reason)) {
+    throw new Error(`scheduleImport: "${String(reason)}" is not a skip reason with words`);
+  }
+  return SKIP_DESCRIPTIONS[reason];
+}
 
 /**
  * A sentence for a code, for a screen that has only the code.

@@ -64,7 +64,8 @@ export const SCHEDULE_EXPORT_COLUMNS = Object.freeze([...MASTER_HEADERS]);
  * settled here.
  *
  * @param {Object} params
- * @param {Array<Object>} params.teams
+ * @param {Array<Object>} params.teams  a team flagged `isExternal: true` is an outside club: it is named as the opponent in
+ *   the rows of the league's own teams and has no rows or file of its own
  * @param {Array<Object>} [params.practiceAssignments=[]]
  * @param {Array<Object>} [params.gameAssignments=[]]
  * @param {Array<Object>} [params.tbdItems=[]] - practices a team is still short of and games not placed
@@ -119,6 +120,9 @@ export function generateScheduleExports({
       division: team.division ?? '',
       coaches: cells.coaches,
       coachEmails: cells.emails,
+      // An outside club (a team row flagged `is_external`, 20261121010000) is a side of a game and nothing else: it is
+      // named as the opponent in the rows of the league's own teams, and has no rows and no file of its own.
+      isExternal: team.isExternal === true,
     };
     teamDirectory.set(team.id, sanitized);
   }
@@ -127,6 +131,7 @@ export function generateScheduleExports({
   const teamRows = new Map();
 
   const pushRow = (teamId, row) => {
+    if (teamDirectory.get(teamId)?.isExternal) return;
     masterRows.push(row);
     const bucket = teamRows.get(teamId) ?? [];
     bucket.push(row);

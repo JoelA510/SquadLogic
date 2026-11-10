@@ -1,0 +1,157 @@
+{
+  "_about": "One table of label cases, run through core's normaliseExternalLabel, through the SQL function public.normalise_external_label (supabase/tests/game_import_round2.sql, which carries this same table and is held to it by tests/gameImportLabelParity.test.js) and, as a name to create beside a name that exists, through the apply (pgTAP) and the mock. 'expected' is core's output, computed by the test and compared here so the file cannot drift from core.",
+  "cases": [
+    {
+      "group": "plain",
+      "input": "Lions",
+      "expected": "lions"
+    },
+    {
+      "group": "plain",
+      "input": "LIONS",
+      "expected": "lions"
+    },
+    {
+      "group": "plain",
+      "input": "  Lions  ",
+      "expected": "lions"
+    },
+    {
+      "group": "space-run",
+      "input": "Blue  Jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "space-run",
+      "input": "blue     jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "space-run",
+      "input": "Blue Jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "tab",
+      "input": "Blue\tJays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "line-feed",
+      "input": "Blue\nJays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "no-break-space",
+      "input": "Blue\u00a0Jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "no-break-space",
+      "input": "\u00a0Blue Jays\u00a0",
+      "expected": "blue jays"
+    },
+    {
+      "group": "other-unicode-space",
+      "input": "Blue\u2003Jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "other-unicode-space",
+      "input": "Blue\u3000Jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "other-unicode-space",
+      "input": "\ufeffBlue Jays",
+      "expected": "blue jays"
+    },
+    {
+      "group": "diacritic-case",
+      "input": "\u00c9toile",
+      "expected": "\u00e9toile"
+    },
+    {
+      "group": "diacritic-case",
+      "input": "\u00e9toile",
+      "expected": "\u00e9toile"
+    },
+    {
+      "group": "diacritic-kept",
+      "input": "Etoile",
+      "expected": "etoile"
+    },
+    {
+      "group": "trailing-punctuation-kept",
+      "input": "Hawks.",
+      "expected": "hawks."
+    },
+    {
+      "group": "trailing-punctuation-kept",
+      "input": "Hawks. ",
+      "expected": "hawks."
+    },
+    {
+      "group": "no-trailing-punctuation",
+      "input": "Hawks",
+      "expected": "hawks"
+    },
+    {
+      "group": "zero-width-space-is-not-whitespace",
+      "input": "Blue\u200bJays",
+      "expected": "blue\u200bjays"
+    },
+    {
+      "group": "next-line-is-not-whitespace",
+      "input": "Blue\u0085Jays",
+      "expected": "blue\u0085jays"
+    }
+  ],
+  "pairs": [
+    {
+      "existing": "Blue Jays",
+      "creating": "Blue  Jays",
+      "same": true
+    },
+    {
+      "existing": "Blue Jays",
+      "creating": "blue jays",
+      "same": true
+    },
+    {
+      "existing": "Blue Jays",
+      "creating": "Blue\tJays",
+      "same": true
+    },
+    {
+      "existing": "Blue Jays",
+      "creating": "Blue\u00a0Jays",
+      "same": true
+    },
+    {
+      "existing": "Blue Jays",
+      "creating": "\u00a0Blue Jays\u00a0",
+      "same": true
+    },
+    {
+      "existing": "\u00c9toile",
+      "creating": "\u00e9toile",
+      "same": true
+    },
+    {
+      "existing": "Etoile",
+      "creating": "\u00c9toile",
+      "same": false
+    },
+    {
+      "existing": "Hawks",
+      "creating": "Hawks.",
+      "same": false
+    },
+    {
+      "existing": "Blue Jays",
+      "creating": "Blue\u200bJays",
+      "same": false
+    }
+  ]
+}

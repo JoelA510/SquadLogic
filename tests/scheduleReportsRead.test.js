@@ -171,8 +171,20 @@ describe('loadReportsReference: the league the reports are built over', () => {
       params
     );
     expect(result.data.teams).toEqual([
-      { id: 't-1', name: 'Synthetic Comets', divisionId: 'd-10', division: 'U10' },
-      { id: 't-4', name: 'Synthetic Planets', divisionId: 'd-12', division: 'U12' },
+      {
+        id: 't-1',
+        name: 'Synthetic Comets',
+        divisionId: 'd-10',
+        division: 'U10',
+        isExternal: false,
+      },
+      {
+        id: 't-4',
+        name: 'Synthetic Planets',
+        divisionId: 'd-12',
+        division: 'U12',
+        isExternal: false,
+      },
     ]);
   });
 

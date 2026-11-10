@@ -32,13 +32,15 @@ export function useNavBadges() {
     if (!orgId) return undefined;
     let cancelled = false;
 
-    const countRows = async (table, seasonScoped = false) => {
+    const countRows = async (table, seasonScoped = false, ownOnly = false) => {
       try {
         let query = supabase
           .from(table)
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', orgId);
         if (seasonScoped) query = query.eq('season_settings_id', seasonId);
+        // An outside club is a side of a game, not one of the organization's teams (20261121010000).
+        if (ownOnly) query = query.neq('is_external', true);
         const { count, error } = await query;
         // An unanswered count is no badge, never a wrong number.
         if (error || typeof count !== 'number') return null;
@@ -53,7 +55,7 @@ export function useNavBadges() {
         // No season shown (none yet, or still loading): no people badge, never a wrong number.
         seasonId ? countRows('players', true) : null,
         seasonId ? countRows('coaches', true) : null,
-        countRows('teams'),
+        countRows('teams', false, true),
       ]);
       if (!cancelled) {
         setState({ key, badges: { players, coaches, teams } });

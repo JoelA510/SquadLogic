@@ -42,9 +42,11 @@ export function useSetupProgress() {
     let cancelled = false;
     (async () => {
       if (!orgId) return;
-      const countOf = async (table, seasonScoped = false) => {
+      const countOf = async (table, seasonScoped = false, ownOnly = false) => {
         try {
           let query = supabase.from(table).select('id').eq('organization_id', orgId);
+          // An outside club is a side of a game, not one of the organization's teams (20261121010000).
+          if (ownOnly) query = query.neq('is_external', true);
           // The players imported for the season the header shows (20261108010000).
           if (seasonScoped) query = query.eq('season_settings_id', seasonId);
           const { data, error } = await query;
@@ -55,7 +57,7 @@ export function useSetupProgress() {
       };
       const [players, teams, fields] = await Promise.all([
         seasonId ? countOf('players', true) : 0,
-        countOf('teams'),
+        countOf('teams', false, true),
         countOf('fields'),
       ]);
       if (!cancelled) setCounts({ players, teams, fields, loaded: true });

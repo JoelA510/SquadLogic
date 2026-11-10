@@ -51,7 +51,8 @@ export default function TeamBuilderPage() {
         const { data, error } = await supabase
           .from('teams')
           .select('*')
-          .eq('organization_id', orgId);
+          .eq('organization_id', orgId)
+          .neq('is_external', true);
         if (!cancelled && !error) setTeams(data || []);
       } catch (err) {
         logger.error('[TeamBuilder] teams load failed:', err);

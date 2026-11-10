@@ -381,11 +381,17 @@ export async function readLatestGameImportJob(client, { organizationId, seasonSe
  * season's teams, the venues and fields, and the TIME TBD games that hold a date. Read whole or not at all.
  *
  * @param {any} client
- * @param {{ organizationId: string, seasonSettingsId: string }} params
+ * @param {{ organizationId: string, seasonSettingsId: string, timeZone: string | null | undefined }} params
+ *   `timeZone` is the season's (`season_settings.timezone`): a game's times are read on it, never on the host's clock
  * @returns {Promise<ReturnType<typeof buildScheduleCsv> & { games: number }>}
  */
-export async function readSavedScheduleCsv(client, { organizationId, seasonSettingsId }) {
+export async function readSavedScheduleCsv(client, { organizationId, seasonSettingsId, timeZone }) {
   requireClient(client);
+  if (typeof timeZone !== 'string' || timeZone.trim() === '') {
+    throw refusal(
+      'This season has no time zone set, so the times of its games cannot be written. Set the season’s time zone first.'
+    );
+  }
   // The same reading of "the current run" the Published controls use (one place decides it).
   const { runId } = await readCurrentSavedGameIds({ organizationId, seasonSettingsId, client });
   const [games, slots, league, tbd] = await Promise.all([
@@ -395,14 +401,14 @@ export async function readSavedScheduleCsv(client, { organizationId, seasonSetti
           client
             .from('game_assignments')
             .select(
-              'id, external_ref, game_slot_id, field_id, home_team_id, away_team_id, division, week_index'
+              'id, external_ref, game_slot_id, field_id, home_team_id, away_team_id, division, week_index, start, end'
             )
             .eq('run_id', runId)
         ),
     fetchAllPages(() =>
       client
         .from('game_slots')
-        .select('id, field_id, slot_date, start_time, end_time, week_index')
+        .select('id, field_id, week_index')
         .eq('organization_id', organizationId)
     ),
     readGameImportLeague(client, { organizationId, seasonSettingsId }),
@@ -419,12 +425,12 @@ export async function readSavedScheduleCsv(client, { organizationId, seasonSetti
       awayTeamId: String(g.away_team_id),
       division: g.division ?? null,
       weekIndex: g.week_index ?? null,
+      start: g.start ?? null,
+      end: g.end ?? null,
     })),
+    timeZone,
     slots: slots.map((s) => ({
       id: String(s.id),
-      date: s.slot_date ?? null,
-      startTime: s.start_time ?? null,
-      endTime: s.end_time ?? null,
       fieldId: s.field_id ?? null,
       weekIndex: s.week_index ?? null,
     })),

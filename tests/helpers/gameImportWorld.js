@@ -126,8 +126,12 @@ export function seedGameImportWorld() {
       saved(SAVED.open, 'S-1', slots[0], TEAMS.t1, TEAMS.t2, false),
       // Published, and the file would move it: skipped
       saved(SAVED.published, 'S-2', slots[1], TEAMS.t3, TEAMS.t4, true),
-      // not named by the file at all
-      saved(SAVED.untouched, 'S-3', slots[2], TEAMS.t5, TEAMS.t6, false),
+      // not named by the file at all. It runs half an hour past its slot's end: a game keeps its OWN end (an import
+      // reuses a slot by its start), so a reader that takes the slot's end for the game's is wrong about this one.
+      {
+        ...saved(SAVED.untouched, 'S-3', slots[2], TEAMS.t5, TEAMS.t6, false),
+        end: '2026-09-19T09:30:00-07:00',
+      },
     ],
     schedule_tbd: [],
     staging_import_rows: [],

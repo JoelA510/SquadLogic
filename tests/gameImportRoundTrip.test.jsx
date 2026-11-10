@@ -29,7 +29,7 @@ const { confirmPreview, stageMapPreview } = await import('./helpers/gameImportFl
 const { readSavedScheduleCsv } = await import('../frontend/src/utils/gameImportClient.js');
 const core = await import('../packages/core/src/scheduleImport/index.js');
 
-const params = { organizationId: ORG, seasonSettingsId: SEASON };
+const params = { organizationId: ORG, seasonSettingsId: SEASON, timeZone: SEASON_ROW.timezone };
 const parseCsv = (csv) => {
   const { data, meta, errors } = Papa.parse(csv, { header: true, skipEmptyLines: true });
   expect(errors).toEqual([]);
@@ -225,6 +225,24 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
     expectZeroChanges(again.preview, { games, tbd });
   });
 
+  it('a game whose end is not its slot’s is exported with its OWN end, on the season’s clock (Codex P2)', async () => {
+    const exported = await readSavedScheduleCsv(mockSupabase, params);
+    const row = exported.rows.find((r) => r['Game ID'] === 'S-3');
+    // the slot says 08:00 to 09:00; the game runs to 09:30
+    expect(row).toMatchObject({ Date: '2026-09-19', 'Start Time': '08:00', 'End Time': '09:30' });
+    // and under another host zone the file is the same file (the season's clock, never the host's)
+    const original = process.env.TZ;
+    try {
+      for (const tz of ['Asia/Tokyo', 'Pacific/Kiritimati']) {
+        process.env.TZ = tz;
+        expect((await readSavedScheduleCsv(mockSupabase, params)).csv).toBe(exported.csv);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+
   it('a cancelled game is not in the export, and the re-import does not bring it back', async () => {
     const cancelled = await mockSupabase.rpc('admin_cancel_game_assignment', {
       p_assignment_id: SAVED.untouched,
@@ -249,7 +267,7 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
     const row = file.rows.find((r) => r['Game ID'] === 'S-3');
     expect(row['Start Time']).toBe('08:00');
     row['Start Time'] = '08:30';
-    row['End Time'] = '09:30';
+    row['End Time'] = '10:00';
     const again = await stageMapPreview(mockSupabase, {
       ...params,
       ...file,
@@ -260,17 +278,10 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
   });
 
   it('says what it cannot write, and writes no half row: an undated TIME TBD game, a game with no place', () => {
+    const at = { start: '2026-09-12T09:00:00-07:00', end: '2026-09-12T10:00:00-07:00' };
     const base = {
-      slots: [
-        {
-          id: 's1',
-          date: '2026-09-12',
-          startTime: '09:00:00',
-          endTime: '10:00:00',
-          fieldId: 'f1',
-          weekIndex: 1,
-        },
-      ],
+      timeZone: 'America/Los_Angeles',
+      slots: [{ id: 's1', fieldId: 'f1', weekIndex: 1 }],
       teams: [
         { id: 'a', name: 'Team A', division: 'U10' },
         { id: 'b', name: 'Team B', division: 'U10' },
@@ -283,6 +294,7 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
       games: [
         {
           id: 'g1',
+          ...at,
           externalRef: 'G-1',
           gameSlotId: 's1',
           fieldId: 'f1',
@@ -293,6 +305,9 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
         },
         {
           id: 'g2',
+          // no time that can be read
+          start: null,
+          end: null,
           externalRef: 'G-2',
           gameSlotId: 'gone',
           fieldId: 'f1',
@@ -303,6 +318,7 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
         },
         {
           id: 'g3',
+          ...at,
           externalRef: 'G-3',
           gameSlotId: 's1',
           fieldId: 'f1',
@@ -341,5 +357,25 @@ describe('the every-outcome league: a cancelled game, a TIME TBD game, and a con
     });
     expect(built.csv.split('\n')).toHaveLength(3);
     expect(() => core.buildScheduleCsv({ ...base, games: null })).toThrow(/games must be an array/);
+    expect(() => core.buildScheduleCsv({ ...base, games: [], timeZone: '' })).toThrow(/time zone/);
+    // a game that runs past midnight on the season's clock is counted, not written with an end before its start
+    const late = core.buildScheduleCsv({
+      ...base,
+      games: [
+        {
+          id: 'g9',
+          start: '2026-09-12T23:30:00-07:00',
+          end: '2026-09-13T00:30:00-07:00',
+          gameSlotId: 's1',
+          fieldId: 'f1',
+          homeTeamId: 'a',
+          awayTeamId: 'b',
+          division: 'U10',
+          weekIndex: 1,
+        },
+      ],
+    });
+    expect(late.rows).toEqual([]);
+    expect(late.omitted.noPlace).toBe(1);
   });
 });

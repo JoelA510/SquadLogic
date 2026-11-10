@@ -458,7 +458,11 @@ export default function ScheduleImportPanel({
     setExportNote(null);
     setBusy('Reading the saved schedule');
     try {
-      const saved = await K.exportSaved(client, { organizationId, seasonSettingsId });
+      const saved = await K.exportSaved(client, {
+        organizationId,
+        seasonSettingsId,
+        timeZone: currentSeasonSetting?.timezone ?? null,
+      });
       setBusy(null);
       if (saved.rows.length === 0) {
         setExportNote('There is no saved game to download yet.');

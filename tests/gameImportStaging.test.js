@@ -264,8 +264,13 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
   }));
 
   it('reaches ok, every TIME TBD form and every refusal the parse can give (a check over fewer would pass)', () => {
+    // F5: `bad-time` and `bad-week` are kept rows that carry the code as a flag, so a flag reaches its code too.
     const reached = new Set(
-      outcomes.map(({ row }) => (row.status === 'refused' ? row.reason : `${row.status}`))
+      outcomes.flatMap(({ row }) =>
+        row.status === 'refused'
+          ? [row.reason]
+          : [`${row.status}`, ...row.flags.map((/** @type {{ code: string }} */ f) => f.code)]
+      )
     );
     for (const code of [
       'ok',
@@ -295,6 +300,32 @@ describe('every parse outcome stages in a shape the SQL accepts (a JS twin of it
       const staged = toStagedGameRow(row);
       expect(shapeProblem(/** @type {any} */ (staged)), `${name} row ${row.rowNumber}`).toBeNull();
     }
+  });
+
+  it('F5: a bad-time row stages as a dated TIME TBD game and a bad-week row with its derived week; the warning is not staged', () => {
+    const [badTime] = parseFile([fileRow({ 'Start Time': '25:99' })]);
+    const [badWeek] = parseFile([fileRow({ Week: 'abc' })]);
+    const t = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (badTime)));
+    expect(t.validation_errors).toEqual([]);
+    expect(t.normalized_payload).toMatchObject({
+      status: 'tbd',
+      tbd_reason: 'imported-without-time',
+      date: '2026-09-12',
+      start: null,
+      end: null,
+      start_time: null,
+      end_time: null,
+      flags: [],
+    });
+    const w = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (badWeek)));
+    expect(w.normalized_payload).toMatchObject({ status: 'ok', week_index: 1, flags: [] });
+    // CONTROL: a flag the SQL knows IS staged, and staging the parse's warning would be refused by the SQL's shape check.
+    const [differs] = parseFile([fileRow({ Week: '3' })]);
+    const d = /** @type {any} */ (toStagedGameRow(/** @type {any} */ (differs)));
+    expect(d.normalized_payload.flags).toEqual(['week-differs']);
+    expect(
+      shapeProblem({ ...t, normalized_payload: { ...t.normalized_payload, flags: ['bad-time'] } })
+    ).toBe('flags');
   });
 
   it('CONTROL: the twin refuses what the SQL refuses (so it can fail)', () => {

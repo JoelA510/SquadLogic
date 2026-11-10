@@ -130,7 +130,7 @@ describe('upload: the file is read by the server, and what it kept or refused is
       /Row 10: "13\/04\/2026" is not a date/
     );
     // ...and never left the browser: the request carried the header NAMES and only the columns the import reads
-    const sent = invoke.mock.calls.map(([, options]) => options.body);
+    const sent = invoke.mock.calls.map((call) => /** @type {any} */ (call[1]).body);
     expect(sent.length).toBeGreaterThanOrEqual(1);
     expect(sent[0].headers).toContain('Notes');
     expect(Object.keys(sent[0].rows[0])).not.toContain('Notes');

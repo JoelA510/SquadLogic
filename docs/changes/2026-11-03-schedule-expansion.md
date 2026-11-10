@@ -8,7 +8,7 @@ fixture or test is written by this change.** The owner approved the scope on 202
 additions on 2026-11-06, answered all thirty-one decisions on 2026-11-06 and said "Let's proceed with your changes and
 recommendations" (the messages are verbatim at the top of section 10). **The hold is lifted.** The gate before PR 5, the
 F11 plan (decision 12), was approved on 2026-11-07 and its F11-1 is merged; PR 14 is held (decision 28). Work started with
-PR 1 together with PR 4; what is merged and what is next is in section 14 (updated 2026-11-09; the rest of this header is
+PR 1 together with PR 4; what is merged and what is next is in section 14 (updated 2026-11-10; the rest of this header is
 the 2026-11-06 text). A new scope, a new dependency or anything outside this plan still needs the owner.
 Order of work around this plan (owner, 2026-11-06): dependency updates are cleared now and are a separate wave, not in
 this plan; then this expansion; then the owner's manual testing; then the test-suite audit; then the desktop build (the
@@ -1420,14 +1420,18 @@ home side only (the coach-clash plant sits on an away side).
 
 Depends on: PR 1 merged and deployed; PR 4 merged; **the F11 plan approved by the owner** (decision 12: this PR's
 migration adds `external_ref` and defines re-import by it, so game identity must be settled first). Review (c) because
-it holds a migration, the re-import key, Published-row skipping and `is_external`.
+it holds a migration, the re-import key, Published-row skipping and `is_external`. **Merged as #719 (`ad18861`); E1 to
+E4 are ticked because each task's files are in that merge** (statically checked on 2026-11-10: the migration
+`20261121010000_game_import.sql`, its revert and smoke, the catalogue snapshot, `prove.sh`,
+`supabase/tests/game_import_apply_rollback.sql`, `tests/externalTeamReaders.test.js`, `tests/mockGameImport.test.js` and
+the three docs; not re-run here). What was decided during its review is in section 10, the 2026-11-10 answers, entry 6.
 
-- [ ] E1 (L) Migration: `import_type` and `job_type` `games` through every list of 4.10; `game_assignments.import_job_id`
+- [x] E1 (L) Migration: `import_type` and `job_type` `games` through every list of 4.10; `game_assignments.import_job_id`
       and `external_ref`; `teams.is_external`; `ensure_game_slot` (an admin RPC, audited `game.slot_created`);
       `map_game_import_job`; `apply_game_import_job(job, dry_run)`; `rollback_game_import_job`; the
       `imported-without-time` reason; the guard's rollback exemption (3.3, 4.7). Revert and smoke; catalogue snapshot;
       harness plants re-aimed.
-- [ ] E2 (L) **First** `supabase/tests/game_import_apply_rollback.sql` and the two censuses (the lists of 4.10;
+- [x] E2 (L) **First** `supabase/tests/game_import_apply_rollback.sql` and the two censuses (the lists of 4.10;
       `tests/externalTeamReaders.test.js`) red against today's code, then the migration. The reader census carries the
       classes of 4.6 (decision 5): the **exclude** list; the **include** list with a positive test per reader; the
       **not-applicable** list (team-in-two-places checks); `view_league_standings` excluded (standings (i)); and a pin
@@ -1438,9 +1442,9 @@ it holds a migration, the re-import key, Published-row skipping and `is_external
       conflicting file is stored and flagged; team shells land in a team run (`results.teams`) and the two checks of
       4.5 hold; rollback refuses after a change and succeeds before; a no-user job and a cross-organization job are
       refused; a completed season refuses.
-- [ ] E3 (S) The mock finalizer mirrors apply and rollback. Test `tests/mockGameImport.test.js`: the fixture through the
+- [x] E3 (S) The mock finalizer mirrors apply and rollback. Test `tests/mockGameImport.test.js`: the fixture through the
       mock equals the pgTAP's expected counts.
-- [ ] E4 (S) Docs: `docs/operations/ingestion-pipeline.md` (a games section), `docs/architecture/gotsport-import-contract.md`
+- [x] E4 (S) Docs: `docs/operations/ingestion-pipeline.md` (a games section), `docs/architecture/gotsport-import-contract.md`
       ("Schedule import: kept fields"), `docs/ARCHITECTURE.md` (the "no schedule importer" gap closed).
 
 Plants: the dry run writes; the `ON CONFLICT` upsert removed (a re-import duplicates); rollback's "changed since"
@@ -1468,6 +1472,27 @@ preview and apply parity.
 - [ ] G5 (S, moved from PR 7) Optional "record as baseline" at import (decision 15), ticked by default when the games
       arrive Published. Tests of G3 and G5: as they were in PR 7 (as 5.1 and 5.6, each with a case for a cancelled game
       and a TIME TBD game).
+
+- [ ] F5 (S, added 2026-11-10; section 10, the 2026-11-10 answers, entry 4) Core's parse turns a `bad-time` row into a
+      dated TIME TBD game with a warning and derives the week of a `bad-week` row from its date with a warning;
+      `outside-season-window` stays a refusal. Test `tests/scheduleImportParse.test.js`: one case per code, each beside a
+      well-formed control, and a `bad-week` row whose date is outside the season still refused.
+- [ ] F6 (M, added 2026-11-10; entry 1) A TIME TBD game's date is shown with a blank time on the Games page list, in the
+      master export, and under its date in the Day Sheet (data: `schedule_tbd.game_date`). Tests: a case in each of the
+      three surfaces' existing test files for a dated TIME TBD game (the date present, the time blank) beside an undated
+      one, which reads as today.
+- [ ] F7 (M, added 2026-11-10; entry 3) Preview-stale protection: the confirm step passes the previewed counts, and the
+      apply is refused with `game_import_preview_stale` when its own differ. PR 6 has no migration, so the Edge function
+      re-runs the dry run, compares, and refuses. Tests: a Deno test and its mock twin in which the schedule changes
+      between preview and confirm (refused, nothing written), beside an unchanged control that applies.
+- [ ] F8 (S, added 2026-11-10; entry 4) The mapping screen defaults to "map to existing" when a match exists. Test: a
+      case in `tests/gameImportPanel.test.jsx` (a label with a match opens on "map to existing"; one without does not).
+- [ ] F9 (S, added 2026-11-10) The Games page shows the import's warning list (`games-swapped`, `game-made-time-tbd`,
+      `week-differs`). Test: a case in `tests/gameImportPanel.test.jsx`, or the Games page's own test file, that each of
+      the three is listed in words and that no list is drawn when there is none.
+- [ ] F3b (S, added 2026-11-10) Align the reason code for an outside club whose custom name collides with an own team:
+      core and the mock say `unknown-team`, the SQL says `label-is-own-team`; both refuse (reported from PR 5's review,
+      not re-traced here). Test: one case in `tests/gameImportLabelParity.test.js` requiring the same code from all three.
 
 Plants: the conversion reads the host zone; an unmatched label created without the confirm list; the preview's counts
 computed apart from the dry run.
@@ -2078,6 +2103,48 @@ entry says so and plans nothing.
    - `publishedOmissions` and `changesPublishedPlacement` (no shipped caller since F11-1) are removed in F11-3 if still
      unused (task C7 there).
 
+### Owner answers (2026-11-09 evening and 2026-11-10)
+
+The owner's answers of the evening of 2026-11-09 and of 2026-11-10, in the same form as the block above: words in
+quotation marks are the owner's, as sent; the rest of an entry is the agent's reading. Entry 6 is not an owner answer: it
+lists what the coordinating agent decided under entry 5 while PR 5 was in review. Nothing here adds a pull request, a
+decision number or scope; the tasks that follow from entries 1 to 4 are in section 7, under PR 6.
+
+1. **2026-11-09 (evening), a TIME TBD game's date.** "Time TBD should hold a date only and no time on the game schedule."
+   Consequence: implemented in PR 5 as `schedule_tbd.game_date` (migration `20261121010000_game_import.sql`); showing it
+   is PR 6 (task F6).
+2. **2026-11-09 (evening), swaps.** "For swaps - warnings, not blockers. We try not to introduce blockers unless
+   necessary." Consequence, a standing principle: prefer a warning to a refusal. A blocker stays only where it is
+   necessary: the Published, held or scored guard; a completed season; tenancy and auth; a malformed row that cannot be
+   stored; a unique constraint that cannot be satisfied; a rollback that would destroy a later writer's work.
+3. **2026-11-09 (evening), the remaining recommendations.** "Otherwise agree as recommended". That accepted:
+   - An imported TIME TBD game stays listed until the next game save that carries an `unscheduled` list (PR 6 fixes it if
+     the Games page shows it).
+   - The team shells an import creates land in one team run.
+   - `persist_practice_schedule`'s outside-club count is accepted until that function's next replacement.
+   - The preview-stale protection is PR 6's (task F7).
+4. **2026-11-10, `bad-time` and `bad-week`.** "agree with the recommendations on bad-time and bad-week". Consequence
+   (PR 6, in core's parse; task F5): the parse turns a `bad-time` row into a dated TIME TBD game with a warning, and
+   derives the week of a `bad-week` row from its date with a warning. Kept as row-level refusals:
+   `outside-season-window` (no week can be derived); a `create` over a name that exists (the PR 6 mapping screen defaults
+   to "map to existing" when a match exists; task F8); a TIME TBD swap or chain between the same teams (rare);
+   `label-is-own-team`.
+5. **2026-11-10, delegation** (reported, not a quotation). The owner gave the coordinating agent the call on questions
+   that come up, in line with the recommendation it states. That includes merging a PR Codex cannot review (after an
+   independent read-only review), F11-5 and PR 14: each is decided on its merits when its turn comes and recorded here.
+   Not started until everything else is complete, and then in this order: the test-suite audit, then the desktop build.
+   The repository's rules are unchanged: the hard exclusions (AGENTS.md section 2), CI the only writer of migrations,
+   and the required checks green.
+6. **2026-11-10, decisions taken under the delegation during PR 5** (the coordinating agent's, not the owner's):
+   - The rollback refuses when a later change touched a TIME TBD row the import wrote (a necessary blocker, entry 2).
+   - A record the import created that was edited since is kept and reported.
+   - A run the rollback keeps is retired from current-run selection.
+   - Two source rows that resolve to one saved game refuse the tuple-matched row as `duplicate-row`.
+   - A stored Game ID is never erased by a row that omits it.
+   - Accepted and documented edges: re-inserting a game the apply took out, where its place or Game ID was taken since,
+     raises a raw unique violation (atomic, nothing lost); a game a later writer saved into the import's own run is
+     hidden once that run is kept and retired, until the next save or import.
+
 ### The thirty-one decisions (as offered, with the answer under those that carry one)
 
 1. **Who may override, and what it needs.** Recommended: any `is_org_admin` (admin, tenant admin, staff, as every
@@ -2438,26 +2505,29 @@ read here, and that `admin_delete_team`'s latest body is still `20261112010000:1
 are **outside the repository** (the second, a practice grid, was recomputed on 2026-11-06); if a figure from them is
 needed again, ask the owner for the files and recompute counts only. Never copy a name or value.
 
-**Where this stands (updated 2026-11-09; first written 2026-11-06).** The owner answered all thirty-one decisions and
+**Where this stands (updated 2026-11-10; first written 2026-11-06).** The owner answered all thirty-one decisions and
 lifted the hold. The verbatim messages, the nine agreed changes and the answer table are at the top of section 10, and the
-owner's answers of 2026-11-09 follow them: read them first. **Merged on `main`** (statically read from `git log` at
-`e5ce8b8`; whether each migration is deployed was not checked): PR 4 (#706), PR 1 (#707), PR 9 (#708), PR 2 (#709), PR 3
-(#710), PR 13 (#711), PR 7 (#713), and the F11 plan's F11-1 (#712). **Not merged:** PR 5, 6, 8, 10, 11 and 12, and F11-2 to
-F11-5; no pull request was open on 2026-11-09. PR 14 stays held.
+owner's answers of 2026-11-09 and of 2026-11-09 evening and 2026-11-10 follow them: read them first. **Merged on `main`**
+(statically read from `git log` at `ad18861`; whether each migration is deployed was not checked): PR 4 (#706), PR 1
+(#707), PR 9 (#708), PR 2 (#709), PR 3 (#710), PR 13 (#711), PR 7 (#713), the F11 plan's F11-1 (#712), and PR 5 (#719,
+`ad18861`). **Not merged:** PR 6, 8, 10, 11 and 12, and F11-2 to F11-5. PR 14 stays held.
 
 - **Order and the dependency rule.** Section 7 ("Dependencies and order") has the dependency table and the one priority
   rule: at most two PRs in flight; a free slot takes the first PR, in the order PR 1; PR 4; PR 2; PR 5; PR 3; PR 9;
   PR 6; PR 10; PR 7; PR 13; PR 8; PR 11; PR 12, whose dependencies are merged and deployed. There are no waves. PR 14 is
-  held (decision 28). Left in that order: PR 5 (next; confirm F11-1's migration `20261120010000` is deployed first), PR 6,
-  PR 10, PR 8, PR 11, PR 12. The F11 plan's own order: F11-2 and F11-3 after PR 6, ahead of PR 10; F11-4 before PR 12;
-  F11-5 last and only on the owner's word. Also next, with no PR number: plan: registration state and optional-data
-  features (after PR 5), a plan-change the owner agreed to on 2026-11-09 (section 10, entry 2).
+  held (decision 28). Left, with the F11 plan's pull requests in their places: PR 6 (next, once PR 5's migration
+  `20261121010000` is deployed and verified; its task list grew on 2026-11-10, F5 to F9 and F3b), then F11-2, F11-3,
+  PR 10, PR 8, PR 11, F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
+  answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
+  optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside
+  this plan: Dependabot #716 to #718, to be batched into one dependency pull request.
 - **Gate cleared.** The F11 plan (decision 12; `docs/changes/2026-11-06-games-table-source-of-truth.md`) was approved by
   the owner on 2026-11-07 and its F11-1 (identity) is merged (#712). PR 5 is specified with that plan's amendments ("What
   PR 5, and the other pull requests, must do or avoid"); the owner answered on 2026-11-09 that Game IDs are not reused, so
-  its `external_ref` index stays unique on `(season_settings_id, external_ref)`. Nothing else gates a start; an agent
-  still merges only when the owner has said so for that PR (AGENTS.md section 3), and new scope, a new dependency or
-  anything outside this plan still needs the owner.
+  its `external_ref` index stays unique on `(season_settings_id, external_ref)`. PR 5 is merged (#719). Nothing else gates a
+  start; an agent still merges only when the owner has said so for that PR (AGENTS.md section 3; the delegation of 2026-11-10 is in
+  section 10, the 2026-11-10 answers, entry 5), and new scope, a new dependency or anything outside this plan still needs
+  the owner.
 - **Review.** By content (decision 16; section 7, "Review"): (c) for PRs 1, 2, 4, 5, 6, 8, 9, 10, 11, 12; (a) for PRs 3, 7, 13. A (c) PR opens without `/code-review`; Codex reviews it; its findings are addressed; then one `/code-review high`
   runs and its findings are fixed in the same push; never a second. An (a) PR gets a labelled self-review and the Codex
   review, no `/code-review`. Documentation, very minor and dependency PRs get no `/code-review`. AGENTS.md section 3 and
@@ -2468,7 +2538,8 @@ F11-5; no pull request was open on 2026-11-09. PR 14 stays held.
   PR description says what it did not run; no dependency is added.
 - **PR 1 and PR 4 started together and are merged.** The dependency updates are a separate wave and are not in this plan;
   the owner's manual testing (2026-11-09: "I'll do this a little later, I'd prefer we shore up more of the open work
-  first."), the test-suite audit and the desktop build come after this expansion (header).
+  first."), the test-suite audit and the desktop build come after this expansion (header); the audit and then the
+  build start only when everything else is complete (owner, 2026-11-10).
 - **Decisions.** None open (section 10). B5.10 was answered on 2026-11-09 (section 10, entry 2): the signal is the
   platform's Waitlist column. What the owner described is still UNPLANNED and not decided; it needs a plan-change
   (AGENTS.md rule 14) after PR 5, which the owner agreed to ("your recommendation suffices here"), and no work is

@@ -631,8 +631,8 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
   }
 
   // 3. Parse and validate request body. A games import has its own shape (see `GamesImportPayload`).
-  let generic: z.infer<typeof ImportValidationPayload> | null = null;
-  let games: z.infer<typeof GamesImportPayload> | null = null;
+  let parsedGeneric: z.infer<typeof ImportValidationPayload> | null = null;
+  let parsedGames: z.infer<typeof GamesImportPayload> | null = null;
   try {
     const raw = await req.json();
     const isGames =
@@ -648,11 +648,14 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
         400
       );
     }
-    if (isGames) games = parsed.data as z.infer<typeof GamesImportPayload>;
-    else generic = parsed.data as z.infer<typeof ImportValidationPayload>;
+    if (isGames) parsedGames = parsed.data as z.infer<typeof GamesImportPayload>;
+    else parsedGeneric = parsed.data as z.infer<typeof ImportValidationPayload>;
   } catch {
     return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
   }
+  // Constants from here on: a callback below reads them, and only a constant keeps its narrowing inside one.
+  const games = parsedGames;
+  const generic = parsedGeneric;
   const organizationId = (games ?? generic)?.organization_id;
   if (!organizationId) {
     return jsonResponse({ status: 'error', message: 'Invalid payload' }, 400);

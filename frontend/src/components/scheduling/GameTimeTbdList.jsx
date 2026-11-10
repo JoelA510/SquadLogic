@@ -94,7 +94,8 @@ GameTimeTbdList.propTypes = {
  * The list, read for a season: `readScheduleTbd` (the RPC, with the dates joined from the table), again whenever
  * `refreshKey` changes (the saved run the page shows). The list is an administrator's to read (`get_schedule_tbd`
  * refuses anyone else, 42501): `enabled` is the page's own answer to "may this person manage the schedule", and with it
- * false nothing is read or drawn. A read that fails for an administrator is said.
+ * false nothing is read or drawn. A 42501 from the read draws nothing either (the list is not theirs); any other
+ * failure is said.
  *
  * @param {Object} props
  * @param {string | null | undefined} props.seasonSettingsId
@@ -127,13 +128,16 @@ export default function GameTimeTbdSection({
         if (current) setState({ season: seasonSettingsId, rows: read.rows, error: null });
       },
       (err) => {
-        if (current) {
-          setState({
-            season: seasonSettingsId,
-            rows: [],
-            error: err?.message || 'the read failed',
-          });
-        }
+        if (!current) return;
+        // The list is an administrator's (`get_schedule_tbd` answers 42501 to anyone else, and to a season it does
+        // not hold): for a person who may manage the schedule and is not one, there is no list to draw and nothing
+        // went wrong. Any other failure is said.
+        const notTheirs = err?.code === '42501';
+        setState({
+          season: seasonSettingsId,
+          rows: [],
+          error: notTheirs ? null : err?.message || 'the read failed',
+        });
       }
     );
     return () => {

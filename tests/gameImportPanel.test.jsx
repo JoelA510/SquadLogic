@@ -106,11 +106,13 @@ beforeEach(() => {
   seedGameImportWorld();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe('upload: the file is read by the server, and what it kept or refused is said', () => {
   it('stages the file and lists the rows it kept and changed, and the rows it cannot import', async () => {
+    const invoke = vi.spyOn(mockSupabase.functions, 'invoke');
     render(<ScheduleImportPanel />);
     expect(step()).toMatch(/1 of 4/);
     await toMapping();
@@ -127,6 +129,12 @@ describe('upload: the file is read by the server, and what it kept or refused is
     expect(screen.getByTestId('schedule-import-upload-refused').textContent).toMatch(
       /Row 10: "13\/04\/2026" is not a date/
     );
+    // ...and never left the browser: the request carried the header NAMES and only the columns the import reads
+    const sent = invoke.mock.calls.map(([, options]) => options.body);
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(sent[0].headers).toContain('Notes');
+    expect(Object.keys(sent[0].rows[0])).not.toContain('Notes');
+    expect(JSON.stringify(sent)).not.toContain('placeholder note');
     // one job, for this season, waiting for its confirm
     const jobs = await table('import_jobs');
     expect(jobs).toHaveLength(1);

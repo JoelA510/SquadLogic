@@ -22,6 +22,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { stageScheduleChunk } from '../packages/core/src/scheduleImport/staging.js';
+// The cell cleaner is the import pipeline's own (the browser's copy; the Edge function holds its twin).
+import { sanitizeImportText } from '../frontend/src/utils/importRows.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SCHEDULE_IMPORT_VECTORS_PATH =
@@ -238,6 +240,7 @@ export function buildScheduleImportVectors() {
       rowOffset: input.rowOffset ?? 0,
       rows: input.rows,
       expected: stageScheduleChunk({
+        clean: sanitizeImportText,
         headers: input.headers,
         rows: input.rows,
         season: input.season,

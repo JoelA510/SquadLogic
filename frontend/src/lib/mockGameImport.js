@@ -44,6 +44,7 @@ import {
   stagedRowToParsed,
 } from '@squadlogic/core/scheduleImport/index.js';
 import { carryTeamRunResults } from '@squadlogic/core/utils/teamRunResults.js';
+import { sanitizeImportText } from '../utils/importRows.js';
 import { mockGameHeldIds } from './mockGameIdentity.js';
 
 export const GAME_IMPORT_RPCS = Object.freeze([
@@ -2046,6 +2047,7 @@ export function handleGameImportFunction(db, body, ctx) {
     );
   }
   const chunk = stageScheduleChunk({
+    clean: sanitizeImportText,
     headers: Array.isArray(body.headers) ? body.headers : [],
     rows,
     season: {

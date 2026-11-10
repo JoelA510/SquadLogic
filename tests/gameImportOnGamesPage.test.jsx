@@ -245,6 +245,31 @@ describe('F6: the Games page lists a TIME TBD game with its date and no time', (
     );
   });
 
+  it('draws nothing, and no alert, when the list is not this person’s to read (42501); any other failure is said', async () => {
+    await importFile(FILE_ROWS);
+    // a season the database does not hold reads as "not yours" (the RPC's 42501)
+    const denied = render(
+      <GameTimeTbdSection seasonSettingsId="0a000000-0000-4000-8000-00000000beef" enabled />
+    );
+    await waitFor(async () => {
+      const { error } = await mockSupabase.rpc('get_schedule_tbd', {
+        p_season_settings_id: '0a000000-0000-4000-8000-00000000beef',
+      });
+      expect(error.code).toBe('42501');
+    });
+    expect(denied.container.firstChild).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    denied.unmount();
+    // CONTROL: a failure that is not a refusal is an alert
+    const broken = {
+      rpc: async () => ({ data: null, error: { code: 'XX000', message: 'the database is away' } }),
+    };
+    render(<GameTimeTbdSection seasonSettingsId={SEASON} enabled supabaseClient={broken} />);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'The TIME TBD games could not be read: the database is away'
+    );
+  });
+
   it('says so when a listed game also has a game on the grid in its week (open item (a)), and never hides it', async () => {
     await importFile(FILE_ROWS);
     render(

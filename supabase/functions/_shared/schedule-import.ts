@@ -18,6 +18,7 @@
  * is dropped before a value is read from it, and is neither staged nor returned.
  */
 
+import { sanitizeImportText } from './import-rows.ts';
 import { resolveZonedInstant, TIMING_REASON } from './timing/seasonClock.ts';
 
 // ------------------------------------------------------------------------------------------------ the closed lists
@@ -779,18 +780,9 @@ export function toStagedGameRow(row: ParsedGameRow): StagedGameRow {
   };
 }
 
-/** A cell as text, without markup or control characters, cut to the cell limit. */
-function cleanCell(value: unknown): string {
-  if (value === undefined || value === null) return '';
-  return (
-    String(value)
-      .replace(/<[^>]*>/g, '')
-      // deno-lint-ignore no-control-regex
-      // eslint-disable-next-line no-control-regex -- the class is the point: control characters are not text of a label
-      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
-      .slice(0, GAME_IMPORT_LIMITS.MAX_CELL_LENGTH)
-  );
-}
+/** A cell as text, by the import pipeline's one cleaner, cut to the cell limit. */
+const cleanCell = (value: unknown): string =>
+  sanitizeImportText(value, GAME_IMPORT_LIMITS.MAX_CELL_LENGTH);
 
 export interface GameChunkResult {
   /** Set when the whole file is refused: nothing is staged. */

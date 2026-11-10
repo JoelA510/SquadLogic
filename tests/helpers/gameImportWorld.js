@@ -209,14 +209,3 @@ export function fileCsv(rows = FILE_ROWS) {
     .map((line) => line.map(cell).join(','))
     .join('\n');
 }
-
-/** The choices that reach every outcome: an outside club, a created field, division and teams; one label left alone. */
-export const EVERY_OUTCOME_CHOICES = Object.freeze({
-  teams: {
-    'Visiting Club A': 'outside',
-    'U07G Team 01': 'create',
-    'U07G Team 02': 'create',
-  },
-  fields: { 'Field 9': 'create' },
-  divisions: { 'U07 Girls': 'create' },
-});

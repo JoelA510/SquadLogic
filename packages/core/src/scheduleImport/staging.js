@@ -116,25 +116,15 @@ export const SCHEDULE_IMPORT_CHUNK_LIMITS = Object.freeze({
   MAX_HEADERS: 200,
 });
 
-/** A cell as text, without markup or control characters, cut to the cell limit. @param {unknown} value */
-function cleanCell(value) {
-  if (value === undefined || value === null) return '';
-  return (
-    String(value)
-      .replace(/<[^>]*>/g, '')
-      // eslint-disable-next-line no-control-regex -- the class is the point: control characters are not text of a label
-      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
-      .slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH)
-  );
-}
-
 /**
  * One request's rows, read and made ready to stage: what the Edge function does with a chunk of a games file
  * (`supabase/functions/_shared/schedule-import.ts` is the copy it runs; `tests/gameImportEdgeParity.test.js` holds the
  * two equal). The mock's `import-validation` runs this one.
  *
  * The allowlist comes first: only the columns of plan 4.3 are kept (by the header's normalised name), each cell is
- * cleaned, and everything else of the row is dropped before the parse sees it. `raw_payload` is those same columns as
+ * cleaned by the caller's cleaner (the import pipeline's one cleaner of a cell: `sanitizeImportText`, which the Edge
+ * function and the browser each hold a copy of, held equal by `tests/importRowsParity.test.js`; core holds none), and
+ * everything else of the row is dropped before the parse sees it. `raw_payload` is those same columns as
  * typed, under the template's names; nothing else of the file is staged or returned.
  *
  * @param {Object} input
@@ -142,6 +132,8 @@ function cleanCell(value) {
  * @param {Array<Record<string, unknown>>} input.rows
  * @param {{ timeZone?: string | null, startDate?: string | null, endDate?: string | null } | null} input.season
  * @param {number} input.rowOffset  how many rows of the file came before these
+ * @param {(value: unknown, maxLength: number) => string} input.clean  a cell as text with no markup or control
+ *   characters, cut to `maxLength`
  * @returns {{
  *   refusal: { code: string, message: string, column?: string } | null,
  *   staged: Array<ReturnType<typeof toStagedGameRow> & { raw_payload: Record<string, string> }>,
@@ -151,7 +143,12 @@ function cleanCell(value) {
  *     refused_rows: Array<{ row: number, code: string, message: string }> },
  * }}
  */
-export function stageScheduleChunk({ headers, rows, season, rowOffset }) {
+export function stageScheduleChunk({ headers, rows, season, rowOffset, clean }) {
+  if (typeof clean !== 'function') {
+    throw new TypeError('stageScheduleChunk: clean must be the cell cleaner (sanitizeImportText)');
+  }
+  /** @param {unknown} value */
+  const cleanCell = (value) => clean(value, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CELL_LENGTH);
   const byKey = new Map(
     Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => [scheduleLabelKey(name), name])
   );

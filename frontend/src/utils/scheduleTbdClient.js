@@ -52,7 +52,12 @@ export async function readScheduleTbd(client, seasonSettingsId) {
   const { data, error } = await client.rpc('get_schedule_tbd', {
     p_season_settings_id: seasonSettingsId,
   });
-  if (error) throw new Error(error.message || 'the TIME TBD list could not be read');
+  if (error) {
+    // The code goes with the words: a reader can tell "not yours to read" (42501) from a read that failed.
+    throw Object.assign(new Error(error.message || 'the TIME TBD list could not be read'), {
+      code: error.code ?? null,
+    });
+  }
   const rows = await withGameDates(client, seasonSettingsId, data);
   return { rows, items: scheduleTbdItemsFromRows(rows) };
 }

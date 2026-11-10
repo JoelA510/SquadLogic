@@ -130,12 +130,20 @@ describe('the Edge wiring (read, not executed)', () => {
   });
 
   it('import-validation refuses a demo before it reads a job or stages a row', () => {
+    // One ask, for whatever shape the request has (a people import or a games import): `organizationId` is the
+    // parsed body's, before either arm reads a job.
     const asks = imports.indexOf(
-      'await readDemoState(asDemoClient(serviceClient), body.organization_id)'
+      'await readDemoState(asDemoClient(serviceClient), organizationId)'
     );
     const firstRead = imports.indexOf(".from('import_jobs')");
     expect(asks).toBeGreaterThan(0);
     expect(firstRead).toBeGreaterThan(asks);
+    // the games arm (its job read, its staging and its apply) comes after the ask too
+    const gamesArm = imports.indexOf('if (games) {');
+    expect(gamesArm).toBeGreaterThan(asks);
+    expect(imports.indexOf('applyGameImportConfirmed(')).toBeGreaterThan(gamesArm);
+    expect(imports.indexOf('stageGameChunk(')).toBeGreaterThan(gamesArm);
+    expect(imports).toContain('const organizationId = (games ?? generic)?.organization_id;');
     expect(imports).toMatch(/demo === null \|\| demo\.isDemo/);
     expect(imports).toMatch(/demo_import_refused/);
   });

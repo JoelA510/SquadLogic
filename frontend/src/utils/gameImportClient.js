@@ -21,6 +21,8 @@ import {
   SCHEDULE_IMPORT_CHUNK_LIMITS,
   stagedRowToParsed,
 } from '@squadlogic/core/scheduleImport/staging.js';
+import { scheduleLabelKey } from '@squadlogic/core/scheduleImport/mapping.js';
+import { SCHEDULE_IMPORT_COLUMNS } from '@squadlogic/core/scheduleImport/parseRows.js';
 import { buildScheduleCsv } from '@squadlogic/core/scheduleImport/scheduleCsv.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { readCurrentSavedGameIds } from './gamePublishedClient.js';
@@ -148,6 +150,14 @@ export async function startGameImport(
     refused_rows: [],
   };
   const size = SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_CHUNK_ROWS;
+  // Only the columns the import reads leave the browser (the function drops the rest too, but a note, a coach or an
+  // email in the file has no reason to travel). The header row goes whole, as names, so the dropped columns are named.
+  const read = new Set(
+    Object.values(SCHEDULE_IMPORT_COLUMNS).map((name) => scheduleLabelKey(name))
+  );
+  const kept = headers.filter((header) => read.has(scheduleLabelKey(header)));
+  const sentHeaders = headers.slice(0, SCHEDULE_IMPORT_CHUNK_LIMITS.MAX_HEADERS);
+  const sentRows = rows.map((row) => Object.fromEntries(kept.map((h) => [h, row?.[h] ?? ''])));
   // A file with a header and no rows still goes to the function once, so the refusal or the empty answer is its own.
   for (let offset = 0; offset === 0 || offset < rows.length; offset += size) {
     const { data, error } = await client.functions.invoke('import-validation', {
@@ -156,8 +166,8 @@ export async function startGameImport(
         action: 'stage',
         organization_id: organizationId,
         import_job_id: jobId,
-        headers,
-        rows: rows.slice(offset, offset + size),
+        headers: sentHeaders,
+        rows: sentRows.slice(offset, offset + size),
         row_offset: offset,
       },
     });
@@ -346,11 +356,15 @@ export async function readLatestGameImportJob(client, { organizationId, seasonSe
     .eq('season_settings_id', seasonSettingsId)
     .in('status', ['completed', 'completed_with_warnings'])
     .order('completed_at', { ascending: false })
-    .limit(1);
+    .limit(10);
   if (error) throw fromRpc(error, 'The last games import could not be read.');
-  const job = (data ?? [])[0];
+  // The latest one that wrote something: an import that found nothing to apply made no run and has nothing to undo.
+  const job = (data ?? []).find((candidate) => {
+    const stored = candidate?.warning_summary?.game_import;
+    return stored && stored.nothing_to_apply !== true;
+  });
   const result = job?.warning_summary?.game_import;
-  if (!job || !result || result.nothing_to_apply === true) return null;
+  if (!job || !result) return null;
   return {
     id: String(job.id),
     // `import_jobs.storage_path` is `imports/<user>/<file name>`: the name is its last part.

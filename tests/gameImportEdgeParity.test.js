@@ -29,8 +29,9 @@ import {
   isScheduleImportConfirmCounts,
   scheduleImportConfirmCounts,
   scheduleLabelKey,
-  stageScheduleChunk,
+  stageScheduleChunk as stageWithCleaner,
 } from '../packages/core/src/scheduleImport/index.js';
+import { sanitizeImportText } from '../frontend/src/utils/importRows.js';
 import * as edge from '../supabase/functions/_shared/schedule-import.ts';
 import {
   SCHEDULE_IMPORT_VECTORS_PATH,
@@ -38,6 +39,9 @@ import {
   serialiseScheduleImportVectors,
 } from '../scripts/generate-schedule-import-vectors.mjs';
 import { loadScheduleFixture } from './helpers/scheduleFixtureLoad.js';
+
+/** Core's stage with the pipeline's cell cleaner, as the mock's `import-validation` calls it. */
+const stageScheduleChunk = (input) => stageWithCleaner({ ...input, clean: sanitizeImportText });
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TABLE_TEXT = readFileSync(path.join(REPO, SCHEDULE_IMPORT_VECTORS_PATH), 'utf8');

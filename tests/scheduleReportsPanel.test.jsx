@@ -406,7 +406,7 @@ describe('the Day Sheet', () => {
     expect(tbd).toHaveTextContent('Synthetic Comets');
     expect(tbd).toHaveTextContent('Synthetic Meteors');
     expect(tbd).toHaveTextContent(/no game slot was free for it/);
-    expect(tbd).toHaveTextContent(/no date or venue/i);
+    expect(tbd).toHaveTextContent(/a game with no date yet is listed whatever date and venue/i);
   });
 
   it('downloads the rows it shows, as a CSV named for the date', async () => {

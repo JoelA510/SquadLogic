@@ -1,4 +1,36 @@
 import { scheduleTbdItemsFromRows } from '@squadlogic/core/scheduleTbd.js';
+import { fetchAllPages } from '../lib/pagedFetch.js';
+
+/**
+ * The RPC's rows with the date a schedule import gave a TIME TBD game (`schedule_tbd.game_date`, migration
+ * 20261121010000) and its Game ID. `get_schedule_tbd` predates those columns and does not return them; an admin may
+ * read the table (RLS: admins select), so the two columns are read from it and joined on by row id. A list that cannot
+ * be read is an error, never a list with its dates missing.
+ *
+ * @param {any} client
+ * @param {string} seasonSettingsId
+ * @param {unknown} rows - the RPC's `data`
+ */
+async function withGameDates(client, seasonSettingsId, rows) {
+  if (!Array.isArray(rows) || !rows.some((row) => row?.kind === 'game')) return rows;
+  if (typeof client?.from !== 'function') {
+    throw new Error('there is no database connection to read the TIME TBD dates with');
+  }
+  const dated = await fetchAllPages(() =>
+    client
+      .from('schedule_tbd')
+      .select('id, game_date, external_ref')
+      .eq('season_settings_id', seasonSettingsId)
+      .eq('kind', 'game')
+  );
+  const byId = new Map(dated.map((row) => [String(row.id), row]));
+  return rows.map((row) => {
+    const found = row?.kind === 'game' ? byId.get(String(row.id)) : undefined;
+    return found
+      ? { ...row, game_date: found.game_date ?? null, external_ref: found.external_ref ?? null }
+      : row;
+  });
+}
 
 /**
  * Read the season's TIME TBD list (`get_schedule_tbd`, admin only) for the master export.
@@ -20,7 +52,8 @@ export async function readScheduleTbd(client, seasonSettingsId) {
     p_season_settings_id: seasonSettingsId,
   });
   if (error) throw new Error(error.message || 'the TIME TBD list could not be read');
-  return { rows: data, items: scheduleTbdItemsFromRows(data) };
+  const rows = await withGameDates(client, seasonSettingsId, data);
+  return { rows, items: scheduleTbdItemsFromRows(rows) };
 }
 
 /**

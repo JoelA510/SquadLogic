@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import GameReadinessPanel from '../components/GameReadinessPanel.jsx';
 import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx';
+import GameTimeTbdSection from '../components/scheduling/GameTimeTbdList.jsx';
 import { formatDateTime } from '../utils/formatters.js';
 import {
   SeasonClockError,
@@ -1934,6 +1935,18 @@ export default function GameSchedulingPage() {
 
       <GameConflictBanner
         warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}
+      />
+
+      {/* The season's TIME TBD games: not on the grid, so listed here. A game an import gave a date and no time is
+          listed with its date (owner, 2026-11-09). Read again when the saved run changes. */}
+      <GameTimeTbdSection
+        seasonSettingsId={currentSeasonSetting?.id}
+        enabled={
+          permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
+          permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION)
+        }
+        refreshKey={game?.runId ?? null}
+        placed={savedAssignments}
       />
 
       {(applyStatus !== 'idle' ||

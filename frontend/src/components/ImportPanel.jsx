@@ -806,7 +806,7 @@ export default function ImportPanel({ onImport }) {
 
         <div
           data-testid="import-type-selector"
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8"
+          className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8"
         >
           {IMPORT_TYPES.map((type) => (
             <Tooltip key={type} content={IMPORT_TYPE_TOOLTIPS[type]} className="w-full">
@@ -835,7 +835,7 @@ export default function ImportPanel({ onImport }) {
                     <span
                       className={`font-semibold capitalize truncate ${importType === type ? 'text-text-accent' : 'text-text-primary'}`}
                     >
-                      {type.replace(/_/g, ' ')}
+                      {type}
                     </span>
                     {getImportedCount(type) > 0 && (
                       <span className="shrink-0 text-xs bg-green-500/20 text-status-success-text px-2 py-0.5 rounded-full flex items-center gap-1">

@@ -104,6 +104,7 @@
     "game_assignments_published_guard() returns trigger",
     "game_held_ids(p_game_ids uuid[]) returns SETOF uuid",
     "game_import_image(p_row jsonb) returns jsonb",
+    "game_import_row_unchanged(p_now jsonb, p_applied jsonb) returns boolean",
     "game_is_held(p_game_id uuid) returns boolean",
     "generate_invite_code() returns text",
     "get_facility_permits(p_organization_id uuid) returns jsonb",

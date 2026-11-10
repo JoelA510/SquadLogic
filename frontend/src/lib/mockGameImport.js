@@ -76,6 +76,32 @@ function imageOf(row) {
   ]);
 }
 
+/** A value as jsonb compares it: keys in any order, undefined as null. */
+function canon(value) {
+  if (value === undefined || value === null) return 'null';
+  if (Array.isArray(value)) return `[${value.map(canon).join(',')}]`;
+  if (typeof value === 'object')
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canon(value[k])}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
+}
+
+/**
+ * The SQL's `game_import_row_unchanged`: every column the apply recorded still holds the recorded value (created_at and
+ * updated_at aside), and an empty image matches nothing. The SQL reads the keys of the STORED image, which carries every
+ * column of the table (a column added later does not make an old job's rows look changed); a mock row carries only the
+ * columns something set, so a column that was never set is a null, and both rows' keys are read here.
+ */
+function rowUnchanged(now, applied) {
+  if (!now || !applied || typeof applied !== 'object' || Object.keys(applied).length === 0)
+    return false;
+  const keys = new Set([...Object.keys(applied), ...Object.keys(now)]);
+  for (const key of ['created_at', 'updated_at']) keys.delete(key);
+  return [...keys].every((key) => canon(now[key]) === canon(applied[key]));
+}
+
 const jobSeason = (db, job) =>
   (db.season_settings || []).find(
     (s) => same(s.id, job.season_settings_id) && same(s.organization_id, job.organization_id)
@@ -1479,11 +1505,25 @@ function rollbackJob(db, job, ctx, env) {
     })
     .map((r) => r.target_id)
     .sort();
-  if (changed.length > 0) {
+  // The same for the TIME TBD games of the job: one the apply inserted or changed must still be there and equal what the
+  // apply left; one it removed must still be absent by its id (a tuple or Game ID another row holds is not a refusal: the
+  // rollback counts the row it cannot put back). A refusal and not a warning: the one place a rollback would destroy
+  // another import's or an admin's work.
+  const changedTbd = records
+    .filter((r) => r.target_table === 'schedule_tbd')
+    .filter((r) => {
+      const now = (db.schedule_tbd || []).find((x) => same(x.id, r.target_id));
+      if (r.operation === 'deleted') return Boolean(now);
+      return !now || !rowUnchanged(now, r.applied_payload);
+    })
+    .map((r) => r.target_id)
+    .sort();
+  if (changed.length + changedTbd.length > 0) {
     return fail(
       '22023',
-      `The import cannot be rolled back: ${changed.length} game(s) it wrote were changed, cancelled, had changes allowed or were saved into a later run since`,
-      `game_import_changed count=${changed.length} ids=${changed.slice(0, LISTED_IDS).join(',')}`
+      `The import cannot be rolled back: ${changed.length + changedTbd.length} game(s) (placed or TIME TBD) it wrote were changed, cancelled, had changes allowed or were saved into a later run since`,
+      `game_import_changed count=${changed.length + changedTbd.length} ids=${changed.slice(0, LISTED_IDS).join(',')}` +
+        (changedTbd.length > 0 ? ` tbd_ids=${changedTbd.slice(0, LISTED_IDS).join(',')}` : '')
     );
   }
   const of = (table, op) =>
@@ -1554,9 +1594,17 @@ function rollbackJob(db, job, ctx, env) {
     (r) => !(db.schedule_tbd || []).some((x) => same(x.id, r.target_id))
   ).length;
   const games = db.game_assignments || [];
+  // A row the import created is deleted only while it is still the row the apply stored (a rename, an address, a coach:
+  // later work); otherwise it stays and is named in `kept`.
+  const asStored = (table) => (r) =>
+    rowUnchanged(
+      (db[table] || []).find((row) => same(row.id, r.target_id)),
+      r.applied_payload
+    );
   const slotsDeleted = gone(
     'game_slots',
     of('game_slots', 'inserted')
+      .filter(asStored('game_slots'))
       .map((r) => r.target_id)
       .filter(
         (id) => !games.some((g) => same(g.game_slot_id ?? '', id) || same(g.slot_id ?? '', id))
@@ -1590,10 +1638,19 @@ function rollbackJob(db, job, ctx, env) {
   const teamsDeleted = gone(
     'teams',
     of('teams', 'inserted')
+      .filter(asStored('teams'))
       .map((r) => r.target_id)
       .filter((id) => !teamRefs(id) && !namedElsewhere.has(String(id).toLowerCase()))
   );
   const liveTeams = new Set((db.teams || []).map((t) => String(t.id).toLowerCase()));
+  // A run something else still names stays (every foreign key onto scheduler_runs sets null): a game or TIME TBD game saved
+  // into it, a practice row, an evaluation of it.
+  const runNamed = (id) =>
+    games.some((g) => same(g.run_id ?? '', id)) ||
+    (db.schedule_tbd || []).some((s) => same(s.run_id ?? '', id)) ||
+    attached('practice_assignments', 'run_id', id) ||
+    attached('practice_exceptions', 'run_id', id) ||
+    attached('evaluation_runs', 'scheduler_run_id', id);
   const runsBefore = (db.scheduler_runs || []).length;
   db.scheduler_runs = (db.scheduler_runs || []).filter(
     (r) =>
@@ -1601,13 +1658,15 @@ function rollbackJob(db, job, ctx, env) {
         same(r.organization_id, org) &&
         r.run_type === 'team' &&
         r.parameters?.import_job_id === job.id &&
-        !(r.parameters.shell_ids || []).some((id) => liveTeams.has(String(id).toLowerCase()))
+        !(r.parameters.shell_ids || []).some((id) => liveTeams.has(String(id).toLowerCase())) &&
+        !runNamed(r.id)
       )
   );
   const teamRunsDeleted = runsBefore - db.scheduler_runs.length;
   const fieldsDeleted = gone(
     'fields',
     of('fields', 'inserted')
+      .filter(asStored('fields'))
       .map((r) => r.target_id)
       .filter(
         (id) =>
@@ -1621,6 +1680,7 @@ function rollbackJob(db, job, ctx, env) {
   const venuesDeleted = gone(
     'locations',
     of('locations', 'inserted')
+      .filter(asStored('locations'))
       .map((r) => r.target_id)
       .filter(
         (id) =>
@@ -1632,6 +1692,7 @@ function rollbackJob(db, job, ctx, env) {
   const divisionsDeleted = gone(
     'divisions',
     of('divisions', 'inserted')
+      .filter(asStored('divisions'))
       .map((r) => r.target_id)
       .filter(
         (id) =>
@@ -1639,7 +1700,11 @@ function rollbackJob(db, job, ctx, env) {
           !attached('schedule_tbd', 'division_id', id)
       )
   );
-  // What was created and is still there, named, never deleted silently.
+  // The import's own game run goes last, and stays when something else names it.
+  if (run && !runNamed(run.id))
+    db.scheduler_runs = db.scheduler_runs.filter((r) => !same(r.id, run.id));
+  // What was created and is still there (referenced by something that came after, or changed since), named, never
+  // deleted silently; and a run of the import that is still there for a reason of its own (not for a shell it carries).
   const stillThere = {
     game_slots: 'game_slots',
     teams: 'teams',
@@ -1647,16 +1712,25 @@ function rollbackJob(db, job, ctx, env) {
     locations: 'locations',
     divisions: 'divisions',
   };
-  const kept = records
-    .filter(
-      (r) =>
-        r.operation === 'inserted' &&
-        stillThere[r.target_table] &&
-        (db[stillThere[r.target_table]] || []).some((row) => same(row.id, r.target_id))
-    )
-    .map((r) => ({ table: r.target_table, id: r.target_id }))
-    .sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : a.id < b.id ? -1 : 1));
-  if (run) db.scheduler_runs = db.scheduler_runs.filter((r) => !same(r.id, run.id));
+  const kept = [
+    ...records
+      .filter(
+        (r) =>
+          r.operation === 'inserted' &&
+          stillThere[r.target_table] &&
+          (db[stillThere[r.target_table]] || []).some((row) => same(row.id, r.target_id))
+      )
+      .map((r) => ({ table: r.target_table, id: r.target_id })),
+    ...(db.scheduler_runs || [])
+      .filter(
+        (r) =>
+          same(r.organization_id, org) &&
+          r.parameters?.import_job_id === job.id &&
+          (r.run_type === 'game' ||
+            !(r.parameters.shell_ids || []).some((id) => liveTeams.has(String(id).toLowerCase())))
+      )
+      .map((r) => ({ table: 'scheduler_runs', id: r.id })),
+  ].sort((a, b) => (a.table < b.table ? -1 : a.table > b.table ? 1 : a.id < b.id ? -1 : 1));
   const stamp = env.now();
   for (const r of records)
     Object.assign(r, {

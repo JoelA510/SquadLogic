@@ -141,6 +141,12 @@ BEGIN
     IF has_function_privilege('authenticated', 'public.game_import_image(jsonb)'::regprocedure, 'EXECUTE') THEN
         RAISE EXCEPTION 'game_import_image is internal and a client role may call it';
     END IF;
+    IF has_function_privilege('authenticated', 'public.game_import_row_unchanged(jsonb,jsonb)'::regprocedure, 'EXECUTE')
+       OR public.game_import_row_unchanged('{"a": 1, "updated_at": "x"}'::jsonb, '{"a": 1, "updated_at": "y"}'::jsonb) IS NOT TRUE
+       OR public.game_import_row_unchanged('{"a": 2}'::jsonb, '{"a": 1}'::jsonb) IS NOT FALSE
+       OR public.game_import_row_unchanged('{"a": 1}'::jsonb, '{}'::jsonb) IS NOT FALSE THEN
+        RAISE EXCEPTION 'game_import_row_unchanged is open to a client role, or does not compare the stored image (an empty image must match nothing)';
+    END IF;
     IF (SELECT prosrc FROM pg_proc WHERE oid = 'public.game_assignments_published_guard()'::regprocedure) !~ 'squadlogic\.import_rollback'
        OR pg_get_viewdef('public.view_org_metrics'::regclass) !~ 'is_external'
        OR (SELECT prosrc FROM pg_proc WHERE oid = 'public.sync_schedule_tbd_practices(uuid, uuid, uuid, jsonb)'::regprocedure) !~ 'NOT t\.is_external' THEN
@@ -161,7 +167,7 @@ BEGIN
        OR public.normalise_external_label('  Blue ' || chr(160) || E'\t' || 'Jays ') IS DISTINCT FROM 'blue jays' THEN
         RAISE EXCEPTION 'normalise_external_label is open to a client role, or is not core''s trim, collapse and lower-case';
     END IF;
-    v_checks := v_checks + 11;
+    v_checks := v_checks + 12;
     RAISE NOTICE 'shape: is_external, external_ref and import_job_id, the per-season Game ID index, six lists that take games, 4 client RPCs pinned and closed to anon and PUBLIC, the guard exemption, the view and the sync';
 
     -- ---- seed (no signed-in user) --------------------------------------------------------------------
@@ -317,6 +323,22 @@ BEGIN
         RAISE EXCEPTION 'a refused rollback deleted a game';
     END IF;
     UPDATE public.game_assignments SET published = true WHERE external_ref = 'S-4';
+    -- The same for a TIME TBD game of the job (fix round 3): a later correction of S-5's date refuses the rollback and the
+    -- detail names the TIME TBD row in tbd_ids; nothing is deleted.
+    UPDATE public.schedule_tbd SET game_date = game_date + 1 WHERE external_ref = 'S-5';
+    BEGIN
+        PERFORM public.rollback_game_import_job(v_job);
+        RAISE EXCEPTION 'a rollback after a TIME TBD game was changed was accepted' USING ERRCODE = 'XX000';
+    EXCEPTION WHEN SQLSTATE '22023' THEN
+        GET STACKED DIAGNOSTICS v_detail = PG_EXCEPTION_DETAIL;
+        IF v_detail NOT LIKE 'game_import_changed count=1 ids= tbd_ids=%' OR position((SELECT id::text FROM public.schedule_tbd WHERE external_ref = 'S-5') IN v_detail) = 0 THEN
+            RAISE EXCEPTION 'the rollback refused with the wrong detail for a changed TIME TBD game (%)', v_detail;
+        END IF;
+    END;
+    IF NOT EXISTS (SELECT 1 FROM public.schedule_tbd WHERE external_ref = 'S-5') THEN
+        RAISE EXCEPTION 'a refused rollback deleted a TIME TBD game';
+    END IF;
+    UPDATE public.schedule_tbd SET game_date = game_date - 1 WHERE external_ref = 'S-5';
     PERFORM public.rollback_game_import_job(v_job);
     IF pg_temp.fps() IS DISTINCT FROM v_fps THEN
         RAISE EXCEPTION 'the rollback did not restore the schedule exactly (games, slots, runs, teams, divisions, venues, fields, TIME TBD)';
@@ -324,8 +346,8 @@ BEGIN
     IF (SELECT count(*) FROM public.teams WHERE is_external) <> 0 OR (SELECT count(*) FROM public.import_application_records WHERE import_job_id = v_job AND rolled_back_at IS NULL) <> 0 THEN
         RAISE EXCEPTION 'the rollback left the outside club or an unmarked record';
     END IF;
-    v_checks := v_checks + 3;
-    RAISE NOTICE 'rollback: refused after a change (the game named, nothing deleted), and before one it restored the schedule exactly';
+    v_checks := v_checks + 4;
+    RAISE NOTICE 'rollback: refused after a change (the game, or the TIME TBD game, named, nothing deleted), and before one it restored the schedule exactly';
 
     -- ---- 5. two labels, one creation -----------------------------------------------------------------------
     v_job3 := (public.create_import_job(v_org, 'games', 'twice.csv')).id;

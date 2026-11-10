@@ -111,6 +111,7 @@ DROP FUNCTION IF EXISTS public.rollback_game_import_job(uuid);
 DROP FUNCTION IF EXISTS public.map_game_import_job(uuid, jsonb);
 DROP FUNCTION IF EXISTS public.ensure_game_slot(uuid, uuid, date, time, time, smallint, timestamptz, timestamptz);
 DROP FUNCTION IF EXISTS public.game_import_image(jsonb);
+DROP FUNCTION IF EXISTS public.game_import_row_unchanged(jsonb, jsonb);
 DROP FUNCTION IF EXISTS public.normalise_external_label(text);
 
 -- ---------------------------------------------------------------------------
@@ -486,7 +487,7 @@ BEGIN
     SELECT string_agg(f.sig, ', ') INTO v_bad
       FROM (VALUES ('apply_game_import_job(uuid,boolean)'), ('rollback_game_import_job(uuid)'), ('map_game_import_job(uuid,jsonb)'),
                    ('ensure_game_slot(uuid,uuid,date,time without time zone,time without time zone,smallint,timestamp with time zone,timestamp with time zone)'),
-                   ('game_import_image(jsonb)'), ('normalise_external_label(text)')) AS f(sig)
+                   ('game_import_image(jsonb)'), ('game_import_row_unchanged(jsonb,jsonb)'), ('normalise_external_label(text)')) AS f(sig)
      WHERE to_regprocedure('public.' || f.sig) IS NOT NULL;
     IF v_bad IS NOT NULL THEN
         RAISE EXCEPTION 'function(s) of the migration are still there: %', v_bad;

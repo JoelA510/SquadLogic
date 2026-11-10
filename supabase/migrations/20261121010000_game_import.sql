@@ -11,6 +11,8 @@
 --   * (fix round 2) `schedule_tbd.external_ref` and `schedule_tbd.game_date` (a TIME TBD game's Game ID and DATE, with a shape
 --     check and a per-season unique index), `normalise_external_label(text)` (core's label comparison, internal), and the
 --     application record's `operation` gains `deleted`;
+--   * (fix round 3) `game_import_row_unchanged(jsonb, jsonb)` (internal): the rollback's comparison of a row with the image the
+--     apply stored, for the TIME TBD games and for everything the import created; see section 8.
 --   * `game_assignments.external_ref` (the Game ID: text, at most 40 characters, no space at either end, never empty) and
 --     `game_assignments.import_job_id` (the job that wrote the row; ON DELETE SET NULL). A unique index on
 --     (season_settings_id, external_ref) for the rows that have a Game ID: PER SEASON (F11 decision D6 and the owner's
@@ -425,6 +427,28 @@ $$;
 REVOKE ALL ON FUNCTION public.game_import_image(jsonb) FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.game_import_image(jsonb) IS
     'Internal: the columns of a game_assignments row (as jsonb) that decide whether a games import changed it since it was applied: where, when, who plays, whether it is Published, its division label and its Game ID. Used by the Published guard''s rollback exemption and by rollback_game_import_job. 20261121010000.';
+
+-- The rollback's comparison for every other row it undoes (a TIME TBD game, a division, a venue, a field, a team, a slot): the
+-- row as it stands now against the row as the apply stored it. Every column the apply recorded must still hold the recorded
+-- value, except the two instants a write moves without changing the row's meaning. It reads the keys of the STORED image, so a
+-- column added to a table later does not make every old job's rows look changed, and an empty or missing image (a 'deleted'
+-- record stores `{}`), or a missing row, matches nothing, never NULL: a check that examined no column is not a pass.
+
+CREATE FUNCTION public.game_import_row_unchanged(p_now jsonb, p_applied jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+    SELECT COALESCE(p_now IS NOT NULL AND jsonb_typeof(p_applied) = 'object' AND p_applied <> '{}'::jsonb
+                    AND NOT EXISTS (SELECT 1 FROM jsonb_each(p_applied) e
+                                     WHERE e.key NOT IN ('created_at', 'updated_at') AND (p_now -> e.key) IS DISTINCT FROM e.value),
+                    false)
+$$;
+
+REVOKE ALL ON FUNCTION public.game_import_row_unchanged(jsonb, jsonb) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.game_import_row_unchanged(jsonb, jsonb) IS
+    'Internal: true when every column a games import stored for a row (its application record''s applied image, created_at and updated_at aside) still holds that value in the row as it stands (as jsonb). An empty image matches nothing. Used by rollback_game_import_job for TIME TBD games and for the divisions, venues, fields, teams and slots the import created. 20261121010000.';
 
 
 CREATE OR REPLACE FUNCTION public.game_assignments_published_guard()
@@ -2043,14 +2067,29 @@ COMMENT ON FUNCTION public.apply_game_import_job(uuid, boolean) IS
 -- 8. rollback_game_import_job: take an import back, or say what stands in the way.
 -- ---------------------------------------------------------------------------
 --
--- It refuses, writing nothing, naming up to 50 games, if any game the import wrote (inserted, changed in place, or only
--- carried into its run) is gone, differs from the image the apply stored (where, when, who plays, Published, the Game ID),
--- or is no longer in the import's run (a later save moved it on). Otherwise it names the job in a transaction-local
--- setting, which the Published guard honours only for these rows (see the guard), deletes what the import inserted,
--- puts back what it updated (its run included), removes the TIME TBD games, slots, outside clubs, team shells, fields,
--- venues and divisions it created WHEN NOTHING ELSE REFERENCES THEM (what is referenced is kept and reported), and
--- removes its game run and the team runs whose shells all went. Audited import.rolled_back. The legacy `games` table is
--- not read or written (a slot or team the import made has no row there).
+-- Every record the rollback acts on is first compared with what stands now, because the apply's own writes are not the only
+-- ones: another import, a save or an admin may have touched the row since (the class of defect Codex found twice in this PR:
+-- a permit scope on a field the import made, then a correction to a TIME TBD game it inserted).
+--
+--   * A PLACED game (inserted, changed in place, or only carried into the run) must still be there, equal to the image the
+--     apply stored (where, when, who plays, Published, the Game ID) and still in the import's run; a game the apply took out
+--     must still be out. A TIME TBD game must still equal the image the apply stored (an inserted or changed one) or still be
+--     absent (a removed one). Otherwise the rollback REFUSES, writing nothing, naming up to 50 of each (22023,
+--     `game_import_changed count=<both> ids=<placed games> [tbd_ids=<TIME TBD games>]`). This is a refusal and not a
+--     warning because it is the one place a rollback would destroy another import's or an admin's work (the owner's rule is
+--     warnings over blockers EXCEPT where necessary; here it is necessary): the fix is to roll the later change back first.
+--   * A division, venue, field, outside club, team shell or slot the import CREATED is deleted only when nothing references
+--     it AND it is still the row the apply stored (a rename, an address, a coach: later work). Otherwise it is KEPT and
+--     named in `kept`, never deleted silently, never a refusal.
+--   * The import's runs are deleted only when nothing else names them (a game or TIME TBD game saved into one since, an
+--     evaluation of it); a run that stays is named in `kept` too.
+--
+-- Otherwise it names the job in a transaction-local setting, which the Published guard honours only for these rows (see
+-- the guard), deletes what the import inserted, puts back what it updated (its run included), puts back the games and TIME
+-- TBD rows it took out, and removes what it created as above. Audited import.rolled_back. The legacy `games` table is not
+-- read or written (a slot or team the import made has no row there). The pgTAP file game_import_rollback_class.sql derives
+-- the (table, operation) pairs the apply writes from the apply's source and fails unless every one has a scenario in which a
+-- later writer changes the record and the rollback refuses or keeps it without losing what that writer did.
 
 CREATE FUNCTION public.rollback_game_import_job(p_import_job_id uuid)
 RETURNS jsonb
@@ -2068,6 +2107,7 @@ DECLARE
     v_run uuid;
     v_pending integer;
     v_changed uuid[];
+    v_changed_tbd uuid[];
     n_games_deleted bigint := 0; n_games_restored bigint := 0; n_games_reinserted bigint := 0; n_tbd bigint := 0; n_tbd_restored bigint := 0;
     n_tbd_reinserted bigint := 0; n_tbd_not_reinserted bigint := 0; n_slots bigint := 0;
     n_teams bigint := 0; n_fields bigint := 0; n_venues bigint := 0; n_divs bigint := 0; n_team_runs bigint := 0;
@@ -2128,11 +2168,30 @@ BEGIN
                         ELSE ga.id IS NULL
                              OR public.game_import_image(to_jsonb(ga)) IS DISTINCT FROM public.game_import_image(r.applied_payload)
                              OR ga.run_id IS DISTINCT FROM v_run END) x;
-    IF cardinality(v_changed) > 0 THEN
-        RAISE EXCEPTION 'The import cannot be rolled back: % game(s) it wrote were changed, cancelled, had changes allowed or were saved into a later run since', cardinality(v_changed)
+    -- The same for the TIME TBD games of the job (Codex on 305137b: they were deleted, restored and put back with no
+    -- comparison, so rolling import A back deleted the correction import B had made to a game A inserted). One that the
+    -- apply inserted or changed must still be there and equal what the apply left (it is not the image from before the
+    -- apply that counts: that is what the rollback puts back); one the apply removed must still be absent by its id. A
+    -- removed row whose tuple or Game ID another row now holds is NOT a refusal: that row is someone else's, nothing of
+    -- theirs is lost, and the rollback counts the row it cannot put back (time_tbd_not_reinserted) and says so.
+    SELECT COALESCE(array_agg(x.id ORDER BY x.id), ARRAY[]::uuid[]) INTO v_changed_tbd
+      FROM (SELECT r.target_id AS id
+              FROM public.import_application_records r
+              LEFT JOIN public.schedule_tbd s ON s.id = r.target_id
+             WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.target_table = 'schedule_tbd'
+               AND r.rolled_back_at IS NULL
+               AND CASE WHEN r.operation = 'deleted'
+                        THEN s.id IS NOT NULL
+                        ELSE s.id IS NULL OR NOT public.game_import_row_unchanged(to_jsonb(s), r.applied_payload) END) x;
+    IF cardinality(v_changed) + cardinality(v_changed_tbd) > 0 THEN
+        RAISE EXCEPTION 'The import cannot be rolled back: % game(s) (placed or TIME TBD) it wrote were changed, cancelled, had changes allowed or were saved into a later run since',
+                        cardinality(v_changed) + cardinality(v_changed_tbd)
             USING ERRCODE = '22023',
-                  DETAIL = format('game_import_changed count=%s ids=%s', cardinality(v_changed),
-                                  array_to_string((SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM unnest(v_changed) c ORDER BY c LIMIT c_listed) q), ','));
+                  DETAIL = format('game_import_changed count=%s ids=%s', cardinality(v_changed) + cardinality(v_changed_tbd),
+                                  array_to_string((SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM unnest(v_changed) c ORDER BY c LIMIT c_listed) q), ','))
+                           || CASE WHEN cardinality(v_changed_tbd) = 0 THEN ''
+                                   ELSE format(' tbd_ids=%s', array_to_string((SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM unnest(v_changed_tbd) c ORDER BY c LIMIT c_listed) q), ','))
+                              END;
     END IF;
 
     -- The guard's rollback exemption names this job, for the length of this transaction only.
@@ -2222,7 +2281,8 @@ BEGIN
     DELETE FROM public.game_slots gs USING public.import_application_records r
      WHERE r.target_id = gs.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
        AND r.target_table = 'game_slots' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.game_slot_id = gs.id OR ga.slot_id = gs.id);
+       AND NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.game_slot_id = gs.id OR ga.slot_id = gs.id)
+       AND public.game_import_row_unchanged(to_jsonb(gs), r.applied_payload);
     GET DIAGNOSTICS n_slots = ROW_COUNT;
 
     -- The ids every OTHER team run of the organization names anywhere in its results, read ONCE. (The check used to cast
@@ -2252,14 +2312,22 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.practice_exceptions pe WHERE pe.team_id = t.id)
        AND NOT EXISTS (SELECT 1 FROM public.coach_practice_preferences cp WHERE cp.team_id = t.id)
        AND NOT EXISTS (SELECT 1 FROM public.players p WHERE p.team_id = t.id)
-       AND NOT EXISTS (SELECT 1 FROM _gr_named n WHERE n.id = t.id::text);
+       AND NOT EXISTS (SELECT 1 FROM _gr_named n WHERE n.id = t.id::text)
+       AND public.game_import_row_unchanged(to_jsonb(t), r.applied_payload);
     GET DIAGNOSTICS n_teams = ROW_COUNT;
 
-    -- The import's team runs whose shells are all gone (one that still carries a kept shell stays).
+    -- The import's team runs whose shells are all gone (one that still carries a kept shell stays), and that nothing else
+    -- names: every foreign key onto scheduler_runs sets null (the pgTAP file derives them from the catalogue and fails unless
+    -- each is guarded here), and a null run is a game or an evaluation that lost the run it belongs to.
     DELETE FROM public.scheduler_runs sr
      WHERE sr.organization_id = v_org AND sr.run_type = 'team' AND sr.parameters ->> 'import_job_id' = p_import_job_id::text
        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(sr.parameters -> 'shell_ids', '[]'::jsonb)) sid
-                        WHERE EXISTS (SELECT 1 FROM public.teams t WHERE t.id::text = sid));
+                        WHERE EXISTS (SELECT 1 FROM public.teams t WHERE t.id::text = sid))
+       AND NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.run_id = sr.id)
+       AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd s WHERE s.run_id = sr.id)
+       AND NOT EXISTS (SELECT 1 FROM public.practice_assignments pa WHERE pa.run_id = sr.id)
+       AND NOT EXISTS (SELECT 1 FROM public.practice_exceptions pe WHERE pe.run_id = sr.id)
+       AND NOT EXISTS (SELECT 1 FROM public.evaluation_runs er WHERE er.scheduler_run_id = sr.id);
     GET DIAGNOSTICS n_team_runs = ROW_COUNT;
 
     -- Fields, venues and divisions the import created and nothing else uses. Everything an admin attached afterwards keeps
@@ -2275,14 +2343,16 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.facility_permit_scopes ps WHERE ps.field_id = f.id)
        AND NOT EXISTS (SELECT 1 FROM public.field_blackouts fb WHERE fb.field_id = f.id)
        AND NOT EXISTS (SELECT 1 FROM public.field_subunits su WHERE su.field_id = f.id)
-       AND NOT EXISTS (SELECT 1 FROM public.field_bookings(v_org, f.id, NULL) b);
+       AND NOT EXISTS (SELECT 1 FROM public.field_bookings(v_org, f.id, NULL) b)
+       AND public.game_import_row_unchanged(to_jsonb(f), r.applied_payload);
     GET DIAGNOSTICS n_fields = ROW_COUNT;
     DELETE FROM public.locations l USING public.import_application_records r
      WHERE r.target_id = l.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
        AND r.target_table = 'locations' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
        AND NOT EXISTS (SELECT 1 FROM public.fields f WHERE f.location_id = l.id)
        AND NOT EXISTS (SELECT 1 FROM public.facility_permit_scopes ps WHERE ps.location_id = l.id)
-       AND NOT EXISTS (SELECT 1 FROM public.field_blackouts fb WHERE fb.location_id = l.id);
+       AND NOT EXISTS (SELECT 1 FROM public.field_blackouts fb WHERE fb.location_id = l.id)
+       AND public.game_import_row_unchanged(to_jsonb(l), r.applied_payload);
     GET DIAGNOSTICS n_venues = ROW_COUNT;
     DELETE FROM public.divisions d USING public.import_application_records r
      WHERE r.target_id = d.id AND r.import_job_id = p_import_job_id AND r.import_type = 'games'
@@ -2291,25 +2361,41 @@ BEGIN
        AND NOT EXISTS (SELECT 1 FROM public.players p WHERE p.division_id = d.id)
        AND NOT EXISTS (SELECT 1 FROM public.game_slots gs WHERE gs.division_id = d.id)
        AND NOT EXISTS (SELECT 1 FROM public.practice_slots ps WHERE ps.division_id = d.id)
-       AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd s WHERE s.division_id = d.id);
+       AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd s WHERE s.division_id = d.id)
+       AND public.game_import_row_unchanged(to_jsonb(d), r.applied_payload);
     GET DIAGNOSTICS n_divs = ROW_COUNT;
 
-    -- What was created and is still there (referenced by something that came after), named, never deleted silently.
-    SELECT COALESCE(jsonb_agg(jsonb_build_object('table', r.target_table, 'id', r.target_id) ORDER BY r.target_table, r.target_id), '[]'::jsonb)
-      INTO v_kept
-      FROM public.import_application_records r
-     WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
-       AND r.target_table IN ('game_slots', 'teams', 'fields', 'locations', 'divisions')
-       AND ((r.target_table = 'game_slots' AND EXISTS (SELECT 1 FROM public.game_slots x WHERE x.id = r.target_id))
-         OR (r.target_table = 'teams' AND EXISTS (SELECT 1 FROM public.teams x WHERE x.id = r.target_id))
-         OR (r.target_table = 'fields' AND EXISTS (SELECT 1 FROM public.fields x WHERE x.id = r.target_id))
-         OR (r.target_table = 'locations' AND EXISTS (SELECT 1 FROM public.locations x WHERE x.id = r.target_id))
-         OR (r.target_table = 'divisions' AND EXISTS (SELECT 1 FROM public.divisions x WHERE x.id = r.target_id)));
-
-    -- The import's own game run goes last: every game that named it has been deleted or put back into the run it was in.
+    -- The import's own game run goes last: every game that named it has been deleted or put back into the run it was in. A run
+    -- something else still names (a game saved into it since) stays, as above.
     IF v_run IS NOT NULL THEN
-        DELETE FROM public.scheduler_runs sr WHERE sr.id = v_run;
+        DELETE FROM public.scheduler_runs sr WHERE sr.id = v_run
+           AND NOT EXISTS (SELECT 1 FROM public.game_assignments ga WHERE ga.run_id = sr.id)
+           AND NOT EXISTS (SELECT 1 FROM public.schedule_tbd s WHERE s.run_id = sr.id)
+           AND NOT EXISTS (SELECT 1 FROM public.practice_assignments pa WHERE pa.run_id = sr.id)
+           AND NOT EXISTS (SELECT 1 FROM public.practice_exceptions pe WHERE pe.run_id = sr.id)
+           AND NOT EXISTS (SELECT 1 FROM public.evaluation_runs er WHERE er.scheduler_run_id = sr.id);
     END IF;
+
+    -- What was created and is still there (referenced by something that came after, or changed since), named, never
+    -- deleted silently; and a run of the import that is still there for a reason of its own (not for a shell it carries).
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('table', k.t, 'id', k.id) ORDER BY k.t, k.id), '[]'::jsonb)
+      INTO v_kept
+      FROM (SELECT r.target_table AS t, r.target_id AS id
+              FROM public.import_application_records r
+             WHERE r.import_job_id = p_import_job_id AND r.import_type = 'games' AND r.operation = 'inserted' AND r.rolled_back_at IS NULL
+               AND r.target_table IN ('game_slots', 'teams', 'fields', 'locations', 'divisions')
+               AND ((r.target_table = 'game_slots' AND EXISTS (SELECT 1 FROM public.game_slots x WHERE x.id = r.target_id))
+                 OR (r.target_table = 'teams' AND EXISTS (SELECT 1 FROM public.teams x WHERE x.id = r.target_id))
+                 OR (r.target_table = 'fields' AND EXISTS (SELECT 1 FROM public.fields x WHERE x.id = r.target_id))
+                 OR (r.target_table = 'locations' AND EXISTS (SELECT 1 FROM public.locations x WHERE x.id = r.target_id))
+                 OR (r.target_table = 'divisions' AND EXISTS (SELECT 1 FROM public.divisions x WHERE x.id = r.target_id)))
+            UNION ALL
+            SELECT 'scheduler_runs', sr.id
+              FROM public.scheduler_runs sr
+             WHERE sr.organization_id = v_org AND sr.parameters ->> 'import_job_id' = p_import_job_id::text
+               AND (sr.run_type = 'game'
+                    OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(sr.parameters -> 'shell_ids', '[]'::jsonb)) sid
+                                    WHERE EXISTS (SELECT 1 FROM public.teams t WHERE t.id::text = sid)))) k;
 
     UPDATE public.import_application_records r
        SET rolled_back_at = now(), rolled_back_by = v_uid, rollback_payload = jsonb_build_object('rolled_back', true)
@@ -2345,7 +2431,7 @@ $function$;
 REVOKE ALL ON FUNCTION public.rollback_game_import_job(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rollback_game_import_job(uuid) TO authenticated;
 COMMENT ON FUNCTION public.rollback_game_import_job(uuid) IS
-    'Admin-only, signed in: take a games import back. Refused (22023, game_import_changed, naming up to 50 games) while a game it wrote has been changed, cancelled, had changes allowed or been saved into a later run; otherwise deletes the games it inserted and puts back the ones it changed (through the Published guard''s rollback exemption), puts back the games it took out and the TIME TBD rows it changed or removed, removes the TIME TBD games, slots, outside clubs, shells, fields, venues and divisions it created when nothing else references them, and its runs. Audited import.rolled_back. 20261121010000.';
+    'Admin-only, signed in: take a games import back. Refused (22023, game_import_changed count= ids= [tbd_ids=], naming up to 50 placed games and up to 50 TIME TBD games) while a game or TIME TBD game it wrote has been changed, removed, cancelled, had changes allowed or been saved into a later run; otherwise deletes the games it inserted and puts back the ones it changed (through the Published guard''s rollback exemption), puts back the games it took out and the TIME TBD rows it changed or removed, removes the TIME TBD games, slots, outside clubs, shells, fields, venues and divisions it created when nothing else references them and nobody has changed them (what stays is named in kept), and its runs when nothing else names them. Audited import.rolled_back. 20261121010000.';
 
 -- ---------------------------------------------------------------------------
 -- 9. The end state, or the migration does not commit.
@@ -2375,7 +2461,7 @@ BEGIN
     SELECT string_agg(f.sig, ', ') INTO v_bad
       FROM (VALUES ('apply_game_import_job(uuid,boolean)'), ('rollback_game_import_job(uuid)'), ('map_game_import_job(uuid,jsonb)'),
                    ('ensure_game_slot(uuid,uuid,date,time without time zone,time without time zone,smallint,timestamp with time zone,timestamp with time zone)'),
-                   ('game_import_image(jsonb)'), ('normalise_external_label(text)')) AS f(sig)
+                   ('game_import_image(jsonb)'), ('game_import_row_unchanged(jsonb,jsonb)'), ('normalise_external_label(text)')) AS f(sig)
      WHERE to_regprocedure('public.' || f.sig) IS NULL;
     IF v_bad IS NOT NULL THEN
         RAISE EXCEPTION 'function(s) missing: %', v_bad;
@@ -2394,6 +2480,12 @@ BEGIN
     IF has_function_privilege('authenticated', to_regprocedure('public.game_import_image(jsonb)'), 'EXECUTE')
        OR has_function_privilege('anon', to_regprocedure('public.game_import_image(jsonb)'), 'EXECUTE') THEN
         RAISE EXCEPTION 'game_import_image is internal';
+    END IF;
+    IF has_function_privilege('authenticated', to_regprocedure('public.game_import_row_unchanged(jsonb,jsonb)'), 'EXECUTE')
+       OR has_function_privilege('anon', to_regprocedure('public.game_import_row_unchanged(jsonb,jsonb)'), 'EXECUTE')
+       OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+                   WHERE p.oid = to_regprocedure('public.game_import_row_unchanged(jsonb,jsonb)') AND a.grantee = 0) THEN
+        RAISE EXCEPTION 'game_import_row_unchanged is internal';
     END IF;
     IF has_function_privilege('authenticated', to_regprocedure('public.normalise_external_label(text)'), 'EXECUTE')
        OR has_function_privilege('anon', to_regprocedure('public.normalise_external_label(text)'), 'EXECUTE')

@@ -5574,6 +5574,7 @@ plant "M69 the season of a named game is not checked" "$M69" \
 #   - a row with a Game ID is matched by its tuple, not by (season, Game ID): a moved game is a second row;
 #   - the held predicate is not asked, so a Published game whose row changed is updated instead of skipped-published;
 #   - the rollback no longer refuses after a game it wrote has changed;
+#   - the rollback no longer refuses after a TIME TBD game it wrote has changed (Codex on 305137b);
 #   - a re-import is never "nothing to apply", so it makes a run again;
 #   - the guard's rollback exemption is gone, so the rollback cannot take a Published game back;
 #   - the metrics view counts an outside club as one of the organization's teams (the condition is kept in the text, so the
@@ -5600,8 +5601,13 @@ plant "M70 a held game is updated, not skipped" "$M70" \
   "smoke 20261121010000"
 
 plant "M70 the rollback no longer refuses after a change" "$M70" \
-  "    IF cardinality(v_changed) > 0 THEN" \
+  "    IF cardinality(v_changed) + cardinality(v_changed_tbd) > 0 THEN" \
   "    IF false THEN" \
+  "smoke 20261121010000"
+
+plant "M70 the rollback does not judge a TIME TBD game against what the apply left" "$M70" \
+  "                        ELSE s.id IS NULL OR NOT public.game_import_row_unchanged(to_jsonb(s), r.applied_payload) END) x;" \
+  "                        ELSE false END) x;" \
   "smoke 20261121010000"
 
 plant "M70 a re-import is never nothing to apply" "$M70" \

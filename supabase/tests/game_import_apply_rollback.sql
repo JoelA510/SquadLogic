@@ -36,7 +36,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(209);
+SELECT plan(210);
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 CREATE FUNCTION pg_temp.u(n int) RETURNS uuid LANGUAGE sql IMMUTABLE AS $f$
@@ -811,19 +811,22 @@ SELECT is(jsonb_array_length((SELECT v::jsonb -> 'kept' FROM marks WHERE name = 
 SELECT is(pg_temp.val($$SELECT count(*) FROM public.game_assignments WHERE import_job_id = pg_temp.j('jk')$$), '0', 'the six games are gone either way');
 
 -- 12.2 (Codex 1, the class) Every foreign key that cascades or sets null onto what the rollback deletes is guarded by a
--- NOT EXISTS in its DELETE (or by the shared field producer, whose own source names the table) or is on this list. The
--- subject set is the CATALOGUE, never the rollback's own text (lessons 46 and 92).
+-- NOT EXISTS in EVERY DELETE of that table (or by the shared field producer, whose own source names the table) or is on this
+-- list. The subject set is the CATALOGUE, never the rollback's own text (lessons 46 and 92). Fix round 3 widened it from the
+-- five tables the import creates to every table the rollback deletes from: scheduler_runs (the import's runs; a null run is
+-- a game or an evaluation that lost its run) and the two it also restores (game_assignments, schedule_tbd, which nothing
+-- references). The file game_import_rollback_class.sql does the same for the records.
 CREATE FUNCTION pg_temp.rb_pairs() RETURNS text LANGUAGE sql AS $f$
     SELECT string_agg(par.relname || '<-' || ch.relname, ', ' ORDER BY par.relname, ch.relname)
       FROM (SELECT DISTINCT k.confrelid, k.conrelid FROM pg_constraint k
              WHERE k.contype = 'f' AND k.confdeltype IN ('c', 'n')) k
       JOIN pg_class par ON par.oid = k.confrelid AND par.relnamespace = 'public'::regnamespace
       JOIN pg_class ch ON ch.oid = k.conrelid
-     WHERE par.relname IN ('teams', 'fields', 'locations', 'divisions', 'game_slots')
+     WHERE par.relname IN ('teams', 'fields', 'locations', 'divisions', 'game_slots', 'scheduler_runs', 'game_assignments', 'schedule_tbd')
 $f$;
 CREATE FUNCTION pg_temp.rb_unguarded(p_src text) RETURNS text LANGUAGE plpgsql AS $f$
 DECLARE
-    r record; v_seg text; v_i int; v_out text[] := '{}';
+    r record; v_seg text; v_n int; v_out text[] := '{}';
     -- Allowed without a guard, each for a stated reason:
     --   teams<-team_calendar_tokens   a trigger makes one token for EVERY team row, so every shell has one: derived by design;
     --   teams<-games, game_slots<-games   the legacy `games` table: the F11 plan forbids this import to read, write or
@@ -835,33 +838,42 @@ BEGIN
     FOR r IN SELECT DISTINCT par.relname AS parent, ch.relname AS child
                FROM pg_constraint k JOIN pg_class par ON par.oid = k.confrelid JOIN pg_class ch ON ch.oid = k.conrelid
               WHERE k.contype = 'f' AND par.relnamespace = 'public'::regnamespace
-                AND par.relname IN ('teams', 'fields', 'locations', 'divisions', 'game_slots') AND k.confdeltype IN ('c', 'n')
+                AND par.relname IN ('teams', 'fields', 'locations', 'divisions', 'game_slots', 'scheduler_runs', 'game_assignments', 'schedule_tbd')
+                AND k.confdeltype IN ('c', 'n')
               ORDER BY 1, 2 LOOP
-        v_i := position('DELETE FROM public.' || r.parent || ' ' IN p_src);
-        IF v_i = 0 THEN v_out := v_out || (r.parent || '<-' || r.child || ' (no DELETE of the parent)'); CONTINUE; END IF;
-        v_seg := substr(p_src, v_i);
-        v_seg := substr(v_seg, 1, position('GET DIAGNOSTICS' IN v_seg));
-        IF v_seg ~ ('NOT EXISTS \(SELECT 1 FROM public\.' || r.child || '\M') THEN CONTINUE; END IF;
-        IF v_seg LIKE '%public.field_bookings(%' AND v_bookings ~ ('public\.' || r.child || '\M') THEN CONTINUE; END IF;
-        IF (r.parent || '<-' || r.child) = ANY (v_allowed) THEN CONTINUE; END IF;
-        v_out := v_out || (r.parent || '<-' || r.child);
+        v_n := 0;
+        -- EVERY DELETE of the parent (a statement runs to its semicolon), not the first: scheduler_runs is deleted from twice.
+        FOR v_seg IN SELECT m[1] FROM regexp_matches(p_src, '(DELETE FROM public\.' || r.parent || ' [^;]*;)', 'g') AS m LOOP
+            v_n := v_n + 1;
+            IF v_seg ~ ('NOT EXISTS \(SELECT 1 FROM public\.' || r.child || '\M') THEN CONTINUE; END IF;
+            IF v_seg LIKE '%public.field_bookings(%' AND v_bookings ~ ('public\.' || r.child || '\M') THEN CONTINUE; END IF;
+            IF (r.parent || '<-' || r.child) = ANY (v_allowed) THEN CONTINUE; END IF;
+            v_out := v_out || (r.parent || '<-' || r.child);
+            EXIT;
+        END LOOP;
+        IF v_n = 0 THEN v_out := v_out || (r.parent || '<-' || r.child || ' (no DELETE of the parent)'); END IF;
     END LOOP;
     RETURN COALESCE(array_to_string(v_out, ', '), '');
 END
 $f$;
 GRANT EXECUTE ON FUNCTION pg_temp.rb_pairs(), pg_temp.rb_unguarded(text) TO PUBLIC;
-SELECT ok(array_length(string_to_array(pg_temp.rb_pairs(), ', '), 1) >= 25,
-    'meta: the catalogue gives at least 25 foreign keys that cascade or set null onto the five tables (a census over nothing would pass)');
+SELECT ok(array_length(string_to_array(pg_temp.rb_pairs(), ', '), 1) >= 30,
+    'meta: the catalogue gives at least 30 foreign keys that cascade or set null onto the eight tables the rollback deletes from (a census over nothing would pass)');
 SELECT is(pg_temp.rb_unguarded((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure)), '',
     'every such foreign key is guarded in the rollback or allowed above with its reason');
 CREATE TABLE public.zz_fk_plant (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    field_id uuid REFERENCES public.fields(id) ON DELETE CASCADE, team_id uuid REFERENCES public.teams(id) ON DELETE SET NULL);
+    field_id uuid REFERENCES public.fields(id) ON DELETE CASCADE, team_id uuid REFERENCES public.teams(id) ON DELETE SET NULL,
+    run_id uuid REFERENCES public.scheduler_runs(id) ON DELETE SET NULL);
 SELECT is(pg_temp.rb_unguarded((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure)),
-    'fields<-zz_fk_plant, teams<-zz_fk_plant', 'PLANT: a new table with a cascade onto fields and a set null onto teams is reported by the census');
+    'fields<-zz_fk_plant, scheduler_runs<-zz_fk_plant, teams<-zz_fk_plant', 'PLANT: a new table with a cascade onto fields and a set null onto teams and onto a run is reported by the census');
 DROP TABLE public.zz_fk_plant;
 SELECT is(pg_temp.rb_unguarded(replace((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure),
         'NOT EXISTS (SELECT 1 FROM public.facility_permit_scopes', 'NOT EXISTS (SELECT 1 FROM public.nothing')),
     'fields<-facility_permit_scopes, locations<-facility_permit_scopes', 'PLANT: the permit-scope guard taken out of the rollback is reported (the migration without this round''s fix)');
+SELECT is(pg_temp.rb_unguarded(replace((SELECT p.prosrc FROM pg_proc p WHERE p.oid = 'public.rollback_game_import_job(uuid)'::regprocedure),
+        E'AND NOT EXISTS (SELECT 1 FROM public.evaluation_runs er WHERE er.scheduler_run_id = sr.id);\n    END IF;',
+        E'AND NOT EXISTS (SELECT 1 FROM public.nothing er WHERE er.scheduler_run_id = sr.id);\n    END IF;')),
+    'scheduler_runs<-evaluation_runs', 'PLANT: a guard missing from only ONE of the two DELETEs of scheduler_runs (the import''s own game run) is reported: every DELETE of a table is examined, not the first');
 
 -- 12.3 (Codex 2) Two labels of the file that resolve to one record the import would create are ONE creation: one team per
 -- (division, name), one division per name, one venue per name, one field per (venue, name), one outside club. The dry run

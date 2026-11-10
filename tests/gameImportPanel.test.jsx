@@ -34,17 +34,24 @@ vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
   return { supabase: mockSupabase, supabaseReady: Promise.resolve() };
 });
+// The header's organization and season, which a test can switch under a mounted panel (the page stays mounted when the
+// admin switches either).
+const scope = vi.hoisted(() => ({
+  organization: { id: '0a000000-0000-4000-8000-000000000001', name: 'Placeholder League' },
+  season: {
+    id: '0a000000-0000-4000-8000-000000000002',
+    name: 'Fall 2026',
+    status: 'active',
+    season_start: '2026-09-07',
+    season_end: '2027-03-31',
+    timezone: 'America/Los_Angeles',
+  },
+}));
+const HOME_SCOPE = { organization: { ...scope.organization }, season: { ...scope.season } };
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: '0a000000-0000-4000-8000-000000000001', name: 'Placeholder League' },
-    currentSeasonSetting: {
-      id: '0a000000-0000-4000-8000-000000000002',
-      name: 'Fall 2026',
-      status: 'active',
-      season_start: '2026-09-07',
-      season_end: '2027-03-31',
-      timezone: 'America/Los_Angeles',
-    },
+    currentOrganization: scope.organization,
+    currentSeasonSetting: scope.season,
   }),
 }));
 vi.mock('../frontend/src/utils/scheduleDownloads.js', async (original) => ({
@@ -103,6 +110,8 @@ const decideEverything = () => {
 };
 
 beforeEach(() => {
+  scope.organization = { ...HOME_SCOPE.organization };
+  scope.season = { ...HOME_SCOPE.season };
   seedGameImportWorld();
 });
 afterEach(() => {
@@ -539,6 +548,117 @@ describe('accessibility: keyboard, names, and no state by colour alone', () => {
     const games = await table('game_assignments');
     expect(games.filter((g) => g.import_job_id && g.published)).toHaveLength(0);
     expect(screen.getByTestId('schedule-import-applied').textContent).not.toMatch(/are Published/);
+  });
+});
+
+describe('a switch of organization or season under the panel ends the import on screen (Codex P1)', () => {
+  // The page stays mounted when the header's organization or season changes. The panel kept its job, its preview, its
+  // result and its roll back button, and the roll back names only the job: an admin of two organizations could take
+  // back A's import while looking at B, and a confirm pending for one season stayed armed under another.
+  const OTHER_ORG = { id: '0b000000-0000-4000-8000-000000000001', name: 'Another League' };
+  const OTHER_SEASON = {
+    ...HOME_SCOPE.season,
+    id: '0b000000-0000-4000-8000-000000000002',
+    name: 'Spring 2027',
+  };
+  const applyEverything = async () => {
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    await waitFor(() => expect(step()).toMatch(/4 of 4/));
+  };
+
+  it('after an apply: another organization sees no result, no roll back, and not the first one’s last import', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await applyEverything();
+    // CONTROL: in the organization that imported, the roll back is offered
+    expect(screen.getByRole('button', { name: 'Roll back this import' })).toBeTruthy();
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    scope.organization = OTHER_ORG;
+    view.rerender(<ScheduleImportPanel />);
+    await waitFor(() => expect(step()).toMatch(/1 of 4/));
+    expect(screen.queryByRole('button', { name: /Roll back/ })).toBeNull();
+    expect(screen.queryByTestId('schedule-import-applied')).toBeNull();
+    expect(screen.queryByTestId('schedule-import-last')).toBeNull();
+    expect(rpc.mock.calls.filter(([name]) => name === 'rollback_game_import_job')).toEqual([]);
+    expect(await table('game_assignments')).toHaveLength(10);
+    // back in the first organization the last import is offered again (read for THAT scope)
+    scope.organization = { ...HOME_SCOPE.organization };
+    view.rerender(<ScheduleImportPanel />);
+    expect(await screen.findByTestId('schedule-import-last')).toBeTruthy();
+  });
+
+  it('mid-flow: a season switch drops the staged file and the pending confirm', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    expect(screen.getByRole('button', { name: 'Confirm and import' })).toBeTruthy();
+    scope.season = OTHER_SEASON;
+    view.rerender(<ScheduleImportPanel />);
+    await waitFor(() => expect(step()).toMatch(/1 of 4/));
+    expect(screen.queryByRole('button', { name: 'Confirm and import' })).toBeNull();
+    expect(screen.queryByTestId('schedule-import-counts')).toBeNull();
+    // nothing was applied
+    expect(await table('game_assignments')).toHaveLength(3);
+  });
+
+  it('an answer that returns for the old scope does not come back onto the screen', async () => {
+    const view = render(<ScheduleImportPanel />);
+    await toMapping();
+    decideEverything();
+    await toPreview();
+    fireEvent.click(screen.getByLabelText('Create the 5 records listed above'));
+    // hold the confirm's answer until after the switch
+    const real = mockSupabase.functions.invoke.bind(mockSupabase.functions);
+    let release = () => {};
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(mockSupabase.functions, 'invoke').mockImplementation(async (...args) => {
+      const answer = await real(...args);
+      await gate;
+      return answer;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and import' }));
+    scope.organization = OTHER_ORG;
+    view.rerender(<ScheduleImportPanel />);
+    await waitFor(() => expect(step()).toMatch(/1 of 4/));
+    release();
+    // the import the admin confirmed did happen (in its own organization)...
+    await waitFor(async () => expect(await table('game_assignments')).toHaveLength(10));
+    // ...and nothing of it is drawn under the other organization
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(step()).toMatch(/1 of 4/);
+    expect(screen.queryByTestId('schedule-import-applied')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Roll back/ })).toBeNull();
+  });
+
+  it('the roll back call itself refuses a job that is not of the organization and season on screen', async () => {
+    const { rollbackGameImport } = await import('../frontend/src/utils/gameImportClient.js');
+    render(<ScheduleImportPanel />);
+    await applyEverything();
+    const [job] = await table('import_jobs');
+    const rpc = vi.spyOn(mockSupabase, 'rpc');
+    for (const wrong of [
+      { organizationId: OTHER_ORG.id, seasonSettingsId: SEASON },
+      { organizationId: ORG, seasonSettingsId: OTHER_SEASON.id },
+    ]) {
+      await expect(rollbackGameImport(mockSupabase, { jobId: job.id, ...wrong })).rejects.toThrow(
+        /is not an import of the organization and season/
+      );
+    }
+    expect(rpc.mock.calls.filter(([name]) => name === 'rollback_game_import_job')).toEqual([]);
+    expect(await table('game_assignments')).toHaveLength(10);
+    // CONTROL: the right scope rolls it back
+    await rollbackGameImport(mockSupabase, {
+      jobId: job.id,
+      organizationId: ORG,
+      seasonSettingsId: SEASON,
+    });
+    expect(await table('game_assignments')).toHaveLength(3);
   });
 });
 

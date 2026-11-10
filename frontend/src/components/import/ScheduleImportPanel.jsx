@@ -197,7 +197,16 @@ function Notice({ tone = 'info', testId, children, role }) {
  * @param {() => void} [props.onDownloadTemplate]
  * @param {any} [props.supabaseClient] - injected for tests
  */
-export default function ScheduleImportPanel({
+export default function ScheduleImportPanel(props) {
+  const { currentOrganization, currentSeasonSetting } = useOrganization();
+  // One import belongs to ONE organization and season. The page stays mounted when the header switches either, so the
+  // whole workflow is keyed by them: a switch discards the staged file, the preview, the pending confirm, the result
+  // and its roll back, and an answer still in flight for the old scope lands in a component that is gone.
+  const scopeKey = `${props.kind ?? 'games'}:${currentOrganization?.id ?? ''}:${currentSeasonSetting?.id ?? ''}`;
+  return <ScheduleImportWorkflow key={scopeKey} {...props} />;
+}
+
+function ScheduleImportWorkflow({
   kind = 'games',
   isDemo = false,
   onDemoBlocked,
@@ -316,6 +325,16 @@ export default function ScheduleImportPanel({
     setRolledBack(null);
   }, []);
 
+  // False once this workflow is gone (the scope changed, or the page closed): a step that was waiting does not go on
+  // to start the next one for a scope nobody is looking at.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
   const fail = (err, fallback) => {
     logger.error(fallback, err);
     setError(err?.message || fallback);
@@ -367,6 +386,7 @@ export default function ScheduleImportPanel({
             setBusy(null);
             return;
           }
+          if (!alive.current) return;
           setBusy('Checking the file');
           const started = await K.start(client, {
             organizationId,
@@ -401,6 +421,7 @@ export default function ScheduleImportPanel({
     setBusy('Working out what the import would do');
     try {
       await K.saveMapping(client, jobId, mappingForJob(proposal, choices, published));
+      if (!alive.current) return;
       setPreview(await K.preview(client, jobId));
       setBusy(null);
       setStep('preview');
@@ -441,7 +462,7 @@ export default function ScheduleImportPanel({
     setError(null);
     setBusy('Rolling the import back');
     try {
-      const undone = await K.rollback(client, id);
+      const undone = await K.rollback(client, { jobId: id, organizationId, seasonSettingsId });
       setRolledBack(undone);
       setBusy(null);
       refreshLast();

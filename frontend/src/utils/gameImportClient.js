@@ -318,9 +318,35 @@ export async function confirmGameImport(client, { organizationId, jobId, confirm
   return { status: 'applied', result: data.result };
 }
 
-/** @param {any} client @param {string} jobId */
-export async function rollbackGameImport(client, jobId) {
+/**
+ * Roll an applied import back. The database decides by the job alone (an admin of the job's organization may), so the
+ * caller says which organization and season it is looking at, and a job of any other is refused HERE, before the call:
+ * a roll back button must never undo an import of a scope that is not on screen.
+ *
+ * @param {any} client
+ * @param {{ jobId: string, organizationId: string | null, seasonSettingsId: string | null }} input
+ */
+export async function rollbackGameImport(client, { jobId, organizationId, seasonSettingsId }) {
   requireClient(client);
+  const found = await client
+    .from('import_jobs')
+    .select('id, organization_id, season_settings_id, job_type')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (found.error) throw fromRpc(found.error, 'The import could not be read.');
+  const job = found.data;
+  if (
+    !job ||
+    !organizationId ||
+    !seasonSettingsId ||
+    String(job.organization_id) !== String(organizationId) ||
+    String(job.season_settings_id) !== String(seasonSettingsId)
+  ) {
+    throw refusal(
+      'This is not an import of the organization and season on screen, so it is not rolled back from here.',
+      'game_import_out_of_scope'
+    );
+  }
   const { data, error } = await client.rpc('rollback_game_import_job', {
     p_import_job_id: jobId,
   });

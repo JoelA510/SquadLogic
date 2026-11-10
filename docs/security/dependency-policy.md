@@ -157,10 +157,9 @@ patterns; pinned at 7.0.1 in `package.json`), `@tanstack/react-virtual`
 jsx-a11y release supports ESLint 10), and `typescript` 6.1 and later
 (`typescript-eslint` accepts TypeScript below 6.1 only and refuses 7.0 at load;
 held at `~6.0.3` in `package.json`; remove when `typescript-eslint` widens its
-range or the side-by-side setup in the resume queue is adopted), and `@sentry/react` 11.10.x and 11.11.x
-(its `tunnel` option fails typecheck in `tests/sentryConfig.test.js`, in 11.10.0 and again in
-11.11.0, tried on 2026-11-10; later releases are proposed again, and the entry goes once one is
-taken). Each other npm major is taken as its own
+range or the side-by-side setup in the resume queue is adopted), and `@sentry/react` 11.10.x only
+(its `tunnel` option fails typecheck in `tests/sentryConfig.test.js`; later releases are proposed
+again, and the entry goes once one is taken). Each other npm major is taken as its own
 planned upgrade (the resume queue lists them). A held-back
 package in the minor-and-patch group would otherwise fail a gate and hold the
 whole batch with it. Security updates (Settings -> Advanced

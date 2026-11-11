@@ -831,7 +831,9 @@ describe('the adversarial review of the panel (R1, R2, R3, R4, R8, R10)', () => 
     fireEvent.click(screen.getByRole('button', { name: 'Preview the import' }));
     await screen.findByTestId('schedule-import-busy');
     // every select and every bulk button is off while the call is pending
-    for (const control of screen.getAllByRole('combobox')) expect(control.disabled).toBe(true);
+    for (const control of screen.getAllByRole('combobox')) {
+      expect(/** @type {HTMLSelectElement} */ (control).disabled).toBe(true);
+    }
     expect(button('Create every undecided team').disabled).toBe(true);
     expect(button('Mark every undecided team an outside club').disabled).toBe(true);
     // a change attempted now does not take

@@ -354,7 +354,14 @@ export async function rollbackGameImport(client, { jobId, organizationId, season
   return data;
 }
 
-/** Discard a staged import that was never applied. @param {any} client @param {string} jobId */
+/**
+ * Discard a staged import that was never applied: `cancel_ready_import_job` marks the job `failed` (audited
+ * `import.canceled`), so it can no longer be mapped or applied. Its staged rows stay with the failed job (they hold
+ * labels, dates and times, no person's data) and go when the job does.
+ *
+ * @param {any} client
+ * @param {string} jobId
+ */
 export async function discardGameImport(client, jobId) {
   requireClient(client);
   const { error } = await client.rpc('cancel_ready_import_job', {
@@ -479,4 +486,34 @@ export async function readSavedScheduleCsv(client, { organizationId, seasonSetti
       })),
   });
   return { ...built, games: games.length };
+}
+
+/**
+ * The season's games imports that were checked and never confirmed (`ready_to_apply`), newest first. Nothing ends one
+ * on its own: the stale-job sweep fails only a job still `importing`, and the Import page's job screen leaves games
+ * jobs to this panel. The upload step names them and offers to discard each (`discardGameImport`).
+ *
+ * @param {any} client
+ * @param {{ organizationId: string, seasonSettingsId: string }} params
+ * @returns {Promise<Array<{ id: string, fileName: string, createdAt: string | null }>>}
+ */
+export async function readUnfinishedGameImportJobs(client, { organizationId, seasonSettingsId }) {
+  requireClient(client);
+  const { data, error } = await client
+    .from('import_jobs')
+    .select('id, storage_path, status, created_at, season_settings_id')
+    .eq('organization_id', organizationId)
+    .eq('job_type', 'games')
+    .eq('season_settings_id', seasonSettingsId)
+    .eq('status', 'ready_to_apply')
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (error) throw fromRpc(error, 'The unfinished games imports could not be read.');
+  return (data ?? []).map((job) => ({
+    id: String(job.id),
+    fileName: String(job.storage_path ?? '')
+      .split('/')
+      .pop(),
+    createdAt: job.created_at ?? null,
+  }));
 }

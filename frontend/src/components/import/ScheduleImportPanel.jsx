@@ -26,6 +26,7 @@ import {
   readLatestGameImportJob,
   readSavedScheduleCsv,
   readStagedGameRows,
+  readUnfinishedGameImportJobs,
   rollbackGameImport,
   saveGameImportMapping,
   startGameImport,
@@ -79,6 +80,7 @@ const KINDS = Object.freeze({
     rollback: rollbackGameImport,
     discard: discardGameImport,
     latest: readLatestGameImportJob,
+    unfinished: readUnfinishedGameImportJobs,
     exportSaved: readSavedScheduleCsv,
     exportFileName: 'squadlogic-game-schedule.csv',
   },
@@ -259,6 +261,9 @@ function ScheduleImportWorkflow({
     /** @type {{ jobId: string, undone: any } | null} */ (null)
   );
   const [lastImport, setLastImport] = useState(/** @type {any} */ (null));
+  const [unfinished, setUnfinished] = useState(
+    /** @type {Array<{ id: string, fileName: string, createdAt: string | null }>} */ ([])
+  );
 
   // The step's heading takes focus when the step changes, so a keyboard or screen-reader user lands on what is new.
   const firstRender = useRef(true);
@@ -285,6 +290,16 @@ function ScheduleImportWorkflow({
         // Said, not swallowed: the upload still works without it.
         logger.warn('The last schedule import could not be read:', err);
         if (current) setLastImport(null);
+      }
+    );
+    // Imports that were checked and never confirmed (a closed tab): named on the upload step, with a way to end them.
+    K.unfinished(client, { organizationId, seasonSettingsId }).then(
+      (found) => {
+        if (current) setUnfinished(found);
+      },
+      (err) => {
+        logger.warn('The unfinished schedule imports could not be read:', err);
+        if (current) setUnfinished([]);
       }
     );
     return () => {
@@ -342,12 +357,28 @@ function ScheduleImportWorkflow({
   // False once this workflow is gone (the scope changed, or the page closed): a step that was waiting does not go on
   // to start the next one for a scope nobody is looking at.
   const alive = useRef(true);
+  // The staged job this workflow would leave behind if it went away now: set while a job waits for its confirm,
+  // cleared once it is applied or discarded.
+  const pendingJob = useRef(/** @type {string | null} */ (null));
+  useEffect(() => {
+    pendingJob.current = jobId !== null && result === null ? jobId : null;
+  }, [jobId, result]);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      // Leaving the flow (another import tile, a switch of organization or season, the page closing in the app)
+      // ends the staged job: a job nobody will confirm must not wait for its confirm forever. Best effort: a tab
+      // that is simply closed never runs this, and the upload step names what it left (`unfinished`).
+      const left = pendingJob.current;
+      if (left !== null) {
+        pendingJob.current = null;
+        K.discard(client, left).catch((err) => {
+          logger.warn('The staged import could not be discarded on leaving:', err);
+        });
+      }
     };
-  }, []);
+  }, [K, client]);
 
   const fail = (err, fallback) => {
     logger.error(fallback, err);
@@ -564,14 +595,29 @@ function ScheduleImportWorkflow({
 
   const handleDiscard = async () => {
     if (jobId) {
+      pendingJob.current = null;
       try {
         await K.discard(client, jobId);
       } catch (err) {
-        // Nothing was written by a staged import; it is left to expire, and the reason is logged.
+        // A staged import wrote nothing. Its job stays `ready_to_apply` (nothing expires it): the upload step lists
+        // it as unfinished, where it can be discarded again. The reason is logged.
         logger.warn('The staged import could not be discarded:', err);
       }
     }
     reset();
+    refreshLast();
+  };
+
+  const handleDiscardUnfinished = async (id) => {
+    setError(null);
+    setBusy('Discarding the unfinished import');
+    try {
+      await K.discard(client, id);
+      setBusy(null);
+      refreshLast();
+    } catch (err) {
+      fail(err, 'The unfinished import could not be discarded.');
+    }
   };
 
   const setChoice = (group, key, value) =>
@@ -700,6 +746,42 @@ function ScheduleImportWorkflow({
             <div className="mt-3">
               <Notice testId="schedule-import-export-note">{exportNote}</Notice>
             </div>
+          )}
+
+          {unfinished.length > 0 && (
+            <section
+              data-testid="schedule-import-unfinished"
+              aria-label="Unfinished imports"
+              className="mt-6 border-t border-border-subtle pt-4"
+            >
+              <h4 className="text-sm font-semibold text-text-primary">
+                {`Unfinished imports (${unfinished.length})`}
+              </h4>
+              <p className="text-xs text-text-muted mt-1 max-w-prose">
+                Each of these files was checked and never confirmed. Nothing of it was written.
+                Discard it, then choose the file again if you still want it.
+              </p>
+              <ul className="mt-2 space-y-2">
+                {unfinished.map((job) => (
+                  <li
+                    key={job.id}
+                    className="flex flex-wrap items-center gap-3 text-sm text-text-secondary"
+                  >
+                    <span className="break-words">
+                      {`${job.fileName || 'A file'}${job.createdAt ? `, started ${job.createdAt.slice(0, 10)}` : ''}`}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy !== null}
+                      onClick={() => handleDiscardUnfinished(job.id)}
+                    >
+                      Discard it
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
 
           {lastImport && !rolledBack && (

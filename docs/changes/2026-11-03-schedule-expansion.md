@@ -1538,6 +1538,13 @@ neither, so whichever pull request next replaces one takes its line):**
 - `get_schedule_tbd` should return `game_date` and `external_ref`; the client's second read of `schedule_tbd` then
   goes.
 
+**For the next migration, whichever it is (F11-2's or its own; noted 2026-11-11, fix round 3):**
+`cancel_ready_import_job` must refuse a job that is not `ready_to_apply`. It is a deployed function (PR 5 added
+`games` to it) with no check of the job's status: called for an applied job of any of its six types it marks the job
+`failed` and audits `import.canceled`, while everything the apply wrote stays. PR 6 closes the games panel's way to
+that call from the client (below); only the function can close the time between a client's read and its call, and
+the other callers. The mock's copy has no status check either, on purpose, until the SQL has one.
+
 **Review round (2026-11-11, the one adversarial review, ten findings, all taken).** The panel: a roll back is kept
 per job (the next import's result is its own); "nothing to apply" says why from the counts; the "Games arrive
 Published" box shows the STORED mapping and there is no confirm without a preview of it; a column the import reads
@@ -1548,6 +1555,22 @@ with it) and one left by a closed tab is named on the upload step with "Discard 
 shows a TIME TBD game's date; a TIME TBD game whose date changed is a change since publication; the Day Sheet says how
 many TIME TBD games it left to another day. The template's header row is in a constants-only module, so the Import
 page does not load the parser.
+
+**Fix round 3 (2026-11-11, Codex on the review round's push, two findings, both taken).** (1) A confirm whose
+answer was lost after the apply committed left the panel free to discard the job on leaving, and
+`cancel_ready_import_job` marks an applied job `failed`: the games stayed, the job left the roll back, and a false
+`import.canceled` was audited. The panel now settles a failed confirm from the job itself before anything else
+(applied: the result screen with its roll back; still `ready_to_apply`: "The import was not applied", confirm again or
+discard; unreadable: the outcome is said to be unknown, "Check again", nothing sent again and nothing discarded), and
+`discardGameImport` reads the job and calls the cancel only for one read as `ready_to_apply`, for every caller (Cancel,
+another tile, a switch of organization or season, the page closing, the unfinished list). Declared: the read and the
+call are two statements; the function's own check (above) closes that. (2) The schedule CSV wrote an end in the hour
+the clocks repeat as its wall time, which the import reads as the first time round: a game ending the second time
+round came back an hour shorter. Such an end is now written as a `Length` with a blank End Time (the column joins the
+file only then); a start the second time round cannot be written and is counted and said
+(`omitted.repeatedHour`); a start the first time round round-trips. No stored instant reads as a time in the hour the
+clocks skip, and the import refuses a file that names one, so the export has no such case
+(`tests/scheduleCsvRepeatedHour.test.js`: Los Angeles, Sydney, and Phoenix as the control).
 
 **Follow-ups found in PR 6's review (2026-11-11; recorded, not fixed here).**
 
@@ -1560,6 +1583,12 @@ page does not load the parser.
    list for `bad-time` and `bad-week`, `game_date` returned by the RPC, the preview-stale check inside the RPC.
 4. A sweep in SQL for abandoned `ready_to_apply` games jobs, if the panel's client-side discard proves insufficient
    (a closed tab never runs it; the upload step lists what it left).
+5. `cancel_ready_import_job` refuses a job that is not `ready_to_apply` (the note for the next migration, above; fix
+   round 3). Until then the Import page's own deferred-apply flow can still reach it blind: `ImportContext`'s
+   `cancelDeferredImport` (`importDeferredActions.js`, `cancelDeferredImportJob`) is offered again after
+   `applyDeferredImport` throws, for the coach, field, field availability, practice preference and evaluation
+   imports, and a finalize that committed and lost its answer throws (statically read, not reproduced; not changed
+   in PR 6).
 
 ### PR 6b: baseline at import (S after its refactor; no migration; Review: (a); added 2026-11-10)
 

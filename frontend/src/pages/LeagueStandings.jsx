@@ -146,6 +146,12 @@ export default function LeagueStandings() {
       </div>
     );
 
+  // One result against an outside club is one game of one own team, so the sum over teams is a count of results.
+  const outsideResultsNotCounted = standings.reduce(
+    (sum, row) => sum + (Number(row.results_not_counted) || 0),
+    0
+  );
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-fadeIn">
       <div className="flex items-center gap-3 mb-6">
@@ -160,6 +166,17 @@ export default function LeagueStandings() {
         <div className="p-4 bg-status-error-bg border border-status-error/30 text-status-error rounded-xl text-sm font-medium">
           {error}
         </div>
+      )}
+
+      {/* What the numbers below leave out (lesson 92: say what a number is a count of). The view counts a result
+          against an outside club only when the organization says so, and says per team how many it left out. */}
+      {outsideResultsNotCounted > 0 && (
+        <p className="text-sm text-text-secondary" data-testid="standings-outside-not-counted">
+          {outsideResultsNotCounted === 1
+            ? '1 result against an outside club is not counted.'
+            : `${outsideResultsNotCounted} results against outside clubs are not counted.`}{' '}
+          An admin can count them in Settings, under Features.
+        </p>
       )}
 
       {/* Standings Tables by Division */}

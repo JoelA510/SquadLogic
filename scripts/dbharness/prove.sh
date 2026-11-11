@@ -5737,6 +5737,32 @@ plant "R70 the revert leaves the outside-club column" "$R70" \
   "SELECT 1;" \
   "revert 20261121010000"
 
+# Scores, the held rule and standings (docs/changes/2026-11-06-games-table-source-of-truth.md, F11-2). The smoke
+# docs/sql/20261122010000_smoke.sql enters a score on a saved game as a signed-in admin and must go red for each plant (the
+# pgTAP file, supabase/tests/game_scores.sql, is CI's and holds the full table; the same plants were also run against a
+# database built from the migrations with the local pgTAP stand-in, which is NOT pgTAP):
+#   - the held predicate ignores scores (the condition stays in the text, so the migration's own end-state check, which
+#     wants the predicate to name the score table, does not catch it first): a scored game is moved, left out, cancelled;
+#   - the standings view counts an outside opponent whatever the organization's setting says.
+# The plan's third plant (the carry removed from the save: a regeneration that does not pin a scored game) is a vitest
+# mutation of the page's pin set, in the pull request.
+plant "M71 the held predicate ignores scores" "$M71" \
+  "            OR EXISTS (SELECT 1 FROM public.game_scores gs WHERE gs.game_id = ga.id))" \
+  "            OR (false AND EXISTS (SELECT 1 FROM public.game_scores gs WHERE gs.game_id = ga.id)))" \
+  "smoke 20261122010000"
+
+plant "M71 the standings count an outside opponent" "$M71" \
+  "           (NOT opp.is_external OR public.standings_counts_outside(own.division_id)) AS counted" \
+  "           (NOT (opp.is_external AND false) OR public.standings_counts_outside(own.division_id)) AS counted" \
+  "smoke 20261122010000"
+
+# The revert (docs/sql/20261122010000_revert.sql) refuses while a score is recorded. The harness plants one, requires the
+# first run to refuse in its words and change nothing, removes the score, and runs it again.
+plant "R71 the revert does not refuse while a score is recorded" "$R71" \
+  "    IF v_scores > 0 THEN" \
+  "    IF false THEN" \
+  "revert 20261122010000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------

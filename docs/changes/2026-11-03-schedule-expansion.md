@@ -1538,6 +1538,29 @@ neither, so whichever pull request next replaces one takes its line):**
 - `get_schedule_tbd` should return `game_date` and `external_ref`; the client's second read of `schedule_tbd` then
   goes.
 
+**Review round (2026-11-11, the one adversarial review, ten findings, all taken).** The panel: a roll back is kept
+per job (the next import's result is its own); "nothing to apply" says why from the counts; the "Games arrive
+Published" box shows the STORED mapping and there is no confirm without a preview of it; a column the import reads
+given twice refuses the file (the CSV reader renames a repeat, so the parse never saw it); the mapping controls are off
+while a preview is made and the confirm lists the names of the mapping that was sent; the Import page's 10 MB guard;
+a staged import that is left is discarded (`cancel_ready_import_job`: the job is marked failed, its staged rows stay
+with it) and one left by a closed tab is named on the upload step with "Discard it". The reports: the coach schedule
+shows a TIME TBD game's date; a TIME TBD game whose date changed is a change since publication; the Day Sheet says how
+many TIME TBD games it left to another day. The template's header row is in a constants-only module, so the Import
+page does not load the parser.
+
+**Follow-ups found in PR 6's review (2026-11-11; recorded, not fixed here).**
+
+1. `ImportContext` keeps `activeJob` and `imported*.importJobId` across a switch of organization or season, for the
+   coach, field, field availability and evaluations imports (statically read, not reproduced): the same class as the
+   schedule panel's Codex P1, in another component.
+2. The calendar feed (`supabase/functions/_shared/calendar/teamFeed.ts`) and `useTeamPortal.js` read the SLOT's times,
+   not the game's own `start` and `end`: an imported game whose end differs from its slot's shows the slot's end.
+3. At the next replacement of `apply_game_import_job` or `get_schedule_tbd` (the three lines above): the staged-flag
+   list for `bad-time` and `bad-week`, `game_date` returned by the RPC, the preview-stale check inside the RPC.
+4. A sweep in SQL for abandoned `ready_to_apply` games jobs, if the panel's client-side discard proves insufficient
+   (a closed tab never runs it; the upload step lists what it left).
+
 ### PR 6b: baseline at import (S after its refactor; no migration; Review: (a); added 2026-11-10)
 
 Depends on: PR 6 merged. On no other pull request's dependency path; placed after F11-3 in the order.
@@ -2573,6 +2596,9 @@ section 7). **Not merged:** PR 8, 10, 11 and 12, and F11-2 to F11-5. PR 14 stays
   held (decision 28). Left, with the F11 plan's pull requests in their places: PR 6 (in review; PR 5's migration
   `20261121010000` was deployed first; its task list grew on 2026-11-10, F5 to F9 and F3b), then F11-2, F11-3,
   PR 6b (baseline at import, task G5, deferred from PR 6 on 2026-11-10; it is on no dependency path),
+  and the four follow-ups of PR 6's review, listed under PR 6 in section 7 (the scope switch in `ImportContext`; slot
+  times in the calendar feed and the team portal; the three changes for the next function replacement; a SQL sweep
+  for abandoned games jobs), none with a pull request number yet,
   PR 10, PR 8, PR 11, F11-4, PR 12. F11-5 and PR 14 are the coordinating agent's call when their turn comes (section 10, the 2026-11-10
   answers, entry 5). Later, with no PR number: the B5.10 discovery pass and its plan-change (registration state and
   optional-data features), which the owner agreed to on 2026-11-09 (section 10, the 2026-11-09 answers, entry 2). Outside
